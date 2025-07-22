@@ -16,7 +16,6 @@ const FB_SCOPES = [
   'pages_show_list'
 ];
 
-// MVP: store user token in-memory
 let userTokens = {};
 
 // Step 1: Facebook login
@@ -26,7 +25,7 @@ router.get('/facebook', (req, res) => {
   res.redirect(fbAuthUrl);
 });
 
-// Step 2: Callback
+// Step 2: Facebook callback
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Missing code');
@@ -80,18 +79,17 @@ router.get('/facebook/pages', async (req, res) => {
   }
 });
 
-// ========== LAUNCH CAMPAIGN (SAVES NAME/START DATE) ==========
+// ========== LAUNCH CAMPAIGN ==========
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // Pull details from the request body
   const { form, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
   try {
-    // 1. Upload Image
+    // Upload Image
     let imageHash;
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -115,7 +113,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Create Campaign with name/status
+    // Create Campaign
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -128,7 +126,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 3. Create Ad Set
+    // Create Ad Set
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -151,7 +149,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const adSetId = adSetRes.data.id;
 
-    // 4. Create Ad Creative
+    // Create Ad Creative
     const creativeRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
       {
@@ -171,7 +169,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const creativeId = creativeRes.data.id;
 
-    // 5. Create Ad
+    // Create Ad
     const adRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
       {
@@ -201,7 +199,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 });
 
-// ========== LIST CAMPAIGNS (includes name/start_date) ==========
+// ========== LIST CAMPAIGNS ==========
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -270,7 +268,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 
-// ========== PAUSE CAMPAIGN (REAL!) ==========
+// ========== PAUSE CAMPAIGN ==========
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -291,7 +289,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
   }
 });
 
-// ========== UNPAUSE (ACTIVATE) CAMPAIGN ==========
+// ========== UNPAUSE CAMPAIGN ==========
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
