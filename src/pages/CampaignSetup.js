@@ -540,7 +540,7 @@ useEffect(() => {
       border: "1px solid #2b2923"
     }}
   >
-    Pay (${total.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
+    Pay (${fee.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
   </div>
 )}
 
