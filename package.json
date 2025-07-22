@@ -46,6 +46,6 @@
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/smartmarktec/smartmark-mvp/issues"
-  },
-  "homepage": "https://github.com/smartmarktec/smartmark-mvp#readme"
+  }
+ 
 }
