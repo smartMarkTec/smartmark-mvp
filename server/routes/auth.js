@@ -1,7 +1,8 @@
+// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
-const { Buffer } = require('buffer'); // Needed for base64 image upload
+const { Buffer } = require('buffer');
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
@@ -15,16 +16,17 @@ const FB_SCOPES = [
   'pages_show_list'
 ];
 
-let userTokens = {}; // MVP
+// MVP: store user token in-memory
+let userTokens = {};
 
-// Step 1: Redirect to Facebook OAuth
+// Step 1: Facebook login
 router.get('/facebook', (req, res) => {
   const fbAuthUrl =
     `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}&scope=${FB_SCOPES.join(',')}`;
   res.redirect(fbAuthUrl);
 });
 
-// Step 2: Facebook callback — exchange code for access_token
+// Step 2: Callback
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Missing code');
@@ -46,7 +48,7 @@ router.get('/facebook/callback', async (req, res) => {
   }
 });
 
-// Get all ad accounts for user
+// Fetch ad accounts
 router.get('/facebook/adaccounts', async (req, res) => {
   const userToken = userTokens['singleton'];
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
@@ -62,7 +64,7 @@ router.get('/facebook/adaccounts', async (req, res) => {
   }
 });
 
-// Get Facebook Pages the user manages
+// Fetch Facebook Pages
 router.get('/facebook/pages', async (req, res) => {
   const userToken = userTokens['singleton'];
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
@@ -78,7 +80,7 @@ router.get('/facebook/pages', async (req, res) => {
   }
 });
 
-// LAUNCH A FACEBOOK CAMPAIGN (ACTIVE + IMAGE UPLOAD)
+// ========== LAUNCH CAMPAIGN (SAVES NAME/START DATE) ==========
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -86,15 +88,15 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
   // Pull details from the request body
   const { form, budget, adCopy, adImage, campaignType, pageId } = req.body;
+  const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
   try {
-    // --- STEP 1: UPLOAD IMAGE TO FACEBOOK ---
+    // 1. Upload Image
     let imageHash;
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
       if (!matches) throw new Error("Invalid image data.");
       const base64Data = matches[2];
-
       const fbImageRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
         new URLSearchParams({ bytes: base64Data }),
@@ -113,11 +115,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // --- STEP 2: CREATE CAMPAIGN (ACTIVE) ---
+    // 2. Create Campaign with name/status
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
-        name: form.businessName || "SmartMark Campaign",
+        name: campaignName,
         objective: "OUTCOME_TRAFFIC",
         status: "ACTIVE",
         special_ad_categories: []
@@ -126,11 +128,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // --- STEP 3: CREATE AD SET (ACTIVE) ---
+    // 3. Create Ad Set
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
-        name: `${form.businessName || "Ad Set"} - ${new Date().toISOString()}`,
+        name: `${campaignName} - ${new Date().toISOString()}`,
         campaign_id: campaignId,
         daily_budget: Math.round(parseFloat(budget) * 100),
         billing_event: "IMPRESSIONS",
@@ -149,18 +151,18 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const adSetId = adSetRes.data.id;
 
-    // --- STEP 4: CREATE AD CREATIVE (with image_hash) ---
+    // 4. Create Ad Creative
     const creativeRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
       {
-        name: `${form.businessName || "Ad Creative"} - ${new Date().toISOString()}`,
+        name: `${campaignName} - ${new Date().toISOString()}`,
         object_story_spec: {
           page_id: pageId,
           link_data: {
             message: adCopy,
             link: form.url || "https://your-smartmark-site.com",
             image_hash: imageHash,
-            caption: form.businessName || "",
+            caption: campaignName,
             description: form.description || ""
           }
         }
@@ -169,11 +171,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const creativeId = creativeRes.data.id;
 
-    // --- STEP 5: CREATE THE AD (ACTIVE) ---
+    // 5. Create Ad
     const adRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
       {
-        name: `${form.businessName || "Ad"} - ${new Date().toISOString()}`,
+        name: `${campaignName} - ${new Date().toISOString()}`,
         adset_id: adSetId,
         creative: { creative_id: creativeId },
         status: "ACTIVE"
@@ -199,7 +201,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 });
 
-// List all campaigns for an ad account
+// ========== LIST CAMPAIGNS (includes name/start_date) ==========
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -208,7 +210,7 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   try {
     const response = await axios.get(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-      { params: { access_token: userToken, fields: 'id,name,status' } }
+      { params: { access_token: userToken, fields: 'id,name,status,start_time' } }
     );
     res.json(response.data);
   } catch (err) {
@@ -220,10 +222,10 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   }
 });
 
-// Get campaign details (status, etc)
+// ========== GET CAMPAIGN DETAILS ==========
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async (req, res) => {
   const userToken = userTokens['singleton'];
-  const { accountId, campaignId } = req.params;
+  const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   try {
@@ -241,10 +243,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
   }
 });
 
-// Get campaign metrics/insights (impressions, clicks, etc)
+// ========== GET CAMPAIGN METRICS ==========
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async (req, res) => {
   const userToken = userTokens['singleton'];
-  const { accountId, campaignId } = req.params;
+  const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   try {
@@ -261,6 +263,69 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
     res.json(response.data);
   } catch (err) {
     let errorMsg = "Failed to fetch campaign metrics.";
+    if (err.response && err.response.data && err.response.data.error) {
+      errorMsg = err.response.data.error.message;
+    }
+    res.status(500).json({ error: errorMsg });
+  }
+});
+
+// ========== PAUSE CAMPAIGN (REAL!) ==========
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { campaignId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${campaignId}`,
+      { status: 'PAUSED' },
+      { params: { access_token: userToken } }
+    );
+    res.json({ success: true, message: `Campaign ${campaignId} paused.` });
+  } catch (err) {
+    let errorMsg = "Failed to pause campaign.";
+    if (err.response && err.response.data && err.response.data.error) {
+      errorMsg = err.response.data.error.message;
+    }
+    res.status(500).json({ error: errorMsg });
+  }
+});
+
+// ========== UNPAUSE (ACTIVATE) CAMPAIGN ==========
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { campaignId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${campaignId}`,
+      { status: 'ACTIVE' },
+      { params: { access_token: userToken } }
+    );
+    res.json({ success: true, message: `Campaign ${campaignId} unpaused.` });
+  } catch (err) {
+    let errorMsg = "Failed to unpause campaign.";
+    if (err.response && err.response.data && err.response.data.error) {
+      errorMsg = err.response.data.error.message;
+    }
+    res.status(500).json({ error: errorMsg });
+  }
+});
+
+// ========== CANCEL (ARCHIVE) CAMPAIGN ==========
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { campaignId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${campaignId}`,
+      { status: 'ARCHIVED' },
+      { params: { access_token: userToken } }
+    );
+    res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
+  } catch (err) {
+    let errorMsg = "Failed to cancel campaign.";
     if (err.response && err.response.data && err.response.data.error) {
       errorMsg = err.response.data.error.message;
     }

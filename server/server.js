@@ -2,6 +2,9 @@ require('dotenv').config({ path: './.env' });
 
 const express = require('express');
 const cors = require('cors');
+// If you're on Node 18+ you can use global fetch
+// Otherwise, install node-fetch and use the line below
+const fetch = require('node-fetch');
 
 const app = express();
 
@@ -24,22 +27,86 @@ app.use('/api', aiRoutes);
 const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
-// ====== PAUSE/UNPAUSE/CANCEL CAMPAIGN ROUTES ======
+// ====== REAL PAUSE/UNPAUSE/CANCEL CAMPAIGN ROUTES ======
 // These must come AFTER other /api/ routes
+
+// NOTE: Replace this function to get the real user's Facebook access token
+function getUserAccessToken(req) {
+  // TODO: Get from req.session, DB, or OAuth flow
+  // For testing, fallback to an env variable
+  return req.headers['fb-access-token'] || process.env.FB_ACCESS_TOKEN;
+}
+
+// --- PAUSE CAMPAIGN ---
 app.post('/api/campaign/:id/pause', async (req, res) => {
-  // TODO: Integrate with Facebook/Meta API to pause
-  // Replace this with your pause logic
-  res.json({ success: true, message: `Campaign ${req.params.id} paused.` });
+  const campaignId = req.params.id;
+  const accessToken = getUserAccessToken(req);
+  try {
+    const fbRes = await fetch(
+      `https://graph.facebook.com/v19.0/${campaignId}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "PAUSED",
+          access_token: accessToken
+        })
+      }
+    );
+    const data = await fbRes.json();
+    if (data.error) throw new Error(data.error.message);
+    res.json({ success: true, message: `Campaign ${campaignId} paused on Facebook.` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
+
+// --- UNPAUSE CAMPAIGN ---
 app.post('/api/campaign/:id/unpause', async (req, res) => {
-  // TODO: Integrate with Facebook/Meta API to unpause
-  // Replace this with your unpause logic
-  res.json({ success: true, message: `Campaign ${req.params.id} unpaused.` });
+  const campaignId = req.params.id;
+  const accessToken = getUserAccessToken(req);
+  try {
+    const fbRes = await fetch(
+      `https://graph.facebook.com/v19.0/${campaignId}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "ACTIVE",
+          access_token: accessToken
+        })
+      }
+    );
+    const data = await fbRes.json();
+    if (data.error) throw new Error(data.error.message);
+    res.json({ success: true, message: `Campaign ${campaignId} unpaused on Facebook.` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
+
+// --- CANCEL CAMPAIGN ---
 app.post('/api/campaign/:id/cancel', async (req, res) => {
-  // TODO: Integrate with Facebook/Meta API to cancel
-  // Replace this with your cancel logic
-  res.json({ success: true, message: `Campaign ${req.params.id} cancelled.` });
+  const campaignId = req.params.id;
+  const accessToken = getUserAccessToken(req);
+  try {
+    const fbRes = await fetch(
+      `https://graph.facebook.com/v19.0/${campaignId}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "DELETED",
+          access_token: accessToken
+        })
+      }
+    );
+    const data = await fbRes.json();
+    if (data.error) throw new Error(data.error.message);
+    res.json({ success: true, message: `Campaign ${campaignId} cancelled on Facebook.` });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
 });
 
 // ====== ROOT ROUTE ======
