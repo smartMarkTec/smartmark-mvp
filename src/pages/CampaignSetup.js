@@ -1,9 +1,8 @@
-// src/pages/CampaignSetup.js
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-const backendUrl = "https://smartmark-mvp.onrender.com";
+const backendUrl = "https://smartmark-backend.onrender.com";
 const DARK_GREEN = "#185431";
 const LIGHT_BG = "#34373d";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -73,11 +72,12 @@ const CampaignSetup = () => {
   // Fetch Ad Accounts
   useEffect(() => {
     if (!fbConnected) return;
-    fetch(`${backendUrl}/auth/facebook/adaccounts`)
+    fetch("/auth/facebook/adaccounts")
       .then(res => res.json())
       .then(json => {
         setAdAccounts(json.data || []);
-        if (json.data && json.data.length > 0) setSelectedAccount(json.data[0].id.replace("act_", ""));
+        // DO NOT auto-select first account, user must choose!
+        // setSelectedAccount(""); <-- Do NOT set
       })
       .catch(err => console.error("FB ad accounts error", err));
   }, [fbConnected]);
@@ -85,11 +85,12 @@ const CampaignSetup = () => {
   // Fetch Pages
   useEffect(() => {
     if (!fbConnected) return;
-    fetch(`${backendUrl}/auth/facebook/pages`)
+    fetch("/auth/facebook/pages")
       .then(res => res.json())
       .then(json => {
         setPages(json.data || []);
-        if (json.data && json.data.length > 0) setSelectedPageId(json.data[0].id);
+        // DO NOT auto-select first page, user must choose!
+        // setSelectedPageId(""); <-- Do NOT set
       })
       .catch(err => console.error("FB pages error", err));
   }, [fbConnected]);
@@ -98,12 +99,14 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (fbConnected && selectedAccount) {
       const acctId = selectedAccount.replace("act_", "");
-      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
+      fetch(`/auth/facebook/adaccount/${acctId}/campaigns`)
         .then(res => res.json())
         .then(data => {
           if (data && data.data) {
+            // Limit to 2 campaigns
             setCampaigns(data.data.slice(0, 2));
-            if (data.data.length > 0) setSelectedCampaignId(data.data[0].id);
+            // DO NOT auto-select campaign
+            // setSelectedCampaignId(""); <-- Do NOT set
           }
         });
     }
@@ -112,8 +115,9 @@ const CampaignSetup = () => {
   // When a campaign is selected, fetch its details and metrics
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
+      // Fetch ad copy/image/budget/description from backend
       const acctId = selectedAccount.replace("act_", "");
-      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
+      fetch(`/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
         .then(res => res.json())
         .then(c => {
           setBudget(c.budget || "");
@@ -121,7 +125,8 @@ const CampaignSetup = () => {
           setAdImage(c.adImage || "");
           setDescription(c.description || "");
         });
-      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
+      // Fetch metrics
+      fetch(`/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
         .then(res => res.json())
         .then(setMetrics)
         .catch(() => setMetrics(null));
@@ -158,7 +163,7 @@ const CampaignSetup = () => {
       alert("Please enter a description or business info.");
       return;
     }
-    const res = await fetch(`${backendUrl}/api/generate-ad-copy`, {
+    const res = await fetch("/api/generate-ad-copy", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -176,7 +181,7 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       const acctId = selectedAccount.replace("act_", "");
-      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+      const res = await fetch(`/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -357,8 +362,8 @@ const CampaignSetup = () => {
             marginBottom: "0.2rem",
             boxShadow: "0 2px 12px #193a3a11"
           }}>
-            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
-              <div style={{color:"#fff",fontWeight:800,fontSize:"1.17rem"}}>Your Campaigns</div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div style={{ color: "#fff", fontWeight: 800, fontSize: "1.17rem" }}>Your Campaigns</div>
               <button
                 type="button"
                 onClick={handleNewCampaign}
@@ -382,7 +387,7 @@ const CampaignSetup = () => {
             </div>
             {/* Campaign List Dropdown */}
             {campaigns.length > 0 && (
-              <div style={{marginBottom: 12}}>
+              <div style={{ marginBottom: 12 }}>
                 <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
                   Select Campaign:
                 </label>
@@ -395,6 +400,7 @@ const CampaignSetup = () => {
                     fontSize: "1.09rem",
                   }}
                 >
+                  <option value="">-- Select a campaign --</option>
                   {campaigns.map((c, i) => (
                     <option key={c.id} value={c.id}>
                       {c.name || `Campaign ${i + 1}`}
@@ -414,7 +420,7 @@ const CampaignSetup = () => {
                 marginTop: 12,
                 marginBottom: -8
               }}>
-                <div style={{fontSize:"1.19rem",fontWeight:700,color:"#fff",marginBottom:8}}>
+                <div style={{ fontSize: "1.19rem", fontWeight: 700, color: "#fff", marginBottom: 8 }}>
                   Campaign Metrics
                 </div>
                 <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
@@ -451,6 +457,7 @@ const CampaignSetup = () => {
                   fontSize: "1.06rem",
                 }}
               >
+                <option value="">-- Select an ad account --</option>
                 {adAccounts.map(ac => (
                   <option key={ac.id} value={ac.id.replace("act_", "")}>
                     {ac.name || ac.id}
@@ -467,6 +474,7 @@ const CampaignSetup = () => {
                   fontSize: "1.06rem",
                 }}
               >
+                <option value="">-- Select a page --</option>
                 {pages.map(p => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -697,7 +705,7 @@ const CampaignSetup = () => {
               border: "1px solid #2ed99344"
             }}
           >
-            Send <span style={{color:'#fff',fontWeight:800}}>${fee.toFixed(2)}</span> to <a href="https://cash.app/$Wknowles20" target="_blank" rel="noopener noreferrer" style={{color:"#2ed993",textDecoration:"underline"}}>$Wknowles20</a> via CashApp to complete your campaign setup.
+            Send <span style={{ color: '#fff', fontWeight: 800 }}>${fee.toFixed(2)}</span> to <a href="https://cash.app/$Wknowles20" target="_blank" rel="noopener noreferrer" style={{ color: "#2ed993", textDecoration: "underline" }}>$Wknowles20</a> via CashApp to complete your campaign setup.
           </div>
         )}
 
