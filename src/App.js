@@ -1,24 +1,18 @@
-import logo from './logo.svg';
-import './App.css';
+import React from "react";
+import { Routes, Route } from "react-router-dom";
+import Landing from "./pages/Landing";
+import FormPage from "./pages/FormPage";
+import CampaignSetup from "./pages/CampaignSetup";
+import Login from "./pages/Login"; // <--- ADD THIS LINE
 
 function App() {
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
-    </div>
+    <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/form" element={<FormPage />} />
+      <Route path="/setup" element={<CampaignSetup />} />
+      <Route path="/login" element={<Login />} /> {/* <--- ADD THIS LINE */}
+    </Routes>
   );
 }
 
