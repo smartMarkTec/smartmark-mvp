@@ -19,7 +19,6 @@ const calculateFees = (budget) => {
   return { fee, total };
 };
 
-// At top of CampaignSetup.js
 const btnStyle = {
   padding: "0.7rem 1.6rem",
   marginRight: "0.7rem",
@@ -32,34 +31,6 @@ const btnStyle = {
   cursor: "pointer",
   transition: "background 0.18s"
 };
-
-// Add state to track campaign status
-const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
-
-// Fetch campaign status whenever selectedCampaignId changes
-useEffect(() => {
-  if (selectedCampaignId) {
-    fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/status`)
-      .then(res => res.json())
-      .then(data => setCampaignStatus(data.status || "ACTIVE"))
-      .catch(() => setCampaignStatus("ACTIVE"));
-  }
-}, [selectedCampaignId, selectedAccount]);
-
-// Action handlers
-const pauseCampaign = async () => {
-  await fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
-  setCampaignStatus("PAUSED");
-};
-const unpauseCampaign = async () => {
-  await fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
-  setCampaignStatus("ACTIVE");
-};
-const cancelCampaign = async () => {
-  await fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
-  setCampaignStatus("CANCELED");
-};
-
 
 const CampaignSetup = () => {
   const navigate = useNavigate();
@@ -92,6 +63,33 @@ const CampaignSetup = () => {
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
+  // --- NEW: State for campaign status ---
+  const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
+
+  // --- NEW: Fetch campaign status whenever selectedCampaignId changes ---
+  useEffect(() => {
+    if (selectedCampaignId && selectedAccount) {
+      fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/status`)
+        .then(res => res.json())
+        .then(data => setCampaignStatus(data.status || "ACTIVE"))
+        .catch(() => setCampaignStatus("ACTIVE"));
+    }
+  }, [selectedCampaignId, selectedAccount]);
+
+  // --- NEW: Action handlers ---
+  const pauseCampaign = async () => {
+    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
+    setCampaignStatus("PAUSED");
+  };
+  const unpauseCampaign = async () => {
+    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
+    setCampaignStatus("ACTIVE");
+  };
+  const cancelCampaign = async () => {
+    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
+    setCampaignStatus("CANCELED");
+  };
+
   // On mount: load user info and all saved data
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
@@ -112,64 +110,64 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, [location, userKey]);
 
- // Fetch Ad Accounts
-useEffect(() => {
-  if (!fbConnected) return;
-  fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
-    .then(res => res.json())
-    .then(json => {
-      setAdAccounts(json.data || []);
-      if (json.data && json.data.length > 0) setSelectedAccount(json.data[0].id.replace("act_", ""));
-    })
-    .catch(err => console.error("FB ad accounts error", err));
-}, [fbConnected]);
-
-// Fetch Pages
-useEffect(() => {
-  if (!fbConnected) return;
-  fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
-    .then(res => res.json())
-    .then(json => {
-      setPages(json.data || []);
-      if (json.data && json.data.length > 0) setSelectedPageId(json.data[0].id);
-    })
-    .catch(err => console.error("FB pages error", err));
-}, [fbConnected]);
-
-// Fetch campaigns for dropdown
-useEffect(() => {
-  if (fbConnected && selectedAccount) {
-    const acctId = selectedAccount.replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
+  // Fetch Ad Accounts
+  useEffect(() => {
+    if (!fbConnected) return;
+    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
       .then(res => res.json())
-      .then(data => {
-        if (data && data.data) {
-          setCampaigns(data.data.slice(0, 2));
-          if (data.data.length > 0) setSelectedCampaignId(data.data[0].id);
-        }
-      });
-  }
-}, [fbConnected, selectedAccount, launched]);
+      .then(json => {
+        setAdAccounts(json.data || []);
+        if (json.data && json.data.length > 0) setSelectedAccount(json.data[0].id.replace("act_", ""));
+      })
+      .catch(err => console.error("FB ad accounts error", err));
+  }, [fbConnected]);
 
-// When a campaign is selected, fetch its details and metrics
-useEffect(() => {
-  if (selectedCampaignId && selectedAccount) {
-    const acctId = selectedAccount.replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
+  // Fetch Pages
+  useEffect(() => {
+    if (!fbConnected) return;
+    fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
       .then(res => res.json())
-      .then(c => {
-        setBudget(c.budget || "");
-        setAdCopy(c.adCopy || "");
-        setAdImage(c.adImage || "");
-        setDescription(c.description || "");
-      });
-    // Fetch metrics
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(setMetrics)
-      .catch(() => setMetrics(null));
-  }
-}, [selectedCampaignId, selectedAccount]);
+      .then(json => {
+        setPages(json.data || []);
+        if (json.data && json.data.length > 0) setSelectedPageId(json.data[0].id);
+      })
+      .catch(err => console.error("FB pages error", err));
+  }, [fbConnected]);
+
+  // Fetch campaigns for dropdown
+  useEffect(() => {
+    if (fbConnected && selectedAccount) {
+      const acctId = selectedAccount.replace("act_", "");
+      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.data) {
+            setCampaigns(data.data.slice(0, 2));
+            if (data.data.length > 0) setSelectedCampaignId(data.data[0].id);
+          }
+        });
+    }
+  }, [fbConnected, selectedAccount, launched]);
+
+  // When a campaign is selected, fetch its details and metrics
+  useEffect(() => {
+    if (selectedCampaignId && selectedAccount) {
+      const acctId = selectedAccount.replace("act_", "");
+      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
+        .then(res => res.json())
+        .then(c => {
+          setBudget(c.budget || "");
+          setAdCopy(c.adCopy || "");
+          setAdImage(c.adImage || "");
+          setDescription(c.description || "");
+        });
+      // Fetch metrics
+      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
+        .then(res => res.json())
+        .then(setMetrics)
+        .catch(() => setMetrics(null));
+    }
+  }, [selectedCampaignId, selectedAccount]);
 
   // + New Campaign (reset state if <2 exist)
   const handleNewCampaign = () => {
@@ -197,28 +195,26 @@ useEffect(() => {
 
   // Ad copy generation
   const handleGenerateAdCopy = async () => {
-  if (!description && !form.businessName && !form.url) {
-    alert("Please enter a description or business info.");
-    return;
-  }
-  const res = await fetch("/api/generate-ad-copy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      description,
-      businessName: form.businessName,
-      url: form.url
-    })
-  });
-  const data = await res.json();
-  if (data.adCopy) {
-  // Replace [Your Link] or similar with the actual url
-  let copyWithUrl = data.adCopy.replace(/\[Your Link\]|\[Link\]/gi, form.url || "");
-  setAdCopy(copyWithUrl);
-}
-
-};
-
+    if (!description && !form.businessName && !form.url) {
+      alert("Please enter a description or business info.");
+      return;
+    }
+    const res = await fetch("/api/generate-ad-copy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description,
+        businessName: form.businessName,
+        url: form.url
+      })
+    });
+    const data = await res.json();
+    if (data.adCopy) {
+      // Replace [Your Link] or similar with the actual url
+      let copyWithUrl = data.adCopy.replace(/\[Your Link\]|\[Link\]/gi, form.url || "");
+      setAdCopy(copyWithUrl);
+    }
+  };
 
   // After launch, set the new status
   const handleLaunch = async () => {
@@ -430,6 +426,8 @@ useEffect(() => {
               </button>
             </div>
        {/* Campaign List Dropdown */}
+
+
 {campaigns.length > 0 && (
   <div style={{marginBottom: 12}}>
     <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
