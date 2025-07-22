@@ -1,14 +1,14 @@
 require('dotenv').config({ path: './.env' });
 
 const express = require('express');
-const cors = require('cors'); // <-- ADD THIS LINE
+const cors = require('cors');
 
 const app = express();
 
 // ====== ENABLE CORS ======
 app.use(cors({
-  origin: 'https://smartmark-mvp.vercel.app', // <-- Your frontend domain
-  credentials: true, // Optional, if you want to use cookies/session later
+  origin: 'https://smartmark-mvp.vercel.app',
+  credentials: true,
 }));
 
 app.use(express.json({ limit: '10mb' }));
@@ -30,7 +30,7 @@ app.get('/', (req, res) => {
 });
 
 // ====== START SERVER ======
-const PORT = process.env.PORT || 5176;
+const PORT = process.env.PORT || 10000; // <-- use 10000 as default for local, but Render will set PORT!
 app.listen(PORT, () => {
   console.log(`🚀 Server started on http://localhost:${PORT}`);
 });
