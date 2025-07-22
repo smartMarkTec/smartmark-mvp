@@ -155,22 +155,28 @@ useEffect(() => {
 
   // Ad copy generation
   const handleGenerateAdCopy = async () => {
-    if (!description && !form.businessName && !form.url) {
-      alert("Please enter a description or business info.");
-      return;
-    }
-    const res = await fetch("/api/generate-ad-copy", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        description,
-        businessName: form.businessName,
-        url: form.url
-      })
-    });
-    const data = await res.json();
-    if (data.adCopy) setAdCopy(data.adCopy);
-  };
+  if (!description && !form.businessName && !form.url) {
+    alert("Please enter a description or business info.");
+    return;
+  }
+  const res = await fetch("/api/generate-ad-copy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      description,
+      businessName: form.businessName,
+      url: form.url
+    })
+  });
+  const data = await res.json();
+  if (data.adCopy) {
+  // Replace [Your Link] or similar with the actual url
+  let copyWithUrl = data.adCopy.replace(/\[Your Link\]|\[Link\]/gi, form.url || "");
+  setAdCopy(copyWithUrl);
+}
+
+};
+
 
   // After launch, set the new status
   const handleLaunch = async () => {
