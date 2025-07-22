@@ -22,12 +22,6 @@ const Login = () => {
   const handleLogin = (e) => {
     e.preventDefault();
 
-    // Debug log
-    console.log("Saved Username:", savedUsername);
-    console.log("Saved Password:", savedPassword);
-    console.log("Input Username:", username);
-    console.log("Input Password:", password);
-
     if (
       username.trim() === savedUsername.trim() &&
       password.trim() === savedPassword.trim() &&
@@ -51,14 +45,18 @@ const Login = () => {
         alignItems: "center",
         justifyContent: "center",
         fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+        padding: "1.5rem", // Add padding for mobile
       }}
     >
-      <div style={{
-        position: "fixed",
-        top: 30,
-        right: 36,
-        zIndex: 99,
-      }}>
+      {/* Logo */}
+      <div
+        style={{
+          position: "fixed",
+          top: 16,
+          right: 18,
+          zIndex: 99,
+        }}
+      >
         <SmartMarkLogoButton />
       </div>
 
@@ -67,13 +65,13 @@ const Login = () => {
         onClick={() => navigate("/")}
         style={{
           position: "fixed",
-          top: 32,
-          left: 72,
+          top: 16,
+          left: 18,
           background: "rgba(52,55,61,0.82)",
           color: "#fff",
           border: "none",
           borderRadius: "1.1rem",
-          padding: "0.65rem 1.6rem",
+          padding: "0.55rem 1.1rem",
           fontWeight: 700,
           fontSize: "1rem",
           letterSpacing: "0.8px",
@@ -91,22 +89,23 @@ const Login = () => {
         onSubmit={handleLogin}
         style={{
           background: "#34373de6",
-          padding: "2.8rem 2.2rem",
-          borderRadius: "2.1rem",
+          padding: "2rem 1.2rem",
+          borderRadius: "1.2rem",
           boxShadow: "0 8px 40px 0 rgba(24,84,49,0.12)",
           display: "flex",
           flexDirection: "column",
-          minWidth: 340,
-          gap: "1.7rem",
+          width: "100%",
+          maxWidth: 350,
+          gap: "1.1rem",
         }}
       >
         <h2
           style={{
             color: "#fff",
             fontWeight: 700,
-            fontSize: "2.1rem",
+            fontSize: "1.7rem",
             textAlign: "center",
-            marginBottom: "1.4rem",
+            marginBottom: "1rem",
             letterSpacing: "-0.5px",
             fontFamily: "'Poppins', 'Times New Roman', Times, serif",
           }}
@@ -124,12 +123,13 @@ const Login = () => {
           }}
           required
           style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
+            padding: "0.9rem",
+            borderRadius: "1rem",
             border: "none",
-            fontSize: "1.15rem",
+            fontSize: "1rem",
             outline: "none",
             fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+            width: "100%",
           }}
           autoComplete="username"
         />
@@ -144,12 +144,13 @@ const Login = () => {
           }}
           required
           style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
+            padding: "0.9rem",
+            borderRadius: "1rem",
             border: "none",
-            fontSize: "1.15rem",
+            fontSize: "1rem",
             outline: "none",
             fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+            width: "100%",
           }}
           autoComplete="email"
         />
@@ -159,11 +160,11 @@ const Login = () => {
               color: "#F87171",
               background: "#232529",
               borderRadius: "0.7rem",
-              padding: "0.8rem 0.8rem",
+              padding: "0.7rem 0.8rem",
               fontWeight: 600,
-              fontSize: "1.01rem",
+              fontSize: "0.97rem",
               textAlign: "center",
-              marginTop: "-0.8rem",
+              marginTop: "-0.6rem",
               fontFamily: "'Poppins', 'Times New Roman', Times, serif",
             }}
           >
@@ -173,19 +174,19 @@ const Login = () => {
         <button
           type="submit"
           style={{
-            padding: "1.08rem 0",
-            borderRadius: "2.2rem",
+            padding: "0.9rem 0",
+            borderRadius: "2rem",
             border: "none",
             background: DARK_GREEN,
             color: "#fff",
             fontWeight: 700,
-            fontSize: "1.21rem",
-            letterSpacing: "1.2px",
+            fontSize: "1.08rem",
+            letterSpacing: "1.1px",
             cursor: "pointer",
             fontFamily: "'Poppins', 'Times New Roman', Times, serif",
             boxShadow: "0 2px 16px 0 rgba(24,84,49,0.16)",
             transition: "background 0.18s",
-            marginTop: "0.6rem",
+            marginTop: "0.2rem",
           }}
           onMouseOver={(e) => (e.target.style.background = "#1e6a3e")}
           onMouseOut={(e) => (e.target.style.background = DARK_GREEN)}
