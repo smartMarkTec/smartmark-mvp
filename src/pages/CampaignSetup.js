@@ -451,7 +451,7 @@ const CampaignSetup = () => {
   </div>
 )}
 
-/* --- New: Status + Action Buttons --- */
+
 {selectedCampaignId && (
   <div style={{ marginBottom: "1.2rem", marginTop: "0.2rem" }}>
     <span style={{
@@ -495,7 +495,7 @@ const CampaignSetup = () => {
   </div>
 )}
 
-/* --- Keep your metrics below as is --- */
+
 {selectedCampaignId && metrics && (
   <div style={{
     background: "#191d1f",
