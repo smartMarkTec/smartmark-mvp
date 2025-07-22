@@ -37,11 +37,9 @@ const CampaignSetup = () => {
   const location = useLocation();
   const fileInputRef = useRef();
 
-  // State for login/user
+  // Main State
   const [form, setForm] = useState({});
   const [userKey, setUserKey] = useState("");
-
-  // State for campaign setup
   const [budget, setBudget] = useState("");
   const [adCopy, setAdCopy] = useState("");
   const [adImage, setAdImage] = useState("");
@@ -63,10 +61,11 @@ const CampaignSetup = () => {
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
 
-  // --- NEW: State for campaign status ---
+  // Status and Modal
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
+  const [showPauseModal, setShowPauseModal] = useState(false);
 
-  // --- NEW: Fetch campaign status whenever selectedCampaignId changes ---
+  // Fetch campaign status
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
       fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/status`)
@@ -76,7 +75,7 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // --- NEW: Action handlers ---
+  // Handlers for pause/unpause/cancel
   const pauseCampaign = async () => {
     await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
     setCampaignStatus("PAUSED");
@@ -90,7 +89,7 @@ const CampaignSetup = () => {
     setCampaignStatus("CANCELED");
   };
 
-  // On mount: load user info and all saved data
+  // Load user info
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
     let cashapp = localStorage.getItem("smartmark_last_cashapp") || "";
@@ -160,6 +159,12 @@ const CampaignSetup = () => {
           setAdCopy(c.adCopy || "");
           setAdImage(c.adImage || "");
           setDescription(c.description || "");
+          // Load campaign name and startDate into the form
+          setForm(f => ({
+            ...f,
+            campaignName: c.campaignName || "",
+            startDate: c.startDate || ""
+          }));
         });
       // Fetch metrics
       fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
@@ -169,7 +174,7 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // + New Campaign (reset state if <2 exist)
+  // + New Campaign
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
     setSelectedCampaignId("");
@@ -180,6 +185,7 @@ const CampaignSetup = () => {
     setLaunched(false);
     setLaunchResult(null);
     setMetrics(null);
+    setForm({});
   };
 
   // File/image upload
@@ -210,13 +216,12 @@ const CampaignSetup = () => {
     });
     const data = await res.json();
     if (data.adCopy) {
-      // Replace [Your Link] or similar with the actual url
       let copyWithUrl = data.adCopy.replace(/\[Your Link\]|\[Link\]/gi, form.url || "");
       setAdCopy(copyWithUrl);
     }
   };
 
-  // After launch, set the new status
+  // Launch campaign
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -225,12 +230,13 @@ const CampaignSetup = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          form,
+          ...form, // includes campaignName
           budget,
           adCopy,
           adImage,
           campaignType: form?.campaignType || "Website Traffic",
           pageId: selectedPageId,
+          startDate: form.startDate || new Date().toISOString() // add startDate if you want to set on frontend
         }),
       });
       const json = await res.json();
@@ -245,7 +251,7 @@ const CampaignSetup = () => {
     setLoading(false);
   };
 
-  // OPEN FB PAYMENT POPUP
+  // FB payment popup
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
       alert("Please select an ad account first.");
@@ -425,97 +431,100 @@ const CampaignSetup = () => {
                 + New Campaign
               </button>
             </div>
-       {/* Campaign List Dropdown */}
+            {/* Campaign List Dropdown */}
+            {campaigns.length > 0 && (
+              <div style={{marginBottom: 12}}>
+                <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
+                  Select Campaign:
+                </label>
+                <select
+                  value={selectedCampaignId}
+                  onChange={e => setSelectedCampaignId(e.target.value)}
+                  style={{
+                    padding: "0.7rem",
+                    borderRadius: "1.1rem",
+                    fontSize: "1.09rem",
+                  }}
+                >
+                  {campaigns.map((c, idx) => (
+                    <option key={c.id} value={c.id}>
+                      {c.campaignName || `Campaign ${idx + 1}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
+            {/* Status, Pause/Unpause/Cancel, Start Date */}
+            {selectedCampaignId && (
+              <div style={{ marginBottom: "1.2rem", marginTop: "0.2rem" }}>
+                <span style={{
+                  color: "#fff",
+                  fontWeight: 600,
+                  fontSize: "1.05rem",
+                  marginRight: 16,
+                  letterSpacing: ".4px"
+                }}>
+                  Status:{" "}
+                  {campaignStatus === "PAUSED"
+                    ? "Paused"
+                    : campaignStatus === "CANCELED"
+                    ? "Canceled"
+                    : "Active"}
+                </span>
+                {(campaignStatus === "ACTIVE" || campaignStatus === "RUNNING") && (
+                  <button
+                    onClick={() => setShowPauseModal(true)}
+                    style={btnStyle}
+                  >
+                    Pause
+                  </button>
+                )}
+                {campaignStatus === "PAUSED" && (
+                  <button
+                    onClick={unpauseCampaign}
+                    style={btnStyle}
+                  >
+                    Unpause
+                  </button>
+                )}
+                {campaignStatus !== "CANCELED" && (
+                  <button
+                    onClick={cancelCampaign}
+                    style={{ ...btnStyle, background: "#e74c3c", color: "#fff" }}
+                  >
+                    Cancel
+                  </button>
+                )}
+                {/* Show Start Date */}
+                <div style={{color:'#fff', fontWeight:600, marginTop:8}}>
+                  Started: {campaigns.find(c=>c.id===selectedCampaignId)?.startDate ?
+                    new Date(campaigns.find(c=>c.id===selectedCampaignId).startDate).toLocaleDateString() : "--"}
+                </div>
+              </div>
+            )}
 
-{campaigns.length > 0 && (
-  <div style={{marginBottom: 12}}>
-    <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
-      Select Campaign:
-    </label>
-    <select
-      value={selectedCampaignId}
-      onChange={e => setSelectedCampaignId(e.target.value)}
-      style={{
-        padding: "0.7rem",
-        borderRadius: "1.1rem",
-        fontSize: "1.09rem",
-      }}
-    >
-      {campaigns.map((c, idx) => (
-        <option key={c.id} value={c.id}>
-          {`Campaign ${idx + 1}`}
-        </option>
-      ))}
-    </select>
-  </div>
-)}
-
-
-{selectedCampaignId && (
-  <div style={{ marginBottom: "1.2rem", marginTop: "0.2rem" }}>
-    <span style={{
-      color: "#fff",
-      fontWeight: 600,
-      fontSize: "1.05rem",
-      marginRight: 16,
-      letterSpacing: ".4px"
-    }}>
-      Status:{" "}
-      {campaignStatus === "PAUSED"
-        ? "Paused"
-        : campaignStatus === "CANCELED"
-        ? "Canceled"
-        : "Active"}
-    </span>
-    {(campaignStatus === "ACTIVE" || campaignStatus === "RUNNING") && (
-      <button
-        onClick={pauseCampaign}
-        style={btnStyle}
-      >
-        Pause
-      </button>
-    )}
-    {campaignStatus === "PAUSED" && (
-      <button
-        onClick={unpauseCampaign}
-        style={btnStyle}
-      >
-        Unpause
-      </button>
-    )}
-    {campaignStatus !== "CANCELED" && (
-      <button
-        onClick={cancelCampaign}
-        style={{ ...btnStyle, background: "#e74c3c", color: "#fff" }}
-      >
-        Cancel
-      </button>
-    )}
-  </div>
-)}
-
-
-{selectedCampaignId && metrics && (
-  <div style={{
-    background: "#191d1f",
-    borderRadius: "1rem",
-    padding: "1.2rem 1.4rem",
-    color: "#a8e8a8",
-    fontWeight: 600,
-    marginTop: 12,
-    marginBottom: -8
-  }}>
-    <div style={{fontSize:"1.19rem",fontWeight:700,color:"#fff",marginBottom:8}}>
-      Campaign Metrics
-    </div>
-    <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
-    <div>Clicks: <b>{metrics.clicks ?? "--"}</b></div>
-    <div>CTR: <b>{metrics.ctr ?? "--"}</b></div>
-    <div>Spend: <b>{metrics.spend ? `$${metrics.spend}` : "--"}</b></div>
-    <div>Results: <b>{metrics.results ?? "--"}</b></div>
-  </div>
-)}
+            {/* Metrics */}
+            {selectedCampaignId && metrics && (
+              <div style={{
+                background: "#191d1f",
+                borderRadius: "1rem",
+                padding: "1.2rem 1.4rem",
+                color: "#a8e8a8",
+                fontWeight: 600,
+                marginTop: 12,
+                marginBottom: -8
+              }}>
+                <div style={{fontSize:"1.19rem",fontWeight:700,color:"#fff",marginBottom:8}}>
+                  Campaign Metrics
+                </div>
+                <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
+                <div>Clicks: <b>{metrics.clicks ?? "--"}</b></div>
+                <div>CTR: <b>{metrics.ctr ?? "--"}</b></div>
+                <div>Spend: <b>{metrics.spend ? `$${metrics.spend}` : "--"}</b></div>
+                <div>Results: <b>{metrics.results ?? "--"}</b></div>
+              </div>
+            )}
 
             <div style={{
               marginTop: "0.9rem",
@@ -582,76 +591,93 @@ const CampaignSetup = () => {
               marginTop: "1.6rem",
             }}
           >
+            {/* Campaign Name */}
+            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Campaign Name</label>
+            <input
+              type="text"
+              value={form.campaignName || ""}
+              onChange={e => setForm({ ...form, campaignName: e.target.value })}
+              placeholder="Name your campaign"
+              style={{
+                padding: "0.8rem 1.1rem",
+                borderRadius: "1.1rem",
+                border: "1px solid #c6c6c6",
+                fontSize: "1.11rem",
+                width: "100%",
+                marginBottom: "1rem",
+              }}
+            />
+
             <label style={{ color: "#fff", fontWeight: 600 }}>Campaign Budget ($)</label>
-<input
-  type="number"
-  placeholder="Enter budget (minimum $100)"
-  min={100}
-  step={10}
-  value={budget}
-  onChange={e => setBudget(e.target.value)}
-  style={{
-    padding: "0.8rem 1.1rem",
-    borderRadius: "1.1rem",
-    border: "1px solid #c6c6c6",
-    fontSize: "1.11rem",
-    width: "100%",
-    marginBottom: "1rem",
-  }}
-/>
-{/* Show CashTag only if budget is entered and > 0 */}
-{budget && Number(budget) > 0 && (
-  <div style={{
-    marginTop: "-0.7rem",
-    marginBottom: "0.5rem",
-    fontWeight: 700,
-    color: "#1ec885",
-    fontSize: "1.05rem",
-    textAlign: "left",
-    letterSpacing: "0.03em",
-    fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-  }}>
-    Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
-  </div>
-)}
+            <input
+              type="number"
+              placeholder="Enter budget (minimum $100)"
+              min={100}
+              step={10}
+              value={budget}
+              onChange={e => setBudget(e.target.value)}
+              style={{
+                padding: "0.8rem 1.1rem",
+                borderRadius: "1.1rem",
+                border: "1px solid #c6c6c6",
+                fontSize: "1.11rem",
+                width: "100%",
+                marginBottom: "1rem",
+              }}
+            />
+            {/* Show CashTag only if budget is entered and > 0 */}
+            {budget && Number(budget) > 0 && (
+              <div style={{
+                marginTop: "-0.7rem",
+                marginBottom: "0.5rem",
+                fontWeight: 700,
+                color: "#1ec885",
+                fontSize: "1.05rem",
+                textAlign: "left",
+                letterSpacing: "0.03em",
+                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+              }}>
+                Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
+              </div>
+            )}
 
-<div style={{ color: "#afeca3", fontWeight: 600 }}>
-  SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
-</div>
-{budget && Number(budget) >= 100 && (
-  <div
-    style={{
-      marginTop: "0.7rem",
-      color: "#ffe066",
-      background: "#1c1c1e",
-      borderRadius: "0.8rem",
-      padding: "0.75rem 1rem",
-      fontWeight: 700,
-      textAlign: "center",
-      fontSize: "1.13rem",
-      border: "1px solid #2b2923"
-    }}
-  >
-    Pay (${fee.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
-  </div>
-)}
+            <div style={{ color: "#afeca3", fontWeight: 600 }}>
+              SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
+            </div>
+            {budget && Number(budget) >= 100 && (
+              <div
+                style={{
+                  marginTop: "0.7rem",
+                  color: "#ffe066",
+                  background: "#1c1c1e",
+                  borderRadius: "0.8rem",
+                  padding: "0.75rem 1rem",
+                  fontWeight: 700,
+                  textAlign: "center",
+                  fontSize: "1.13rem",
+                  border: "1px solid #2b2923"
+                }}
+              >
+                Pay (${fee.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
+              </div>
+            )}
 
-<label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
-<textarea
-  rows={3}
-  value={description}
-  onChange={e => setDescription(e.target.value)}
-  placeholder="Describe your business or promo"
-  style={{
-    padding: "0.8rem",
-    borderRadius: "0.9rem",
-    border: "1px solid #ddd",
-    fontSize: "1.08rem",
-    width: "100%",
-    marginBottom: "1rem",
-    resize: "vertical",
-  }}
-/>
+            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
+            <textarea
+              rows={3}
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Describe your business or promo"
+              style={{
+                padding: "0.8rem",
+                borderRadius: "0.9rem",
+                border: "1px solid #ddd",
+                fontSize: "1.08rem",
+                width: "100%",
+                marginBottom: "1rem",
+                resize: "vertical",
+              }}
+            />
             <button
               type="button"
               onClick={handleGenerateAdCopy}
@@ -744,6 +770,38 @@ const CampaignSetup = () => {
           )}
         </div>
       </div>
+      {/* Pause Modal */}
+      {showPauseModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: '#24262b', borderRadius: 16, padding: 32, minWidth: 340, boxShadow: "0 8px 40px #000a"
+          }}>
+            <div style={{fontWeight: 700, fontSize: 20, marginBottom: 24, color:'#fff'}}>
+              Are you sure you want to pause this campaign?
+            </div>
+            <div style={{display: 'flex', justifyContent: 'flex-end', gap: 16}}>
+              <button
+                onClick={() => setShowPauseModal(false)}
+                style={{background:'#e74c3c', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
+              >
+                No
+              </button>
+              <button
+                onClick={async () => {
+                  setShowPauseModal(false);
+                  await pauseCampaign();
+                }}
+                style={{background:'#21b16d', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
+              >
+                Yes, Pause
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
