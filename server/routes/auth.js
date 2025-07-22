@@ -4,6 +4,7 @@ const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
 
+// ENV VARS
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
@@ -16,16 +17,16 @@ const FB_SCOPES = [
   'pages_show_list'
 ];
 
+// ====== MVP: store ONE user access token in memory ======
 let userTokens = {};
 
-// Step 1: Facebook login
+// ====== FACEBOOK LOGIN FLOW ======
 router.get('/facebook', (req, res) => {
   const fbAuthUrl =
     `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}&scope=${FB_SCOPES.join(',')}`;
   res.redirect(fbAuthUrl);
 });
 
-// Step 2: Facebook callback
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Missing code');
@@ -47,7 +48,7 @@ router.get('/facebook/callback', async (req, res) => {
   }
 });
 
-// Fetch ad accounts
+// ====== AD ACCOUNTS, PAGES ======
 router.get('/facebook/adaccounts', async (req, res) => {
   const userToken = userTokens['singleton'];
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
@@ -63,7 +64,6 @@ router.get('/facebook/adaccounts', async (req, res) => {
   }
 });
 
-// Fetch Facebook Pages
 router.get('/facebook/pages', async (req, res) => {
   const userToken = userTokens['singleton'];
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
@@ -79,7 +79,7 @@ router.get('/facebook/pages', async (req, res) => {
   }
 });
 
-// ========== LAUNCH CAMPAIGN ==========
+// ====== LAUNCH CAMPAIGN (with campaignName, startDate) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -89,7 +89,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
   try {
-    // Upload Image
+    // 1. Upload image (to Facebook)
     let imageHash;
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -113,7 +113,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // Create Campaign
+    // 2. Create campaign
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -126,7 +126,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // Create Ad Set
+    // 3. Create ad set
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -149,7 +149,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const adSetId = adSetRes.data.id;
 
-    // Create Ad Creative
+    // 4. Create ad creative
     const creativeRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
       {
@@ -169,7 +169,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const creativeId = creativeRes.data.id;
 
-    // Create Ad
+    // 5. Create ad
     const adRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
       {
@@ -199,7 +199,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 });
 
-// ========== LIST CAMPAIGNS ==========
+// ====== LIST CAMPAIGNS (name, start_time, status) ======
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -220,7 +220,7 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   }
 });
 
-// ========== GET CAMPAIGN DETAILS ==========
+// ====== GET CAMPAIGN DETAILS ======
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -241,7 +241,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
   }
 });
 
-// ========== GET CAMPAIGN METRICS ==========
+// ====== GET CAMPAIGN METRICS ======
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -268,7 +268,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 
-// ========== PAUSE CAMPAIGN ==========
+// ====== PAUSE CAMPAIGN (status: PAUSED) ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -289,7 +289,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
   }
 });
 
-// ========== UNPAUSE CAMPAIGN ==========
+// ====== UNPAUSE CAMPAIGN (status: ACTIVE) ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -310,7 +310,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   }
 });
 
-// ========== CANCEL (ARCHIVE) CAMPAIGN ==========
+// ====== CANCEL (ARCHIVE) CAMPAIGN (status: ARCHIVED) ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;

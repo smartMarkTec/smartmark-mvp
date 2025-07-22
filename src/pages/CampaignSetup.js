@@ -68,26 +68,35 @@ const CampaignSetup = () => {
   // Fetch campaign status
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
-      fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/status`)
-        .then(res => res.json())
-        .then(data => setCampaignStatus(data.status || "ACTIVE"))
-        .catch(() => setCampaignStatus("ACTIVE"));
+      fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+  .then(res => res.json())
+  .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"))
+  .catch(() => setCampaignStatus("ACTIVE"));
     }
   }, [selectedCampaignId, selectedAccount]);
 
   // Handlers for pause/unpause/cancel
   const pauseCampaign = async () => {
-    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
-    setCampaignStatus("PAUSED");
-  };
-  const unpauseCampaign = async () => {
-    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
-    setCampaignStatus("ACTIVE");
-  };
-  const cancelCampaign = async () => {
-    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
-    setCampaignStatus("CANCELED");
-  };
+  await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
+  // Refetch status after
+  fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+    .then(res => res.json())
+    .then(data => setCampaignStatus(data.status || data.effective_status || "PAUSED"));
+};
+
+const unpauseCampaign = async () => {
+  await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
+  fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+    .then(res => res.json())
+    .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"));
+};
+
+const cancelCampaign = async () => {
+  await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
+  fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+    .then(res => res.json())
+    .then(data => setCampaignStatus(data.status || data.effective_status || "ARCHIVED"));
+};
 
   // Load user info
   useEffect(() => {
