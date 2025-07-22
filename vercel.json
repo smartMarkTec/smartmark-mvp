@@ -2,8 +2,5 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "https://smartmark-mvp.onrender.com/api/$1" },
     { "source": "/auth/(.*)", "destination": "https://smartmark-mvp.onrender.com/auth/$1" }
-  ],
-  "routes": [
-    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
