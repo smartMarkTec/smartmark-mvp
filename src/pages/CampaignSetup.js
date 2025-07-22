@@ -526,23 +526,40 @@ useEffect(() => {
 <div style={{ color: "#afeca3", fontWeight: 600 }}>
   SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
 </div>
+{budget && Number(budget) >= 100 && (
+  <div
+    style={{
+      marginTop: "0.7rem",
+      color: "#ffe066",
+      background: "#1c1c1e",
+      borderRadius: "0.8rem",
+      padding: "0.75rem 1rem",
+      fontWeight: 700,
+      textAlign: "center",
+      fontSize: "1.13rem",
+      border: "1px solid #2b2923"
+    }}
+  >
+    Pay (${total.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
+  </div>
+)}
 
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
-            <textarea
-              rows={3}
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Describe your business or promo"
-              style={{
-                padding: "0.8rem",
-                borderRadius: "0.9rem",
-                border: "1px solid #ddd",
-                fontSize: "1.08rem",
-                width: "100%",
-                marginBottom: "1rem",
-                resize: "vertical",
-              }}
-            />
+<label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
+<textarea
+  rows={3}
+  value={description}
+  onChange={e => setDescription(e.target.value)}
+  placeholder="Describe your business or promo"
+  style={{
+    padding: "0.8rem",
+    borderRadius: "0.9rem",
+    border: "1px solid #ddd",
+    fontSize: "1.08rem",
+    width: "100%",
+    marginBottom: "1rem",
+    resize: "vertical",
+  }}
+/>
             <button
               type="button"
               onClick={handleGenerateAdCopy}
