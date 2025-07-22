@@ -24,9 +24,22 @@ const faqList = [
   },
 ];
 
+// ----------- Responsive Helper ------------
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 750);
+  React.useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 750);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isMobile;
+};
+// ------------------------------------------
+
 const Landing = () => {
   const navigate = useNavigate();
   const faqRef = useRef(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     localStorage.removeItem("smartmark_form_fields");
@@ -36,6 +49,21 @@ const Landing = () => {
   const goToForm = () => navigate("/form");
   const goToLogin = () => navigate("/login");
   const scrollToFaq = () => faqRef.current && faqRef.current.scrollIntoView({ behavior: "smooth" });
+
+  // ---- Style helpers ----
+  const headerPadding = isMobile ? "18px" : "36px";
+  const heroFontSize = isMobile ? "2.1rem" : "3.7rem";
+  const heroSubFontSize = isMobile ? "1.18rem" : "2.2rem";
+  const launchBtnSize = isMobile ? "1.05rem" : "2.0rem";
+  const launchBtnPadding = isMobile ? "0.75rem 1.6rem" : "1.35rem 3.8rem";
+  const stepColDirection = isMobile ? "column" : "row";
+  const stepGap = isMobile ? "0.7rem" : "2.7rem";
+  const stepMinWidth = isMobile ? "auto" : 170;
+  const stepMaxWidth = isMobile ? "100vw" : 220;
+  const belowDiagramMargin = isMobile ? "0.7rem" : "1.5rem";
+  const faqPad = isMobile ? "2.2rem 0 4rem 0" : "4.4rem 0 6rem 0";
+  const faqFontSize = isMobile ? "1.37rem" : "2.2rem";
+  const faqWidth = isMobile ? "99vw" : "94vw";
 
   return (
     <div
@@ -54,19 +82,21 @@ const Landing = () => {
           position: "relative",
           width: "100vw",
           display: "flex",
-          justifyContent: "space-between",
+          flexDirection: isMobile ? "column" : "row",
+          justifyContent: isMobile ? "center" : "space-between",
           alignItems: "center",
-          paddingLeft: 36,
-          paddingRight: 36,
-          marginTop: 30,
+          paddingLeft: headerPadding,
+          paddingRight: headerPadding,
+          marginTop: isMobile ? 12 : 30,
           zIndex: 10,
           background: "transparent",
+          gap: isMobile ? "1.3rem" : 0,
         }}
       >
         <button
           style={{
             fontWeight: 500,
-            fontSize: "1.02rem",
+            fontSize: isMobile ? "1.05rem" : "1.02rem",
             color: "rgba(255,255,255,0.43)",
             background: "none",
             border: "none",
@@ -77,6 +107,9 @@ const Landing = () => {
             opacity: 0.73,
             outline: "none",
             userSelect: "none",
+            width: isMobile ? "80vw" : "auto",
+            margin: isMobile ? "0 auto" : 0,
+            display: "block",
           }}
           onMouseOver={e => {
             e.target.style.color = "#fff";
@@ -95,8 +128,8 @@ const Landing = () => {
         <div style={{ display: "flex", gap: "1.25rem" }}>
           <button
             style={{
-              padding: "0.88rem 2.2rem",
-              fontSize: "1.18rem",
+              padding: isMobile ? "0.65rem 1.3rem" : "0.88rem 2.2rem",
+              fontSize: isMobile ? "1.01rem" : "1.18rem",
               background: "none",
               color: "#fff",
               border: `2px solid ${DARK_GREEN}`,
@@ -122,8 +155,8 @@ const Landing = () => {
           </button>
           <button
             style={{
-              padding: "0.88rem 2.5rem",
-              fontSize: "1.22rem",
+              padding: isMobile ? "0.7rem 1.6rem" : "0.88rem 2.5rem",
+              fontSize: isMobile ? "1.07rem" : "1.22rem",
               background: DARK_GREEN,
               color: "#fff",
               border: "none",
@@ -149,23 +182,24 @@ const Landing = () => {
       {/* Centered Content */}
       <div
         style={{
-          minHeight: "80vh",
+          minHeight: isMobile ? "44vh" : "80vh",
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
           alignItems: "center",
-          gap: "2.5rem",
+          gap: isMobile ? "1.1rem" : "2.5rem",
+          marginTop: isMobile ? "1.4rem" : 0,
         }}
       >
         <h1
           style={{
             fontFamily: MODERN_FONT,
-            fontSize: "3.7rem",
+            fontSize: heroFontSize,
             fontWeight: 800,
             color: "#fff",
             textAlign: "center",
-            margin: "0 0 0 15px", // move slightly right
-            letterSpacing: "-2px",
+            margin: isMobile ? "0 0 0 3vw" : "0 0 0 15px",
+            letterSpacing: isMobile ? "-1.1px" : "-2px",
             lineHeight: 1.12,
             textShadow: "0 2px 16px #12151833",
             userSelect: "none",
@@ -176,12 +210,12 @@ const Landing = () => {
         <h2
           style={{
             fontFamily: MODERN_FONT,
-            fontSize: "2.2rem",
+            fontSize: heroSubFontSize,
             fontWeight: 600,
             color: "#fff",
             textAlign: "center",
             margin: 0,
-            letterSpacing: "-1px",
+            letterSpacing: isMobile ? "-0.3px" : "-1px",
             lineHeight: 1.13,
             textShadow: "0 2px 16px #12151855",
             userSelect: "none",
@@ -193,10 +227,10 @@ const Landing = () => {
         {/* Main "Launch Campaign" Button */}
         <button
           style={{
-            marginTop: "2.7rem",
-            marginLeft: "22px",
-            padding: "1.35rem 3.8rem",
-            fontSize: "2.0rem",
+            marginTop: isMobile ? "1.15rem" : "2.7rem",
+            marginLeft: isMobile ? "3vw" : "22px",
+            padding: launchBtnPadding,
+            fontSize: launchBtnSize,
             fontFamily: MODERN_FONT,
             background: DARK_GREEN,
             color: "#fff",
@@ -238,24 +272,24 @@ const Landing = () => {
           justifyContent: "center",
           alignItems: "center",
           background: "#2b2e32",
-          padding: "3.7rem 0 1.7rem 0",
+          padding: isMobile ? "2.1rem 0 1.1rem 0" : "3.7rem 0 1.7rem 0",
           borderTop: "1px solid #222b",
         }}
       >
         <div
           style={{
             display: "flex",
-            flexDirection: "row",
+            flexDirection: stepColDirection,
             alignItems: "center",
             justifyContent: "center",
-            width: "90vw",
+            width: isMobile ? "98vw" : "90vw",
             maxWidth: 1100,
-            minHeight: 210,
+            minHeight: isMobile ? 150 : 210,
             background: "rgba(24,84,49,0.11)",
             borderRadius: "2.2rem",
             boxShadow: "0 6px 44px 0 #122e1b18",
-            padding: "2.1rem 1.8rem",
-            gap: "2.7rem",
+            padding: isMobile ? "1.3rem 0.7rem" : "2.1rem 1.8rem",
+            gap: stepGap,
           }}
         >
           {/* Steps with arrows between */}
@@ -266,17 +300,14 @@ const Landing = () => {
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  minWidth: 170,
-                  maxWidth: 220,
-                  // Bring launch closer to previous
-                  ...(step.title === "Launch"
-                    ? { marginLeft: "-46px" } // adjust this value for "slight" closeness
-                    : {}),
+                  minWidth: stepMinWidth,
+                  maxWidth: stepMaxWidth,
+                  marginLeft: step.title === "Launch" && !isMobile ? "-46px" : 0,
                 }}
               >
                 <div
                   style={{
-                    fontSize: "2.7rem",
+                    fontSize: isMobile ? "2.1rem" : "2.7rem",
                     background: "linear-gradient(135deg, #3be09d 35%, #7fd5ff 100%)",
                     WebkitBackgroundClip: "text",
                     WebkitTextFillColor: "transparent",
@@ -289,7 +320,7 @@ const Landing = () => {
                 <div
                   style={{
                     fontWeight: 700,
-                    fontSize: "1.13rem",
+                    fontSize: isMobile ? "1.03rem" : "1.13rem",
                     color: "#fff",
                     marginBottom: "0.18rem",
                     fontFamily: MODERN_FONT,
@@ -302,10 +333,11 @@ const Landing = () => {
               {idx !== processSteps.length - 1 && (
                 <div
                   style={{
-                    fontSize: "2.1rem",
+                    fontSize: isMobile ? "1.3rem" : "2.1rem",
                     color: "#32e897",
-                    margin: "0 0.4rem",
-                    marginBottom: "-0.14rem",
+                    margin: isMobile ? "0.2rem 0" : "0 0.4rem",
+                    marginBottom: isMobile ? "0" : "-0.14rem",
+                    transform: isMobile ? "rotate(90deg)" : "none",
                   }}
                 >
                   →
@@ -323,7 +355,7 @@ const Landing = () => {
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          marginTop: "1.5rem",
+          marginTop: belowDiagramMargin,
         }}
       >
         <div
@@ -342,8 +374,8 @@ const Landing = () => {
         </div>
         <button
           style={{
-            padding: "1.11rem 2.9rem",
-            fontSize: "1.22rem",
+            padding: isMobile ? "0.7rem 1.7rem" : "1.11rem 2.9rem",
+            fontSize: isMobile ? "1.07rem" : "1.22rem",
             background: DARK_GREEN,
             color: "#fff",
             border: "none",
@@ -371,7 +403,7 @@ const Landing = () => {
         style={{
           width: "100vw",
           background: "#232529",
-          padding: "4.4rem 0 6rem 0",
+          padding: faqPad,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -382,8 +414,8 @@ const Landing = () => {
           style={{
             color: "#fff",
             fontWeight: 800,
-            fontSize: "2.2rem",
-            marginBottom: "2.3rem",
+            fontSize: faqFontSize,
+            marginBottom: isMobile ? "1.35rem" : "2.3rem",
             letterSpacing: "-1px",
             textShadow: "0 2px 16px #12151822",
             userSelect: "none",
@@ -394,11 +426,11 @@ const Landing = () => {
         </h2>
         <div
           style={{
-            width: "94vw",
+            width: faqWidth,
             maxWidth: 600,
             display: "flex",
             flexDirection: "column",
-            gap: "2.5rem",
+            gap: isMobile ? "1.3rem" : "2.5rem",
           }}
         >
           {faqList.map((item, idx) => (
@@ -407,7 +439,7 @@ const Landing = () => {
               style={{
                 background: "rgba(25,84,49,0.11)",
                 borderRadius: "1.4rem",
-                padding: "1.2rem 1.6rem",
+                padding: isMobile ? "0.8rem 1rem" : "1.2rem 1.6rem",
                 boxShadow: "0 2px 14px 0 #122e1b10",
                 border: "1px solid #1ec88511",
               }}
@@ -416,7 +448,7 @@ const Landing = () => {
                 style={{
                   color: "#2ed993",
                   fontWeight: 700,
-                  fontSize: "1.18rem",
+                  fontSize: isMobile ? "1.09rem" : "1.18rem",
                   marginBottom: "0.4rem",
                   letterSpacing: "-0.7px",
                   fontFamily: MODERN_FONT,
@@ -428,7 +460,7 @@ const Landing = () => {
                 style={{
                   color: "rgba(255,255,255,0.97)",
                   fontWeight: 400,
-                  fontSize: "1.1rem",
+                  fontSize: isMobile ? "1.01rem" : "1.1rem",
                   lineHeight: 1.57,
                   marginBottom: 0,
                   fontFamily: MODERN_FONT,
