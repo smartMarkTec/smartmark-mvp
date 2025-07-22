@@ -19,6 +19,48 @@ const calculateFees = (budget) => {
   return { fee, total };
 };
 
+// At top of CampaignSetup.js
+const btnStyle = {
+  padding: "0.7rem 1.6rem",
+  marginRight: "0.7rem",
+  borderRadius: "1.1rem",
+  background: "#21b16d",
+  color: "#fff",
+  border: "none",
+  fontWeight: 700,
+  fontSize: "1rem",
+  cursor: "pointer",
+  transition: "background 0.18s"
+};
+
+// Add state to track campaign status
+const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
+
+// Fetch campaign status whenever selectedCampaignId changes
+useEffect(() => {
+  if (selectedCampaignId) {
+    fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/status`)
+      .then(res => res.json())
+      .then(data => setCampaignStatus(data.status || "ACTIVE"))
+      .catch(() => setCampaignStatus("ACTIVE"));
+  }
+}, [selectedCampaignId, selectedAccount]);
+
+// Action handlers
+const pauseCampaign = async () => {
+  await fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
+  setCampaignStatus("PAUSED");
+};
+const unpauseCampaign = async () => {
+  await fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
+  setCampaignStatus("ACTIVE");
+};
+const cancelCampaign = async () => {
+  await fetch(`/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
+  setCampaignStatus("CANCELED");
+};
+
+
 const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -387,51 +429,96 @@ useEffect(() => {
                 + New Campaign
               </button>
             </div>
-            {/* Campaign List Dropdown */}
-            {campaigns.length > 0 && (
-              <div style={{marginBottom: 12}}>
-                <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
-                  Select Campaign:
-                </label>
-                <select
-                  value={selectedCampaignId}
-                  onChange={e => setSelectedCampaignId(e.target.value)}
-                  style={{
-                    padding: "0.7rem",
-                    borderRadius: "1.1rem",
-                    fontSize: "1.09rem",
-                  }}
-                >
-                  {campaigns.map((c, idx) => (
-  <option key={c.id} value={c.id}>
-    {`Campaign ${idx + 1}`}
-  </option>
-))}
+       {/* Campaign List Dropdown */}
+{campaigns.length > 0 && (
+  <div style={{marginBottom: 12}}>
+    <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
+      Select Campaign:
+    </label>
+    <select
+      value={selectedCampaignId}
+      onChange={e => setSelectedCampaignId(e.target.value)}
+      style={{
+        padding: "0.7rem",
+        borderRadius: "1.1rem",
+        fontSize: "1.09rem",
+      }}
+    >
+      {campaigns.map((c, idx) => (
+        <option key={c.id} value={c.id}>
+          {`Campaign ${idx + 1}`}
+        </option>
+      ))}
+    </select>
+  </div>
+)}
 
-                </select>
-              </div>
-            )}
-            {/* Show metrics for selected campaign */}
-            {selectedCampaignId && metrics && (
-              <div style={{
-                background: "#191d1f",
-                borderRadius: "1rem",
-                padding: "1.2rem 1.4rem",
-                color: "#a8e8a8",
-                fontWeight: 600,
-                marginTop: 12,
-                marginBottom: -8
-              }}>
-                <div style={{fontSize:"1.19rem",fontWeight:700,color:"#fff",marginBottom:8}}>
-                  Campaign Metrics
-                </div>
-                <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
-                <div>Clicks: <b>{metrics.clicks ?? "--"}</b></div>
-                <div>CTR: <b>{metrics.ctr ?? "--"}</b></div>
-                <div>Spend: <b>{metrics.spend ? `$${metrics.spend}` : "--"}</b></div>
-                <div>Results: <b>{metrics.results ?? "--"}</b></div>
-              </div>
-            )}
+/* --- New: Status + Action Buttons --- */
+{selectedCampaignId && (
+  <div style={{ marginBottom: "1.2rem", marginTop: "0.2rem" }}>
+    <span style={{
+      color: "#fff",
+      fontWeight: 600,
+      fontSize: "1.05rem",
+      marginRight: 16,
+      letterSpacing: ".4px"
+    }}>
+      Status:{" "}
+      {campaignStatus === "PAUSED"
+        ? "Paused"
+        : campaignStatus === "CANCELED"
+        ? "Canceled"
+        : "Active"}
+    </span>
+    {(campaignStatus === "ACTIVE" || campaignStatus === "RUNNING") && (
+      <button
+        onClick={pauseCampaign}
+        style={btnStyle}
+      >
+        Pause
+      </button>
+    )}
+    {campaignStatus === "PAUSED" && (
+      <button
+        onClick={unpauseCampaign}
+        style={btnStyle}
+      >
+        Unpause
+      </button>
+    )}
+    {campaignStatus !== "CANCELED" && (
+      <button
+        onClick={cancelCampaign}
+        style={{ ...btnStyle, background: "#e74c3c", color: "#fff" }}
+      >
+        Cancel
+      </button>
+    )}
+  </div>
+)}
+
+/* --- Keep your metrics below as is --- */
+{selectedCampaignId && metrics && (
+  <div style={{
+    background: "#191d1f",
+    borderRadius: "1rem",
+    padding: "1.2rem 1.4rem",
+    color: "#a8e8a8",
+    fontWeight: 600,
+    marginTop: 12,
+    marginBottom: -8
+  }}>
+    <div style={{fontSize:"1.19rem",fontWeight:700,color:"#fff",marginBottom:8}}>
+      Campaign Metrics
+    </div>
+    <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
+    <div>Clicks: <b>{metrics.clicks ?? "--"}</b></div>
+    <div>CTR: <b>{metrics.ctr ?? "--"}</b></div>
+    <div>Spend: <b>{metrics.spend ? `$${metrics.spend}` : "--"}</b></div>
+    <div>Results: <b>{metrics.results ?? "--"}</b></div>
+  </div>
+)}
+
             <div style={{
               marginTop: "0.9rem",
               marginBottom: "0.2rem",
