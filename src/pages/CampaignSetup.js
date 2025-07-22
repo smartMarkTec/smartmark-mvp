@@ -73,7 +73,7 @@ const CampaignSetup = () => {
   // Fetch Ad Accounts
   useEffect(() => {
     if (!fbConnected) return;
-    fetch("/auth/facebook/adaccounts")
+    fetch(`${backendUrl}/auth/facebook/adaccounts`)
       .then(res => res.json())
       .then(json => {
         setAdAccounts(json.data || []);
@@ -85,7 +85,7 @@ const CampaignSetup = () => {
   // Fetch Pages
   useEffect(() => {
     if (!fbConnected) return;
-    fetch("/auth/facebook/pages")
+    fetch(`${backendUrl}/auth/facebook/pages`)
       .then(res => res.json())
       .then(json => {
         setPages(json.data || []);
@@ -98,11 +98,10 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (fbConnected && selectedAccount) {
       const acctId = selectedAccount.replace("act_", "");
-      fetch(`/auth/facebook/adaccount/${acctId}/campaigns`)
+      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
         .then(res => res.json())
         .then(data => {
           if (data && data.data) {
-            // Limit to 2 campaigns
             setCampaigns(data.data.slice(0, 2));
             if (data.data.length > 0) setSelectedCampaignId(data.data[0].id);
           }
@@ -113,9 +112,8 @@ const CampaignSetup = () => {
   // When a campaign is selected, fetch its details and metrics
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
-      // Fetch ad copy/image/budget/description from backend
       const acctId = selectedAccount.replace("act_", "");
-      fetch(`/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
+      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
         .then(res => res.json())
         .then(c => {
           setBudget(c.budget || "");
@@ -123,8 +121,7 @@ const CampaignSetup = () => {
           setAdImage(c.adImage || "");
           setDescription(c.description || "");
         });
-      // Fetch metrics
-      fetch(`/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
+      fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
         .then(res => res.json())
         .then(setMetrics)
         .catch(() => setMetrics(null));
@@ -161,7 +158,7 @@ const CampaignSetup = () => {
       alert("Please enter a description or business info.");
       return;
     }
-    const res = await fetch("/api/generate-ad-copy", {
+    const res = await fetch(`${backendUrl}/api/generate-ad-copy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -175,35 +172,33 @@ const CampaignSetup = () => {
   };
 
   // After launch, set the new status
-const handleLaunch = async () => {
-  // ... your existing checks ...
-  setLoading(true);
-  try {
-    const acctId = selectedAccount.replace("act_", "");
-    const res = await fetch(`/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        form,
-        budget,
-        adCopy,
-        adImage,
-        campaignType: form?.campaignType || "Website Traffic",
-        pageId: selectedPageId,
-      }),
-    });
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    setLaunched(true);
-    setLaunchResult(json);
-    // Show status in your UI
-    setTimeout(() => setLaunched(false), 1500);
-  } catch (err) {
-    alert("Failed to launch campaign: " + (err.message || ""));
-    console.error(err);
-  }
-  setLoading(false);
-};
+  const handleLaunch = async () => {
+    setLoading(true);
+    try {
+      const acctId = selectedAccount.replace("act_", "");
+      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          form,
+          budget,
+          adCopy,
+          adImage,
+          campaignType: form?.campaignType || "Website Traffic",
+          pageId: selectedPageId,
+        }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setLaunched(true);
+      setLaunchResult(json);
+      setTimeout(() => setLaunched(false), 1500);
+    } catch (err) {
+      alert("Failed to launch campaign: " + (err.message || ""));
+      console.error(err);
+    }
+    setLoading(false);
+  };
 
   // OPEN FB PAYMENT POPUP
   const openFbPaymentPopup = () => {
@@ -292,44 +287,44 @@ const handleLaunch = async () => {
         }}
       >
         {/* Facebook Connect: button always clickable, status shown nearby */}
-<div style={{ marginBottom: "1.1rem", display: "flex", alignItems: "center", gap: "1.3rem" }}>
-  <a
-    href={`${backendUrl}/auth/facebook`}
-    style={{
-      display: "inline-block",
-      padding: "0.95rem 1.5rem",
-      borderRadius: "1.7rem",
-      border: "none",
-      background: "#1877F2",
-      color: "#fff",
-      fontWeight: 700,
-      fontSize: "1.18rem",
-      letterSpacing: "1px",
-      cursor: "pointer",
-      boxShadow: "0 2px 12px #1877f233",
-      fontFamily: MODERN_FONT,
-      transition: "background 0.16s",
-      width: "auto",
-      textAlign: "center",
-      textDecoration: "none"
-    }}
-  >
-    Connect Facebook Ads
-  </a>
-  {fbConnected && (
-    <div
-      style={{
-        color: "#1ec885",
-        fontWeight: 700,
-        fontSize: "1.13rem",
-        fontFamily: MODERN_FONT,
-        textShadow: "0 1px 6px #12392144"
-      }}
-    >
-      Facebook Ads Connected!
-    </div>
-  )}
-</div>
+        <div style={{ marginBottom: "1.1rem", display: "flex", alignItems: "center", gap: "1.3rem" }}>
+          <a
+            href={`${backendUrl}/auth/facebook`}
+            style={{
+              display: "inline-block",
+              padding: "0.95rem 1.5rem",
+              borderRadius: "1.7rem",
+              border: "none",
+              background: "#1877F2",
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: "1.18rem",
+              letterSpacing: "1px",
+              cursor: "pointer",
+              boxShadow: "0 2px 12px #1877f233",
+              fontFamily: MODERN_FONT,
+              transition: "background 0.16s",
+              width: "auto",
+              textAlign: "center",
+              textDecoration: "none"
+            }}
+          >
+            Connect Facebook Ads
+          </a>
+          {fbConnected && (
+            <div
+              style={{
+                color: "#1ec885",
+                fontWeight: 700,
+                fontSize: "1.13rem",
+                fontFamily: MODERN_FONT,
+                textShadow: "0 1px 6px #12392144"
+              }}
+            >
+              Facebook Ads Connected!
+            </div>
+          )}
+        </div>
 
         {/* Add/Manage Payment Method Button */}
         {fbConnected && (
