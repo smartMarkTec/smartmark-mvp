@@ -1,10 +1,18 @@
 require('dotenv').config({ path: './.env' });
 
 const express = require('express');
+const cors = require('cors'); // <-- ADD THIS LINE
+
 const app = express();
 
-app.use(express.json({ limit: '10mb' }));           // <<< THIS FIXES THE 413 ERROR
-app.use(express.urlencoded({ extended: true, limit: '10mb' })); // <<< Also good practice
+// ====== ENABLE CORS ======
+app.use(cors({
+  origin: 'https://smartmark-mvp.vercel.app', // <-- Your frontend domain
+  credentials: true, // Optional, if you want to use cookies/session later
+}));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // ====== ROUTES ======
 const authRoutes = require('./routes/auth');
