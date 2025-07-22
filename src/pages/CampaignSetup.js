@@ -402,11 +402,12 @@ useEffect(() => {
                     fontSize: "1.09rem",
                   }}
                 >
-                  {campaigns.map((c, i) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name || `Campaign ${i + 1}`}
-                    </option>
-                  ))}
+                  {campaigns.map((c, idx) => (
+  <option key={c.id} value={c.id}>
+    {`Campaign ${idx + 1}`}
+  </option>
+))}
+
                 </select>
               </div>
             )}
