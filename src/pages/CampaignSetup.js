@@ -70,64 +70,64 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, [location, userKey]);
 
-  // Fetch Ad Accounts
-  useEffect(() => {
-    if (!fbConnected) return;
-    fetch("/auth/facebook/adaccounts")
+ // Fetch Ad Accounts
+useEffect(() => {
+  if (!fbConnected) return;
+  fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
+    .then(res => res.json())
+    .then(json => {
+      setAdAccounts(json.data || []);
+      if (json.data && json.data.length > 0) setSelectedAccount(json.data[0].id.replace("act_", ""));
+    })
+    .catch(err => console.error("FB ad accounts error", err));
+}, [fbConnected]);
+
+// Fetch Pages
+useEffect(() => {
+  if (!fbConnected) return;
+  fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
+    .then(res => res.json())
+    .then(json => {
+      setPages(json.data || []);
+      if (json.data && json.data.length > 0) setSelectedPageId(json.data[0].id);
+    })
+    .catch(err => console.error("FB pages error", err));
+}, [fbConnected]);
+
+// Fetch campaigns for dropdown
+useEffect(() => {
+  if (fbConnected && selectedAccount) {
+    const acctId = selectedAccount.replace("act_", "");
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
       .then(res => res.json())
-      .then(json => {
-        setAdAccounts(json.data || []);
-        if (json.data && json.data.length > 0) setSelectedAccount(json.data[0].id.replace("act_", ""));
-      })
-      .catch(err => console.error("FB ad accounts error", err));
-  }, [fbConnected]);
+      .then(data => {
+        if (data && data.data) {
+          setCampaigns(data.data.slice(0, 2));
+          if (data.data.length > 0) setSelectedCampaignId(data.data[0].id);
+        }
+      });
+  }
+}, [fbConnected, selectedAccount, launched]);
 
-  // Fetch Pages
-  useEffect(() => {
-    if (!fbConnected) return;
-    fetch("/auth/facebook/pages")
+// When a campaign is selected, fetch its details and metrics
+useEffect(() => {
+  if (selectedCampaignId && selectedAccount) {
+    const acctId = selectedAccount.replace("act_", "");
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
       .then(res => res.json())
-      .then(json => {
-        setPages(json.data || []);
-        if (json.data && json.data.length > 0) setSelectedPageId(json.data[0].id);
-      })
-      .catch(err => console.error("FB pages error", err));
-  }, [fbConnected]);
-
-  // Fetch campaigns for dropdown
-  useEffect(() => {
-    if (fbConnected && selectedAccount) {
-      const acctId = selectedAccount.replace("act_", "");
-      fetch(`/auth/facebook/adaccount/${acctId}/campaigns`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.data) {
-            setCampaigns(data.data.slice(0, 2));
-            if (data.data.length > 0) setSelectedCampaignId(data.data[0].id);
-          }
-        });
-    }
-  }, [fbConnected, selectedAccount, launched]);
-
-  // When a campaign is selected, fetch its details and metrics
-  useEffect(() => {
-    if (selectedCampaignId && selectedAccount) {
-      const acctId = selectedAccount.replace("act_", "");
-      fetch(`/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
-        .then(res => res.json())
-        .then(c => {
-          setBudget(c.budget || "");
-          setAdCopy(c.adCopy || "");
-          setAdImage(c.adImage || "");
-          setDescription(c.description || "");
-        });
-      // Fetch metrics
-      fetch(`/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
-        .then(res => res.json())
-        .then(setMetrics)
-        .catch(() => setMetrics(null));
-    }
-  }, [selectedCampaignId, selectedAccount]);
+      .then(c => {
+        setBudget(c.budget || "");
+        setAdCopy(c.adCopy || "");
+        setAdImage(c.adImage || "");
+        setDescription(c.description || "");
+      });
+    // Fetch metrics
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
+      .then(res => res.json())
+      .then(setMetrics)
+      .catch(() => setMetrics(null));
+  }
+}, [selectedCampaignId, selectedAccount]);
 
   // + New Campaign (reset state if <2 exist)
   const handleNewCampaign = () => {
