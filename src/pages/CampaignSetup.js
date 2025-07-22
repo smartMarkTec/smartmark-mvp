@@ -491,25 +491,42 @@ useEffect(() => {
             }}
           >
             <label style={{ color: "#fff", fontWeight: 600 }}>Campaign Budget ($)</label>
-            <input
-              type="number"
-              placeholder="Enter budget (minimum $100)"
-              min={100}
-              step={10}
-              value={budget}
-              onChange={e => setBudget(e.target.value)}
-              style={{
-                padding: "0.8rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1px solid #c6c6c6",
-                fontSize: "1.11rem",
-                width: "100%",
-                marginBottom: "1rem",
-              }}
-            />
-            <div style={{ color: "#afeca3", fontWeight: 600 }}>
-              SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
-            </div>
+<input
+  type="number"
+  placeholder="Enter budget (minimum $100)"
+  min={100}
+  step={10}
+  value={budget}
+  onChange={e => setBudget(e.target.value)}
+  style={{
+    padding: "0.8rem 1.1rem",
+    borderRadius: "1.1rem",
+    border: "1px solid #c6c6c6",
+    fontSize: "1.11rem",
+    width: "100%",
+    marginBottom: "1rem",
+  }}
+/>
+{/* Show CashTag only if budget is entered and > 0 */}
+{budget && Number(budget) > 0 && (
+  <div style={{
+    marginTop: "-0.7rem",
+    marginBottom: "0.5rem",
+    fontWeight: 700,
+    color: "#1ec885",
+    fontSize: "1.05rem",
+    textAlign: "left",
+    letterSpacing: "0.03em",
+    fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+  }}>
+    Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
+  </div>
+)}
+
+<div style={{ color: "#afeca3", fontWeight: 600 }}>
+  SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
+</div>
+
             <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
             <textarea
               rows={3}
