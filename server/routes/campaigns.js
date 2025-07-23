@@ -1,18 +1,26 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); // <-- Use your new LowDB database!
+const db = require('../db'); // Use LowDB database!
+const { nanoid } = require('nanoid'); // Add this: npm install nanoid
 
 // Save a campaign for a user (append to their campaign list)
 router.post('/save-campaign', async (req, res) => {
-  const { username, campaign } = req.body; // use username to match the new system
+  const { username, campaign } = req.body;
   if (!username || !campaign) return res.status(400).json({ error: 'Username and campaign required' });
 
   await db.read();
   db.data.campaigns ||= [];
+  // Ensure max 2 campaigns per user
+  const userCampaigns = db.data.campaigns.filter(c => c.username === username);
+  if (userCampaigns.length >= 2) {
+    return res.status(400).json({ error: 'Campaign limit reached (2 per user)' });
+  }
+  // Add ID if not present
+  campaign.id = campaign.id || nanoid(12);
   db.data.campaigns.push({ username, ...campaign });
   await db.write();
 
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', id: campaign.id });
 });
 
 // Get all campaigns for a user
@@ -26,7 +34,7 @@ router.get('/user-campaigns', async (req, res) => {
   res.json({ campaigns: userCampaigns });
 });
 
-// Optionally: Get a single campaign by ID (if you add campaign IDs later)
+// Get a single campaign by ID
 router.get('/campaign/:id', async (req, res) => {
   const { id } = req.params;
   await db.read();
@@ -36,7 +44,7 @@ router.get('/campaign/:id', async (req, res) => {
   res.json({ campaign });
 });
 
-// (Optional) Delete a campaign by ID
+// Delete a campaign by ID
 router.delete('/campaign/:id', async (req, res) => {
   const { id } = req.params;
   await db.read();
