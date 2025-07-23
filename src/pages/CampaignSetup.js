@@ -34,16 +34,16 @@ const btnStyle = {
 };
 
 const CampaignSetup = () => {
-  // Remove FB OAuth #_=_ hash (MUST be inside component)
+  const navigate = useNavigate();
+  const location = useLocation();
+  const fileInputRef = useRef();
+
+  // Remove FB OAuth #_=_ hash
   useEffect(() => {
     if (window.location.hash === '#_=_') {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }, []);
-
-  const navigate = useNavigate();
-  const location = useLocation();
-  const fileInputRef = useRef();
 
   const [form, setForm] = useState({});
   const [userKey, setUserKey] = useState("");
