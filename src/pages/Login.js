@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
 const DARK_GREEN = "#185431";
+const BACKEND_URL = "https://smartmark-mvp.onrender.com"; // Set to your deployed backend
 
 // Responsive CSS
 const loginStyles = `
@@ -82,25 +83,44 @@ const Login = () => {
   const [username, setUsername] = useState(savedUsername);
   const [password, setPassword] = useState(savedPassword);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setUsername(savedUsername);
     setPassword(savedPassword);
   }, [savedUsername, savedPassword]);
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setLoading(true);
+    setError("");
 
-    if (
-      username.trim() === savedUsername.trim() &&
-      password.trim() === savedPassword.trim() &&
-      username.length > 0 &&
-      password.length > 0
-    ) {
-      setError("");
-      navigate("/setup");
-    } else {
-      setError("Username or email does not match what you signed up with. Please try again.");
+    // For MVP, password is just email (same as signup)
+    try {
+      const res = await fetch(`${BACKEND_URL}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: username.trim(),
+          password: password.trim()
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        localStorage.setItem("smartmark_login_username", username.trim());
+        localStorage.setItem("smartmark_login_password", password.trim());
+        localStorage.setItem("smartmark_last_email", password.trim());
+        localStorage.setItem("smartmark_last_cashapp", username.trim());
+        setError("");
+        setLoading(false);
+        navigate("/setup");
+      } else {
+        setError(data.error || "Login failed. Please check your details.");
+        setLoading(false);
+      }
+    } catch (err) {
+      setError("Server error. Please try again.");
+      setLoading(false);
     }
   };
 
@@ -196,6 +216,7 @@ const Login = () => {
           )}
           <button
             type="submit"
+            disabled={loading}
             style={{
               padding: "1.08rem 0",
               borderRadius: "2.2rem",
@@ -205,16 +226,21 @@ const Login = () => {
               fontWeight: 700,
               fontSize: "1.21rem",
               letterSpacing: "1.2px",
-              cursor: "pointer",
+              cursor: loading ? "not-allowed" : "pointer",
               fontFamily: "'Poppins', 'Times New Roman', Times, serif",
               boxShadow: "0 2px 16px 0 rgba(24,84,49,0.16)",
               transition: "background 0.18s",
               marginTop: "0.6rem",
+              opacity: loading ? 0.7 : 1,
             }}
-            onMouseOver={(e) => (e.target.style.background = "#1e6a3e")}
-            onMouseOut={(e) => (e.target.style.background = DARK_GREEN)}
+            onMouseOver={(e) => {
+              if (!loading) e.target.style.background = "#1e6a3e";
+            }}
+            onMouseOut={(e) => {
+              if (!loading) e.target.style.background = DARK_GREEN;
+            }}
           >
-            Login
+            {loading ? "Logging in..." : "Login"}
           </button>
         </form>
       </div>

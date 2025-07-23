@@ -1,8 +1,8 @@
-// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
+const db = require('../db'); // <-- LOWDB DB
 
 // ENV VARS
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
@@ -19,6 +19,29 @@ const FB_SCOPES = [
 
 // ====== MVP: store ONE user access token in memory ======
 let userTokens = {};
+
+// ====== MVP: AUTH SIGNUP/LOGIN ENDPOINTS (LowDB) ======
+
+// POST /auth/signup
+router.post('/signup', async (req, res) => {
+  const { username, email, cashtag, password } = req.body;
+  await db.read();
+  if (db.data.users.find(u => u.username === username || u.email === email)) {
+    return res.status(400).json({ error: 'Username or email already exists' });
+  }
+  db.data.users.push({ username, email, cashtag, password });
+  await db.write();
+  res.json({ success: true, user: { username, email, cashtag } });
+});
+
+// POST /auth/login
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  await db.read();
+  const user = db.data.users.find(u => u.username === username && u.password === password);
+  if (!user) return res.status(401).json({ error: 'Invalid login' });
+  res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
+});
 
 // ====== FACEBOOK LOGIN FLOW ======
 router.get('/facebook', (req, res) => {

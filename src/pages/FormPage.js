@@ -5,9 +5,7 @@ import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
 const DARK_GREEN = "#185431";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-
-const getUserKey = (email, cashapp) =>
-  `smartmark_user_${(email || "").trim().toLowerCase()}_${(cashapp || "").trim().toLowerCase()}`;
+const BACKEND_URL = "https://smartmark-mvp.onrender.com"; // Change if your backend url differs
 
 const FormPage = () => {
   const navigate = useNavigate();
@@ -18,32 +16,81 @@ const FormPage = () => {
     url: "",
     campaignType: "Website Traffic"
   });
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  // Pre-populate fields if the user already has data
+  // Pre-populate fields from last session (optional, good UX)
   useEffect(() => {
     const lastEmail = localStorage.getItem("smartmark_last_email") || "";
     const lastCashapp = localStorage.getItem("smartmark_last_cashapp") || "";
     if (lastEmail && lastCashapp) {
-      const saved = localStorage.getItem(getUserKey(lastEmail, lastCashapp));
-      if (saved) setFields(JSON.parse(saved));
+      setFields((prev) => ({
+        ...prev,
+        email: lastEmail,
+        cashapp: lastCashapp
+      }));
     }
   }, []);
 
-  const handleSubmit = e => {
-    e.preventDefault();
-    const userKey = getUserKey(fields.email, fields.cashapp);
-
-    // Save form under user-specific key
-    localStorage.setItem(userKey, JSON.stringify(fields));
-    localStorage.setItem("smartmark_last_email", fields.email);
-    localStorage.setItem("smartmark_last_cashapp", fields.cashapp);
-    localStorage.setItem("smartmark_current_user", userKey);
-
-    navigate("/setup");
+  const handleChange = (e) => {
+    setFields({ ...fields, [e.target.name]: e.target.value });
+    setError("");
   };
 
-  const handleChange = e => {
-    setFields({ ...fields, [e.target.name]: e.target.value });
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+
+    // Step 1: Register user (MVP: just sign up every time, backend will reject duplicates)
+    try {
+      const signupRes = await fetch(`${BACKEND_URL}/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: fields.cashapp,
+          email: fields.email,
+          cashtag: fields.cashapp,
+          password: fields.email // MVP: password is email, you can prompt for real password later
+        })
+      });
+      const signupData = await signupRes.json();
+      if (!signupData.success && !signupData.error?.includes("exists")) {
+        setError(signupData.error || "Signup failed.");
+        setLoading(false);
+        return;
+      }
+
+      // Step 2: Save campaign for this user
+      const saveRes = await fetch(`${BACKEND_URL}/api/save-campaign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          username: fields.cashapp,
+          campaign: {
+            ...fields,
+            createdAt: new Date().toISOString()
+          }
+        })
+      });
+      const saveData = await saveRes.json();
+      if (saveData.status !== "ok") {
+        setError("Failed to save campaign.");
+        setLoading(false);
+        return;
+      }
+
+      // Store username for later autologin
+      localStorage.setItem("smartmark_login_username", fields.cashapp);
+      localStorage.setItem("smartmark_login_password", fields.email); // MVP only
+      localStorage.setItem("smartmark_last_email", fields.email);
+      localStorage.setItem("smartmark_last_cashapp", fields.cashapp);
+
+      setLoading(false);
+      navigate("/setup");
+    } catch (err) {
+      setError("Server error. Please try again.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -60,12 +107,14 @@ const FormPage = () => {
       }}
     >
       {/* Logo top right */}
-      <div style={{
-        position: "fixed",
-        top: 30,
-        right: 36,
-        zIndex: 99
-      }}>
+      <div
+        style={{
+          position: "fixed",
+          top: 30,
+          right: 36,
+          zIndex: 99
+        }}
+      >
         <SmartMarkLogoButton />
       </div>
 
@@ -78,7 +127,7 @@ const FormPage = () => {
           display: "flex",
           flexDirection: "column",
           minWidth: 400,
-          gap: "1.7rem",
+          gap: "1.7rem"
         }}
         onSubmit={handleSubmit}
       >
@@ -90,7 +139,7 @@ const FormPage = () => {
             textAlign: "center",
             marginBottom: "1.4rem",
             letterSpacing: "-0.5px",
-            fontFamily: MODERN_FONT,
+            fontFamily: MODERN_FONT
           }}
         >
           Start Your Campaign
@@ -108,7 +157,7 @@ const FormPage = () => {
             border: "none",
             fontSize: "1.15rem",
             outline: "none",
-            fontFamily: MODERN_FONT,
+            fontFamily: MODERN_FONT
           }}
         />
         <input
@@ -124,7 +173,7 @@ const FormPage = () => {
             border: "none",
             fontSize: "1.15rem",
             outline: "none",
-            fontFamily: MODERN_FONT,
+            fontFamily: MODERN_FONT
           }}
         />
         <input
@@ -140,7 +189,7 @@ const FormPage = () => {
             border: "none",
             fontSize: "1.15rem",
             outline: "none",
-            fontFamily: MODERN_FONT,
+            fontFamily: MODERN_FONT
           }}
         />
         <input
@@ -156,7 +205,7 @@ const FormPage = () => {
             border: "none",
             fontSize: "1.15rem",
             outline: "none",
-            fontFamily: MODERN_FONT,
+            fontFamily: MODERN_FONT
           }}
         />
         <select
@@ -174,13 +223,31 @@ const FormPage = () => {
             background: "#fff",
             color: "#2b2e32",
             fontWeight: 600,
-            marginBottom: "0.2rem",
+            marginBottom: "0.2rem"
           }}
         >
           <option value="Website Traffic">Website Traffic</option>
         </select>
+        {error && (
+          <div
+            style={{
+              color: "#F87171",
+              background: "#232529",
+              borderRadius: "0.7rem",
+              padding: "0.8rem 0.8rem",
+              fontWeight: 600,
+              fontSize: "1.01rem",
+              textAlign: "center",
+              marginTop: "-0.8rem",
+              fontFamily: MODERN_FONT
+            }}
+          >
+            {error}
+          </div>
+        )}
         <button
           type="submit"
+          disabled={loading}
           style={{
             padding: "1.1rem 0",
             borderRadius: "2.2rem",
@@ -190,16 +257,21 @@ const FormPage = () => {
             fontWeight: 700,
             fontSize: "1.22rem",
             letterSpacing: "1.2px",
-            cursor: "pointer",
+            cursor: loading ? "not-allowed" : "pointer",
             marginTop: "0.5rem",
             fontFamily: MODERN_FONT,
             boxShadow: "0 2px 16px 0 rgba(24,84,49,0.16)",
             transition: "background 0.18s",
+            opacity: loading ? 0.7 : 1
           }}
-          onMouseOver={e => (e.target.style.background = "#1e6a3e")}
-          onMouseOut={e => (e.target.style.background = DARK_GREEN)}
+          onMouseOver={e => {
+            if (!loading) e.target.style.background = "#1e6a3e";
+          }}
+          onMouseOut={e => {
+            if (!loading) e.target.style.background = DARK_GREEN;
+          }}
         >
-          Continue Setup
+          {loading ? "Submitting..." : "Continue Setup"}
         </button>
       </form>
     </div>
