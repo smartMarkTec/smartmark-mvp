@@ -4,6 +4,10 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://smartmark-mvp.vercel.app',
@@ -34,7 +38,7 @@ app.use('/auth', authRoutes);
 const aiRoutes = require('./routes/ai');
 app.use('/api', aiRoutes);
 
-const campaignRoutes = require('./routes/campaign');
+const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
 // Health check endpoint
