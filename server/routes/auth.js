@@ -22,7 +22,35 @@ let userTokens = {};
 
 // ====== MVP: AUTH SIGNUP/LOGIN ENDPOINTS (LowDB) ======
 
-// ... [signup, login, facebook login, adaccounts, pages, etc. unchanged] ...
+// POST /auth/signup
+router.post('/signup', async (req, res) => {
+  const { username, email, cashtag, password } = req.body;
+  if (!username || !email || !cashtag || !password) {
+    return res.status(400).json({ error: 'All fields required' });
+  }
+  await db.read();
+  // Check if username or email or cashtag already exists
+  if (
+    db.data.users.find(u => u.username === username || u.email === email || u.cashtag === cashtag)
+  ) {
+    return res.status(400).json({ error: 'Username, email, or cashtag already exists' });
+  }
+  db.data.users.push({ username, email, cashtag, password });
+  await db.write();
+  res.json({ success: true, user: { username, email, cashtag } });
+});
+
+// POST /auth/login
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password)
+    return res.status(400).json({ error: 'Username and password required' });
+  await db.read();
+  const user = db.data.users.find(u => u.username === username && u.password === password);
+  if (!user)
+    return res.status(401).json({ error: 'Invalid login' });
+  res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
+});
 
 // ====== LAUNCH CAMPAIGN (with campaignName, startDate) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
