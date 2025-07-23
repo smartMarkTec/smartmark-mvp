@@ -4,15 +4,17 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-// ENABLE CORS
+// ***** CORS MUST BE FIRST, BEFORE ALL MIDDLEWARE AND ROUTES *****
 app.use(cors({
-  origin: 'https://smartmark-mvp.vercel.app',
+  origin: 'https://smartmark-mvp.vercel.app', // Your frontend URL
   credentials: true,
 }));
+
+// Body parsers must come after CORS but before routes
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ROUTES (order matters!)
+// ===== ROUTES (order matters!) =====
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
@@ -22,6 +24,12 @@ app.use('/api', aiRoutes);
 const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
+// Health check endpoint (optional, useful for Render)
+app.get('/healthz', (req, res) => {
+  res.send('OK');
+});
+
+// Simple root endpoint
 app.get('/', (req, res) => {
   res.send('SmartMark backend is running!');
 });
