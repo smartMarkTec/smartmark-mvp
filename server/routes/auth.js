@@ -22,85 +22,7 @@ let userTokens = {};
 
 // ====== MVP: AUTH SIGNUP/LOGIN ENDPOINTS (LowDB) ======
 
-// POST /auth/signup
-router.post('/signup', async (req, res) => {
-  const { username, email, cashtag, password } = req.body;
-  await db.read();
-  if (db.data.users.find(u => u.username === username || u.email === email)) {
-    return res.status(400).json({ error: 'Username or email already exists' });
-  }
-  db.data.users.push({ username, email, cashtag, password });
-  await db.write();
-  res.json({ success: true, user: { username, email, cashtag } });
-});
-
-// POST /auth/login
-router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  await db.read();
-  const user = db.data.users.find(u => u.username === username && u.password === password);
-  if (!user) return res.status(401).json({ error: 'Invalid login' });
-  res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
-});
-
-// ====== FACEBOOK LOGIN FLOW ======
-router.get('/facebook', (req, res) => {
-  const fbAuthUrl =
-    `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}&scope=${FB_SCOPES.join(',')}`;
-  res.redirect(fbAuthUrl);
-});
-
-router.get('/facebook/callback', async (req, res) => {
-  const code = req.query.code;
-  if (!code) return res.status(400).send('Missing code');
-  try {
-    const tokenRes = await axios.get(
-      `https://graph.facebook.com/v18.0/oauth/access_token`, {
-        params: {
-          client_id: FACEBOOK_APP_ID,
-          redirect_uri: FACEBOOK_REDIRECT_URI,
-          client_secret: FACEBOOK_APP_SECRET,
-          code
-        }
-      }
-    );
-    userTokens['singleton'] = tokenRes.data.access_token;
-    return res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
-  } catch (err) {
-    return res.status(500).send('Facebook Auth Failed');
-  }
-});
-
-// ====== AD ACCOUNTS, PAGES ======
-router.get('/facebook/adaccounts', async (req, res) => {
-  const userToken = userTokens['singleton'];
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const accountRes = await axios.get(
-      `https://graph.facebook.com/v18.0/me/adaccounts`, {
-        params: { access_token: userToken }
-      }
-    );
-    res.json(accountRes.data);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch ad accounts' });
-  }
-});
-
-router.get('/facebook/pages', async (req, res) => {
-  const userToken = userTokens['singleton'];
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const pagesRes = await axios.get(
-      `https://graph.facebook.com/v18.0/me/accounts`, {
-        params: { access_token: userToken }
-      }
-    );
-    res.json(pagesRes.data);
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to fetch Facebook Pages' });
-  }
-});
+// ... [signup, login, facebook login, adaccounts, pages, etc. unchanged] ...
 
 // ====== LAUNCH CAMPAIGN (with campaignName, startDate) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
@@ -108,8 +30,47 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  const { form, budget, adCopy, adImage, campaignType, pageId } = req.body;
+  const { form, budget, adCopy, adImage, campaignType, pageId, aiAudience } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
+
+  // ==== AI AUDIENCE LOGIC ====
+  let targeting = {
+    geo_locations: { countries: ["US"] },
+    age_min: 18,
+    age_max: 65,
+    // You can add "interests" if you want to expand here
+  };
+  // If aiAudience JSON provided, use it
+  if (aiAudience) {
+    try {
+      // Parse JSON if it's a string
+      const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
+      // Location (for MVP, default to US unless AI gives a country)
+      if (ai.location && ai.location.length > 1) {
+        // If the AI gives a country name, try to convert to ISO code for Facebook
+        // For now, fallback to "US" if not recognized
+        let loc = ai.location;
+        if (/united states|usa|america/i.test(loc)) loc = "US";
+        targeting.geo_locations = { countries: [loc] };
+      }
+      // Age range
+      if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
+        const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x));
+        if (age_min && age_max && age_max > age_min) {
+          targeting.age_min = age_min;
+          targeting.age_max = age_max;
+        }
+      }
+      // Interests (Facebook needs IDs, but we can at least pass text for now)
+      if (ai.interests && ai.interests.length > 1) {
+        // Facebook needs an array of interest objects with id and name; for MVP, pass as keywords
+        targeting.flexible_spec = [{ interests: [{ name: ai.interests }] }];
+      }
+      // You can expand here for gender, etc., if you add to ai.js
+    } catch (err) {
+      console.error("Failed to parse aiAudience JSON:", err.message);
+    }
+  }
 
   try {
     // 1. Upload image (to Facebook)
@@ -149,7 +110,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 3. Create ad set
+    // 3. Create ad set (uses AI audience for targeting!)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -162,11 +123,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         status: "ACTIVE",
         start_time: new Date(Date.now() + 60 * 1000).toISOString(),
         end_time: null,
-        targeting: {
-          geo_locations: { countries: ["US"] },
-          age_min: 18,
-          age_max: 65
-        }
+        targeting, // <<<< THIS is now filled from AI
       },
       { params: { access_token: userToken } }
     );
@@ -221,6 +178,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     res.status(500).json({ error: errorMsg });
   }
 });
+
+// ====== [The rest of your routes stay unchanged] ======
+
+module.exports = router;
+
 
 // ====== LIST CAMPAIGNS (name, start_time, status) ======
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {

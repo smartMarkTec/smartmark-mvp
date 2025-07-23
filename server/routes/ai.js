@@ -62,17 +62,21 @@ router.post('/detect-audience', async (req, res) => {
     return res.status(400).json({ error: 'Could not extract website text.' });
   }
 
-  // 2. OpenAI prompt
+  // 2. OpenAI prompt - asks for response in strict JSON format
   const prompt = `
+Analyze this website's homepage content and answer ONLY in the following JSON format:
+
+{
+  "brandName": "",
+  "demographic": "",
+  "ageRange": "",
+  "location": "",
+  "interests": "",
+  "summary": ""
+}
+
 Website homepage text:
 """${websiteText}"""
-
-Based only on this text, describe:
-1. What type of business or website is this?
-2. Where is it located, or who is the ideal geographic audience?
-3. What interests/age/gender best match this site?
-4. Suggest a Facebook/Google ad audience targeting (geo, interests, age) for best results.
-Be concise and business-like.
 `;
 
   try {
@@ -83,7 +87,17 @@ Be concise and business-like.
       temperature: 0.3,
     });
     const aiText = response.choices[0]?.message?.content?.trim();
-    res.json({ audience: aiText });
+
+    // Try to parse the JSON in the response
+    let audienceJson = null;
+    try {
+      const jsonMatch = aiText.match(/\{[\s\S]*\}/); // extract first {...} block
+      audienceJson = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
+    } catch (err) {
+      return res.status(500).json({ error: 'AI returned invalid JSON', raw: aiText });
+    }
+
+    res.json({ audience: audienceJson });
   } catch (err) {
     console.error('OpenAI Error:', err?.response?.data || err.message);
     res.status(500).json({ error: 'AI audience detection failed.' });

@@ -17,6 +17,16 @@ router.post('/save-campaign', async (req, res) => {
   }
   // Add ID if not present
   campaign.id = campaign.id || nanoid(12);
+
+  // If aiAudience exists, store it as an object (or JSON string if needed)
+  if (campaign.aiAudience && typeof campaign.aiAudience === 'string') {
+    try {
+      campaign.aiAudience = JSON.parse(campaign.aiAudience);
+    } catch {
+      // Keep as string if parsing fails
+    }
+  }
+
   db.data.campaigns.push({ username, ...campaign });
   await db.write();
 
