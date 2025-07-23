@@ -1,31 +1,58 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); // Use LowDB database!
-const { nanoid } = require('nanoid'); // Add this: npm install nanoid
+const db = require('../db'); // LowDB
+const { nanoid } = require('nanoid');
 
-// Save a campaign for a user (append to their campaign list)
+const DEFAULT_AUDIENCE = {
+  location: "US",
+  ageRange: "18-65",
+  interests: "Business, Restaurants"
+};
+
+// ======= SAVE CAMPAIGN =======
 router.post('/save-campaign', async (req, res) => {
   const { username, campaign } = req.body;
   if (!username || !campaign) return res.status(400).json({ error: 'Username and campaign required' });
 
   await db.read();
   db.data.campaigns ||= [];
-  // Ensure max 2 campaigns per user
+
+  // Enforce campaign limit per user
   const userCampaigns = db.data.campaigns.filter(c => c.username === username);
   if (userCampaigns.length >= 2) {
     return res.status(400).json({ error: 'Campaign limit reached (2 per user)' });
   }
+
   // Add ID if not present
   campaign.id = campaign.id || nanoid(12);
 
-  // If aiAudience exists, store it as an object (or JSON string if needed)
-  if (campaign.aiAudience && typeof campaign.aiAudience === 'string') {
+  // ============ AI AUDIENCE STRUCTURE DEFENSE ============
+  // Accepts stringified JSON, parsed object, or null/undefined
+  let aiAudience = campaign.aiAudience;
+
+  // Defensive: always store as a full valid object, never null/undefined/empty
+  if (typeof aiAudience === 'string') {
     try {
-      campaign.aiAudience = JSON.parse(campaign.aiAudience);
+      aiAudience = JSON.parse(aiAudience);
     } catch {
-      // Keep as string if parsing fails
+      aiAudience = { ...DEFAULT_AUDIENCE };
     }
+  } else if (typeof aiAudience !== 'object' || !aiAudience) {
+    aiAudience = { ...DEFAULT_AUDIENCE };
   }
+
+  // Enforce safe fields for targeting
+  aiAudience = {
+    location: typeof aiAudience.location === "string" && aiAudience.location.length > 0
+      ? aiAudience.location.toUpperCase()
+      : "US",
+    ageRange: /^\d{2}-\d{2}$/.test(aiAudience.ageRange || "") ? aiAudience.ageRange : "18-65",
+    interests: aiAudience.interests && String(aiAudience.interests).length > 0
+      ? aiAudience.interests
+      : "Business, Restaurants"
+  };
+
+  campaign.aiAudience = aiAudience;
 
   db.data.campaigns.push({ username, ...campaign });
   await db.write();
@@ -33,7 +60,7 @@ router.post('/save-campaign', async (req, res) => {
   res.json({ status: 'ok', id: campaign.id });
 });
 
-// Get all campaigns for a user
+// ======= GET ALL USER CAMPAIGNS =======
 router.get('/user-campaigns', async (req, res) => {
   const { username } = req.query;
   if (!username) return res.status(400).json({ error: 'Username required' });
@@ -44,7 +71,7 @@ router.get('/user-campaigns', async (req, res) => {
   res.json({ campaigns: userCampaigns });
 });
 
-// Get a single campaign by ID
+// ======= GET A SINGLE CAMPAIGN BY ID =======
 router.get('/campaign/:id', async (req, res) => {
   const { id } = req.params;
   await db.read();
@@ -54,7 +81,7 @@ router.get('/campaign/:id', async (req, res) => {
   res.json({ campaign });
 });
 
-// Delete a campaign by ID
+// ======= DELETE CAMPAIGN BY ID =======
 router.delete('/campaign/:id', async (req, res) => {
   const { id } = req.params;
   await db.read();

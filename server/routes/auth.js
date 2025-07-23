@@ -1,4 +1,3 @@
-// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -131,7 +130,7 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// ====== LAUNCH CAMPAIGN (with campaignName, startDate, and AI audience) ======
+// ====== LAUNCH CAMPAIGN (SAFE VERSION) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -143,57 +142,52 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
   // ==== AI AUDIENCE LOGIC ====
-let targeting = {
-  geo_locations: { countries: ["US"] }, // Default to US
-  age_min: 18,
-  age_max: 65,
-};
+  let targeting = {
+    geo_locations: { countries: ["US"] }, // Default to US
+    age_min: 18,
+    age_max: 65,
+  };
+  const VALID_COUNTRY_CODES = ["US", "CA", "MX"];
 
-// Defensive parse for country codes (only allow real country codes)
-const VALID_COUNTRY_CODES = ["US", "CA", "MX"]; // Add more as needed
-
-if (aiAudience) {
-  try {
-    const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
-
-    // Defensive country code extraction
-    if (ai.location && typeof ai.location === "string") {
-      // Normalize input and extract country code if possible
-      let loc = ai.location.trim().toUpperCase();
-      if (VALID_COUNTRY_CODES.includes(loc)) {
-        targeting.geo_locations.countries = [loc];
-      } else if (/united states|usa|america/i.test(loc)) {
-        targeting.geo_locations.countries = ["US"];
-      } // else, leave as default US
-    }
-
-    // Defensive age range
-    if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
-      const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x, 10));
-      if (Number.isInteger(age_min) && Number.isInteger(age_max) && age_max > age_min) {
-        targeting.age_min = age_min;
-        targeting.age_max = age_max;
+  if (aiAudience) {
+    try {
+      const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
+      // Defensive country code extraction
+      if (ai.location && typeof ai.location === "string") {
+        let loc = ai.location.trim().toUpperCase();
+        if (VALID_COUNTRY_CODES.includes(loc)) {
+          targeting.geo_locations.countries = [loc];
+        } else if (/united states|usa|america/i.test(loc)) {
+          targeting.geo_locations.countries = ["US"];
+        }
       }
+      // Defensive age range
+      if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
+        const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x, 10));
+        if (Number.isInteger(age_min) && Number.isInteger(age_max) && age_max > age_min) {
+          targeting.age_min = age_min;
+          targeting.age_max = age_max;
+        }
+      }
+      // Defensive interests
+      if (ai.interests) {
+        if (Array.isArray(ai.interests)) {
+          targeting.flexible_spec = [{ interests: ai.interests.filter(i => typeof i === 'string' && i.length > 0).map(i => ({ name: i })) }];
+        } else if (typeof ai.interests === "string" && ai.interests.length > 0) {
+          targeting.flexible_spec = [{ interests: [{ name: ai.interests }] }];
+        }
+      }
+    } catch (err) {
+      console.error("Failed to parse aiAudience JSON:", err.message);
     }
-
-    // Defensive interests
-    if (ai.interests && typeof ai.interests === "string" && ai.interests.length > 0) {
-      targeting.flexible_spec = [{ interests: [{ name: ai.interests }] }];
-    }
-
-  } catch (err) {
-    console.error("Failed to parse aiAudience JSON:", err.message);
   }
-}
-
-// *** Failsafe: Always send at least one valid country ***
-if (
-  !targeting.geo_locations.countries ||
-  targeting.geo_locations.countries.length === 0
-) {
-  targeting.geo_locations.countries = ["US"];
-}
-
+  // Failsafe for country code
+  if (!targeting.geo_locations.countries || targeting.geo_locations.countries.length === 0) {
+    targeting.geo_locations.countries = ["US"];
+  }
+  // Failsafe for age
+  if (!Number.isInteger(targeting.age_min) || targeting.age_min < 13) targeting.age_min = 18;
+  if (!Number.isInteger(targeting.age_max) || targeting.age_max < targeting.age_min) targeting.age_max = 65;
 
   try {
     // 1. Upload image (to Facebook)
@@ -220,7 +214,13 @@ if (
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Create campaign
+    // 2. Budget (Facebook minimum: $3.00/day)
+    let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
+    if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
+      return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
+    }
+
+    // 3. Create campaign
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -233,55 +233,45 @@ if (
     );
     const campaignId = campaignRes.data.id;
 
-    // 3. Create ad set (uses AI audience for targeting!)
-    // Just before adSetRes
-let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
-if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
-  return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
-}
-
-
-const adSetRes = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-  {
-    name: `${campaignName} - ${new Date().toISOString()}`,
-    campaign_id: campaignId,
-    daily_budget: dailyBudgetCents,
-    billing_event: "IMPRESSIONS",
-    optimization_goal: "LINK_CLICKS",
-    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-    status: "ACTIVE",
-    start_time: new Date(Date.now() + 60 * 1000).toISOString(),
-    end_time: null,
-    targeting,
-  },
-  { params: { access_token: userToken } }
-);
-
+    // 4. Create ad set (uses AI audience for targeting!)
+    const adSetRes = await axios.post(
+      `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+      {
+        name: `${campaignName} - ${new Date().toISOString()}`,
+        campaign_id: campaignId,
+        daily_budget: dailyBudgetCents,
+        billing_event: "IMPRESSIONS",
+        optimization_goal: "LINK_CLICKS",
+        bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+        status: "ACTIVE",
+        start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+        end_time: null,
+        targeting,
+      },
+      { params: { access_token: userToken } }
+    );
     const adSetId = adSetRes.data.id;
 
-    // 4. Create ad creative
+    // 5. Create ad creative
     const creativeRes = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-  {
-    name: `${campaignName} - ${new Date().toISOString()}`,
-    object_story_spec: {
-      page_id: pageId,
-      link_data: {
-        message: adCopy,
-        link: form.url || "https://your-smartmark-site.com",
-        image_hash: imageHash,
-        // REMOVE this line: caption: campaignName,
-        description: form.description || ""
-      }
-    }
-  },
-  { params: { access_token: userToken } }
-);
-
+      `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+      {
+        name: `${campaignName} - ${new Date().toISOString()}`,
+        object_story_spec: {
+          page_id: pageId,
+          link_data: {
+            message: adCopy,
+            link: form.url || "https://your-smartmark-site.com",
+            image_hash: imageHash,
+            description: form.description || ""
+          }
+        }
+      },
+      { params: { access_token: userToken } }
+    );
     const creativeId = creativeRes.data.id;
 
-    // 5. Create ad
+    // 6. Create ad
     const adRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
       {
@@ -311,7 +301,7 @@ const adSetRes = await axios.post(
   }
 });
 
-// ====== LIST CAMPAIGNS (name, start_time, status) ======
+// ====== LIST CAMPAIGNS ======
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -380,7 +370,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 
-// ====== PAUSE CAMPAIGN (status: PAUSED) ======
+// ====== PAUSE CAMPAIGN ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -401,7 +391,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
   }
 });
 
-// ====== UNPAUSE CAMPAIGN (status: ACTIVE) ======
+// ====== UNPAUSE CAMPAIGN ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -422,7 +412,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   }
 });
 
-// ====== CANCEL (ARCHIVE) CAMPAIGN (status: ARCHIVED) ======
+// ====== CANCEL (ARCHIVE) CAMPAIGN ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;

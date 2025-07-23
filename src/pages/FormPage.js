@@ -1,11 +1,26 @@
 // src/pages/FormPage.js
+
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
 const DARK_GREEN = "#185431";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const BACKEND_URL = "https://smartmark-mvp.onrender.com"; // Change if your backend url differs
+const BACKEND_URL = "https://smartmark-mvp.onrender.com";
+
+const DEFAULT_AUDIENCE = {
+  location: "US",
+  ageRange: "18-65",
+  interests: "Business, Restaurants"
+};
+
+const validateFields = (fields) => {
+  if (!fields.businessName) return "Business name is required.";
+  if (!fields.email || !fields.email.includes("@")) return "Valid email required.";
+  if (!fields.cashapp) return "CashApp Username required.";
+  if (!fields.url || !/^https?:\/\/.+\..+/.test(fields.url)) return "Valid website URL required.";
+  return "";
+};
 
 const FormPage = () => {
   const navigate = useNavigate();
@@ -19,12 +34,12 @@ const FormPage = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // New: AI audience structured/animated fields
+  // AI audience detection
   const [aiAudience, setAiAudience] = useState(null);
   const [audienceProgress, setAudienceProgress] = useState([]);
   const [audienceLoading, setAudienceLoading] = useState(false);
 
-  // Pre-populate fields from last session (optional, good UX)
+  // Prefill from last session
   useEffect(() => {
     const lastEmail = localStorage.getItem("smartmark_last_email") || "";
     const lastCashapp = localStorage.getItem("smartmark_last_cashapp") || "";
@@ -40,14 +55,14 @@ const FormPage = () => {
   const handleChange = (e) => {
     setFields({ ...fields, [e.target.name]: e.target.value });
     setError("");
-    // If user is editing URL, reset audience
+    // Reset audience if editing url
     if (e.target.name === "url") {
       setAiAudience(null);
       setAudienceProgress([]);
     }
   };
 
-  // Animated AI audience detection
+  // AI audience fetch
   const detectAudience = async (websiteUrl) => {
     if (!websiteUrl || websiteUrl.length < 7) return;
     setAudienceLoading(true);
@@ -62,13 +77,13 @@ const FormPage = () => {
       const data = await res.json();
 
       if (!data.audience) {
-        setAudienceProgress(["Could not detect audience."]);
+        setAudienceProgress(["Could not detect audience. Using default targeting."]);
+        setAiAudience(DEFAULT_AUDIENCE);
         setAudienceLoading(false);
         return;
       }
 
       let parsed;
-      // If already object, use it. If string, try to parse as JSON, else fallback
       if (typeof data.audience === "object") {
         parsed = data.audience;
       } else {
@@ -80,20 +95,29 @@ const FormPage = () => {
               ? data.audience
               : JSON.stringify(data.audience)
           ]);
+          setAiAudience(DEFAULT_AUDIENCE);
           setAudienceLoading(false);
           return;
         }
       }
 
-      setAiAudience(parsed);
+      // Defensive fallback: Must include all keys, no empties/nulls!
+      const safeAudience = {
+        location: parsed.location || "US",
+        ageRange: /^\d{2}-\d{2}$/.test(parsed.ageRange || "") ? parsed.ageRange : "18-65",
+        interests: parsed.interests && parsed.interests.length > 0
+          ? parsed.interests
+          : "Business, Restaurants"
+      };
+      setAiAudience(safeAudience);
 
-      // Animate progress step-by-step
+      // Animate progress
       const steps = [
         `Brand name found: ${parsed.brandName || "N/A"}`,
         `Demographic found: ${parsed.demographic || "N/A"}`,
-        `Age range found: ${parsed.ageRange || "N/A"}`,
-        `Location found: ${parsed.location || "N/A"}`,
-        `Interests found: ${parsed.interests || "N/A"}`,
+        `Age range found: ${safeAudience.ageRange}`,
+        `Location found: ${safeAudience.location}`,
+        `Interests found: ${safeAudience.interests}`,
         "AI finished!"
       ];
       setAudienceProgress(["AI searching..."]);
@@ -102,9 +126,10 @@ const FormPage = () => {
         setAudienceProgress((prev) => [...prev, steps[idx]]);
         idx++;
         if (idx >= steps.length) clearInterval(interval);
-      }, 800); // ~0.8 sec per reveal
+      }, 800);
     } catch {
-      setAudienceProgress(["Could not detect audience."]);
+      setAudienceProgress(["Could not detect audience. Using default targeting."]);
+      setAiAudience(DEFAULT_AUDIENCE);
     }
     setAudienceLoading(false);
   };
@@ -113,8 +138,16 @@ const FormPage = () => {
     e.preventDefault();
     setLoading(true);
 
-    // Step 1: Register user
+    // Validate
+    const errMsg = validateFields(fields);
+    if (errMsg) {
+      setError(errMsg);
+      setLoading(false);
+      return;
+    }
+
     try {
+      // Register user
       const signupRes = await fetch(`${BACKEND_URL}/auth/signup`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -126,13 +159,17 @@ const FormPage = () => {
         })
       });
       const signupData = await signupRes.json();
-      if (!signupData.success && !signupData.error?.includes("exists")) {
+      if (!signupData.success && !String(signupData.error).includes("exists")) {
         setError(signupData.error || "Signup failed.");
         setLoading(false);
         return;
       }
 
-      // Step 2: Save campaign for this user (include structured AI audience!)
+      // Save campaign for this user
+      const aiToSave = aiAudience
+        ? JSON.stringify(aiAudience)
+        : JSON.stringify(DEFAULT_AUDIENCE);
+
       const saveRes = await fetch(`${BACKEND_URL}/api/save-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,7 +177,7 @@ const FormPage = () => {
           username: fields.cashapp,
           campaign: {
             ...fields,
-            aiAudience: aiAudience, // Will be parsed object or null
+            aiAudience: aiToSave,
             createdAt: new Date().toISOString()
           }
         })
@@ -152,14 +189,14 @@ const FormPage = () => {
         return;
       }
 
-      // Store username for later autologin
+      // Store credentials for autologin
       localStorage.setItem("smartmark_login_username", fields.cashapp);
       localStorage.setItem("smartmark_login_password", fields.email);
       localStorage.setItem("smartmark_last_email", fields.email);
       localStorage.setItem("smartmark_last_cashapp", fields.cashapp);
       // Save latest fields for pre-filling on next step
-localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(fields));
-localStorage.setItem("smartmark_last_ai_audience", JSON.stringify(aiAudience));
+      localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(fields));
+      localStorage.setItem("smartmark_last_ai_audience", aiToSave);
 
       setLoading(false);
       navigate("/setup");
@@ -206,6 +243,7 @@ localStorage.setItem("smartmark_last_ai_audience", JSON.stringify(aiAudience));
           gap: "1.7rem"
         }}
         onSubmit={handleSubmit}
+        autoComplete="off"
       >
         <h2
           style={{

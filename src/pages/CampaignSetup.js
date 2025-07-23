@@ -1,4 +1,5 @@
 // src/pages/CampaignSetup.js
+
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
@@ -37,31 +38,23 @@ const CampaignSetup = () => {
   const location = useLocation();
   const fileInputRef = useRef();
 
-  // Main State
   const [form, setForm] = useState({});
   const [userKey, setUserKey] = useState("");
   const [budget, setBudget] = useState("");
   const [adCopy, setAdCopy] = useState("");
   const [adImage, setAdImage] = useState("");
   const [description, setDescription] = useState("");
-
-  // Facebook/account state
   const [fbConnected, setFbConnected] = useState(false);
   const [adAccounts, setAdAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [pages, setPages] = useState([]);
   const [selectedPageId, setSelectedPageId] = useState("");
-
-  // Campaign management
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [metrics, setMetrics] = useState(null);
-
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
-
-  // Status and Modal
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
 
@@ -69,50 +62,45 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
       fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-  .then(res => res.json())
-  .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"))
-  .catch(() => setCampaignStatus("ACTIVE"));
+        .then(res => res.json())
+        .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"))
+        .catch(() => setCampaignStatus("ACTIVE"));
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // Handlers for pause/unpause/cancel
+  // Pause/unpause/cancel handlers
   const pauseCampaign = async () => {
-  await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
-  // Refetch status after
-  fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-    .then(res => res.json())
-    .then(data => setCampaignStatus(data.status || data.effective_status || "PAUSED"));
-};
+    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
+    fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+      .then(res => res.json())
+      .then(data => setCampaignStatus(data.status || data.effective_status || "PAUSED"));
+  };
 
-const unpauseCampaign = async () => {
-  await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
-  fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-    .then(res => res.json())
-    .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"));
-};
+  const unpauseCampaign = async () => {
+    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
+    fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+      .then(res => res.json())
+      .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"));
+  };
 
-const cancelCampaign = async () => {
-  await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
-  fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-    .then(res => res.json())
-    .then(data => setCampaignStatus(data.status || data.effective_status || "ARCHIVED"));
-};
+  const cancelCampaign = async () => {
+    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
+    fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
+      .then(res => res.json())
+      .then(data => setCampaignStatus(data.status || data.effective_status || "ARCHIVED"));
+  };
 
-  // Load user info
+  // Load user info and prefill campaign form
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
     let cashapp = localStorage.getItem("smartmark_last_cashapp") || "";
     let key = getUserKey(email, cashapp);
     setUserKey(key);
     setFbConnected(localStorage.getItem(`${key}_fb_connected`) === "1");
-
-    // NEW: Pre-fill campaign form with last info
-  const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
-  if (lastFields) setForm(JSON.parse(lastFields));
-  const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
-  if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
-
-
+    const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
+    if (lastFields) setForm(JSON.parse(lastFields));
+    const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
+    if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
   // Facebook connect detection
@@ -176,7 +164,6 @@ const cancelCampaign = async () => {
           setAdCopy(c.adCopy || "");
           setAdImage(c.adImage || "");
           setDescription(c.description || "");
-          // Load campaign name and startDate into the form
           setForm(f => ({
             ...f,
             campaignName: c.campaignName || "",
@@ -238,40 +225,52 @@ const cancelCampaign = async () => {
     }
   };
 
-  // Launch campaign
-  const handleLaunch = async () => {
-  setLoading(true);
-  try {
-    const acctId = selectedAccount.replace("act_", "");
-    // NEW: include aiAudience and url from form
-    const payload = {
-      ...form,
-      aiAudience: form.aiAudience,
-      url: form.url,
-      budget,
-      adCopy,
-      adImage,
-      campaignType: form?.campaignType || "Website Traffic",
-      pageId: selectedPageId,
-      startDate: form.startDate || new Date().toISOString()
-    };
-    const res = await fetch(`/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json();
-    if (json.error) throw new Error(json.error);
-    setLaunched(true);
-    setLaunchResult(json);
-    setTimeout(() => setLaunched(false), 1500);
-  } catch (err) {
-    alert("Failed to launch campaign: " + (err.message || ""));
-    console.error(err);
-  }
-  setLoading(false);
-};
+  // -- Launch button logic: ensure everything valid, always type-sane --
+  const canLaunch = !!(
+    fbConnected &&
+    selectedAccount &&
+    selectedPageId &&
+    adCopy &&
+    adImage &&
+    budget &&
+    !isNaN(parseFloat(budget)) &&
+    parseFloat(budget) >= 3
+  );
 
+  // Launch campaign (ALWAYS send complete, safe payload)
+  const handleLaunch = async () => {
+    setLoading(true);
+    try {
+      const acctId = selectedAccount.replace("act_", "");
+      const safeBudget = Math.max(3, Number(budget) || 0);
+      const payload = {
+        form: {
+          ...form,
+          description,
+        },
+        budget: safeBudget,
+        adCopy,
+        adImage,
+        campaignType: form?.campaignType || "Website Traffic",
+        pageId: selectedPageId,
+        aiAudience: form?.aiAudience,
+      };
+      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Server error");
+      setLaunched(true);
+      setLaunchResult(json);
+      setTimeout(() => setLaunched(false), 1500);
+    } catch (err) {
+      alert("Failed to launch campaign: " + (err.message || ""));
+      console.error(err);
+    }
+    setLoading(false);
+  };
 
   // FB payment popup
   const openFbPaymentPopup = () => {
@@ -359,7 +358,7 @@ const cancelCampaign = async () => {
           gap: "2.2rem",
         }}
       >
-        {/* Facebook Connect: button always clickable, status shown nearby */}
+        {/* Facebook Connect */}
         <div style={{ marginBottom: "1.1rem", display: "flex", alignItems: "center", gap: "1.3rem" }}>
           <a
             href={`${backendUrl}/auth/facebook`}
@@ -421,7 +420,7 @@ const cancelCampaign = async () => {
           </button>
         )}
 
-        {/* --------- CAMPAIGNS TAB --------- */}
+        {/* Campaigns Tab */}
         {fbConnected && (
           <div style={{
             background: "#232529",
@@ -453,7 +452,6 @@ const cancelCampaign = async () => {
                 + New Campaign
               </button>
             </div>
-            {/* Campaign List Dropdown */}
             {campaigns.length > 0 && (
               <div style={{marginBottom: 12}}>
                 <label style={{ color: "#fff", fontWeight: 600, marginRight: 8 }}>
@@ -476,8 +474,6 @@ const cancelCampaign = async () => {
                 </select>
               </div>
             )}
-
-            {/* Status, Pause/Unpause/Cancel, Start Date */}
             {selectedCampaignId && (
               <div style={{ marginBottom: "1.2rem", marginTop: "0.2rem" }}>
                 <span style={{
@@ -518,15 +514,12 @@ const cancelCampaign = async () => {
                     Cancel
                   </button>
                 )}
-                {/* Show Start Date */}
                 <div style={{color:'#fff', fontWeight:600, marginTop:8}}>
                   Started: {campaigns.find(c=>c.id===selectedCampaignId)?.startDate ?
                     new Date(campaigns.find(c=>c.id===selectedCampaignId).startDate).toLocaleDateString() : "--"}
                 </div>
               </div>
             )}
-
-            {/* Metrics */}
             {selectedCampaignId && metrics && (
               <div style={{
                 background: "#191d1f",
@@ -547,7 +540,6 @@ const cancelCampaign = async () => {
                 <div>Results: <b>{metrics.results ?? "--"}</b></div>
               </div>
             )}
-
             <div style={{
               marginTop: "0.9rem",
               marginBottom: "0.2rem",
@@ -560,27 +552,27 @@ const cancelCampaign = async () => {
           </div>
         )}
 
-        {/* --------- MAIN CAMPAIGN FORM --------- */}
+        {/* Main Campaign Form */}
         <div>
           {/* Ad Account + Page selection */}
           {fbConnected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <label style={{ color: "#fff", fontWeight: 600 }}>Ad Account</label>
-<select
-  value={selectedAccount}
-  onChange={e => setSelectedAccount(e.target.value)}
-  style={{
-    padding: "0.7rem",
-    borderRadius: "1.1rem",
-    fontSize: "1.06rem",
-  }}
->
-  {adAccounts.map(ac => (
-    <option key={ac.id} value={ac.id.replace("act_", "")}>
-      {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
-    </option>
-  ))}
-</select>
+              <select
+                value={selectedAccount}
+                onChange={e => setSelectedAccount(e.target.value)}
+                style={{
+                  padding: "0.7rem",
+                  borderRadius: "1.1rem",
+                  fontSize: "1.06rem",
+                }}
+              >
+                {adAccounts.map(ac => (
+                  <option key={ac.id} value={ac.id.replace("act_", "")}>
+                    {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
+                  </option>
+                ))}
+              </select>
 
               <label style={{ color: "#fff", fontWeight: 600 }}>Facebook Page</label>
               <select
@@ -634,9 +626,9 @@ const cancelCampaign = async () => {
             <label style={{ color: "#fff", fontWeight: 600 }}>Campaign Budget ($)</label>
             <input
               type="number"
-              placeholder="Enter budget (minimum $100)"
-              min={100}
-              step={10}
+              placeholder="Enter budget (minimum $3)"
+              min={3}
+              step={1}
               value={budget}
               onChange={e => setBudget(e.target.value)}
               style={{
@@ -648,7 +640,6 @@ const cancelCampaign = async () => {
                 marginBottom: "1rem",
               }}
             />
-            {/* Show CashTag only if budget is entered and > 0 */}
             {budget && Number(budget) > 0 && (
               <div style={{
                 marginTop: "-0.7rem",
@@ -667,7 +658,7 @@ const cancelCampaign = async () => {
             <div style={{ color: "#afeca3", fontWeight: 600 }}>
               SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
             </div>
-            {budget && Number(budget) >= 100 && (
+            {budget && Number(budget) >= 3 && (
               <div
                 style={{
                   marginTop: "0.7rem",
@@ -761,7 +752,7 @@ const cancelCampaign = async () => {
           <button
             type="button"
             onClick={handleLaunch}
-            disabled={loading}
+            disabled={loading || !canLaunch}
             style={{
               background: DARK_GREEN,
               color: "#fff",
@@ -770,13 +761,14 @@ const cancelCampaign = async () => {
               border: "none",
               padding: "1rem 2.4rem",
               fontSize: "1.14rem",
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: loading || !canLaunch ? "not-allowed" : "pointer",
               marginTop: "2.2rem",
               width: "100%",
-              opacity: loading ? 0.75 : 1,
+              opacity: loading || !canLaunch ? 0.75 : 1,
               fontFamily: MODERN_FONT,
               boxShadow: "0 2px 18px 0 #15713717"
             }}
+            title={!canLaunch ? "Fill in all required fields. Budget must be $3+." : ""}
           >
             {loading ? "Launching..." : "Launch Campaign"}
           </button>

@@ -4,17 +4,32 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-// ***** CORS MUST BE FIRST, BEFORE ALL MIDDLEWARE AND ROUTES *****
+// ====== RELIABLE CORS (order: first) ======
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://smartmark-mvp.vercel.app';
+
 app.use(cors({
-  origin: 'https://smartmark-mvp.vercel.app', // Your frontend URL
+  origin: FRONTEND_URL,
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Body parsers must come after CORS but before routes
+// Handle preflight requests
+app.options('*', cors({
+  origin: FRONTEND_URL,
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// If behind proxy (Render, Vercel, etc)
+app.set('trust proxy', 1);
+
+// ====== BODY PARSER ======
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ===== ROUTES (order matters!) =====
+// ====== ROUTES ======
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
@@ -24,16 +39,28 @@ app.use('/api', aiRoutes);
 const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
-// Health check endpoint (optional, useful for Render)
+// Health check endpoint (for Render uptime)
 app.get('/healthz', (req, res) => {
   res.send('OK');
 });
 
-// Simple root endpoint
+// Root endpoint
 app.get('/', (req, res) => {
   res.send('SmartMark backend is running!');
 });
 
+// ====== CATCH-ALL 404 (OPTIONAL) ======
+// app.use((req, res) => {
+//   res.status(404).send('Not found');
+// });
+
+// ====== GLOBAL ERROR HANDLER ======
+app.use((err, req, res, next) => {
+  console.error('Unhandled server error:', err);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// ====== SERVER START ======
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server started on http://localhost:${PORT}`);

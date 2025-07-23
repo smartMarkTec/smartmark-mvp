@@ -4,11 +4,12 @@ const router = express.Router();
 const { OpenAI } = require('openai');
 const axios = require('axios');
 
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// ========== QUICK TEST ENDPOINT ==========
 router.get('/test', (req, res) => {
   res.json({ msg: "AI route is working!" });
 });
-
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ========== AI: EXPERT AD COPY GENERATOR ==========
 router.post('/generate-ad-copy', async (req, res) => {
@@ -30,14 +31,24 @@ router.post('/generate-ad-copy', async (req, res) => {
       messages: [{ role: "user", content: prompt }],
       max_tokens: 120,
     });
-    const adCopy = response.choices[0].message.content.trim();
+    const adCopy = response.choices[0]?.message?.content?.trim() || "";
     return res.json({ adCopy });
   } catch (err) {
+    console.error("Ad Copy Generation Error:", err?.response?.data || err.message);
     return res.status(500).json({ error: "Failed to generate ad copy" });
   }
 });
 
 // ========== AI: AUTOMATIC AUDIENCE DETECTION ==========
+
+const DEFAULT_AUDIENCE = {
+  brandName: "",
+  demographic: "",
+  ageRange: "18-65",
+  location: "US",
+  interests: "Business, Restaurants",
+  summary: ""
+};
 
 // Helper: Scrape website homepage text
 async function getWebsiteText(url) {
@@ -58,8 +69,9 @@ router.post('/detect-audience', async (req, res) => {
   // 1. Scrape website text
   const websiteText = await getWebsiteText(url);
 
+  // Defensive fallback if we can't extract usable text
   if (!websiteText || websiteText.length < 100) {
-    return res.status(400).json({ error: 'Could not extract website text.' });
+    return res.json({ audience: DEFAULT_AUDIENCE });
   }
 
   // 2. OpenAI prompt - asks for response in strict JSON format
@@ -93,14 +105,30 @@ Website homepage text:
     try {
       const jsonMatch = aiText.match(/\{[\s\S]*\}/); // extract first {...} block
       audienceJson = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
+
+      // Enforce required fields and safe fallback
+      audienceJson = {
+        brandName: audienceJson.brandName || "",
+        demographic: audienceJson.demographic || "",
+        ageRange: /^\d{2}-\d{2}$/.test(audienceJson.ageRange || "") ? audienceJson.ageRange : "18-65",
+        location: typeof audienceJson.location === "string" && audienceJson.location.trim().length > 0
+          ? audienceJson.location.trim().toUpperCase()
+          : "US",
+        interests: audienceJson.interests && String(audienceJson.interests).length > 0
+          ? audienceJson.interests
+          : "Business, Restaurants",
+        summary: audienceJson.summary || ""
+      };
     } catch (err) {
-      return res.status(500).json({ error: 'AI returned invalid JSON', raw: aiText });
+      // If OpenAI returns invalid JSON, fall back to default
+      return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
-    res.json({ audience: audienceJson });
+    return res.json({ audience: audienceJson });
   } catch (err) {
     console.error('OpenAI Error:', err?.response?.data || err.message);
-    res.status(500).json({ error: 'AI audience detection failed.' });
+    // On AI fail, always return DEFAULT_AUDIENCE so the rest of your stack is safe
+    return res.json({ audience: DEFAULT_AUDIENCE });
   }
 });
 
