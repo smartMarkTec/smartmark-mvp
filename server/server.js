@@ -4,32 +4,30 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-// ====== RELIABLE CORS (order: first) ======
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://smartmark-mvp.vercel.app';
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://smartmark-mvp.vercel.app',
+  'http://localhost:3000'
+];
 
 app.use(cors({
-  origin: FRONTEND_URL,
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS not allowed from this origin: ' + origin), false);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Handle preflight requests
-app.options('*', cors({
-  origin: FRONTEND_URL,
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.options('*', cors());
 
-// If behind proxy (Render, Vercel, etc)
 app.set('trust proxy', 1);
 
-// ====== BODY PARSER ======
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ====== ROUTES ======
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
@@ -39,29 +37,33 @@ app.use('/api', aiRoutes);
 const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
-// Health check endpoint (for Render uptime)
+// Health check endpoint
 app.get('/healthz', (req, res) => {
-  res.send('OK');
+  res.json({ status: 'OK', uptime: process.uptime() });
 });
 
 // Root endpoint
 app.get('/', (req, res) => {
-  res.send('SmartMark backend is running!');
+  res.json({ status: 'SmartMark backend running', time: new Date().toISOString() });
 });
 
-// ====== CATCH-ALL 404 (OPTIONAL) ======
-// app.use((req, res) => {
-//   res.status(404).send('Not found');
-// });
+// 404
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
 
-// ====== GLOBAL ERROR HANDLER ======
+// Global error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(500).json({
+    error: 'Internal server error',
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+  });
 });
 
-// ====== SERVER START ======
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server started on http://localhost:${PORT}`);
 });
+
+module.exports = app;

@@ -10,6 +10,29 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
+// --- Helper to resolve interest names to Facebook interest IDs ---
+async function resolveInterests(interestNames, userToken) {
+  const interests = [];
+  for (const name of interestNames) {
+    try {
+      const resp = await axios.get('https://graph.facebook.com/v18.0/search', {
+        params: {
+          type: 'adinterest',
+          q: name,
+          access_token: userToken,
+        }
+      });
+      const match = resp.data.data && resp.data.data[0];
+      if (match) {
+        interests.push({ id: match.id, name: match.name });
+      }
+    } catch (err) {
+      console.error(`Failed to resolve interest "${name}":`, err?.response?.data || err.message);
+    }
+  }
+  return interests;
+}
+
 const FB_SCOPES = [
   'ads_management',
   'ads_read',
@@ -141,53 +164,55 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-  // ==== AI AUDIENCE LOGIC ====
-  let targeting = {
-    geo_locations: { countries: ["US"] }, // Default to US
-    age_min: 18,
-    age_max: 65,
-  };
-  const VALID_COUNTRY_CODES = ["US", "CA", "MX"];
+let targeting = {
+  geo_locations: { countries: ["US"] }, // Default to US
+  age_min: 18,
+  age_max: 65,
+};
+const VALID_COUNTRY_CODES = ["US", "CA", "MX"];
 
-  if (aiAudience) {
-    try {
-      const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
-      // Defensive country code extraction
-      if (ai.location && typeof ai.location === "string") {
-        let loc = ai.location.trim().toUpperCase();
-        if (VALID_COUNTRY_CODES.includes(loc)) {
-          targeting.geo_locations.countries = [loc];
-        } else if (/united states|usa|america/i.test(loc)) {
-          targeting.geo_locations.countries = ["US"];
-        }
+if (aiAudience) {
+  try {
+    const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
+
+    // Country code
+    if (ai.location && typeof ai.location === "string") {
+      let loc = ai.location.trim().toUpperCase();
+      if (VALID_COUNTRY_CODES.includes(loc)) {
+        targeting.geo_locations.countries = [loc];
+      } else if (/united states|usa|america/i.test(loc)) {
+        targeting.geo_locations.countries = ["US"];
       }
-      // Defensive age range
-      if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
-        const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x, 10));
-        if (Number.isInteger(age_min) && Number.isInteger(age_max) && age_max > age_min) {
-          targeting.age_min = age_min;
-          targeting.age_max = age_max;
-        }
-      }
-      // Defensive interests
-      if (ai.interests) {
-        if (Array.isArray(ai.interests)) {
-          targeting.flexible_spec = [{ interests: ai.interests.filter(i => typeof i === 'string' && i.length > 0).map(i => ({ name: i })) }];
-        } else if (typeof ai.interests === "string" && ai.interests.length > 0) {
-          targeting.flexible_spec = [{ interests: [{ name: ai.interests }] }];
-        }
-      }
-    } catch (err) {
-      console.error("Failed to parse aiAudience JSON:", err.message);
     }
+    // Age range
+    if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
+      const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x, 10));
+      if (Number.isInteger(age_min) && Number.isInteger(age_max) && age_max > age_min) {
+        targeting.age_min = age_min;
+        targeting.age_max = age_max;
+      }
+    }
+    // Interests - MUST resolve to Facebook IDs!
+    if (ai.interests) {
+      let interestArr = Array.isArray(ai.interests) ? ai.interests : [ai.interests];
+      interestArr = interestArr.filter(i => typeof i === 'string' && i.length > 0);
+      // Lookup interest IDs
+      const resolvedInterests = await resolveInterests(interestArr, userToken);
+      if (resolvedInterests.length > 0) {
+        targeting.flexible_spec = [{ interests: resolvedInterests }];
+      }
+    }
+  } catch (err) {
+    console.error("Failed to parse aiAudience JSON:", err.message);
   }
-  // Failsafe for country code
-  if (!targeting.geo_locations.countries || targeting.geo_locations.countries.length === 0) {
-    targeting.geo_locations.countries = ["US"];
-  }
-  // Failsafe for age
-  if (!Number.isInteger(targeting.age_min) || targeting.age_min < 13) targeting.age_min = 18;
-  if (!Number.isInteger(targeting.age_max) || targeting.age_max < targeting.age_min) targeting.age_max = 65;
+}
+
+// Failsafes
+if (!targeting.geo_locations.countries || targeting.geo_locations.countries.length === 0) {
+  targeting.geo_locations.countries = ["US"];
+}
+if (!Number.isInteger(targeting.age_min) || targeting.age_min < 13) targeting.age_min = 18;
+if (!Number.isInteger(targeting.age_max) || targeting.age_max < targeting.age_min) targeting.age_max = 65;
 
   try {
     // 1. Upload image (to Facebook)
