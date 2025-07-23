@@ -1,3 +1,4 @@
+// routes/auth.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -22,7 +23,7 @@ let userTokens = {};
 
 // ====== FACEBOOK OAUTH - Connect Facebook ======
 
-// GET /auth/facebook  <-- This is the route you were missing!
+// GET /auth/facebook
 router.get('/facebook', (req, res) => {
   const state = "randomstring123";
   const fbUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}&scope=${FB_SCOPES.join(',')}&response_type=code&state=${state}`;
@@ -52,6 +53,50 @@ router.get('/facebook/callback', async (req, res) => {
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
     res.status(500).send('Failed to authenticate with Facebook.');
+  }
+});
+
+// ====== GET FB AD ACCOUNTS (for connected user) ======
+// GET /auth/facebook/adaccounts
+router.get('/facebook/adaccounts', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+  try {
+    // Get user's ad accounts (requires ads_management)
+    const me = await axios.get(
+      `https://graph.facebook.com/v18.0/me/adaccounts`,
+      { params: { access_token: userToken, fields: 'id,name,account_status' } }
+    );
+    res.json(me.data);
+  } catch (err) {
+    let errorMsg = "Failed to fetch ad accounts.";
+    if (err.response && err.response.data && err.response.data.error) {
+      errorMsg = err.response.data.error.message;
+    }
+    res.status(500).json({ error: errorMsg });
+  }
+});
+
+// ====== GET FB PAGES (for connected user) ======
+// GET /auth/facebook/pages
+router.get('/facebook/pages', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+  try {
+    // Get user's pages (requires pages_show_list)
+    const me = await axios.get(
+      `https://graph.facebook.com/v18.0/me/accounts`,
+      { params: { access_token: userToken, fields: 'id,name,access_token' } }
+    );
+    res.json(me.data);
+  } catch (err) {
+    let errorMsg = "Failed to fetch Facebook Pages.";
+    if (err.response && err.response.data && err.response.data.error) {
+      errorMsg = err.response.data.error.message;
+    }
+    res.status(500).json({ error: errorMsg });
   }
 });
 
