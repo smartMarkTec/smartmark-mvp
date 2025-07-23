@@ -157,6 +157,9 @@ const FormPage = () => {
       localStorage.setItem("smartmark_login_password", fields.email);
       localStorage.setItem("smartmark_last_email", fields.email);
       localStorage.setItem("smartmark_last_cashapp", fields.cashapp);
+      // Save latest fields for pre-filling on next step
+localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(fields));
+localStorage.setItem("smartmark_last_ai_audience", JSON.stringify(aiAudience));
 
       setLoading(false);
       navigate("/setup");

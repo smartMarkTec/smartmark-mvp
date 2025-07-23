@@ -105,6 +105,14 @@ const cancelCampaign = async () => {
     let key = getUserKey(email, cashapp);
     setUserKey(key);
     setFbConnected(localStorage.getItem(`${key}_fb_connected`) === "1");
+
+    // NEW: Pre-fill campaign form with last info
+  const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
+  if (lastFields) setForm(JSON.parse(lastFields));
+  const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
+  if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
+
+
   }, []);
 
   // Facebook connect detection
@@ -232,33 +240,38 @@ const cancelCampaign = async () => {
 
   // Launch campaign
   const handleLaunch = async () => {
-    setLoading(true);
-    try {
-      const acctId = selectedAccount.replace("act_", "");
-      const res = await fetch(`/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form, // includes campaignName
-          budget,
-          adCopy,
-          adImage,
-          campaignType: form?.campaignType || "Website Traffic",
-          pageId: selectedPageId,
-          startDate: form.startDate || new Date().toISOString() // add startDate if you want to set on frontend
-        }),
-      });
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      setLaunched(true);
-      setLaunchResult(json);
-      setTimeout(() => setLaunched(false), 1500);
-    } catch (err) {
-      alert("Failed to launch campaign: " + (err.message || ""));
-      console.error(err);
-    }
-    setLoading(false);
-  };
+  setLoading(true);
+  try {
+    const acctId = selectedAccount.replace("act_", "");
+    // NEW: include aiAudience and url from form
+    const payload = {
+      ...form,
+      aiAudience: form.aiAudience,
+      url: form.url,
+      budget,
+      adCopy,
+      adImage,
+      campaignType: form?.campaignType || "Website Traffic",
+      pageId: selectedPageId,
+      startDate: form.startDate || new Date().toISOString()
+    };
+    const res = await fetch(`/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (json.error) throw new Error(json.error);
+    setLaunched(true);
+    setLaunchResult(json);
+    setTimeout(() => setLaunched(false), 1500);
+  } catch (err) {
+    alert("Failed to launch campaign: " + (err.message || ""));
+    console.error(err);
+  }
+  setLoading(false);
+};
+
 
   // FB payment popup
   const openFbPaymentPopup = () => {
