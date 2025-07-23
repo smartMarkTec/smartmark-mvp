@@ -34,7 +34,7 @@ router.post('/generate-ad-copy', async (req, res) => {
     const adCopy = response.choices?.[0]?.message?.content?.trim() || "";
     return res.json({ adCopy });
   } catch (err) {
-    console.error("Ad Copy Generation Error:", err?.response?.data || err.message);
+    console.error("[AI] Ad Copy Generation Error:", err?.response?.data || err.message);
     return res.status(500).json({ error: "Failed to generate ad copy" });
   }
 });
@@ -57,7 +57,7 @@ async function getWebsiteText(url) {
     // Remove all tags, get main text, limit to 3500 chars for OpenAI
     return data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3500);
   } catch (err) {
-    console.warn("Could not scrape website text for:", url);
+    console.warn("[AI] Could not scrape website text for:", url, err?.message || err);
     return '';
   }
 }
@@ -126,13 +126,21 @@ Website homepage text:
       };
     } catch (err) {
       // If OpenAI returns invalid JSON, fall back to default
-      console.error("[AI] Could not parse JSON from OpenAI output:", aiText);
+      console.error("[AI] Could not parse JSON from OpenAI output:", aiText, err?.message);
+      // You see the full AI output in the logs
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
+    // Log final result for debugging
+    console.log("[AI] Final parsed audienceJson:", audienceJson);
+
     return res.json({ audience: audienceJson });
   } catch (err) {
-    console.error('OpenAI Error:', err?.response?.data || err.message);
+    if (err?.response?.status === 429) {
+      console.error('[AI] OpenAI rate limit hit:', err?.response?.data || err.message);
+    } else {
+      console.error('[AI] OpenAI Error:', err?.response?.data || err.message);
+    }
     // On AI fail, always return DEFAULT_AUDIENCE so the rest of your stack is safe
     return res.json({ audience: DEFAULT_AUDIENCE });
   }

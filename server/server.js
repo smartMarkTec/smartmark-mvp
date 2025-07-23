@@ -4,18 +4,16 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-app.use((req, res, next) => {
-  res.setHeader('Content-Type', 'application/json');
-  next();
-});
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://smartmark-mvp.vercel.app',
   'http://localhost:3000'
 ];
 
+// Fix CORS to always respond for preflight, set headers **before** any routes
 app.use(cors({
-  origin: function(origin, callback) {
+  origin: function (origin, callback) {
+    // Allow REST tools or direct server calls with no origin
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('CORS not allowed from this origin: ' + origin), false);
@@ -24,8 +22,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-app.options('*', cors());
+app.options('*', cors()); // handle preflight for all routes
 
 app.set('trust proxy', 1);
 
@@ -51,12 +48,12 @@ app.get('/', (req, res) => {
   res.json({ status: 'SmartMark backend running', time: new Date().toISOString() });
 });
 
-// 404
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Global error handler
+// Error handler
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err);
   res.status(500).json({
