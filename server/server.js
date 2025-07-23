@@ -34,7 +34,7 @@ app.use('/auth', authRoutes);
 const aiRoutes = require('./routes/ai');
 app.use('/api', aiRoutes);
 
-const campaignRoutes = require('./routes/campaigns');
+const campaignRoutes = require('./routes/campaign');
 app.use('/api', campaignRoutes);
 
 // Health check endpoint
