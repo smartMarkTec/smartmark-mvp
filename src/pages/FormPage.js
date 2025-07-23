@@ -1,5 +1,3 @@
-// src/pages/FormPage.js
-
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
