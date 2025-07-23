@@ -553,21 +553,22 @@ const cancelCampaign = async () => {
           {fbConnected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <label style={{ color: "#fff", fontWeight: 600 }}>Ad Account</label>
-              <select
-                value={selectedAccount}
-                onChange={e => setSelectedAccount(e.target.value)}
-                style={{
-                  padding: "0.7rem",
-                  borderRadius: "1.1rem",
-                  fontSize: "1.06rem",
-                }}
-              >
-                {adAccounts.map(ac => (
-                  <option key={ac.id} value={ac.id.replace("act_", "")}>
-                    {ac.name || ac.id}
-                  </option>
-                ))}
-              </select>
+<select
+  value={selectedAccount}
+  onChange={e => setSelectedAccount(e.target.value)}
+  style={{
+    padding: "0.7rem",
+    borderRadius: "1.1rem",
+    fontSize: "1.06rem",
+  }}
+>
+  {adAccounts.map(ac => (
+    <option key={ac.id} value={ac.id.replace("act_", "")}>
+      {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
+    </option>
+  ))}
+</select>
+
               <label style={{ color: "#fff", fontWeight: 600 }}>Facebook Page</label>
               <select
                 value={selectedPageId}
