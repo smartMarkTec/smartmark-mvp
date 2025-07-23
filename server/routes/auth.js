@@ -143,33 +143,57 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
   // ==== AI AUDIENCE LOGIC ====
-  let targeting = {
-    geo_locations: { countries: ["US"] },
-    age_min: 18,
-    age_max: 65,
-  };
-  if (aiAudience) {
-    try {
-      const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
-      if (ai.location && ai.location.length > 1) {
-        let loc = ai.location;
-        if (/united states|usa|america/i.test(loc)) loc = "US";
-        targeting.geo_locations = { countries: [loc] };
-      }
-      if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
-        const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x));
-        if (age_min && age_max && age_max > age_min) {
-          targeting.age_min = age_min;
-          targeting.age_max = age_max;
-        }
-      }
-      if (ai.interests && ai.interests.length > 1) {
-        targeting.flexible_spec = [{ interests: [{ name: ai.interests }] }];
-      }
-    } catch (err) {
-      console.error("Failed to parse aiAudience JSON:", err.message);
+let targeting = {
+  geo_locations: { countries: ["US"] }, // Default to US
+  age_min: 18,
+  age_max: 65,
+};
+
+// Defensive parse for country codes (only allow real country codes)
+const VALID_COUNTRY_CODES = ["US", "CA", "MX"]; // Add more as needed
+
+if (aiAudience) {
+  try {
+    const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
+
+    // Defensive country code extraction
+    if (ai.location && typeof ai.location === "string") {
+      // Normalize input and extract country code if possible
+      let loc = ai.location.trim().toUpperCase();
+      if (VALID_COUNTRY_CODES.includes(loc)) {
+        targeting.geo_locations.countries = [loc];
+      } else if (/united states|usa|america/i.test(loc)) {
+        targeting.geo_locations.countries = ["US"];
+      } // else, leave as default US
     }
+
+    // Defensive age range
+    if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
+      const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x, 10));
+      if (Number.isInteger(age_min) && Number.isInteger(age_max) && age_max > age_min) {
+        targeting.age_min = age_min;
+        targeting.age_max = age_max;
+      }
+    }
+
+    // Defensive interests
+    if (ai.interests && typeof ai.interests === "string" && ai.interests.length > 0) {
+      targeting.flexible_spec = [{ interests: [{ name: ai.interests }] }];
+    }
+
+  } catch (err) {
+    console.error("Failed to parse aiAudience JSON:", err.message);
   }
+}
+
+// *** Failsafe: Always send at least one valid country ***
+if (
+  !targeting.geo_locations.countries ||
+  targeting.geo_locations.countries.length === 0
+) {
+  targeting.geo_locations.countries = ["US"];
+}
+
 
   try {
     // 1. Upload image (to Facebook)
@@ -212,10 +236,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     // 3. Create ad set (uses AI audience for targeting!)
     // Just before adSetRes
 let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
-if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 100) {
-  // Fallback: set to minimum $1.00 = 100 cents if invalid or too low
-  dailyBudgetCents = 100;
+if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
+  return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
 }
+
 
 const adSetRes = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
