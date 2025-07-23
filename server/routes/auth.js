@@ -210,22 +210,30 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const campaignId = campaignRes.data.id;
 
     // 3. Create ad set (uses AI audience for targeting!)
-    const adSetRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-      {
-        name: `${campaignName} - ${new Date().toISOString()}`,
-        campaign_id: campaignId,
-        daily_budget: Math.round(parseFloat(budget) * 100),
-        billing_event: "IMPRESSIONS",
-        optimization_goal: "LINK_CLICKS",
-        bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-        status: "ACTIVE",
-        start_time: new Date(Date.now() + 60 * 1000).toISOString(),
-        end_time: null,
-        targeting,
-      },
-      { params: { access_token: userToken } }
-    );
+    // Just before adSetRes
+let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
+if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 100) {
+  // Fallback: set to minimum $1.00 = 100 cents if invalid or too low
+  dailyBudgetCents = 100;
+}
+
+const adSetRes = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+  {
+    name: `${campaignName} - ${new Date().toISOString()}`,
+    campaign_id: campaignId,
+    daily_budget: dailyBudgetCents,
+    billing_event: "IMPRESSIONS",
+    optimization_goal: "LINK_CLICKS",
+    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+    status: "ACTIVE",
+    start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+    end_time: null,
+    targeting,
+  },
+  { params: { access_token: userToken } }
+);
+
     const adSetId = adSetRes.data.id;
 
     // 4. Create ad creative
