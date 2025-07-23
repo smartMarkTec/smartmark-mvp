@@ -4,13 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-useEffect(() => {
-  if (window.location.hash === '#_=_') {
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
-  }
-}, []);
-
-
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
 const LIGHT_BG = "#34373d";
@@ -41,6 +34,13 @@ const btnStyle = {
 };
 
 const CampaignSetup = () => {
+  // Remove FB OAuth #_=_ hash (MUST be inside component)
+  useEffect(() => {
+    if (window.location.hash === '#_=_') {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
+
   const navigate = useNavigate();
   const location = useLocation();
   const fileInputRef = useRef();
