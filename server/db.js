@@ -1,14 +1,14 @@
-// db.js
-const { Low, JSONFile } = require('lowdb');
+const { Low } = require('lowdb');
+const { JSONFile } = require('lowdb/node');
 
-const adapter = new JSONFile('db.json');
-const db = new Low(adapter);
+// Store database file in the backend folder (so it’s always found)
+const db = new Low(new JSONFile(__dirname + '/db.json'), { users: [], campaigns: [] });
 
-async function init() {
+// Always ensure .data is initialized
+(async () => {
   await db.read();
   db.data ||= { users: [], campaigns: [] };
   await db.write();
-}
-init();
+})();
 
 module.exports = db;
