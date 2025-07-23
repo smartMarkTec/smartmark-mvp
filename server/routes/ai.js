@@ -4,6 +4,10 @@ const router = express.Router();
 const { OpenAI } = require('openai');
 const axios = require('axios');
 
+router.get('/test', (req, res) => {
+  res.json({ msg: "AI route is working!" });
+});
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ========== AI: EXPERT AD COPY GENERATOR ==========
