@@ -230,22 +230,23 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     // 4. Create ad creative
     const creativeRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-      {
-        name: `${campaignName} - ${new Date().toISOString()}`,
-        object_story_spec: {
-          page_id: pageId,
-          link_data: {
-            message: adCopy,
-            link: form.url || "https://your-smartmark-site.com",
-            image_hash: imageHash,
-            caption: campaignName,
-            description: form.description || ""
-          }
-        }
-      },
-      { params: { access_token: userToken } }
-    );
+  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+  {
+    name: `${campaignName} - ${new Date().toISOString()}`,
+    object_story_spec: {
+      page_id: pageId,
+      link_data: {
+        message: adCopy,
+        link: form.url || "https://your-smartmark-site.com",
+        image_hash: imageHash,
+        // REMOVE this line: caption: campaignName,
+        description: form.description || ""
+      }
+    }
+  },
+  { params: { access_token: userToken } }
+);
+
     const creativeId = creativeRes.data.id;
 
     // 5. Create ad
