@@ -31,7 +31,7 @@ router.post('/generate-ad-copy', async (req, res) => {
       messages: [{ role: "user", content: prompt }],
       max_tokens: 120,
     });
-    const adCopy = response.choices[0]?.message?.content?.trim() || "";
+    const adCopy = response.choices?.[0]?.message?.content?.trim() || "";
     return res.json({ adCopy });
   } catch (err) {
     console.error("Ad Copy Generation Error:", err?.response?.data || err.message);
@@ -57,6 +57,7 @@ async function getWebsiteText(url) {
     // Remove all tags, get main text, limit to 3500 chars for OpenAI
     return data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3500);
   } catch (err) {
+    console.warn("Could not scrape website text for:", url);
     return '';
   }
 }
@@ -71,6 +72,7 @@ router.post('/detect-audience', async (req, res) => {
 
   // Defensive fallback if we can't extract usable text
   if (!websiteText || websiteText.length < 100) {
+    console.log(`[AI] Fallback to DEFAULT_AUDIENCE: not enough text scraped from ${url}`);
     return res.json({ audience: DEFAULT_AUDIENCE });
   }
 
@@ -98,7 +100,10 @@ Website homepage text:
       max_tokens: 220,
       temperature: 0.3,
     });
-    const aiText = response.choices[0]?.message?.content?.trim();
+    const aiText = response.choices?.[0]?.message?.content?.trim();
+
+    // Log for debugging
+    console.log("[AI] OpenAI raw output:", aiText);
 
     // Try to parse the JSON in the response
     let audienceJson = null;
@@ -121,6 +126,7 @@ Website homepage text:
       };
     } catch (err) {
       // If OpenAI returns invalid JSON, fall back to default
+      console.error("[AI] Could not parse JSON from OpenAI output:", aiText);
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 

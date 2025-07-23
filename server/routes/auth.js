@@ -2,9 +2,8 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
-const db = require('../db'); // <-- LOWDB DB
+const db = require('../db'); // LOWDB
 
-// ENV VARS
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
@@ -17,25 +16,19 @@ const FB_SCOPES = [
   'pages_show_list'
 ];
 
-// ====== MVP: store ONE user access token in memory ======
 let userTokens = {};
 
-// ====== FACEBOOK OAUTH - Connect Facebook ======
-
-// GET /auth/facebook
+// --- FACEBOOK OAUTH --- //
 router.get('/facebook', (req, res) => {
   const state = "randomstring123";
   const fbUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}&scope=${FB_SCOPES.join(',')}&response_type=code&state=${state}`;
   res.redirect(fbUrl);
 });
 
-// GET /auth/facebook/callback
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send("No code returned from Facebook.");
-
   try {
-    // Exchange code for access token
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: {
         client_id: FACEBOOK_APP_ID,
@@ -45,9 +38,7 @@ router.get('/facebook/callback', async (req, res) => {
       }
     });
     const accessToken = tokenRes.data.access_token;
-    userTokens['singleton'] = accessToken; // MVP: one user
-
-    // Redirect to frontend, notify connection
+    userTokens['singleton'] = accessToken;
     res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
@@ -55,53 +46,37 @@ router.get('/facebook/callback', async (req, res) => {
   }
 });
 
-// ====== GET FB AD ACCOUNTS (for connected user) ======
-// GET /auth/facebook/adaccounts
+// --- AD ACCOUNTS --- //
 router.get('/facebook/adaccounts', async (req, res) => {
   const userToken = userTokens['singleton'];
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-
   try {
-    // Get user's ad accounts (requires ads_management)
     const me = await axios.get(
       `https://graph.facebook.com/v18.0/me/adaccounts`,
       { params: { access_token: userToken, fields: 'id,name,account_status' } }
     );
     res.json(me.data);
   } catch (err) {
-    let errorMsg = "Failed to fetch ad accounts.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch ad accounts." });
   }
 });
 
-// ====== GET FB PAGES (for connected user) ======
-// GET /auth/facebook/pages
+// --- FB PAGES --- //
 router.get('/facebook/pages', async (req, res) => {
   const userToken = userTokens['singleton'];
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-
   try {
-    // Get user's pages (requires pages_show_list)
     const me = await axios.get(
       `https://graph.facebook.com/v18.0/me/accounts`,
       { params: { access_token: userToken, fields: 'id,name,access_token' } }
     );
     res.json(me.data);
   } catch (err) {
-    let errorMsg = "Failed to fetch Facebook Pages.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch Facebook Pages." });
   }
 });
 
-// ====== MVP: AUTH SIGNUP/LOGIN ENDPOINTS (LowDB) ======
-
-// POST /auth/signup
+// --- AUTH SIGNUP/LOGIN (LowDB) --- //
 router.post('/signup', async (req, res) => {
   const { username, email, cashtag, password } = req.body;
   if (!username || !email || !cashtag || !password) {
@@ -118,7 +93,6 @@ router.post('/signup', async (req, res) => {
   res.json({ success: true, user: { username, email, cashtag } });
 });
 
-// POST /auth/login
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password)
@@ -130,27 +104,23 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// ====== LAUNCH CAMPAIGN (SAFE VERSION, NO AI TARGETING) ======
+// --- LAUNCH CAMPAIGN --- //
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // Accept aiAudience at top level or inside form (but we IGNORE for now!)
-  // const aiAudience = req.body.aiAudience || (req.body.form && req.body.form.aiAudience);
   const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-  // ------ DEFAULT, STATIC TARGETING ------
   let targeting = {
     geo_locations: { countries: ["US"] },
     age_min: 18,
     age_max: 65
-    // No interests or flexible_spec for now
   };
 
   try {
-    // 1. Upload image (to Facebook)
+    // 1. Upload image
     let imageHash;
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -174,7 +144,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Budget (Facebook minimum: $3.00/day)
+    // 2. Budget (minimum $3/day)
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
     if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
       return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
@@ -193,7 +163,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (uses STATIC targeting!)
+    // 4. Create ad set
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -252,17 +222,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       campaignStatus: "ACTIVE"
     });
   } catch (err) {
-    let errorMsg = "Failed to launch campaign.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    console.error("FB Campaign Launch Error:", err.response ? err.response.data : err);
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to launch campaign." });
   }
 });
 
-
-// ====== LIST CAMPAIGNS ======
+// --- CAMPAIGN MGMT (unchanged, just tightened error handling) --- //
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -275,15 +239,10 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
     );
     res.json(response.data);
   } catch (err) {
-    let errorMsg = "Failed to fetch campaigns.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch campaigns." });
   }
 });
 
-// ====== GET CAMPAIGN DETAILS ======
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -296,15 +255,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
     );
     res.json(response.data);
   } catch (err) {
-    let errorMsg = "Failed to fetch campaign details.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch campaign details." });
   }
 });
 
-// ====== GET CAMPAIGN METRICS ======
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -323,15 +277,11 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
     );
     res.json(response.data);
   } catch (err) {
-    let errorMsg = "Failed to fetch campaign metrics.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch campaign metrics." });
   }
 });
 
-// ====== PAUSE CAMPAIGN ======
+// --- PAUSE / UNPAUSE / CANCEL --- //
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -344,15 +294,9 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
     );
     res.json({ success: true, message: `Campaign ${campaignId} paused.` });
   } catch (err) {
-    let errorMsg = "Failed to pause campaign.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to pause campaign." });
   }
 });
-
-// ====== UNPAUSE CAMPAIGN ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -365,15 +309,9 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
     );
     res.json({ success: true, message: `Campaign ${campaignId} unpaused.` });
   } catch (err) {
-    let errorMsg = "Failed to unpause campaign.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to unpause campaign." });
   }
 });
-
-// ====== CANCEL (ARCHIVE) CAMPAIGN ======
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { campaignId } = req.params;
@@ -386,11 +324,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
     );
     res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
   } catch (err) {
-    let errorMsg = "Failed to cancel campaign.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to cancel campaign." });
   }
 });
 

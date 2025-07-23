@@ -3,21 +3,88 @@ import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
 const DARK_GREEN = "#185431";
-const BACKEND_URL = "https://smartmark-mvp.onrender.com";
+const BACKEND_URL = "https://smartmark-mvp.onrender.com"; // Set to your deployed backend
 
-// Responsive CSS as before...
-const loginStyles = ` ...same as you had above... `; // Keep your CSS here
+// Responsive CSS
+const loginStyles = `
+  .smartmark-login-bg {
+    min-height: 100vh;
+    background: linear-gradient(135deg, #232529 0%, #34373d 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Poppins', 'Times New Roman', Times, serif;
+  }
+  .smartmark-login-form {
+    background: #34373de6;
+    padding: 2.8rem 2.2rem;
+    border-radius: 2.1rem;
+    box-shadow: 0 8px 40px 0 rgba(24,84,49,0.12);
+    display: flex;
+    flex-direction: column;
+    min-width: 340px;
+    gap: 1.7rem;
+    border: none;
+  }
+  .smartmark-login-logo {
+    position: fixed;
+    top: 30px;
+    right: 36px;
+    z-index: 99;
+  }
+  .smartmark-login-back-btn {
+    position: fixed;
+    top: 32px;
+    left: 72px;
+    background: rgba(52,55,61,0.82);
+    color: #fff;
+    border: none;
+    border-radius: 1.1rem;
+    padding: 0.65rem 1.6rem;
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+    box-shadow: 0 2px 12px 0 rgba(24,84,49,0.09);
+    z-index: 20;
+    transition: background 0.18s;
+    font-family: 'Poppins', 'Times New Roman', Times, serif;
+  }
+  @media (max-width: 600px) {
+    .smartmark-login-form {
+      min-width: unset;
+      width: 96vw;
+      padding: 1.2rem 0.4rem;
+      border-radius: 1.1rem;
+    }
+    .smartmark-login-bg {
+      padding: 0 0.5rem;
+    }
+    .smartmark-login-logo {
+      top: 14px;
+      right: 10px;
+    }
+    .smartmark-login-back-btn {
+      top: 18px;
+      left: 10px;
+      font-size: 0.97rem;
+      padding: 0.5rem 1.05rem;
+    }
+  }
+`;
 
 const Login = () => {
   const navigate = useNavigate();
 
-  // Local storage for "username" and "password"
-  const [username, setUsername] = useState(localStorage.getItem("smartmark_login_username") || "");
-  const [password, setPassword] = useState(localStorage.getItem("smartmark_login_password") || "");
+  // Improved: Always use the most up-to-date localStorage on mount, not on first render only
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    // Always check fresh values on mount
     setUsername(localStorage.getItem("smartmark_login_username") || "");
     setPassword(localStorage.getItem("smartmark_login_password") || "");
   }, []);
@@ -26,17 +93,19 @@ const Login = () => {
     e.preventDefault();
     setLoading(true);
     setError("");
+
     try {
       const res = await fetch(`${BACKEND_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: username.trim(),
-          password: password.trim(), // MVP: password is just email
+          password: password.trim()
         }),
       });
       const data = await res.json();
       if (data.success) {
+        // Save most recent user login info for autofill
         localStorage.setItem("smartmark_login_username", username.trim());
         localStorage.setItem("smartmark_login_password", password.trim());
         localStorage.setItem("smartmark_last_email", password.trim());
@@ -61,6 +130,7 @@ const Login = () => {
         <div className="smartmark-login-logo">
           <SmartMarkLogoButton />
         </div>
+
         {/* Back Button */}
         <button
           onClick={() => navigate("/")}
@@ -68,19 +138,22 @@ const Login = () => {
         >
           ← Back
         </button>
+
         <form
           onSubmit={handleLogin}
           className="smartmark-login-form"
         >
-          <h2 style={{
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: "2.1rem",
-            textAlign: "center",
-            marginBottom: "1.4rem",
-            letterSpacing: "-0.5px",
-            fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-          }}>
+          <h2
+            style={{
+              color: "#fff",
+              fontWeight: 700,
+              fontSize: "2.1rem",
+              textAlign: "center",
+              marginBottom: "1.4rem",
+              letterSpacing: "-0.5px",
+              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+            }}
+          >
             Login
           </h2>
           <input
@@ -88,7 +161,10 @@ const Login = () => {
             name="username"
             placeholder="CashApp Username"
             value={username}
-            onChange={(e) => { setUsername(e.target.value); setError(""); }}
+            onChange={(e) => {
+              setUsername(e.target.value);
+              setError("");
+            }}
             required
             style={{
               padding: "1.1rem",
@@ -105,7 +181,10 @@ const Login = () => {
             name="password"
             placeholder="Email Address"
             value={password}
-            onChange={(e) => { setPassword(e.target.value); setError(""); }}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setError("");
+            }}
             required
             style={{
               padding: "1.1rem",
@@ -153,8 +232,12 @@ const Login = () => {
               marginTop: "0.6rem",
               opacity: loading ? 0.7 : 1,
             }}
-            onMouseOver={(e) => { if (!loading) e.target.style.background = "#1e6a3e"; }}
-            onMouseOut={(e) => { if (!loading) e.target.style.background = DARK_GREEN; }}
+            onMouseOver={(e) => {
+              if (!loading) e.target.style.background = "#1e6a3e";
+            }}
+            onMouseOut={(e) => {
+              if (!loading) e.target.style.background = DARK_GREEN;
+            }}
           >
             {loading ? "Logging in..." : "Login"}
           </button>
