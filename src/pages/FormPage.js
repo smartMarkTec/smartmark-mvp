@@ -19,6 +19,10 @@ const FormPage = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // NEW: For AI audience detection
+  const [audience, setAudience] = useState("");
+  const [audienceLoading, setAudienceLoading] = useState(false);
+
   // Pre-populate fields from last session (optional, good UX)
   useEffect(() => {
     const lastEmail = localStorage.getItem("smartmark_last_email") || "";
@@ -35,6 +39,30 @@ const FormPage = () => {
   const handleChange = (e) => {
     setFields({ ...fields, [e.target.name]: e.target.value });
     setError("");
+    // If user is editing URL, reset audience
+    if (e.target.name === "url") {
+      setAudience("");
+    }
+  };
+
+  // AI audience detection
+  const detectAudience = async (websiteUrl) => {
+    if (!websiteUrl || websiteUrl.length < 7) return;
+    setAudienceLoading(true);
+    setAudience("Detecting...");
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/detect-audience`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: websiteUrl })
+      });
+      const data = await res.json();
+      if (data.audience) setAudience(data.audience);
+      else setAudience("Could not detect audience.");
+    } catch {
+      setAudience("Could not detect audience.");
+    }
+    setAudienceLoading(false);
   };
 
   const handleSubmit = async (e) => {
@@ -60,7 +88,7 @@ const FormPage = () => {
         return;
       }
 
-      // Step 2: Save campaign for this user
+      // Step 2: Save campaign for this user (include AI audience in campaign object)
       const saveRes = await fetch(`${BACKEND_URL}/api/save-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -68,6 +96,7 @@ const FormPage = () => {
           username: fields.cashapp,
           campaign: {
             ...fields,
+            aiAudience: audience,
             createdAt: new Date().toISOString()
           }
         })
@@ -198,6 +227,11 @@ const FormPage = () => {
           placeholder="Your Website URL"
           value={fields.url}
           onChange={handleChange}
+          onBlur={(e) => {
+            if (e.target.value && e.target.value.length > 7) {
+              detectAudience(e.target.value);
+            }
+          }}
           required
           style={{
             padding: "1.1rem",
@@ -208,6 +242,29 @@ const FormPage = () => {
             fontFamily: MODERN_FONT
           }}
         />
+        {/* AI Audience detection display */}
+        {audience && (
+          <div
+            style={{
+              background: "#222c22",
+              color: "#e0ffe7",
+              fontWeight: 600,
+              borderRadius: "1rem",
+              padding: "1rem",
+              marginBottom: "0.8rem",
+              fontFamily: MODERN_FONT,
+              fontSize: "1.01rem"
+            }}
+          >
+            <div style={{ marginBottom: 6 }}>
+              <span role="img" aria-label="AI">🤖</span>{" "}
+              <b>Recommended Audience:</b>
+            </div>
+            <div>
+              {audienceLoading ? <span>Detecting...</span> : audience}
+            </div>
+          </div>
+        )}
         <select
           name="campaignType"
           value={fields.campaignType}
