@@ -10,29 +10,6 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// --- Helper to resolve interest names to Facebook interest IDs ---
-async function resolveInterests(interestNames, userToken) {
-  const interests = [];
-  for (const name of interestNames) {
-    try {
-      const resp = await axios.get('https://graph.facebook.com/v18.0/search', {
-        params: {
-          type: 'adinterest',
-          q: name,
-          access_token: userToken,
-        }
-      });
-      const match = resp.data.data && resp.data.data[0];
-      if (match) {
-        interests.push({ id: match.id, name: match.name });
-      }
-    } catch (err) {
-      console.error(`Failed to resolve interest "${name}":`, err?.response?.data || err.message);
-    }
-  }
-  return interests;
-}
-
 const FB_SCOPES = [
   'ads_management',
   'ads_read',
@@ -153,66 +130,24 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// ====== LAUNCH CAMPAIGN (SAFE VERSION) ======
+// ====== LAUNCH CAMPAIGN (SAFE VERSION, NO AI TARGETING) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // Accept aiAudience at top level or inside form
-  const aiAudience = req.body.aiAudience || (req.body.form && req.body.form.aiAudience);
+  // Accept aiAudience at top level or inside form (but we IGNORE for now!)
+  // const aiAudience = req.body.aiAudience || (req.body.form && req.body.form.aiAudience);
   const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-let targeting = {
-  geo_locations: { countries: ["US"] }, // Default to US
-  age_min: 18,
-  age_max: 65,
-};
-const VALID_COUNTRY_CODES = ["US", "CA", "MX"];
-
-if (aiAudience) {
-  try {
-    const ai = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
-
-    // Country code
-    if (ai.location && typeof ai.location === "string") {
-      let loc = ai.location.trim().toUpperCase();
-      if (VALID_COUNTRY_CODES.includes(loc)) {
-        targeting.geo_locations.countries = [loc];
-      } else if (/united states|usa|america/i.test(loc)) {
-        targeting.geo_locations.countries = ["US"];
-      }
-    }
-    // Age range
-    if (ai.ageRange && /^\d{2}-\d{2}$/.test(ai.ageRange)) {
-      const [age_min, age_max] = ai.ageRange.split('-').map(x => parseInt(x, 10));
-      if (Number.isInteger(age_min) && Number.isInteger(age_max) && age_max > age_min) {
-        targeting.age_min = age_min;
-        targeting.age_max = age_max;
-      }
-    }
-    // Interests - MUST resolve to Facebook IDs!
-    if (ai.interests) {
-      let interestArr = Array.isArray(ai.interests) ? ai.interests : [ai.interests];
-      interestArr = interestArr.filter(i => typeof i === 'string' && i.length > 0);
-      // Lookup interest IDs
-      const resolvedInterests = await resolveInterests(interestArr, userToken);
-      if (resolvedInterests.length > 0) {
-        targeting.flexible_spec = [{ interests: resolvedInterests }];
-      }
-    }
-  } catch (err) {
-    console.error("Failed to parse aiAudience JSON:", err.message);
-  }
-}
-
-// Failsafes
-if (!targeting.geo_locations.countries || targeting.geo_locations.countries.length === 0) {
-  targeting.geo_locations.countries = ["US"];
-}
-if (!Number.isInteger(targeting.age_min) || targeting.age_min < 13) targeting.age_min = 18;
-if (!Number.isInteger(targeting.age_max) || targeting.age_max < targeting.age_min) targeting.age_max = 65;
+  // ------ DEFAULT, STATIC TARGETING ------
+  let targeting = {
+    geo_locations: { countries: ["US"] },
+    age_min: 18,
+    age_max: 65
+    // No interests or flexible_spec for now
+  };
 
   try {
     // 1. Upload image (to Facebook)
@@ -258,7 +193,7 @@ if (!Number.isInteger(targeting.age_max) || targeting.age_max < targeting.age_mi
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (uses AI audience for targeting!)
+    // 4. Create ad set (uses STATIC targeting!)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -325,6 +260,7 @@ if (!Number.isInteger(targeting.age_max) || targeting.age_max < targeting.age_mi
     res.status(500).json({ error: errorMsg });
   }
 });
+
 
 // ====== LIST CAMPAIGNS ======
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
