@@ -19,8 +19,9 @@ const FormPage = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // NEW: For AI audience detection
-  const [audience, setAudience] = useState("");
+  // New: AI audience structured/animated fields
+  const [aiAudience, setAiAudience] = useState(null);
+  const [audienceProgress, setAudienceProgress] = useState([]);
   const [audienceLoading, setAudienceLoading] = useState(false);
 
   // Pre-populate fields from last session (optional, good UX)
@@ -41,15 +42,17 @@ const FormPage = () => {
     setError("");
     // If user is editing URL, reset audience
     if (e.target.name === "url") {
-      setAudience("");
+      setAiAudience(null);
+      setAudienceProgress([]);
     }
   };
 
-  // AI audience detection
+  // Animated AI audience detection
   const detectAudience = async (websiteUrl) => {
     if (!websiteUrl || websiteUrl.length < 7) return;
     setAudienceLoading(true);
-    setAudience("Detecting...");
+    setAiAudience(null);
+    setAudienceProgress(["AI searching..."]);
     try {
       const res = await fetch(`${BACKEND_URL}/api/detect-audience`, {
         method: "POST",
@@ -57,10 +60,51 @@ const FormPage = () => {
         body: JSON.stringify({ url: websiteUrl })
       });
       const data = await res.json();
-      if (data.audience) setAudience(data.audience);
-      else setAudience("Could not detect audience.");
+
+      if (!data.audience) {
+        setAudienceProgress(["Could not detect audience."]);
+        setAudienceLoading(false);
+        return;
+      }
+
+      let parsed;
+      // If already object, use it. If string, try to parse as JSON, else fallback
+      if (typeof data.audience === "object") {
+        parsed = data.audience;
+      } else {
+        try {
+          parsed = JSON.parse(data.audience);
+        } catch {
+          setAudienceProgress([
+            typeof data.audience === "string"
+              ? data.audience
+              : JSON.stringify(data.audience)
+          ]);
+          setAudienceLoading(false);
+          return;
+        }
+      }
+
+      setAiAudience(parsed);
+
+      // Animate progress step-by-step
+      const steps = [
+        `Brand name found: ${parsed.brandName || "N/A"}`,
+        `Demographic found: ${parsed.demographic || "N/A"}`,
+        `Age range found: ${parsed.ageRange || "N/A"}`,
+        `Location found: ${parsed.location || "N/A"}`,
+        `Interests found: ${parsed.interests || "N/A"}`,
+        "AI finished!"
+      ];
+      setAudienceProgress(["AI searching..."]);
+      let idx = 0;
+      const interval = setInterval(() => {
+        setAudienceProgress((prev) => [...prev, steps[idx]]);
+        idx++;
+        if (idx >= steps.length) clearInterval(interval);
+      }, 800); // ~0.8 sec per reveal
     } catch {
-      setAudience("Could not detect audience.");
+      setAudienceProgress(["Could not detect audience."]);
     }
     setAudienceLoading(false);
   };
@@ -69,7 +113,7 @@ const FormPage = () => {
     e.preventDefault();
     setLoading(true);
 
-    // Step 1: Register user (MVP: just sign up every time, backend will reject duplicates)
+    // Step 1: Register user
     try {
       const signupRes = await fetch(`${BACKEND_URL}/auth/signup`, {
         method: "POST",
@@ -78,7 +122,7 @@ const FormPage = () => {
           username: fields.cashapp,
           email: fields.email,
           cashtag: fields.cashapp,
-          password: fields.email // MVP: password is email, you can prompt for real password later
+          password: fields.email // MVP: password is email
         })
       });
       const signupData = await signupRes.json();
@@ -88,7 +132,7 @@ const FormPage = () => {
         return;
       }
 
-      // Step 2: Save campaign for this user (include AI audience in campaign object)
+      // Step 2: Save campaign for this user (include structured AI audience!)
       const saveRes = await fetch(`${BACKEND_URL}/api/save-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -96,7 +140,7 @@ const FormPage = () => {
           username: fields.cashapp,
           campaign: {
             ...fields,
-            aiAudience: audience,
+            aiAudience: aiAudience, // Will be parsed object or null
             createdAt: new Date().toISOString()
           }
         })
@@ -110,7 +154,7 @@ const FormPage = () => {
 
       // Store username for later autologin
       localStorage.setItem("smartmark_login_username", fields.cashapp);
-      localStorage.setItem("smartmark_login_password", fields.email); // MVP only
+      localStorage.setItem("smartmark_login_password", fields.email);
       localStorage.setItem("smartmark_last_email", fields.email);
       localStorage.setItem("smartmark_last_cashapp", fields.cashapp);
 
@@ -243,7 +287,7 @@ const FormPage = () => {
           }}
         />
         {/* AI Audience detection display */}
-        {audience && (
+        {audienceProgress.length > 0 && (
           <div
             style={{
               background: "#222c22",
@@ -258,10 +302,16 @@ const FormPage = () => {
           >
             <div style={{ marginBottom: 6 }}>
               <span role="img" aria-label="AI">🤖</span>{" "}
-              <b>Recommended Audience:</b>
+              <b>AI Progress:</b>
             </div>
             <div>
-              {audienceLoading ? <span>Detecting...</span> : audience}
+              {audienceProgress.map((line, i) => (
+                <div key={i}>
+                  {typeof line === "string"
+                    ? line
+                    : JSON.stringify(line)}
+                </div>
+              ))}
             </div>
           </div>
         )}
