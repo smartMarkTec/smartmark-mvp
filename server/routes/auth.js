@@ -104,90 +104,44 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// ====== LAUNCH CAMPAIGN (AI TARGETING ENABLED) ======
+// ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  const { form = {}, budget, adCopy, adImage, campaignType, pageId, aiAudience: aiAudienceRaw } = req.body;
+  // Accept aiAudience from payload (sent from frontend)
+  const { form = {}, budget, adCopy, adImage, campaignType, pageId, aiAudience } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-  // ===== 1. Parse AI Audience (from frontend or fallback) =====
-  let aiAudience = null;
-  try {
-    if (typeof aiAudienceRaw === "string") {
-      aiAudience = JSON.parse(aiAudienceRaw);
-    } else if (typeof aiAudienceRaw === "object" && aiAudienceRaw !== null) {
-      aiAudience = aiAudienceRaw;
-    }
-  } catch {
-    aiAudience = null;
-  }
-
-  // ===== 2. Build Targeting Dynamically =====
-  let targeting = {
-    geo_locations: { countries: ["US"] },
-    age_min: 18,
-    age_max: 65
+  // Fallback if missing
+  const audience = aiAudience || {
+    location: "US",
+    ageRange: "18-65",
+    fbInterestIds: [],
   };
 
-  // --- Location ---
-  if (aiAudience && aiAudience.location) {
-    const loc = aiAudience.location.toLowerCase();
-    if (loc.includes("texas")) {
-      targeting.geo_locations = { regions: [{ key: "3886" }] }; // Example: Texas
-    } else if (loc.includes("usa") || loc.includes("united states")) {
-      targeting.geo_locations = { countries: ["US"] };
-    } else if (loc.match(/[a-z]+/)) {
-      // Add more mappings for other states/countries as needed!
-      targeting.geo_locations = { countries: [aiAudience.location] };
+  // --- Advanced Targeting Object ---
+  let targeting = {
+    geo_locations: { countries: [audience.location || "US"] },
+    age_min: 18,
+    age_max: 65,
+  };
+
+  // Age range parsing (ex: "25-54")
+  if (audience.ageRange) {
+    const [min, max] = audience.ageRange.split("-").map(a => parseInt(a));
+    if (!isNaN(min) && !isNaN(max)) {
+      targeting.age_min = min;
+      targeting.age_max = max;
     }
   }
 
-  // --- Age ---
-  if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
-    const [min, max] = aiAudience.ageRange.split('-').map(Number);
-    targeting.age_min = min;
-    targeting.age_max = max;
+  // Insert Facebook interest IDs for granular targeting
+  if (audience.fbInterestIds && audience.fbInterestIds.length > 0) {
+    targeting.interests = audience.fbInterestIds.map(id => ({ id }));
   }
-
-  // --- Interests: Lookup FB Interest IDs ---
-  if (aiAudience && aiAudience.interests) {
-    const interestNames = aiAudience.interests.split(',').map(s => s.trim()).filter(Boolean);
-    const fbInterestIds = [];
-    for (let name of interestNames) {
-      try {
-        const fbRes = await axios.get(
-          'https://graph.facebook.com/v18.0/search',
-          {
-            params: {
-              type: 'adinterest',
-              q: name,
-              access_token: userToken
-            }
-          }
-        );
-        if (fbRes.data && fbRes.data.data && fbRes.data.data.length > 0) {
-          fbInterestIds.push({ id: fbRes.data.data[0].id, name: fbRes.data.data[0].name });
-        }
-      } catch (e) {
-        console.warn("FB interest search failed for:", name, e.message);
-      }
-    }
-    if (fbInterestIds.length > 0) {
-      targeting.flexible_spec = [{ interests: fbInterestIds }];
-    }
-  }
-
-  // --- (OPTIONAL) Genders, Demographics, etc ---
-  // If your AI adds "men"/"women"/"male"/"female" to demographic, you could:
-  /*
-  if (aiAudience && aiAudience.demographic) {
-    if (aiAudience.demographic.toLowerCase().includes("men")) targeting.genders = [1];
-    if (aiAudience.demographic.toLowerCase().includes("women")) targeting.genders = [2];
-  }
-  */
+  
 
   try {
     // 1. Upload image (to Facebook)
@@ -233,7 +187,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (now with AI-powered targeting!)
+    // 4. Create ad set (now uses ADVANCED targeting!)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -300,6 +254,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     res.status(500).json({ error: errorMsg });
   }
 });
+
 
 
 // --- CAMPAIGN MGMT (unchanged, just tightened error handling) --- //
