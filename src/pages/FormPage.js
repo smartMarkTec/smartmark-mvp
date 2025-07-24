@@ -256,22 +256,26 @@ const FormPage = () => {
         >
           Start Your Campaign
         </h2>
-        <input
-          type="text"
-          name="businessName"
-          placeholder="Business Name"
-          value={fields.businessName}
-          onChange={handleChange}
-          required
-          style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
-            border: "none",
-            fontSize: "1.15rem",
-            outline: "none",
-            fontFamily: MODERN_FONT
-          }}
-        />
+        {/* Login Link Above First Field */}
+        <div style={{
+          fontSize: "0.89rem",
+          color: "#e2e2e2",
+          marginBottom: "0.23rem",
+          marginLeft: "0.18rem"
+        }}>
+          Don’t have an account?{" "}
+          <span
+            style={{
+              color: "#33bbff",
+              textDecoration: "underline",
+              cursor: "pointer",
+              fontWeight: 600
+            }}
+            onClick={() => navigate("/login")}
+          >
+            Login here →
+          </span>
+        </div>
         <input
           type="email"
           name="email"
@@ -293,6 +297,22 @@ const FormPage = () => {
           name="cashapp"
           placeholder="CashApp Username"
           value={fields.cashapp}
+          onChange={handleChange}
+          required
+          style={{
+            padding: "1.1rem",
+            borderRadius: "1.2rem",
+            border: "none",
+            fontSize: "1.15rem",
+            outline: "none",
+            fontFamily: MODERN_FONT
+          }}
+        />
+        <input
+          type="text"
+          name="businessName"
+          placeholder="Business Name"
+          value={fields.businessName}
           onChange={handleChange}
           required
           style={{
