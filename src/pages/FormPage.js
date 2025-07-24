@@ -263,7 +263,7 @@ const FormPage = () => {
           marginBottom: "0.23rem",
           marginLeft: "0.18rem"
         }}>
-          Don’t have an account?{" "}
+          already have an account?{" "}
           <span
             style={{
               color: "#33bbff",
@@ -273,7 +273,7 @@ const FormPage = () => {
             }}
             onClick={() => navigate("/login")}
           >
-            Login here →
+            Login here 
           </span>
         </div>
         <input
