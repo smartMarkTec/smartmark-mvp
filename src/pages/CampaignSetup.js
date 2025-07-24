@@ -1,3 +1,5 @@
+// src/pages/CampaignSetup.js
+
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
@@ -68,8 +70,8 @@ const CampaignSetup = () => {
   // --- Facebook Connect Button State (New) ---
   const [fbConnected, setFbConnected] = useState(false);
   // Accordion states for Ad Account and Page
-  const [openAccount, setOpenAccount] = useState(true); // display by default
-  const [openPage, setOpenPage] = useState(true);       // display by default
+  const [openAccount, setOpenAccount] = useState(true);
+  const [openPage, setOpenPage] = useState(true);
   // ------------------------------------------
   const [adAccounts, setAdAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState("");
@@ -409,7 +411,6 @@ const CampaignSetup = () => {
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", width: "100%" }}>
           <button
             onClick={() => window.location.href = `${backendUrl}/auth/facebook`}
-            disabled={fbConnected}
             style={{
               marginTop: "2.2rem",
               marginBottom: "1.2rem",
@@ -421,7 +422,7 @@ const CampaignSetup = () => {
               fontWeight: 700,
               fontSize: "1.18rem",
               letterSpacing: "1px",
-              cursor: fbConnected ? "not-allowed" : "pointer",
+              cursor: "pointer",
               boxShadow: "0 2px 12px #1877f233",
               fontFamily: MODERN_FONT,
               width: "auto",
@@ -589,9 +590,10 @@ const CampaignSetup = () => {
 
         {/* Main Campaign Form */}
         <div>
-          {/* Ad Account + Page selection -- always visible, user can close/open */}
+          {/* Ad Account + Page selection -- now as collapsible dropdowns */}
           {fbConnected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {/* Ad Account Dropdown */}
               <div>
                 <div style={dropdownHeader} onClick={() => setOpenAccount(v => !v)}>
                   <span>Ad Account</span>
@@ -610,6 +612,7 @@ const CampaignSetup = () => {
                   </select>
                 )}
               </div>
+              {/* Facebook Page Dropdown */}
               <div>
                 <div style={dropdownHeader} onClick={() => setOpenPage(v => !v)}>
                   <span>Facebook Page</span>
@@ -631,8 +634,7 @@ const CampaignSetup = () => {
             </div>
           )}
 
-          {/* --- AD CREATIVE, COPY, BUDGET, LAUNCH BUTTON --- */}
-          {/* --- DO NOT TOUCH --- */}
+          {/* Ad Creative & Copy */}
           <div
             style={{
               display: "flex",
