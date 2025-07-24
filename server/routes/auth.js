@@ -111,25 +111,24 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-
+  // Accept aiAudience from payload (sent from frontend)
   const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-
-  // --- Advanced Targeting Object ---
+  // --- Advanced Targeting Setup ---
   let countryCode = "US";
   let ageMin = 18, ageMax = 65;
-
+  let parsedInterests = [];
 
   if (form && form.aiAudience) {
     let aiAudience = {};
     try { aiAudience = typeof form.aiAudience === 'string' ? JSON.parse(form.aiAudience) : form.aiAudience; } catch {}
 
-    // Country code
+    // Location (country code)
     if (aiAudience.location) {
-
+      // Try to extract 2-letter ISO code, fallback to "US"
       const isoMatch = String(aiAudience.location).match(/\b[A-Z]{2}\b/i);
-      countryCode = isoMatch ? isoMatch[0].toUpperCase() : "US";
+      if (isoMatch) countryCode = isoMatch[0].toUpperCase();
     }
 
     // Age range
@@ -141,19 +140,32 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       }
     }
 
+    // Interests: Parse, but you should eventually map these to FB interest IDs
+    if (aiAudience.interests) {
+      parsedInterests = String(aiAudience.interests)
+        .split(",")
+        .map(s => s.trim())
+        .filter(s => s.length > 2 && !/^(business|restaurants)$/i.test(s));
+    }
   }
-  
 
   // --- Facebook Targeting Object ---
   let targeting = {
     geo_locations: { countries: [countryCode] },
     age_min: ageMin,
-    age_max: ageMax
-
+    age_max: ageMax,
+    targeting_automation: { advantage_audience: 0 } // CRITICAL: disables FB auto audience
   };
 
-  // Debug log!
-  console.log("[FB Launch] Sending targeting object:", JSON.stringify(targeting, null, 2));
+  // Only add interests if present
+  if (parsedInterests.length > 0) {
+    // For MVP: send as broad interests strings (production: map to FB IDs)
+    targeting.flexible_spec = [
+      {
+        interests: parsedInterests.map(term => ({ name: term }))
+      }
+    ];
+  }
 
   try {
     // 1. Upload image (to Facebook)
@@ -180,7 +192,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Budget
+    // 2. Budget (Facebook minimum: $3.00/day)
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
     if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
       return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
@@ -199,7 +211,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (uses targeting)
+    // 4. Create ad set (with advanced targeting!)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
