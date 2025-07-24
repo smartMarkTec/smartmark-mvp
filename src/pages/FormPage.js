@@ -60,7 +60,7 @@ const FormPage = () => {
     }
   };
 
-  // AI audience fetch
+  // AI audience fetch (fixed: always set audienceLoading false)
   const detectAudience = async (websiteUrl) => {
     if (!websiteUrl || websiteUrl.length < 7) return;
     setAudienceLoading(true);
@@ -72,6 +72,7 @@ const FormPage = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: websiteUrl })
       });
+
       const data = await res.json();
 
       if (!data.audience) {
@@ -123,13 +124,20 @@ const FormPage = () => {
       const interval = setInterval(() => {
         setAudienceProgress((prev) => [...prev, steps[idx]]);
         idx++;
-        if (idx >= steps.length) clearInterval(interval);
+        if (idx >= steps.length) {
+          clearInterval(interval);
+          setAudienceLoading(false); // <-- MAKE SURE TO CLEAR
+        }
       }, 800);
+      // In case interval never runs, ensure fallback in 5 seconds
+      setTimeout(() => setAudienceLoading(false), 5000);
+      return;
     } catch {
       setAudienceProgress(["Could not detect audience. Using default targeting."]);
       setAiAudience(DEFAULT_AUDIENCE);
+      setAudienceLoading(false);
+      return;
     }
-    setAudienceLoading(false);
   };
 
   const handleSubmit = async (e) => {
