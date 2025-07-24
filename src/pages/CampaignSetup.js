@@ -1,7 +1,10 @@
+// src/pages/CampaignSetup.js
+
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
+// Place helpers OUTSIDE the component function
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
 const LIGHT_BG = "#34373d";
@@ -46,25 +49,24 @@ const dropdownHeader = {
 };
 
 const plusButtonStyle = {
-  marginLeft: 10,
+  marginLeft: 6,
   background: "#fff",
-  color: "#222",
+  color: "#1b1b1b",
   border: "none",
   borderRadius: "50%",
   width: 28,
   height: 28,
-  fontWeight: 800,
-  fontSize: "1.35rem",
+  fontWeight: 900,
+  fontSize: "1.18rem",
+  cursor: "pointer",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
-  cursor: "pointer",
-  boxShadow: "0 2px 8px #2223"
+  boxShadow: "0 2px 8px #00000015",
+  transition: "background 0.18s"
 };
 
-// Only ONE CampaignSetup function!
 const CampaignSetup = () => {
-
   useEffect(() => {
     if (window.location.hash === '#_=_') {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -81,10 +83,11 @@ const CampaignSetup = () => {
   const [adCopy, setAdCopy] = useState("");
   const [adImage, setAdImage] = useState("");
   const [description, setDescription] = useState("");
-
   const [fbConnected, setFbConnected] = useState(false);
+
   const [openAccount, setOpenAccount] = useState(true);
   const [openPage, setOpenPage] = useState(true);
+
   const [adAccounts, setAdAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [pages, setPages] = useState([]);
@@ -98,13 +101,19 @@ const CampaignSetup = () => {
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
 
+  // ---- Plus Button & Modal State ----
+  const [showAddAccountModal, setShowAddAccountModal] = useState(false);
+  const [newAccountId, setNewAccountId] = useState("");
+  const [addAccountError, setAddAccountError] = useState("");
+  // -----------------------------------
 
+  // Facebook connect with 5-day reset
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
     let cashapp = localStorage.getItem("smartmark_last_cashapp") || "";
     let key = getUserKey(email, cashapp);
     setUserKey(key);
-
+    // Enhanced: store time + connection in localStorage, expire after 5 days (432000000 ms)
     const conn = localStorage.getItem(`${key}_fb_connected_v2`);
     if (conn) {
       const { connected, time } = JSON.parse(conn);
@@ -115,16 +124,15 @@ const CampaignSetup = () => {
         localStorage.removeItem(`${key}_fb_connected_v2`);
       }
     }
-
+    // load last form fields (no changes)
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) setForm(JSON.parse(lastFields));
     const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
-
+  // Facebook connect detection (triggers after redirect from FB OAuth)
   useEffect(() => {
-
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
@@ -133,10 +141,8 @@ const CampaignSetup = () => {
       }
       window.history.replaceState({}, document.title, "/setup");
     }
-
   }, [location, userKey]);
 
-  
   useEffect(() => {
     if (fbConnected && userKey) {
       localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
@@ -174,6 +180,7 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
+  // Pause/unpause/cancel handlers
   const pauseCampaign = async () => {
     await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
     fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
@@ -245,6 +252,29 @@ const CampaignSetup = () => {
     setForm({});
   };
 
+  // Plus button handler
+  const handleAddAccount = () => {
+    if (!newAccountId) {
+      setAddAccountError("Please enter an Ad Account ID.");
+      return;
+    }
+    if (adAccounts.find(a => a.id.replace("act_", "") === newAccountId)) {
+      setAddAccountError("Account already added.");
+      return;
+    }
+    if (adAccounts.length >= 2) {
+      setAddAccountError("You can only have 2 accounts.");
+      return;
+    }
+    setAdAccounts([...adAccounts, { id: "act_" + newAccountId, name: "" }]);
+    setSelectedAccount(newAccountId);
+    setShowAddAccountModal(false);
+    setNewAccountId("");
+    setAddAccountError("");
+    // Optional: persist to backend or localStorage here
+  };
+
+  // File/image upload (no changes)
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -255,6 +285,7 @@ const CampaignSetup = () => {
     reader.readAsDataURL(file);
   };
 
+  // Ad copy generation (no changes)
   const handleGenerateAdCopy = async () => {
     if (!description && !form.businessName && !form.url) {
       alert("Please enter a description or business info.");
@@ -276,6 +307,7 @@ const CampaignSetup = () => {
     }
   };
 
+  // -- Launch button logic
   const canLaunch = !!(
     fbConnected &&
     selectedAccount &&
@@ -302,7 +334,7 @@ const CampaignSetup = () => {
         adImage,
         campaignType: form?.campaignType || "Website Traffic",
         pageId: selectedPageId,
-        aiAudience: JSON.stringify(form?.aiAudience || {}), // **ALWAYS STRINGIFY**
+        aiAudience: form?.aiAudience,
       };
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
@@ -321,6 +353,7 @@ const CampaignSetup = () => {
     setLoading(false);
   };
 
+  // FB payment popup (no changes)
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
       alert("Please select an ad account first.");
@@ -591,29 +624,25 @@ const CampaignSetup = () => {
 
         {/* Main Campaign Form */}
         <div>
-          {/* Ad Account + Page selection -- always visible, user can close/open, plus button */}
+          {/* Ad Account + Page selection -- now as collapsible dropdowns */}
           {fbConnected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {/* Ad Account Dropdown */}
               <div>
                 <div style={dropdownHeader}>
-                  <div style={{ display: "flex", alignItems: "center" }}>
-                    <span style={{ marginRight: 8 }}>Ad Account</span>
-                    <span
-                      style={{ cursor: "pointer", marginRight: 4 }}
-                      onClick={() => setOpenAccount(v => !v)}
-                    >
-                      {openAccount ? "▲" : "▼"}
-                    </span>
-                    <button
-                      type="button"
-                      style={plusButtonStyle}
-                      title="Add Ad Account (max 2)"
-                      disabled={adAccounts.length >= 2}
-                      onClick={handleNewCampaign}
-                    >
-                      +
-                    </button>
-                  </div>
+                  <span style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}} onClick={() => setOpenAccount(v => !v)}>
+                    <span>Ad Account</span>
+                    <span>{openAccount ? "▲" : "▼"}</span>
+                  </span>
+                  <button
+                    type="button"
+                    style={plusButtonStyle}
+                    title="Add Ad Account (max 2)"
+                    disabled={adAccounts.length >= 2}
+                    onClick={() => setShowAddAccountModal(true)}
+                  >
+                    +
+                  </button>
                 </div>
                 {openAccount && (
                   <select
@@ -628,6 +657,7 @@ const CampaignSetup = () => {
                   </select>
                 )}
               </div>
+              {/* Facebook Page Dropdown */}
               <div>
                 <div style={dropdownHeader} onClick={() => setOpenPage(v => !v)}>
                   <span>Facebook Page</span>
@@ -649,7 +679,7 @@ const CampaignSetup = () => {
             </div>
           )}
 
-          {/* --- DO NOT TOUCH --- Ad creative/copy/launch/button --- */}
+          {/* Ad Creative & Copy */}
           <div
             style={{
               display: "flex",
@@ -841,6 +871,54 @@ const CampaignSetup = () => {
           )}
         </div>
       </div>
+      {/* Add Account Modal */}
+      {showAddAccountModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1002
+        }}>
+          <div style={{
+            background: '#24262b', borderRadius: 16, padding: 32, minWidth: 320, boxShadow: "0 8px 40px #000a"
+          }}>
+            <div style={{fontWeight: 700, fontSize: 20, marginBottom: 18, color:'#fff'}}>
+              Add New Ad Account
+            </div>
+            <input
+              type="text"
+              placeholder="Ad Account ID (digits only)"
+              value={newAccountId}
+              onChange={e => { setNewAccountId(e.target.value); setAddAccountError(""); }}
+              style={{
+                padding: "0.85rem 1.1rem",
+                borderRadius: "1.1rem",
+                border: "1px solid #c6c6c6",
+                fontSize: "1.11rem",
+                width: "100%",
+                marginBottom: "1.2rem",
+                fontWeight: 600
+              }}
+            />
+            {addAccountError && (
+              <div style={{color: "#f87171", fontWeight: 700, marginBottom: 10}}>{addAccountError}</div>
+            )}
+            <div style={{display: 'flex', justifyContent: 'flex-end', gap: 12}}>
+              <button
+                onClick={() => setShowAddAccountModal(false)}
+                style={{background:'#e74c3c', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddAccount}
+                style={{background:'#21b16d', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Pause Modal */}
       {showPauseModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
