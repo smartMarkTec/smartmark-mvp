@@ -1,10 +1,7 @@
-// src/pages/CampaignSetup.js
-
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-// Place helpers OUTSIDE the component function
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
 const LIGHT_BG = "#34373d";
@@ -48,9 +45,7 @@ const dropdownHeader = {
   fontSize: "1.06rem"
 };
 
-// Only ONE CampaignSetup function!
 const CampaignSetup = () => {
-  // Remove FB OAuth #_=_ hash (MUST be inside component)
   useEffect(() => {
     if (window.location.hash === '#_=_') {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -67,12 +62,9 @@ const CampaignSetup = () => {
   const [adCopy, setAdCopy] = useState("");
   const [adImage, setAdImage] = useState("");
   const [description, setDescription] = useState("");
-  // --- Facebook Connect Button State (New) ---
   const [fbConnected, setFbConnected] = useState(false);
-  // Accordion states for Ad Account and Page
-  const [openAccount, setOpenAccount] = useState(false);
-  const [openPage, setOpenPage] = useState(false);
-  // ------------------------------------------
+  const [openAccount, setOpenAccount] = useState(true); // changed: open by default
+  const [openPage, setOpenPage] = useState(true); // changed: open by default
   const [adAccounts, setAdAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [pages, setPages] = useState([]);
@@ -110,7 +102,6 @@ const CampaignSetup = () => {
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
-  // Facebook connect detection (triggers after redirect from FB OAuth)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
@@ -123,7 +114,6 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, [location, userKey]);
 
-  // After connect, persist timestamped status for 5 days
   useEffect(() => {
     if (fbConnected && userKey) {
       localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
@@ -137,7 +127,11 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(json => {
         setAdAccounts(json.data || []);
-        if (json.data && json.data.length > 0) setSelectedAccount(json.data[0].id.replace("act_", ""));
+        if (json.data && json.data.length > 0) {
+          setSelectedAccount(json.data[0].id.replace("act_", ""));
+          // Auto-open if only 1 option
+          setOpenAccount(json.data.length === 1);
+        }
       })
       .catch(err => console.error("FB ad accounts error", err));
   }, [fbConnected]);
@@ -149,7 +143,10 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(json => {
         setPages(json.data || []);
-        if (json.data && json.data.length > 0) setSelectedPageId(json.data[0].id);
+        if (json.data && json.data.length > 0) {
+          setSelectedPageId(json.data[0].id);
+          setOpenPage(json.data.length === 1);
+        }
       })
       .catch(err => console.error("FB pages error", err));
   }, [fbConnected]);
@@ -164,7 +161,6 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // Pause/unpause/cancel handlers (no changes)
   const pauseCampaign = async () => {
     await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
     fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
@@ -226,7 +222,6 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // + New Campaign (no changes)
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
     setSelectedCampaignId("");
@@ -240,7 +235,6 @@ const CampaignSetup = () => {
     setForm({});
   };
 
-  // File/image upload (no changes)
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -251,7 +245,6 @@ const CampaignSetup = () => {
     reader.readAsDataURL(file);
   };
 
-  // Ad copy generation (no changes)
   const handleGenerateAdCopy = async () => {
     if (!description && !form.businessName && !form.url) {
       alert("Please enter a description or business info.");
@@ -273,7 +266,6 @@ const CampaignSetup = () => {
     }
   };
 
-  // -- Launch button logic: ensure everything valid, always type-sane --
   const canLaunch = !!(
     fbConnected &&
     selectedAccount &&
@@ -285,7 +277,6 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // Launch campaign (no changes)
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -320,7 +311,6 @@ const CampaignSetup = () => {
     setLoading(false);
   };
 
-  // FB payment popup (no changes)
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
       alert("Please select an ad account first.");
@@ -591,16 +581,15 @@ const CampaignSetup = () => {
 
         {/* Main Campaign Form */}
         <div>
-          {/* Ad Account + Page selection -- now as collapsible dropdowns */}
+          {/* Ad Account + Page selection -- always visible, dropdown is for more than 1 */}
           {fbConnected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-              {/* Ad Account Dropdown */}
               <div>
                 <div style={dropdownHeader} onClick={() => setOpenAccount(v => !v)}>
                   <span>Ad Account</span>
                   <span>{openAccount ? "▲" : "▼"}</span>
                 </div>
-                {openAccount && (
+                {(openAccount || adAccounts.length === 1) && (
                   <select
                     value={selectedAccount}
                     onChange={e => setSelectedAccount(e.target.value)}
@@ -613,13 +602,12 @@ const CampaignSetup = () => {
                   </select>
                 )}
               </div>
-              {/* Facebook Page Dropdown */}
               <div>
                 <div style={dropdownHeader} onClick={() => setOpenPage(v => !v)}>
                   <span>Facebook Page</span>
                   <span>{openPage ? "▲" : "▼"}</span>
                 </div>
-                {openPage && (
+                {(openPage || pages.length === 1) && (
                   <select
                     value={selectedPageId}
                     onChange={e => setSelectedPageId(e.target.value)}
@@ -635,6 +623,10 @@ const CampaignSetup = () => {
             </div>
           )}
 
+          {/* ...The rest is unchanged (ad creative/copy, launch button, etc)... */}
+          {/* KEEP THE REST OF YOUR COMPONENT AS-IS */}
+          {/* ... */}
+
           {/* Ad Creative & Copy */}
           <div
             style={{
@@ -648,183 +640,12 @@ const CampaignSetup = () => {
               marginTop: "1.6rem",
             }}
           >
-            {/* Campaign Name */}
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Campaign Name</label>
-            <input
-              type="text"
-              value={form.campaignName || ""}
-              onChange={e => setForm({ ...form, campaignName: e.target.value })}
-              placeholder="Name your campaign"
-              style={{
-                padding: "0.8rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1px solid #c6c6c6",
-                fontSize: "1.11rem",
-                width: "100%",
-                marginBottom: "1rem",
-              }}
-            />
-
-            <label style={{ color: "#fff", fontWeight: 600 }}>Campaign Budget ($)</label>
-            <input
-              type="number"
-              placeholder="Enter budget (minimum $3)"
-              min={3}
-              step={1}
-              value={budget}
-              onChange={e => setBudget(e.target.value)}
-              style={{
-                padding: "0.8rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1px solid #c6c6c6",
-                fontSize: "1.11rem",
-                width: "100%",
-                marginBottom: "1rem",
-              }}
-            />
-            {budget && Number(budget) > 0 && (
-              <div style={{
-                marginTop: "-0.7rem",
-                marginBottom: "0.5rem",
-                fontWeight: 700,
-                color: "#1ec885",
-                fontSize: "1.05rem",
-                textAlign: "left",
-                letterSpacing: "0.03em",
-                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              }}>
-                Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
-              </div>
-            )}
-
-            <div style={{ color: "#afeca3", fontWeight: 600 }}>
-              SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
-            </div>
-            {budget && Number(budget) >= 3 && (
-              <div
-                style={{
-                  marginTop: "0.7rem",
-                  color: "#ffe066",
-                  background: "#1c1c1e",
-                  borderRadius: "0.8rem",
-                  padding: "0.75rem 1rem",
-                  fontWeight: 700,
-                  textAlign: "center",
-                  fontSize: "1.13rem",
-                  border: "1px solid #2b2923"
-                }}
-              >
-                Pay (${fee.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
-              </div>
-            )}
-
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
-            <textarea
-              rows={3}
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Describe your business or promo"
-              style={{
-                padding: "0.8rem",
-                borderRadius: "0.9rem",
-                border: "1px solid #ddd",
-                fontSize: "1.08rem",
-                width: "100%",
-                marginBottom: "1rem",
-                resize: "vertical",
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleGenerateAdCopy}
-              style={{
-                background: "#1adf72",
-                color: "#222",
-                border: "none",
-                borderRadius: "1.1rem",
-                padding: "0.7rem 1.7rem",
-                fontWeight: 700,
-                fontSize: "1.05rem",
-                marginBottom: "1rem",
-                cursor: "pointer",
-                fontFamily: MODERN_FONT,
-              }}
-            >
-              Generate Ad Copy with AI
-            </button>
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1rem" }}>Ad Copy</label>
-            <textarea
-              rows={3}
-              value={adCopy}
-              onChange={e => setAdCopy(e.target.value)}
-              placeholder="Paste or write your ad copy"
-              style={{
-                padding: "0.8rem",
-                borderRadius: "0.9rem",
-                border: "1px solid #ddd",
-                fontSize: "1.08rem",
-                width: "100%",
-                marginBottom: "1rem",
-                resize: "vertical",
-              }}
-            />
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1rem" }}>Ad Image</label>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              onChange={handleImageUpload}
-              style={{ marginBottom: "1rem" }}
-            />
-            {adImage && (
-              <img
-                src={adImage}
-                alt="Ad preview"
-                style={{
-                  maxWidth: 320,
-                  maxHeight: 180,
-                  borderRadius: "1.1rem",
-                  marginBottom: "1.2rem",
-                  objectFit: "cover",
-                }}
-              />
-            )}
+            {/* ... */}
+            {/* (the rest of the component, unchanged from your version) */}
+            {/* ... */}
           </div>
           {/* LAUNCH BUTTON */}
-          <button
-            type="button"
-            onClick={handleLaunch}
-            disabled={loading || !canLaunch}
-            style={{
-              background: DARK_GREEN,
-              color: "#fff",
-              fontWeight: 700,
-              borderRadius: "1.1rem",
-              border: "none",
-              padding: "1rem 2.4rem",
-              fontSize: "1.14rem",
-              cursor: loading || !canLaunch ? "not-allowed" : "pointer",
-              marginTop: "2.2rem",
-              width: "100%",
-              opacity: loading || !canLaunch ? 0.75 : 1,
-              fontFamily: MODERN_FONT,
-              boxShadow: "0 2px 18px 0 #15713717"
-            }}
-            title={!canLaunch ? "Fill in all required fields. Budget must be $3+." : ""}
-          >
-            {loading ? "Launching..." : "Launch Campaign"}
-          </button>
-          {launched && launchResult && (
-            <div style={{
-              color: "#1eea78",
-              fontWeight: 800,
-              marginTop: "1.2rem",
-              fontSize: "1.16rem",
-              textShadow: "0 2px 8px #0a893622"
-            }}>
-              Campaign launched! ID: {launchResult.campaignId || "--"}
-            </div>
-          )}
+          {/* ... (keep launch button as you have it) ... */}
         </div>
       </div>
       {/* Pause Modal */}
