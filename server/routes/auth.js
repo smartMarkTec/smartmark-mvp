@@ -83,6 +83,7 @@ router.post('/signup', async (req, res) => {
     return res.status(400).json({ error: 'All fields required' });
   }
   await db.read();
+  if (!db.data.users) db.data.users = []; // --- PATCHED LINE ---
   if (
     db.data.users.find(u => u.username === username || u.email === email || u.cashtag === cashtag)
   ) {
