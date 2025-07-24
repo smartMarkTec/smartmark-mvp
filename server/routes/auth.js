@@ -104,23 +104,81 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// --- LAUNCH CAMPAIGN --- //
+// ====== LAUNCH CAMPAIGN (AI TARGETING ENABLED) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
+  // Accept aiAudience at top level or inside form
+  const aiAudience = req.body.aiAudience || (req.body.form && req.body.form.aiAudience);
   const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
+  // -- Helper: Map AI audience to FB targeting
+  function mapAIAudienceToFB(ai) {
+    // Basic mapping for interests (expand this table as needed)
+    const INTEREST_LOOKUP = {
+      "restaurants": { id: "6003139266461", name: "Restaurants" },
+      "food": { id: "6003349442621", name: "Food" },
+      "bbq": { id: "6003088054172", name: "Barbecue" },
+      "barbecue": { id: "6003088054172", name: "Barbecue" },
+      "breakfast": { id: "6003131506581", name: "Breakfast" },
+      "baking": { id: "6003165635876", name: "Baking" },
+      // ...add more as needed
+    };
+
+    // Location (default: US)
+    let countries = ["US"];
+    if (ai.location && ai.location.toUpperCase().includes("TEXAS")) countries = ["US"];
+    else if (ai.location && ai.location.length === 2) countries = [ai.location.toUpperCase()];
+
+    // Age parsing
+    let ageMin = 18, ageMax = 65;
+    if (/^\d{2}-\d{2}$/.test(ai.ageRange || "")) {
+      [ageMin, ageMax] = ai.ageRange.split("-").map(Number);
+      ageMin = Math.max(13, ageMin); // FB min age
+      ageMax = Math.min(65, ageMax);
+    }
+
+    // Interests parsing (map to IDs)
+    let interestArr = [];
+    if (ai.interests) {
+      const tokens = ai.interests.split(/[,\|;]/).map(s => s.trim().toLowerCase());
+      for (let t of tokens) {
+        if (INTEREST_LOOKUP[t]) interestArr.push(INTEREST_LOOKUP[t]);
+      }
+    }
+    // Fallback if none matched
+    if (!interestArr.length) interestArr = [INTEREST_LOOKUP["restaurants"]];
+
+    return {
+      geo_locations: { countries },
+      age_min: ageMin,
+      age_max: ageMax,
+      interests: interestArr
+    };
+  }
+
+  // -- Decide targeting (AI or default)
   let targeting = {
     geo_locations: { countries: ["US"] },
     age_min: 18,
-    age_max: 65
+    age_max: 65,
+    interests: [{ id: "6003139266461", name: "Restaurants" }]
   };
 
+  if (aiAudience) {
+    try {
+      let parsedAI = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
+      targeting = mapAIAudienceToFB(parsedAI);
+    } catch (err) {
+      console.error("Could not parse aiAudience, using fallback targeting.");
+    }
+  }
+
   try {
-    // 1. Upload image
+    // 1. Upload image (to Facebook)
     let imageHash;
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
@@ -144,7 +202,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Budget (minimum $3/day)
+    // 2. Budget (Facebook minimum: $3.00/day)
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
     if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
       return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
@@ -163,7 +221,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set
+    // 4. Create ad set (**use new targeting here!**)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -176,7 +234,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         status: "ACTIVE",
         start_time: new Date(Date.now() + 60 * 1000).toISOString(),
         end_time: null,
-        targeting,
+        targeting, // <-- AI Targeting now applied here
       },
       { params: { access_token: userToken } }
     );
@@ -222,7 +280,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       campaignStatus: "ACTIVE"
     });
   } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || "Failed to launch campaign." });
+    let errorMsg = "Failed to launch campaign.";
+    if (err.response && err.response.data && err.response.data.error) {
+      errorMsg = err.response.data.error.message;
+    }
+    console.error("FB Campaign Launch Error:", err.response ? err.response.data : err);
+    res.status(500).json({ error: errorMsg });
   }
 });
 
