@@ -143,6 +143,18 @@ const Login = () => {
           onSubmit={handleLogin}
           className="smartmark-login-form"
         >
+          {/* The only addition: sign up prompt */}
+          <div style={{ marginBottom: "-1.0rem", fontSize: "0.97rem", color: "#bfc1c4", textAlign: "right", fontWeight: 500 }}>
+            Don&apos;t have an account?{" "}
+            <span
+              style={{ color: "#1ec885", cursor: "pointer", textDecoration: "underline" }}
+              onClick={() => navigate("/form")}
+              tabIndex={0}
+              role="button"
+            >
+              Click here
+            </span>
+          </div>
           <h2
             style={{
               color: "#fff",
