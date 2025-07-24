@@ -110,72 +110,84 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // Accept aiAudience at top level or inside form
-  const aiAudience = req.body.aiAudience || (req.body.form && req.body.form.aiAudience);
-  const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
+  const { form = {}, budget, adCopy, adImage, campaignType, pageId, aiAudience: aiAudienceRaw } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-  // -- Helper: Map AI audience to FB targeting
-  function mapAIAudienceToFB(ai) {
-    // Basic mapping for interests (expand this table as needed)
-    const INTEREST_LOOKUP = {
-      "restaurants": { id: "6003139266461", name: "Restaurants" },
-      "food": { id: "6003349442621", name: "Food" },
-      "bbq": { id: "6003088054172", name: "Barbecue" },
-      "barbecue": { id: "6003088054172", name: "Barbecue" },
-      "breakfast": { id: "6003131506581", name: "Breakfast" },
-      "baking": { id: "6003165635876", name: "Baking" },
-      // ...add more as needed
-    };
-
-    // Location (default: US)
-    let countries = ["US"];
-    if (ai.location && ai.location.toUpperCase().includes("TEXAS")) countries = ["US"];
-    else if (ai.location && ai.location.length === 2) countries = [ai.location.toUpperCase()];
-
-    // Age parsing
-    let ageMin = 18, ageMax = 65;
-    if (/^\d{2}-\d{2}$/.test(ai.ageRange || "")) {
-      [ageMin, ageMax] = ai.ageRange.split("-").map(Number);
-      ageMin = Math.max(13, ageMin); // FB min age
-      ageMax = Math.min(65, ageMax);
+  // ===== 1. Parse AI Audience (from frontend or fallback) =====
+  let aiAudience = null;
+  try {
+    if (typeof aiAudienceRaw === "string") {
+      aiAudience = JSON.parse(aiAudienceRaw);
+    } else if (typeof aiAudienceRaw === "object" && aiAudienceRaw !== null) {
+      aiAudience = aiAudienceRaw;
     }
-
-    // Interests parsing (map to IDs)
-    let interestArr = [];
-    if (ai.interests) {
-      const tokens = ai.interests.split(/[,\|;]/).map(s => s.trim().toLowerCase());
-      for (let t of tokens) {
-        if (INTEREST_LOOKUP[t]) interestArr.push(INTEREST_LOOKUP[t]);
-      }
-    }
-    // Fallback if none matched
-    if (!interestArr.length) interestArr = [INTEREST_LOOKUP["restaurants"]];
-
-    return {
-      geo_locations: { countries },
-      age_min: ageMin,
-      age_max: ageMax,
-      interests: interestArr
-    };
+  } catch {
+    aiAudience = null;
   }
 
-  // -- Decide targeting (AI or default)
+  // ===== 2. Build Targeting Dynamically =====
   let targeting = {
     geo_locations: { countries: ["US"] },
     age_min: 18,
-    age_max: 65,
-    interests: [{ id: "6003139266461", name: "Restaurants" }]
+    age_max: 65
   };
 
-  if (aiAudience) {
-    try {
-      let parsedAI = typeof aiAudience === "string" ? JSON.parse(aiAudience) : aiAudience;
-      targeting = mapAIAudienceToFB(parsedAI);
-    } catch (err) {
-      console.error("Could not parse aiAudience, using fallback targeting.");
+  // --- Location ---
+  if (aiAudience && aiAudience.location) {
+    const loc = aiAudience.location.toLowerCase();
+    if (loc.includes("texas")) {
+      targeting.geo_locations = { regions: [{ key: "3886" }] }; // Example: Texas
+    } else if (loc.includes("usa") || loc.includes("united states")) {
+      targeting.geo_locations = { countries: ["US"] };
+    } else if (loc.match(/[a-z]+/)) {
+      // Add more mappings for other states/countries as needed!
+      targeting.geo_locations = { countries: [aiAudience.location] };
     }
   }
+
+  // --- Age ---
+  if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
+    const [min, max] = aiAudience.ageRange.split('-').map(Number);
+    targeting.age_min = min;
+    targeting.age_max = max;
+  }
+
+  // --- Interests: Lookup FB Interest IDs ---
+  if (aiAudience && aiAudience.interests) {
+    const interestNames = aiAudience.interests.split(',').map(s => s.trim()).filter(Boolean);
+    const fbInterestIds = [];
+    for (let name of interestNames) {
+      try {
+        const fbRes = await axios.get(
+          'https://graph.facebook.com/v18.0/search',
+          {
+            params: {
+              type: 'adinterest',
+              q: name,
+              access_token: userToken
+            }
+          }
+        );
+        if (fbRes.data && fbRes.data.data && fbRes.data.data.length > 0) {
+          fbInterestIds.push({ id: fbRes.data.data[0].id, name: fbRes.data.data[0].name });
+        }
+      } catch (e) {
+        console.warn("FB interest search failed for:", name, e.message);
+      }
+    }
+    if (fbInterestIds.length > 0) {
+      targeting.flexible_spec = [{ interests: fbInterestIds }];
+    }
+  }
+
+  // --- (OPTIONAL) Genders, Demographics, etc ---
+  // If your AI adds "men"/"women"/"male"/"female" to demographic, you could:
+  /*
+  if (aiAudience && aiAudience.demographic) {
+    if (aiAudience.demographic.toLowerCase().includes("men")) targeting.genders = [1];
+    if (aiAudience.demographic.toLowerCase().includes("women")) targeting.genders = [2];
+  }
+  */
 
   try {
     // 1. Upload image (to Facebook)
@@ -221,7 +233,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (**use new targeting here!**)
+    // 4. Create ad set (now with AI-powered targeting!)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -234,7 +246,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         status: "ACTIVE",
         start_time: new Date(Date.now() + 60 * 1000).toISOString(),
         end_time: null,
-        targeting, // <-- AI Targeting now applied here
+        targeting,
       },
       { params: { access_token: userToken } }
     );
@@ -288,6 +300,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     res.status(500).json({ error: errorMsg });
   }
 });
+
 
 // --- CAMPAIGN MGMT (unchanged, just tightened error handling) --- //
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
