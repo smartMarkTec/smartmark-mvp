@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-// Place helpers OUTSIDE the component function
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
 const LIGHT_BG = "#34373d";
@@ -46,9 +45,26 @@ const dropdownHeader = {
   fontSize: "1.06rem"
 };
 
+const plusButtonStyle = {
+  marginLeft: 10,
+  background: "#fff",
+  color: "#222",
+  border: "none",
+  borderRadius: "50%",
+  width: 28,
+  height: 28,
+  fontWeight: 800,
+  fontSize: "1.35rem",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+  boxShadow: "0 2px 8px #2223"
+};
+
 // Only ONE CampaignSetup function!
 const CampaignSetup = () => {
-  // Remove FB OAuth #_=_ hash (MUST be inside component)
+
   useEffect(() => {
     if (window.location.hash === '#_=_') {
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
@@ -65,12 +81,10 @@ const CampaignSetup = () => {
   const [adCopy, setAdCopy] = useState("");
   const [adImage, setAdImage] = useState("");
   const [description, setDescription] = useState("");
-  // --- Facebook Connect Button State (New) ---
+
   const [fbConnected, setFbConnected] = useState(false);
-  // Accordion states for Ad Account and Page
-  const [openAccount, setOpenAccount] = useState(true); // display by default
-  const [openPage, setOpenPage] = useState(true);       // display by default
-  // ------------------------------------------
+  const [openAccount, setOpenAccount] = useState(true);
+  const [openPage, setOpenPage] = useState(true);
   const [adAccounts, setAdAccounts] = useState([]);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [pages, setPages] = useState([]);
@@ -84,13 +98,13 @@ const CampaignSetup = () => {
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
 
-  // Facebook connect with 5-day reset
+
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
     let cashapp = localStorage.getItem("smartmark_last_cashapp") || "";
     let key = getUserKey(email, cashapp);
     setUserKey(key);
-    // Enhanced: store time + connection in localStorage, expire after 5 days (432000000 ms)
+
     const conn = localStorage.getItem(`${key}_fb_connected_v2`);
     if (conn) {
       const { connected, time } = JSON.parse(conn);
@@ -101,15 +115,16 @@ const CampaignSetup = () => {
         localStorage.removeItem(`${key}_fb_connected_v2`);
       }
     }
-    // load last form fields (no changes)
+
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) setForm(JSON.parse(lastFields));
     const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
-  // Facebook connect detection (triggers after redirect from FB OAuth)
+
   useEffect(() => {
+
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
@@ -118,17 +133,16 @@ const CampaignSetup = () => {
       }
       window.history.replaceState({}, document.title, "/setup");
     }
-    // eslint-disable-next-line
+
   }, [location, userKey]);
 
-  // After connect, persist timestamped status for 5 days
+  
   useEffect(() => {
     if (fbConnected && userKey) {
       localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
     }
   }, [fbConnected, userKey]);
 
-  // Fetch Ad Accounts
   useEffect(() => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
@@ -140,7 +154,6 @@ const CampaignSetup = () => {
       .catch(err => console.error("FB ad accounts error", err));
   }, [fbConnected]);
 
-  // Fetch Pages
   useEffect(() => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
@@ -152,7 +165,6 @@ const CampaignSetup = () => {
       .catch(err => console.error("FB pages error", err));
   }, [fbConnected]);
 
-  // Fetch campaign status
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
       fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
@@ -162,7 +174,6 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // Pause/unpause/cancel handlers (no changes)
   const pauseCampaign = async () => {
     await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
     fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
@@ -184,7 +195,6 @@ const CampaignSetup = () => {
       .then(data => setCampaignStatus(data.status || data.effective_status || "ARCHIVED"));
   };
 
-  // Fetch campaigns for dropdown
   useEffect(() => {
     if (fbConnected && selectedAccount) {
       const acctId = selectedAccount.replace("act_", "");
@@ -199,7 +209,6 @@ const CampaignSetup = () => {
     }
   }, [fbConnected, selectedAccount, launched]);
 
-  // When a campaign is selected, fetch its details and metrics
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
       const acctId = selectedAccount.replace("act_", "");
@@ -216,7 +225,6 @@ const CampaignSetup = () => {
             startDate: c.startDate || ""
           }));
         });
-      // Fetch metrics
       fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
         .then(res => res.json())
         .then(setMetrics)
@@ -224,7 +232,6 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // + New Campaign (no changes)
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
     setSelectedCampaignId("");
@@ -238,7 +245,6 @@ const CampaignSetup = () => {
     setForm({});
   };
 
-  // File/image upload (no changes)
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -249,7 +255,6 @@ const CampaignSetup = () => {
     reader.readAsDataURL(file);
   };
 
-  // Ad copy generation (no changes)
   const handleGenerateAdCopy = async () => {
     if (!description && !form.businessName && !form.url) {
       alert("Please enter a description or business info.");
@@ -271,7 +276,6 @@ const CampaignSetup = () => {
     }
   };
 
-  // -- Launch button logic: ensure everything valid, always type-sane --
   const canLaunch = !!(
     fbConnected &&
     selectedAccount &&
@@ -283,7 +287,6 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // Launch campaign (no changes)
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -299,7 +302,7 @@ const CampaignSetup = () => {
         adImage,
         campaignType: form?.campaignType || "Website Traffic",
         pageId: selectedPageId,
-        aiAudience: form?.aiAudience,
+        aiAudience: JSON.stringify(form?.aiAudience || {}), // **ALWAYS STRINGIFY**
       };
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
@@ -318,7 +321,6 @@ const CampaignSetup = () => {
     setLoading(false);
   };
 
-  // FB payment popup (no changes)
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
       alert("Please select an ad account first.");
@@ -589,13 +591,29 @@ const CampaignSetup = () => {
 
         {/* Main Campaign Form */}
         <div>
-          {/* Ad Account + Page selection -- always visible, user can close/open */}
+          {/* Ad Account + Page selection -- always visible, user can close/open, plus button */}
           {fbConnected && (
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div>
-                <div style={dropdownHeader} onClick={() => setOpenAccount(v => !v)}>
-                  <span>Ad Account</span>
-                  <span>{openAccount ? "▲" : "▼"}</span>
+                <div style={dropdownHeader}>
+                  <div style={{ display: "flex", alignItems: "center" }}>
+                    <span style={{ marginRight: 8 }}>Ad Account</span>
+                    <span
+                      style={{ cursor: "pointer", marginRight: 4 }}
+                      onClick={() => setOpenAccount(v => !v)}
+                    >
+                      {openAccount ? "▲" : "▼"}
+                    </span>
+                    <button
+                      type="button"
+                      style={plusButtonStyle}
+                      title="Add Ad Account (max 2)"
+                      disabled={adAccounts.length >= 2}
+                      onClick={handleNewCampaign}
+                    >
+                      +
+                    </button>
+                  </div>
                 </div>
                 {openAccount && (
                   <select
@@ -631,8 +649,7 @@ const CampaignSetup = () => {
             </div>
           )}
 
-          {/* --- AD CREATIVE, COPY, BUDGET, LAUNCH BUTTON --- */}
-          {/* --- DO NOT TOUCH --- */}
+          {/* --- DO NOT TOUCH --- Ad creative/copy/launch/button --- */}
           <div
             style={{
               display: "flex",
@@ -824,7 +841,6 @@ const CampaignSetup = () => {
           )}
         </div>
       </div>
-      {/* Pause Modal */}
       {showPauseModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
