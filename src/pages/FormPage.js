@@ -263,7 +263,7 @@ const FormPage = () => {
           marginBottom: "0.23rem",
           marginLeft: "0.18rem"
         }}>
-          already have an account?{" "}
+          Already have an account?{" "}
           <span
             style={{
               color: "#33bbff",
