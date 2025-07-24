@@ -34,19 +34,19 @@ router.post('/generate-ad-copy', async (req, res) => {
     const adCopy = response.choices?.[0]?.message?.content?.trim() || "";
     return res.json({ adCopy });
   } catch (err) {
-    console.error("[AI] Ad Copy Generation Error:", err?.response?.data || err.message);
+    console.error("Ad Copy Generation Error:", err?.response?.data || err.message);
     return res.status(500).json({ error: "Failed to generate ad copy" });
   }
 });
 
-// ========== AI: AUTOMATIC AUDIENCE DETECTION ==========
-
+// ========== AI: AUTOMATIC AUDIENCE DETECTION (with FB Interest Mapping) ==========
 const DEFAULT_AUDIENCE = {
   brandName: "",
   demographic: "",
   ageRange: "18-65",
   location: "US",
   interests: "Business, Restaurants",
+  fbInterestIds: [],
   summary: ""
 };
 
@@ -57,14 +57,74 @@ async function getWebsiteText(url) {
     // Remove all tags, get main text, limit to 3500 chars for OpenAI
     return data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3500);
   } catch (err) {
-    console.warn("[AI] Could not scrape website text for:", url, err?.message || err);
+    console.warn("Could not scrape website text for:", url);
     return '';
   }
 }
 
+// Helper: Extract keywords/topics from website using OpenAI
+async function extractKeywords(text) {
+  const prompt = `
+Extract 3-6 of the most relevant keywords or topics (comma-separated, lowercase, no duplicates) from the text below. Only output a comma-separated string, no extra text.
+
+Website text:
+"""${text}"""
+`;
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 40,
+      temperature: 0.2,
+    });
+    return response.choices?.[0]?.message?.content
+      .replace(/[\n.]/g, "")
+      .toLowerCase()
+      .split(",")
+      .map(k => k.trim())
+      .filter(Boolean);
+  } catch (err) {
+    return [];
+  }
+}
+
+// Helper: Look up FB Interest IDs for given keywords
+async function getFbInterestIds(keywords, fbToken) {
+  const results = [];
+  for (let keyword of keywords) {
+    try {
+      const resp = await axios.get(
+        `https://graph.facebook.com/v18.0/search`,
+        {
+          params: {
+            type: "adinterest",
+            q: keyword,
+            access_token: fbToken,
+            limit: 1
+          }
+        }
+      );
+      if (
+        resp.data &&
+        Array.isArray(resp.data.data) &&
+        resp.data.data[0] &&
+        resp.data.data[0].id
+      ) {
+        results.push({
+          id: resp.data.data[0].id,
+          name: resp.data.data[0].name
+        });
+      }
+    } catch (err) {
+      // Ignore errors for missing matches
+    }
+  }
+  return results;
+}
+
 // POST /api/detect-audience
 router.post('/detect-audience', async (req, res) => {
-  const { url } = req.body;
+  const { url, fbToken } = req.body; // Optionally pass user's FB token from frontend or backend
   if (!url) return res.status(400).json({ error: 'Missing URL' });
 
   // 1. Scrape website text
@@ -72,7 +132,7 @@ router.post('/detect-audience', async (req, res) => {
 
   // Defensive fallback if we can't extract usable text
   if (!websiteText || websiteText.length < 100) {
-    console.log(`[AI] Fallback to DEFAULT_AUDIENCE: not enough text scraped from ${url}`);
+
     return res.json({ audience: DEFAULT_AUDIENCE });
   }
 
@@ -94,6 +154,7 @@ Website homepage text:
 `;
 
   try {
+    // --- MAIN AI AUDIENCE BLOCK ---
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
@@ -102,10 +163,7 @@ Website homepage text:
     });
     const aiText = response.choices?.[0]?.message?.content?.trim();
 
-    // Log for debugging
-    console.log("[AI] OpenAI raw output:", aiText);
-
-    // Try to parse the JSON in the response
+    
     let audienceJson = null;
     try {
       const jsonMatch = aiText.match(/\{[\s\S]*\}/); // extract first {...} block
@@ -125,23 +183,26 @@ Website homepage text:
         summary: audienceJson.summary || ""
       };
     } catch (err) {
-      // If OpenAI returns invalid JSON, fall back to default
-      console.error("[AI] Could not parse JSON from OpenAI output:", aiText, err?.message);
-      // You see the full AI output in the logs
+
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
-    // Log final result for debugging
-    console.log("[AI] Final parsed audienceJson:", audienceJson);
+    // --- ADVANCED: Extract FB Interests using keywords ---
+    let fbInterestIds = [];
+    if (fbToken) {
+      const keywords = await extractKeywords(websiteText);
+      const fbInterests = await getFbInterestIds(keywords, fbToken);
+      fbInterestIds = fbInterests.map(i => i.id);
+      audienceJson.fbInterestIds = fbInterestIds;
+      audienceJson.fbInterestNames = fbInterests.map(i => i.name);
+    } else {
+      audienceJson.fbInterestIds = [];
+      audienceJson.fbInterestNames = [];
+    }
 
     return res.json({ audience: audienceJson });
   } catch (err) {
-    if (err?.response?.status === 429) {
-      console.error('[AI] OpenAI rate limit hit:', err?.response?.data || err.message);
-    } else {
-      console.error('[AI] OpenAI Error:', err?.response?.data || err.message);
-    }
-    // On AI fail, always return DEFAULT_AUDIENCE so the rest of your stack is safe
+
     return res.json({ audience: DEFAULT_AUDIENCE });
   }
 });

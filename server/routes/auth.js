@@ -105,43 +105,59 @@ router.post('/login', async (req, res) => {
 });
 
 // ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests) ======
+// ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   // Accept aiAudience from payload (sent from frontend)
-  const { form = {}, budget, adCopy, adImage, campaignType, pageId, aiAudience } = req.body;
+  const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
-
-  // Fallback if missing
-  const audience = aiAudience || {
-    location: "US",
-    ageRange: "18-65",
-    fbInterestIds: [],
-  };
+  
 
   // --- Advanced Targeting Object ---
-  let targeting = {
-    geo_locations: { countries: [audience.location || "US"] },
-    age_min: 18,
-    age_max: 65,
-  };
+  let countryCode = "US";
+  let ageMin = 18, ageMax = 65;
+  let parsedInterests = [];
 
-  // Age range parsing (ex: "25-54")
-  if (audience.ageRange) {
-    const [min, max] = audience.ageRange.split("-").map(a => parseInt(a));
-    if (!isNaN(min) && !isNaN(max)) {
-      targeting.age_min = min;
-      targeting.age_max = max;
+  if (form && form.aiAudience) {
+    let aiAudience = {};
+    try { aiAudience = typeof form.aiAudience === 'string' ? JSON.parse(form.aiAudience) : form.aiAudience; } catch {}
+
+    // Location (country code)
+    if (aiAudience.location) {
+      // Try to extract 2-letter ISO code, fallback to "US"
+      const isoMatch = String(aiAudience.location).match(/\b[A-Z]{2}\b/i);
+      if (isoMatch) countryCode = isoMatch[0].toUpperCase();
+    }
+
+    // Age range
+    if (typeof aiAudience.ageRange === "string" && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
+      const [min, max] = aiAudience.ageRange.split("-").map(Number);
+      if (min && max && min < max) {
+        ageMin = min;
+        ageMax = max;
+      }
+    }
+
+    // Interests (for later expansion)
+    if (aiAudience.interests) {
+      parsedInterests = String(aiAudience.interests)
+        .split(",")
+        .map(s => s.trim())
+        .filter(s => s.length > 2 && !/^(business|restaurants)$/i.test(s));
     }
   }
 
-  // Insert Facebook interest IDs for granular targeting
-  if (audience.fbInterestIds && audience.fbInterestIds.length > 0) {
-    targeting.interests = audience.fbInterestIds.map(id => ({ id }));
-  }
-  
+  // --- Facebook Targeting Object ---
+  let targeting = {
+    geo_locations: { countries: [countryCode] },
+    age_min: ageMin,
+    age_max: ageMax
+    // To use interests, you must use flexible_spec, see FB docs.
+    // flexible_spec: [{ interests: [{ id: '...'}, ...] }]
+  };
 
   try {
     // 1. Upload image (to Facebook)
@@ -187,7 +203,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (now uses ADVANCED targeting!)
+    // 4. Create ad set (with AI-powered targeting!)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
