@@ -104,32 +104,32 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests) ======
+
 // ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // Accept aiAudience from payload (sent from frontend)
+
   const { form = {}, budget, adCopy, adImage, campaignType, pageId } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
-  
+
 
   // --- Advanced Targeting Object ---
   let countryCode = "US";
   let ageMin = 18, ageMax = 65;
-  let parsedInterests = [];
+
 
   if (form && form.aiAudience) {
     let aiAudience = {};
     try { aiAudience = typeof form.aiAudience === 'string' ? JSON.parse(form.aiAudience) : form.aiAudience; } catch {}
 
-    // Location (country code)
+    // Country code
     if (aiAudience.location) {
-      // Try to extract 2-letter ISO code, fallback to "US"
+
       const isoMatch = String(aiAudience.location).match(/\b[A-Z]{2}\b/i);
-      if (isoMatch) countryCode = isoMatch[0].toUpperCase();
+      countryCode = isoMatch ? isoMatch[0].toUpperCase() : "US";
     }
 
     // Age range
@@ -141,23 +141,19 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       }
     }
 
-    // Interests (for later expansion)
-    if (aiAudience.interests) {
-      parsedInterests = String(aiAudience.interests)
-        .split(",")
-        .map(s => s.trim())
-        .filter(s => s.length > 2 && !/^(business|restaurants)$/i.test(s));
-    }
   }
+  
 
   // --- Facebook Targeting Object ---
   let targeting = {
     geo_locations: { countries: [countryCode] },
     age_min: ageMin,
     age_max: ageMax
-    // To use interests, you must use flexible_spec, see FB docs.
-    // flexible_spec: [{ interests: [{ id: '...'}, ...] }]
+
   };
+
+  // Debug log!
+  console.log("[FB Launch] Sending targeting object:", JSON.stringify(targeting, null, 2));
 
   try {
     // 1. Upload image (to Facebook)
@@ -184,7 +180,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Budget (Facebook minimum: $3.00/day)
+    // 2. Budget
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
     if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
       return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
@@ -203,7 +199,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (with AI-powered targeting!)
+    // 4. Create ad set (uses targeting)
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -270,6 +266,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     res.status(500).json({ error: errorMsg });
   }
 });
+
 
 
 
