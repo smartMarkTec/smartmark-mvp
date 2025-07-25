@@ -3,6 +3,39 @@ const express = require('express');
 const router = express.Router();
 const { OpenAI } = require('openai');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+
+// ----------- Load All Training Files At Startup -----------
+const TRAINING_DOCS = [
+  path.join(__dirname, '../mnt/data/MetaRealTalkCreativePlaybookForSmallBusinesses.txt'),
+  path.join(__dirname, '../mnt/data/Copywriting-101.txt'),
+  path.join(__dirname, '../mnt/data/AUGUST-MEMBERS-PRINTABLE-PAID-ADVERTISING-GUIDE-TRAFFIC-CAMPAIGNS.txt'),
+  path.join(__dirname, '../mnt/data/10x-Facebook-Ads-Course-Workbook.txt'),
+  path.join(__dirname, '../mnt/data/Master Digital Marketing notes.docx'),
+  path.join(__dirname, '../mnt/data/Master Digital Marketing version 2.docx')
+];
+
+// Minimal .docx parsing (for pro use mammoth, here just .toString for MVP)
+const extractDocxText = filePath => {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return buffer.toString('utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  } catch { return ''; }
+};
+
+let customContext = '';
+for (const file of TRAINING_DOCS) {
+  try {
+    if (file.endsWith('.docx')) {
+      customContext += extractDocxText(file).slice(0, 7000) + '\n\n';
+    } else {
+      customContext += fs.readFileSync(file, 'utf8').slice(0, 7000) + '\n\n';
+    }
+  } catch (e) {
+    console.warn(`Could not load file: ${file}:`, e.message);
+  }
+}
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -54,7 +87,6 @@ const DEFAULT_AUDIENCE = {
 async function getWebsiteText(url) {
   try {
     const { data } = await axios.get(url, { timeout: 8000 });
-    // Remove all tags, get main text, limit to 3500 chars for OpenAI
     return data.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 3500);
   } catch (err) {
     console.warn("Could not scrape website text for:", url);
@@ -132,7 +164,6 @@ router.post('/detect-audience', async (req, res) => {
 
   // Defensive fallback if we can't extract usable text
   if (!websiteText || websiteText.length < 100) {
-
     return res.json({ audience: DEFAULT_AUDIENCE });
   }
 
@@ -154,7 +185,6 @@ Website homepage text:
 `;
 
   try {
-    // --- MAIN AI AUDIENCE BLOCK ---
     const response = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
@@ -162,14 +192,10 @@ Website homepage text:
       temperature: 0.3,
     });
     const aiText = response.choices?.[0]?.message?.content?.trim();
-
-    
     let audienceJson = null;
     try {
-      const jsonMatch = aiText.match(/\{[\s\S]*\}/); // extract first {...} block
+      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
       audienceJson = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
-
-      // Enforce required fields and safe fallback
       audienceJson = {
         brandName: audienceJson.brandName || "",
         demographic: audienceJson.demographic || "",
@@ -183,11 +209,10 @@ Website homepage text:
         summary: audienceJson.summary || ""
       };
     } catch (err) {
-
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
-    // --- ADVANCED: Extract FB Interests using keywords ---
+    // --- Extract FB Interests ---
     let fbInterestIds = [];
     if (fbToken) {
       const keywords = await extractKeywords(websiteText);
@@ -202,8 +227,76 @@ Website homepage text:
 
     return res.json({ audience: audienceJson });
   } catch (err) {
-
     return res.json({ audience: DEFAULT_AUDIENCE });
+  }
+});
+
+// ===== NEW! GENERATE FULL AD SUITE FROM NOTES + SURVEY ======
+router.post('/generate-campaign-assets', async (req, res) => {
+  const { answers = {}, url = "" } = req.body;
+  if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
+    return res.status(400).json({ error: "Missing answers" });
+  }
+
+  let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+  const prompt = `
+You are a Facebook Ads expert. Use ONLY the marketing strategies, ad copy frameworks, and techniques in the following context.
+
+### Training context:
+${customContext}
+
+### Survey answers:
+${surveyStr}
+Website URL: ${url}
+
+### Generate the following, each with clear labels:
+1. High-converting Facebook ad copy (headline + body)
+2. An image prompt describing exactly what the ad image should look like (detailed, visual, for a human designer or for DALL·E)
+3. A short, punchy 30-second video ad script
+
+Respond as JSON:
+{
+  "headline": "...",
+  "body": "...",
+  "image_prompt": "...",
+  "video_script": "..."
+}
+  `;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 700
+    });
+    const raw = response.choices?.[0]?.message?.content?.trim();
+    let result;
+    try { result = JSON.parse(raw); } catch (e) { result = { raw }; }
+    res.json(result);
+  } catch (err) {
+    console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
+    res.status(500).json({ error: "AI error", detail: err.message });
+  }
+});
+
+// ========== AI: GENERATE IMAGE FROM PROMPT (DALL·E 3, OpenAI) ==========
+router.post('/generate-image-from-prompt', async (req, res) => {
+  const { prompt } = req.body;
+  if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
+  try {
+    const imageRes = await openai.images.generate({
+      prompt,
+      n: 1,
+      size: "1024x1024"
+    });
+    const imageUrl = imageRes.data[0].url;
+    res.json({ imageUrl });
+  } catch (err) {
+    console.error("Image generation error:", err?.response?.data || err.message);
+    res.status(500).json({ error: "Image generation failed." });
   }
 });
 
