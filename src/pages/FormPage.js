@@ -1,207 +1,131 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-const DARK_GREEN = "#185431";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const BACKEND_URL = "https://smartmark-mvp.onrender.com";
-
-const DEFAULT_AUDIENCE = {
-  location: "US",
-  ageRange: "18-65",
-  interests: "Business, Restaurants"
-};
-
-const validateFields = (fields) => {
-  if (!fields.businessName) return "Business name is required.";
-  if (!fields.email || !fields.email.includes("@")) return "Valid email required.";
-  if (!fields.cashapp) return "CashApp Username required.";
-  if (!fields.url || !/^https?:\/\/.+\..+/.test(fields.url)) return "Valid website URL required.";
-  return "";
-};
+const DARK_GREEN = "#185431";
+const QUESTIONS = [
+  // Yes/No Qs
+  {
+    type: "yesno",
+    question: "Would you like us to use your website to learn about your business and generate your ad?",
+    key: "useWebsite",
+    followup: {
+      type: "text",
+      question: "Enter your website URL",
+      key: "websiteUrl"
+    }
+  },
+  {
+    type: "yesno",
+    question: "Is your business primarily targeting local customers?",
+    key: "isLocal"
+  },
+  {
+    type: "yesno",
+    question: "Are you currently running any promotions or offers?",
+    key: "hasPromo",
+    followup: {
+      type: "text",
+      question: "Briefly describe the offer",
+      key: "promoDesc"
+    }
+  },
+  {
+    type: "yesno",
+    question: "Would you prefer your ad to focus on brand awareness over direct sales?",
+    key: "brandAwareness"
+  },
+  {
+    type: "yesno",
+    question: "Do you offer delivery or online ordering?",
+    key: "hasDelivery"
+  },
+  {
+    type: "yesno",
+    question: "Should we emphasize fast service or convenience in your ad?",
+    key: "fastService"
+  },
+  // Multiple Choice
+  {
+    type: "multiple",
+    question: "What’s the main goal of this ad?",
+    key: "adGoal",
+    options: [
+      "Get more website visitors",
+      "Drive online orders",
+      "Increase bookings",
+      "Promote a special deal"
+    ]
+  },
+  {
+    type: "multiple",
+    question: "Which best describes your brand's vibe?",
+    key: "brandVibe",
+    options: [
+      "Premium / Luxury",
+      "Friendly & Approachable",
+      "Trendy & Bold",
+      "Minimal / Clean",
+      "Energetic / Fun"
+    ]
+  },
+  // Free Response
+  {
+    type: "text",
+    question: "What would you like customers to do once they visit your website?",
+    key: "websiteGoal"
+  },
+  {
+    type: "text",
+    question: "Is there anything specific you want shown in the ad?",
+    key: "adSpecific"
+  }
+];
 
 const FormPage = () => {
   const navigate = useNavigate();
-  const [fields, setFields] = useState({
-    businessName: "",
-    email: "",
-    cashapp: "",
-    url: "",
-    campaignType: "Website Traffic"
-  });
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState(0);
+  const [answers, setAnswers] = useState({});
+  const [inputValue, setInputValue] = useState("");
 
-  // AI audience detection
-  const [aiAudience, setAiAudience] = useState(null);
-  const [audienceProgress, setAudienceProgress] = useState([]);
-  const [audienceLoading, setAudienceLoading] = useState(false);
+  const current = QUESTIONS[step];
 
-  // Prefill from last session
-  useEffect(() => {
-    const lastEmail = localStorage.getItem("smartmark_last_email") || "";
-    const lastCashapp = localStorage.getItem("smartmark_last_cashapp") || "";
-    if (lastEmail && lastCashapp) {
-      setFields((prev) => ({
-        ...prev,
-        email: lastEmail,
-        cashapp: lastCashapp
-      }));
+  // For followup question (e.g. promo or url)
+  const [showFollowup, setShowFollowup] = useState(false);
+
+  const handleNext = (value) => {
+    let newAnswers = { ...answers };
+    if (showFollowup) {
+      newAnswers[current.followup.key] = value;
+      setAnswers(newAnswers);
+      setShowFollowup(false);
+      setInputValue("");
+      setStep(step + 1);
+      return;
     }
-  }, []);
+    newAnswers[current.key] = value;
 
-  const handleChange = (e) => {
-    setFields({ ...fields, [e.target.name]: e.target.value });
-    setError("");
-    // Reset audience if editing url
-    if (e.target.name === "url") {
-      setAiAudience(null);
-      setAudienceProgress([]);
-    }
-  };
-
-  // AI audience fetch
-  const detectAudience = async (websiteUrl) => {
-    if (!websiteUrl || websiteUrl.length < 7) return;
-    setAudienceLoading(true);
-    setAiAudience(null);
-    setAudienceProgress(["AI searching..."]);
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/detect-audience`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: websiteUrl })
-      });
-      const data = await res.json();
-
-      if (!data.audience) {
-        setAudienceProgress(["Could not detect audience. Using default targeting."]);
-        setAiAudience(DEFAULT_AUDIENCE);
-        setAudienceLoading(false);
-        return;
-      }
-
-      let parsed;
-      if (typeof data.audience === "object") {
-        parsed = data.audience;
-      } else {
-        try {
-          parsed = JSON.parse(data.audience);
-        } catch {
-          setAudienceProgress([
-            typeof data.audience === "string"
-              ? data.audience
-              : JSON.stringify(data.audience)
-          ]);
-          setAiAudience(DEFAULT_AUDIENCE);
-          setAudienceLoading(false);
-          return;
-        }
-      }
-
-      // Defensive fallback: Must include all keys, no empties/nulls!
-      const safeAudience = {
-        location: parsed.location || "US",
-        ageRange: /^\d{2}-\d{2}$/.test(parsed.ageRange || "") ? parsed.ageRange : "18-65",
-        interests: parsed.interests && parsed.interests.length > 0
-          ? parsed.interests
-          : "Business, Restaurants"
-      };
-      setAiAudience(safeAudience);
-
-      // Animate progress
-      const steps = [
-        `Brand name found: ${parsed.brandName || "N/A"}`,
-        `Demographic found: ${parsed.demographic || "N/A"}`,
-        `Age range found: ${safeAudience.ageRange}`,
-        `Location found: ${safeAudience.location}`,
-        `Interests found: ${safeAudience.interests}`,
-        "AI finished!"
-      ];
-      setAudienceProgress(["AI searching..."]);
-      let idx = 0;
-      const interval = setInterval(() => {
-        setAudienceProgress((prev) => [...prev, steps[idx]]);
-        idx++;
-        if (idx >= steps.length) clearInterval(interval);
-      }, 800);
-    } catch {
-      setAudienceProgress(["Could not detect audience. Using default targeting."]);
-      setAiAudience(DEFAULT_AUDIENCE);
-    }
-    setAudienceLoading(false);
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-
-    // Validate
-    const errMsg = validateFields(fields);
-    if (errMsg) {
-      setError(errMsg);
-      setLoading(false);
+    // Trigger followup if yes and followup exists
+    if (current.followup && value === "yes") {
+      setAnswers(newAnswers);
+      setShowFollowup(true);
+      setInputValue("");
       return;
     }
 
-    try {
-      // Register user
-      const signupRes = await fetch(`${BACKEND_URL}/auth/signup`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: fields.cashapp,
-          email: fields.email,
-          cashtag: fields.cashapp,
-          password: fields.email // MVP: password is email
-        })
-      });
-      const signupData = await signupRes.json();
-      if (!signupData.success && !String(signupData.error).includes("exists")) {
-        setError(signupData.error || "Signup failed.");
-        setLoading(false);
-        return;
-      }
+    setAnswers(newAnswers);
+    setInputValue("");
+    setStep(step + 1);
+  };
 
-      // Save campaign for this user
-      const aiToSave = aiAudience
-        ? JSON.stringify(aiAudience)
-        : JSON.stringify(DEFAULT_AUDIENCE);
-
-      const saveRes = await fetch(`${BACKEND_URL}/api/save-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: fields.cashapp,
-          campaign: {
-            ...fields,
-            aiAudience: aiToSave,
-            createdAt: new Date().toISOString()
-          }
-        })
-      });
-      const saveData = await saveRes.json();
-      if (saveData.status !== "ok") {
-        setError("Failed to save campaign.");
-        setLoading(false);
-        return;
-      }
-
-      // Store credentials for autologin
-      localStorage.setItem("smartmark_login_username", fields.cashapp);
-      localStorage.setItem("smartmark_login_password", fields.email);
-      localStorage.setItem("smartmark_last_email", fields.email);
-      localStorage.setItem("smartmark_last_cashapp", fields.cashapp);
-      // Save latest fields for pre-filling on next step
-      localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(fields));
-      localStorage.setItem("smartmark_last_ai_audience", aiToSave);
-
-      setLoading(false);
-      navigate("/setup");
-    } catch (err) {
-      setError("Server error. Please try again.");
-      setLoading(false);
-    }
+  // Handle form finish (send to backend or move to next page)
+  const handleFinish = () => {
+    // TODO: submit answers to backend
+    console.log("Collected Answers:", answers);
+    // Save to localStorage or context if needed
+    // Redirect to campaign setup page or next step
+    navigate("/setup", { state: { surveyAnswers: answers } });
   };
 
   return (
@@ -217,31 +141,22 @@ const FormPage = () => {
         position: "relative"
       }}
     >
-      {/* Logo top right */}
-      <div
-        style={{
-          position: "fixed",
-          top: 30,
-          right: 36,
-          zIndex: 99
-        }}
-      >
+      <div style={{ position: "fixed", top: 30, right: 36, zIndex: 99 }}>
         <SmartMarkLogoButton />
       </div>
 
-      <form
+      <div
         style={{
           background: "#34373de6",
           padding: "2.8rem 2.2rem",
           borderRadius: "2.1rem",
           boxShadow: "0 8px 40px 0 rgba(24,84,49,0.12)",
-          display: "flex",
-          flexDirection: "column",
+          
           minWidth: 400,
-          gap: "1.7rem"
+          maxWidth: 440,
+          transition: "all 0.7s cubic-bezier(.79,.11,.21,.99)"
         }}
-        onSubmit={handleSubmit}
-        autoComplete="off"
+
       >
         <h2
           style={{
@@ -254,192 +169,152 @@ const FormPage = () => {
             fontFamily: MODERN_FONT
           }}
         >
-          Start Your Campaign
+          Quick Campaign Survey
         </h2>
-        {/* Login Link Above First Field */}
-        <div style={{
-          fontSize: "0.89rem",
-          color: "#e2e2e2",
-          marginBottom: "0.23rem",
-          marginLeft: "0.18rem"
-        }}>
-          Already have an account?{" "}
-          <span
-            style={{
-              color: "#33bbff",
-              textDecoration: "underline",
-              cursor: "pointer",
-              fontWeight: 600
-            }}
-            onClick={() => navigate("/login")}
-          >
-            Login here 
-          </span>
+        {/* Question */}
+        <div style={{ color: "#fff", fontSize: "1.18rem", marginBottom: "1.6rem", fontWeight: 500, minHeight: 56 }}>
+          {showFollowup ? current.followup.question : current.question}
         </div>
-        <input
-          type="email"
-          name="email"
-          placeholder="Email Address"
-          value={fields.email}
-          onChange={handleChange}
-          required
-          style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
-            border: "none",
-            fontSize: "1.15rem",
-            outline: "none",
-            fontFamily: MODERN_FONT
-          }}
-        />
-        <input
-          type="text"
-          name="cashapp"
-          placeholder="CashApp Username"
-          value={fields.cashapp}
-          onChange={handleChange}
-          required
-          style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
-            border: "none",
-            fontSize: "1.15rem",
-            outline: "none",
-            fontFamily: MODERN_FONT
-          }}
-        />
-        <input
-          type="text"
-          name="businessName"
-          placeholder="Business Name"
-          value={fields.businessName}
-          onChange={handleChange}
-          required
-          style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
-            border: "none",
-            fontSize: "1.15rem",
-            outline: "none",
-            fontFamily: MODERN_FONT
-          }}
-        />
-        <input
-          type="url"
-          name="url"
-          placeholder="Your Website URL"
-          value={fields.url}
-          onChange={handleChange}
-          onBlur={(e) => {
-            if (e.target.value && e.target.value.length > 7) {
-              detectAudience(e.target.value);
-            }
-          }}
-          required
-          style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
-            border: "none",
-            fontSize: "1.15rem",
-            outline: "none",
-            fontFamily: MODERN_FONT
-          }}
-        />
-        {/* AI Audience detection display */}
-        {audienceProgress.length > 0 && (
-          <div
+        {/* Input */}
+        {showFollowup || current.type === "text" ? (
+          <input
+            type="text"
+            autoFocus
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
             style={{
-              background: "#222c22",
-              color: "#e0ffe7",
-              fontWeight: 600,
-              borderRadius: "1rem",
-              padding: "1rem",
-              marginBottom: "0.8rem",
+              padding: "1.1rem",
+              borderRadius: "1.2rem",
+              border: "none",
+              fontSize: "1.15rem",
+              outline: "none",
               fontFamily: MODERN_FONT,
-              fontSize: "1.01rem"
+              marginBottom: "1.1rem",
+              width: "100%"
             }}
-          >
-            <div style={{ marginBottom: 6 }}>
-              <span role="img" aria-label="AI">🤖</span>{" "}
-              <b>AI Progress:</b>
-            </div>
-            <div>
-              {audienceProgress.map((line, i) => (
-                <div key={i}>
-                  {typeof line === "string"
-                    ? line
-                    : JSON.stringify(line)}
-                </div>
-              ))}
-            </div>
+            placeholder="Type your answer..."
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && inputValue.trim() !== "") {
+                handleNext(inputValue.trim());
+              }
+            }}
+          />
+        ) : current.type === "yesno" ? (
+          <div style={{ display: "flex", gap: "2rem", marginBottom: "1.2rem" }}>
+            <button
+              style={{
+                background: DARK_GREEN,
+                color: "#fff",
+                border: "none",
+                borderRadius: "1.1rem",
+                padding: "1rem 2.5rem",
+                fontWeight: 600,
+                fontSize: "1.18rem",
+                cursor: "pointer",
+                fontFamily: MODERN_FONT,
+                boxShadow: "0 2px 18px 0 #15713717",
+                opacity: 0.95
+              }}
+              onClick={() => handleNext("yes")}
+            >
+              Yes
+            </button>
+            <button
+              style={{
+                background: "#fff",
+                color: "#232529",
+                border: "none",
+                borderRadius: "1.1rem",
+                padding: "1rem 2.5rem",
+                fontWeight: 600,
+                fontSize: "1.18rem",
+                cursor: "pointer",
+                fontFamily: MODERN_FONT,
+                boxShadow: "0 2px 18px 0 #15713717",
+                opacity: 0.95
+              }}
+              onClick={() => handleNext("no")}
+            >
+              No
+            </button>
           </div>
-        )}
-        <select
-          name="campaignType"
-          value={fields.campaignType}
-          onChange={handleChange}
-          required
-          style={{
-            padding: "1.1rem",
-            borderRadius: "1.2rem",
-            border: "none",
-            fontSize: "1.15rem",
-            outline: "none",
-            fontFamily: MODERN_FONT,
-            background: "#fff",
-            color: "#2b2e32",
-            fontWeight: 600,
-            marginBottom: "0.2rem"
-          }}
-        >
-          <option value="Website Traffic">Website Traffic</option>
-        </select>
-        {error && (
-          <div
+        ) : current.type === "multiple" ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1.3rem", marginBottom: "1.2rem" }}>
+            {current.options.map((opt, i) => (
+              <button
+                key={i}
+                style={{
+                  background: DARK_GREEN,
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "1.1rem",
+                  padding: "1rem",
+                  fontWeight: 600,
+                  fontSize: "1.09rem",
+                  cursor: "pointer",
+                  fontFamily: MODERN_FONT,
+                  boxShadow: "0 2px 14px 0 #15713711",
+                  opacity: 0.93,
+                  textAlign: "left"
+                }}
+                onClick={() => handleNext(opt)}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        {/* Next/Finish Button */}
+        {(showFollowup || current.type === "text") && (
+          <button
+            disabled={inputValue.trim() === ""}
             style={{
-              color: "#F87171",
-              background: "#232529",
-              borderRadius: "0.7rem",
-              padding: "0.8rem 0.8rem",
-              fontWeight: 600,
-              fontSize: "1.01rem",
-              textAlign: "center",
-              marginTop: "-0.8rem",
-              fontFamily: MODERN_FONT
+              background: DARK_GREEN,
+              color: "#fff",
+              border: "none",
+              borderRadius: "1.1rem",
+              padding: "1rem 2.3rem",
+              fontWeight: 700,
+              fontSize: "1.12rem",
+              cursor: inputValue.trim() === "" ? "not-allowed" : "pointer",
+              fontFamily: MODERN_FONT,
+              marginTop: 6,
+              opacity: inputValue.trim() === "" ? 0.6 : 1
             }}
+            onClick={() => handleNext(inputValue.trim())}
           >
-            {error}
-          </div>
+            Next
+          </button>
         )}
-        <button
-          type="submit"
-          disabled={loading}
-          style={{
-            padding: "1.1rem 0",
-            borderRadius: "2.2rem",
-            border: "none",
-            background: DARK_GREEN,
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: "1.22rem",
-            letterSpacing: "1.2px",
-            cursor: loading ? "not-allowed" : "pointer",
-            marginTop: "0.5rem",
-            fontFamily: MODERN_FONT,
-            boxShadow: "0 2px 16px 0 rgba(24,84,49,0.16)",
-            transition: "background 0.18s",
-            opacity: loading ? 0.7 : 1
-          }}
-          onMouseOver={e => {
-            if (!loading) e.target.style.background = "#1e6a3e";
-          }}
-          onMouseOut={e => {
-            if (!loading) e.target.style.background = DARK_GREEN;
-          }}
-        >
-          {loading ? "Submitting..." : "Continue Setup"}
-        </button>
-      </form>
+        {/* Finish */}
+        {step === QUESTIONS.length && (
+          <button
+            style={{
+              background: DARK_GREEN,
+              color: "#fff",
+              border: "none",
+              borderRadius: "1.1rem",
+              padding: "1.1rem 2.8rem",
+              fontWeight: 700,
+              fontSize: "1.15rem",
+              cursor: "pointer",
+              fontFamily: MODERN_FONT,
+              width: "100%",
+              marginTop: "1.2rem"
+            }}
+            onClick={handleFinish}
+          >
+            Finish & Continue
+          </button>
+        )}
+        {/* Carousel progress */}
+        <div style={{ marginTop: 25, textAlign: "center", color: "#b4b7bb", fontSize: "1.01rem" }}>
+          {step < QUESTIONS.length
+            ? `Question ${step + 1} of ${QUESTIONS.length}`
+            : "Done"}
+        </div>
+      </div>
     </div>
   );
 };
