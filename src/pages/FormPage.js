@@ -1,11 +1,21 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
+import { FaEdit, FaCheckCircle } from "react-icons/fa";
 
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const DARK_GREEN = "#185431";
+const FADE = "0 8px 40px 0 rgba(24,84,49,0.12)";
+
+// Sample ad content (to be replaced by AI results)
+const DEFAULT_IMAGE =
+  "https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=facearea&w=600&q=80";
+const DEFAULT_VIDEO =
+  "https://www.w3schools.com/html/mov_bbb.mp4";
+const DEFAULT_COPY =
+  "Discover why locals love us! Visit our website to get exclusive deals, fast service, and a friendly welcome.";
+
 const QUESTIONS = [
-  // Yes/No Qs
   {
     type: "yesno",
     question: "Would you like us to use your website to learn about your business and generate your ad?",
@@ -46,7 +56,6 @@ const QUESTIONS = [
     question: "Should we emphasize fast service or convenience in your ad?",
     key: "fastService"
   },
-  // Multiple Choice
   {
     type: "multiple",
     question: "What’s the main goal of this ad?",
@@ -70,7 +79,6 @@ const QUESTIONS = [
       "Energetic / Fun"
     ]
   },
-  // Free Response
   {
     type: "text",
     question: "What would you like customers to do once they visit your website?",
@@ -83,17 +91,191 @@ const QUESTIONS = [
   }
 ];
 
+const AdPreview = ({
+  type,
+  selected,
+  onSelect,
+  onEdit,
+  adCopy,
+  src,
+  editing,
+  onCopyChange,
+  onCloseEdit
+}) => (
+  <div
+    className={`group relative rounded-2xl shadow-lg transition-all duration-300 cursor-pointer ${
+      selected ? "ring-4 ring-green-400 scale-105" : "hover:scale-105"
+    }`}
+    style={{
+      border: selected ? "2px solid #18b158" : "2px solid transparent",
+      margin: "0 1.2rem",
+      background: "#212425",
+      minWidth: 330,
+      maxWidth: 360,
+      minHeight: 380,
+      display: "flex",
+      flexDirection: "column",
+      position: "relative",
+      boxShadow: FADE,
+      transition: "box-shadow 0.3s, transform 0.3s"
+    }}
+    onClick={onSelect}
+    onMouseEnter={e => e.currentTarget.classList.add("animate-wiggle")}
+    onMouseLeave={e => e.currentTarget.classList.remove("animate-wiggle")}
+  >
+    {/* Edit Button */}
+    <button
+      onClick={e => {
+        e.stopPropagation();
+        onEdit();
+      }}
+      style={{
+        position: "absolute",
+        top: 18,
+        right: 18,
+        background: "#fff",
+        color: "#1a9e5e",
+        borderRadius: "999px",
+        border: "none",
+        boxShadow: "0 1px 4px #1a9e5e19",
+        fontWeight: 700,
+        fontSize: 17,
+        padding: 8,
+        zIndex: 2,
+        cursor: "pointer",
+        opacity: 0.85
+      }}
+      title="Edit Ad"
+    >
+      <FaEdit />
+    </button>
+
+    {/* Ad Content */}
+    <div style={{ flex: 1, paddingTop: type === "image" ? 18 : 8 }}>
+      {type === "image" ? (
+        <img
+          src={src}
+          alt="Generated ad"
+          style={{
+            width: "100%",
+            height: 210,
+            borderRadius: 20,
+            objectFit: "cover",
+            marginBottom: 10
+          }}
+        />
+      ) : (
+        <video
+          src={src}
+          controls
+          loop
+          muted
+          style={{
+            width: "100%",
+            height: 210,
+            borderRadius: 20,
+            objectFit: "cover",
+            marginBottom: 10,
+            background: "#232829"
+          }}
+        />
+      )}
+      {/* Ad Copy */}
+      {editing ? (
+        <div style={{ padding: "1rem" }}>
+          <textarea
+            value={adCopy}
+            onChange={e => onCopyChange(e.target.value)}
+            style={{
+              width: "100%",
+              minHeight: 78,
+              borderRadius: 10,
+              border: "1.5px solid #11b179",
+              fontSize: "1.12rem",
+              padding: 8,
+              marginBottom: 7
+            }}
+          />
+          <div style={{ display: "flex", gap: 12 }}>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                onCloseEdit();
+              }}
+              style={{
+                background: "#17a658",
+                color: "#fff",
+                borderRadius: 10,
+                border: "none",
+                fontWeight: 700,
+                fontSize: "1rem",
+                padding: "7px 22px",
+                cursor: "pointer"
+              }}
+            >
+              Save
+            </button>
+            <button
+              onClick={e => {
+                e.stopPropagation();
+                onCopyChange(DEFAULT_COPY);
+                onCloseEdit();
+              }}
+              style={{
+                background: "#eaeaea",
+                color: "#123",
+                borderRadius: 10,
+                border: "none",
+                fontWeight: 700,
+                fontSize: "1rem",
+                padding: "7px 22px",
+                cursor: "pointer"
+              }}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: "1rem", fontSize: "1.1rem", color: "#e0e0e0" }}>
+          {adCopy}
+        </div>
+      )}
+    </div>
+    {/* Select Checkmark */}
+    {selected && (
+      <FaCheckCircle
+        style={{
+          position: "absolute",
+          bottom: 16,
+          right: 18,
+          color: "#22d37a",
+          fontSize: 28,
+          background: "#fff",
+          borderRadius: "50%",
+          boxShadow: "0 0 6px #13d37b55"
+        }}
+      />
+    )}
+  </div>
+);
+
 const FormPage = () => {
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
   const [inputValue, setInputValue] = useState("");
+  const [showFollowup, setShowFollowup] = useState(false);
+
+  // Ad preview logic
+  const [showAds, setShowAds] = useState(false);
+  const [selected, setSelected] = useState({ image: false, video: false });
+  const [editMode, setEditMode] = useState({ image: false, video: false });
+  const [copy, setCopy] = useState({ image: DEFAULT_COPY, video: DEFAULT_COPY });
 
   const current = QUESTIONS[step];
 
-  // For followup question (e.g. promo or url)
-  const [showFollowup, setShowFollowup] = useState(false);
-
+  // Survey Next
   const handleNext = (value) => {
     let newAnswers = { ...answers };
     if (showFollowup) {
@@ -105,28 +287,40 @@ const FormPage = () => {
       return;
     }
     newAnswers[current.key] = value;
-
-    // Trigger followup if yes and followup exists
     if (current.followup && value === "yes") {
       setAnswers(newAnswers);
       setShowFollowup(true);
       setInputValue("");
       return;
     }
-
     setAnswers(newAnswers);
     setInputValue("");
     setStep(step + 1);
   };
 
-  // Handle form finish (send to backend or move to next page)
-  const handleFinish = () => {
-    // TODO: submit answers to backend
-    console.log("Collected Answers:", answers);
-    // Save to localStorage or context if needed
-    // Redirect to campaign setup page or next step
-    navigate("/setup", { state: { surveyAnswers: answers } });
+  // Handle finish survey → show ad previews
+  const handleGenerate = () => {
+    setShowAds(true);
+    // TODO: Replace with AI-generated content
   };
+
+  // Handle Finalize
+  const handleFinalize = () => {
+    // TODO: Send choices + creative to backend
+    alert(
+      `Campaign finalized!\nSelected: ${
+        selected.image && selected.video
+          ? "Both"
+          : selected.image
+          ? "Image"
+          : "Video"
+      }`
+    );
+    // Navigate or reset
+    navigate("/dashboard");
+  };
+
+  // Carousel fade/slide can be added here if needed (Framer Motion, etc.)
 
   return (
     <div
@@ -136,9 +330,10 @@ const FormPage = () => {
         background: "linear-gradient(135deg, #2b2e32 0%, #383c40 100%)",
         display: "flex",
         justifyContent: "center",
-        alignItems: "center",
+        alignItems: "flex-start",
         fontFamily: MODERN_FONT,
-        position: "relative"
+        position: "relative",
+        padding: "3rem 0"
       }}
     >
       <div style={{ position: "fixed", top: 30, right: 36, zIndex: 99 }}>
@@ -150,171 +345,283 @@ const FormPage = () => {
           background: "#34373de6",
           padding: "2.8rem 2.2rem",
           borderRadius: "2.1rem",
-          boxShadow: "0 8px 40px 0 rgba(24,84,49,0.12)",
-          
+          boxShadow: FADE,
           minWidth: 400,
-          maxWidth: 440,
-          transition: "all 0.7s cubic-bezier(.79,.11,.21,.99)"
+          maxWidth: 470,
+          width: "100%",
+          margin: "0 auto",
+          transition: "all 0.7s cubic-bezier(.79,.11,.21,.99)",
         }}
-
       >
-        <h2
-          style={{
-            color: "#fff",
-            fontWeight: 700,
-            fontSize: "2.1rem",
-            textAlign: "center",
-            marginBottom: "1.4rem",
-            letterSpacing: "-0.5px",
-            fontFamily: MODERN_FONT
-          }}
-        >
-          Quick Campaign Survey
-        </h2>
-        {/* Question */}
-        <div style={{ color: "#fff", fontSize: "1.18rem", marginBottom: "1.6rem", fontWeight: 500, minHeight: 56 }}>
-          {showFollowup ? current.followup.question : current.question}
-        </div>
-        {/* Input */}
-        {showFollowup || current.type === "text" ? (
-          <input
-            type="text"
-            autoFocus
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            style={{
-              padding: "1.1rem",
-              borderRadius: "1.2rem",
-              border: "none",
-              fontSize: "1.15rem",
-              outline: "none",
-              fontFamily: MODERN_FONT,
-              marginBottom: "1.1rem",
-              width: "100%"
-            }}
-            placeholder="Type your answer..."
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && inputValue.trim() !== "") {
-                handleNext(inputValue.trim());
-              }
-            }}
-          />
-        ) : current.type === "yesno" ? (
-          <div style={{ display: "flex", gap: "2rem", marginBottom: "1.2rem" }}>
-            <button
+        {/* Survey */}
+        {!showAds && (
+          <>
+            <h2
               style={{
-                background: DARK_GREEN,
                 color: "#fff",
-                border: "none",
-                borderRadius: "1.1rem",
-                padding: "1rem 2.5rem",
-                fontWeight: 600,
-                fontSize: "1.18rem",
-                cursor: "pointer",
-                fontFamily: MODERN_FONT,
-                boxShadow: "0 2px 18px 0 #15713717",
-                opacity: 0.95
+                fontWeight: 700,
+                fontSize: "2.1rem",
+                textAlign: "center",
+                marginBottom: "1.4rem",
+                letterSpacing: "-0.5px",
+                fontFamily: MODERN_FONT
               }}
-              onClick={() => handleNext("yes")}
             >
-              Yes
-            </button>
-            <button
-              style={{
-                background: "#fff",
-                color: "#232529",
-                border: "none",
-                borderRadius: "1.1rem",
-                padding: "1rem 2.5rem",
-                fontWeight: 600,
-                fontSize: "1.18rem",
-                cursor: "pointer",
-                fontFamily: MODERN_FONT,
-                boxShadow: "0 2px 18px 0 #15713717",
-                opacity: 0.95
-              }}
-              onClick={() => handleNext("no")}
-            >
-              No
-            </button>
-          </div>
-        ) : current.type === "multiple" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: "1.3rem", marginBottom: "1.2rem" }}>
-            {current.options.map((opt, i) => (
+              Quick Campaign Survey
+            </h2>
+            <div style={{ color: "#fff", fontSize: "1.18rem", marginBottom: "1.6rem", fontWeight: 500, minHeight: 56 }}>
+              {showFollowup ? current.followup.question : current.question}
+            </div>
+            {/* Input */}
+            {showFollowup || current.type === "text" ? (
+              <input
+                type="text"
+                autoFocus
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                style={{
+                  padding: "1.1rem",
+                  borderRadius: "1.2rem",
+                  border: "none",
+                  fontSize: "1.15rem",
+                  outline: "none",
+                  fontFamily: MODERN_FONT,
+                  marginBottom: "1.1rem",
+                  width: "100%"
+                }}
+                placeholder="Type your answer..."
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && inputValue.trim() !== "") {
+                    handleNext(inputValue.trim());
+                  }
+                }}
+              />
+            ) : current.type === "yesno" ? (
+              <div style={{ display: "flex", gap: "2rem", marginBottom: "1.2rem" }}>
+                <button
+                  style={{
+                    background: DARK_GREEN,
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: "1.1rem",
+                    padding: "1rem 2.5rem",
+                    fontWeight: 600,
+                    fontSize: "1.18rem",
+                    cursor: "pointer",
+                    fontFamily: MODERN_FONT,
+                    boxShadow: "0 2px 18px 0 #15713717",
+                    opacity: 0.95
+                  }}
+                  onClick={() => handleNext("yes")}
+                >
+                  Yes
+                </button>
+                <button
+                  style={{
+                    background: "#fff",
+                    color: "#232529",
+                    border: "none",
+                    borderRadius: "1.1rem",
+                    padding: "1rem 2.5rem",
+                    fontWeight: 600,
+                    fontSize: "1.18rem",
+                    cursor: "pointer",
+                    fontFamily: MODERN_FONT,
+                    boxShadow: "0 2px 18px 0 #15713717",
+                    opacity: 0.95
+                  }}
+                  onClick={() => handleNext("no")}
+                >
+                  No
+                </button>
+              </div>
+            ) : current.type === "multiple" ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "1.3rem", marginBottom: "1.2rem" }}>
+                {current.options.map((opt, i) => (
+                  <button
+                    key={i}
+                    style={{
+                      background: DARK_GREEN,
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: "1.1rem",
+                      padding: "1rem",
+                      fontWeight: 600,
+                      fontSize: "1.09rem",
+                      cursor: "pointer",
+                      fontFamily: MODERN_FONT,
+                      boxShadow: "0 2px 14px 0 #15713711",
+                      opacity: 0.93,
+                      textAlign: "left"
+                    }}
+                    onClick={() => handleNext(opt)}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+
+            {/* Next/Finish Button */}
+            {(showFollowup || current.type === "text") && (
               <button
-                key={i}
+                disabled={inputValue.trim() === ""}
                 style={{
                   background: DARK_GREEN,
                   color: "#fff",
                   border: "none",
                   borderRadius: "1.1rem",
-                  padding: "1rem",
-                  fontWeight: 600,
-                  fontSize: "1.09rem",
+                  padding: "1rem 2.3rem",
+                  fontWeight: 700,
+                  fontSize: "1.12rem",
+                  cursor: inputValue.trim() === "" ? "not-allowed" : "pointer",
+                  fontFamily: MODERN_FONT,
+                  marginTop: 6,
+                  opacity: inputValue.trim() === "" ? 0.6 : 1
+                }}
+                onClick={() => handleNext(inputValue.trim())}
+              >
+                Next
+              </button>
+            )}
+            {/* Generate Campaign */}
+            {step === QUESTIONS.length && (
+              <button
+                style={{
+                  background: DARK_GREEN,
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: "1.2rem",
+                  padding: "1.1rem 2.8rem",
+                  fontWeight: 700,
+                  fontSize: "1.17rem",
                   cursor: "pointer",
                   fontFamily: MODERN_FONT,
-                  boxShadow: "0 2px 14px 0 #15713711",
-                  opacity: 0.93,
-                  textAlign: "left"
+                  width: "100%",
+                  marginTop: "1.4rem"
                 }}
-                onClick={() => handleNext(opt)}
+                onClick={handleGenerate}
               >
-                {opt}
+                Generate Campaign
               </button>
-            ))}
-          </div>
-        ) : null}
+            )}
+            {/* Progress */}
+            <div style={{ marginTop: 25, textAlign: "center", color: "#b4b7bb", fontSize: "1.01rem" }}>
+              {step < QUESTIONS.length
+                ? `Question ${step + 1} of ${QUESTIONS.length}`
+                : "Done"}
+            </div>
+          </>
+        )}
 
-        {/* Next/Finish Button */}
-        {(showFollowup || current.type === "text") && (
-          <button
-            disabled={inputValue.trim() === ""}
-            style={{
-              background: DARK_GREEN,
+        {/* Ad Previews */}
+        {showAds && (
+          <div>
+            <h2 style={{
               color: "#fff",
-              border: "none",
-              borderRadius: "1.1rem",
-              padding: "1rem 2.3rem",
               fontWeight: 700,
-              fontSize: "1.12rem",
-              cursor: inputValue.trim() === "" ? "not-allowed" : "pointer",
-              fontFamily: MODERN_FONT,
-              marginTop: 6,
-              opacity: inputValue.trim() === "" ? 0.6 : 1
-            }}
-            onClick={() => handleNext(inputValue.trim())}
-          >
-            Next
-          </button>
+              fontSize: "2.0rem",
+              textAlign: "center",
+              margin: "1.3rem 0 0.8rem 0",
+              letterSpacing: "-0.5px"
+            }}>
+              Ad Previews
+            </h2>
+            <div style={{
+              display: "flex",
+              flexDirection: "row",
+              gap: "2.8rem",
+              justifyContent: "center",
+              margin: "1.2rem 0"
+            }}>
+              <AdPreview
+                type="image"
+                selected={selected.image}
+                onSelect={() =>
+                  setSelected(sel => ({
+                    ...sel,
+                    image: !sel.image
+                  }))
+                }
+                onEdit={() => setEditMode(em => ({ ...em, image: true }))}
+                adCopy={copy.image}
+                src={DEFAULT_IMAGE}
+                editing={editMode.image}
+                onCopyChange={v => setCopy(c => ({ ...c, image: v }))}
+                onCloseEdit={() => setEditMode(em => ({ ...em, image: false }))}
+              />
+              <AdPreview
+                type="video"
+                selected={selected.video}
+                onSelect={() =>
+                  setSelected(sel => ({
+                    ...sel,
+                    video: !sel.video
+                  }))
+                }
+                onEdit={() => setEditMode(em => ({ ...em, video: true }))}
+                adCopy={copy.video}
+                src={DEFAULT_VIDEO}
+                editing={editMode.video}
+                onCopyChange={v => setCopy(c => ({ ...c, video: v }))}
+                onCloseEdit={() => setEditMode(em => ({ ...em, video: false }))}
+              />
+            </div>
+            <div style={{
+              textAlign: "center",
+              color: "#b6ffc3",
+              margin: "1rem 0 1.3rem 0",
+              fontWeight: 500,
+              fontSize: "1.08rem"
+            }}>
+              {!(selected.image || selected.video)
+                ? "Pick at least one to continue"
+                : `You selected: ${
+                    selected.image && selected.video
+                      ? "Both"
+                      : selected.image
+                      ? "Image"
+                      : "Video"
+                  }`}
+            </div>
+            <button
+              disabled={!(selected.image || selected.video)}
+              style={{
+                background: DARK_GREEN,
+                color: "#fff",
+                border: "none",
+                borderRadius: "1.2rem",
+                padding: "1.2rem 2.5rem",
+                fontWeight: 700,
+                fontSize: "1.2rem",
+                cursor: !(selected.image || selected.video)
+                  ? "not-allowed"
+                  : "pointer",
+                fontFamily: MODERN_FONT,
+                width: "100%",
+                opacity: !(selected.image || selected.video) ? 0.5 : 1,
+                marginTop: "0.6rem"
+              }}
+              onClick={handleFinalize}
+            >
+              Finalize Campaign
+            </button>
+          </div>
         )}
-        {/* Finish */}
-        {step === QUESTIONS.length && (
-          <button
-            style={{
-              background: DARK_GREEN,
-              color: "#fff",
-              border: "none",
-              borderRadius: "1.1rem",
-              padding: "1.1rem 2.8rem",
-              fontWeight: 700,
-              fontSize: "1.15rem",
-              cursor: "pointer",
-              fontFamily: MODERN_FONT,
-              width: "100%",
-              marginTop: "1.2rem"
-            }}
-            onClick={handleFinish}
-          >
-            Finish & Continue
-          </button>
-        )}
-        {/* Carousel progress */}
-        <div style={{ marginTop: 25, textAlign: "center", color: "#b4b7bb", fontSize: "1.01rem" }}>
-          {step < QUESTIONS.length
-            ? `Question ${step + 1} of ${QUESTIONS.length}`
-            : "Done"}
-        </div>
       </div>
+      {/* Ad preview hover animation */}
+      <style>{`
+        .animate-wiggle {
+          animation: wiggle 0.33s linear 1;
+        }
+        @keyframes wiggle {
+          0% { transform: scale(1) rotate(-2deg); }
+          25% { transform: scale(1.02) rotate(2deg);}
+          50% { transform: scale(1.06) rotate(-2deg);}
+          75% { transform: scale(1.02) rotate(2deg);}
+          100% { transform: scale(1) rotate(0);}
+        }
+      `}</style>
     </div>
   );
 };
