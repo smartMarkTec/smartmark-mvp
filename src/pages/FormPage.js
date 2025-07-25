@@ -3,35 +3,29 @@ import { FaEdit } from "react-icons/fa";
 
 const QUESTIONS = [
   {
-    question: "Would you like us to use your website to learn about your business and generate your ad?",
-    type: "yesno",
+    question: "Use your website to generate the ad?",
     key: "useWebsite"
   },
   {
-    question: "Is your business primarily targeting local customers?",
-    type: "yesno",
+    question: "Is your business local?",
     key: "isLocal"
   },
   {
-    question: "Are you currently running any promotions or offers?",
-    type: "yesno",
+    question: "Currently running promotions?",
     key: "hasPromo"
   },
   {
-    question: "Would you prefer your ad to focus on brand awareness over direct sales?",
-    type: "yesno",
+    question: "Focus on brand awareness over sales?",
     key: "brandAwareness"
   },
   {
-    question: "Do you offer delivery or online ordering?",
-    type: "yesno",
+    question: "Offer delivery or online ordering?",
     key: "hasDelivery"
   },
   {
-    question: "Should we emphasize fast service or convenience in your ad?",
-    type: "yesno",
+    question: "Emphasize fast service or convenience?",
     key: "fastService"
-  }
+  },
 ];
 
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -115,17 +109,11 @@ const AdPreviewCard = ({ title, type }) => (
 );
 
 export default function FormPage() {
-  const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [showPreviews, setShowPreviews] = useState(false);
 
-  const handleAnswer = (ans) => {
-    setAnswers({ ...answers, [QUESTIONS[step].key]: ans });
-    if (step === QUESTIONS.length - 1) return;
-    setStep(step + 1);
+  const handleAnswer = (key, value) => {
+    setAnswers(prev => ({ ...prev, [key]: value }));
   };
-
-  const handleGenerate = () => setShowPreviews(true);
 
   return (
     <div
@@ -141,7 +129,7 @@ export default function FormPage() {
     >
       <div style={{
         width: "100%",
-        maxWidth: 760,
+        maxWidth: 780,
         marginTop: 60,
         marginBottom: 30,
         background: "#202327",
@@ -152,124 +140,93 @@ export default function FormPage() {
         flexDirection: "column",
         alignItems: "center"
       }}>
-        {!showPreviews ? (
-          <>
-            <div style={{
-              color: "#fff",
-              fontWeight: 800,
-              fontSize: "2.13rem",
-              textAlign: "center",
-              marginBottom: 32,
-              lineHeight: 1.22,
-              letterSpacing: "-.4px"
-            }}>
-              {QUESTIONS[step].question}
+        <div style={{
+          color: "#fff",
+          fontWeight: 800,
+          fontSize: "2.13rem",
+          textAlign: "center",
+          marginBottom: 32,
+          lineHeight: 1.22,
+          letterSpacing: "-.4px"
+        }}>
+          Campaign Setup Survey
+        </div>
+
+        {/* Survey Questions */}
+        <div style={{
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          gap: 28,
+          marginBottom: 48
+        }}>
+          {QUESTIONS.map(q => (
+            <div key={q.key} style={{ width: "100%" }}>
+              <div style={{
+                color: "#e4e4e4",
+                fontWeight: 700,
+                fontSize: "1.21rem",
+                marginBottom: 10
+              }}>
+                {q.question}
+              </div>
+              <div style={{ display: "flex", gap: 20 }}>
+                <button
+                  style={{
+                    background: answers[q.key] === "yes" ? TEAL : "#23282e",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 14,
+                    fontWeight: 700,
+                    fontSize: "1.16rem",
+                    padding: "13px 44px",
+                    cursor: "pointer",
+                    boxShadow: "0 2px 10px #1112",
+                    transition: "background 0.15s"
+                  }}
+                  onClick={() => handleAnswer(q.key, "yes")}
+                >Yes</button>
+                <button
+                  style={{
+                    background: answers[q.key] === "no" ? TEAL : "#23282e",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 14,
+                    fontWeight: 700,
+                    fontSize: "1.16rem",
+                    padding: "13px 44px",
+                    cursor: "pointer",
+                    boxShadow: "0 2px 10px #1112",
+                    transition: "background 0.15s"
+                  }}
+                  onClick={() => handleAnswer(q.key, "no")}
+                >No</button>
+              </div>
             </div>
-            {/* Yes/No buttons */}
-            <div style={{
-              display: "flex",
-              gap: 20,
-              width: "100%",
-              justifyContent: "center",
-              marginBottom: 38
-            }}>
-              <button
-                style={{
-                  background: "#23282e",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 14,
-                  fontWeight: 700,
-                  fontSize: "1.22rem",
-                  padding: "17px 54px",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 10px #1112",
-                  transition: "background 0.15s"
-                }}
-                onClick={() => handleAnswer("yes")}
-              >Yes</button>
-              <button
-                style={{
-                  background: "#23282e",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 14,
-                  fontWeight: 700,
-                  fontSize: "1.22rem",
-                  padding: "17px 54px",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 10px #1112",
-                  transition: "background 0.15s"
-                }}
-                onClick={() => handleAnswer("no")}
-              >No</button>
-            </div>
-            {/* Generate or Done button */}
-            {step === QUESTIONS.length - 1 ? (
-              <button
-                style={{
-                  marginTop: 10,
-                  marginBottom: 0,
-                  background: TEAL,
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 10,
-                  fontWeight: 700,
-                  fontSize: "1.19rem",
-                  padding: "16px 52px",
-                  cursor: "pointer",
-                  boxShadow: "0 2px 16px #0cc4be44",
-                  transition: "background 0.18s"
-                }}
-                onClick={handleGenerate}
-              >
-                Generate Campaign
-              </button>
-            ) : (
-              <button
-                style={{
-                  marginTop: 8,
-                  marginBottom: 0,
-                  background: TEAL,
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: 10,
-                  fontWeight: 700,
-                  fontSize: "1.18rem",
-                  padding: "15px 46px",
-                  cursor: "pointer",
-                  opacity: 0.7,
-                  boxShadow: "0 2px 16px #0cc4be22"
-                }}
-                disabled
-              >
-                Next
-              </button>
-            )}
-          </>
-        ) : (
-          // Ad previews with divider
+          ))}
+        </div>
+
+        {/* Ad Previews with Divider */}
+        <div style={{
+          display: "flex",
+          alignItems: "stretch",
+          width: "100%",
+          gap: 0,
+          position: "relative",
+          marginTop: 18
+        }}>
+          <AdPreviewCard title="IMAGE AD PREVIEW" type="image" />
+          {/* Vertical Divider */}
           <div style={{
-            display: "flex",
-            alignItems: "stretch",
-            width: "100%",
-            gap: 0,
-            position: "relative",
-            marginTop: 18
-          }}>
-            <AdPreviewCard title="IMAGE AD PREVIEW" type="image" />
-            {/* Vertical Divider */}
-            <div style={{
-              width: 2,
-              background: "linear-gradient(180deg, #22d1c6 0%, #0fe8b5 100%)",
-              borderRadius: 8,
-              margin: "0 30px",
-              minHeight: 270,
-              alignSelf: "center"
-            }} />
-            <AdPreviewCard title="VIDEO AD PREVIEW" type="video" />
-          </div>
-        )}
+            width: 2,
+            background: "linear-gradient(180deg, #22d1c6 0%, #0fe8b5 100%)",
+            borderRadius: 8,
+            margin: "0 30px",
+            minHeight: 270,
+            alignSelf: "center"
+          }} />
+          <AdPreviewCard title="VIDEO AD PREVIEW" type="video" />
+        </div>
       </div>
     </div>
   );
