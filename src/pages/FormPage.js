@@ -1,31 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { FaEdit } from "react-icons/fa";
 
 const QUESTIONS = [
   {
-    question: "Use your website to generate the ad?",
+    question: "Would you like us to use your website to generate your ad?",
     key: "useWebsite"
   },
   {
-    question: "Is your business local?",
+    question: "Is your business primarily targeting local customers?",
     key: "isLocal"
   },
   {
-    question: "Currently running promotions?",
+    question: "Are you currently running any promotions or offers?",
     key: "hasPromo"
   },
   {
-    question: "Focus on brand awareness over sales?",
+    question: "Would you prefer your ad to focus on brand awareness over direct sales?",
     key: "brandAwareness"
   },
   {
-    question: "Offer delivery or online ordering?",
+    question: "Do you offer delivery or online ordering?",
     key: "hasDelivery"
   },
   {
-    question: "Emphasize fast service or convenience?",
+    question: "Should we emphasize fast service or convenience in your ad?",
     key: "fastService"
-  },
+  }
 ];
 
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -36,7 +36,7 @@ const AdPreviewCard = ({ title, type }) => (
   <div
     style={{
       flex: 1,
-      minWidth: 320,
+      minWidth: 340,
       maxWidth: 400,
       background: "#23262a",
       borderRadius: 18,
@@ -109,10 +109,45 @@ const AdPreviewCard = ({ title, type }) => (
 );
 
 export default function FormPage() {
+  const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
+  const [done, setDone] = useState(false);
+  const carouselRef = useRef();
 
-  const handleAnswer = (key, value) => {
-    setAnswers(prev => ({ ...prev, [key]: value }));
+  const handleAnswer = (ans) => {
+    setAnswers({ ...answers, [QUESTIONS[step].key]: ans });
+    if (step < QUESTIONS.length - 1) {
+      setStep(step + 1);
+    } else {
+      setDone(true);
+      // Optionally: scroll to Generate button
+      setTimeout(() => {
+        document.getElementById("generate-campaign-btn")?.scrollIntoView({ behavior: "smooth" });
+      }, 150);
+    }
+  };
+
+  const handleBack = () => {
+    if (step > 0) {
+      setStep(step - 1);
+      setDone(false);
+    }
+  };
+
+  // Simple horizontal carousel effect
+  const slideStyle = {
+    display: "flex",
+    flexDirection: "row",
+    transition: "transform 0.44s cubic-bezier(.8, .2, .15, 1)",
+    width: `${QUESTIONS.length * 100}%`,
+    transform: `translateX(-${step * (100 / QUESTIONS.length)}%)`
+  };
+  const singleSlide = {
+    width: `${100 / QUESTIONS.length}%`,
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center"
   };
 
   return (
@@ -140,71 +175,142 @@ export default function FormPage() {
         flexDirection: "column",
         alignItems: "center"
       }}>
-        <div style={{
-          color: "#fff",
-          fontWeight: 800,
-          fontSize: "2.13rem",
-          textAlign: "center",
-          marginBottom: 32,
-          lineHeight: 1.22,
-          letterSpacing: "-.4px"
-        }}>
-          Campaign Setup Survey
-        </div>
-
-        {/* Survey Questions */}
+        {/* Carousel/Slider Survey */}
         <div style={{
           width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: 28,
-          marginBottom: 48
+          overflow: "hidden",
+          marginBottom: 34,
+          position: "relative",
+          minHeight: 180
         }}>
-          {QUESTIONS.map(q => (
-            <div key={q.key} style={{ width: "100%" }}>
-              <div style={{
-                color: "#e4e4e4",
+          <div style={slideStyle} ref={carouselRef}>
+            {QUESTIONS.map((q, i) => (
+              <div style={singleSlide} key={q.key}>
+                <div style={{
+                  color: "#fff",
+                  fontWeight: 800,
+                  fontSize: "2.13rem",
+                  textAlign: "center",
+                  marginBottom: 36,
+                  lineHeight: 1.22,
+                  letterSpacing: "-.4px",
+                  minHeight: 52,
+                  maxWidth: 540
+                }}>
+                  {q.question}
+                </div>
+                <div style={{ display: "flex", gap: 20 }}>
+                  <button
+                    style={{
+                      background: answers[q.key] === "yes" ? TEAL : "#23282e",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 14,
+                      fontWeight: 700,
+                      fontSize: "1.22rem",
+                      padding: "17px 54px",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 10px #1112",
+                      transition: "background 0.15s"
+                    }}
+                    onClick={() => handleAnswer("yes")}
+                  >Yes</button>
+                  <button
+                    style={{
+                      background: answers[q.key] === "no" ? TEAL : "#23282e",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 14,
+                      fontWeight: 700,
+                      fontSize: "1.22rem",
+                      padding: "17px 54px",
+                      cursor: "pointer",
+                      boxShadow: "0 2px 10px #1112",
+                      transition: "background 0.15s"
+                    }}
+                    onClick={() => handleAnswer("no")}
+                  >No</button>
+                </div>
+              </div>
+            ))}
+          </div>
+          {/* Back Button */}
+          {step > 0 && !done && (
+            <button
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 35,
+                background: "rgba(52,55,61,0.82)",
+                color: "#fff",
+                border: "none",
+                borderRadius: "1.1rem",
+                padding: "0.65rem 1.6rem",
                 fontWeight: 700,
-                fontSize: "1.21rem",
-                marginBottom: 10
-              }}>
-                {q.question}
-              </div>
-              <div style={{ display: "flex", gap: 20 }}>
-                <button
-                  style={{
-                    background: answers[q.key] === "yes" ? TEAL : "#23282e",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 14,
-                    fontWeight: 700,
-                    fontSize: "1.16rem",
-                    padding: "13px 44px",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 10px #1112",
-                    transition: "background 0.15s"
-                  }}
-                  onClick={() => handleAnswer(q.key, "yes")}
-                >Yes</button>
-                <button
-                  style={{
-                    background: answers[q.key] === "no" ? TEAL : "#23282e",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 14,
-                    fontWeight: 700,
-                    fontSize: "1.16rem",
-                    padding: "13px 44px",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 10px #1112",
-                    transition: "background 0.15s"
-                  }}
-                  onClick={() => handleAnswer(q.key, "no")}
-                >No</button>
-              </div>
-            </div>
-          ))}
+                fontSize: "1rem",
+                letterSpacing: "0.8px",
+                cursor: "pointer",
+                boxShadow: "0 2px 12px 0 rgba(24,84,49,0.09)",
+                fontFamily: MODERN_FONT,
+                zIndex: 20,
+                transition: "background 0.18s"
+              }}
+              onClick={handleBack}
+            >
+              ← Back
+            </button>
+          )}
+          {/* Done button on last step */}
+          {step === QUESTIONS.length - 1 && !done && (
+            <button
+              style={{
+                position: "absolute",
+                right: 0,
+                top: 35,
+                background: TEAL,
+                color: "#fff",
+                border: "none",
+                borderRadius: "1.1rem",
+                padding: "0.65rem 1.8rem",
+                fontWeight: 700,
+                fontSize: "1rem",
+                letterSpacing: "0.8px",
+                cursor: "pointer",
+                boxShadow: "0 2px 12px 0 #12b3a622",
+                fontFamily: MODERN_FONT,
+                zIndex: 20,
+                transition: "background 0.18s"
+              }}
+              onClick={() => setDone(true)}
+            >
+              Done
+            </button>
+          )}
         </div>
+        {/* Generate Campaign Button */}
+        {done && (
+          <button
+            id="generate-campaign-btn"
+            style={{
+              background: TEAL,
+              color: "#fff",
+              border: "none",
+              borderRadius: 12,
+              fontWeight: 700,
+              fontSize: "1.24rem",
+              padding: "18px 66px",
+              cursor: "pointer",
+              boxShadow: "0 2px 16px #0cc4be44",
+              marginBottom: 42,
+              marginTop: 8,
+              fontFamily: MODERN_FONT,
+              transition: "background 0.18s"
+            }}
+            onClick={() => alert("Generate Campaign (hook up logic here)!")}
+          >
+            Generate Campaign
+          </button>
+        )}
 
         {/* Ad Previews with Divider */}
         <div style={{
