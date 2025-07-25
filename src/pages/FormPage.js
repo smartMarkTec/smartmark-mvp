@@ -205,7 +205,7 @@ const AdPreviewCard = ({
         : videoScript || "Video ad copy..."}
     </div>
     {/* Show image prompt for image preview card */}
-    {type === "image" && imagePrompt && (
+    {type === "image" && (
       <div style={{
         marginTop: 8,
         background: "#27302a",
@@ -597,9 +597,6 @@ export default function FormPage() {
               title="IMAGE AD PREVIEW"
               type="image"
               headline={result.headline}
-              body={result.body}
-              imagePrompt={result.image_prompt}
-              imageUrl={imageUrl}
               imageLoading={imageLoading}
               onRegenerate={handleRegenerateImage}
             />
@@ -615,8 +612,6 @@ export default function FormPage() {
               title="VIDEO AD PREVIEW"
               type="video"
               headline={result.headline}
-              body={result.body}
-              videoScript={result.video_script}
             />
           </div>
         )}
