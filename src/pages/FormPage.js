@@ -1,53 +1,74 @@
-import React, { useState, useRef } from "react";
-import { FaEdit, FaArrowLeft } from "react-icons/fa";
+import React, { useState } from "react";
+import { FaEdit, FaArrowLeft, FaArrowRight } from "react-icons/fa";
 
 const QUESTIONS = [
   {
-    question: "Would you like us to use your website to generate your ad?",
-    key: "useWebsite",
-    type: "yesno",
+    question: "Main objective?",
+    key: "objective",
+    type: "choices",
+    choices: [
+      "Drive sales",
+      "Get leads",
+      "Website visits",
+      "Build brand"
+    ]
   },
   {
-    question: "Is your business primarily targeting local customers?",
-    key: "isLocal",
-    type: "yesno",
+    question: "Is your offer time-limited?",
+    key: "timelimit",
+    type: "yesno"
   },
   {
-    question: "Are you currently running any promotions or offers?",
-    key: "hasPromo",
-    type: "yesno",
+    question: "Business mostly local or online?",
+    key: "localOnline",
+    type: "choices",
+    choices: [
+      "Local",
+      "Online"
+    ]
   },
   {
-    question: "Would you prefer your ad to focus on brand awareness over direct sales?",
-    key: "brandAwareness",
-    type: "yesno",
+    question: "How urgent is your offer?",
+    key: "urgency",
+    type: "choices",
+    choices: [
+      "Very urgent",
+      "Somewhat urgent",
+      "Not urgent"
+    ]
   },
   {
-    question: "Do you offer delivery or online ordering?",
-    key: "hasDelivery",
-    type: "yesno",
+    question: "Target new customers, existing, or both?",
+    key: "target",
+    type: "choices",
+    choices: [
+      "New",
+      "Existing",
+      "Both"
+    ]
   },
   {
-    question: "Should we emphasize fast service or convenience in your ad?",
-    key: "fastService",
-    type: "yesno",
+    question: "Feature a specific product or service?",
+    key: "featureSpecific",
+    type: "yesno"
   },
   {
-    question: "What would you like customers to do once they visit your website?",
-    key: "goal",
+    question: "Describe your perfect customer in one sentence.",
+    key: "perfectCustomer",
     type: "text",
-    placeholder: "e.g., place an order, book, read a blog...",
+    placeholder: "e.g. 'Families who order takeout weekly'",
   },
   {
-    question: "Anything specific you want shown in the ad?",
-    key: "custom",
+    question: "What should people do after seeing your ad?",
+    key: "desiredAction",
     type: "text",
-    placeholder: "e.g., menu items, offers, images, phrases...",
+    placeholder: "e.g. 'Order online', 'Call for a quote', 'Visit website'",
   }
 ];
 
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
+const TEAL_DARK = "#10b597";
 const DARK_BG = "#181b20";
 
 const AdPreviewCard = ({ title, type }) => (
@@ -75,7 +96,6 @@ const AdPreviewCard = ({ title, type }) => (
     }}>
       {title}
     </span>
-    {/* Placeholder for image or video */}
     <div
       style={{
         width: "100%",
@@ -95,7 +115,6 @@ const AdPreviewCard = ({ title, type }) => (
     >
       {type === "image" ? "Image goes here" : "Video goes here"}
     </div>
-    {/* Sample ad copy text */}
     <div style={{ color: "#fff", fontWeight: 600, fontSize: "1.19rem", marginBottom: 7 }}>
       {type === "image" ? "Don't Miss Our Limited-Time Offer" : "Welcome New Customers Instantly!"}
     </div>
@@ -129,45 +148,26 @@ const AdPreviewCard = ({ title, type }) => (
 export default function FormPage() {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState({});
-  const [done, setDone] = useState(false);
+  const [touched, setTouched] = useState(false);
 
-  const handleAnswer = (ans) => {
-    setAnswers({ ...answers, [QUESTIONS[step].key]: ans });
-    if (step < QUESTIONS.length - 1) {
-      setStep(step + 1);
-    } else {
-      setDone(true);
-    }
-  };
+  const q = QUESTIONS[step];
+  const isLast = step === QUESTIONS.length - 1;
+  const readyToAdvance = !!answers[q.key];
 
   const handleBack = () => {
-    if (done) {
-      setDone(false);
-      setStep(QUESTIONS.length - 1);
-    } else if (step > 0) {
-      setStep(step - 1);
+    if (step > 0) setStep(step - 1);
+  };
+  const handleForward = () => {
+    if (isLast) return;
+    if (readyToAdvance) {
+      setStep(step + 1);
+      setTouched(false);
     }
   };
 
-  // Carousel slide logic
-  const slideStyle = {
-    display: "flex",
-    flexDirection: "row",
-    transition: "transform 0.44s cubic-bezier(.8, .2, .15, 1)",
-    width: `${QUESTIONS.length * 100}%`,
-    transform: `translateX(-${step * (100 / QUESTIONS.length)}%)`
-  };
-  const singleSlide = {
-    width: `${100 / QUESTIONS.length}%`,
-    flexShrink: 0,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center"
-  };
-
-  // Input for free response
-  const handleTextChange = (e) => {
-    setAnswers({ ...answers, [QUESTIONS[step].key]: e.target.value });
+  const handleAnswer = (value) => {
+    setAnswers({ ...answers, [q.key]: value });
+    setTouched(true);
   };
 
   return (
@@ -195,195 +195,198 @@ export default function FormPage() {
         flexDirection: "column",
         alignItems: "center"
       }}>
-        {/* Carousel/Slider Survey */}
+        {/* Stationary Q&A Card */}
         <div style={{
           width: "100%",
-          overflow: "hidden",
+          minHeight: 180,
           marginBottom: 34,
           position: "relative",
-          minHeight: 180
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
         }}>
-          <div style={slideStyle}>
-            {QUESTIONS.map((q, i) => (
-              <div style={singleSlide} key={q.key}>
-                <div style={{
+          <div style={{display:"flex", alignItems:"center", gap:22, width:"100%", justifyContent:"center"}}>
+            {/* Back arrow */}
+            {step > 0 && (
+              <button
+                aria-label="Back"
+                onClick={handleBack}
+                style={{
+                  border: "none",
+                  background: "#232729",
+                  borderRadius: 8,
+                  width: 38,
+                  height: 38,
                   display: "flex",
                   alignItems: "center",
-                  gap: 16,
-                  marginBottom: 36,
-                  justifyContent: "center"
+                  justifyContent: "center",
+                  boxShadow: "0 2px 7px #0002",
+                  cursor: "pointer",
+                  marginRight: 2,
+                  outline: "none"
                 }}>
-                  {/* Back arrow button */}
-                  {((step === i && step > 0 && !done) || (done && i === QUESTIONS.length - 1)) && (
-                    <button
-                      aria-label="Back"
-                      onClick={handleBack}
-                      style={{
-                        border: "none",
-                        background: "#222729",
-                        borderRadius: 8,
-                        width: 38,
-                        height: 38,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: "0 2px 7px #0002",
-                        cursor: "pointer",
-                        marginRight: 6,
-                        outline: "none"
-                      }}>
-                      <FaArrowLeft size={20} color={TEAL} />
-                    </button>
-                  )}
-                  <div style={{
+                <FaArrowLeft size={20} color={TEAL} />
+              </button>
+            )}
+            <div style={{
+              color: "#fff",
+              fontWeight: 800,
+              fontSize: "2.04rem",
+              textAlign: "center",
+              lineHeight: 1.15,
+              letterSpacing: "-.4px",
+              minHeight: 52,
+              maxWidth: 540,
+              flex:1
+            }}>
+              {q.question}
+            </div>
+            {/* Forward arrow */}
+            {(!isLast || (isLast && readyToAdvance)) && (
+              <button
+                aria-label="Next"
+                onClick={handleForward}
+                disabled={!readyToAdvance}
+                style={{
+                  border: "none",
+                  background: readyToAdvance ? TEAL : "#243835",
+                  borderRadius: 8,
+                  width: 38,
+                  height: 38,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: readyToAdvance ? "0 2px 7px #14e7b929" : "0 2px 7px #2229",
+                  cursor: readyToAdvance ? "pointer" : "not-allowed",
+                  marginLeft: 2,
+                  outline: "none",
+                  transition: "background 0.2s"
+                }}>
+                <FaArrowRight size={20} color={readyToAdvance ? "#fff" : "#57a091"} />
+              </button>
+            )}
+          </div>
+          {/* Answers */}
+          <div style={{
+            marginTop: 36,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            width: "100%"
+          }}>
+            {/* YES/NO */}
+            {q.type === "yesno" && (
+              <div style={{display:"flex", gap:18, justifyContent:"center"}}>
+                <button
+                  style={{
+                    background: answers[q.key] === "yes" ? TEAL : "#202c28",
                     color: "#fff",
-                    fontWeight: 800,
-                    fontSize: "2.13rem",
-                    textAlign: "center",
-                    lineHeight: 1.22,
-                    letterSpacing: "-.4px",
-                    minHeight: 52,
-                    maxWidth: 540
-                  }}>
-                    {q.question}
-                  </div>
-                </div>
-                {q.type === "yesno" && (
-                  <div style={{ display: "flex", gap: 20 }}>
-                    <button
-                      style={{
-                        background: answers[q.key] === "yes" ? TEAL : "#202c28",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 14,
-                        fontWeight: 700,
-                        fontSize: "1.19rem",
-                        padding: "15px 48px",
-                        cursor: "pointer",
-                        boxShadow: "0 2px 10px #1112",
-                        transition: "background 0.15s"
-                      }}
-                      onClick={() => handleAnswer("yes")}
-                    >Yes</button>
-                    <button
-                      style={{
-                        background: answers[q.key] === "no" ? TEAL : "#202c28",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 14,
-                        fontWeight: 700,
-                        fontSize: "1.19rem",
-                        padding: "15px 48px",
-                        cursor: "pointer",
-                        boxShadow: "0 2px 10px #1112",
-                        transition: "background 0.15s"
-                      }}
-                      onClick={() => handleAnswer("no")}
-                    >No</button>
-                  </div>
-                )}
-                {q.type === "text" && (
-                  <input
-                    type="text"
-                    value={answers[q.key] || ""}
-                    onChange={handleTextChange}
-                    placeholder={q.placeholder || ""}
-                    style={{
-                      background: "#191b1e",
-                      color: "#fff",
-                      border: "none",
-                      outline: "none",
-                      borderRadius: 99,
-                      fontWeight: 600,
-                      fontSize: "1.17rem",
-                      padding: "17px 28px",
-                      marginTop: 6,
-                      marginBottom: 8,
-                      minWidth: 320,
-                      boxShadow: "0 2px 8px #0002",
-                      letterSpacing: ".04em",
-                      textAlign: "center"
-                    }}
-                    onKeyDown={e => {
-                      if (e.key === "Enter" && (answers[q.key] || "").length > 0) {
-                        handleAnswer(e.target.value);
-                      }
-                    }}
-                  />
-                )}
-                {/* Show Done button on last question and it's not text input */}
-                {(step === QUESTIONS.length - 1 && q.type !== "text" && !done) && (
-                  <button
-                    style={{
-                      marginTop: 28,
-                      background: TEAL,
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 12,
-                      fontWeight: 700,
-                      fontSize: "1.19rem",
-                      padding: "15px 48px",
-                      cursor: "pointer",
-                      boxShadow: "0 2px 12px #13e8be32",
-                      fontFamily: MODERN_FONT,
-                      transition: "background 0.18s"
-                    }}
-                    onClick={() => setDone(true)}
-                  >
-                    Done
-                  </button>
-                )}
-                {/* Show Done for last free response if not empty */}
-                {(step === QUESTIONS.length - 1 && q.type === "text" && (answers[q.key] || "").length > 0 && !done) && (
-                  <button
-                    style={{
-                      marginTop: 18,
-                      background: TEAL,
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 12,
-                      fontWeight: 700,
-                      fontSize: "1.19rem",
-                      padding: "15px 48px",
-                      cursor: "pointer",
-                      boxShadow: "0 2px 12px #13e8be32",
-                      fontFamily: MODERN_FONT,
-                      transition: "background 0.18s"
-                    }}
-                    onClick={() => setDone(true)}
-                  >
-                    Done
-                  </button>
-                )}
+                    border: "none",
+                    borderRadius: 14,
+                    fontWeight: 700,
+                    fontSize: "1.16rem",
+                    padding: "15px 45px",
+                    cursor: "pointer",
+                    boxShadow: "0 2px 10px #1112",
+                    transition: "background 0.15s"
+                  }}
+                  onClick={() => handleAnswer("yes")}
+                >Yes</button>
+                <button
+                  style={{
+                    background: answers[q.key] === "no" ? TEAL : "#202c28",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 14,
+                    fontWeight: 700,
+                    fontSize: "1.16rem",
+                    padding: "15px 45px",
+                    cursor: "pointer",
+                    boxShadow: "0 2px 10px #1112",
+                    transition: "background 0.15s"
+                  }}
+                  onClick={() => handleAnswer("no")}
+                >No</button>
               </div>
-            ))}
+            )}
+            {/* MULTI CHOICE */}
+            {q.type === "choices" && (
+              <div style={{display:"flex", gap:18, flexWrap:"wrap", justifyContent:"center"}}>
+                {q.choices.map((c, idx) => (
+                  <button
+                    key={c}
+                    style={{
+                      background: answers[q.key] === c ? TEAL : "#202c28",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 14,
+                      fontWeight: 700,
+                      fontSize: "1.07rem",
+                      padding: "15px 38px",
+                      cursor: "pointer",
+                      marginBottom: 6,
+                      boxShadow: "0 2px 10px #1112",
+                      transition: "background 0.15s"
+                    }}
+                    onClick={() => handleAnswer(c)}
+                  >{c}</button>
+                ))}
+              </div>
+            )}
+            {/* FREE RESPONSE */}
+            {q.type === "text" && (
+              <input
+                type="text"
+                value={answers[q.key] || ""}
+                onChange={e => handleAnswer(e.target.value)}
+                placeholder={q.placeholder || ""}
+                style={{
+                  background: "#191b1e",
+                  color: "#fff",
+                  border: "none",
+                  outline: "none",
+                  borderRadius: 99,
+                  fontWeight: 600,
+                  fontSize: "1.11rem",
+                  padding: "17px 28px",
+                  minWidth: 320,
+                  maxWidth: 420,
+                  boxShadow: "0 2px 8px #0002",
+                  letterSpacing: ".04em",
+                  textAlign: "center"
+                }}
+                onKeyDown={e => {
+                  if (e.key === "Enter" && (answers[q.key] || "").length > 0) {
+                    handleForward();
+                  }
+                }}
+              />
+            )}
           </div>
         </div>
-        {/* Generate Campaign Button */}
-        {done && (
-          <button
-            id="generate-campaign-btn"
-            style={{
-              background: TEAL,
-              color: "#222",
-              border: "none",
-              borderRadius: 12,
-              fontWeight: 700,
-              fontSize: "1.24rem",
-              padding: "18px 66px",
-              cursor: "pointer",
-              boxShadow: "0 2px 16px #0cc4be44",
-              marginBottom: 42,
-              marginTop: 8,
-              fontFamily: MODERN_FONT,
-              transition: "background 0.18s"
-            }}
-            onClick={() => alert("Generate Campaign (hook up logic here)!")}
-          >
-            Generate Campaign
-          </button>
-        )}
-
+        {/* Generate Campaign Button (only active on last q) */}
+        <button
+          id="generate-campaign-btn"
+          disabled={!isLast || !readyToAdvance}
+          style={{
+            background: isLast && readyToAdvance ? TEAL : "#26322f",
+            color: isLast && readyToAdvance ? "#fff" : "#87e6d7",
+            border: "none",
+            borderRadius: 12,
+            fontWeight: 700,
+            fontSize: "1.19rem",
+            padding: "17px 66px",
+            cursor: isLast && readyToAdvance ? "pointer" : "not-allowed",
+            boxShadow: isLast && readyToAdvance ? "0 2px 16px #0cc4be44" : "none",
+            marginBottom: 42,
+            marginTop: 10,
+            fontFamily: MODERN_FONT,
+            transition: "background 0.18s"
+          }}
+          onClick={() => isLast && readyToAdvance && alert("Generate Campaign (hook up logic here)!")}
+        >
+          Generate Campaign
+        </button>
         {/* Ad Previews with Divider */}
         <div style={{
           display: "flex",
@@ -394,7 +397,6 @@ export default function FormPage() {
           marginTop: 18
         }}>
           <AdPreviewCard title="IMAGE AD PREVIEW" type="image" />
-          {/* Vertical Divider */}
           <div style={{
             width: 2,
             background: "linear-gradient(180deg, #22d1c6 0%, #0fe8b5 100%)",
