@@ -6,32 +6,23 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
-// ----------- Load All Training Files At Startup -----------
-const TRAINING_DOCS = [
-  path.join(__dirname, '../mnt/data/MetaRealTalkCreativePlaybookForSmallBusinesses.txt'),
-  path.join(__dirname, '../mnt/data/Copywriting-101.txt'),
-  path.join(__dirname, '../mnt/data/AUGUST-MEMBERS-PRINTABLE-PAID-ADVERTISING-GUIDE-TRAFFIC-CAMPAIGNS.txt'),
-  path.join(__dirname, '../mnt/data/10x-Facebook-Ads-Course-Workbook.txt'),
-  path.join(__dirname, '../mnt/data/Master Digital Marketing notes.docx'),
-  path.join(__dirname, '../mnt/data/Master Digital Marketing version 2.docx')
-];
-
-// Minimal .docx parsing (for pro use mammoth, here just .toString for MVP)
-const extractDocxText = filePath => {
-  try {
-    const buffer = fs.readFileSync(filePath);
-    return buffer.toString('utf8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-  } catch { return ''; }
-};
+// ----------- UNIVERSAL TRAINING FILE LOADER -----------
+const dataDir = path.join(__dirname, '../data');
+const TRAINING_DOCS = fs.existsSync(dataDir)
+  ? fs.readdirSync(dataDir).map(file => path.join(dataDir, file))
+  : [];
 
 let customContext = '';
 for (const file of TRAINING_DOCS) {
   try {
     if (file.endsWith('.docx')) {
-      customContext += extractDocxText(file).slice(0, 7000) + '\n\n';
+      // Naive .docx support (use a library for production)
+      const buffer = fs.readFileSync(file);
+      customContext += buffer.toString('utf8') + '\n\n';
     } else {
-      customContext += fs.readFileSync(file, 'utf8').slice(0, 7000) + '\n\n';
+      customContext += fs.readFileSync(file, 'utf8') + '\n\n';
     }
+    console.log(`Loaded training file: ${file}`);
   } catch (e) {
     console.warn(`Could not load file: ${file}:`, e.message);
   }
