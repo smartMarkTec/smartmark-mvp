@@ -108,11 +108,12 @@ const AdPreview = ({
     }`}
     style={{
       border: selected ? "2px solid #18b158" : "2px solid transparent",
-      margin: "0 1.2rem",
       background: "#212425",
       minWidth: 330,
       maxWidth: 360,
-      minHeight: 380,
+      minHeight: 410,
+      flex: 1,
+      margin: "0 0.7rem",
       display: "flex",
       flexDirection: "column",
       position: "relative",
@@ -273,7 +274,7 @@ const FormPage = () => {
   const [editMode, setEditMode] = useState({ image: false, video: false });
   const [copy, setCopy] = useState({ image: DEFAULT_COPY, video: DEFAULT_COPY });
 
-  const current = QUESTIONS[step];
+  const current = step < QUESTIONS.length ? QUESTIONS[step] : null;
 
   // Survey Next
   const handleNext = (value) => {
@@ -320,14 +321,16 @@ const FormPage = () => {
     navigate("/dashboard");
   };
 
-  // Carousel fade/slide can be added here if needed (Framer Motion, etc.)
+  // Layout config
+  const mainWidth = showAds ? 820 : 660;
+  const previewWidth = 740;
 
   return (
     <div
       style={{
         minHeight: "100vh",
         minWidth: "100vw",
-        background: "linear-gradient(135deg, #2b2e32 0%, #383c40 100%)",
+        background: "linear-gradient(135deg, #232425 0%, #363a3d 100%)",
         display: "flex",
         justifyContent: "center",
         alignItems: "flex-start",
@@ -339,18 +342,17 @@ const FormPage = () => {
       <div style={{ position: "fixed", top: 30, right: 36, zIndex: 99 }}>
         <SmartMarkLogoButton />
       </div>
-
       <div
         style={{
           background: "#34373de6",
-          padding: "2.8rem 2.2rem",
-          borderRadius: "2.1rem",
+          padding: "2.7rem 2.5rem 3.2rem 2.5rem",
+          borderRadius: "2.2rem",
           boxShadow: FADE,
-          minWidth: 400,
-          maxWidth: 470,
+          minWidth: mainWidth,
+          maxWidth: mainWidth + 16,
           width: "100%",
           margin: "0 auto",
-          transition: "all 0.7s cubic-bezier(.79,.11,.21,.99)",
+          transition: "all 0.4s cubic-bezier(.79,.11,.21,.99)",
         }}
       >
         {/* Survey */}
@@ -360,7 +362,7 @@ const FormPage = () => {
               style={{
                 color: "#fff",
                 fontWeight: 700,
-                fontSize: "2.1rem",
+                fontSize: "2.2rem",
                 textAlign: "center",
                 marginBottom: "1.4rem",
                 letterSpacing: "-0.5px",
@@ -369,136 +371,142 @@ const FormPage = () => {
             >
               Quick Campaign Survey
             </h2>
-            <div style={{ color: "#fff", fontSize: "1.18rem", marginBottom: "1.6rem", fontWeight: 500, minHeight: 56 }}>
-              {showFollowup ? current.followup.question : current.question}
-            </div>
-            {/* Input */}
-            {showFollowup || current.type === "text" ? (
-              <input
-                type="text"
-                autoFocus
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                style={{
-                  padding: "1.1rem",
-                  borderRadius: "1.2rem",
-                  border: "none",
-                  fontSize: "1.15rem",
-                  outline: "none",
-                  fontFamily: MODERN_FONT,
-                  marginBottom: "1.1rem",
-                  width: "100%"
-                }}
-                placeholder="Type your answer..."
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && inputValue.trim() !== "") {
-                    handleNext(inputValue.trim());
-                  }
-                }}
-              />
-            ) : current.type === "yesno" ? (
-              <div style={{ display: "flex", gap: "2rem", marginBottom: "1.2rem" }}>
-                <button
-                  style={{
-                    background: DARK_GREEN,
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: "1.1rem",
-                    padding: "1rem 2.5rem",
-                    fontWeight: 600,
-                    fontSize: "1.18rem",
-                    cursor: "pointer",
-                    fontFamily: MODERN_FONT,
-                    boxShadow: "0 2px 18px 0 #15713717",
-                    opacity: 0.95
-                  }}
-                  onClick={() => handleNext("yes")}
-                >
-                  Yes
-                </button>
-                <button
-                  style={{
-                    background: "#fff",
-                    color: "#232529",
-                    border: "none",
-                    borderRadius: "1.1rem",
-                    padding: "1rem 2.5rem",
-                    fontWeight: 600,
-                    fontSize: "1.18rem",
-                    cursor: "pointer",
-                    fontFamily: MODERN_FONT,
-                    boxShadow: "0 2px 18px 0 #15713717",
-                    opacity: 0.95
-                  }}
-                  onClick={() => handleNext("no")}
-                >
-                  No
-                </button>
-              </div>
-            ) : current.type === "multiple" ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: "1.3rem", marginBottom: "1.2rem" }}>
-                {current.options.map((opt, i) => (
+            {step < QUESTIONS.length && (
+              <>
+                <div style={{ color: "#fff", fontSize: "1.24rem", marginBottom: "1.6rem", fontWeight: 500, minHeight: 56 }}>
+                  {showFollowup ? current.followup.question : current.question}
+                </div>
+                {/* Input */}
+                {showFollowup || current.type === "text" ? (
+                  <input
+                    type="text"
+                    autoFocus
+                    value={inputValue}
+                    onChange={(e) => setInputValue(e.target.value)}
+                    style={{
+                      padding: "1.1rem",
+                      borderRadius: "1.2rem",
+                      border: "none",
+                      fontSize: "1.17rem",
+                      outline: "none",
+                      fontFamily: MODERN_FONT,
+                      marginBottom: "1.1rem",
+                      width: "100%"
+                    }}
+                    placeholder="Type your answer..."
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && inputValue.trim() !== "") {
+                        handleNext(inputValue.trim());
+                      }
+                    }}
+                  />
+                ) : current.type === "yesno" ? (
+                  <div style={{ display: "flex", gap: "2rem", marginBottom: "1.2rem" }}>
+                    <button
+                      style={{
+                        background: DARK_GREEN,
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: "1.1rem",
+                        padding: "1.05rem 2.7rem",
+                        fontWeight: 600,
+                        fontSize: "1.21rem",
+                        cursor: "pointer",
+                        fontFamily: MODERN_FONT,
+                        boxShadow: "0 2px 18px 0 #15713717",
+                        opacity: 0.96
+                      }}
+                      onClick={() => handleNext("yes")}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      style={{
+                        background: "#fff",
+                        color: "#232529",
+                        border: "none",
+                        borderRadius: "1.1rem",
+                        padding: "1.05rem 2.7rem",
+                        fontWeight: 600,
+                        fontSize: "1.21rem",
+                        cursor: "pointer",
+                        fontFamily: MODERN_FONT,
+                        boxShadow: "0 2px 18px 0 #15713717",
+                        opacity: 0.96
+                      }}
+                      onClick={() => handleNext("no")}
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : current.type === "multiple" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "1.3rem", marginBottom: "1.2rem" }}>
+                    {current.options.map((opt, i) => (
+                      <button
+                        key={i}
+                        style={{
+                          background: DARK_GREEN,
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: "1.1rem",
+                          padding: "1.04rem",
+                          fontWeight: 600,
+                          fontSize: "1.12rem",
+                          cursor: "pointer",
+                          fontFamily: MODERN_FONT,
+                          boxShadow: "0 2px 14px 0 #15713711",
+                          opacity: 0.93,
+                          textAlign: "left"
+                        }}
+                        onClick={() => handleNext(opt)}
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                {/* Next/Finish Button (for free text/followup) */}
+                {(showFollowup || current.type === "text") && (
                   <button
-                    key={i}
+                    disabled={inputValue.trim() === ""}
                     style={{
                       background: DARK_GREEN,
                       color: "#fff",
                       border: "none",
                       borderRadius: "1.1rem",
-                      padding: "1rem",
-                      fontWeight: 600,
-                      fontSize: "1.09rem",
-                      cursor: "pointer",
+                      padding: "1.09rem 2.7rem",
+                      fontWeight: 700,
+                      fontSize: "1.15rem",
+                      cursor: inputValue.trim() === "" ? "not-allowed" : "pointer",
                       fontFamily: MODERN_FONT,
-                      boxShadow: "0 2px 14px 0 #15713711",
-                      opacity: 0.93,
-                      textAlign: "left"
+                      marginTop: 6,
+                      opacity: inputValue.trim() === "" ? 0.6 : 1
                     }}
-                    onClick={() => handleNext(opt)}
+                    onClick={() => handleNext(inputValue.trim())}
                   >
-                    {opt}
+                    Next
                   </button>
-                ))}
-              </div>
-            ) : null}
-
-            {/* Next/Finish Button */}
-            {(showFollowup || current.type === "text") && (
-              <button
-                disabled={inputValue.trim() === ""}
-                style={{
-                  background: DARK_GREEN,
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "1.1rem",
-                  padding: "1rem 2.3rem",
-                  fontWeight: 700,
-                  fontSize: "1.12rem",
-                  cursor: inputValue.trim() === "" ? "not-allowed" : "pointer",
-                  fontFamily: MODERN_FONT,
-                  marginTop: 6,
-                  opacity: inputValue.trim() === "" ? 0.6 : 1
-                }}
-                onClick={() => handleNext(inputValue.trim())}
-              >
-                Next
-              </button>
+                )}
+              </>
             )}
-            {/* Generate Campaign */}
-            {step === QUESTIONS.length && (
+
+            {/* Generate Campaign Button: Only after last Q */}
+            {step >= QUESTIONS.length && (
               <button
                 style={{
                   background: DARK_GREEN,
                   color: "#fff",
                   border: "none",
-                  borderRadius: "1.2rem",
-                  padding: "1.1rem 2.8rem",
+                  borderRadius: "1.3rem",
+                  padding: "1.25rem 2.9rem",
                   fontWeight: 700,
-                  fontSize: "1.17rem",
+                  fontSize: "1.23rem",
                   cursor: "pointer",
                   fontFamily: MODERN_FONT,
                   width: "100%",
-                  marginTop: "1.4rem"
+                  marginTop: "2.0rem",
+                  marginBottom: "0.7rem"
                 }}
                 onClick={handleGenerate}
               >
@@ -506,23 +514,29 @@ const FormPage = () => {
               </button>
             )}
             {/* Progress */}
-            <div style={{ marginTop: 25, textAlign: "center", color: "#b4b7bb", fontSize: "1.01rem" }}>
-              {step < QUESTIONS.length
-                ? `Question ${step + 1} of ${QUESTIONS.length}`
-                : "Done"}
-            </div>
+            {step < QUESTIONS.length && (
+              <div style={{ marginTop: 27, textAlign: "center", color: "#b4b7bb", fontSize: "1.07rem" }}>
+                {`Question ${step + 1} of ${QUESTIONS.length}`}
+              </div>
+            )}
           </>
         )}
 
         {/* Ad Previews */}
         {showAds && (
-          <div>
+          <div style={{
+            marginTop: "1.4rem",
+            width: previewWidth,
+            maxWidth: "100%",
+            marginLeft: "auto",
+            marginRight: "auto"
+          }}>
             <h2 style={{
               color: "#fff",
               fontWeight: 700,
-              fontSize: "2.0rem",
+              fontSize: "2.07rem",
               textAlign: "center",
-              margin: "1.3rem 0 0.8rem 0",
+              margin: "1.0rem 0 1.2rem 0",
               letterSpacing: "-0.5px"
             }}>
               Ad Previews
@@ -530,10 +544,15 @@ const FormPage = () => {
             <div style={{
               display: "flex",
               flexDirection: "row",
-              gap: "2.8rem",
               justifyContent: "center",
-              margin: "1.2rem 0"
+              alignItems: "stretch",
+              gap: "0",
+              width: "100%",
+              minHeight: 420,
+              margin: "0 auto",
+              background: "transparent"
             }}>
+              {/* Image Ad */}
               <AdPreview
                 type="image"
                 selected={selected.image}
@@ -550,6 +569,15 @@ const FormPage = () => {
                 onCopyChange={v => setCopy(c => ({ ...c, image: v }))}
                 onCloseEdit={() => setEditMode(em => ({ ...em, image: false }))}
               />
+              {/* Divider */}
+              <div style={{
+                width: 2,
+                background: "linear-gradient(180deg, #0ee196 0%, #9effe2 100%)",
+                margin: "0 16px",
+                borderRadius: 12,
+                alignSelf: "center"
+              }} />
+              {/* Video Ad */}
               <AdPreview
                 type="video"
                 selected={selected.video}
@@ -570,9 +598,9 @@ const FormPage = () => {
             <div style={{
               textAlign: "center",
               color: "#b6ffc3",
-              margin: "1rem 0 1.3rem 0",
+              margin: "1.2rem 0 1.3rem 0",
               fontWeight: 500,
-              fontSize: "1.08rem"
+              fontSize: "1.09rem"
             }}>
               {!(selected.image || selected.video)
                 ? "Pick at least one to continue"
@@ -590,17 +618,17 @@ const FormPage = () => {
                 background: DARK_GREEN,
                 color: "#fff",
                 border: "none",
-                borderRadius: "1.2rem",
-                padding: "1.2rem 2.5rem",
+                borderRadius: "1.3rem",
+                padding: "1.15rem 2.7rem",
                 fontWeight: 700,
-                fontSize: "1.2rem",
+                fontSize: "1.19rem",
                 cursor: !(selected.image || selected.video)
                   ? "not-allowed"
                   : "pointer",
                 fontFamily: MODERN_FONT,
                 width: "100%",
                 opacity: !(selected.image || selected.video) ? 0.5 : 1,
-                marginTop: "0.6rem"
+                marginTop: "0.5rem"
               }}
               onClick={handleFinalize}
             >
