@@ -227,7 +227,6 @@ export default function FormPage() {
   const [touched, setTouched] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // AI/campaign outputs:
   const [result, setResult] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
@@ -235,7 +234,7 @@ export default function FormPage() {
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
 
-  // Find actual next visible question (skip conditional if needed)
+  // Helper for skipping conditional questions
   const getNextVisibleStep = (currentStep, direction = 1) => {
     let s = currentStep + direction;
     while (QUESTIONS[s] && QUESTIONS[s].conditional) {
@@ -287,60 +286,56 @@ export default function FormPage() {
     setTouched(true);
   };
 
-// Generate full campaign assets (AI)
-const handleGenerate = async () => {
-  setLoading(true);
-  setResult(null);
-  setImageUrl("");
-  setError("");
-  try {
-    const toSend = { ...answers };
-    const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: toSend, url: answers.url || "" })
-    });
-    const data = await res.json();
-    if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
-    setResult(data);
-    // Generate image: ONLY use the industry field for Pexels!
-    if (answers.industry) {
+  // Generate full campaign assets (AI)
+  const handleGenerate = async () => {
+    setLoading(true);
+    setResult(null);
+    setImageUrl("");
+    setError("");
+    try {
+      const toSend = { ...answers };
+      const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: toSend, url: answers.url || "" })
+      });
+      const data = await res.json();
+      if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
+      setResult(data);
+      // Generate image: ONLY use url and industry fields for Pexels!
       setImageLoading(true);
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: answers.industry.trim().toLowerCase() })
+        body: JSON.stringify({ url: answers.url || "", industry: answers.industry || "" })
       });
       const imgData = await imgRes.json();
       setImageUrl(imgData.imageUrl || "");
       setImageLoading(false);
+    } catch (err) {
+      setError("Failed to generate campaign: " + (err.message || ""));
+      setLoading(false);
     }
-  } catch (err) {
-    setError("Failed to generate campaign: " + (err.message || ""));
     setLoading(false);
-  }
-  setLoading(false);
-};
+  };
 
-// Allow user to regenerate image
-const handleRegenerateImage = async () => {
-  if (!answers.industry) return;
-  setImageLoading(true);
-  setImageUrl("");
-  try {
-    const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: answers.industry.trim().toLowerCase() })
-    });
-    const imgData = await imgRes.json();
-    setImageUrl(imgData.imageUrl || "");
-  } catch {
+  // Allow user to regenerate image
+  const handleRegenerateImage = async () => {
+    setImageLoading(true);
     setImageUrl("");
-  }
-  setImageLoading(false);
-};
-
+    try {
+      const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: answers.url || "", industry: answers.industry || "" })
+      });
+      const imgData = await imgRes.json();
+      setImageUrl(imgData.imageUrl || "");
+    } catch {
+      setImageUrl("");
+    }
+    setImageLoading(false);
+  };
 
   // Modal open/close handlers
   const handleImageClick = (url) => {
