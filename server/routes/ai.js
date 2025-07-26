@@ -274,6 +274,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 You are an AI photo director for high-end advertising. Your job is to write hyper-specific, realistic prompts for DALL·E to generate photorealistic images for ad campaigns.
 
 **Follow these rules:**
+- Max length: 900 characters. Stay concise.
 - Describe the number of people, diversity, their positions, facial features, body proportions (height, build, skin tone, hair, clothing, accessories, expression), and exact pose for each person.
 - Give realistic, proportional face and body details (no dysmorphia), but remember, in real life, not everyone is perfectly proportionate—describe a mix if appropriate.
 - Reference real-world stock photo styles (e.g., "modern, diverse group in urban fashion, Canon DSLR, soft natural light, studio backdrop").
@@ -287,36 +288,57 @@ Here’s the ad image concept to use as context:
 
 """${prompt}"""
 
-**Output:**
-Only output the final DALL·E prompt, ready to be sent for image generation.
-
-If you need people, describe them with precise physical and facial details, stock-photo style.
+**Output:** Only the final DALL·E prompt, nothing else.
 `;
 
   try {
+    // 1. Get ultra-precise prompt from GPT
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: gptPrompt }],
-      max_tokens: 220,
+      max_tokens: 200,
       temperature: 0.5,
     });
 
-    const dallePrompt = response.choices?.[0]?.message?.content?.trim() || "";
+    let dallePrompt = response.choices?.[0]?.message?.content?.trim() || "";
 
-    // **Log the prompt for every request**
+    // Basic prompt cleanup
+    if (dallePrompt.toLowerCase().startsWith("dall·e prompt:")) {
+      dallePrompt = dallePrompt.replace(/^dall·e prompt:/i, '').trim();
+    }
+    if (!dallePrompt) {
+      console.error("GPT did not return a prompt!");
+      return res.status(500).json({ error: "AI failed to generate image prompt." });
+    }
+
+    // 2. Log the prompt for debugging
     console.log("Generated DALL·E prompt:", dallePrompt);
 
-    const imageRes = await openai.images.generate({
-      prompt: dallePrompt,
-      n: 1,
-      size: "1024x1024"
-    });
+    // 3. Generate the image
+    let imageRes;
+    try {
+      imageRes = await openai.images.generate({
+        prompt: dallePrompt,
+        n: 1,
+        size: "1024x1024"
+      });
+    } catch (err) {
+      console.error("DALL·E API error:", err?.response?.data || err.message || err);
+      return res.status(500).json({ error: "DALL·E image API failed.", detail: err?.response?.data || err.message || err });
+    }
 
-    const imageUrl = imageRes.data[0].url;
-    res.json({ imageUrl, dallePrompt }); // Return prompt for debugging if you want
+    const imageUrl = imageRes.data[0]?.url || null;
+    if (!imageUrl) {
+      console.error("No image URL returned by DALL·E!");
+      return res.status(500).json({ error: "No image URL returned by DALL·E." });
+    }
+
+    res.json({ imageUrl, dallePrompt });
+
   } catch (err) {
-    console.error("Ultra-Precise Image Generation Error:", err?.response?.data || err.message);
-    res.status(500).json({ error: "Image generation failed." });
+    // This catches GPT or generic errors
+    console.error("Ultra-Precise Image Generation Error:", err?.response?.data || err.message || err);
+    res.status(500).json({ error: "Image generation failed.", detail: err?.response?.data || err.message || err });
   }
 });
 
