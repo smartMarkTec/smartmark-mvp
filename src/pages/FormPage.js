@@ -21,6 +21,30 @@ const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
 const DARK_BG = "#181b20";
 
+// Simple loading spinner (CSS-in-JS)
+function LoadingSpinner() {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: 150
+    }}>
+      <div style={{
+        border: "4px solid #19e5b7",
+        borderTop: "4px solid #23262a",
+        borderRadius: "50%",
+        width: 44,
+        height: 44,
+        animation: "spin 1s linear infinite"
+      }} />
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg);}
+          100% { transform: rotate(360deg);}
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // Fullscreen modal for image view
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
@@ -89,76 +113,82 @@ const AdPreviewCard = ({
       {title}
     </span>
     {/* Image Preview */}
-    {type === "image" && imageUrl ? (
-      <div
-        style={{
-          width: "100%",
-          marginBottom: 18,
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center"
-        }}
-        onClick={() => onImageClick(imageUrl)}
-        title="Click to view larger"
-      >
-        <img
-          src={imageUrl}
-          alt="Ad Preview"
+    {type === "image" ? (
+      imageLoading ? (
+        <div style={{ width: "100%", marginBottom: 18 }}>
+          <LoadingSpinner />
+        </div>
+      ) : imageUrl ? (
+        <div
           style={{
-            maxWidth: "100%",
-            maxHeight: 270,
-            borderRadius: 12,
-            background: "#282d33",
-            boxShadow: "0 2px 14px #1114",
-            objectFit: "contain",
-            transition: "box-shadow 0.15s"
-          }}
-        />
-        <button
-          style={{
-            position: "absolute",
-            top: 18,
-            right: 22,
-            background: "#232c29",
-            color: "#fff",
-            border: "1.5px solid #222",
-            borderRadius: 8,
-            fontWeight: 700,
-            fontSize: "1.07rem",
-            padding: "7px 16px",
+            width: "100%",
+            marginBottom: 18,
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
-            gap: 7
+            justifyContent: "center"
           }}
-          onClick={e => { e.stopPropagation(); onRegenerate(); }}
-          disabled={imageLoading}
+          onClick={() => onImageClick(imageUrl)}
+          title="Click to view larger"
         >
-          <FaSyncAlt style={{ fontSize: 15 }} />
-          {imageLoading ? "Regenerating..." : "Regenerate"}
-        </button>
-      </div>
-    ) : type === "image" ? (
-      <div
-        style={{
-          width: "100%",
-          height: 150,
-          background: "#282d33",
-          borderRadius: 10,
-          marginBottom: 20,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#555",
-          fontWeight: 700,
-          fontSize: 22,
-          fontFamily: MODERN_FONT,
-          letterSpacing: 1
-        }}
-      >
-        {imageLoading ? "" : "Image goes here"}
-      </div>
+          <img
+            src={imageUrl}
+            alt="Ad Preview"
+            style={{
+              maxWidth: "100%",
+              maxHeight: 270,
+              borderRadius: 12,
+              background: "#282d33",
+              boxShadow: "0 2px 14px #1114",
+              objectFit: "contain",
+              transition: "box-shadow 0.15s"
+            }}
+          />
+          <button
+            style={{
+              position: "absolute",
+              top: 18,
+              right: 22,
+              background: "#232c29",
+              color: "#fff",
+              border: "1.5px solid #222",
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: "1.07rem",
+              padding: "7px 16px",
+              cursor: imageLoading ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 7
+            }}
+            onClick={e => { e.stopPropagation(); onRegenerate(); }}
+            disabled={imageLoading}
+          >
+            <FaSyncAlt style={{ fontSize: 15 }} />
+            {imageLoading ? "Regenerating..." : "Regenerate"}
+          </button>
+        </div>
+      ) : (
+        <div
+          style={{
+            width: "100%",
+            height: 150,
+            background: "#282d33",
+            borderRadius: 10,
+            marginBottom: 20,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#555",
+            fontWeight: 700,
+            fontSize: 22,
+            fontFamily: MODERN_FONT,
+            letterSpacing: 1
+          }}
+        >
+          Image goes here
+        </div>
+      )
     ) : (
       <div
         style={{
@@ -214,12 +244,18 @@ const AdPreviewCard = ({
         alignItems: "center",
         gap: 6
       }}
+      // Placeholder for edit
+      onClick={() => {}}
     >
       <FaEdit style={{ fontSize: 15 }} />
       Edit
     </button>
   </div>
 );
+
+function getRandomString() {
+  return Math.random().toString(36).substring(2, 12) + Date.now();
+}
 
 export default function FormPage() {
   const [step, setStep] = useState(0);
@@ -233,6 +269,7 @@ export default function FormPage() {
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
+  const [lastRegenerateToken, setLastRegenerateToken] = useState("");
 
   // Helper for skipping conditional questions
   const getNextVisibleStep = (currentStep, direction = 1) => {
@@ -302,12 +339,19 @@ export default function FormPage() {
       const data = await res.json();
       if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
       setResult(data);
+
       // Generate image: ONLY use url and industry fields for Pexels!
       setImageLoading(true);
+      const token = getRandomString();
+      setLastRegenerateToken(token);
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: answers.url || "", industry: answers.industry || "" })
+        body: JSON.stringify({
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
+        })
       });
       const imgData = await imgRes.json();
       setImageUrl(imgData.imageUrl || "");
@@ -324,10 +368,16 @@ export default function FormPage() {
     setImageLoading(true);
     setImageUrl("");
     try {
+      const token = getRandomString();
+      setLastRegenerateToken(token);
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: answers.url || "", industry: answers.industry || "" })
+        body: JSON.stringify({
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
+        })
       });
       const imgData = await imgRes.json();
       setImageUrl(imgData.imageUrl || "");
@@ -590,7 +640,7 @@ export default function FormPage() {
                 title="IMAGE AD PREVIEW"
                 type="image"
                 imageUrl={imageUrl}
-                imageLoading={imageLoading}
+                imageLoading={imageLoading || loading}
                 headline={result?.headline}
                 body={result?.body}
                 onRegenerate={handleRegenerateImage}
@@ -624,7 +674,7 @@ export default function FormPage() {
               title="IMAGE AD PREVIEW"
               type="image"
               imageUrl={imageUrl}
-              imageLoading={imageLoading}
+              imageLoading={imageLoading || loading}
               headline={result.headline}
               body={result.body}
               onRegenerate={handleRegenerateImage}
