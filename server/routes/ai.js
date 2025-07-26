@@ -391,13 +391,11 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // 2. Prepare SVG overlay (headline at top, CTA at bottom right)
     const svg = `
       <svg width="1200" height="627">
-        <!-- Headline background -->
         <rect x="0" y="40" width="1200" height="110" rx="28" fill="rgba(30,30,30,0.67)" />
         <text x="50%" y="115" text-anchor="middle"
           font-family="Arial,sans-serif" font-size="62" font-weight="bold"
           fill="#fff" letter-spacing="2" style="text-shadow:2px 3px 16px #0007"
         >${headline.slice(0, 60)}</text>
-        <!-- CTA background (optional) -->
         ${cta ? `
         <rect x="800" y="517" width="370" height="75" rx="22" fill="rgba(23,152,204,0.86)" />
         <text x="985" y="570" text-anchor="middle"
@@ -415,23 +413,23 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .toBuffer();
 
     // 4. Save in /tmp and return URL
-    const tmpDir = '/tmp';
+    const tmpDir = '/tmp'; // Always use system tmp on Render
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(tmpDir, fileName);
     fs.writeFileSync(filePath, outBuffer);
+
+    const publicUrl = `/tmp/${fileName}`;
     console.log("Overlay image saved at:", filePath, "and served as:", publicUrl);
 
-
-    // You must serve /tmp as static for this to work as a URL:
-    // app.use('/tmp', express.static(path.join(__dirname, 'tmp')));
-    const publicUrl = `/tmp/${fileName}`;
-
     return res.json({ imageUrl: publicUrl, headline, cta });
+
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
+
 
 module.exports = router;
