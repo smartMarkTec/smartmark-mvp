@@ -264,40 +264,58 @@ Respond as JSON:
 });
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (DALL·E 3) ==========
+// routes/ai.js (replace your /generate-image-from-prompt route)
 router.post('/generate-image-from-prompt', async (req, res) => {
-  let { prompt } = req.body;
+  const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
 
-  // Use GPT-4o to rewrite prompt for best realism, faces, and specifics
-  try {
-    const enhancePrompt = `
-Enhance and rewrite the following image prompt for DALL·E to maximize photorealism, ensure all faces are close-up, beautiful, realistic, and detailed (describe age, gender, skin, hair, eye color, clothing, emotion, lighting, background, camera, NO TEXT). If there is any mention of 'person', 'people', 'man', 'woman', 'customer', etc, generate a detailed, realistic description. Never mention words or writing. Return only the improved prompt.
+  // This GPT prompt gets ultra-specific and references stock photo realism.
+  const gptPrompt = `
+You are an AI photo director for high-end advertising. Your job is to write hyper-specific, realistic prompts for DALL·E to generate photorealistic images for ad campaigns.
 
-Image prompt:
+**Follow these rules:**
+- Describe the number of people, diversity, their positions, facial features, body proportions (height, build, skin tone, hair, clothing, accessories, expression), and exact pose for each person.
+- Give realistic, proportional face and body details (no dysmorphia), but remember, in real life, not everyone is perfectly proportionate—describe a mix if appropriate.
+- Reference real-world stock photo styles (e.g., "modern, diverse group in urban fashion, Canon DSLR, soft natural light, studio backdrop").
+- Use photography terms (composition, camera, lighting, perspective).
+- NEVER include any text, letters, or logos in the image.
+- Do NOT mention the words "AI", "artificial", "generated", "cartoon", "painting", or anything non-photorealistic.
+- Be ultra-precise. Include full-body or half-body framing as needed.
+- If the original business type is given (like fashion, restaurant), make the scene appropriate for that business and setting.
+
+Here’s the ad image concept to use as context:
+
 """${prompt}"""
-    `;
-    const gptRes = await openai.chat.completions.create({
+
+**Output:**
+Only output the final DALL·E prompt, ready to be sent for image generation.
+
+If you need people, describe them with precise physical and facial details, stock-photo style.
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
       model: "gpt-4o",
-      messages: [{ role: "user", content: enhancePrompt }],
-      max_tokens: 140,
+      messages: [{ role: "user", content: gptPrompt }],
+      max_tokens: 220,
       temperature: 0.5,
     });
-    prompt = gptRes.choices?.[0]?.message?.content?.trim() || prompt;
-  } catch (e) {
-    // fallback: use original
-  }
 
-  // Now send to DALL·E
-  try {
+    const dallePrompt = response.choices?.[0]?.message?.content?.trim() || "";
+
+    // **Log the prompt for every request**
+    console.log("Generated DALL·E prompt:", dallePrompt);
+
     const imageRes = await openai.images.generate({
-      prompt,
+      prompt: dallePrompt,
       n: 1,
       size: "1024x1024"
     });
+
     const imageUrl = imageRes.data[0].url;
-    res.json({ imageUrl });
+    res.json({ imageUrl, dallePrompt }); // Return prompt for debugging if you want
   } catch (err) {
-    console.error("Image generation error:", err?.response?.data || err.message);
+    console.error("Ultra-Precise Image Generation Error:", err?.response?.data || err.message);
     res.status(500).json({ error: "Image generation failed." });
   }
 });
