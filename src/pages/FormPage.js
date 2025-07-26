@@ -4,14 +4,17 @@ import { FaEdit, FaArrowLeft, FaArrowRight, FaSyncAlt, FaTimes } from "react-ico
 const API_BASE = "/api";
 
 const QUESTIONS = [
-  { question: "Main objective?", key: "objective", type: "choices", choices: ["Drive sales", "Get leads", "Website visits", "Build brand"] },
-  { question: "Is your offer time-limited?", key: "timelimit", type: "yesno" },
-  { question: "Business mostly local or online?", key: "localOnline", type: "choices", choices: ["Local", "Online"] },
-  { question: "How urgent is your offer?", key: "urgency", type: "choices", choices: ["Very urgent", "Somewhat urgent", "Not urgent"] },
-  { question: "Target new customers, existing, or both?", key: "target", type: "choices", choices: ["New", "Existing", "Both"] },
-  { question: "Feature a specific product or service?", key: "featureSpecific", type: "yesno" },
-  { question: "Describe your perfect customer in one sentence.", key: "perfectCustomer", type: "text", placeholder: "e.g. 'Families who order takeout weekly'", },
-  { question: "What should people do after seeing your ad?", key: "desiredAction", type: "text", placeholder: "e.g. 'Order online', 'Call for a quote', 'Visit website'", }
+  { question: "Website URL", key: "url", type: "text", placeholder: "https://yourbusiness.com" },
+  { question: "Business/Industry", key: "industry", type: "text", placeholder: "e.g. Pizza restaurant, Fashion store" },
+  { question: "Business Name", key: "businessName", type: "text", placeholder: "e.g. Joe's Pizza" },
+  { question: "Describe your ideal customer in one sentence.", key: "idealCustomer", type: "text", placeholder: "e.g. Working moms in Dallas" },
+  { question: "What is the main problem your customer wants solved?", key: "mainProblem", type: "text", placeholder: "e.g. No time to cook after work" },
+  { question: "Do you have a special offer or promo?", key: "hasOffer", type: "yesno" },
+  { question: "What is your offer/promo?", key: "offer", type: "text", placeholder: "e.g. $5 off first order", conditional: { key: "hasOffer", value: "yes" } },
+  { question: "What’s the main benefit or transformation you promise?", key: "mainBenefit", type: "text", placeholder: "e.g. Healthy meals in under 20 minutes" },
+  { question: "What’s a common objection customers have?", key: "objection", type: "text", placeholder: "e.g. Too expensive" },
+  { question: "What makes you different? (Unique selling point)", key: "uniqueSellingPoint", type: "text", placeholder: "e.g. Only organic ingredients" },
+  { question: "What action do you want people to take after seeing your ad?", key: "cta", type: "text", placeholder: "e.g. Order online" },
 ];
 
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -154,7 +157,6 @@ const AdPreviewCard = ({
           letterSpacing: 1
         }}
       >
-        {/* No "AI generating..." in preview */}
         {imageLoading ? "" : "Image goes here"}
       </div>
     ) : (
@@ -233,23 +235,55 @@ export default function FormPage() {
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
 
-  const q = QUESTIONS[step];
-  const isLast = step === QUESTIONS.length - 1;
-  const readyToAdvance = !!answers[q.key];
+  // Find actual next visible question (skip conditional if needed)
+  const getNextVisibleStep = (currentStep, direction = 1) => {
+    let s = currentStep + direction;
+    while (QUESTIONS[s] && QUESTIONS[s].conditional) {
+      const cond = QUESTIONS[s].conditional;
+      if (answers[cond.key] !== cond.value) {
+        s += direction;
+      } else break;
+    }
+    return s;
+  };
+
+  const currentQ = QUESTIONS[step];
+  if (currentQ.conditional) {
+    const { key, value } = currentQ.conditional;
+    if (answers[key] !== value) {
+      setTimeout(() => setStep(getNextVisibleStep(step)), 1);
+      return null;
+    }
+  }
+
+  // Show generate only if on last *visible* question
+  const isLast = (() => {
+    let s = step;
+    while (QUESTIONS[s + 1] && QUESTIONS[s + 1].conditional && answers[QUESTIONS[s + 1].conditional.key] !== QUESTIONS[s + 1].conditional.value) {
+      s++;
+    }
+    return s === QUESTIONS.length - 1;
+  })();
+
+  const readyToAdvance = !!answers[currentQ.key] || (currentQ.type === "yesno" && typeof answers[currentQ.key] !== "undefined");
 
   const handleBack = () => {
-    if (step > 0) setStep(step - 1);
+    let prevStep = step - 1;
+    while (prevStep >= 0 && QUESTIONS[prevStep].conditional && answers[QUESTIONS[prevStep].conditional.key] !== QUESTIONS[prevStep].conditional.value) {
+      prevStep--;
+    }
+    if (prevStep >= 0) setStep(prevStep);
   };
   const handleForward = () => {
     if (isLast) return;
     if (readyToAdvance) {
-      setStep(step + 1);
+      setStep(getNextVisibleStep(step));
       setTouched(false);
     }
   };
 
   const handleAnswer = (value) => {
-    setAnswers({ ...answers, [q.key]: value });
+    setAnswers({ ...answers, [currentQ.key]: value });
     setTouched(true);
   };
 
@@ -260,22 +294,22 @@ export default function FormPage() {
     setImageUrl("");
     setError("");
     try {
+      const toSend = { ...answers };
       const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, url: "" })
+        body: JSON.stringify({ answers: toSend, url: answers.url || "" })
       });
       const data = await res.json();
       if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
       setResult(data);
-
-      // Generate image
+      // Generate image (uses url and industry for best results)
       if (data.image_prompt) {
         setImageLoading(true);
         const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: data.image_prompt })
+          body: JSON.stringify({ prompt: `${answers.industry || ""} ${answers.url || ""} ${data.image_prompt}` })
         });
         const imgData = await imgRes.json();
         setImageUrl(imgData.imageUrl || "");
@@ -297,7 +331,7 @@ export default function FormPage() {
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: result.image_prompt })
+        body: JSON.stringify({ prompt: `${answers.industry || ""} ${answers.url || ""} ${result.image_prompt}` })
       });
       const imgData = await imgRes.json();
       setImageUrl(imgData.imageUrl || "");
@@ -391,7 +425,7 @@ export default function FormPage() {
                   maxWidth: 540,
                   flex:1
                 }}>
-                  {q.question}
+                  {currentQ.question}
                 </div>
                 {/* Forward arrow */}
                 {(!isLast || (isLast && readyToAdvance)) && (
@@ -426,11 +460,11 @@ export default function FormPage() {
                 alignItems: "center",
                 width: "100%"
               }}>
-                {q.type === "yesno" && (
+                {currentQ.type === "yesno" && (
                   <div style={{display:"flex", gap:18, justifyContent:"center"}}>
                     <button
                       style={{
-                        background: answers[q.key] === "yes" ? TEAL : "#202c28",
+                        background: answers[currentQ.key] === "yes" ? TEAL : "#202c28",
                         color: "#fff",
                         border: "none",
                         borderRadius: 14,
@@ -445,7 +479,7 @@ export default function FormPage() {
                     >Yes</button>
                     <button
                       style={{
-                        background: answers[q.key] === "no" ? TEAL : "#202c28",
+                        background: answers[currentQ.key] === "no" ? TEAL : "#202c28",
                         color: "#fff",
                         border: "none",
                         borderRadius: 14,
@@ -460,13 +494,13 @@ export default function FormPage() {
                     >No</button>
                   </div>
                 )}
-                {q.type === "choices" && (
+                {currentQ.type === "choices" && (
                   <div style={{display:"flex", gap:18, flexWrap:"wrap", justifyContent:"center"}}>
-                    {q.choices.map((c, idx) => (
+                    {currentQ.choices.map((c, idx) => (
                       <button
                         key={c}
                         style={{
-                          background: answers[q.key] === c ? TEAL : "#202c28",
+                          background: answers[currentQ.key] === c ? TEAL : "#202c28",
                           color: "#fff",
                           border: "none",
                           borderRadius: 14,
@@ -483,12 +517,12 @@ export default function FormPage() {
                     ))}
                   </div>
                 )}
-                {q.type === "text" && (
+                {currentQ.type === "text" && (
                   <input
                     type="text"
-                    value={answers[q.key] || ""}
+                    value={answers[currentQ.key] || ""}
                     onChange={e => handleAnswer(e.target.value)}
-                    placeholder={q.placeholder || ""}
+                    placeholder={currentQ.placeholder || ""}
                     style={{
                       background: "#191b1e",
                       color: "#fff",
@@ -505,7 +539,7 @@ export default function FormPage() {
                       textAlign: "center"
                     }}
                     onKeyDown={e => {
-                      if (e.key === "Enter" && (answers[q.key] || "").length > 0) {
+                      if (e.key === "Enter" && (answers[currentQ.key] || "").length > 0) {
                         handleForward();
                       }
                     }}
@@ -578,12 +612,10 @@ export default function FormPage() {
                 title="VIDEO AD PREVIEW"
                 type="video"
                 headline={result?.headline}
-                // No script shown
               />
             </div>
           </>
         )}
-        {/* Show AI Results + Real Image */}
         {result && (
           <div style={{
             width: "100%",
