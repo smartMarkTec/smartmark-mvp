@@ -264,48 +264,35 @@ Respond as JSON:
 });
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (DALL·E 3) ==========
-// routes/ai.js (replace your /generate-image-from-prompt route)
 router.post('/generate-image-from-prompt', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
 
-  // This GPT prompt gets ultra-specific and references stock photo realism.
   const gptPrompt = `
-You are an AI photo director for high-end advertising. Your job is to write hyper-specific, realistic prompts for DALL·E to generate photorealistic images for ad campaigns.
+You are an AI photo director for high-end advertising. Write an ultra-specific, concise (under 900 characters), photorealistic prompt for DALL·E.
 
-**Follow these rules:**
-- Max length: 900 characters. Stay concise.
-- Ensure every subject's eyes are looking directly at the camera, perfectly straight and level, with symmetrical facial features and no head tilt.
- Always describe faces as "front-facing, straight, proportional, natural expressions, no distortion, clear eyes, realistic skin texture, perfect symmetry, focused and sharp."
-- Describe the number of people, diversity, their positions, facial features, body proportions (height, build, skin tone, hair, clothing, accessories, expression), and exact pose for each person.
-- Give realistic, proportional face and body details (no dysmorphia), but remember, in real life, not everyone is perfectly proportionate—describe a mix if appropriate.
-- Reference real-world stock photo styles (e.g., "modern, diverse group in urban fashion, Canon DSLR, soft natural light, studio backdrop").
-- Use photography terms (composition, camera, lighting, perspective).
-- NEVER include any text, letters, or logos in the image.
-- Do NOT mention the words "AI", "artificial", "generated", "cartoon", "painting", or anything non-photorealistic.
-- Be ultra-precise. Include full-body or half-body framing as needed.
-- If the original business type is given (like fashion, restaurant), make the scene appropriate for that business and setting.
+Rules:
+- All faces must be front-facing, straight, perfectly proportional, eyes looking directly at the camera, clear eyes, sharp focus, natural expressions, realistic skin, perfect facial symmetry.
+- Be precise about each subject's appearance, position, and the composition (body/face ratios, camera angle, lens, lighting, no distortion).
+- If relevant, set: "Canon DSLR, close-up, straight gaze, studio backdrop, no text, no logo."
+- If business type is given, style and setting should match.
 
-Here’s the ad image concept to use as context:
-
+Scene:
 """${prompt}"""
 
-**Always append this to the end of your prompt:**
-"Faces are front-facing, straight, perfectly proportional, natural expressions, no distortion, clear eyes, realistic skin texture, sharp focus, perfect facial symmetry."
-
-**Output:** Only the final DALL·E prompt, nothing else.
-`;
+ALWAYS append: "Faces are front-facing, straight, perfectly proportional, natural expressions, no distortion, clear eyes, realistic skin texture, sharp focus, perfect facial symmetry."
+Output: Only the DALL·E prompt, nothing else.
+  `;
 
   try {
-    // 1. Get ultra-precise prompt from GPT
-    const response = await openai.chat.completions.create({
+    // 1. Get final DALL·E prompt from GPT
+    const gptRes = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: gptPrompt }],
       max_tokens: 200,
       temperature: 0.5,
     });
-
-    let dallePrompt = response.choices?.[0]?.message?.content?.trim() || "";
+    let dallePrompt = gptRes.choices?.[0]?.message?.content?.trim() || "";
 
     // Basic prompt cleanup
     if (dallePrompt.toLowerCase().startsWith("dall·e prompt:")) {
@@ -315,11 +302,9 @@ Here’s the ad image concept to use as context:
       console.error("GPT did not return a prompt!");
       return res.status(500).json({ error: "AI failed to generate image prompt." });
     }
-
-    // 2. Log the prompt for debugging
     console.log("Generated DALL·E prompt:", dallePrompt);
 
-    // 3. Generate the image
+    // 2. Generate the image with DALL·E
     let imageRes;
     try {
       imageRes = await openai.images.generate({
@@ -338,10 +323,24 @@ Here’s the ad image concept to use as context:
       return res.status(500).json({ error: "No image URL returned by DALL·E." });
     }
 
-    res.json({ imageUrl, dallePrompt });
+    // 3. Run Replicate Face Fixer (GFPGAN)
+    let fixedImageUrl = imageUrl;
+    try {
+      const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
+      const output = await replicate.run(
+        "tencentarc/gfpgan:1.4",
+        { input: { img: imageUrl, scale: 2 } }
+      );
+      fixedImageUrl = Array.isArray(output) ? output[0] : output;
+    } catch (err) {
+      console.error("Replicate face fixer failed:", err?.response?.data || err.message || err);
+      // fallback: return original DALL·E image
+      fixedImageUrl = imageUrl;
+    }
+
+    res.json({ imageUrl: fixedImageUrl, dallePrompt });
 
   } catch (err) {
-    // This catches GPT or generic errors
     console.error("Ultra-Precise Image Generation Error:", err?.response?.data || err.message || err);
     res.status(500).json({ error: "Image generation failed.", detail: err?.response?.data || err.message || err });
   }
