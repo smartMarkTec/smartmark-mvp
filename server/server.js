@@ -2,7 +2,7 @@ require('dotenv').config({ path: './.env' });
 
 const express = require('express');
 const cors = require('cors');
-const path = require('path'); // <-- Needed for serving /tmp images
+const path = require('path');
 const app = express();
 
 const allowedOrigins = [
@@ -11,11 +11,10 @@ const allowedOrigins = [
   'http://localhost:3000'
 ];
 
-// Fix CORS to always respond for preflight, set headers **before** any routes
+// CORS setup
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow REST tools or direct server calls with no origin
-    if (!origin) return callback(null, true);
+    if (!origin) return callback(null, true); // Allow REST tools, local scripts
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('CORS not allowed from this origin: ' + origin), false);
   },
@@ -23,16 +22,16 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.options('*', cors()); // handle preflight for all routes
+app.options('*', cors());
 
 app.set('trust proxy', 1);
 
+// Parse JSON and urlencoded payloads
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// ----------- THIS LINE ADDED: SERVE TMP IMAGES -----------
+// -------- Serve /tmp images for AI overlays --------
 app.use('/tmp', express.static(path.join(__dirname, 'tmp')));
-// ---------------------------------------------------------
 
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
@@ -43,12 +42,12 @@ app.use('/api', aiRoutes);
 const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
-// Health check endpoint
+// Health check
 app.get('/healthz', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
 });
 
-// Root endpoint
+// Root
 app.get('/', (req, res) => {
   res.json({ status: 'SmartMark backend running', time: new Date().toISOString() });
 });
