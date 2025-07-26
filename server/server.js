@@ -2,6 +2,7 @@ require('dotenv').config({ path: './.env' });
 
 const express = require('express');
 const cors = require('cors');
+const path = require('path'); // <-- Needed for serving /tmp images
 const app = express();
 
 const allowedOrigins = [
@@ -28,6 +29,10 @@ app.set('trust proxy', 1);
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ----------- THIS LINE ADDED: SERVE TMP IMAGES -----------
+app.use('/tmp', express.static(path.join(__dirname, 'tmp')));
+// ---------------------------------------------------------
 
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
