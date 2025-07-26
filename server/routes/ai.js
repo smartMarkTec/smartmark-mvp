@@ -266,17 +266,17 @@ Respond as JSON:
 
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
-const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // You can use process.env.PEXELS_API_KEY
+const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // Or use process.env.PEXELS_API_KEY
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
 
 // POST /api/generate-image-from-prompt
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
+    // Accept both url and industry from frontend!
     const { url = "", industry = "" } = req.body;
 
     // 1. Use GPT to get a 1-2 word image topic (e.g., "gym", "fashion", "pizza restaurant", "office")
-    let searchTerm = industry;
-    if (!searchTerm) searchTerm = url;
+    let searchTerm = industry || url;
     if (!searchTerm) {
       return res.status(400).json({ error: "Missing url or industry" });
     }
