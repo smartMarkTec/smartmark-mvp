@@ -63,7 +63,7 @@ router.post('/generate-ad-copy', async (req, res) => {
   }
 });
 
-// ========== AI: AUTOMATIC AUDIENCE DETECTION (with FB Interest Mapping) ==========
+// ========== AI: AUTOMATIC AUDIENCE DETECTION ==========
 const DEFAULT_AUDIENCE = {
   brandName: "",
   demographic: "",
@@ -242,7 +242,12 @@ Website URL: ${url}
 
 ### Generate the following, each with clear labels:
 1. High-converting Facebook ad copy (headline + body)
-2. An image prompt describing exactly what the ad image should look like (detailed, visual, for a human designer)
+2. A DALL·E 3 prompt for a photorealistic, high-quality Facebook ad image, with these rules:
+    - NO text, letters, numbers, or words anywhere in the image.
+    - If people are shown, only show from the waist up (close up, clear faces).
+    - Prioritize realism, professional lighting, and modern ad style.
+    - Describe the setting, style, and mood in detail, make the ad visually compelling for Facebook.
+    - Make sure the prompt will NOT include text in the image or suggest "insert text here".
 3. A short, punchy 30-second video ad script
 
 Respond as JSON:
@@ -273,30 +278,29 @@ Respond as JSON:
   }
 });
 
-// ========== AI: GENERATE IMAGE PREVIEW/DESCRIPTION WITH GPT-4o ==========
+// ========== AI: GENERATE DALL·E 3 IMAGE FROM GPT PROMPT ==========
 router.post('/generate-image-from-prompt', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
+
+  // Ensure prompt is extra clear: No text, close-up, modern, photoreal, etc.
+  const dallePrompt = `${prompt}
+  -- No text, no letters, no numbers, no words in the image.
+  -- If people are included, show only from the waist up, close-up and clearly visible.
+  -- Modern, photorealistic, vibrant, eye-catching, professionally lit, Facebook ad style.
+  -- No generic or placeholder elements, no watermarks.`;
+
   try {
-    const gptPrompt = `
-Describe the following Facebook ad concept with a visual ASCII-style sketch OR a vivid, short visual description (3-6 lines). Only output the ASCII or visual description, no explanation.
-
-Ad Image Prompt:
-"""${prompt}"""
-    `;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: gptPrompt }],
-      max_tokens: 120,
-      temperature: 0.6,
+    const imageRes = await openai.images.generate({
+      prompt: dallePrompt,
+      n: 1,
+      size: "1024x1024"
     });
-
-    const imagePreview = response.choices?.[0]?.message?.content?.trim() || "";
-    res.json({ imageUrl: null, preview: imagePreview });
+    const imageUrl = imageRes.data[0].url;
+    res.json({ imageUrl });
   } catch (err) {
-    console.error("Image GPT Preview error:", err?.response?.data || err.message);
-    res.status(500).json({ error: "Image preview failed." });
+    console.error("Image generation error:", err?.response?.data || err.message);
+    res.status(500).json({ error: "Image generation failed." });
   }
 });
 
