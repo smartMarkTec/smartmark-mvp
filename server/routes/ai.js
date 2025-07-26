@@ -221,29 +221,19 @@ router.post('/generate-campaign-assets', async (req, res) => {
   }
 
   let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+
+  // 🚀 Bulletproof, model-proof prompt!
   const prompt = `
-You are a Facebook Ads expert. Use ONLY the marketing strategies, ad copy frameworks, and techniques in the following context.
+You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script.
 
-### Training context:
-${customContext}
+Example:
+{"headline":"30% Off for First-Time Customers!","body":"Hungry for pizza? Order now from Joe's Pizza and get 30% off your first order. Fresh, fast, and delicious — delivered to your door. Don't miss out!","image_prompt":"Close-up of a smiling chef holding a pizza box in a bright, modern kitchen, soft lighting, high energy, happy expression, NO text.","video_script":"[15s fast montage] Fresh dough tossed, oven flames, happy customers, ending with a call-to-action to order online now."}
 
-### Survey answers:
+${customContext ? "Training context:\n" + customContext : ""}
+Survey answers:
 ${surveyStr}
 Website URL: ${url}
-
-### Generate the following, each with clear labels:
-1. High-converting Facebook ad copy (headline + body)
-2. An image prompt describing exactly what the ad image should look like (detailed, visual, for a human designer; must describe people/faces with close-up, camera/lighting, emotion, appearance, and absolutely NO text)
-3. A short, punchy 30-second video ad script
-
-Respond as JSON:
-{
-  "headline": "...",
-  "body": "...",
-  "image_prompt": "...",
-  "video_script": "..."
-}
-  `;
+`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -255,27 +245,26 @@ Respond as JSON:
       max_tokens: 700
     });
     const raw = response.choices?.[0]?.message?.content?.trim();
-let result;
-try {
-  result = JSON.parse(raw);
-  // Defensive: Ensure all expected fields exist, or add fallback
-  result.headline = result.headline || "";
-  result.body = result.body || "";
-  result.image_prompt = result.image_prompt || "";
-  result.video_script = result.video_script || "";
-} catch (e) {
-  // Always return something
-  result = {
-    headline: "",
-    body: "",
-    image_prompt: "",
-    video_script: "",
-    raw: raw || "",
-    parseError: e.message || "Failed to parse AI response"
-  };
-}
-res.json(result);
-
+    let result;
+    try {
+      // Strip markdown and linebreaks if needed
+      const clean = raw.replace(/```(json)?/g, '').replace(/[\r\n]+/g, '');
+      result = JSON.parse(clean);
+      result.headline = result.headline || "";
+      result.body = result.body || "";
+      result.image_prompt = result.image_prompt || "";
+      result.video_script = result.video_script || "";
+    } catch (e) {
+      result = {
+        headline: "",
+        body: "",
+        image_prompt: "",
+        video_script: "",
+        raw: raw || "",
+        parseError: e.message || "Failed to parse AI response"
+      };
+    }
+    res.json(result);
   } catch (err) {
     console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
     res.status(500).json({ error: "AI error", detail: err.message });
