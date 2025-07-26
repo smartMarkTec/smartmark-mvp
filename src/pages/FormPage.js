@@ -335,13 +335,12 @@ export default function FormPage() {
       });
       const data = await res.json();
 
-      // Only use headline/body for preview
       setResult({
         headline: data.headline || "",
         body: data.body || ""
       });
 
-      // Generate image: ONLY use url and industry fields for Pexels!
+      // Step 1: Generate a new stock image
       setImageLoading(true);
       const token = getRandomString();
       setLastRegenerateToken(token);
@@ -355,7 +354,24 @@ export default function FormPage() {
         })
       });
       const imgData = await imgRes.json();
-      setImageUrl(imgData.imageUrl || "");
+      const stockImageUrl = imgData.imageUrl || "";
+
+      // Step 2: If overlay text exists, overlay on image
+      if (stockImageUrl && data.image_overlay_text) {
+        const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl: stockImageUrl,
+            headline: data.image_overlay_text,
+            cta: answers.offer || data.headline || ""
+          })
+        });
+        const overlayData = await overlayRes.json();
+        setImageUrl(overlayData.imageUrl || stockImageUrl);
+      } else {
+        setImageUrl(stockImageUrl);
+      }
       setImageLoading(false);
     } catch (err) {
       setError("Failed to generate campaign: " + (err.message || ""));
@@ -364,13 +380,15 @@ export default function FormPage() {
     setLoading(false);
   };
 
-  // Allow user to regenerate image
+  // Allow user to regenerate image with overlay!
   const handleRegenerateImage = async () => {
     setImageLoading(true);
     setImageUrl("");
     try {
       const token = getRandomString();
       setLastRegenerateToken(token);
+
+      // Get a new image
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -381,7 +399,25 @@ export default function FormPage() {
         })
       });
       const imgData = await imgRes.json();
-      setImageUrl(imgData.imageUrl || "");
+      const stockImageUrl = imgData.imageUrl || "";
+
+      // If overlay text exists, overlay on image
+      if (stockImageUrl && result?.headline) {
+        // get image_overlay_text for regen
+        const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl: stockImageUrl,
+            headline: result.headline, // could also refetch overlay text if you want
+            cta: answers.offer || result.headline || ""
+          })
+        });
+        const overlayData = await overlayRes.json();
+        setImageUrl(overlayData.imageUrl || stockImageUrl);
+      } else {
+        setImageUrl(stockImageUrl);
+      }
     } catch {
       setImageUrl("");
     }
