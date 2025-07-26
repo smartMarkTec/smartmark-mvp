@@ -6,6 +6,9 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 
+// ========== CONFIG ==========
+const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu";
+
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
 const TRAINING_DOCS = fs.existsSync(dataDir)
@@ -263,85 +266,57 @@ Respond as JSON:
   }
 });
 
-// ========== AI: GENERATE IMAGE FROM PROMPT (DALL·E 3) ==========
+// ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS - REAL PHOTO) ==========
 router.post('/generate-image-from-prompt', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
 
-  const gptPrompt = `
-You are an AI photo director for high-end advertising. Write an ultra-specific, concise (under 900 characters), photorealistic prompt for DALL·E.
-
-Rules:
-- All faces must be front-facing, straight, perfectly proportional, eyes looking directly at the camera, clear eyes, sharp focus, natural expressions, realistic skin, perfect facial symmetry.
-- Be precise about each subject's appearance, position, and the composition (body/face ratios, camera angle, lens, lighting, no distortion).
-- If relevant, set: "Canon DSLR, close-up, straight gaze, studio backdrop, no text, no logo."
-- If business type is given, style and setting should match.
-
-Scene:
-"""${prompt}"""
-
-ALWAYS append: "Faces are front-facing, straight, perfectly proportional, natural expressions, no distortion, clear eyes, realistic skin texture, sharp focus, perfect facial symmetry."
-Output: Only the DALL·E prompt, nothing else.
-  `;
-
   try {
-    // 1. Get final DALL·E prompt from GPT
+    // 1. Use GPT to create the best Pexels search query from the ad description
+    const gptPrompt = `
+Act as an expert advertising art director. Given the following ad image concept, create a short, extremely precise search query (less than 10 words) for a stock photo website. The query should match the ideal photo to use for an ad, with emphasis on photorealistic people, style, emotion, diversity, setting, and close-up if needed. Do NOT include words like "illustration" or "cartoon." Output only the search query, nothing else.
+
+Ad Image Concept:
+"""${prompt}"""
+    `;
     const gptRes = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: gptPrompt }],
-      max_tokens: 200,
-      temperature: 0.5,
+      max_tokens: 30,
+      temperature: 0.3
     });
-    let dallePrompt = gptRes.choices?.[0]?.message?.content?.trim() || "";
+    let searchQuery = gptRes.choices?.[0]?.message?.content?.replace(/["\n]/g, '').trim();
+    if (!searchQuery) searchQuery = "diverse people business advertising"; // fallback
 
-    // Basic prompt cleanup
-    if (dallePrompt.toLowerCase().startsWith("dall·e prompt:")) {
-      dallePrompt = dallePrompt.replace(/^dall·e prompt:/i, '').trim();
-    }
-    if (!dallePrompt) {
-      console.error("GPT did not return a prompt!");
-      return res.status(500).json({ error: "AI failed to generate image prompt." });
-    }
-    console.log("Generated DALL·E prompt:", dallePrompt);
+    // 2. Use Pexels API to fetch the best matching real photo
+    const pexelsRes = await axios.get(
+      "https://api.pexels.com/v1/search",
+      {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: {
+          query: searchQuery,
+          per_page: 1,
+          orientation: "square"
+        }
+      }
+    );
 
-    // 2. Generate the image with DALL·E
-    let imageRes;
-    try {
-      imageRes = await openai.images.generate({
-        prompt: dallePrompt,
-        n: 1,
-        size: "1024x1024"
-      });
-    } catch (err) {
-      console.error("DALL·E API error:", err?.response?.data || err.message || err);
-      return res.status(500).json({ error: "DALL·E image API failed.", detail: err?.response?.data || err.message || err });
+    const photos = pexelsRes.data.photos || [];
+    if (!photos.length) {
+      return res.status(404).json({ error: "No stock photo found for this prompt." });
     }
 
-    const imageUrl = imageRes.data[0]?.url || null;
-    if (!imageUrl) {
-      console.error("No image URL returned by DALL·E!");
-      return res.status(500).json({ error: "No image URL returned by DALL·E." });
-    }
+    // Return the URL for the highest-res version
+    const photo = photos[0];
+    const imageUrl = photo.src.original || photo.src.large || photo.src.medium;
 
-    // 3. Run Replicate Face Fixer (GFPGAN)
-    let fixedImageUrl = imageUrl;
-    try {
-      const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN });
-      const output = await replicate.run(
-        "tencentarc/gfpgan:1.4",
-        { input: { img: imageUrl, scale: 2 } }
-      );
-      fixedImageUrl = Array.isArray(output) ? output[0] : output;
-    } catch (err) {
-      console.error("Replicate face fixer failed:", err?.response?.data || err.message || err);
-      // fallback: return original DALL·E image
-      fixedImageUrl = imageUrl;
-    }
+    // Log for debug
+    console.log("Pexels Search Query:", searchQuery);
+    console.log("Pexels Image Used:", imageUrl);
 
-    res.json({ imageUrl: fixedImageUrl, dallePrompt });
-
+    res.json({ imageUrl, pexelsQuery: searchQuery, photographer: photo.photographer });
   } catch (err) {
-    console.error("Ultra-Precise Image Generation Error:", err?.response?.data || err.message || err);
+    console.error("PEXELS IMAGE GENERATION ERROR:", err?.response?.data || err.message || err);
     res.status(500).json({ error: "Image generation failed.", detail: err?.response?.data || err.message || err });
   }
 });
