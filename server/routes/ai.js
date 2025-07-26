@@ -264,7 +264,6 @@ Respond as JSON:
   }
 });
 
-
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
 const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // Or use process.env.PEXELS_API_KEY
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
@@ -272,16 +271,14 @@ const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
 // POST /api/generate-image-from-prompt
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
-    // Accept both url and industry from frontend!
-    const { url = "", industry = "" } = req.body;
+    const { url = "", industry = "", regenerateToken = "" } = req.body;
 
-    // 1. Use GPT to get a 1-2 word image topic (e.g., "gym", "fashion", "pizza restaurant", "office")
+    // Use GPT to get a 1-2 word search topic
     let searchTerm = industry || url;
     if (!searchTerm) {
       return res.status(400).json({ error: "Missing url or industry" });
     }
 
-    // Use GPT to refine into 1–2 word search
     const gptPrompt = `
 Given this business URL and industry, output only the most relevant 1-2 word search term for a stock photo (such as "gym", "restaurant", "pizza", "doctor", "salon", "fashion", "coffee shop", "bakery"). Do NOT use more than 2 words. Only output the search term. Do not include any quotes or extra words.
 
@@ -289,35 +286,74 @@ URL: ${url}
 Industry: ${industry}
     `.trim();
 
-    const gptRes = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: gptPrompt }],
-      max_tokens: 6,
-      temperature: 0.3
-    });
-    let keyword = gptRes.choices?.[0]?.message?.content?.trim().replace(/["'.]/g, "");
-    if (!keyword) keyword = industry || url;
+    // GPT: Timeout after 3.5s for max speed
+    let keyword = "";
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3500);
+      const gptRes = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: gptPrompt }],
+        max_tokens: 6,
+        temperature: 0.35
+      }, { signal: controller.signal });
+      clearTimeout(timeout);
+      keyword = gptRes.choices?.[0]?.message?.content?.trim().replace(/["'.]/g, "");
+      if (!keyword) keyword = industry || url;
+    } catch (e) {
+      keyword = industry || url;
+    }
 
-    // 2. Fetch stock image from Pexels
-    const pexelsRes = await axios.get(PEXELS_BASE_URL, {
-      headers: { Authorization: PEXELS_API_KEY },
-      params: { query: keyword, per_page: 1 }
-    });
-
-    const photos = pexelsRes.data.photos;
-    if (photos && photos.length > 0) {
-      const img = photos[0];
-      return res.json({
-        imageUrl: img.src.large2x || img.src.original || img.src.large,
-        photographer: img.photographer,
-        pexelsUrl: img.url,
-        keyword
+    // 2. Fetch 15 stock images from Pexels (limit = speed + variety)
+    const perPage = 15;
+    let photos = [];
+    try {
+      const resp = await axios.get(PEXELS_BASE_URL, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: {
+          query: keyword,
+          per_page: perPage,
+          // Use a cache-busting param to always get fresh results
+          cb: Date.now() + (regenerateToken || "")
+        },
+        timeout: 4800, // < 5s hard limit for speed
       });
-    } else {
+      photos = resp.data.photos || [];
+    } catch (err) {
+      console.error("Pexels fetch error:", err?.message || err);
+      return res.status(500).json({ error: "Image search failed" });
+    }
+
+    // 3. Pick a random image from available results (for variety on regenerate)
+    if (!photos.length) {
       return res.status(404).json({ error: "No images found for this topic." });
     }
+
+    // To make "regenerate" always return a different image, use the token as a seed:
+    let imgIdx = 0;
+    if (regenerateToken) {
+      // Basic deterministic seed from regenerateToken, else just random
+      let hash = 0;
+      for (let i = 0; i < regenerateToken.length; i++) {
+        hash = (hash * 31 + regenerateToken.charCodeAt(i)) % perPage;
+      }
+      imgIdx = Math.abs(hash) % photos.length;
+    } else {
+      imgIdx = Math.floor(Math.random() * photos.length);
+    }
+
+    const img = photos[imgIdx];
+
+    return res.json({
+      imageUrl: img.src.large2x || img.src.original || img.src.large,
+      photographer: img.photographer,
+      pexelsUrl: img.url,
+      keyword,
+      totalResults: photos.length,
+      usedIndex: imgIdx
+    });
   } catch (err) {
-    console.error("Pexels image fetch error:", err?.response?.data || err.message || err);
+    console.error("AI image generation error:", err?.message || err);
     res.status(500).json({ error: "Failed to fetch stock image", detail: err.message });
   }
 });
