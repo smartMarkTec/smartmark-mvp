@@ -222,7 +222,7 @@ Website homepage text:
   }
 });
 
-// ===== NEW! GENERATE FULL AD SUITE FROM NOTES + SURVEY ======
+// ===== GENERATE FULL AD SUITE FROM NOTES + SURVEY ======
 router.post('/generate-campaign-assets', async (req, res) => {
   const { answers = {}, url = "" } = req.body;
   if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
@@ -242,7 +242,7 @@ Website URL: ${url}
 
 ### Generate the following, each with clear labels:
 1. High-converting Facebook ad copy (headline + body)
-2. An image prompt describing exactly what the ad image should look like (detailed, visual, for a human designer or for DALL·E)
+2. An image prompt describing exactly what the ad image should look like (detailed, visual, for a human designer)
 3. A short, punchy 30-second video ad script
 
 Respond as JSON:
@@ -273,21 +273,30 @@ Respond as JSON:
   }
 });
 
-// ========== AI: GENERATE IMAGE FROM PROMPT (DALL·E 3, OpenAI) ==========
+// ========== AI: GENERATE IMAGE PREVIEW/DESCRIPTION WITH GPT-4o ==========
 router.post('/generate-image-from-prompt', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
   try {
-    const imageRes = await openai.images.generate({
-      prompt,
-      n: 1,
-      size: "1024x1024"
+    const gptPrompt = `
+Describe the following Facebook ad concept with a visual ASCII-style sketch OR a vivid, short visual description (3-6 lines). Only output the ASCII or visual description, no explanation.
+
+Ad Image Prompt:
+"""${prompt}"""
+    `;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: gptPrompt }],
+      max_tokens: 120,
+      temperature: 0.6,
     });
-    const imageUrl = imageRes.data[0].url;
-    res.json({ imageUrl });
+
+    const imagePreview = response.choices?.[0]?.message?.content?.trim() || "";
+    res.json({ imageUrl: null, preview: imagePreview });
   } catch (err) {
-    console.error("Image generation error:", err?.response?.data || err.message);
-    res.status(500).json({ error: "Image generation failed." });
+    console.error("Image GPT Preview error:", err?.response?.data || err.message);
+    res.status(500).json({ error: "Image preview failed." });
   }
 });
 
