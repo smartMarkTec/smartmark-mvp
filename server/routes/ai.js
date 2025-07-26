@@ -16,7 +16,6 @@ let customContext = '';
 for (const file of TRAINING_DOCS) {
   try {
     if (file.endsWith('.docx')) {
-      // Naive .docx support (use a library for production)
       const buffer = fs.readFileSync(file);
       customContext += buffer.toString('utf8') + '\n\n';
     } else {
@@ -74,7 +73,6 @@ const DEFAULT_AUDIENCE = {
   summary: ""
 };
 
-// Helper: Scrape website homepage text
 async function getWebsiteText(url) {
   try {
     const { data } = await axios.get(url, { timeout: 8000 });
@@ -85,7 +83,6 @@ async function getWebsiteText(url) {
   }
 }
 
-// Helper: Extract keywords/topics from website using OpenAI
 async function extractKeywords(text) {
   const prompt = `
 Extract 3-6 of the most relevant keywords or topics (comma-separated, lowercase, no duplicates) from the text below. Only output a comma-separated string, no extra text.
@@ -111,7 +108,6 @@ Website text:
   }
 }
 
-// Helper: Look up FB Interest IDs for given keywords
 async function getFbInterestIds(keywords, fbToken) {
   const results = [];
   for (let keyword of keywords) {
@@ -138,27 +134,22 @@ async function getFbInterestIds(keywords, fbToken) {
           name: resp.data.data[0].name
         });
       }
-    } catch (err) {
-      // Ignore errors for missing matches
-    }
+    } catch (err) {}
   }
   return results;
 }
 
 // POST /api/detect-audience
 router.post('/detect-audience', async (req, res) => {
-  const { url, fbToken } = req.body; // Optionally pass user's FB token from frontend or backend
+  const { url, fbToken } = req.body;
   if (!url) return res.status(400).json({ error: 'Missing URL' });
 
-  // 1. Scrape website text
   const websiteText = await getWebsiteText(url);
 
-  // Defensive fallback if we can't extract usable text
   if (!websiteText || websiteText.length < 100) {
     return res.json({ audience: DEFAULT_AUDIENCE });
   }
 
-  // 2. OpenAI prompt - asks for response in strict JSON format
   const prompt = `
 Analyze this website's homepage content and answer ONLY in the following JSON format:
 
@@ -203,7 +194,6 @@ Website homepage text:
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
-    // --- Extract FB Interests ---
     let fbInterestIds = [];
     if (fbToken) {
       const keywords = await extractKeywords(websiteText);
@@ -242,12 +232,7 @@ Website URL: ${url}
 
 ### Generate the following, each with clear labels:
 1. High-converting Facebook ad copy (headline + body)
-2. A DALL·E 3 prompt for a photorealistic, high-quality Facebook ad image, with these rules:
-    - NO text, letters, numbers, or words anywhere in the image.
-    - If people are shown, only show from the waist up (close up, clear faces).
-    - Prioritize realism, professional lighting, and modern ad style.
-    - Describe the setting, style, and mood in detail, make the ad visually compelling for Facebook.
-    - Make sure the prompt will NOT include text in the image or suggest "insert text here".
+2. An image prompt describing exactly what the ad image should look like (detailed, visual, for a human designer; must describe people/faces with close-up, camera/lighting, emotion, appearance, and absolutely NO text)
 3. A short, punchy 30-second video ad script
 
 Respond as JSON:
@@ -278,21 +263,34 @@ Respond as JSON:
   }
 });
 
-// ========== AI: GENERATE DALL·E 3 IMAGE FROM GPT PROMPT ==========
+// ========== AI: GENERATE IMAGE FROM PROMPT (DALL·E 3) ==========
 router.post('/generate-image-from-prompt', async (req, res) => {
-  const { prompt } = req.body;
+  let { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
 
-  // Ensure prompt is extra clear: No text, close-up, modern, photoreal, etc.
-  const dallePrompt = `${prompt}
-  -- No text, no letters, no numbers, no words in the image.
-  -- If people are included, show only from the waist up, close-up and clearly visible.
-  -- Modern, photorealistic, vibrant, eye-catching, professionally lit, Facebook ad style.
-  -- No generic or placeholder elements, no watermarks.`;
+  // Use GPT-4o to rewrite prompt for best realism, faces, and specifics
+  try {
+    const enhancePrompt = `
+Enhance and rewrite the following image prompt for DALL·E to maximize photorealism, ensure all faces are close-up, beautiful, realistic, and detailed (describe age, gender, skin, hair, eye color, clothing, emotion, lighting, background, camera, NO TEXT). If there is any mention of 'person', 'people', 'man', 'woman', 'customer', etc, generate a detailed, realistic description. Never mention words or writing. Return only the improved prompt.
 
+Image prompt:
+"""${prompt}"""
+    `;
+    const gptRes = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: enhancePrompt }],
+      max_tokens: 140,
+      temperature: 0.5,
+    });
+    prompt = gptRes.choices?.[0]?.message?.content?.trim() || prompt;
+  } catch (e) {
+    // fallback: use original
+  }
+
+  // Now send to DALL·E
   try {
     const imageRes = await openai.images.generate({
-      prompt: dallePrompt,
+      prompt,
       n: 1,
       size: "1024x1024"
     });
