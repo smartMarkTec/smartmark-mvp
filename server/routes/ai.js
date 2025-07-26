@@ -1,13 +1,9 @@
 // routes/ai.js
 const express = require('express');
 const router = express.Router();
-const { OpenAI } = require('openai');
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-
-// ========== CONFIG ==========
-const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu";
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
@@ -30,6 +26,8 @@ for (const file of TRAINING_DOCS) {
   }
 }
 
+// ----------- OPENAI -----------
+const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ========== QUICK TEST ENDPOINT ==========
@@ -266,58 +264,61 @@ Respond as JSON:
   }
 });
 
-// ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS - REAL PHOTO) ==========
+
+// ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
+const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // You can use process.env.PEXELS_API_KEY
+const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
+
+// POST /api/generate-image-from-prompt
 router.post('/generate-image-from-prompt', async (req, res) => {
-  const { prompt } = req.body;
-  if (!prompt) return res.status(400).json({ error: "Missing image prompt." });
-
   try {
-    // 1. Use GPT to create the best Pexels search query from the ad description
-    const gptPrompt = `
-Act as an expert advertising art director. Given the following ad image concept, create a short, extremely precise search query (less than 10 words) for a stock photo website. The query should match the ideal photo to use for an ad, with emphasis on photorealistic people, style, emotion, diversity, setting, and close-up if needed. Do NOT include words like "illustration" or "cartoon." Output only the search query, nothing else.
+    const { url = "", industry = "" } = req.body;
 
-Ad Image Concept:
-"""${prompt}"""
-    `;
+    // 1. Use GPT to get a 1-2 word image topic (e.g., "gym", "fashion", "pizza restaurant", "office")
+    let searchTerm = industry;
+    if (!searchTerm) searchTerm = url;
+    if (!searchTerm) {
+      return res.status(400).json({ error: "Missing url or industry" });
+    }
+
+    // Use GPT to refine into 1–2 word search
+    const gptPrompt = `
+Given this business URL and industry, output only the most relevant 1-2 word search term for a stock photo (such as "gym", "restaurant", "pizza", "doctor", "salon", "fashion", "coffee shop", "bakery"). Do NOT use more than 2 words. Only output the search term. Do not include any quotes or extra words.
+
+URL: ${url}
+Industry: ${industry}
+    `.trim();
+
     const gptRes = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [{ role: "user", content: gptPrompt }],
-      max_tokens: 30,
+      max_tokens: 6,
       temperature: 0.3
     });
-    let searchQuery = gptRes.choices?.[0]?.message?.content?.replace(/["\n]/g, '').trim();
-    if (!searchQuery) searchQuery = "diverse people business advertising"; // fallback
+    let keyword = gptRes.choices?.[0]?.message?.content?.trim().replace(/["'.]/g, "");
+    if (!keyword) keyword = industry || url;
 
-    // 2. Use Pexels API to fetch the best matching real photo
-    const pexelsRes = await axios.get(
-      "https://api.pexels.com/v1/search",
-      {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: {
-          query: searchQuery,
-          per_page: 1,
-          orientation: "square"
-        }
-      }
-    );
+    // 2. Fetch stock image from Pexels
+    const pexelsRes = await axios.get(PEXELS_BASE_URL, {
+      headers: { Authorization: PEXELS_API_KEY },
+      params: { query: keyword, per_page: 1 }
+    });
 
-    const photos = pexelsRes.data.photos || [];
-    if (!photos.length) {
-      return res.status(404).json({ error: "No stock photo found for this prompt." });
+    const photos = pexelsRes.data.photos;
+    if (photos && photos.length > 0) {
+      const img = photos[0];
+      return res.json({
+        imageUrl: img.src.large2x || img.src.original || img.src.large,
+        photographer: img.photographer,
+        pexelsUrl: img.url,
+        keyword
+      });
+    } else {
+      return res.status(404).json({ error: "No images found for this topic." });
     }
-
-    // Return the URL for the highest-res version
-    const photo = photos[0];
-    const imageUrl = photo.src.original || photo.src.large || photo.src.medium;
-
-    // Log for debug
-    console.log("Pexels Search Query:", searchQuery);
-    console.log("Pexels Image Used:", imageUrl);
-
-    res.json({ imageUrl, pexelsQuery: searchQuery, photographer: photo.photographer });
   } catch (err) {
-    console.error("PEXELS IMAGE GENERATION ERROR:", err?.response?.data || err.message || err);
-    res.status(500).json({ error: "Image generation failed.", detail: err?.response?.data || err.message || err });
+    console.error("Pexels image fetch error:", err?.response?.data || err.message || err);
+    res.status(500).json({ error: "Failed to fetch stock image", detail: err.message });
   }
 });
 
