@@ -275,6 +275,7 @@ You are an AI photo director for high-end advertising. Your job is to write hype
 
 **Follow these rules:**
 - Max length: 900 characters. Stay concise.
+ Always describe faces as "front-facing, straight, proportional, natural expressions, no distortion, clear eyes, realistic skin texture, perfect symmetry, focused and sharp."
 - Describe the number of people, diversity, their positions, facial features, body proportions (height, build, skin tone, hair, clothing, accessories, expression), and exact pose for each person.
 - Give realistic, proportional face and body details (no dysmorphia), but remember, in real life, not everyone is perfectly proportionate—describe a mix if appropriate.
 - Reference real-world stock photo styles (e.g., "modern, diverse group in urban fashion, Canon DSLR, soft natural light, studio backdrop").
@@ -287,6 +288,9 @@ You are an AI photo director for high-end advertising. Your job is to write hype
 Here’s the ad image concept to use as context:
 
 """${prompt}"""
+
+**Always append this to the end of your prompt:**
+"Faces are front-facing, straight, perfectly proportional, natural expressions, no distortion, clear eyes, realistic skin texture, sharp focus, perfect facial symmetry."
 
 **Output:** Only the final DALL·E prompt, nothing else.
 `;
