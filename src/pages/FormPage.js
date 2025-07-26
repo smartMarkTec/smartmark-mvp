@@ -287,59 +287,60 @@ export default function FormPage() {
     setTouched(true);
   };
 
-  // Generate full campaign assets (AI)
-  const handleGenerate = async () => {
-    setLoading(true);
-    setResult(null);
-    setImageUrl("");
-    setError("");
-    try {
-      const toSend = { ...answers };
-      const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: toSend, url: answers.url || "" })
-      });
-      const data = await res.json();
-      if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
-      setResult(data);
-      // Generate image (uses url and industry for best results)
-      if (data.image_prompt) {
-        setImageLoading(true);
-        const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ prompt: `${answers.industry || ""} ${answers.url || ""} ${data.image_prompt}` })
-        });
-        const imgData = await imgRes.json();
-        setImageUrl(imgData.imageUrl || "");
-        setImageLoading(false);
-      }
-    } catch (err) {
-      setError("Failed to generate campaign: " + (err.message || ""));
-      setLoading(false);
-    }
-    setLoading(false);
-  };
-
-  // Allow user to regenerate image
-  const handleRegenerateImage = async () => {
-    if (!result?.image_prompt) return;
-    setImageLoading(true);
-    setImageUrl("");
-    try {
+// Generate full campaign assets (AI)
+const handleGenerate = async () => {
+  setLoading(true);
+  setResult(null);
+  setImageUrl("");
+  setError("");
+  try {
+    const toSend = { ...answers };
+    const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: toSend, url: answers.url || "" })
+    });
+    const data = await res.json();
+    if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
+    setResult(data);
+    // Generate image: ONLY use the industry field for Pexels!
+    if (answers.industry) {
+      setImageLoading(true);
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: `${answers.industry || ""} ${answers.url || ""} ${result.image_prompt}` })
+        body: JSON.stringify({ prompt: answers.industry.trim().toLowerCase() })
       });
       const imgData = await imgRes.json();
       setImageUrl(imgData.imageUrl || "");
-    } catch {
-      setImageUrl("");
+      setImageLoading(false);
     }
-    setImageLoading(false);
-  };
+  } catch (err) {
+    setError("Failed to generate campaign: " + (err.message || ""));
+    setLoading(false);
+  }
+  setLoading(false);
+};
+
+// Allow user to regenerate image
+const handleRegenerateImage = async () => {
+  if (!answers.industry) return;
+  setImageLoading(true);
+  setImageUrl("");
+  try {
+    const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: answers.industry.trim().toLowerCase() })
+    });
+    const imgData = await imgRes.json();
+    setImageUrl(imgData.imageUrl || "");
+  } catch {
+    setImageUrl("");
+  }
+  setImageLoading(false);
+};
+
 
   // Modal open/close handlers
   const handleImageClick = (url) => {
