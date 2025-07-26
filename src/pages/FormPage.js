@@ -73,7 +73,7 @@ const TEAL = "#14e7b9";
 const TEAL_DARK = "#10b597";
 const DARK_BG = "#181b20";
 
-// Updated AdPreviewCard, now supports real values + regenerate
+// Updated AdPreviewCard — supports text/ASCII art preview!
 const AdPreviewCard = ({
   title,
   type,
@@ -81,6 +81,7 @@ const AdPreviewCard = ({
   body,
   videoScript,
   imageUrl,
+  imagePreview,
   imagePrompt,
   onRegenerate,
   imageLoading
@@ -110,20 +111,39 @@ const AdPreviewCard = ({
       {title}
     </span>
     {/* Image Preview */}
-    {type === "image" && imageUrl ? (
+    {type === "image" && (imagePreview || imageUrl) ? (
       <div style={{ width: "100%", textAlign: "center", marginBottom: 18 }}>
-        <img
-          src={imageUrl}
-          alt="Ad Preview"
-          style={{
-            width: "100%",
-            maxWidth: 320,
-            height: 150,
-            objectFit: "cover",
-            borderRadius: 10,
-            background: "#282d33"
-          }}
-        />
+        {imageUrl ? (
+          <img
+            src={imageUrl}
+            alt="Ad Preview"
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              height: 150,
+              objectFit: "cover",
+              borderRadius: 10,
+              background: "#282d33"
+            }}
+          />
+        ) : (
+          <pre
+            style={{
+              width: "100%",
+              minHeight: 110,
+              maxHeight: 150,
+              fontFamily: "monospace",
+              background: "#1a2220",
+              color: "#b8ffdf",
+              fontSize: 15,
+              borderRadius: 10,
+              padding: "16px 10px",
+              whiteSpace: "pre-wrap",
+              margin: 0,
+              overflow: "auto"
+            }}
+          >{imagePreview}</pre>
+        )}
         <button
           style={{
             position: "absolute",
@@ -252,6 +272,7 @@ export default function FormPage() {
   // AI/campaign outputs:
   const [result, setResult] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
+  const [imagePreview, setImagePreview] = useState(""); // <-- new
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -280,9 +301,9 @@ export default function FormPage() {
     setLoading(true);
     setResult(null);
     setImageUrl("");
+    setImagePreview("");
     setError("");
     try {
-      // In a real app, ask for URL too! For demo, omit or add an input
       const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -291,7 +312,7 @@ export default function FormPage() {
       const data = await res.json();
       if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
       setResult(data);
-      // Generate image
+      // Generate image (actually gets ASCII/text preview)
       if (data.image_prompt) {
         setImageLoading(true);
         const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
@@ -300,7 +321,8 @@ export default function FormPage() {
           body: JSON.stringify({ prompt: data.image_prompt })
         });
         const imgData = await imgRes.json();
-        setImageUrl(imgData.imageUrl || "");
+        setImageUrl(""); // not used
+        setImagePreview(imgData.preview || "No preview.");
         setImageLoading(false);
       }
     } catch (err) {
@@ -315,6 +337,7 @@ export default function FormPage() {
     if (!result?.image_prompt) return;
     setImageLoading(true);
     setImageUrl("");
+    setImagePreview("");
     try {
       const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
@@ -322,9 +345,10 @@ export default function FormPage() {
         body: JSON.stringify({ prompt: result.image_prompt })
       });
       const imgData = await imgRes.json();
-      setImageUrl(imgData.imageUrl || "");
+      setImageUrl(""); // not used
+      setImagePreview(imgData.preview || "No preview.");
     } catch {
-      setImageUrl("");
+      setImagePreview("No preview.");
     }
     setImageLoading(false);
   };
@@ -597,8 +621,11 @@ export default function FormPage() {
               title="IMAGE AD PREVIEW"
               type="image"
               headline={result.headline}
+              body={result.body}
               imageLoading={imageLoading}
               onRegenerate={handleRegenerateImage}
+              imagePreview={imagePreview}
+              imagePrompt={result.image_prompt}
             />
             <div style={{
               width: 2,
@@ -612,6 +639,7 @@ export default function FormPage() {
               title="VIDEO AD PREVIEW"
               type="video"
               headline={result.headline}
+              videoScript={result.video_script}
             />
           </div>
         )}
