@@ -222,12 +222,17 @@ router.post('/generate-campaign-assets', async (req, res) => {
 
   let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
 
-  // 🚀 Bulletproof, model-proof prompt!
+  // 🚀 Bulletproof prompt requesting overlay text!
   const prompt = `
-You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script.
+You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script, image_overlay_text.
+
+Rules for "image_overlay_text":
+- Write a short, punchy, 7–10 word text for the image overlay.
+- Make it direct, bold, and readable on a photo.
+- Use ALL-CAPS. No punctuation.
 
 Example:
-{"headline":"30% Off for First-Time Customers!","body":"Hungry for pizza? Order now from Joe's Pizza and get 30% off your first order. Fresh, fast, and delicious — delivered to your door. Don't miss out!","image_prompt":"Close-up of a smiling chef holding a pizza box in a bright, modern kitchen, soft lighting, high energy, happy expression, NO text.","video_script":"[15s fast montage] Fresh dough tossed, oven flames, happy customers, ending with a call-to-action to order online now."}
+{"headline":"30% Off for First-Time Customers!","body":"Hungry for pizza? Order now from Joe's Pizza and get 30% off your first order. Fresh, fast, and delicious — delivered to your door. Don't miss out!","image_prompt":"Close-up of a smiling chef holding a pizza box in a bright, modern kitchen, soft lighting, high energy, happy expression, NO text.","video_script":"[15s fast montage] Fresh dough tossed, oven flames, happy customers, ending with a call-to-action to order online now.","image_overlay_text":"ORDER NOW GET 30 PERCENT OFF FRESH FAST PIZZA"}
 
 ${customContext ? "Training context:\n" + customContext : ""}
 Survey answers:
@@ -242,7 +247,7 @@ Website URL: ${url}
         { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
         { role: "user", content: prompt }
       ],
-      max_tokens: 700
+      max_tokens: 750
     });
     const raw = response.choices?.[0]?.message?.content?.trim();
     let result;
@@ -254,12 +259,14 @@ Website URL: ${url}
       result.body = result.body || "";
       result.image_prompt = result.image_prompt || "";
       result.video_script = result.video_script || "";
+      result.image_overlay_text = result.image_overlay_text || "";
     } catch (e) {
       result = {
         headline: "",
         body: "",
         image_prompt: "",
         video_script: "",
+        image_overlay_text: "",
         raw: raw || "",
         parseError: e.message || "Failed to parse AI response"
       };
