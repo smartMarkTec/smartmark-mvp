@@ -337,8 +337,22 @@ export default function FormPage() {
         body: JSON.stringify({ answers: toSend, url: answers.url || "" })
       });
       const data = await res.json();
-      if (!data.headline && !data.body && !data.image_prompt) throw new Error("AI did not return campaign assets.");
-      setResult(data);
+      if ((!data.headline || !data.body || !data.image_prompt) && data.raw) {
+  // Partial AI error, show raw response for debugging
+  setResult({
+    headline: data.headline || "",
+    body: data.body || "",
+    image_prompt: data.image_prompt || "",
+    video_script: data.video_script || "",
+    error: data.parseError || "AI returned malformed response",
+    raw: data.raw
+  });
+} else if (!data.headline && !data.body && !data.image_prompt) {
+  throw new Error("AI did not return any campaign assets.");
+} else {
+  setResult(data);
+}
+
 
       // Generate image: ONLY use url and industry fields for Pexels!
       setImageLoading(true);

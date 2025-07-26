@@ -255,9 +255,27 @@ Respond as JSON:
       max_tokens: 700
     });
     const raw = response.choices?.[0]?.message?.content?.trim();
-    let result;
-    try { result = JSON.parse(raw); } catch (e) { result = { raw }; }
-    res.json(result);
+let result;
+try {
+  result = JSON.parse(raw);
+  // Defensive: Ensure all expected fields exist, or add fallback
+  result.headline = result.headline || "";
+  result.body = result.body || "";
+  result.image_prompt = result.image_prompt || "";
+  result.video_script = result.video_script || "";
+} catch (e) {
+  // Always return something
+  result = {
+    headline: "",
+    body: "",
+    image_prompt: "",
+    video_script: "",
+    raw: raw || "",
+    parseError: e.message || "Failed to parse AI response"
+  };
+}
+res.json(result);
+
   } catch (err) {
     console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
     res.status(500).json({ error: "AI error", detail: err.message });
