@@ -415,11 +415,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .toBuffer();
 
     // 4. Save in /tmp and return URL
-    const tmpDir = path.join(__dirname, '../tmp');
+    const tmpDir = '/tmp';
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(tmpDir, fileName);
     fs.writeFileSync(filePath, outBuffer);
+    console.log("Overlay image saved at:", filePath, "and served as:", publicUrl);
+
 
     // You must serve /tmp as static for this to work as a URL:
     // app.use('/tmp', express.static(path.join(__dirname, 'tmp')));

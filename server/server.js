@@ -31,7 +31,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // -------- Serve /tmp images for AI overlays --------
-app.use('/tmp', express.static(path.join(__dirname, 'tmp')));
+app.use('/tmp', express.static('/tmp'));
+
 
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
