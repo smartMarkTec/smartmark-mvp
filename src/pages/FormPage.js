@@ -335,9 +335,11 @@ export default function FormPage() {
       });
       const data = await res.json();
 
+      // Store overlay text as well
       setResult({
         headline: data.headline || "",
-        body: data.body || ""
+        body: data.body || "",
+        image_overlay_text: data.image_overlay_text || ""
       });
 
       // Step 1: Generate a new stock image
@@ -363,7 +365,7 @@ export default function FormPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             imageUrl: stockImageUrl,
-            headline: data.image_overlay_text,
+            headline: data.image_overlay_text, // <-- this is the actual overlay!
             cta: answers.offer || data.headline || ""
           })
         });
@@ -379,6 +381,7 @@ export default function FormPage() {
     }
     setLoading(false);
   };
+
 
   // Allow user to regenerate image with overlay!
   const handleRegenerateImage = async () => {
