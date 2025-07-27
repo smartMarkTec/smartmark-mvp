@@ -396,8 +396,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
     const neutralOverlayPalette = [
-      "#BAB6AB77", "#C7C3B477", "#B8C0B977", "#D3CEC677", "#94958877", "#A8A59C77", "#DEDAD177"
-    ];
+  "#DEDAD133", "#C7C3B433", "#BAB6AB33", "#A8A59C33", "#B8C0B933", "#E3DDD533", "#94958833"
+];
+//                ^^^^^^^^ see the 33
+
 
     function hexToHexAlpha(hex, alpha = 0.35) {
       let c = hex.replace('#', '');
