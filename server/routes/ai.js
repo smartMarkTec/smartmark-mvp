@@ -365,7 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (advanced: industry-aware color/box/position) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (neutral palette, advanced box/position) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -388,16 +388,25 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // Color helpers
-    function hexToHexAlpha(hex, alpha = 0.45) {
+    // ---- Neutral color palette (based on your uploaded image)
+    const NEUTRALS = [
+      "#F2F1EA", "#E7E5DD", "#DFDACE", "#CFC8B8", "#E2DED4", // warm whites, ivories
+      "#B9B6A7", "#C5BAA4", "#C7BEB4", "#A9A292", "#B0AAA2", // taupes/greige
+      "#A5B4B0", "#A8B6BE", "#9DAEB5", "#C4C8C6",             // grayish blues/greens
+      "#6B787A", "#72787B", "#8D9292", "#656665", "#71706F",  // soft greys
+      "#3D4C50", "#25373D", "#3C3932", "#494B4E", "#424242",  // deep greys, black
+      "#8E847B", "#C1B7AC", "#D1CDC8"                         // sand/stone
+    ];
+
+    function pickFrom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
+    function hexToHexAlpha(hex, alpha = 0.42) {
       let c = hex.replace('#', '');
       if (c.length === 3) c = c.split('').map(x => x + x).join('');
       if (c.length !== 6) return hex;
       let a = Math.round(alpha * 255).toString(16).padStart(2, '0');
       return `#${c}${a}`;
-    }
-    function pickFrom(arr) {
-      return arr[Math.floor(Math.random() * arr.length)];
     }
 
     // Font family pool
@@ -405,10 +414,9 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       "Poppins,Arial Black,Arial,sans-serif",
       "'Times New Roman',Times,serif",
       "'Helvetica Neue',Helvetica,Arial,sans-serif",
-      "Impact,Arial,sans-serif",
       "Inter,Arial,sans-serif"
     ];
-    const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
+    const fontFamily = pickFrom(fontFamilies);
 
     // --- INDUSTRY LOGIC ---
     const seriousIndustries = [
@@ -421,7 +429,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       (industry || "").toLowerCase().includes(kw)
     );
 
-    // --- HEADLINE WRAP ---
+    // --- Headline wrap ---
     function smartWrap(text, maxLines = 3) {
       if (!text) return [];
       const words = text.trim().split(' ');
@@ -439,7 +447,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const headlineFont = 52;
     const headlineLines = smartWrap(headline, 3);
 
-    // --- SUBHEADLINE WRAP ---
+    // --- Subheadline wrap ---
     const subFont = 28;
     function fitLines(text, fontSize, maxWidth, maxLines = 2) {
       let words = text.split(' ');
@@ -476,49 +484,37 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     let showCta = !!ctaText;
     const ctaFont = 30;
     const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
-    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
+    const ctaBoxH = 56, ctaBoxY = 52;
 
-    // --- COLOR LOGIC ---
-    // If serious: full overlay filter, box color dark-contrast with overlay; if non-serious: just headline box, no full overlay, fun color
-    let overlayColor, boxColor, textColor;
+    // --- NEUTRAL COLOR LOGIC ---
+    // Both serious and non-serious now use only NEUTRALS!
+    let overlayColor = null, boxColor = pickFrom(NEUTRALS), textColor, ctaColor;
+    // Overlay: only for serious, using translucent version of another neutral
     if (isSerious) {
-      // Overlay: random dark blue/gray with alpha
-      const overlayPalette = [
-        "#22356B77", "#15436099", "#00315388", "#00336677", "#1A4D2E77", "#2A394B77",
-        "#23293B88", "#1A3C4077", "#222D3C88"
-      ];
-      overlayColor = pickFrom(overlayPalette);
-      // Box: dark neutral, more opaque
-      const boxPalette = [
-        "#2D3250F0", "#20293DEE", "#232F3FEE", "#242A3EEE", "#222E3AEE"
-      ];
-      boxColor = pickFrom(boxPalette);
-      textColor = "#fff";
-    } else {
-      overlayColor = null;
-      // Lighter/fun options, some white, black, blue, green, orange
-      const boxPalette = [
-        "#1656C2EE", "#0F9153EE", "#6D2DEE", "#CA5500EE", "#222222EE", "#F7F7F7EE", "#32B88BEE"
-      ];
-      const textPalette = ["#fff", "#222"];
-      boxColor = pickFrom(boxPalette);
-      textColor = ["#F7F7F7EE", "#fff"].includes(boxColor) ? "#222" : "#fff";
+      overlayColor = hexToHexAlpha(pickFrom(NEUTRALS.slice(10)), 0.32);
     }
+    // Text color: pick black for lighter boxes, white for darker
+    function isLight(hex) {
+      // returns true for "light" background
+      hex = hex.replace('#','');
+      const r = parseInt(hex.substring(0,2),16), g = parseInt(hex.substring(2,4),16), b = parseInt(hex.substring(4,6),16);
+      const lum = (0.299*r + 0.587*g + 0.114*b)/255;
+      return lum > 0.68;
+    }
+    textColor = isLight(boxColor) ? "#222" : "#fff";
+    // CTA color: another neutral, different from box
+    ctaColor = pickFrom(NEUTRALS.filter(c => c !== boxColor && c !== "#fff"));
 
-    // --- BOX SIZE/PLACEMENT ---
+    // --- BOX SIZE/PLACEMENT/STYLE ---
     const paddingX = 54, paddingY = 36;
     const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
     const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
-
-    // Randomize headline alignment (center or left) if "serious"
-    let align = "center";
-    if (isSerious) align = Math.random() < 0.55 ? "left" : "center";
-    const boxX = align === "center"
-      ? 600 - boxWidth / 2
-      : 160; // left edge padding
+    let align = Math.random() < 0.5 ? "center" : "left";
+    const boxX = align === "center" ? 600 - boxWidth / 2 : 160;
     const textX = align === "center" ? 600 : (boxX + paddingX);
-
     const boxY = 130;
+    // Randomly round or not
+    const boxRx = Math.random() < 0.5 ? 36 : 0;
 
     function escapeForSVG(text) {
       return String(text)
@@ -532,18 +528,18 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // --- SVG ASSEMBLE ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  ${isSerious && overlayColor ? `<rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />` : ""}
+  ${overlayColor ? `<rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />` : ""}
   <!-- Headline Box -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="28" fill="${boxColor}" />
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
     `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="${align === "center" ? "middle" : "start"}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
   ${subLines.length ? subLines.map((line, i) =>
-    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#444">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="#2aa5ecE6" />
-    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
+    <rect x="${1200 - estCtaWidth - 40}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="${ctaColor}" />
+    <text x="${1200 - estCtaWidth/2 - 40}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${isLight(ctaColor) ? "#222" : "#fff"}">${escapeForSVG(ctaText)}</text>
   ` : ''}
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
@@ -571,5 +567,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
