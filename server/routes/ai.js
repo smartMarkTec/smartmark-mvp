@@ -365,7 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (randomized position, robust SVG) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (advanced: industry-aware color/box/position) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -376,7 +376,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       footer = "",
       color = "#225bb3",
       footerColor = "#FFD700",
-      industry = ""  // NEW: take industry from req.body
+      industry = ""
     } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
@@ -388,13 +388,16 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // 8-digit hex for overlay
+    // Color helpers
     function hexToHexAlpha(hex, alpha = 0.45) {
       let c = hex.replace('#', '');
       if (c.length === 3) c = c.split('').map(x => x + x).join('');
       if (c.length !== 6) return hex;
       let a = Math.round(alpha * 255).toString(16).padStart(2, '0');
       return `#${c}${a}`;
+    }
+    function pickFrom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
     }
 
     // Font family pool
@@ -407,8 +410,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ];
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
 
-    // ----- INDUSTRY-BASED OVERLAY DECISION -----
-    // Only apply overlay to "serious" industries (medicine, hvac, construction, legal, finance, insurance, real estate, etc)
+    // --- INDUSTRY LOGIC ---
     const seriousIndustries = [
       "medicine","medical","doctor","dentist","health","hospital","hospice",
       "law","legal","lawyer","attorney","finance","financial","accounting","bank","banking",
@@ -418,42 +420,26 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const isSerious = seriousIndustries.some(kw =>
       (industry || "").toLowerCase().includes(kw)
     );
-    // If not serious, no overlay, just headline box
-    const useColorOverlay = isSerious && !!color && color !== "#000" && color !== "#000000";
-    const overlayColor = useColorOverlay ? hexToHexAlpha(color, 0.42) : null;
 
-    function truncateCta(text) {
-      let str = (text || "").trim();
-      let words = str.split(" ");
-      if (words.length > 5) words = words.slice(0, 5);
-      str = words.join(" ");
-      return str;
-    }
-    let ctaText = truncateCta(cta);
-    let showCta = !!ctaText;
-    const ctaFont = 30;
-    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
-    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
-
-    // --- Smart word wrap for headline, split into up to 3 lines, balance lines
+    // --- HEADLINE WRAP ---
     function smartWrap(text, maxLines = 3) {
       if (!text) return [];
       const words = text.trim().split(' ');
-      if (words.length <= maxLines) return words; // Each word a line if 3 or fewer
-      // Try to balance lines, simple algorithm
+      if (words.length <= maxLines) return words;
       let lines = [];
       let avg = Math.ceil(words.length / maxLines);
       let used = 0;
       for (let i = 0; i < maxLines; i++) {
         lines.push(words.slice(used, used + avg).join(' '));
         used += avg;
-        if (i === maxLines - 2) avg = words.length - used; // Last line gets the rest
+        if (i === maxLines - 2) avg = words.length - used;
       }
       return lines;
     }
     const headlineFont = 52;
     const headlineLines = smartWrap(headline, 3);
 
+    // --- SUBHEADLINE WRAP ---
     const subFont = 28;
     function fitLines(text, fontSize, maxWidth, maxLines = 2) {
       let words = text.split(' ');
@@ -478,6 +464,55 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
     const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
+    // --- CTA ---
+    function truncateCta(text) {
+      let str = (text || "").trim();
+      let words = str.split(" ");
+      if (words.length > 5) words = words.slice(0, 5);
+      str = words.join(" ");
+      return str;
+    }
+    let ctaText = truncateCta(cta);
+    let showCta = !!ctaText;
+    const ctaFont = 30;
+    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
+    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
+
+    // --- COLOR LOGIC ---
+    // If serious: full overlay filter, box color dark-contrast with overlay; if non-serious: just headline box, no full overlay, fun color
+    let overlayColor, boxColor, textColor;
+    if (isSerious) {
+      overlayColor = hexToHexAlpha(color, 0.38); // full image overlay
+      // Box: dark version of overlay, or just black with .9 alpha
+      boxColor = hexToHexAlpha("#20293d", 0.92);
+      textColor = "#fff";
+    } else {
+      overlayColor = null; // no overlay
+      // Fun color palette that works for light/modern: blue, green, purple, black, white, orange, etc
+      const boxPalette = [
+        "#222E3AEE", "#1656C2EE", "#0F9153EE", "#6D2DEE", "#CA5500EE", "#222222EE", "#F7F7F7EE"
+      ];
+      const textPalette = ["#fff", "#222"];
+      boxColor = pickFrom(boxPalette);
+      // Contrast: light box = dark text, dark box = white text
+      textColor = ["#F7F7F7EE", "#fff"].includes(boxColor) ? "#222" : "#fff";
+    }
+
+    // --- BOX SIZE/PLACEMENT ---
+    const paddingX = 54, paddingY = 36;
+    const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
+    const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
+
+    // Randomize headline alignment (center or left) if "serious"
+    let align = "center";
+    if (isSerious) align = Math.random() < 0.55 ? "left" : "center";
+    const boxX = align === "center"
+      ? 600 - boxWidth / 2
+      : 160; // left edge padding (looks professional)
+    const textX = align === "center" ? 600 : (boxX + paddingX);
+
+    const boxY = 130;
+
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -487,28 +522,15 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // SVG string with tight box around headline
-const paddingX = 54;  // Horizontal padding (px)
-const paddingY = 36;  // Vertical padding (px)
-const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
-const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
-const boxX = 600 - boxWidth / 2; // Center horizontally (1200px image)
-const boxY = 130; // Pushed up a bit, adjust as needed
-
-const svg = `
+    // --- SVG ASSEMBLE ---
+    const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  ${useColorOverlay ? `
-    <!-- Centered, tight headline box -->
-    <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="36" fill="${overlayColor}" />
-    ${headlineLines.map((line, i) =>
-      `<text x="600" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
-    ).join("\n")}
-  ` : `
-    <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="36" fill="#21293cD3" />
-    ${headlineLines.map((line, i) =>
-      `<text x="600" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
-    ).join("\n")}
-  `}
+  ${isSerious && overlayColor ? `<rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />` : ""}
+  <!-- Headline Box -->
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="36" fill="${boxColor}" />
+  ${headlineLines.map((line, i) =>
+    `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="${align === "center" ? "middle" : "start"}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
+  ).join("\n")}
   ${subLines.length ? subLines.map((line, i) =>
     `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
@@ -520,7 +542,7 @@ const svg = `
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
 
-    // Composite SVG
+    // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
@@ -542,6 +564,5 @@ const svg = `
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
