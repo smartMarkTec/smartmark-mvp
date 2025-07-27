@@ -213,7 +213,8 @@ Website homepage text:
   }
 });
 
-// ===== GENERATE FULL AD SUITE FROM NOTES + SURVEY ======
+
+
 router.post('/generate-campaign-assets', async (req, res) => {
   const { answers = {}, url = "" } = req.body;
   if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
@@ -269,6 +270,7 @@ Website URL: ${url}
       result.image_overlay_text = result.image_overlay_text || "";
     } catch (e) {
       console.error("Parse error! Raw AI output was:", raw);
+      // KEY CHANGE: Always return JSON on error!
       return res.status(500).json({
         error: "Failed to parse AI response",
         raw,
@@ -277,10 +279,12 @@ Website URL: ${url}
     }
     res.json(result);
   } catch (err) {
+    // KEY CHANGE: Always return JSON on error!
     console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
     res.status(500).json({ error: "AI error", detail: err.message });
   }
 });
+
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
 const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // Or use process.env.PEXELS_API_KEY
@@ -434,7 +438,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       return { lines, fontSize };
     }
-    
+
     const { lines: headlineLines, fontSize: headlineFont } = fitHeadline(
       headline,
       boxW - 60,
