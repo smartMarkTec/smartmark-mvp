@@ -385,6 +385,7 @@ Industry: ${industry}
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (ENHANCED) ==========
 // POST /api/generate-image-with-overlay
+// ========== AI: GENERATE IMAGE WITH OVERLAY (RANDOMIZED, FITS BOX) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -396,22 +397,31 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     let baseImage = sharp(imgRes.data).resize(1200, 627); // Facebook ad size
 
-    // ----------- Dynamic Sizing & Variety -----------
+    // ----------- Overlay Styles (Randomized) -----------
     const overlayStyles = [
-      { rect: { x: 0, y: 40, width: 1200, height: 120, rx: 28, fill: "rgba(30,30,30,0.72)" }, text: { x: 600, y: 115, anchor: "middle", fontSize: 60, color: "#fff", maxWidth: 1080 } },
-      { rect: { x: 70, y: 260, width: 1060, height: 130, rx: 34, fill: "rgba(23, 23, 60, 0.76)" }, text: { x: 600, y: 335, anchor: "middle", fontSize: 64, color: "#fff", maxWidth: 1000 } },
-      { rect: { x: 0, y: 495, width: 1200, height: 110, rx: 30, fill: "rgba(18,32,44,0.82)" }, text: { x: 600, y: 570, anchor: "middle", fontSize: 58, color: "#fff", maxWidth: 1080 } }
+      { rect: { x: 0, y: 40, width: 1200, height: 120, rx: 28, fill: "rgba(30,30,30,0.79)" }, text: { x: 600, y: 115, anchor: "middle", fontSize: 60, color: "#fff", maxWidth: 1080 } },
+      { rect: { x: 80, y: 250, width: 1040, height: 135, rx: 32, fill: "rgba(30,50,90,0.76)" }, text: { x: 600, y: 340, anchor: "middle", fontSize: 62, color: "#fff", maxWidth: 980 } },
+      { rect: { x: 0, y: 495, width: 1200, height: 110, rx: 30, fill: "rgba(18,32,44,0.88)" }, text: { x: 600, y: 570, anchor: "middle", fontSize: 58, color: "#fff", maxWidth: 1080 } }
     ];
+    // Choose a random overlay style
     const randStyle = overlayStyles[Math.floor(Math.random() * overlayStyles.length)];
 
-    // Wrap text utility (SVG-safe, max 2 lines, shrink font if needed)
+    // Randomly choose whether to show headline or CTA in the main box (default to headline if no CTA)
+    let mainText = headline;
+    let secondaryText = cta;
+    if (cta && Math.random() > 0.5) {
+      mainText = cta;
+      secondaryText = headline;
+    }
+
+    // --- SVG-safe word wrapping that always fits in box ---
     function wrapText(text, fontSize, maxWidth, maxLines = 2) {
       const words = text.split(" ");
       let lines = [];
       let line = "";
       for (let word of words) {
         const testLine = line ? `${line} ${word}` : word;
-        const estWidth = testLine.length * (fontSize * 0.62);
+        const estWidth = testLine.length * (fontSize * 0.62); // very close for Helvetica Neue/Arial
         if (estWidth > maxWidth && line) {
           lines.push(line);
           line = word;
@@ -421,7 +431,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       if (line) lines.push(line);
       let usedFont = fontSize;
-      while (lines.length > maxLines && usedFont > 34) {
+      while (lines.length > maxLines && usedFont > 32) {
         usedFont -= 6;
         lines = wrapText(text, usedFont, maxWidth, maxLines).lines;
       }
@@ -433,24 +443,34 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { lines, fontSize: usedFont };
     }
 
-    const { lines: headlineLines, fontSize: usedFontSize } = wrapText(headline, randStyle.text.fontSize, randStyle.text.maxWidth, 2);
-    let showCTA = cta && String(cta).trim().length > 0;
-    const ctaMaxWidth = 370;
+    const { lines: mainLines, fontSize: mainFontSize } = wrapText(mainText, randStyle.text.fontSize, randStyle.text.maxWidth, 2);
+    let showSecondary = secondaryText && String(secondaryText).trim().length > 0;
+
+    // Secondary box always at bottom-right, CTA style
+    const ctaBox = {
+      x: 800,
+      y: 517,
+      width: 370,
+      height: 75,
+      rx: 22,
+      fill: "rgba(23,152,204,0.92)"
+    };
     const ctaFontInit = 38;
-    const { lines: ctaLines, fontSize: ctaFontSize } = showCTA
-      ? wrapText(cta, ctaFontInit, ctaMaxWidth, 2)
+    const ctaMaxWidth = 340;
+    const { lines: ctaLines, fontSize: ctaFontSize } = showSecondary
+      ? wrapText(secondaryText, ctaFontInit, ctaMaxWidth, 2)
       : { lines: [], fontSize: ctaFontInit };
 
-    const svg =
-`<svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
+    const svg = `
+<svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   <rect x="${randStyle.rect.x}" y="${randStyle.rect.y}" width="${randStyle.rect.width}" height="${randStyle.rect.height}" rx="${randStyle.rect.rx}" fill="${randStyle.rect.fill}" />
-  ${headlineLines.map((line, i) =>
-    `<text x="${randStyle.text.x}" y="${randStyle.text.y + i * (usedFontSize + 8)}" text-anchor="${randStyle.text.anchor}" font-family="Arial,sans-serif" font-size="${usedFontSize}" font-weight="bold" fill="${randStyle.text.color}" letter-spacing="2" style="text-shadow:2px 3px 16px #0007">${line}</text>`
+  ${mainLines.map((line, i) =>
+    `<text x="${randStyle.text.x}" y="${randStyle.text.y + i * (mainFontSize + 8)}" text-anchor="${randStyle.text.anchor}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="${mainFontSize}" font-weight="bold" fill="${randStyle.text.color}" letter-spacing="2" style="text-shadow:2px 3px 18px #0009">${line}</text>`
   ).join("\n")}
-  ${showCTA ? `
-    <rect x="800" y="517" width="370" height="75" rx="22" fill="rgba(23,152,204,0.89)" />
+  ${showSecondary ? `
+    <rect x="${ctaBox.x}" y="${ctaBox.y}" width="${ctaBox.width}" height="${ctaBox.height}" rx="${ctaBox.rx}" fill="${ctaBox.fill}" />
     ${ctaLines.map((line, i) =>
-      `<text x="985" y="${570 + i * (ctaFontSize + 4)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff" letter-spacing="2">${line}</text>`
+      `<text x="${ctaBox.x + ctaBox.width/2}" y="${ctaBox.y + 52 + i * (ctaFontSize + 4)}" text-anchor="middle" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff" letter-spacing="2">${line}</text>`
     ).join("\n")}
   ` : ''}
 </svg>`;
@@ -458,7 +478,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // Composite SVG overlay
     const outBuffer = await baseImage
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-      .jpeg({ quality: 96 })
+      .jpeg({ quality: 97 })
       .toBuffer();
 
     // Save in /tmp and return URL
@@ -471,11 +491,12 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const publicUrl = `/tmp/${fileName}`;
     console.log("Overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl, headline, cta });
+    return res.json({ imageUrl: publicUrl, mainText, secondaryText });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+;
 
 module.exports = router;
