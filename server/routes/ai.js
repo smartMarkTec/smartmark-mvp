@@ -405,34 +405,33 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const textColor = textColors[Math.floor(Math.random() * textColors.length)];
     const fontFamily = fonts[Math.floor(Math.random() * fonts.length)];
 
-    // Randomly choose layout: 0 = left-middle, 1 = below-center
-    const headlineLayout = Math.random() < 0.5 ? 0 : 1;
+    // --- Headline box: random between 3 positions
+    // 0 = Left-center, 1 = Top-left, 2 = Bottom-left
+    const positions = [
+      // [x, y, width, height]
+      [72, 220, 460, 130],   // Left-center
+      [60, 60, 440, 110],    // Top-left
+      [60, 460, 480, 120],   // Bottom-left
+    ];
+    const idx = Math.floor(Math.random() * positions.length);
+    const [boxX, boxY, boxW, boxH] = positions[idx];
+    const align = "left";
+    const anchor = "start";
 
-    // Headline box & position for both layouts
-    let boxW, boxH, boxX, boxY, align, anchor;
-    if (headlineLayout === 0) {
-      // LEFT-MIDDLE (aligned left)
-      boxW = 620; boxH = 120;
-      boxX = 72; boxY = 260;
-      align = "left"; anchor = "start";
-    } else {
-      // BELOW CENTER (centered)
-      boxW = 860; boxH = 98;
-      boxX = (1200 - boxW) / 2; boxY = 410;
-      align = "center"; anchor = "middle";
-    }
+    // --- Box rounding: random (0 = square, 1 = rounded)
+    const rx = Math.random() < 0.5 ? 0 : 30;
 
-    // Headline fit (max 2 lines, always fits)
-    function fitHeadline(text, maxWidth, maxHeight, maxLines = 2) {
-      let fontSize = 44;
+    // --- Headline fit (more wrap, up to 3 lines)
+    function fitHeadline(text, maxWidth, maxHeight, maxLines = 3) {
+      let fontSize = 37; // slightly smaller to force more wrapping
       let lines = [];
       let words = text.split(' ');
-      while (fontSize >= 24) {
+      while (fontSize >= 20) {
         lines = [];
         let currentLine = '';
         for (let i = 0; i < words.length; i++) {
           let testLine = currentLine.length ? currentLine + ' ' + words[i] : words[i];
-          let estWidth = testLine.length * (fontSize * 0.62);
+          let estWidth = testLine.length * (fontSize * 0.60); // Tighter wrap
           if (estWidth > maxWidth && currentLine) {
             lines.push(currentLine);
             currentLine = words[i];
@@ -443,7 +442,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         if (currentLine) lines.push(currentLine);
         if (
           lines.length <= maxLines &&
-          lines.every(l => l.length * (fontSize * 0.62) <= maxWidth)
+          lines.every(l => l.length * (fontSize * 0.60) <= maxWidth)
         ) break;
         fontSize -= 2;
       }
@@ -455,7 +454,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { lines, fontSize };
     }
     const { lines: headlineLines, fontSize: headlineFont } = fitHeadline(
-      headline, boxW - 54, boxH - 18, 2
+      headline, boxW - 38, boxH - 18, 3
     );
 
     // CTA (top right, always fits)
@@ -494,9 +493,9 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // --- SVG ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="30" fill="${boxColor}" />
+  <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="${rx}" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
-    `<text x="${align === "left" ? boxX + 32 : boxX + boxW / 2}" y="${boxY + 38 + i * (headlineFont + 14)}" text-anchor="${anchor}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.4">${escapeForSVG(line)}</text>`
+    `<text x="${boxX + 24}" y="${boxY + 44 + i * (headlineFont + 10)}" text-anchor="${anchor}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.2">${escapeForSVG(line)}</text>`
   ).join("\n")}
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="18" fill="#24A3E3" />
@@ -528,5 +527,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
