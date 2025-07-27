@@ -2,6 +2,9 @@ import React, { useState } from "react";
 import { FaEdit, FaArrowLeft, FaArrowRight, FaSyncAlt, FaTimes } from "react-icons/fa";
 
 const API_BASE = "/api";
+// Add this:
+const BACKEND_URL = "https://smartmark-mvp.onrender.com";
+
 
 const QUESTIONS = [
   { question: "Website URL", key: "url", type: "text", placeholder: "https://yourbusiness.com" },
@@ -65,18 +68,19 @@ function ImageModal({ open, imageUrl, onClose }) {
           <FaTimes size={20} />
         </button>
         <img
-          src={imageUrl}
-          alt="Full Ad"
-          style={{
-            display: "block",
-            maxWidth: "90vw",
-            maxHeight: "82vh",
-            borderRadius: 16,
-            background: "#222",
-            margin: "40px 28px 28px 28px",
-            boxShadow: "0 8px 38px #000b"
-          }}
-        />
+  src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
+  alt="Full Ad"
+  style={{
+    display: "block",
+    maxWidth: "90vw",
+    maxHeight: "82vh",
+    borderRadius: 16,
+    background: "#222",
+    margin: "40px 28px 28px 28px",
+    boxShadow: "0 8px 38px #000b"
+  }}
+/>
+
       </div>
     </div>
   );
@@ -130,18 +134,19 @@ const AdPreviewCard = ({
           title="Click to view larger"
         >
           <img
-            src={imageUrl}
-            alt="Ad Preview"
-            style={{
-              maxWidth: "100%",
-              maxHeight: 270,
-              borderRadius: 12,
-              background: "#282d33",
-              boxShadow: "0 2px 14px #1114",
-              objectFit: "contain",
-              transition: "box-shadow 0.15s"
-            }}
-          />
+  src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
+  alt="Ad Preview"
+  style={{
+    maxWidth: "100%",
+    maxHeight: 270,
+    borderRadius: 12,
+    background: "#282d33",
+    boxShadow: "0 2px 14px #1114",
+    objectFit: "contain",
+    transition: "box-shadow 0.15s"
+  }}
+/>
+
           <button
             style={{
               position: "absolute",
