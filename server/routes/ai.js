@@ -224,7 +224,6 @@ router.post('/generate-campaign-assets', async (req, res) => {
 
   let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
 
-  // 🚀 Bulletproof prompt requesting overlay text!
   const prompt = `
 You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script, image_overlay_text.
 
@@ -253,25 +252,34 @@ Website URL: ${url}
     });
     const raw = response.choices?.[0]?.message?.content?.trim();
     let result;
+
+    // Bulletproof JSON cleaner/parser
+    function tryParseJson(str) {
+      // Remove Markdown and any ``` wrappers
+      let cleaned = str.replace(/```(json)?/gi, '').replace(/[\r\n]/g, ' ');
+      // Remove any explanation text before/after the JSON
+      const jsonMatch = cleaned.match(/\{.*\}/s);
+      if (jsonMatch) cleaned = jsonMatch[0];
+      // Remove trailing commas (not valid in JSON)
+      cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+      // Attempt to parse
+      return JSON.parse(cleaned);
+    }
+
     try {
-      // Strip markdown and linebreaks if needed
-      const clean = raw.replace(/```(json)?/g, '').replace(/[\r\n]+/g, '');
-      result = JSON.parse(clean);
+      result = tryParseJson(raw);
       result.headline = result.headline || "";
       result.body = result.body || "";
       result.image_prompt = result.image_prompt || "";
       result.video_script = result.video_script || "";
       result.image_overlay_text = result.image_overlay_text || "";
     } catch (e) {
-      result = {
-        headline: "",
-        body: "",
-        image_prompt: "",
-        video_script: "",
-        image_overlay_text: "",
-        raw: raw || "",
-        parseError: e.message || "Failed to parse AI response"
-      };
+      console.error("Parse error! Raw AI output was:", raw);
+      return res.status(500).json({
+        error: "Failed to parse AI response",
+        raw,
+        parseError: e.message
+      });
     }
     res.json(result);
   } catch (err) {
@@ -279,6 +287,7 @@ Website URL: ${url}
     res.status(500).json({ error: "AI error", detail: err.message });
   }
 });
+
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
 const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // Or use process.env.PEXELS_API_KEY
