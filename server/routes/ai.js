@@ -365,7 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (final: always filter on serious, always neutral, box+overlay logic) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (serious = visible colored overlay, always neutral boxes) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -388,26 +388,24 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // ----- Neutral Palette -----
+    // ----- Palettes -----
     const neutralPalette = [
       "#DEDAD1EE", "#C7C3B4EE", "#BAB6ABEE", "#A8A59CEE", "#B8C0B9EE",
       "#E3DDD5EE", "#949588EE", "#C4CBC7EE", "#B7B9A4EE", "#D3CEC6EE",
       "#99A4A6EE", "#717678EE", "#5A6366EE", "#D6D1C4EE", "#B0B7BEEE",
       "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
-    const neutralOverlayPalette = [
-  "#DEDAD133", "#C7C3B433", "#BAB6AB33", "#A8A59C33", "#B8C0B933", "#E3DDD533", "#94958833"
-];
-//                ^^^^^^^^ see the 33
 
+    // Strong, visible, but clean overlays (20% opacity = 33)
+    const overlayColorPalette = [
+      // Blues & Teals
+      "#225bb333", "#185e8233", "#39657b33", "#4471a833", "#2e6f6e33", "#31918633",
+      // Action: Orange/Red/Maroon
+      "#d3540033", "#ff704333", "#b9474733", "#9c2c2c33", "#b5540033", "#b4422233",
+      // Neutral/Charcoal fallback
+      "#2c3e5033", "#353c4133", "#bab6ab33"
+    ];
 
-    function hexToHexAlpha(hex, alpha = 0.35) {
-      let c = hex.replace('#', '');
-      if (c.length === 3) c = c.split('').map(x => x + x).join('');
-      if (c.length !== 6) return hex;
-      let a = Math.round(alpha * 255).toString(16).padStart(2, '0');
-      return `#${c}${a}`;
-    }
     function pickFrom(arr) {
       return arr[Math.floor(Math.random() * arr.length)];
     }
@@ -490,34 +488,19 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
     const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
-   // --- Overlay and Box Color Logic ---
-const overlayNeutralPalette = [
-  "#DEDAD1BB", // soft cream-beige, translucent
-  "#BAB6ABAA", // warm gray-beige
-  "#B8C0B9BB", // cool gray-green
-  "#C7C3B4CC", // taupe/greige, a bit more solid
-  "#A8A59CBB", // warm stone
-  "#D3CEC6BB", // pale clay
-  "#C4CBC7BB", // subtle green-gray
-  "#81868099", // light gray-blue, more cool
-  "#353C4199", // deep charcoal, more subtle
-  "#5A636699", // medium steel gray
-  "#E9E4E0AA"  // off-white
-];
+    // --- Overlay and Box Color Logic ---
+    let overlayColor = null, boxColor, textColor;
+    let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
 
-let overlayColor = null, boxColor, textColor;
-let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
-
-if (isSerious) {
-  // Pick a neutral overlay for serious industries
-  overlayColor = pickFrom(overlayNeutralPalette);
-  boxColor = pickFrom(neutralPalette);
-  textColor = "#232323";
-} else {
-  overlayColor = null; // No overlay for non-serious
-  boxColor = pickFrom(neutralPalette);
-  textColor = "#232323";
-}
+    if (isSerious) {
+      overlayColor = pickFrom(overlayColorPalette);
+      boxColor = pickFrom(neutralPalette);
+      textColor = "#232323";
+    } else {
+      overlayColor = null;
+      boxColor = pickFrom(neutralPalette);
+      textColor = "#232323";
+    }
 
     // Randomize headline alignment (center or left) for all
     let align = Math.random() < 0.55 ? "left" : "center";
@@ -539,11 +522,11 @@ if (isSerious) {
         .replace(/'/g, "&apos;");
     }
 
-        // --- SVG ASSEMBLE ---
+    // --- SVG ASSEMBLE ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${isSerious && overlayColor ? `
-    <!-- FULLSCREEN TRANSPARENT BG FILTER (NEW LAYER) -->
+    <!-- FULLSCREEN TRANSLUCENT BG FILTER (VISIBLE, SERIOUS ONLY) -->
     <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
   ` : ""}
   <!-- Headline Box -->
@@ -561,7 +544,6 @@ if (isSerious) {
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
-
 
     // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
