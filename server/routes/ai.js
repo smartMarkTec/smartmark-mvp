@@ -480,16 +480,17 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <!-- Headline Box -->
   <rect x="${boxX}" y="${mainBoxY}" width="${boxW}" height="${boxH}" rx="32" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxW/2}" y="${mainBoxY + boxPaddingY + i * (headlineFont + 12) + headlineFont}" text-anchor="middle" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.6" style="dominant-baseline:middle;">${line}</text>`
+    `<text x="${boxX + boxW/2}" y="${mainBoxY + boxPaddingY + i * (headlineFont + 12) + headlineFont}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.6" style="dominant-baseline:middle;">${line}</text>`
   ).join("\n")}
   <!-- CTA Box -->
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="22" fill="#24A3E3" />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 28 + i * (ctaFontSize + 2)}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${line}</text>`
+      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 28 + i * (ctaFontSize + 2)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${line}</text>`
     ).join("\n")}
   ` : ''}
 </svg>`;
+
 
 
     // Composite SVG overlay
