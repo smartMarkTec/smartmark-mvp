@@ -374,46 +374,86 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (NEW!) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (ENHANCED) ==========
 // POST /api/generate-image-with-overlay
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
-
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
 
-    // 1. Download the image as a buffer
+    // Download image buffer
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     let baseImage = sharp(imgRes.data).resize(1200, 627); // Facebook ad size
 
-    // 2. Prepare SVG overlay (headline at top, CTA at bottom right)
-    const svg = `
-      <svg width="1200" height="627">
-        <rect x="0" y="40" width="1200" height="110" rx="28" fill="rgba(30,30,30,0.67)" />
-        <text x="50%" y="115" text-anchor="middle"
-          font-family="Arial,sans-serif" font-size="62" font-weight="bold"
-          fill="#fff" letter-spacing="2" style="text-shadow:2px 3px 16px #0007"
-        >${headline.slice(0, 60)}</text>
-        ${cta ? `
-        <rect x="800" y="517" width="370" height="75" rx="22" fill="rgba(23,152,204,0.86)" />
-        <text x="985" y="570" text-anchor="middle"
-          font-family="Arial,sans-serif" font-size="38" font-weight="bold"
-          fill="#fff" letter-spacing="2"
-        >${cta.slice(0, 40)}</text>
-        ` : ''}
-      </svg>
-    `;
+    // ----------- Dynamic Sizing & Variety -----------
+    const overlayStyles = [
+      { rect: { x: 0, y: 40, width: 1200, height: 120, rx: 28, fill: "rgba(30,30,30,0.72)" }, text: { x: 600, y: 115, anchor: "middle", fontSize: 60, color: "#fff", maxWidth: 1080 } },
+      { rect: { x: 70, y: 260, width: 1060, height: 130, rx: 34, fill: "rgba(23, 23, 60, 0.76)" }, text: { x: 600, y: 335, anchor: "middle", fontSize: 64, color: "#fff", maxWidth: 1000 } },
+      { rect: { x: 0, y: 495, width: 1200, height: 110, rx: 30, fill: "rgba(18,32,44,0.82)" }, text: { x: 600, y: 570, anchor: "middle", fontSize: 58, color: "#fff", maxWidth: 1080 } }
+    ];
+    const randStyle = overlayStyles[Math.floor(Math.random() * overlayStyles.length)];
 
-    // 3. Composite SVG overlay on top of image
+    // Wrap text utility (SVG-safe, max 2 lines, shrink font if needed)
+    function wrapText(text, fontSize, maxWidth, maxLines = 2) {
+      const words = text.split(" ");
+      let lines = [];
+      let line = "";
+      for (let word of words) {
+        const testLine = line ? `${line} ${word}` : word;
+        const estWidth = testLine.length * (fontSize * 0.62);
+        if (estWidth > maxWidth && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = testLine;
+        }
+      }
+      if (line) lines.push(line);
+      let usedFont = fontSize;
+      while (lines.length > maxLines && usedFont > 34) {
+        usedFont -= 6;
+        lines = wrapText(text, usedFont, maxWidth, maxLines).lines;
+      }
+      if (lines.length > maxLines) {
+        lines = lines.slice(0, maxLines);
+        let last = lines[lines.length - 1];
+        if (last.length > 5) lines[lines.length - 1] = last.slice(0, -3) + "...";
+      }
+      return { lines, fontSize: usedFont };
+    }
+
+    const { lines: headlineLines, fontSize: usedFontSize } = wrapText(headline, randStyle.text.fontSize, randStyle.text.maxWidth, 2);
+    let showCTA = cta && String(cta).trim().length > 0;
+    const ctaMaxWidth = 370;
+    const ctaFontInit = 38;
+    const { lines: ctaLines, fontSize: ctaFontSize } = showCTA
+      ? wrapText(cta, ctaFontInit, ctaMaxWidth, 2)
+      : { lines: [], fontSize: ctaFontInit };
+
+    const svg =
+`<svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
+  <rect x="${randStyle.rect.x}" y="${randStyle.rect.y}" width="${randStyle.rect.width}" height="${randStyle.rect.height}" rx="${randStyle.rect.rx}" fill="${randStyle.rect.fill}" />
+  ${headlineLines.map((line, i) =>
+    `<text x="${randStyle.text.x}" y="${randStyle.text.y + i * (usedFontSize + 8)}" text-anchor="${randStyle.text.anchor}" font-family="Arial,sans-serif" font-size="${usedFontSize}" font-weight="bold" fill="${randStyle.text.color}" letter-spacing="2" style="text-shadow:2px 3px 16px #0007">${line}</text>`
+  ).join("\n")}
+  ${showCTA ? `
+    <rect x="800" y="517" width="370" height="75" rx="22" fill="rgba(23,152,204,0.89)" />
+    ${ctaLines.map((line, i) =>
+      `<text x="985" y="${570 + i * (ctaFontSize + 4)}" text-anchor="middle" font-family="Arial,sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff" letter-spacing="2">${line}</text>`
+    ).join("\n")}
+  ` : ''}
+</svg>`;
+
+    // Composite SVG overlay
     const outBuffer = await baseImage
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
       .jpeg({ quality: 96 })
       .toBuffer();
 
-    // 4. Save in /tmp and return URL
-    const tmpDir = '/tmp'; // Always use system tmp on Render
+    // Save in /tmp and return URL
+    const tmpDir = '/tmp';
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(tmpDir, fileName);
@@ -423,13 +463,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     console.log("Overlay image saved at:", filePath, "and served as:", publicUrl);
 
     return res.json({ imageUrl: publicUrl, headline, cta });
-
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
-
 
 module.exports = router;
