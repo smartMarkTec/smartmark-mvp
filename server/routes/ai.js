@@ -40,9 +40,11 @@ router.get('/test', (req, res) => {
 // ========== AI: EXPERT AD COPY GENERATOR ==========
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = "", businessName = "", url = "" } = req.body;
+
   if (!description && !businessName && !url) {
     return res.status(400).json({ error: "Please provide at least a description." });
   }
+
   let prompt = `You are a world-class direct response copywriter. Write a short, high-converting Facebook ad based on the following description. Be direct, persuasive, no fluff.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
@@ -253,10 +255,14 @@ Website URL: ${url}
 
     // Bulletproof JSON cleaner/parser
     function tryParseJson(str) {
+      // Remove Markdown and any ``` wrappers
       let cleaned = str.replace(/```(json)?/gi, '').replace(/[\r\n]/g, ' ');
+      // Remove any explanation text before/after the JSON
       const jsonMatch = cleaned.match(/\{.*\}/s);
       if (jsonMatch) cleaned = jsonMatch[0];
+      // Remove trailing commas (not valid in JSON)
       cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+      // Attempt to parse
       return JSON.parse(cleaned);
     }
 
@@ -282,6 +288,7 @@ Website URL: ${url}
   }
 });
 
+
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
 const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // Or use process.env.PEXELS_API_KEY
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
@@ -290,6 +297,8 @@ const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = "", industry = "", regenerateToken = "" } = req.body;
+
+    // Use GPT to get a 1-2 word search topic
     let searchTerm = industry || url;
     if (!searchTerm) {
       return res.status(400).json({ error: "Missing url or industry" });
@@ -302,6 +311,7 @@ URL: ${url}
 Industry: ${industry}
     `.trim();
 
+    // GPT: Timeout after 3.5s for max speed
     let keyword = "";
     try {
       const controller = new AbortController();
@@ -319,6 +329,7 @@ Industry: ${industry}
       keyword = industry || url;
     }
 
+    // 2. Fetch 15 stock images from Pexels (limit = speed + variety)
     const perPage = 15;
     let photos = [];
     try {
@@ -327,6 +338,7 @@ Industry: ${industry}
         params: {
           query: keyword,
           per_page: perPage,
+          // Use a cache-busting param to always get fresh results
           cb: Date.now() + (regenerateToken || "")
         },
         timeout: 4800, // < 5s hard limit for speed
@@ -337,12 +349,15 @@ Industry: ${industry}
       return res.status(500).json({ error: "Image search failed" });
     }
 
+    // 3. Pick a random image from available results (for variety on regenerate)
     if (!photos.length) {
       return res.status(404).json({ error: "No images found for this topic." });
     }
 
+    // To make "regenerate" always return a different image, use the token as a seed:
     let imgIdx = 0;
     if (regenerateToken) {
+      // Basic deterministic seed from regenerateToken, else just random
       let hash = 0;
       for (let i = 0; i < regenerateToken.length; i++) {
         hash = (hash * 31 + regenerateToken.charCodeAt(i)) % perPage;
@@ -368,8 +383,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (ENHANCED) ==========
-// POST /api/generate-image-with-overlay
+// ========== AI: GENERATE IMAGE WITH OVERLAY (MODERN, FITS, SOLID) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -379,91 +393,153 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // Download image buffer
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    let baseImage = sharp(imgRes.data).resize(1200, 627); // Facebook ad size
+    let baseImage = sharp(imgRes.data).resize(1200, 627);
 
-    // ----------- Overlay Styles (Randomized) -----------
-    const overlayStyles = [
-      { rect: { x: 0, y: 40, width: 1200, height: 120, rx: 28, fill: "rgba(30,30,30,0.79)" }, text: { x: 600, y: 115, anchor: "middle", fontSize: 60, color: "#fff", maxWidth: 1080 } },
-      { rect: { x: 80, y: 250, width: 1040, height: 135, rx: 32, fill: "rgba(30,50,90,0.76)" }, text: { x: 600, y: 340, anchor: "middle", fontSize: 62, color: "#fff", maxWidth: 980 } },
-      { rect: { x: 0, y: 495, width: 1200, height: 110, rx: 30, fill: "rgba(18,32,44,0.88)" }, text: { x: 600, y: 570, anchor: "middle", fontSize: 58, color: "#fff", maxWidth: 1080 } }
+    // ==== HEADLINE BOX STYLE ====
+    const FONTS = "'Bebas Neue', 'Bungee Inline', 'Arial Black', Arial, sans-serif";
+    const HEADLINE_MAX_FONT = 74;
+    const HEADLINE_MIN_FONT = 34;
+    const HEADLINE_MAX_WIDTH = 1080;
+    const HEADLINE_BOX_PADDING_X = 56;
+    const HEADLINE_BOX_PADDING_Y = 34;
+    const HEADLINE_BOX_RADIUS = 40;
+    const HEADLINE_HEIGHT = 140;
+
+    // Middle or Top
+    const headlineBoxes = [
+      { // Centered
+        x: HEADLINE_BOX_PADDING_X,
+        y: 210,
+        width: 1200 - 2 * HEADLINE_BOX_PADDING_X,
+        height: HEADLINE_HEIGHT,
+        textY: 210 + 86,
+      },
+      { // Top center
+        x: HEADLINE_BOX_PADDING_X,
+        y: 54,
+        width: 1200 - 2 * HEADLINE_BOX_PADDING_X,
+        height: 110,
+        textY: 54 + 66,
+      }
     ];
-    const randStyle = overlayStyles[Math.floor(Math.random() * overlayStyles.length)];
+    const headlineBox = headlineBoxes[Math.floor(Math.random() * headlineBoxes.length)];
 
-    // Randomly choose whether to show headline or CTA in the main box (default to headline if no CTA)
-    let mainText = headline;
-    let secondaryText = cta;
-    if (cta && Math.random() > 0.5) {
-      mainText = cta;
-      secondaryText = headline;
-    }
+    // ==== CTA BOX STYLE ====
+    const CTA_FONT = 36;
+    const CTA_BOX_WIDTH = 400;
+    const CTA_BOX_HEIGHT = 82;
+    const CTA_BOX_X = 1200 - CTA_BOX_WIDTH - 44;
+    const CTA_BOX_Y = 627 - CTA_BOX_HEIGHT - 38;
+    const CTA_BOX_RADIUS = 24;
 
-    // --- SVG-safe word wrapping that always fits in box ---
-    function wrapText(text, fontSize, maxWidth, maxLines = 2) {
-      const words = text.split(" ");
+    // === Utility: SVG-safe text fit, max 2 lines ===
+    function wrapAndScaleText(text, maxFont, minFont, maxWidth, maxLines = 2) {
+      let fontSize = maxFont;
       let lines = [];
-      let line = "";
-      for (let word of words) {
-        const testLine = line ? `${line} ${word}` : word;
-        const estWidth = testLine.length * (fontSize * 0.61); // tighter estimate for ad fonts
-        if (estWidth > maxWidth && line) {
-          lines.push(line);
-          line = word;
-        } else {
-          line = testLine;
+      while (fontSize >= minFont) {
+        lines = [];
+        let line = '';
+        let words = text.split(' ');
+        for (let word of words) {
+          let testLine = line ? `${line} ${word}` : word;
+          // Estimate: 0.59 factor is pretty close for these display fonts
+          const estWidth = testLine.length * fontSize * 0.59;
+          if (estWidth > maxWidth && line) {
+            lines.push(line);
+            line = word;
+          } else {
+            line = testLine;
+          }
         }
+        if (line) lines.push(line);
+        if (lines.length <= maxLines) break;
+        fontSize -= 4;
       }
-      if (line) lines.push(line);
-      let usedFont = fontSize;
-      // SHRINK more aggressively if too many lines
-      while (lines.length > maxLines && usedFont > 26) {
-        usedFont -= 7;
-        lines = wrapText(text, usedFont, maxWidth, maxLines).lines;
-      }
-      // Final fallback: trim text if still too long
+      // Ellipsis if overflow
       if (lines.length > maxLines) {
         lines = lines.slice(0, maxLines);
         let last = lines[lines.length - 1];
-        if (last.length > 5) lines[lines.length - 1] = last.slice(0, -3) + "...";
+        if (last.length > 6) lines[lines.length - 1] = last.slice(0, -3) + "...";
       }
-      return { lines, fontSize: usedFont };
+      return { lines, fontSize };
     }
 
-    const { lines: mainLines, fontSize: mainFontSize } = wrapText(mainText, randStyle.text.fontSize, randStyle.text.maxWidth, 2);
-    let showSecondary = secondaryText && String(secondaryText).trim().length > 0;
+    // Headline text
+    const { lines: headlineLines, fontSize: headlineFontSize } = wrapAndScaleText(
+      headline,
+      HEADLINE_MAX_FONT,
+      HEADLINE_MIN_FONT,
+      headlineBox.width - 48, // Padding inside box
+      2
+    );
 
-    // Secondary box always at bottom-right, CTA style
-    const ctaBox = {
-      x: 800,
-      y: 517,
-      width: 370,
-      height: 75,
-      rx: 22,
-      fill: "rgba(23,152,204,0.92)"
-    };
-    const ctaFontInit = 38;
-    const ctaMaxWidth = 340;
-    const { lines: ctaLines, fontSize: ctaFontSize } = showSecondary
-      ? wrapText(secondaryText, ctaFontInit, ctaMaxWidth, 2)
-      : { lines: [], fontSize: ctaFontInit };
+    // CTA text
+    let showCTA = cta && String(cta).trim().length > 0;
+    let ctaText = showCTA ? cta : "";
+    const { lines: ctaLines, fontSize: ctaFontSize } = wrapAndScaleText(
+      ctaText,
+      CTA_FONT,
+      24,
+      CTA_BOX_WIDTH - 38,
+      2
+    );
 
+    // ==== SVG OVERLAY ====
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${randStyle.rect.x}" y="${randStyle.rect.y}" width="${randStyle.rect.width}" height="${randStyle.rect.height}" rx="${randStyle.rect.rx}" fill="${randStyle.rect.fill}" />
-  ${mainLines.map((line, i) =>
-    `<text x="${randStyle.text.x}" y="${randStyle.text.y + i * (mainFontSize + 10)}" text-anchor="${randStyle.text.anchor}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="${mainFontSize}" font-weight="bold" fill="${randStyle.text.color}" letter-spacing="2" style="text-shadow:2px 3px 18px #0009">${line}</text>`
+  <!-- Headline Solid Box -->
+  <rect 
+    x="${headlineBox.x}" 
+    y="${headlineBox.y}" 
+    width="${headlineBox.width}" 
+    height="${headlineBox.height}" 
+    rx="${HEADLINE_BOX_RADIUS}" 
+    fill="#233046" 
+    opacity="0.97" 
+  />
+  ${headlineLines.map((line, i) =>
+    `<text 
+      x="600" 
+      y="${headlineBox.textY + i * (headlineFontSize + 8)}" 
+      text-anchor="middle"
+      font-family=${FONTS}
+      font-size="${headlineFontSize}" 
+      font-weight="bold" 
+      fill="#fff"
+      letter-spacing="2"
+      style="text-shadow:2px 3px 20px #0009"
+    >${line}</text>`
   ).join("\n")}
-  ${showSecondary ? `
-    <rect x="${ctaBox.x}" y="${ctaBox.y}" width="${ctaBox.width}" height="${ctaBox.height}" rx="${ctaBox.rx}" fill="${ctaBox.fill}" />
+  ${showCTA ? `
+    <rect 
+      x="${CTA_BOX_X}" 
+      y="${CTA_BOX_Y}" 
+      width="${CTA_BOX_WIDTH}" 
+      height="${CTA_BOX_HEIGHT}" 
+      rx="${CTA_BOX_RADIUS}" 
+      fill="#2497E5" 
+      opacity="0.96" 
+    />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBox.x + ctaBox.width/2}" y="${ctaBox.y + 44 + i * (ctaFontSize + 7)}" text-anchor="middle" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff" letter-spacing="2">${line}</text>`
+      `<text 
+        x="${CTA_BOX_X + CTA_BOX_WIDTH / 2}" 
+        y="${CTA_BOX_Y + 52 + i * (ctaFontSize + 6)}" 
+        text-anchor="middle"
+        font-family=${FONTS}
+        font-size="${ctaFontSize}" 
+        font-weight="bold" 
+        fill="#fff"
+        letter-spacing="1"
+      >${line}</text>`
     ).join("\n")}
   ` : ''}
-</svg>`;
+</svg>
+`;
 
     // Composite SVG overlay
     const outBuffer = await baseImage
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-      .jpeg({ quality: 97 })
+      .jpeg({ quality: 98 })
       .toBuffer();
 
     // Save in /tmp and return URL
@@ -476,7 +552,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const publicUrl = `/tmp/${fileName}`;
     console.log("Overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl, mainText, secondaryText });
+    return res.json({ imageUrl: publicUrl, headline, cta });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
