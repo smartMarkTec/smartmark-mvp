@@ -482,19 +482,26 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // If serious: full overlay filter, box color dark-contrast with overlay; if non-serious: just headline box, no full overlay, fun color
     let overlayColor, boxColor, textColor;
     if (isSerious) {
-      overlayColor = hexToHexAlpha(color, 0.38); // full image overlay
-      // Box: dark version of overlay, or just black with .9 alpha
-      boxColor = hexToHexAlpha("#20293d", 0.92);
+      // Overlay: random dark blue/gray with alpha
+      const overlayPalette = [
+        "#22356B77", "#15436099", "#00315388", "#00336677", "#1A4D2E77", "#2A394B77",
+        "#23293B88", "#1A3C4077", "#222D3C88"
+      ];
+      overlayColor = pickFrom(overlayPalette);
+      // Box: dark neutral, more opaque
+      const boxPalette = [
+        "#2D3250F0", "#20293DEE", "#232F3FEE", "#242A3EEE", "#222E3AEE"
+      ];
+      boxColor = pickFrom(boxPalette);
       textColor = "#fff";
     } else {
-      overlayColor = null; // no overlay
-      // Fun color palette that works for light/modern: blue, green, purple, black, white, orange, etc
+      overlayColor = null;
+      // Lighter/fun options, some white, black, blue, green, orange
       const boxPalette = [
-        "#222E3AEE", "#1656C2EE", "#0F9153EE", "#6D2DEE", "#CA5500EE", "#222222EE", "#F7F7F7EE"
+        "#1656C2EE", "#0F9153EE", "#6D2DEE", "#CA5500EE", "#222222EE", "#F7F7F7EE", "#32B88BEE"
       ];
       const textPalette = ["#fff", "#222"];
       boxColor = pickFrom(boxPalette);
-      // Contrast: light box = dark text, dark box = white text
       textColor = ["#F7F7F7EE", "#fff"].includes(boxColor) ? "#222" : "#fff";
     }
 
@@ -508,7 +515,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     if (isSerious) align = Math.random() < 0.55 ? "left" : "center";
     const boxX = align === "center"
       ? 600 - boxWidth / 2
-      : 160; // left edge padding (looks professional)
+      : 160; // left edge padding
     const textX = align === "center" ? 600 : (boxX + paddingX);
 
     const boxY = 130;
@@ -527,7 +534,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${isSerious && overlayColor ? `<rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />` : ""}
   <!-- Headline Box -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="36" fill="${boxColor}" />
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="28" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
     `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="${align === "center" ? "middle" : "start"}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
