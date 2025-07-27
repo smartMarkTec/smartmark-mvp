@@ -368,7 +368,16 @@ Industry: ${industry}
 // ========== AI: GENERATE IMAGE WITH OVERLAY (randomized position, robust SVG) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
-    const { imageUrl, headline, subheadline = "", cta, footer = "", color = "#225bb3", footerColor = "#FFD700" } = req.body;
+    const {
+      imageUrl,
+      headline,
+      subheadline = "",
+      cta,
+      footer = "",
+      color = "#225bb3",
+      footerColor = "#FFD700",
+      industry = ""  // NEW: take industry from req.body
+    } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
@@ -398,8 +407,19 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ];
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
 
-    // Overlay or not
-    const useColorOverlay = !!color && color !== "#000" && color !== "#000000";
+    // ----- INDUSTRY-BASED OVERLAY DECISION -----
+    // Only apply overlay to "serious" industries (medicine, hvac, construction, legal, finance, insurance, real estate, etc)
+    const seriousIndustries = [
+      "medicine","medical","doctor","dentist","health","hospital","hospice",
+      "law","legal","lawyer","attorney","finance","financial","accounting","bank","banking",
+      "insurance","hvac","plumbing","electrician","contractor",
+      "roofing","construction","real estate","security","consulting"
+    ];
+    const isSerious = seriousIndustries.some(kw =>
+      (industry || "").toLowerCase().includes(kw)
+    );
+    // If not serious, no overlay, just headline box
+    const useColorOverlay = isSerious && !!color && color !== "#000" && color !== "#000000";
     const overlayColor = useColorOverlay ? hexToHexAlpha(color, 0.42) : null;
 
     function truncateCta(text) {
