@@ -415,7 +415,27 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
     const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
-    function fitLines(text, fontSize, maxWidth, maxLines = 3) {
+    // --- Smart word wrap for headline, split into up to 3 lines, balance lines
+    function smartWrap(text, maxLines = 3) {
+      if (!text) return [];
+      const words = text.trim().split(' ');
+      if (words.length <= maxLines) return words; // Each word a line if 3 or fewer
+      // Try to balance lines, simple algorithm
+      let lines = [];
+      let avg = Math.ceil(words.length / maxLines);
+      let used = 0;
+      for (let i = 0; i < maxLines; i++) {
+        lines.push(words.slice(used, used + avg).join(' '));
+        used += avg;
+        if (i === maxLines - 2) avg = words.length - used; // Last line gets the rest
+      }
+      return lines;
+    }
+    const headlineFont = 52;
+    const headlineLines = smartWrap(headline, 3);
+
+    const subFont = 28;
+    function fitLines(text, fontSize, maxWidth, maxLines = 2) {
       let words = text.split(' ');
       let lines = [], currentLine = '';
       for (let word of words) {
@@ -436,10 +456,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       return lines;
     }
-    const headlineFont = 52;
-    const headlineLines = fitLines(headline, headlineFont, 940, 3);
-
-    const subFont = 28;
     const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
     function escapeForSVG(text) {
@@ -457,7 +473,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   ${useColorOverlay ? `
     <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
     ${headlineLines.map((line, i) =>
-      `<text x="84" y="${170 + i * (headlineFont + 12)}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+      `<text x="50%" y="${170 + i * (headlineFont + 10)}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   ` : `
     <rect x="64" y="110" rx="23" width="1002" height="${70 + 60 * headlineLines.length}" fill="#21293cD3" />
@@ -465,16 +481,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       `<text x="90" y="${165 + i * (headlineFont + 10)}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   `}
-
   ${subLines.length ? subLines.map((line, i) =>
     `<text x="94" y="${360 + i * (subFont + 7)}" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
-
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="#2aa5ecE6" />
     <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
   ` : ''}
-
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
