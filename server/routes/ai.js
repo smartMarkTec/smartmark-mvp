@@ -4,8 +4,8 @@ const router = express.Router();
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp'); // Added for creative overlays!
-const { v4: uuidv4 } = require('uuid'); // For unique filenames
+const sharp = require('sharp');
+const { v4: uuidv4 } = require('uuid');
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
@@ -213,8 +213,6 @@ Website homepage text:
   }
 });
 
-
-
 router.post('/generate-campaign-assets', async (req, res) => {
   const { answers = {}, url = "" } = req.body;
   if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
@@ -252,7 +250,6 @@ Website URL: ${url}
     const raw = response.choices?.[0]?.message?.content?.trim();
     let result;
 
-    // Bulletproof JSON cleaner/parser
     function tryParseJson(str) {
       let cleaned = str.replace(/```(json)?/gi, '').replace(/[\r\n]/g, ' ');
       const jsonMatch = cleaned.match(/\{.*\}/s);
@@ -270,7 +267,6 @@ Website URL: ${url}
       result.image_overlay_text = result.image_overlay_text || "";
     } catch (e) {
       console.error("Parse error! Raw AI output was:", raw);
-      // KEY CHANGE: Always return JSON on error!
       return res.status(500).json({
         error: "Failed to parse AI response",
         raw,
@@ -279,18 +275,15 @@ Website URL: ${url}
     }
     res.json(result);
   } catch (err) {
-    // KEY CHANGE: Always return JSON on error!
     console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
     res.status(500).json({ error: "AI error", detail: err.message });
   }
 });
 
-
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
-const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu"; // Or use process.env.PEXELS_API_KEY
+const PEXELS_API_KEY = "x3ydqR4xmwbpuQsqNZYY3hS9ZDoqQijM6H6jCdiAv2ncX5B3DvZIqRuu";
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
 
-// POST /api/generate-image-from-prompt
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = "", industry = "", regenerateToken = "" } = req.body;
@@ -333,7 +326,7 @@ Industry: ${industry}
           per_page: perPage,
           cb: Date.now() + (regenerateToken || "")
         },
-        timeout: 4800, // < 5s hard limit for speed
+        timeout: 4800,
       });
       photos = resp.data.photos || [];
     } catch (err) {
@@ -372,6 +365,7 @@ Industry: ${industry}
   }
 });
 
+// ========== AI: GENERATE IMAGE WITH OVERLAY (robust SVG, always valid XML) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -379,14 +373,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
 
-    // --- Download image as buffer
+    // Download and fit image landscape
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    // Always fit to landscape 1200x627, with black bars if vertical image
     let baseImage = await sharp(imgRes.data)
       .resize(1200, 627, { fit: 'contain', background: '#111' })
       .toBuffer();
 
-    // SVG Escape (for robust XML)
+    // Helper: Escape XML for SVG
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -396,7 +389,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // Styling Variations
+    // Variations
     const boxColors = [
       "rgba(33,75,114,0.94)", "rgba(39,70,144,0.94)", "rgba(46,67,116,0.94)",
       "rgba(37,99,235,0.92)", "rgba(22,72,99,0.92)"
@@ -412,13 +405,12 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const textColor = textColors[Math.floor(Math.random() * textColors.length)];
     const fontFamily = fonts[Math.floor(Math.random() * fonts.length)];
 
-    // --- Main headline box
-    const boxW = 860;
-    const boxH = 98;
+    // --- Headline box: slightly lower, smaller width/height
+    const boxW = 860, boxH = 98;
     const boxX = (1200 - boxW) / 2;
-    const boxY = 410; // This is a bit lower, but not at the bottom
+    const boxY = 410;
 
-    // --- Fit headline (multi-line, stays in box)
+    // --- Headline fit (multi-line, always fits)
     function fitHeadline(text, maxWidth, maxHeight) {
       let fontSize = 46;
       let lines = [];
@@ -457,7 +449,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       boxH - 18
     );
 
-    // --- CTA box (top-right)
+    // --- CTA (top right, always fits)
     let ctaText = cta && String(cta).trim() ? cta : '';
     let showCta = !!ctaText;
     const ctaBoxW = 320, ctaBoxH = 62, ctaBoxX = 1200 - ctaBoxW - 34, ctaBoxY = 40;
@@ -490,23 +482,22 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
     const { lines: ctaLines, fontSize: ctaFontSize } = showCta ? fitCTA(ctaText) : { lines: [], fontSize: 28 };
 
-    // -- SVG OVERLAY --
+    // -- SVG: always robust
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="30" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxW/2}" y="${boxY + 35 + i * (headlineFont + 13)}" text-anchor="middle" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.4">${escapeForSVG(line)}</text>`
+    `<text x="${boxX + boxW / 2}" y="${boxY + 35 + i * (headlineFont + 13)}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.4">${escapeForSVG(line)}</text>`
   ).join("\n")}
-  <!-- CTA Box -->
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="18" fill="#24A3E3" />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 30 + i * (ctaFontSize + 3)}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+      `<text x="${ctaBoxX + ctaBoxW / 2}" y="${ctaBoxY + 30 + i * (ctaFontSize + 3)}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   ` : ''}
 </svg>`;
 
-    // Composite SVG overlay onto base image
+    // Composite SVG
     const outBuffer = await sharp(baseImage)
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
       .jpeg({ quality: 98 })
@@ -528,9 +519,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
-
-
-
 
 module.exports = router;
