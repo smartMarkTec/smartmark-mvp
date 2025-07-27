@@ -397,68 +397,95 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       secondaryText = headline;
     }
 
-    // --- SVG-safe word wrapping that always fits in box ---
-    function wrapText(text, fontSize, maxWidth, maxLines = 2) {
-      const words = text.split(" ");
-      let lines = [];
-      let line = "";
-      for (let word of words) {
-        const testLine = line ? `${line} ${word}` : word;
-        const estWidth = testLine.length * (fontSize * 0.61); // tighter estimate for ad fonts
-        if (estWidth > maxWidth && line) {
-          lines.push(line);
-          line = word;
-        } else {
-          line = testLine;
-        }
-      }
-      if (line) lines.push(line);
-      let usedFont = fontSize;
-      // SHRINK more aggressively if too many lines
-      while (lines.length > maxLines && usedFont > 26) {
-        usedFont -= 7;
-        lines = wrapText(text, usedFont, maxWidth, maxLines).lines;
-      }
-      // Final fallback: trim text if still too long
-      if (lines.length > maxLines) {
-        lines = lines.slice(0, maxLines);
-        let last = lines[lines.length - 1];
-        if (last.length > 5) lines[lines.length - 1] = last.slice(0, -3) + "...";
-      }
-      return { lines, fontSize: usedFont };
+   // --- SVG-safe word wrapping that always fits in box and expands/shrinks the box! ---
+function wrapTextStrict(text, fontSize, maxWidth, maxLines = 2, minFont = 28) {
+  let words = text.split(" ");
+  let lines = [];
+  let line = "";
+  let usedFont = fontSize;
+  // Wrap lines
+  for (let word of words) {
+    let testLine = line ? `${line} ${word}` : word;
+    let estWidth = testLine.length * (usedFont * 0.62);
+    if (estWidth > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = testLine;
     }
+  }
+  if (line) lines.push(line);
 
-    const { lines: mainLines, fontSize: mainFontSize } = wrapText(mainText, randStyle.text.fontSize, randStyle.text.maxWidth, 2);
-    let showSecondary = secondaryText && String(secondaryText).trim().length > 0;
+  // Shrink font if over maxLines or still doesn't fit
+  while ((lines.length > maxLines || Math.max(...lines.map(l => l.length)) * usedFont * 0.62 > maxWidth) && usedFont > minFont) {
+    usedFont -= 4;
+    // Retry wrapping at smaller font
+    lines = [];
+    line = "";
+    for (let word of words) {
+      let testLine = line ? `${line} ${word}` : word;
+      let estWidth = testLine.length * (usedFont * 0.62);
+      if (estWidth > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = testLine;
+      }
+    }
+    if (line) lines.push(line);
+  }
+  // If still too long, ellipsis
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    let last = lines[lines.length - 1];
+    if (last.length > 8) lines[lines.length - 1] = last.slice(0, -3) + "...";
+  }
+  return { lines, fontSize: usedFont };
+}
 
-    // Secondary box always at bottom-right, CTA style
-    const ctaBox = {
-      x: 800,
-      y: 517,
-      width: 370,
-      height: 75,
-      rx: 22,
-      fill: "rgba(23,152,204,0.92)"
-    };
-    const ctaFontInit = 38;
-    const ctaMaxWidth = 340;
-    const { lines: ctaLines, fontSize: ctaFontSize } = showSecondary
-      ? wrapText(secondaryText, ctaFontInit, ctaMaxWidth, 2)
-      : { lines: [], fontSize: ctaFontInit };
+// Use a solid background color for headline box
+const headlineFont = "'Bebas Neue', 'Bungee Inline', Arial, Helvetica, sans-serif"; // Popular ad fonts fallback
+const solidBox = {
+  x: 60,
+  y: 210, // vertical center
+  width: 1080,
+  height: 150,
+  rx: 34,
+  fill: "#233c54", // Deep, solid blue
+};
+const textMaxWidth = solidBox.width - 56;
+const { lines: mainLines, fontSize: mainFontSize } = wrapTextStrict(mainText, 68, textMaxWidth, 2, 26);
 
-    const svg = `
+// (optional) CTA styling, same wrap rules, always all caps, solid bg
+const ctaBox = {
+  x: 850,
+  y: 540,
+  width: 300,
+  height: 64,
+  rx: 18,
+  fill: "#15a1df", // Brighter blue, feel free to adjust
+};
+const ctaFontInit = 32;
+const ctaMaxWidth = ctaBox.width - 40;
+const { lines: ctaLines, fontSize: ctaFontSize } = showSecondary
+  ? wrapTextStrict(String(secondaryText || "").toUpperCase(), ctaFontInit, ctaMaxWidth, 1, 18)
+  : { lines: [], fontSize: ctaFontInit };
+
+// SVG (centered box, no transparency, sharp font, all caps headline)
+const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <rect x="${randStyle.rect.x}" y="${randStyle.rect.y}" width="${randStyle.rect.width}" height="${randStyle.rect.height}" rx="${randStyle.rect.rx}" fill="${randStyle.rect.fill}" />
+  <rect x="${solidBox.x}" y="${solidBox.y}" width="${solidBox.width}" height="${solidBox.height}" rx="${solidBox.rx}" fill="${solidBox.fill}" />
   ${mainLines.map((line, i) =>
-    `<text x="${randStyle.text.x}" y="${randStyle.text.y + i * (mainFontSize + 10)}" text-anchor="${randStyle.text.anchor}" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="${mainFontSize}" font-weight="bold" fill="${randStyle.text.color}" letter-spacing="2" style="text-shadow:2px 3px 18px #0009">${line}</text>`
+    `<text x="600" y="${solidBox.y + 58 + i * (mainFontSize + 8)}" text-anchor="middle" font-family=${headlineFont} font-size="${mainFontSize}" font-weight="bold" fill="#fff" letter-spacing="3" style="text-shadow:2px 4px 18px #000a">${line.toUpperCase()}</text>`
   ).join("\n")}
   ${showSecondary ? `
     <rect x="${ctaBox.x}" y="${ctaBox.y}" width="${ctaBox.width}" height="${ctaBox.height}" rx="${ctaBox.rx}" fill="${ctaBox.fill}" />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBox.x + ctaBox.width/2}" y="${ctaBox.y + 44 + i * (ctaFontSize + 7)}" text-anchor="middle" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff" letter-spacing="2">${line}</text>`
+      `<text x="${ctaBox.x + ctaBox.width/2}" y="${ctaBox.y + 44 + i * (ctaFontSize + 7)}" text-anchor="middle" font-family=${headlineFont} font-size="${ctaFontSize}" font-weight="bold" fill="#fff" letter-spacing="2">${line}</text>`
     ).join("\n")}
   ` : ''}
 </svg>`;
+
 
     // Composite SVG overlay
     const outBuffer = await baseImage
