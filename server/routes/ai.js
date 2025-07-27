@@ -490,20 +490,34 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
     const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
-    // --- COLOR/BOX LOGIC ---
-    // Always neutral palette, always neutral overlay for serious
-    let overlayColor = null, boxColor, textColor;
-    let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
+   // --- Overlay and Box Color Logic ---
+const overlayNeutralPalette = [
+  "#DEDAD1BB", // soft cream-beige, translucent
+  "#BAB6ABAA", // warm gray-beige
+  "#B8C0B9BB", // cool gray-green
+  "#C7C3B4CC", // taupe/greige, a bit more solid
+  "#A8A59CBB", // warm stone
+  "#D3CEC6BB", // pale clay
+  "#C4CBC7BB", // subtle green-gray
+  "#81868099", // light gray-blue, more cool
+  "#353C4199", // deep charcoal, more subtle
+  "#5A636699", // medium steel gray
+  "#E9E4E0AA"  // off-white
+];
 
-    if (isSerious) {
-      overlayColor = pickFrom(neutralOverlayPalette); // full image overlay always for serious
-      boxColor = pickFrom(neutralPalette);
-      textColor = "#232323";
-    } else {
-      overlayColor = null; // no filter for non-serious
-      boxColor = pickFrom(neutralPalette);
-      textColor = "#232323";
-    }
+let overlayColor = null, boxColor, textColor;
+let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
+
+if (isSerious) {
+  // Pick a neutral overlay for serious industries
+  overlayColor = pickFrom(overlayNeutralPalette);
+  boxColor = pickFrom(neutralPalette);
+  textColor = "#232323";
+} else {
+  overlayColor = null; // No overlay for non-serious
+  boxColor = pickFrom(neutralPalette);
+  textColor = "#232323";
+}
 
     // Randomize headline alignment (center or left) for all
     let align = Math.random() < 0.55 ? "left" : "center";
