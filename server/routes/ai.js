@@ -365,7 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (advanced: industry-aware, guaranteed filter for serious, full neutral palette) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (final: always filter on serious, always neutral, box+overlay logic) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -388,19 +388,26 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // Neutral color palette (from your screenshot)
-    const neutralColors = [
-      "#E3DED7", "#D7D3CC", "#C8C3BB", "#B9B3A9", "#A9A396", "#D3D6D3",
-      "#C2C2B0", "#B7B4AA", "#A4A49C", "#8C8B7A", "#E2ECEB", "#B7C1C5",
-      "#A7B5B7", "#A0B0B9", "#829C9B", "#D1D1C8", "#BCB9B2", "#767874",
-      "#353535", "#1E2323"
+    // ----- Neutral Palette -----
+    const neutralPalette = [
+      "#DEDAD1EE", "#C7C3B4EE", "#BAB6ABEE", "#A8A59CEE", "#B8C0B9EE",
+      "#E3DDD5EE", "#949588EE", "#C4CBC7EE", "#B7B9A4EE", "#D3CEC6EE",
+      "#99A4A6EE", "#717678EE", "#5A6366EE", "#D6D1C4EE", "#B0B7BEEE",
+      "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
-    function pickFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-    function pickTwoDistinct(arr) {
-      let a = pickFrom(arr);
-      let b;
-      do { b = pickFrom(arr); } while (b === a);
-      return [a, b];
+    const neutralOverlayPalette = [
+      "#BAB6AB77", "#C7C3B477", "#B8C0B977", "#D3CEC677", "#94958877", "#A8A59C77", "#DEDAD177"
+    ];
+
+    function hexToHexAlpha(hex, alpha = 0.35) {
+      let c = hex.replace('#', '');
+      if (c.length === 3) c = c.split('').map(x => x + x).join('');
+      if (c.length !== 6) return hex;
+      let a = Math.round(alpha * 255).toString(16).padStart(2, '0');
+      return `#${c}${a}`;
+    }
+    function pickFrom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
     }
 
     // Font family pool
@@ -423,28 +430,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const isSerious = seriousIndustries.some(kw =>
       (industry || "").toLowerCase().includes(kw)
     );
-
-    // --- COLOR LOGIC ---
-    let overlayColor = null, boxColor = null, textColor = "#222";
-    let ctaColor = "#353535";
-    let boxRadius = Math.random() > 0.5 ? 24 : 0; // square or rounded
-
-    if (isSerious) {
-      // Two distinct neutral colors
-      let [overlayRaw, boxRaw] = pickTwoDistinct(neutralColors);
-      overlayColor = overlayRaw + "C4"; // add alpha for overlay (C4 = ~77% opacity)
-      boxColor = boxRaw;
-      // Contrast logic
-      textColor = (boxRaw === "#353535" || boxRaw === "#1E2323") ? "#FFF" : "#222";
-      ctaColor = overlayRaw === "#353535" || overlayRaw === "#1E2323" ? "#FFF" : "#353535";
-    } else {
-      // Non-serious: still neutral, box only, overlay always null
-      boxColor = pickFrom(neutralColors);
-      overlayColor = null;
-      textColor = (boxColor === "#353535" || boxColor === "#1E2323") ? "#FFF" : "#222";
-      ctaColor = boxColor === "#353535" || boxColor === "#1E2323" ? "#FFF" : "#353535";
-      boxRadius = Math.random() > 0.5 ? 24 : 0;
-    }
 
     // --- HEADLINE WRAP ---
     function smartWrap(text, maxLines = 3) {
@@ -503,12 +488,29 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
     const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
-    // --- BOX SIZE/PLACEMENT ---
+    // --- COLOR/BOX LOGIC ---
+    // Always neutral palette, always neutral overlay for serious
+    let overlayColor = null, boxColor, textColor;
+    let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
+
+    if (isSerious) {
+      overlayColor = pickFrom(neutralOverlayPalette); // full image overlay always for serious
+      boxColor = pickFrom(neutralPalette);
+      textColor = "#232323";
+    } else {
+      overlayColor = null; // no filter for non-serious
+      boxColor = pickFrom(neutralPalette);
+      textColor = "#232323";
+    }
+
+    // Randomize headline alignment (center or left) for all
+    let align = Math.random() < 0.55 ? "left" : "center";
     const paddingX = 54, paddingY = 36;
     const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
     const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
-    let align = Math.random() < 0.5 ? "center" : "left";
-    const boxX = align === "center" ? 600 - boxWidth / 2 : 160;
+    const boxX = align === "center"
+      ? 600 - boxWidth / 2
+      : 160;
     const textX = align === "center" ? 600 : (boxX + paddingX);
     const boxY = 130;
 
@@ -526,16 +528,16 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${isSerious && overlayColor ? `<rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />` : ""}
   <!-- Headline Box -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRadius}" fill="${boxColor}" />
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
     `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="${align === "center" ? "middle" : "start"}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
   ${subLines.length ? subLines.map((line, i) =>
-    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#222">${escapeForSVG(line)}</text>`
+    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#232323">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="${ctaColor}" />
-    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="${boxColor}" />
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
   ` : ''}
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
@@ -563,5 +565,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
