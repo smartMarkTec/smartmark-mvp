@@ -390,8 +390,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // Overlay setup
-    const overlayColor = color + "E6"; // semi-transparent overlay
+    // Font family pool
+    const fontFamilies = [
+      "'Poppins','Arial Black',Arial,sans-serif",
+      "'Times New Roman',Times,serif",
+      "'Helvetica Neue',Helvetica,Arial,sans-serif",
+      "'Impact',Arial,sans-serif",
+      "'Inter',Arial,sans-serif"
+    ];
+    const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
+
+    // Overlay setup - transparent (0.5)
+    const overlayColor = color.replace('#','%23') + "80"; // #225bb380
+
+    // If overlay color is pure black or missing, we'll use a box behind text
+    const useColorOverlay = !!color && color !== "#000" && color !== "#000000";
 
     // Headline fit
     function fitLines(text, fontSize, maxWidth, maxLines = 3) {
@@ -399,7 +412,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       let lines = [], currentLine = '';
       for (let word of words) {
         let testLine = currentLine ? currentLine + ' ' + word : word;
-        let estWidth = testLine.length * (fontSize * 0.55);
+        let estWidth = testLine.length * (fontSize * 0.57);
         if (estWidth > maxWidth && currentLine) {
           lines.push(currentLine);
           currentLine = word;
@@ -416,95 +429,83 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return lines;
     }
 
+    // --- CTA: always concise, width adapts
+    function truncateCta(text) {
+      let str = (text || "").trim();
+      // Only allow 4-5 words, cut rest
+      let words = str.split(" ");
+      if (words.length > 5) words = words.slice(0, 5);
+      str = words.join(" ");
+      return str;
+    }
+    let ctaText = truncateCta(cta);
+    let showCta = !!ctaText;
+    // Estimate CTA pill width based on text length
+    const ctaFont = 30;
+    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
+    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
+
     // Headline (big font, wide, top 1/3)
     const headlineFont = 52;
     const headlineLines = fitLines(headline, headlineFont, 940, 3);
 
     // Subheadline (smaller, below headline)
-    const subFont = 30;
-    const subLines = subheadline ? fitLines(subheadline, subFont, 740, 2) : [];
-
-    // CTA (top right, blue pill)
-    let ctaText = cta && String(cta).trim() ? cta : '';
-    let showCta = !!ctaText;
-    const ctaBoxW = 340, ctaBoxH = 54, ctaBoxX = 1200 - ctaBoxW - 42, ctaBoxY = 48;
-    function fitCTA(text) {
-      let fontSize = 28, lines = [];
-      let words = text.split(' ');
-      while (fontSize > 20) {
-        lines = [];
-        let testLine = '';
-        for (let i = 0; i < words.length; i++) {
-          let tempLine = testLine.length ? testLine + ' ' + words[i] : words[i];
-          let estWidth = tempLine.length * (fontSize * 0.61);
-          if (estWidth > ctaBoxW - 32 && testLine) {
-            lines.push(testLine);
-            testLine = words[i];
-          } else {
-            testLine = tempLine;
-          }
-        }
-        if (testLine) lines.push(testLine);
-        if (lines.length <= 2) break;
-        fontSize -= 2;
-      }
-      if (lines.length > 2) {
-        lines = lines.slice(0, 2);
-        let last = lines.length - 1;
-        if (lines[last].length > 5) lines[last] = lines[last].slice(0, -3) + "...";
-      }
-      return { lines, fontSize };
-    }
-    const { lines: ctaLines, fontSize: ctaFontSize } = showCta ? fitCTA(ctaText) : { lines: [], fontSize: 28 };
+    const subFont = 28;
+    const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
     // SVG
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <!-- Full color overlay -->
-  <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
-
-  <!-- Headline -->
-  ${headlineLines.map((line, i) =>
-    `<text x="80" y="${170 + i * (headlineFont + 8)}" font-family="'Poppins','Arial',sans-serif" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
-  ).join("\n")}
+  ${useColorOverlay ? `
+    <!-- Semi-transparent color overlay -->
+    <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
+  ` : ''}
+  
+  <!-- Headline: with or without box -->
+  ${useColorOverlay ? `
+    ${headlineLines.map((line, i) =>
+      `<text x="84" y="${170 + i * (headlineFont + 12)}" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+    ).join("\n")}
+  ` : `
+    <rect x="64" y="110" rx="23" width="1002" height="${70 + 60 * headlineLines.length}" fill="rgba(33,41,60,0.83)" />
+    ${headlineLines.map((line, i) =>
+      `<text x="90" y="${165 + i * (headlineFont + 10)}" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+    ).join("\n")}
+  `}
 
   <!-- Subheadline (if any) -->
   ${subLines.length ? subLines.map((line, i) =>
-    `<text x="88" y="${340 + i * (subFont + 4)}" font-family="'Poppins','Arial',sans-serif" font-size="${subFont}" font-weight="500" fill="#fff">${escapeForSVG(line)}</text>`
+    `<text x="94" y="${360 + i * (subFont + 7)}" font-family=${fontFamily} font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
 
   <!-- CTA button (top right) -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="27" fill="#24A3E3" />
-    ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxW / 2}" y="${ctaBoxY + 33 + i * (ctaFontSize + 3)}" text-anchor="middle" font-family="'Poppins','Arial',sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
-    ).join("\n")}
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="#28a6e6CC" />
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
   ` : ''}
 
   <!-- Footer bar (business/brand, lower left) -->
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
-  <text x="72" y="610" font-family="'Poppins','Arial',sans-serif" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
+  <text x="72" y="610" font-family=${fontFamily} font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
 
     // Composite SVG
+    const genDir = path.join(__dirname, '../public/generated');
+    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+    const fileName = `${uuidv4()}.jpg`;
+    const filePath = path.join(genDir, fileName);
+
     const outBuffer = await sharp(baseImage)
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
       .jpeg({ quality: 98 })
       .toBuffer();
 
-    // Save to /tmp
-   // Save to /public/generated
-const genDir = path.join(__dirname, '../public/generated');
-if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
-const fileName = `${uuidv4()}.jpg`;
-const filePath = path.join(genDir, fileName);
-fs.writeFileSync(filePath, outBuffer);
+    fs.writeFileSync(filePath, outBuffer);
 
-const publicUrl = `/generated/${fileName}`;
-console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
+    const publicUrl = `/generated/${fileName}`;
+    console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
 
-return res.json({ imageUrl: publicUrl, mainText: headline, secondaryText: ctaText });
-
+    return res.json({ imageUrl: publicUrl, mainText: headline, secondaryText: ctaText });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
