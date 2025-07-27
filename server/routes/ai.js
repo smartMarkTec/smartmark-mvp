@@ -379,29 +379,29 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // HEX -> RGBA for SVG overlay
-    function hexToRgba(hex, alpha = 0.5) {
+    // 8-digit hex for overlay
+    function hexToHexAlpha(hex, alpha = 0.45) {
       let c = hex.replace('#', '');
       if (c.length === 3) c = c.split('').map(x => x + x).join('');
-      const num = parseInt(c, 16);
-      return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${alpha})`;
+      if (c.length !== 6) return hex;
+      let a = Math.round(alpha * 255).toString(16).padStart(2, '0');
+      return `#${c}${a}`;
     }
 
     // Font family pool
     const fontFamilies = [
-      "'Poppins','Arial Black',Arial,sans-serif",
+      "Poppins,Arial Black,Arial,sans-serif",
       "'Times New Roman',Times,serif",
       "'Helvetica Neue',Helvetica,Arial,sans-serif",
-      "'Impact',Arial,sans-serif",
-      "'Inter',Arial,sans-serif"
+      "Impact,Arial,sans-serif",
+      "Inter,Arial,sans-serif"
     ];
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
 
-    // Use overlay if color is provided and not black
+    // Overlay or not
     const useColorOverlay = !!color && color !== "#000" && color !== "#000000";
-    const overlayColor = useColorOverlay ? hexToRgba(color, 0.5) : null;
+    const overlayColor = useColorOverlay ? hexToHexAlpha(color, 0.42) : null;
 
-    // --- CTA: always concise, width adapts
     function truncateCta(text) {
       let str = (text || "").trim();
       let words = str.split(" ");
@@ -415,7 +415,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
     const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
-    // Headline (big font, wide, top 1/3)
     function fitLines(text, fontSize, maxWidth, maxLines = 3) {
       let words = text.split(' ');
       let lines = [], currentLine = '';
@@ -440,11 +439,9 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const headlineFont = 52;
     const headlineLines = fitLines(headline, headlineFont, 940, 3);
 
-    // Subheadline (smaller, below headline)
     const subFont = 28;
     const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
-    // Helper for SVG text
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -454,39 +451,32 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // SVG
+    // SVG string
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${useColorOverlay ? `
     <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
-  ` : ''}
-  
-  <!-- Headline: with or without box -->
-  ${useColorOverlay ? `
     ${headlineLines.map((line, i) =>
-      `<text x="84" y="${170 + i * (headlineFont + 12)}" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+      `<text x="84" y="${170 + i * (headlineFont + 12)}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   ` : `
-    <rect x="64" y="110" rx="23" width="1002" height="${70 + 60 * headlineLines.length}" fill="rgba(33,41,60,0.83)" />
+    <rect x="64" y="110" rx="23" width="1002" height="${70 + 60 * headlineLines.length}" fill="#21293cD3" />
     ${headlineLines.map((line, i) =>
-      `<text x="90" y="${165 + i * (headlineFont + 10)}" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+      `<text x="90" y="${165 + i * (headlineFont + 10)}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   `}
 
-  <!-- Subheadline (if any) -->
   ${subLines.length ? subLines.map((line, i) =>
-    `<text x="94" y="${360 + i * (subFont + 7)}" font-family=${fontFamily} font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+    `<text x="94" y="${360 + i * (subFont + 7)}" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
 
-  <!-- CTA button (top right) -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="rgba(40,166,230,0.80)" />
-    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="#2aa5ecE6" />
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
   ` : ''}
 
-  <!-- Footer bar (business/brand, lower left) -->
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
-  <text x="72" y="610" font-family=${fontFamily} font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
+  <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
 
     // Composite SVG
