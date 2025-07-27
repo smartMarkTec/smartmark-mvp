@@ -368,7 +368,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (SOLID CENTERED BOX, SCALED TEXT) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (LOWER, SOLID BOX, RANDOM COLOR/FONT, TOP-RIGHT CTA) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -380,27 +380,38 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     let baseImage = sharp(imgRes.data).resize(1200, 627); // Facebook ad size
 
-    // -- Settings --
-    const boxPaddingX = 60;
-    const boxPaddingY = 30;
-    const minFont = 30;
-    const maxFont = 66;
-    const fontFamily = "'Bebas Neue', 'Helvetica Neue', Helvetica, Arial, sans-serif";
-    const boxColor = "#214b72"; // solid modern blue
-    const textColor = "#fff";
+    // -- Styling Variations --
+    const boxColors = ["#214b72", "#274690", "#2e4374", "#2563eb", "#164863"];
+    const textColors = ["#fff", "#f8f9fa", "#e8eaf6"];
+    const fonts = [
+      "'Arial Black', Arial, sans-serif",
+      "'Helvetica Neue', Helvetica, Arial, sans-serif",
+      "'Impact', Arial, sans-serif",
+      "Arial, sans-serif"
+    ];
+    const boxColor = boxColors[Math.floor(Math.random() * boxColors.length)];
+    const textColor = textColors[Math.floor(Math.random() * textColors.length)];
+    const fontFamily = fonts[Math.floor(Math.random() * fonts.length)];
 
-    // -- Smart font sizing & box for headline --
+    // Headline box dimensions: smaller and lower in image
+    const boxW = 900;
+    const boxH = 96;
+    const boxX = (1200 - boxW) / 2;
+    const boxY = 370; // Lower third, but NOT bottom
+
+    // Smart text fit for headline
     function fitHeadline(text, maxWidth, maxHeight) {
-      let fontSize = maxFont;
+      let fontSize = 52;
       let lines = [];
       let words = text.split(' ');
-      while (fontSize >= minFont) {
+      while (fontSize >= 24) {
         let testLine = '';
         lines = [];
         for (let i = 0; i < words.length; i++) {
           let tempLine = testLine.length ? testLine + ' ' + words[i] : words[i];
-          // Estimate width
+
           let estWidth = tempLine.length * (fontSize * 0.62);
+
           if (estWidth > maxWidth && testLine) {
             lines.push(testLine);
             testLine = words[i];
@@ -410,51 +421,40 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         }
         if (testLine) lines.push(testLine);
         if (
-          lines.length * (fontSize + 8) <= maxHeight &&
+          lines.length * (fontSize + 9) <= maxHeight &&
           Math.max(...lines.map(l => l.length)) * (fontSize * 0.62) <= maxWidth
         ) break;
         fontSize -= 3;
       }
       // Fallback: truncate
-      if (lines.length * (fontSize + 8) > maxHeight) {
-        lines = lines.slice(0, Math.floor(maxHeight / (fontSize + 8)));
+      if (lines.length * (fontSize + 9) > maxHeight) {
+        lines = lines.slice(0, Math.floor(maxHeight / (fontSize + 9)));
         let last = lines.length - 1;
         if (lines[last].length > 5) lines[last] = lines[last].slice(0, -3) + "...";
       }
       return { lines, fontSize };
     }
-
-    // --- Main Headline Box: centered or top center only ---
-    // Centered box
-    const boxW = 1080;
-    const boxH = 150;
-    const boxX = (1200 - boxW) / 2;
-    // Choose top or center
-    const centerY = 313 - boxH / 2;
-    const topY = 60;
-    const mainBoxY = Math.random() > 0.5 ? centerY : topY; // randomize between top and center
-
-    // Fit headline
+    
     const { lines: headlineLines, fontSize: headlineFont } = fitHeadline(
       headline,
-      boxW - boxPaddingX * 2,
-      boxH - boxPaddingY * 2
+      boxW - 60,
+      boxH - 26
     );
 
-    // --- CTA box (always bottom-right) ---
+    // --- CTA box (now top-right) ---
     let ctaText = cta && String(cta).trim() ? cta : '';
     let showCta = !!ctaText;
-    const ctaBoxW = 370, ctaBoxH = 75, ctaBoxX = 1200 - ctaBoxW - 38, ctaBoxY = 627 - ctaBoxH - 38;
+    const ctaBoxW = 320, ctaBoxH = 60, ctaBoxX = 1200 - ctaBoxW - 38, ctaBoxY = 38;
     function fitCTA(text) {
-      let fontSize = 38, lines = [];
+      let fontSize = 28, lines = [];
       let words = text.split(' ');
-      while (fontSize > 24) {
+      while (fontSize > 20) {
         let testLine = '';
         lines = [];
         for (let i = 0; i < words.length; i++) {
           let tempLine = testLine.length ? testLine + ' ' + words[i] : words[i];
           let estWidth = tempLine.length * (fontSize * 0.65);
-          if (estWidth > ctaBoxW - 40 && testLine) {
+          if (estWidth > ctaBoxW - 32 && testLine) {
             lines.push(testLine);
             testLine = words[i];
           } else {
@@ -472,21 +472,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       return { lines, fontSize };
     }
-    const { lines: ctaLines, fontSize: ctaFontSize } = showCta ? fitCTA(ctaText) : { lines: [], fontSize: 38 };
+    const { lines: ctaLines, fontSize: ctaFontSize } = showCta ? fitCTA(ctaText) : { lines: [], fontSize: 28 };
 
-    // -- SVG (always solid, always fitted) --
+    // -- SVG --
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   <!-- Headline Box -->
-  <rect x="${boxX}" y="${mainBoxY}" width="${boxW}" height="${boxH}" rx="32" fill="${boxColor}" />
+  <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="32" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxW/2}" y="${mainBoxY + boxPaddingY + i * (headlineFont + 12) + headlineFont}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.6" style="dominant-baseline:middle;">${line}</text>`
+    `<text x="${boxX + boxW/2}" y="${boxY + 36 + i * (headlineFont + 9)}" text-anchor="middle" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.4">${line}</text>`
   ).join("\n")}
   <!-- CTA Box -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="22" fill="#24A3E3" />
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="20" fill="#24A3E3" />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 28 + i * (ctaFontSize + 2)}" text-anchor="middle" font-family="Arial, sans-serif" font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${line}</text>`
+      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 26 + i * (ctaFontSize + 4)}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${line}</text>`
     ).join("\n")}
   ` : ''}
 </svg>`;
@@ -515,6 +515,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
