@@ -366,7 +366,6 @@ Industry: ${industry}
 });
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (final: always filter on serious, always neutral, box+overlay logic) ==========
-// ========== AI: GENERATE IMAGE WITH OVERLAY (final: always filter on serious, always neutral, box+overlay logic) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -475,21 +474,19 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
     const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
-    // --- CTA (5-word, wrapped, auto-size box) ---
-    function wrapCta(text, maxWords = 5) {
-      let words = (text || "").trim().split(/\s+/).slice(0, maxWords);
-      if (words.length <= 3) return [words.join(" ")];
-      const mid = Math.ceil(words.length / 2);
-      return [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
+    // --- CTA ---
+    function truncateCta(text) {
+      let str = (text || "").trim();
+      let words = str.split(" ");
+      if (words.length > 5) words = words.slice(0, 5);
+      str = words.join(" ");
+      return str;
     }
-    let ctaText = (cta || "").trim();
-    let showCta = !!ctaText.length;
+    let ctaText = truncateCta(cta);
+    let showCta = !!ctaText;
     const ctaFont = 30;
-    const ctaLines = showCta ? wrapCta(ctaText, 5) : [];
-    const ctaLineHeight = ctaFont + 2;
-    const estCtaWidth = Math.max(160, Math.min(420, Math.max(...ctaLines.map(l => l.length)) * ctaFont * 0.54 + 44));
-    const ctaBoxH = ctaLines.length * ctaLineHeight + 22;
-    const ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
+    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
+    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
     // --- COLOR/BOX LOGIC ---
     // Always neutral palette, always neutral overlay for serious
@@ -540,9 +537,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   ).join("\n") : ''}
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="${boxColor}" />
-    ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 24 + (i + 1) * ctaFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
-    ).join('\n')}
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
   ` : ''}
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
@@ -570,5 +565,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
