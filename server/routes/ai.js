@@ -487,22 +487,30 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // SVG string
-    const svg = `
+    // SVG string with tight box around headline
+const paddingX = 54;  // Horizontal padding (px)
+const paddingY = 36;  // Vertical padding (px)
+const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
+const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
+const boxX = 600 - boxWidth / 2; // Center horizontally (1200px image)
+const boxY = 130; // Pushed up a bit, adjust as needed
+
+const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${useColorOverlay ? `
-    <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
+    <!-- Centered, tight headline box -->
+    <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="36" fill="${overlayColor}" />
     ${headlineLines.map((line, i) =>
-      `<text x="50%" y="${170 + i * (headlineFont + 10)}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+      `<text x="600" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   ` : `
-    <rect x="64" y="110" rx="23" width="1002" height="${70 + 60 * headlineLines.length}" fill="#21293cD3" />
+    <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="36" fill="#21293cD3" />
     ${headlineLines.map((line, i) =>
-      `<text x="90" y="${165 + i * (headlineFont + 10)}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+      `<text x="600" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   `}
   ${subLines.length ? subLines.map((line, i) =>
-    `<text x="94" y="${360 + i * (subFont + 7)}" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
+    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
   ).join("\n") : ''}
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="#2aa5ecE6" />
