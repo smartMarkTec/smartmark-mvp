@@ -493,16 +493,18 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .toBuffer();
 
     // Save to /tmp
-    const tmpDir = '/tmp';
-    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
-    const fileName = `${uuidv4()}.jpg`;
-    const filePath = path.join(tmpDir, fileName);
-    fs.writeFileSync(filePath, outBuffer);
+   // Save to /public/generated
+const genDir = path.join(__dirname, '../public/generated');
+if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+const fileName = `${uuidv4()}.jpg`;
+const filePath = path.join(genDir, fileName);
+fs.writeFileSync(filePath, outBuffer);
 
-    const publicUrl = `/tmp/${fileName}`;
-    console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
+const publicUrl = `/generated/${fileName}`;
+console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl, mainText: headline, secondaryText: ctaText });
+return res.json({ imageUrl: publicUrl, mainText: headline, secondaryText: ctaText });
+
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
