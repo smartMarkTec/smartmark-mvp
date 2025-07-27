@@ -383,7 +383,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (MODERN, FITS, SOLID) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (MODERN, BOXED, FITS) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -393,156 +393,124 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // Download image buffer
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    let baseImage = sharp(imgRes.data).resize(1200, 627);
+    let baseImage = sharp(imgRes.data).resize(1200, 627); // Facebook ad size
 
-    // ==== HEADLINE BOX STYLE ====
-    const FONTS = "'Bebas Neue', 'Bungee Inline', 'Arial Black', Arial, sans-serif";
-    const HEADLINE_MAX_FONT = 74;
-    const HEADLINE_MIN_FONT = 34;
-    const HEADLINE_MAX_WIDTH = 1080;
-    const HEADLINE_BOX_PADDING_X = 56;
-    const HEADLINE_BOX_PADDING_Y = 34;
-    const HEADLINE_BOX_RADIUS = 40;
-    const HEADLINE_HEIGHT = 140;
+    // 1. Layout choice: center or top
+    const boxPosition = Math.random() > 0.5 ? "center" : "top"; // random between center or top
 
-    // Middle or Top
-    const headlineBoxes = [
-      { // Centered
-        x: HEADLINE_BOX_PADDING_X,
-        y: 210,
-        width: 1200 - 2 * HEADLINE_BOX_PADDING_X,
-        height: HEADLINE_HEIGHT,
-        textY: 210 + 86,
-      },
-      { // Top center
-        x: HEADLINE_BOX_PADDING_X,
-        y: 54,
-        width: 1200 - 2 * HEADLINE_BOX_PADDING_X,
-        height: 110,
-        textY: 54 + 66,
-      }
-    ];
-    const headlineBox = headlineBoxes[Math.floor(Math.random() * headlineBoxes.length)];
+    // 2. Headline Box styling
+    const headlineBox = {
+      x: 64,
+      y: boxPosition === "center" ? 235 : 52,
+      width: 1072, // 1200 - 2*64
+      height: 110,
+      rx: 26,
+      fill: "#202d38", // deep blue-gray solid
+      shadow: "0 6px 30px #0008"
+    };
 
-    // ==== CTA BOX STYLE ====
-    const CTA_FONT = 36;
-    const CTA_BOX_WIDTH = 400;
-    const CTA_BOX_HEIGHT = 82;
-    const CTA_BOX_X = 1200 - CTA_BOX_WIDTH - 44;
-    const CTA_BOX_Y = 627 - CTA_BOX_HEIGHT - 38;
-    const CTA_BOX_RADIUS = 24;
+    // 3. CTA Button styling (bottom right)
+    const ctaBox = {
+      x: 800,
+      y: 517,
+      width: 370,
+      height: 75,
+      rx: 22,
+      fill: "#fff", // solid white
+      border: "#1679e8", // vibrant blue
+      shadow: "0 3px 18px #1679e888"
+    };
 
-    // === Utility: SVG-safe text fit, max 2 lines ===
-    function wrapAndScaleText(text, maxFont, minFont, maxWidth, maxLines = 2) {
-      let fontSize = maxFont;
+    // --- Font Families for "Ad Style" ---
+    const headlineFont = "'Bebas Neue', 'Bungee Inline', 'Arial Black', Arial, sans-serif";
+    const ctaFont = "'Bebas Neue', 'Bungee Inline', 'Arial Black', Arial, sans-serif";
+
+    // --- Text Fitting/Autosizing Utility ---
+    function fitText(text, fontSize, maxWidth, maxLines = 2, allCaps = true) {
+      text = allCaps ? text.toUpperCase() : text;
+      let words = text.split(" ");
       let lines = [];
-      while (fontSize >= minFont) {
-        lines = [];
-        let line = '';
-        let words = text.split(' ');
-        for (let word of words) {
-          let testLine = line ? `${line} ${word}` : word;
-          // Estimate: 0.59 factor is pretty close for these display fonts
-          const estWidth = testLine.length * fontSize * 0.59;
-          if (estWidth > maxWidth && line) {
-            lines.push(line);
-            line = word;
-          } else {
-            line = testLine;
-          }
+      let line = "";
+      for (let word of words) {
+        let testLine = line ? line + " " + word : word;
+        let estWidth = testLine.length * (fontSize * 0.64); // slightly tighter for Bebas
+        if (estWidth > maxWidth && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = testLine;
         }
-        if (line) lines.push(line);
-        if (lines.length <= maxLines) break;
-        fontSize -= 4;
       }
-      // Ellipsis if overflow
+      if (line) lines.push(line);
+      // Shrink font if doesn't fit
+      let usedFont = fontSize;
+      while (lines.length > maxLines && usedFont > 28) {
+        usedFont -= 5;
+        lines = fitText(text, usedFont, maxWidth, maxLines, allCaps).lines;
+      }
+      // If still doesn't fit, truncate
       if (lines.length > maxLines) {
         lines = lines.slice(0, maxLines);
         let last = lines[lines.length - 1];
-        if (last.length > 6) lines[lines.length - 1] = last.slice(0, -3) + "...";
+        if (last.length > 5) lines[lines.length - 1] = last.slice(0, -3) + "...";
       }
-      return { lines, fontSize };
+      return { lines, fontSize: usedFont };
     }
 
-    // Headline text
-    const { lines: headlineLines, fontSize: headlineFontSize } = wrapAndScaleText(
-      headline,
-      HEADLINE_MAX_FONT,
-      HEADLINE_MIN_FONT,
-      headlineBox.width - 48, // Padding inside box
-      2
-    );
+    // 4. Calculate headline/cta lines & size
+    const { lines: headlineLines, fontSize: headlineFontSize } = fitText(headline, 66, headlineBox.width - 48, 2, true);
+    let ctaText = cta && cta.trim().length > 0 ? cta : "";
+    const { lines: ctaLines, fontSize: ctaFontSize } = ctaText
+      ? fitText(ctaText, 44, ctaBox.width - 32, 2, true)
+      : { lines: [], fontSize: 44 };
 
-    // CTA text
-    let showCTA = cta && String(cta).trim().length > 0;
-    let ctaText = showCTA ? cta : "";
-    const { lines: ctaLines, fontSize: ctaFontSize } = wrapAndScaleText(
-      ctaText,
-      CTA_FONT,
-      24,
-      CTA_BOX_WIDTH - 38,
-      2
-    );
-
-    // ==== SVG OVERLAY ====
+    // 5. SVG overlay string
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <!-- Headline Solid Box -->
-  <rect 
-    x="${headlineBox.x}" 
-    y="${headlineBox.y}" 
-    width="${headlineBox.width}" 
-    height="${headlineBox.height}" 
-    rx="${HEADLINE_BOX_RADIUS}" 
-    fill="#233046" 
-    opacity="0.97" 
-  />
+  <!-- Headline solid box with drop shadow -->
+  <rect x="${headlineBox.x}" y="${headlineBox.y}" width="${headlineBox.width}" height="${headlineBox.height}" rx="${headlineBox.rx}" fill="${headlineBox.fill}" filter="url(#hdshadow)"/>
+  <filter id="hdshadow" x="-20%" y="-20%" width="150%" height="150%">
+    <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#0008"/>
+  </filter>
+  <!-- Headline Text -->
   ${headlineLines.map((line, i) =>
-    `<text 
-      x="600" 
-      y="${headlineBox.textY + i * (headlineFontSize + 8)}" 
+    `<text x="600" y="${headlineBox.y + 32 + i * (headlineFontSize + 6)}"
       text-anchor="middle"
-      font-family=${FONTS}
-      font-size="${headlineFontSize}" 
-      font-weight="bold" 
+      font-family=${headlineFont}
+      font-size="${headlineFontSize}"
+      font-weight="bold"
       fill="#fff"
-      letter-spacing="2"
-      style="text-shadow:2px 3px 20px #0009"
+      letter-spacing="2.5"
+      style="dominant-baseline:middle;text-shadow:0 2px 9px #000a;"
     >${line}</text>`
   ).join("\n")}
-  ${showCTA ? `
-    <rect 
-      x="${CTA_BOX_X}" 
-      y="${CTA_BOX_Y}" 
-      width="${CTA_BOX_WIDTH}" 
-      height="${CTA_BOX_HEIGHT}" 
-      rx="${CTA_BOX_RADIUS}" 
-      fill="#2497E5" 
-      opacity="0.96" 
-    />
+  <!-- CTA Button Box and Text (bottom right) -->
+  ${ctaText ? `
+    <rect x="${ctaBox.x}" y="${ctaBox.y}" width="${ctaBox.width}" height="${ctaBox.height}" rx="${ctaBox.rx}" fill="${ctaBox.fill}" stroke="${ctaBox.border}" stroke-width="4"/>
+    <filter id="ctashadow" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="7" flood-color="#1679e8aa"/>
+    </filter>
     ${ctaLines.map((line, i) =>
-      `<text 
-        x="${CTA_BOX_X + CTA_BOX_WIDTH / 2}" 
-        y="${CTA_BOX_Y + 52 + i * (ctaFontSize + 6)}" 
+      `<text x="${ctaBox.x + ctaBox.width/2}" y="${ctaBox.y + 34 + i * (ctaFontSize + 4)}"
         text-anchor="middle"
-        font-family=${FONTS}
-        font-size="${ctaFontSize}" 
-        font-weight="bold" 
-        fill="#fff"
-        letter-spacing="1"
+        font-family=${ctaFont}
+        font-size="${ctaFontSize}"
+        font-weight="bold"
+        fill="#1679e8"
+        letter-spacing="2.5"
+        style="dominant-baseline:middle;"
       >${line}</text>`
     ).join("\n")}
   ` : ''}
-</svg>
-`;
+</svg>`;
 
-    // Composite SVG overlay
+    // 6. Composite overlay
     const outBuffer = await baseImage
       .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-      .jpeg({ quality: 98 })
+      .jpeg({ quality: 97 })
       .toBuffer();
 
-    // Save in /tmp and return URL
+    // 7. Save & return
     const tmpDir = '/tmp';
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
     const fileName = `${uuidv4()}.jpg`;
