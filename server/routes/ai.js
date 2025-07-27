@@ -369,7 +369,6 @@ Industry: ${industry}
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, subheadline = "", cta, footer = "", color = "#225bb3", footerColor = "#FFD700" } = req.body;
-
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
@@ -380,14 +379,12 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // Helper: Escape XML for SVG
-    function escapeForSVG(text) {
-      return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&apos;");
+    // HEX -> RGBA for SVG overlay
+    function hexToRgba(hex, alpha = 0.5) {
+      let c = hex.replace('#', '');
+      if (c.length === 3) c = c.split('').map(x => x + x).join('');
+      const num = parseInt(c, 16);
+      return `rgba(${(num >> 16) & 255},${(num >> 8) & 255},${num & 255},${alpha})`;
     }
 
     // Font family pool
@@ -400,13 +397,25 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ];
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
 
-    // Overlay setup - transparent (0.5)
-    const overlayColor = color.replace('#','%23') + "80"; // #225bb380
-
-    // If overlay color is pure black or missing, we'll use a box behind text
+    // Use overlay if color is provided and not black
     const useColorOverlay = !!color && color !== "#000" && color !== "#000000";
+    const overlayColor = useColorOverlay ? hexToRgba(color, 0.5) : null;
 
-    // Headline fit
+    // --- CTA: always concise, width adapts
+    function truncateCta(text) {
+      let str = (text || "").trim();
+      let words = str.split(" ");
+      if (words.length > 5) words = words.slice(0, 5);
+      str = words.join(" ");
+      return str;
+    }
+    let ctaText = truncateCta(cta);
+    let showCta = !!ctaText;
+    const ctaFont = 30;
+    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
+    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
+
+    // Headline (big font, wide, top 1/3)
     function fitLines(text, fontSize, maxWidth, maxLines = 3) {
       let words = text.split(' ');
       let lines = [], currentLine = '';
@@ -428,24 +437,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       return lines;
     }
-
-    // --- CTA: always concise, width adapts
-    function truncateCta(text) {
-      let str = (text || "").trim();
-      // Only allow 4-5 words, cut rest
-      let words = str.split(" ");
-      if (words.length > 5) words = words.slice(0, 5);
-      str = words.join(" ");
-      return str;
-    }
-    let ctaText = truncateCta(cta);
-    let showCta = !!ctaText;
-    // Estimate CTA pill width based on text length
-    const ctaFont = 30;
-    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
-    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
-
-    // Headline (big font, wide, top 1/3)
     const headlineFont = 52;
     const headlineLines = fitLines(headline, headlineFont, 940, 3);
 
@@ -453,11 +444,20 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const subFont = 28;
     const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
+    // Helper for SVG text
+    function escapeForSVG(text) {
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+    }
+
     // SVG
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${useColorOverlay ? `
-    <!-- Semi-transparent color overlay -->
     <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
   ` : ''}
   
@@ -480,7 +480,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
   <!-- CTA button (top right) -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="#28a6e6CC" />
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="28" fill="rgba(40,166,230,0.80)" />
     <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFont}" font-weight="bold" fill="#fff">${escapeForSVG(ctaText)}</text>
   ` : ''}
 
