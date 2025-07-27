@@ -523,10 +523,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // --- SVG ASSEMBLE ---
+        // --- SVG ASSEMBLE ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  ${isSerious && overlayColor ? `<rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />` : ""}
+  ${isSerious && overlayColor ? `
+    <!-- FULLSCREEN TRANSPARENT BG FILTER (NEW LAYER) -->
+    <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
+  ` : ""}
   <!-- Headline Box -->
   <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
@@ -542,6 +545,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
   <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
+
 
     // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
