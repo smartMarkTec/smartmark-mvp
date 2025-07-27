@@ -372,8 +372,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (LOWER, SOLID BOX, RANDOM COLOR/FONT, TOP-RIGHT CTA) ==========
-// ========== AI: GENERATE IMAGE WITH OVERLAY (LOWER, SOLID BOX, RANDOM COLOR/FONT, TOP-RIGHT CTA) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (LOWER, SOLID BOX, RANDOM COLOR/FONT, TOP-RIGHT CTA, SVG ESCAPE) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -383,11 +382,17 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // Download image buffer
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    if (!imgRes.data || imgRes.data.length < 10000) {
-      // Not a real image (likely failed)
-      return res.status(500).json({ error: "Downloaded image is invalid or too small." });
+    let baseImage = sharp(imgRes.data).resize(1200, 627); // Facebook ad size
+
+    // SVG ESCAPE FUNCTION (for safe XML!)
+    function escapeForSVG(text) {
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
     }
-    let baseImage = sharp(imgRes.data).resize(1200, 627);
 
     // -- Styling Variations --
     const boxColors = ["#214b72", "#274690", "#2e4374", "#2563eb", "#164863"];
@@ -406,7 +411,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const boxW = 900;
     const boxH = 96;
     const boxX = (1200 - boxW) / 2;
-    const boxY = 370;
+    const boxY = 370; // Lower third, but NOT bottom
 
     // Smart text fit for headline
     function fitHeadline(text, maxWidth, maxHeight) {
@@ -418,10 +423,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         lines = [];
         for (let i = 0; i < words.length; i++) {
           let tempLine = testLine.length ? testLine + ' ' + words[i] : words[i];
-
-      
           let estWidth = tempLine.length * (fontSize * 0.62);
-          
           if (estWidth > maxWidth && testLine) {
             lines.push(testLine);
             testLine = words[i];
@@ -444,7 +446,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       return { lines, fontSize };
     }
-
+    
     const { lines: headlineLines, fontSize: headlineFont } = fitHeadline(
       headline,
       boxW - 60,
@@ -490,30 +492,22 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <!-- Headline Box -->
   <rect x="${boxX}" y="${boxY}" width="${boxW}" height="${boxH}" rx="32" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxW/2}" y="${boxY + 36 + i * (headlineFont + 9)}" text-anchor="middle" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.4">${line}</text>`
+    `<text x="${boxX + boxW/2}" y="${boxY + 36 + i * (headlineFont + 9)}" text-anchor="middle" font-family=${fontFamily} font-size="${headlineFont}" font-weight="bold" fill="${textColor}" letter-spacing="1.4">${escapeForSVG(line)}</text>`
   ).join("\n")}
   <!-- CTA Box -->
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="20" fill="#24A3E3" />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 26 + i * (ctaFontSize + 4)}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${line}</text>`
+      `<text x="${ctaBoxX + ctaBoxW/2}" y="${ctaBoxY + 26 + i * (ctaFontSize + 4)}" text-anchor="middle" font-family=${fontFamily} font-size="${ctaFontSize}" font-weight="bold" fill="#fff">${escapeForSVG(line)}</text>`
     ).join("\n")}
   ` : ''}
 </svg>`;
 
-
-
     // Composite SVG overlay
-    let outBuffer;
-    try {
-      outBuffer = await baseImage
-        .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-        .jpeg({ quality: 98 })
-        .toBuffer();
-    } catch (err) {
-      console.error("Sharp composite error:", err.message, err);
-      return res.status(500).json({ error: "Sharp failed to process image", detail: err.message });
-    }
+    const outBuffer = await baseImage
+      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+      .jpeg({ quality: 98 })
+      .toBuffer();
 
     // Save in /tmp and return URL
     const tmpDir = '/tmp';
@@ -528,10 +522,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.json({ imageUrl: publicUrl, mainText: headline, secondaryText: ctaText });
   } catch (err) {
     console.error("Image overlay error:", err.message);
-    console.error("Full error:", err);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 
 
