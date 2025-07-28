@@ -449,16 +449,14 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { font, lines: forcedLines };
     }
 
-    // ---- HEADLINE ----
-    const headlineMaxW = 1040;    // WIDER for wrapping
-    const headlineMaxLines = 5;   // Up to 5 lines max
-    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 42, 18);
-
-    // Box size: height grows with # lines
-    const headlineBoxH = 36 + headlineLines.length * (headlineFont + 14);
-    const headlineBoxW = headlineMaxW + 40;
-    const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-    const headlineBoxY = 65;
+   // Headline logic: force up to 6 lines, shrink font if needed, box grows in height
+const headlineMaxW = 980; // slightly less wide, forces more wrap
+const headlineMaxLines = 6;
+const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline, headlineMaxW, headlineMaxLines, 46, 16);
+const headlineBoxH = 38 + headlineLines.length * (headlineFont + 12);
+const headlineBoxW = headlineMaxW + 32;
+const headlineBoxX = svgW / 2 - headlineBoxW / 2;
+const headlineBoxY = 68;
 
     // ---- CTA ----
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
@@ -550,14 +548,14 @@ const svg = `
     headlineLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${headlineBoxY + 32 + i * (headlineFont + 14)}"
+        y="${headlineBoxY + (headlineFont + 16) + i*(headlineFont + 12)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${headlineFont}"
         font-weight="bold"
         fill="${headlineTextColor}"
-        alignment-baseline="middle"
         dominant-baseline="middle"
+        alignment-baseline="middle"
       >${escapeForSVG(line)}</text>`
     ).join("\n")
   }
@@ -568,14 +566,14 @@ const svg = `
     ctaLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${ctaBoxY + 18 + i * (ctaFont + 12)}"
+        y="${ctaBoxY + (ctaFont + 10) + i*(ctaFont + 10)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${ctaFont}"
         font-weight="bold"
         fill="${ctaTextColor}"
-        alignment-baseline="middle"
         dominant-baseline="middle"
+        alignment-baseline="middle"
       >${escapeForSVG(line)}</text>`
     ).join("\n")
   }
