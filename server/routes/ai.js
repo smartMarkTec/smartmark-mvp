@@ -412,27 +412,48 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const textColor = textColors[Math.floor(Math.random() * textColors.length)];
 
     // --- Text fitting and wrapping ---
-    function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
-      let font = maxFont;
-      let lines = [];
-      while (font >= minFont) {
-        lines = [];
-        let words = text.split(" ");
-        let line = "";
-        for (let word of words) {
-          if ((line + " " + word).trim().length * font * 0.54 > maxWidth && line) {
-            lines.push(line.trim());
-            line = word;
-          } else {
-            line += " " + word;
-          }
-        }
-        if (line) lines.push(line.trim());
-        if (lines.length <= maxLines) break;
-        font -= 2;
+   function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
+  let font = maxFont;
+  let lines = [];
+  while (font >= minFont) {
+    lines = [];
+    let words = text.split(" ");
+    let line = "";
+    for (let word of words) {
+      // Use SVG em approximation for more realistic fit
+      let testLine = line ? line + " " + word : word;
+      // Assume average char width is 0.57em for these fonts
+      let estWidth = testLine.length * font * 0.57;
+      if (estWidth > maxWidth && line) {
+        lines.push(line.trim());
+        line = word;
+      } else {
+        line = testLine;
       }
-      return { font, lines };
     }
+    if (line) lines.push(line.trim());
+    // Enforce that NO line is wider than maxWidth
+    const allFit = lines.every(l => l.length * font * 0.57 <= maxWidth);
+    if (lines.length <= maxLines && allFit) break;
+    font -= 2;
+  }
+  // Final strict wrap (in case of edge case)
+  lines = [];
+  let line = "";
+  text.split(" ").forEach(word => {
+    let testLine = line ? line + " " + word : word;
+    let estWidth = testLine.length * font * 0.57;
+    if (estWidth > maxWidth && line) {
+      lines.push(line.trim());
+      line = word;
+    } else {
+      line = testLine;
+    }
+  });
+  if (line) lines.push(line.trim());
+  return { font, lines };
+}
+
 
     // Headline logic
     const headlineMaxW = 900, headlineMaxLines = 2;
