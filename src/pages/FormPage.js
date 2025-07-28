@@ -325,77 +325,20 @@ export default function FormPage() {
     setTouched(true);
   };
 
-// Generate full campaign assets (AI)
-const handleGenerate = async () => {
-  setLoading(true);
-  setResult(null);
-  setImageUrl("");
-  setError("");
-  try {
-    const toSend = { ...answers };
-    const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers: toSend, url: answers.url || "" })
-    });
-    const data = await res.json();
-
-    // Store overlay text as well
-    setResult({
-      headline: data.headline || "",
-      body: data.body || "",
-      image_overlay_text: data.image_overlay_text || ""
-    });
-
-    // Step 1: Generate a new stock image
-    setImageLoading(true);
-    const token = getRandomString();
-    setLastRegenerateToken(token);
-    const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: answers.url || "",
-        industry: answers.industry || "",
-        regenerateToken: token
-      })
-    });
-    const imgData = await imgRes.json();
-    const stockImageUrl = imgData.imageUrl || "";
-
-    // Step 2: If overlay text exists, overlay on image
-    if (stockImageUrl && data.image_overlay_text) {
-      const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    imageUrl: stockImageUrl,
-    headline: result.image_overlay_text,
-    cta: answers.offer || result.headline || "",
-    industry: answers.industry || ""   // ADD THIS
-  })
-});
-
-      const overlayData = await overlayRes.json();
-      setImageUrl(overlayData.imageUrl || stockImageUrl);
-    } else {
-      setImageUrl(stockImageUrl);
-    }
-    setImageLoading(false);
-  } catch (err) {
-    setError("Failed to generate campaign: " + (err.message || ""));
-    setLoading(false);
-  }
-  setLoading(false);
-};
-
-// Allow user to regenerate image with overlay!
 const handleRegenerateImage = async () => {
   setImageLoading(true);
   setImageUrl("");
   try {
     const token = getRandomString();
     setLastRegenerateToken(token);
+
+    // Always get new campaign copy/overlay for current answers
+    const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers, url: answers.url || "" })
+    });
+    const data = await res.json();
 
     // Get a new image
     const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
@@ -410,30 +353,36 @@ const handleRegenerateImage = async () => {
     const imgData = await imgRes.json();
     const stockImageUrl = imgData.imageUrl || "";
 
-    // If overlay text exists, overlay on image (***IMPORTANT FIX BELOW***)
-    if (stockImageUrl && result?.image_overlay_text) {
-  const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    imageUrl: stockImageUrl,
-    headline: data.image_overlay_text,
-    cta: answers.offer || data.headline || "",
-    industry: answers.industry || ""   // ADD THIS
-  })
-});
+    // Overlay new image with *fresh* overlay text, always passing industry
+    if (stockImageUrl && data.image_overlay_text) {
+      const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: stockImageUrl,
+          headline: data.image_overlay_text,
+          cta: answers.offer || data.headline || "",
+          industry: answers.industry || ""
+        })
+      });
 
       const overlayData = await overlayRes.json();
       setImageUrl(overlayData.imageUrl || stockImageUrl);
     } else {
       setImageUrl(stockImageUrl);
     }
-  } catch {
+
+    // Update state for preview
+    setResult({
+      headline: data.headline || "",
+      body: data.body || "",
+      image_overlay_text: data.image_overlay_text || ""
+    });
+  } catch (err) {
     setImageUrl("");
   }
   setImageLoading(false);
 };
-
 
   // Modal open/close handlers
   const handleImageClick = (url) => {
