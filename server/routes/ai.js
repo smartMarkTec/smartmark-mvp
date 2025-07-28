@@ -372,8 +372,8 @@ Industry: ${industry}
 
 
 // Load ONLY Bodoni Moda and Cinzel
-const bodoniFontPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.woff2');
-const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/files/cinzel-latin-700-normal.woff2');
+const bodoniFontPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.woff');
+const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/files/cinzel-latin-700-normal.woff');
 const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
 const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
 
