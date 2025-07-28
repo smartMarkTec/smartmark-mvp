@@ -367,8 +367,6 @@ Industry: ${industry}
   }
 });
 
-const fs = require('fs');
-const path = require('path');
 
 // Load ONLY Bodoni Moda and Cinzel
 const bodoniFontPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.woff2');
