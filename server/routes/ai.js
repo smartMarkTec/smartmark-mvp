@@ -389,19 +389,34 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // --- Palettes ---
+    // ----- Palettes -----
     const neutralPalette = [
-      "#EEEDEBCC", "#D5D9D8CC", "#B8B9B5CC", "#DFE8E3CC", "#E9E4E0CC", "#F6F6F6CC"
+      "#DEDAD1EE", "#C7C3B4EE", "#BAB6ABEE", "#A8A59CEE", "#B8C0B9EE",
+      "#E3DDD5EE", "#949588EE", "#C4CBC7EE", "#B7B9A4EE", "#D3CEC6EE",
+      "#99A4A6EE", "#717678EE", "#5A6366EE", "#D6D1C4EE", "#B0B7BEEE",
+      "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
+
     const overlayColorPalette = [
-      "#3474E688", "#185e8288", "#4B356888", "#11182788", "#00000022"
+      "#3474E688", // rich blue
+      "#185e8288", // teal-blue
+      "#4B356888", // deep purple
+      "#11182788", // dark navy/charcoal
+      "#00000033"  // very subtle black (20% opacity)
     ];
-    function pickFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-    // --- Font ---
-    const fontFamily = "Poppins,Arial Black,Arial,sans-serif";
+    function pickFrom(arr) {
+      return arr[Math.floor(Math.random() * arr.length)];
+    }
 
-    // --- Industry Logic ---
+    // Font family pool (limit to two most popular ad fonts)
+    const fontFamilies = [
+      "Poppins,Arial Black,Arial,sans-serif",
+      "Inter,Arial,sans-serif"
+    ];
+    const fontFamily = pickFrom(fontFamilies);
+
+    // --- INDUSTRY LOGIC ---
     const seriousIndustries = [
       "medicine","medical","doctor","dentist","health","hospital","hospice",
       "law","legal","lawyer","attorney","finance","financial","accounting","bank","banking",
@@ -412,58 +427,106 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       (industry || "").toLowerCase().includes(kw)
     );
 
-    // --- Headline Split ---
-    function sentenceSplit(text) {
-      let parts = (text.match(/[^.!?]+[.!?]?/g) || [])
-        .map(s => s.trim())
-        .filter(Boolean)
-        .slice(0, 3);
+    // --- HEADLINE LOGIC: add punctuation if missing
+    function addHeadlinePunctuation(txt) {
+      let str = txt.trim();
+      // End with period or exclamation if missing
+      if (/[.!?]$/.test(str)) return str;
+      // Logic: if 'now', 'today', 'free', 'call', 'visit', 'sale', 'save', use exclamation, else period
+      const exclaimWords = ["now", "today", "free", "call", "visit", "sale", "save", "book", "deal"];
+      const lastWord = str.split(/\s+/).pop().toLowerCase();
+      if (exclaimWords.includes(lastWord)) return str + "!";
+      // Randomly pick if not obvious
+      return str + (Math.random() > 0.4 ? "." : "!");
+    }
+    const headlineWithPunct = addHeadlinePunctuation(headline);
 
-      if (parts.length === 0) {
-        const words = text.split(/\s+/);
-        for (let i = 0; i < words.length; i += 3) {
-          let chunk = words.slice(i, i + 3).join(" ");
-          if (!/[.!?]$/.test(chunk)) chunk += "!";
-          parts.push(chunk);
-        }
-      } else {
-        parts = parts.map(s => /[.!?]$/.test(s) ? s : s + ".");
+    // --- HEADLINE WRAP ---
+    function smartWrap(text, maxLines = 3) {
+      if (!text) return [];
+      const words = text.trim().split(' ');
+      if (words.length <= maxLines) return words;
+      let lines = [];
+      let avg = Math.ceil(words.length / maxLines);
+      let used = 0;
+      for (let i = 0; i < maxLines; i++) {
+        lines.push(words.slice(used, used + avg).join(' '));
+        used += avg;
+        if (i === maxLines - 2) avg = words.length - used;
       }
-      return parts;
+      return lines;
     }
-    let headlineLines = sentenceSplit(headline);
+    const headlineFont = 52;
+    const headlineLines = smartWrap(headlineWithPunct, 3);
 
-    const headlineFont = 54;
-    const paddingX = 54, paddingY = 36;
-    const boxRx = 18; // pointed corners
-    const textColor = "#232323";
-    const boxColor = pickFrom(neutralPalette);
-    let overlayColor = isSerious ? pickFrom(overlayColorPalette) : null;
+    // --- SUBHEADLINE WRAP ---
+    const subFont = 28;
+    function fitLines(text, fontSize, maxWidth, maxLines = 2) {
+      let words = text.split(' ');
+      let lines = [], currentLine = '';
+      for (let word of words) {
+        let testLine = currentLine ? currentLine + ' ' + word : word;
+        let estWidth = testLine.length * (fontSize * 0.57);
+        if (estWidth > maxWidth && currentLine) {
+          lines.push(currentLine);
+          currentLine = word;
+        } else {
+          currentLine = testLine;
+        }
+      }
+      if (currentLine) lines.push(currentLine);
+      if (lines.length > maxLines) {
+        lines = lines.slice(0, maxLines);
+        let last = lines.length - 1;
+        if (lines[last].length > 5) lines[last] = lines[last].slice(0, -3) + "...";
+      }
+      return lines;
+    }
+    const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
 
-    const maxLineLen = Math.max(...headlineLines.map(line => line.length), 18);
-    const boxWidth = Math.min(880, Math.max(460, maxLineLen * (headlineFont * 0.56) + paddingX * 2));
-    const boxHeight = headlineLines.length * (headlineFont + 9) + paddingY * 2;
-    const boxX = 600 - boxWidth / 2;
-    const textX = 600;
-    const boxY = 200;
-
-    // --- CTA logic ---
-    function getShortCta(ctaText) {
-      if (!ctaText) return "";
-      let words = ctaText.trim().split(/\s+/);
+    // --- CTA LOGIC: 4-5 words, always fit ---
+    function getCtaText(text) {
+      let str = (text || "").trim();
+      // Remove trailing punctuation
+      str = str.replace(/[.!?,]+$/, "");
+      let words = str.split(/\s+/);
       if (words.length > 5) words = words.slice(0, 5);
-      let out = words.join(" ");
-      if (!/[.!?]$/.test(out)) out += "!";
-      return out;
+      str = words.join(" ");
+      // Ensure not too short, pad with default if needed
+      if (str.length < 3) str = "Learn More";
+      return str;
     }
-    let shortCta = getShortCta(cta);
+    let ctaText = getCtaText(cta);
+    let showCta = !!ctaText;
+    const ctaFont = 30;
+    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
+    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
 
-    const showCta = !!shortCta;
-    const ctaFont = 32;
-    const estCtaWidth = Math.max(200, Math.min(380, shortCta.length * ctaFont * 0.54 + 44));
-    const ctaBoxH = 58, ctaBoxX = 1200 - estCtaWidth - 54, ctaBoxY = 56;
+    // --- Overlay and Box Color Logic ---
+    let overlayColor = null, boxColor, textColor;
+    let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
 
-    // --- SVG escape ---
+    if (isSerious) {
+      overlayColor = pickFrom(overlayColorPalette);
+      boxColor = pickFrom(neutralPalette);
+      textColor = "#232323";
+    } else {
+      overlayColor = null;
+      boxColor = pickFrom(neutralPalette);
+      textColor = "#232323";
+    }
+
+    // Randomize headline alignment (center or left) for all
+    let align = Math.random() < 0.55 ? "left" : "center";
+    const paddingX = 54, paddingY = 36;
+    const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
+    const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
+    const boxX = align === "center"
+      ? 600 - boxWidth / 2
+      : 160;
+    const textX = align === "center" ? 600 : (boxX + paddingX);
+    const boxY = 130;
+
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -473,25 +536,30 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // --- SVG ---
+    // --- SVG ASSEMBLE ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
   ${isSerious && overlayColor ? `
+    <!-- FULLSCREEN TRANSLUCENT BG FILTER (VISIBLE, SERIOUS ONLY) -->
     <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
   ` : ""}
+  <!-- Headline Box -->
   <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" />
   ${headlineLines.map((line, i) =>
-    `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 2 - 7}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
+    `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="${align === "center" ? "middle" : "start"}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
+  ${subLines.length ? subLines.map((line, i) =>
+    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#232323">${escapeForSVG(line)}</text>`
+  ).join("\n") : ''}
   ${showCta ? `
     <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="0" fill="${boxColor}" />
-    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 39}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(shortCta)}</text>
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
   ` : ''}
   <rect x="0" y="570" width="1200" height="60" fill="#222" />
-  <text x="72" y="610" font-family="${fontFamily}" font-size="32" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
+  <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
 
-    // Compose SVG on Image
+    // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
@@ -507,7 +575,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const publicUrl = `/generated/${fileName}`;
     console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl, mainText: headline, secondaryText: shortCta });
+    return res.json({ imageUrl: publicUrl, mainText: headlineWithPunct, secondaryText: ctaText });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
