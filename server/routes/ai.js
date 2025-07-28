@@ -7,6 +7,11 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
+// --- Load text-to-svg for pixel-perfect text measurement ---
+const TextToSVG = require('text-to-svg');
+const bodoniTtfPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.ttf');
+const textToSvg = TextToSVG.loadSync(bodoniTtfPath); // Always use the same font for overlay
+
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
 const TRAINING_DOCS = fs.existsSync(dataDir)
@@ -372,7 +377,7 @@ const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/
 const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
 const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR, FITTED, WRAPPED) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (PIXEL-PERFECT FIT WITH text-to-svg) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta, industry = "" } = req.body;
@@ -394,16 +399,12 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgW = svgW - (borderW + borderGap) * 2;
     const imgH = svgH - (borderW + borderGap) * 2;
 
-    // Font
-    const fontOptions = [
-      { name: 'Bodoni Moda', base64: bodoniFontBase64, css: 'Bodoni Moda, serif' },
-      { name: 'Cinzel', base64: cinzelFontBase64, css: 'Cinzel, serif' }
-    ];
-    const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
+    // Font (SVG font-family must match the text-to-svg font loaded)
+    const fontPick = { name: 'Bodoni Moda', base64: bodoniFontBase64, css: 'Bodoni Moda, serif' };
     const fontFamily = fontPick.css;
 
-    // --- Smart Wrapping Function ---
-    function fitFontLines(text, maxWidth, maxLines, maxFont, minFont) {
+    // --- Pixel-Perfect Wrapping Function ---
+    function fitFontLinesReal(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
       let lines = [];
       while (font >= minFont) {
@@ -412,7 +413,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         let line = "";
         for (let word of words) {
           let testLine = line ? line + " " + word : word;
-          let estWidth = testLine.length * font * 0.6;
+          const estWidth = textToSvg.getMetrics(testLine, { fontSize: font }).width;
           if (estWidth > maxWidth && line) {
             lines.push(line.trim());
             line = word;
@@ -421,7 +422,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
           }
         }
         if (line) lines.push(line.trim());
-        let allFit = lines.every(l => l.length * font * 0.6 <= maxWidth);
+        let allFit = lines.every(l => textToSvg.getMetrics(l, { fontSize: font }).width <= maxWidth);
         if (lines.length <= maxLines && allFit) break;
         font -= 2;
       }
@@ -431,7 +432,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         let curr = "";
         for (let w of l.split(" ")) {
           let testLine = curr ? curr + " " + w : w;
-          let estWidth = testLine.length * font * 0.6;
+          const estWidth = textToSvg.getMetrics(testLine, { fontSize: font }).width;
           if (estWidth > maxWidth && curr) {
             forcedLines.push(curr);
             curr = w;
@@ -449,12 +450,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // ---- HEADLINE ----
-    // Set to be a bit narrower to avoid image overflow, with padding
-    const headlineMaxW = 920;      // 920px, always fits nicely
-    const headlineMaxLines = 4;    // Max 4 lines for big headlines
-    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 42, 16);
+    const headlineMaxW = 920;   // px
+    const headlineMaxLines = 4;
+    const { font: headlineFont, lines: headlineLines } = fitFontLinesReal(headline, headlineMaxW, headlineMaxLines, 42, 16);
 
-    // Truncate extra-long text (safety)
     let headlineDisplayLines = [...headlineLines];
     if (headlineDisplayLines.length > headlineMaxLines) {
       headlineDisplayLines = headlineDisplayLines.slice(0, headlineMaxLines);
@@ -463,14 +462,14 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // Box size: height grows with # lines
     const headlineBoxH = 40 + headlineDisplayLines.length * (headlineFont + 14);
-    const headlineBoxW = headlineMaxW + 36;  // Add just enough padding
+    const headlineBoxW = headlineMaxW + 36;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
     const headlineBoxY = 62;
 
     // ---- CTA ----
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
     const ctaMaxW = 540, ctaMaxLines = 3;
-    const { font: ctaFont, lines: ctaLines } = fitFontLines(ctaText, ctaMaxW, ctaMaxLines, 28, 14);
+    const { font: ctaFont, lines: ctaLines } = fitFontLinesReal(ctaText, ctaMaxW, ctaMaxLines, 28, 14);
     const ctaBoxH = 22 + ctaLines.length * (ctaFont + 10);
     const ctaBoxW = ctaMaxW + 28;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
@@ -619,6 +618,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
