@@ -407,62 +407,78 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
 
-    // --- Text fitting and wrapping ---
-    function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
-      let font = maxFont;
-      let lines = [];
-      while (font >= minFont) {
-        lines = [];
-        let words = text.split(" ");
-        let line = "";
-        for (let word of words) {
-          let testLine = line ? line + " " + word : word;
-          let estWidth = testLine.length * font * 0.57;
-          if (estWidth > maxWidth && line) {
-            lines.push(line.trim());
-            line = word;
-          } else {
-            line = testLine;
-          }
-        }
-        if (line) lines.push(line.trim());
-        const allFit = lines.every(l => l.length * font * 0.57 <= maxWidth);
-        if (lines.length <= maxLines && allFit) break;
-        font -= 2;
+  function fitFontSizeStrict(text, maxWidth, maxLines, maxFont, minFont) {
+  // Break text into words
+  let font = maxFont;
+  let lines = [];
+  let worstLineWidth = 0;
+  while (font >= minFont) {
+    lines = [];
+    let words = text.split(" ");
+    let line = "";
+    for (let word of words) {
+      let testLine = line ? line + " " + word : word;
+      // Measure width using SVG's em approximation
+      let estWidth = testLine.length * font * 0.57;
+      if (estWidth > maxWidth && line) {
+        lines.push(line.trim());
+        line = word;
+      } else {
+        line = testLine;
       }
-      // Final strict wrap
-      lines = [];
-      let line = "";
-      text.split(" ").forEach(word => {
-        let testLine = line ? line + " " + word : word;
-        let estWidth = testLine.length * font * 0.57;
-        if (estWidth > maxWidth && line) {
-          lines.push(line.trim());
-          line = word;
-        } else {
-          line = testLine;
-        }
-      });
-      if (line) lines.push(line.trim());
-      return { font, lines };
     }
+    if (line) lines.push(line.trim());
+    // Check if any line is too wide
+    worstLineWidth = Math.max(...lines.map(l => l.length * font * 0.57));
+    if (lines.length <= maxLines && worstLineWidth <= maxWidth) {
+      break;
+    }
+    font -= 2; // Shrink font if doesn't fit
+  }
+  // One last pass: break up any line that still overflows
+  let finalLines = [];
+  for (let l of lines) {
+    let curr = "";
+    for (let w of l.split(" ")) {
+      let testLine = curr ? curr + " " + w : w;
+      let estWidth = testLine.length * font * 0.57;
+      if (estWidth > maxWidth && curr) {
+        finalLines.push(curr);
+        curr = w;
+      } else {
+        curr = testLine;
+      }
+    }
+    if (curr) finalLines.push(curr);
+  }
+  // Chop to maxLines if needed
+  if (finalLines.length > maxLines) {
+    finalLines = finalLines.slice(0, maxLines);
+    // Optionally add ellipsis to last line if text was cut
+    finalLines[maxLines-1] = finalLines[maxLines-1].replace(/\.*$/, '') + "...";
+  }
+  return { font, lines: finalLines };
+}
 
-    // Headline logic
-    const headlineMaxW = 900;
-    const headlineMaxLines = 3; // Allow more wrapping lines
-    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 52, 26);
-    const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
-    const headlineBoxW = headlineMaxW + 30;
-    const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-    const headlineBoxY = 80;
 
-    const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
-    const ctaMaxW = 480, ctaMaxLines = 3;
-    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 34, 20);
-    const ctaBoxH = 22 + ctaLines.length * (ctaFont + 8);
-    const ctaBoxW = ctaMaxW + 26;
-    const ctaBoxX = svgW / 2 - ctaBoxW / 2;
-    const ctaBoxY = headlineBoxY + headlineBoxH + 40;
+// Headline logic (allow up to 4 lines for headline)
+const headlineMaxW = 900;
+const headlineMaxLines = 4;
+const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline, headlineMaxW, headlineMaxLines, 52, 18);
+const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
+const headlineBoxW = headlineMaxW + 30;
+const headlineBoxX = svgW / 2 - headlineBoxW / 2;
+const headlineBoxY = 80;
+
+// CTA logic (allow up to 3 lines)
+const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
+const ctaMaxW = 480, ctaMaxLines = 3;
+const { font: ctaFont, lines: ctaLines } = fitFontSizeStrict(ctaText, ctaMaxW, ctaMaxLines, 34, 14);
+const ctaBoxH = 22 + ctaLines.length * (ctaFont + 8);
+const ctaBoxW = ctaMaxW + 26;
+const ctaBoxX = svgW / 2 - ctaBoxW / 2;
+const ctaBoxY = headlineBoxY + headlineBoxH + 40;
+
 
     // Extract/blur image regions for glass boxes
     const blurStrength = 15; // Glassmorphism strength
