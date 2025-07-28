@@ -390,9 +390,11 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // ----- Frame Palette -----
     const framePalette = [
-      "#1D3557", "#457B9D", "#A8DADC", "#F1FAEE", "#E63946",
-      "#6366F1", "#18181B", "#FBBF24", "#10B981", "#F472B6",
-      "#F59E42", "#E6D3A3", "#57606f", "#444444"
+      "#232a3b", // dark blue
+      "#181b20", // dark grey
+      "#555a64", // grey
+      "#131313", // black
+      "#dedad1"  // beige
     ];
     function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
     const frameColor = pick(framePalette);
@@ -403,9 +405,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       "#E3DDD5EE", "#949588EE", "#C4CBC7EE", "#B7B9A4EE", "#D3CEC6EE",
       "#99A4A6EE", "#717678EE", "#5A6366EE", "#D6D1C4EE", "#B0B7BEEE",
       "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
-    ];
-    const overlayColorPalette = [
-      "#3474E688", "#185e8288", "#4B356888", "#11182788", "#00000033"
     ];
 
     // Font family pool (only Helvetica, Futura, Impact)
@@ -436,7 +435,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         const lastWord = str.split(/\s+/).pop().toLowerCase();
         str += exclaimWords.includes(lastWord) ? "!" : ".";
       }
-      // Capitalize first letter
       return str.charAt(0).toUpperCase() + str.slice(1);
     }
     const headlineWithPunct = completeSentence(headline);
@@ -468,7 +466,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       str = words.join(" ");
       if (!/[.?!]$/.test(str)) str += ".";
       if (str.length < 3) str = "Learn more.";
-      // Capitalize first letter
       return str.charAt(0).toUpperCase() + str.slice(1);
     }
     let ctaText = getCtaText(cta);
@@ -476,22 +473,22 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // --- Visual Layout ---
     // "Picture frame": Draw frame, then image, then boxes
-    // Frame = outer rectangle, 32px width, full 1200x627
-    const frameWidth = 32;
+    // Frame = outer rectangle, 48px width, full 1200x627
+    const frameWidth = 48;
     const imgX = frameWidth, imgY = frameWidth, imgW = 1200 - frameWidth*2, imgH = 627 - frameWidth*2;
 
-    // Headline box
+    // Headline box (centered horizontally, ~220px from top)
     const boxColor = pick(neutralPalette);
     const textColor = "#222";
-    const boxRx = 0; // pointed corners
-    const boxWidth = 940, boxHeight = 160;
-    const boxX = 120;
-    const boxY = 110;
+    const boxRx = 10;
+    const boxWidth = 920, boxHeight = 146;
+    const boxX = (1200 - boxWidth) / 2;
+    const boxY = imgY + 54;
 
-    // CTA box
+    // CTA box (centered under headline)
     const ctaFont = 30;
     const estCtaWidth = Math.max(180, Math.min(400, ctaText.length * ctaFont * 0.58 + 38));
-    const ctaBoxH = 60, ctaBoxX = 120, ctaBoxY = boxY + boxHeight + 36;
+    const ctaBoxH = 58, ctaBoxX = (1200 - estCtaWidth) / 2, ctaBoxY = boxY + boxHeight + 24;
 
     function escapeForSVG(text) {
       return String(text)
@@ -505,25 +502,25 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // --- SVG ASSEMBLE ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <!-- Picture Frame -->
-  <rect x="0" y="0" width="1200" height="627" fill="${frameColor}" rx="30"/>
-  <!-- Image area (the real photo) -->
+  <!-- Picture Frame: full border -->
+  <rect x="0" y="0" width="1200" height="627" fill="${frameColor}" rx="38"/>
+  <!-- Image area inside the frame -->
   <clipPath id="imgClip">
-    <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="22"/>
+    <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="18"/>
   </clipPath>
   <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
   <!-- Headline Box -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" opacity="0.92" />
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" opacity="0.94" />
   ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxWidth/2}" y="${boxY + 50 + i*54}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
+    `<text x="${boxX + boxWidth/2}" y="${boxY + 54 + i*48}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
   <!-- CTA Button -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="0" fill="${boxColor}" opacity="0.93" />
-    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 40}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="12" fill="${boxColor}" opacity="0.97" />
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 38}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
   ` : ""}
   <!-- Footer -->
-  <rect x="0" y="570" width="1200" height="58" fill="#222" />
+  <rect x="0" y="570" width="1200" height="57" fill="#222" />
   <text x="72" y="608" font-family="${fontFamily}" font-size="30" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
 
@@ -533,13 +530,15 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(genDir, fileName);
 
-    // Compose with frame+svg only (SVG draws photo inline)
-    await sharp(Buffer.from(svg))
-      .jpeg({ quality: 97 })
-      .toFile(filePath);
+    const outBuffer = await sharp(baseImage)
+      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+      .jpeg({ quality: 98 })
+      .toBuffer();
+
+    fs.writeFileSync(filePath, outBuffer);
 
     const publicUrl = `/generated/${fileName}`;
-    console.log("Framed overlay image saved at:", filePath, "and served as:", publicUrl);
+    console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
 
     return res.json({ imageUrl: publicUrl, mainText: headlineWithPunct, secondaryText: ctaText });
   } catch (err) {
