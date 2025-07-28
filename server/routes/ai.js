@@ -407,67 +407,59 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
 
-    // TEXT COLOR: white or beige
-    const textColors = ["#fff", "#edead9"];
-    const textColor = textColors[Math.floor(Math.random() * textColors.length)];
-
     // --- Text fitting and wrapping ---
-   function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
-  let font = maxFont;
-  let lines = [];
-  while (font >= minFont) {
-    lines = [];
-    let words = text.split(" ");
-    let line = "";
-    for (let word of words) {
-      // Use SVG em approximation for more realistic fit
-      let testLine = line ? line + " " + word : word;
-      // Assume average char width is 0.57em for these fonts
-      let estWidth = testLine.length * font * 0.57;
-      if (estWidth > maxWidth && line) {
-        lines.push(line.trim());
-        line = word;
-      } else {
-        line = testLine;
+    function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
+      let font = maxFont;
+      let lines = [];
+      while (font >= minFont) {
+        lines = [];
+        let words = text.split(" ");
+        let line = "";
+        for (let word of words) {
+          let testLine = line ? line + " " + word : word;
+          let estWidth = testLine.length * font * 0.57;
+          if (estWidth > maxWidth && line) {
+            lines.push(line.trim());
+            line = word;
+          } else {
+            line = testLine;
+          }
+        }
+        if (line) lines.push(line.trim());
+        const allFit = lines.every(l => l.length * font * 0.57 <= maxWidth);
+        if (lines.length <= maxLines && allFit) break;
+        font -= 2;
       }
+      // Final strict wrap
+      lines = [];
+      let line = "";
+      text.split(" ").forEach(word => {
+        let testLine = line ? line + " " + word : word;
+        let estWidth = testLine.length * font * 0.57;
+        if (estWidth > maxWidth && line) {
+          lines.push(line.trim());
+          line = word;
+        } else {
+          line = testLine;
+        }
+      });
+      if (line) lines.push(line.trim());
+      return { font, lines };
     }
-    if (line) lines.push(line.trim());
-    // Enforce that NO line is wider than maxWidth
-    const allFit = lines.every(l => l.length * font * 0.57 <= maxWidth);
-    if (lines.length <= maxLines && allFit) break;
-    font -= 2;
-  }
-  // Final strict wrap (in case of edge case)
-  lines = [];
-  let line = "";
-  text.split(" ").forEach(word => {
-    let testLine = line ? line + " " + word : word;
-    let estWidth = testLine.length * font * 0.57;
-    if (estWidth > maxWidth && line) {
-      lines.push(line.trim());
-      line = word;
-    } else {
-      line = testLine;
-    }
-  });
-  if (line) lines.push(line.trim());
-  return { font, lines };
-}
-
 
     // Headline logic
-    const headlineMaxW = 900, headlineMaxLines = 2;
-    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 50, 24);
-    const headlineBoxH = 44 + headlineLines.length * headlineFont;
+    const headlineMaxW = 900;
+    const headlineMaxLines = 3; // Allow more wrapping lines
+    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 52, 26);
+    const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
     const headlineBoxW = headlineMaxW + 30;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
     const headlineBoxY = 80;
 
-    // CTA logic
-    const ctaText = (cta || "Learn more.").replace(/[.]+$/, "."); // basic fix
-    const ctaMaxW = 480, ctaMaxLines = 2;
-    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 36, 20);
-    const ctaBoxH = 28 + ctaLines.length * ctaFont;
+    const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
+    const ctaMaxW = 480, ctaMaxLines = 3;
+    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 34, 20);
+    const ctaBoxH = 22 + ctaLines.length * (ctaFont + 8);
     const ctaBoxW = ctaMaxW + 26;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
     const ctaBoxY = headlineBoxY + headlineBoxH + 40;
@@ -494,6 +486,27 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       })
       .blur(blurStrength)
       .toBuffer();
+
+    // Helper to get average brightness
+    async function getAverageBrightness(imgBuffer) {
+      const { data } = await sharp(imgBuffer)
+        .resize(1, 1)
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const [r, g, b] = data;
+      return 0.299*r + 0.587*g + 0.114*b;
+    }
+
+    // Check headline/cta region brightness
+    const headlineBrightness = await getAverageBrightness(headlineImg);
+    const ctaBrightness = await getAverageBrightness(ctaImg);
+
+    // Set text color: use black if light bg, white/beige if dark
+    const getTextColor = brightness =>
+      brightness > 170 ? "#222" : ["#fff", "#edead9"][Math.floor(Math.random()*2)];
+
+    const headlineTextColor = getTextColor(headlineBrightness);
+    const ctaTextColor = getTextColor(ctaBrightness);
 
     // SVG helper
     function escapeForSVG(text) {
@@ -549,7 +562,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${headlineFont}"
         font-weight="bold"
-        fill="${textColor}"
+        fill="${headlineTextColor}"
         dominant-baseline="middle"
         alignment-baseline="middle"
       >${escapeForSVG(line)}</text>`
@@ -567,7 +580,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${ctaFont}"
         font-weight="bold"
-        fill="${textColor}"
+        fill="${ctaTextColor}"
         dominant-baseline="middle"
         alignment-baseline="middle"
       >${escapeForSVG(line)}</text>`
@@ -606,6 +619,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
