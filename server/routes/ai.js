@@ -7,15 +7,12 @@ const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
 const TextToSVG = require('text-to-svg');
-const textToSvg = TextToSVG.loadSync(); // Uses system default (serif/Georgia)
+const dejavuFontPath = path.join(__dirname, '../fonts/DejaVuSerif-Bold.ttf');
+const textToSvg = TextToSVG.loadSync(dejavuFontPath);
 
-// Font pick for overlay text in SVG
-const fontPick = { name: 'Georgia', css: 'Georgia, serif' };
+const fontPick = { name: 'DejaVu Serif', css: 'DejaVu Serif, serif' };
 const fontFamily = fontPick.css;
-let svgFontFace = ''; // No need to embed anything, Georgia is universal
-
-// ... (your existing code below this stays the same!)
-
+let svgFontFace = ''; // No need to embed, just use font metrics
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
@@ -375,12 +372,6 @@ Industry: ${industry}
   }
 });
 
-// Load ONLY Bodoni Moda and Cinzel for SVG font-face embedding (used in the SVG, optional for now)
-const bodoniWoffPath = path.join(__dirname, '../fonts/bodoni-moda-latin-700-normal.woff');
-const cinzelWoffPath = path.join(__dirname, '../fonts/cinzel-latin-700-normal.woff');
-const bodoniFontBase64 = fs.existsSync(bodoniWoffPath) ? fs.readFileSync(bodoniWoffPath).toString('base64') : '';
-const cinzelFontBase64 = fs.existsSync(cinzelWoffPath) ? fs.readFileSync(cinzelWoffPath).toString('base64') : '';
-
 // ========== AI: GENERATE IMAGE WITH OVERLAY (PIXEL-PERFECT FIT WITH text-to-svg) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
@@ -404,8 +395,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgH = svgH - (borderW + borderGap) * 2;
 
     // Font (SVG font-family must match the text-to-svg font loaded)
-    const fontPick = { name: 'Bodoni Moda', base64: bodoniFontBase64, css: 'Bodoni Moda, serif' };
-    const fontFamily = fontPick.css;
+    // Already set above!
 
     // --- Pixel-Perfect Wrapping Function ---
     function fitFontLinesReal(text, maxWidth, maxLines, maxFont, minFont) {
@@ -521,40 +511,14 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&apos;");
     }
-    // SVG font-face
-    let svgFontFace = '';
-    if (fontPick.base64) {
-      svgFontFace = `
-        <style>
-          @font-face {
-            font-family: '${fontPick.name}';
-            src: url('data:font/woff2;base64,${fontPick.base64}') format('woff2');
-            font-weight: 700;
-            font-style: normal;
-          }
-        </style>
-      `;
-    }
 
     // --- Compose SVG ---
     const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <clipPath id="imgClip">
-      <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="16"/>
-    </clipPath>
-    <clipPath id="headlineClip">
-      <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22"/>
-    </clipPath>
-    <clipPath id="ctaClip">
-      <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19"/>
-    </clipPath>
-  </defs>
-  ${svgFontFace}
   <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" />
   <!-- Glassmorph headline -->
-  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
+  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" opacity="0.97"/>
   <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38"/>
   ${
     headlineDisplayLines.map((line, i) =>
@@ -572,7 +536,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ).join("\n")
   }
   <!-- Glassmorph CTA -->
-  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
+  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" opacity="0.97"/>
   <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19" fill="#ffffff38"/>
   ${
     ctaLines.map((line, i) =>
