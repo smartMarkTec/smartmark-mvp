@@ -7,6 +7,8 @@
     "dev": "nodemon server.js"
   },
   "dependencies": {
+    "@fontsource/bodoni-moda": "^5.2.6",
+    "@fontsource/cinzel": "^5.2.6",
     "axios": "^1.10.0",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
