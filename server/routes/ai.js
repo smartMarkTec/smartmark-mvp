@@ -225,22 +225,24 @@ router.post('/generate-campaign-assets', async (req, res) => {
 
   let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
 
-  const prompt = `
-You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script, image_overlay_text.
+const prompt = `
+You are a top-tier Facebook ad copywriter and creative director.
 
-Rules for "image_overlay_text":
-- Write a short, punchy, 7–10 word text for the image overlay.
-- Make it direct, bold, and readable on a photo.
-- Use ALL-CAPS. No punctuation.
+Output in minified JSON ONLY (no markdown, no explanation).
+Required fields:
+- "headline": Write a high-converting, direct call-to-action headline for the **image overlay**. Use 4–5 words, capitalize first letter of each word, include proper punctuation if appropriate (usually a period or exclamation mark).
+- "cta_box": Write a short, benefit-driven or informational subtitle for the small box below. Also 4–5 words, proper punctuation, capitalize first letter of each word. This can highlight urgency, a feature, or value.
 
 Example:
-{"headline":"30% Off for First-Time Customers!","body":"Hungry for pizza? Order now from Joe's Pizza and get 30% off your first order. Fresh, fast, and delicious — delivered to your door. Don't miss out!","image_prompt":"Close-up of a smiling chef holding a pizza box in a bright, modern kitchen, soft lighting, high energy, happy expression, NO text.","video_script":"[15s fast montage] Fresh dough tossed, oven flames, happy customers, ending with a call-to-action to order online now.","image_overlay_text":"ORDER NOW GET 30 PERCENT OFF FRESH FAST PIZZA"}
+{"headline":"Book Your Free Demo Today!","cta_box":"No Credit Card Required."}
 
+Context:
 ${customContext ? "Training context:\n" + customContext : ""}
 Survey answers:
 ${surveyStr}
 Website URL: ${url}
 `;
+
 
   try {
     const response = await openai.chat.completions.create({
