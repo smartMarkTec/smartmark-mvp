@@ -1,4 +1,3 @@
-// routes/ai.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -7,10 +6,16 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
-// --- Load text-to-svg for pixel-perfect text measurement ---
 const TextToSVG = require('text-to-svg');
-const bodoniTtfPath = path.join(__dirname, '../fonts/bodoni-moda-latin-700-normal.ttf');
-const textToSvg = TextToSVG.loadSync(bodoniTtfPath); // Always use the same font for overlay
+const textToSvg = TextToSVG.loadSync(); // Uses system default (serif/Georgia)
+
+// Font pick for overlay text in SVG
+const fontPick = { name: 'Georgia', css: 'Georgia, serif' };
+const fontFamily = fontPick.css;
+let svgFontFace = ''; // No need to embed anything, Georgia is universal
+
+// ... (your existing code below this stays the same!)
+
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
