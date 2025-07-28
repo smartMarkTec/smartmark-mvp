@@ -397,18 +397,18 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
 
-    // Strong, visible, but clean overlays (blue, teal, orange, red, maroon, charcoal)
     const overlayColorPalette = [
-      "#3474E6CC", // rich blue
-      "#185e82CC", // teal-blue
-      "#31B17BCC", // teal-green
-      "#F47B08CC", // orange
-      "#E63946CC", // red
-      "#B94747CC", // maroon
-      "#4B3568CC", // deep purple
-      "#111827CC", // dark navy/charcoal
-      "#00000055"  // subtle black
-    ];
+  "#3474E688", // rich blue
+  "#185e8288", // teal-blue
+  "#31B17B88", // teal-green
+  "#F47B0888", // orange
+  "#E6394688", // red
+  "#B9474788", // maroon
+  "#4B356888", // deep purple
+  "#11182788", // dark navy/charcoal
+  "#00000033"  // very subtle black (20% opacity)
+];
+
 
     function pickFrom(arr) {
       return arr[Math.floor(Math.random() * arr.length)];
