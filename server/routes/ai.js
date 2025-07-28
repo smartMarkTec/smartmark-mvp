@@ -377,16 +377,16 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return res.status(400).json({ error: "imageUrl required" });
     }
 
-    // === 1. Generate overlay text with AI (4-5 words, punctuation, proper capitalization) ===
-    let headline = "Get Results With SmartMark!";
-    let ctaText = "Free Consultation Included.";
-    try {
-      const prompt = `
+ // === 1. Generate overlay text with AI (4-5 words, punctuation, proper capitalization) ===
+let headline = "GET RESULTS WITH SMARTMARK!";
+let ctaText = "FREE CONSULTATION INCLUDED.";
+try {
+  const prompt = `
 You are a top-tier Facebook ad copywriter and creative director.
 
 Output in minified JSON ONLY (no markdown, no explanation).
 Required fields:
-- "headline": Write a high-converting, direct call-to-action headline for the **image overlay**. Use 4–5 words, capitalize first letter of each word, include proper punctuation if appropriate (usually a period or exclamation mark).
+- "headline": Write a high-converting, direct call-to-action headline for the image overlay. Use 4–5 words, capitalize first letter of each word, include proper punctuation if appropriate (usually a period or exclamation mark).
 - "cta_box": Write a short, benefit-driven or informational subtitle for the small box below. Also 4–5 words, proper punctuation, capitalize first letter of each word. This can highlight urgency, a feature, or value.
 
 Example:
@@ -396,22 +396,26 @@ ${customContext ? "Training context:\n" + customContext : ""}
 Survey answers:
 ${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n')}
 Website URL: ${url}
-      `;
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 120
-      });
-      const raw = response.choices?.[0]?.message?.content?.trim();
-      const parsed = JSON.parse(raw);
-      if (parsed.headline) headline = parsed.headline;
-      if (parsed.cta_box) ctaText = parsed.cta_box;
-    } catch (e) {
-      console.warn("OpenAI overlay fallback:", e.message);
-    }
+  `;
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 120
+  });
+  const raw = response.choices?.[0]?.message?.content?.trim();
+  const parsed = JSON.parse(raw);
+  if (parsed.headline) headline = parsed.headline;
+  if (parsed.cta_box) ctaText = parsed.cta_box;
+} catch (e) {
+  console.warn("OpenAI overlay fallback:", e.message);
+}
+// --- ALL CAPS for overlay text ---
+headline = String(headline).toUpperCase();
+ctaText = String(ctaText).toUpperCase();
+
 
     // Download and fit main image
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
