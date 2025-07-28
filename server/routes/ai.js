@@ -400,10 +400,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const overlayColorPalette = [
   "#3474E688", // rich blue
   "#185e8288", // teal-blue
-  "#31B17B88", // teal-green
-  "#F47B0888", // orange
-  "#E6394688", // red
-  "#B9474788", // maroon
   "#4B356888", // deep purple
   "#11182788", // dark navy/charcoal
   "#00000033"  // very subtle black (20% opacity)
