@@ -377,56 +377,63 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return res.status(400).json({ error: "imageUrl required" });
     }
 
-// === 1. Generate overlay text with AI (4-5 words, relevant, proper punctuation, no fluff) ===
-let headline = "";
-let ctaText = "";
-try {
-  // Build GPT input from user form values (answers)
-  const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-  // Use URL as additional context, but not as main content
-  const contextForAi = [
-    customContext ? "Training context:\n" + customContext : "",
-    mainInfo,
-    url ? `Website: ${url}` : ""
-  ].filter(Boolean).join('\n');
+    // === 1. Generate overlay text with AI (always relevant to form, not generic, never blank) ===
+    let headline = "";
+    let ctaText = "";
+    try {
+      // Format user answers into context
+      const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      const contextForAi = [
+        customContext ? "Training context:\n" + customContext : "",
+        mainInfo,
+        url ? `Website: ${url}` : ""
+      ].filter(Boolean).join('\n');
 
-  // ---- STRICT FOCUSED PROMPT ----
-  const betterPrompt = `
-You are an expert at writing ultra-short, memorable, and friendly Facebook ad overlays for businesses. 
-1. Use ONLY the specific business details provided by the user below (name, description, industry, product, goal, etc). If they mention marketing, leads, clients, bookings, use that! 
-2. DO NOT use any generic, vague, or unrelated phrases ("discover something new", "explore our finds", etc.).
-3. Never mention real estate, homes, or any off-topic unless that's what the user wrote.
-4. Focus on what the business actually does, offers, or wants the user to do (ex: "Book A Free Marketing Call!", "Grow Your Client List Today.", "Get More Bookings Instantly!", etc).
-5. Write **headline**: 4–5 words, punchy, relevant, friendly, not hard-sell. Use proper punctuation (period or exclamation mark). No hashtags.
-6. Write **cta_box**: 4–5 words, more specific, like a benefit, time-limited offer, or what happens next ("No Credit Card Needed.", "Results In 7 Days.", "100% Satisfaction Guarantee.", "See Real Results.").
-7. NEVER say "discover something new", "explore our latest finds", "homes", "house", or anything generic unless user literally wrote that.
-8. Output valid minified JSON, nothing else.
+      const betterPrompt = `
+You are an expert Facebook ad copywriter, specializing in ultra-short, punchy, relevant overlays for business ads. 
+1. Use ONLY the business details provided below (name, description, industry, offer, goal, etc). 
+2. NEVER use generic, vague, or off-topic phrases (like "discover something new", "explore our finds", "homes" unless user wrote it).
+3. Summarize the main benefit, call to action, or value proposition in a modern, light, but confident tone (not hard sell, not robotic).
+4. For "headline": 4–5 words, friendly, clear, includes punctuation (period or exclamation mark).
+5. For "cta_box": 4–5 words, concise next step, feature, or benefit.
+6. Output minified JSON only, no extra text.
 
-User's business info:
+User-provided business info:
 ${contextForAi}
-  `;
+      `;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
-      { role: "user", content: betterPrompt }
-    ],
-    max_tokens: 120
-  });
-  const raw = response.choices?.[0]?.message?.content?.trim();
-  let parsed = {};
-  try {
-    parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-  } catch (e) { parsed = {}; }
-  if (parsed.headline) headline = parsed.headline;
-  if (parsed.cta_box) ctaText = parsed.cta_box;
-} catch (e) {
-  console.warn("OpenAI overlay fallback:", e.message);
-}
-headline = String(headline).toUpperCase();
-ctaText = String(ctaText).toUpperCase();
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
+          { role: "user", content: betterPrompt }
+        ],
+        max_tokens: 120
+      });
+      const raw = response.choices?.[0]?.message?.content?.trim();
+      let parsed = {};
+      try {
+        parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+      } catch (e) { 
+        parsed = {}; 
+        console.warn("Could not parse AI JSON, raw:", raw);
+      }
+      // Always fallback if blank or missing fields:
+      headline = parsed.headline && parsed.headline.trim() 
+        ? parsed.headline 
+        : "BOOK YOUR CALL TODAY!";
+      ctaText = parsed.cta_box && parsed.cta_box.trim() 
+        ? parsed.cta_box 
+        : "SEE REAL RESULTS NOW.";
+    } catch (e) {
+      console.warn("OpenAI overlay fallback:", e.message);
+      headline = "BOOK YOUR CALL TODAY!";
+      ctaText = "SEE REAL RESULTS NOW.";
+    }
+    headline = String(headline).toUpperCase();
+    ctaText = String(ctaText).toUpperCase();
 
+    // === ...the rest of your image processing logic follows as before... ===
 
 
 
