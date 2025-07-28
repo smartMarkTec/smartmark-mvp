@@ -1,4 +1,4 @@
-// routes/ai.js
+// server/routes/ai.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -7,10 +7,9 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
-// --- Load text-to-svg for pixel-perfect text measurement ---
+// --- Use system font for overlay (no font file needed) ---
 const TextToSVG = require('text-to-svg');
-const bodoniTtfPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.ttf');
-const textToSvg = TextToSVG.loadSync(bodoniTtfPath); // Always use the same font for overlay
+const textToSvg = TextToSVG.loadSync(); // Uses default system font (Arial/sans-serif on most OS)
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
@@ -393,8 +392,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgH = svgH - (borderW + borderGap) * 2;
 
     // Font/box params
-    const fontPick = { name: 'Arial', css: 'Arial, sans-serif' };
-    const fontFamily = fontPick.css;
+    const fontFamily = 'Arial, Helvetica, sans-serif';
 
     // Headline fixed params
     const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
@@ -479,7 +477,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     x="${svgW/2}"
     y="${HEADLINE_BOX_Y + HEADLINE_BOX_H/2 + HEADLINE_FONT_SIZE/3}"
     text-anchor="middle"
-    font-family="Arial, sans-serif"
+    font-family="${fontFamily}"
     font-size="${HEADLINE_FONT_SIZE}"
     font-weight="bold"
     fill="${headlineTextColor}"
@@ -494,7 +492,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     x="${svgW/2}"
     y="${CTA_BOX_Y + CTA_BOX_H/2 + CTA_FONT_SIZE/3}"
     text-anchor="middle"
-    font-family="Arial, sans-serif"
+    font-family="${fontFamily}"
     font-size="${CTA_FONT_SIZE}"
     font-weight="bold"
     fill="${ctaTextColor}"
@@ -535,3 +533,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
+module.exports = router;
