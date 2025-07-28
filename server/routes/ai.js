@@ -378,8 +378,8 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
 // === 1. Generate overlay text with AI (4-5 words, relevant, proper punctuation, no fluff) ===
-let headline = "GET RESULTS WITH SMARTMARK!";
-let ctaText = "FREE CONSULTATION INCLUDED.";
+let headline = "";
+let ctaText = "";
 try {
   // Build GPT input from user form values (answers)
   const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
