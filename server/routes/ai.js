@@ -225,24 +225,22 @@ router.post('/generate-campaign-assets', async (req, res) => {
 
   let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
 
-const prompt = `
-You are a top-tier Facebook ad copywriter and creative director.
+  const prompt = `
+You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script, image_overlay_text.
 
-Output in minified JSON ONLY (no markdown, no explanation).
-Required fields:
-- "headline": Write a high-converting, direct call-to-action headline for the **image overlay**. Use 4–5 words, capitalize first letter of each word, include proper punctuation if appropriate (usually a period or exclamation mark).
-- "cta_box": Write a short, benefit-driven or informational subtitle for the small box below. Also 4–5 words, proper punctuation, capitalize first letter of each word. This can highlight urgency, a feature, or value.
+Rules for "image_overlay_text":
+- Write a short, punchy, 7–10 word text for the image overlay.
+- Make it direct, bold, and readable on a photo.
+- Use ALL-CAPS. No punctuation.
 
 Example:
-{"headline":"Book Your Free Demo Today!","cta_box":"No Credit Card Required."}
+{"headline":"30% Off for First-Time Customers!","body":"Hungry for pizza? Order now from Joe's Pizza and get 30% off your first order. Fresh, fast, and delicious — delivered to your door. Don't miss out!","image_prompt":"Close-up of a smiling chef holding a pizza box in a bright, modern kitchen, soft lighting, high energy, happy expression, NO text.","video_script":"[15s fast montage] Fresh dough tossed, oven flames, happy customers, ending with a call-to-action to order online now.","image_overlay_text":"ORDER NOW GET 30 PERCENT OFF FRESH FAST PIZZA"}
 
-Context:
 ${customContext ? "Training context:\n" + customContext : ""}
 Survey answers:
 ${surveyStr}
 Website URL: ${url}
 `;
-
 
   try {
     const response = await openai.chat.completions.create({
@@ -371,12 +369,48 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (FIXED FONT/BOX, ARIAL, GLASSMORPH) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (AUTO AI TEXT, 4-5 WORDS, PUNCTUATION) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
-    const { imageUrl, headline, cta } = req.body;
-    if (!imageUrl || !headline) {
-      return res.status(400).json({ error: "imageUrl and headline are required." });
+    const { imageUrl, answers = {}, url = "" } = req.body;
+    if (!imageUrl) {
+      return res.status(400).json({ error: "imageUrl required" });
+    }
+
+    // === 1. Generate overlay text with AI (4-5 words, punctuation, proper capitalization) ===
+    let headline = "Get Results With SmartMark!";
+    let ctaText = "Free Consultation Included.";
+    try {
+      const prompt = `
+You are a top-tier Facebook ad copywriter and creative director.
+
+Output in minified JSON ONLY (no markdown, no explanation).
+Required fields:
+- "headline": Write a high-converting, direct call-to-action headline for the **image overlay**. Use 4–5 words, capitalize first letter of each word, include proper punctuation if appropriate (usually a period or exclamation mark).
+- "cta_box": Write a short, benefit-driven or informational subtitle for the small box below. Also 4–5 words, proper punctuation, capitalize first letter of each word. This can highlight urgency, a feature, or value.
+
+Example:
+{"headline":"Book Your Free Demo Today!","cta_box":"No Credit Card Required."}
+
+${customContext ? "Training context:\n" + customContext : ""}
+Survey answers:
+${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n')}
+Website URL: ${url}
+      `;
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 120
+      });
+      const raw = response.choices?.[0]?.message?.content?.trim();
+      const parsed = JSON.parse(raw);
+      if (parsed.headline) headline = parsed.headline;
+      if (parsed.cta_box) ctaText = parsed.cta_box;
+    } catch (e) {
+      console.warn("OpenAI overlay fallback:", e.message);
     }
 
     // Download and fit main image
@@ -401,27 +435,12 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
     const HEADLINE_BOX_Y = 62;
     const HEADLINE_FONT_SIZE = 45;
-    const HEADLINE_MAX_WORDS = 5;
 
     // CTA params
     const CTA_BOX_W = 540, CTA_BOX_H = 70;
     const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
     const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
     const CTA_FONT_SIZE = 26;
-    const CTA_MAX_WORDS = 5;
-
-    // === Format headline & CTA ===
-    function trimToWords(str, max) {
-      let arr = String(str).split(/\s+/).filter(Boolean);
-      if (arr.length > max) {
-        return arr.slice(0, max).join(' ') + '...';
-      }
-      return arr.join(' ');
-    }
-
-    const headlineText = trimToWords(headline, HEADLINE_MAX_WORDS).toUpperCase();
-const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS).toUpperCase();
-
 
     // Glassmorph blur for headline box
     const blurStrength = 15;
@@ -446,14 +465,11 @@ const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS).toUpperCase();
       .blur(blurStrength)
       .toBuffer();
 
-    // Helper for brightness
-    async function getAverageBrightness(imgBuffer) {
-      const { data } = await sharp(imgBuffer).resize(1, 1).raw().toBuffer({ resolveWithObject: true });
-      const [r, g, b] = data;
-      return 0.299*r + 0.587*g + 0.114*b;
-    }
-   const headlineTextColor = "#181b20";
-const ctaTextColor = "#181b20";
+    // Helper for brightness (not used, keeping for ref)
+    // async function getAverageBrightness(imgBuffer) { ... }
+
+    const headlineTextColor = "#181b20";
+    const ctaTextColor = "#181b20";
 
     // SVG helper
     function escapeForSVG(text) {
@@ -465,19 +481,16 @@ const ctaTextColor = "#181b20";
         .replace(/'/g, "&apos;");
     }
 
-   // Pick two distinct colors for borders
-const borderColors = ['#edead9', '#191919', '#193356']; // beige, black, navy
-let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-// Ensure colors are not the same
-while (innerBorderColor === outerBorderColor) {
-  innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-}
+    // Pick two distinct colors for borders
+    const borderColors = ['#edead9', '#191919', '#193356']; // beige, black, navy
+    let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+    let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+    while (innerBorderColor === outerBorderColor) {
+      innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+    }
 
-
-
-// --- Compose SVG ---
-const svg = `
+    // --- Compose SVG ---
+    const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <!-- Outer border -->
   <rect x="7" y="7" width="${svgW-14}" height="${svgH-14}" fill="none" stroke="${outerBorderColor}" stroke-width="10" rx="34"/>
@@ -499,7 +512,7 @@ const svg = `
     alignment-baseline="middle"
     dominant-baseline="middle"
     letter-spacing="1"
-  >${escapeForSVG(headlineText)}</text>
+  >${escapeForSVG(headline)}</text>
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" opacity="0.97"/>
   <rect x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" rx="19" fill="#ffffff38"/>
@@ -542,7 +555,7 @@ const svg = `
     const publicUrl = `/generated/${fileName}`;
     console.log("Glass overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl });
+    return res.json({ imageUrl: publicUrl, overlay: { headline, ctaText } });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
