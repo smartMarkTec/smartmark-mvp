@@ -378,32 +378,27 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
 
-    // Download image and fit
+    // Download and fit main image
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const mainW = 1100, mainH = 550;
     let baseImage = await sharp(imgRes.data)
-      .resize(1100, 550, { fit: 'cover' })
+      .resize(mainW, mainH, { fit: 'cover' })
       .toBuffer();
 
-    // -------- BORDER DESIGN --------
-    const borderW = 32;
-    const borderGap = 12;
+    // Border & layout params
     const svgW = 1200, svgH = 627;
+    const borderW = 32, borderGap = 12;
     const imgX = borderW + borderGap, imgY = borderW + borderGap;
     const imgW = svgW - (borderW + borderGap) * 2;
     const imgH = svgH - (borderW + borderGap) * 2;
 
-    // --------- BOX & FONT ---------
-    // GLASS EFFECT: low fill, strong blur, faint white border
-    const boxBg = "#ffffff30"; // transparent white
-    const boxBorder = "#ffffffbb";
-    const textColor = "#222";
+    // Font + wrap logic
     const fontFamilies = [
       "Helvetica,Arial,sans-serif",
       "Futura,Arial,sans-serif"
     ];
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
 
-    // Auto font sizing for headline to fill box (but never overflow)
     function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
       let words = text.split(" ");
@@ -426,7 +421,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { font, lines };
     }
 
-    // HEADLINE box sizing/logic
+    // Headline logic
     const headlineMaxW = 900, headlineMaxLines = 2;
     const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 64, 32);
     const headlineBoxH = 55 + headlineLines.length * headlineFont;
@@ -434,7 +429,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
     const headlineBoxY = 80;
 
-    // CTA sizing/logic
+    // CTA logic
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, "."); // basic fix
     const ctaMaxW = 480, ctaMaxLines = 2;
     const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 38, 22);
@@ -443,7 +438,30 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
     const ctaBoxY = headlineBoxY + headlineBoxH + 40;
 
-    // -------- SVG --------
+    // Extract/blur image regions for glass boxes
+    const blurStrength = 28; // Increase for more glass
+    // Headline
+    const headlineImg = await sharp(baseImage)
+      .extract({
+        left: Math.max(0, Math.round(headlineBoxX - imgX)),
+        top: Math.max(0, Math.round(headlineBoxY - imgY)),
+        width: Math.round(headlineBoxW),
+        height: Math.round(headlineBoxH)
+      })
+      .blur(blurStrength)
+      .toBuffer();
+    // CTA
+    const ctaImg = await sharp(baseImage)
+      .extract({
+        left: Math.max(0, Math.round(ctaBoxX - imgX)),
+        top: Math.max(0, Math.round(ctaBoxY - imgY)),
+        width: Math.round(ctaBoxW),
+        height: Math.round(ctaBoxH)
+      })
+      .blur(blurStrength)
+      .toBuffer();
+
+    // SVG helper
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -453,57 +471,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // SVG for border (kept simple)
-    const borderSvg = `
-      <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
-    `;
-
-    // SVG image insert
-    const imgSvg = `<image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />`;
-
-    // Glassmorphism SVG filter
-    const glassFilter = `
-      <filter id="glass-blur" x="-20%" y="-20%" width="140%" height="140%">
-        <feGaussianBlur in="SourceGraphic" stdDeviation="18" result="blur"/>
-        <feColorMatrix in="blur" type="matrix" values="
-            1 0 0 0 0
-            0 1 0 0 0
-            0 0 1 0 0
-            0 0 0 17 -7" result="colorBlur"/>
-        <feBlend in="SourceGraphic" in2="colorBlur" mode="normal"/>
-      </filter>
-    `;
-
-    // Headline glass box & text
-    const headlineBoxSvg = `
-      <g>
-        <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="24"
-          fill="${boxBg}" stroke="${boxBorder}" stroke-width="2.7" filter="url(#glass-blur)" />
-        <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="24"
-          fill="none" stroke="${boxBorder}" stroke-width="2.7" />
-        ${headlineLines.map((line, i) =>
-          `<text x="${svgW/2}" y="${headlineBoxY + 42 + i*headlineFont}" text-anchor="middle"
-            font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold"
-            fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
-        ).join("\n")}
-      </g>
-    `;
-
-    // CTA glass box & text
-    const ctaBoxSvg = `
-      <g>
-        <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19"
-          fill="${boxBg}" stroke="${boxBorder}" stroke-width="2.2" filter="url(#glass-blur)" />
-        <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19"
-          fill="none" stroke="${boxBorder}" stroke-width="2.2" />
-        ${ctaLines.map((line, i) =>
-          `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle"
-            font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold"
-            fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
-        ).join("\n")}
-      </g>
-    `;
-
     // Compose SVG
     const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
@@ -511,12 +478,31 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     <clipPath id="imgClip">
       <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="16"/>
     </clipPath>
-    ${glassFilter}
+    <clipPath id="headlineClip">
+      <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22"/>
+    </clipPath>
+    <clipPath id="ctaClip">
+      <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19"/>
+    </clipPath>
   </defs>
-  ${borderSvg}
-  ${imgSvg}
-  ${headlineBoxSvg}
-  ${ctaBoxSvg}
+  <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
+  <!-- Glassmorph headline -->
+  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
+  <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38" stroke="#ffffffb9" stroke-width="2.7"/>
+  ${headlineLines.map((line, i) =>
+    `<text x="${svgW/2}" y="${headlineBoxY + 42 + i*headlineFont}" text-anchor="middle"
+      font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold"
+      fill="#181818" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+  ).join("\n")}
+  <!-- Glassmorph CTA -->
+  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
+  <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19" fill="#ffffff38" stroke="#ffffffb9" stroke-width="2.2"/>
+  ${ctaLines.map((line, i) =>
+    `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle"
+      font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold"
+      fill="#181818" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+  ).join("\n")}
 </svg>`;
 
     // --- Compose SVG on Image ---
@@ -550,6 +536,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
