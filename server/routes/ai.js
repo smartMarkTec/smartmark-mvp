@@ -365,7 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (FRAME, FONT, HEADLINE/CTA LOGIC, RANDOM STYLES) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (Perfect frame, smaller boxes, fill all edges) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -388,39 +388,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // Frame Palette (as requested)
+    // Frame Palette
     const framePalette = [
-      "#232a3b", // dark blue
-      "#181b20", // dark grey
-      "#555a64", // grey
-      "#131313", // black
-      "#dedad1"  // beige
+      "#1D3557", "#18181B", "#57606f", "#444444", "#E6D3A3", "#212121", "#3d3d3d", "#1a1a1a"
     ];
     function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
     const frameColor = pick(framePalette);
 
-    // Font families
+    // Font family pool
     const fontFamilies = [
       "Helvetica,Arial,sans-serif",
-      "Futura,Arial,sans-serif",
-      "Arial,Helvetica,sans-serif"
+      "Futura,Arial,sans-serif"
     ];
     const fontFamily = pick(fontFamilies);
 
-    // Headline/CTA box style randomizer
-    const boxModes = [
-      { // white box, black text
-        boxColor: "#fff",
-        textColor: "#181818"
-      },
-      { // black box, white text
-        boxColor: "#111",
-        textColor: "#fff"
-      }
-    ];
-    const mode = pick(boxModes);
-
-    // --- HEADLINE LOGIC: punctuation & case
+    // --- HEADLINE LOGIC: Sentence + punctuation
     function completeSentence(str) {
       if (!str) return "";
       str = str.trim();
@@ -433,26 +415,36 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
     const headlineWithPunct = completeSentence(headline);
 
-    // --- HEADLINE WRAP ---
-    function smartWrap(text, maxCharsPerLine = 27) {
-      if (!text) return [];
-      let words = text.trim().split(' ');
-      let lines = [], line = "";
-      for (let word of words) {
-        if ((line + " " + word).trim().length > maxCharsPerLine && line.length) {
-          lines.push(line.trim());
-          line = word;
-        } else {
-          line += " " + word;
+    // --- HEADLINE WRAP & Font Size ---
+    function fitHeadline(text) {
+      const maxWidth = 880, maxFont = 44, minFont = 30;
+      let fontSize = maxFont;
+      let words = text.split(" ");
+      let lines = [];
+      if (words.length <= 5) {
+        lines = [text];
+      } else {
+        // Try to split lines
+        let half = Math.ceil(words.length / 2);
+        lines = [words.slice(0, half).join(" "), words.slice(half).join(" ")];
+        if (lines[1].length > 42) {
+          // If second line is too long, make three lines
+          let third = Math.ceil(words.length / 3);
+          lines = [
+            words.slice(0, third).join(" "),
+            words.slice(third, third*2).join(" "),
+            words.slice(third*2).join(" ")
+          ];
         }
       }
-      if (line) lines.push(line.trim());
-      return lines;
+      // If any line > maxWidth chars, reduce font
+      if (lines.some(l => l.length > 32)) fontSize = 36;
+      if (lines.some(l => l.length > 40)) fontSize = minFont;
+      return { lines, fontSize };
     }
-    const headlineFont = 50;
-    const headlineLines = smartWrap(headlineWithPunct, 27);
+    const { lines: headlineLines, fontSize: headlineFont } = fitHeadline(headlineWithPunct);
 
-    // --- CTA LOGIC: 4-5 words, always fits, sentence case
+    // --- CTA LOGIC ---
     function getCtaText(text) {
       let str = (text || "").trim();
       str = str.replace(/[.!?,]+$/, "");
@@ -466,37 +458,35 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     let ctaText = getCtaText(cta);
     let showCta = !!ctaText;
 
-    // -- CTA wrap logic (max 20 chars/line)
-    function ctaWrap(text, maxCharsPerLine = 20) {
-      if (!text) return [];
-      let words = text.trim().split(' ');
-      let lines = [], line = "";
-      for (let word of words) {
-        if ((line + " " + word).trim().length > maxCharsPerLine && line.length) {
-          lines.push(line.trim());
-          line = word;
-        } else {
-          line += " " + word;
-        }
-      }
-      if (line) lines.push(line.trim());
-      return lines;
+    // --- CTA Wrap and Font ---
+    function fitCta(text) {
+      const maxWidth = 320, maxFont = 25, minFont = 17;
+      let fontSize = maxFont;
+      let words = text.split(" ");
+      let lines = [];
+      if (words.length <= 4) lines = [text];
+      else lines = [words.slice(0, 3).join(" "), words.slice(3).join(" ")];
+      if (lines.some(l => l.length > 22)) fontSize = 19;
+      if (lines.some(l => l.length > 28)) fontSize = minFont;
+      return { lines, fontSize };
     }
-    const ctaFont = 29;
-    const ctaLines = ctaWrap(ctaText, 20);
+    const { lines: ctaLines, fontSize: ctaFont } = fitCta(ctaText);
 
-    // --- Layout values
-    const frameWidth = 48;
+    // --- Box Sizes ---
+    const frameWidth = 36;
     const imgX = frameWidth, imgY = frameWidth, imgW = 1200 - frameWidth*2, imgH = 627 - frameWidth*2;
 
-    // Headline box (randomize vertical position a little)
-    const boxWidth = 920, boxHeight = 120 + 48 * (headlineLines.length-1);
-    const boxX = (1200 - boxWidth) / 2;
-    const boxY = imgY + 54 + Math.floor(Math.random() * 10);
+    // Smaller headline box
+    const boxWidth = 880, boxHeight = headlineLines.length * (headlineFont+11) + 32;
+    const boxX = 160, boxY = 92;
 
-    // CTA box (centered under headline)
-    const ctaBoxWidth = 420, ctaBoxH = 38 * ctaLines.length + 24;
-    const ctaBoxX = (1200 - ctaBoxWidth) / 2, ctaBoxY = boxY + boxHeight + 20;
+    // Smaller CTA box
+    const ctaBoxWidth = 340, ctaBoxH = ctaLines.length * (ctaFont+8) + 16;
+    const ctaBoxX = 430, ctaBoxY = boxY + boxHeight + 30;
+
+    // Black or white box, random per regen
+    const boxColor = Math.random() > 0.52 ? "#fff" : "#111";
+    const textColor = boxColor === "#fff" ? "#111" : "#fff";
 
     function escapeForSVG(text) {
       return String(text)
@@ -507,37 +497,30 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
- // --- SVG ASSEMBLE (PERFECT FRAME FILL, no gaps) ---
-const svg = `
+    // --- SVG ASSEMBLE ---
+    const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <!-- Picture Frame: full border, pointy corners, covers all edges -->
+  <!-- Solid frame: all edges and bottom always same color, sharp corners -->
   <rect x="0" y="0" width="1200" height="627" fill="${frameColor}" rx="0"/>
-  <!-- Image area inside the frame, clipped so no edge bleed -->
   <clipPath id="imgClip">
     <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="0"/>
   </clipPath>
-  <g>
-    <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
-    <!-- Optional: overlay a solid border rectangle to force any edge color -->
-    <rect x="0" y="0" width="1200" height="627" fill="none" stroke="${frameColor}" stroke-width="${frameWidth}" rx="0"/>
-  </g>
-  <!-- Headline Box (random: solid white or black, pointy) -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="0" fill="${mode.boxColor}" opacity="1.0" />
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
+  <!-- Headline Box -->
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="0" fill="${boxColor}" opacity="1"/>
   ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxWidth/2}" y="${boxY + 60 + i*48}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${mode.textColor}">${escapeForSVG(line)}</text>`
+    `<text x="${boxX + boxWidth/2}" y="${boxY + 48 + i*(headlineFont+8)}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
-  <!-- CTA Button (random: solid white or black, pointy, wraps text) -->
+  <!-- CTA Button -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxWidth}" height="${ctaBoxH}" rx="0" fill="${mode.boxColor}" opacity="1.0" />
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxWidth}" height="${ctaBoxH}" rx="0" fill="${boxColor}" opacity="1" />
     ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxWidth/2}" y="${ctaBoxY + 35 + i*38}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${mode.textColor}">${escapeForSVG(line)}</text>`
+      `<text x="${ctaBoxX + ctaBoxWidth/2}" y="${ctaBoxY + 34 + i*(ctaFont+6)}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
     ).join("\n")}
   ` : ""}
-  <!-- Footer -->
-  <rect x="0" y="570" width="1200" height="57" fill="#222" />
-  <text x="72" y="608" font-family="${fontFamily}" font-size="30" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
+  <!-- Footer (optional) -->
+  <rect x="0" y="570" width="1200" height="57" fill="${frameColor}" />
 </svg>`;
-
 
     // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
