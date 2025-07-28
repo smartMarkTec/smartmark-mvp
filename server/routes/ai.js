@@ -366,6 +366,7 @@ Industry: ${industry}
 });
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (serious = visible colored overlay, always neutral boxes) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (serious = visible colored overlay, always neutral boxes) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -396,14 +397,17 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
 
-    // Strong, visible, but clean overlays (20% opacity = 33)
+    // Strong, visible, but clean overlays (blue, teal, orange, red, maroon, charcoal)
     const overlayColorPalette = [
-      // Blues & Teals
-      "#225bb333", "#185e8233", "#39657b33", "#4471a833", "#2e6f6e33", "#31918633",
-      // Action: Orange/Red/Maroon
-      "#d3540033", "#ff704333", "#b9474733", "#9c2c2c33", "#b5540033", "#b4422233",
-      // Neutral/Charcoal fallback
-      "#2c3e5033", "#353c4133", "#bab6ab33"
+      "#3474E6CC", // rich blue
+      "#185e82CC", // teal-blue
+      "#31B17BCC", // teal-green
+      "#F47B08CC", // orange
+      "#E63946CC", // red
+      "#B94747CC", // maroon
+      "#4B3568CC", // deep purple
+      "#111827CC", // dark navy/charcoal
+      "#00000055"  // subtle black
     ];
 
     function pickFrom(arr) {
