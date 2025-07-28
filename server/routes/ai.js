@@ -402,7 +402,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
 
-    // --- FORCE WRAP AND FIT ---
+    // --- Smart Wrapping Function ---
     function fitFontLines(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
       let lines = [];
@@ -425,7 +425,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         if (lines.length <= maxLines && allFit) break;
         font -= 2;
       }
-      // Make sure no line exceeds maxWidth (force-wrap again if needed)
+      // Force break any final long lines
       let forcedLines = [];
       for (let l of lines) {
         let curr = "";
@@ -449,22 +449,22 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // ---- HEADLINE ----
-    const headlineMaxW = 1040;    // Wide box, but not full width, forces wrap!
-    const headlineMaxLines = 5;   // Up to 5 lines max for super-long text
-    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 42, 18);
+    const headlineMaxW = 1040;    // WIDER for wrapping
+    const headlineMaxLines = 5;   // Up to 5 lines max
+    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 44, 16);
 
     // Box size: height grows with # lines
-    const headlineBoxH = 36 + headlineLines.length * (headlineFont + 14);
+    const headlineBoxH = 38 + headlineLines.length * (headlineFont + 12);
     const headlineBoxW = headlineMaxW + 40;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-    const headlineBoxY = 65;
+    const headlineBoxY = 62;
 
     // ---- CTA ----
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
     const ctaMaxW = 540, ctaMaxLines = 3;
-    const { font: ctaFont, lines: ctaLines } = fitFontLines(ctaText, ctaMaxW, ctaMaxLines, 30, 14);
-    const ctaBoxH = 24 + ctaLines.length * (ctaFont + 10);
-    const ctaBoxW = ctaMaxW + 26;
+    const { font: ctaFont, lines: ctaLines } = fitFontLines(ctaText, ctaMaxW, ctaMaxLines, 28, 14);
+    const ctaBoxH = 22 + ctaLines.length * (ctaFont + 10);
+    const ctaBoxW = ctaMaxW + 28;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
     const ctaBoxY = headlineBoxY + headlineBoxH + 34;
 
@@ -549,7 +549,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     headlineLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${headlineBoxY + 38 + i * (headlineFont + 14)}"
+        y="${headlineBoxY + 36 + i * (headlineFont + 12)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${headlineFont}"
@@ -567,7 +567,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ctaLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${ctaBoxY + 18 + i * (ctaFont + 12)}"
+        y="${ctaBoxY + 16 + i * (ctaFont + 10)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${ctaFont}"
@@ -611,8 +611,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
-module.exports = router;
-
 
 module.exports = router;
