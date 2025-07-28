@@ -365,10 +365,10 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (rounded headline box, box fill, border decorations) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (beige box, smaller radius, grammar/correct promo, all-sides border deco) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
-    const {
+    let {
       imageUrl,
       headline,
       subheadline = "",
@@ -376,24 +376,66 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       footer = "",
       color = "#225bb3",
       footerColor = "#FFD700",
-      industry = ""
+      industry = "",
+      promo = ""
     } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
 
-    // Download and fit image landscape
+    // If promo exists, fix grammar/punctuation with GPT-4o
+    if (promo && promo.length > 2) {
+      try {
+        const prompt = `Rewrite this promo sentence so it is a complete, grammatically correct, and persuasive sentence. Output only the improved sentence:\n\n"${promo}"`;
+        const gptRes = await openai.chat.completions.create({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: 36,
+          temperature: 0.4
+        });
+        cta = gptRes.choices?.[0]?.message?.content?.trim() || promo;
+      } catch (e) {
+        // Fallback to original
+      }
+    }
+
+    // Download and fit image landscape, with tighter frame (bigger border)
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const totalBorder = 48; // Increased to make all four borders even
     let baseImage = await sharp(imgRes.data)
-      .resize(1200, 627, { fit: 'cover' })
+      .resize(1200 - totalBorder * 2, 627 - totalBorder * 2, { fit: 'cover' })
       .toBuffer();
 
-    // Frame Palette
+    // --- Colors ---
     const framePalette = [
-      "#1D3557", "#18181B", "#57606f", "#444444", "#E6D3A3", "#212121", "#3d3d3d", "#1a1a1a"
+      "#1D3557", "#18181B", "#57606f", "#444444", "#E6D3A3", "#212121"
     ];
     function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
     const frameColor = pick(framePalette);
+    const boxColor = "#f7efe3"; // beige
+    const textColor = "#191919";
+
+    // --- Fancy border decorations (all sides) ---
+    // Will be used as SVG patterns on each edge, repeating or dashed/dotted/zag
+    const decoStyles = [
+      // Dashed all sides
+      `<rect x="10" y="10" width="1180" height="607" fill="none" stroke="#fff" stroke-width="5" stroke-dasharray="32 20"/>`,
+      // Zigzag top, bottom, left, right
+      `<polyline points="52,48 92,28 132,48 172,28 212,48 252,28 292,48 332,28 372,48 412,28 452,48 492,28 532,48 572,28 612,48 652,28 692,48 732,28 772,48 812,28 852,48 892,28 932,48 972,28 1012,48 1052,28 1092,48 1132,28 1172,48"
+        stroke="#E6D3A3" stroke-width="6" fill="none"/>
+      <polyline points="52,579 92,599 132,579 172,599 212,579 252,599 292,579 332,599 372,579 412,599 452,579 492,599 532,579 572,599 612,579 652,599 692,579 732,599 772,579 812,599 852,579 892,599 932,579 972,599 1012,579 1052,599 1092,579 1132,599 1172,579"
+        stroke="#fff" stroke-width="6" fill="none"/>
+      <polyline points="48,52 28,92 48,132 28,172 48,212 28,252 48,292 28,332 48,372 28,412 48,452 28,492 48,532 28,572 48,612"
+        stroke="#fff" stroke-width="6" fill="none"/>
+      <polyline points="1152,52 1172,92 1152,132 1172,172 1152,212 1172,252 1152,292 1172,332 1152,372 1172,412 1152,452 1172,492 1152,532 1172,572 1152,612"
+        stroke="#E6D3A3" stroke-width="6" fill="none"/>`,
+      // Dots all around
+      `<rect x="20" y="20" width="1160" height="587" fill="none" stroke="#fff" stroke-width="8" stroke-dasharray="2,24"/>`,
+      // Solid double-line
+      `<rect x="16" y="16" width="1168" height="595" fill="none" stroke="#fff" stroke-width="5"/>
+      <rect x="32" y="32" width="1136" height="563" fill="none" stroke="#E6D3A3" stroke-width="3"/>`
+    ];
+    const decorations = pick(decoStyles);
 
     // Font family pool
     const fontFamilies = [
@@ -402,23 +444,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ];
     const fontFamily = pick(fontFamilies);
 
-    // Decorations pool
-    const decoStyles = [
-      // Dashed border
-      `<rect x="8" y="8" width="1184" height="611" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="24 14"/>`,
-      // Dotted border
-      `<rect x="16" y="16" width="1168" height="595" fill="none" stroke="#E6D3A3" stroke-width="4" stroke-dasharray="2,22"/>`,
-      // Zig-zag top line
-      `<polyline points="36,38 76,26 116,38 156,26 196,38 236,26 276,38 316,26 356,38 396,26 436,38 476,26 516,38 556,26 596,38 636,26 676,38 716,26 756,38 796,26 836,38 876,26 916,38 956,26 996,38 1036,26 1076,38 1116,26 1156,38" stroke="#fff" stroke-width="4" fill="none"/>`,
-      // Circles in corners
-      `<circle cx="44" cy="44" r="14" fill="#E6D3A3" />
-      <circle cx="1156" cy="44" r="14" fill="#E6D3A3" />
-      <circle cx="44" cy="583" r="14" fill="#E6D3A3" />
-      <circle cx="1156" cy="583" r="14" fill="#E6D3A3" />`
-    ];
-    const decorations = pick(decoStyles);
-
-    // --- HEADLINE LOGIC: Sentence + punctuation
+    // --- Headline/CTA logic, box size, corner radius (smaller) ---
     function completeSentence(str) {
       if (!str) return "";
       str = str.trim();
@@ -431,19 +457,17 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
     const headlineWithPunct = completeSentence(headline);
 
-    // --- HEADLINE WRAP & Font Size & Box Fill ---
     function fitHeadline(text) {
-      // Slightly smaller box, more padding
-      const maxWidth = 760, maxFont = 38, minFont = 25, vPad = 28, hPad = 40;
+      // Small tweak from previous: a tad smaller, smaller corners
+      const maxWidth = 710, maxFont = 33, minFont = 20, vPad = 18, hPad = 32;
       let fontSize = maxFont;
       let words = text.split(" ");
       let lines = [];
-      if (words.length <= 5) {
-        lines = [text];
-      } else {
+      if (words.length <= 5) lines = [text];
+      else {
         let half = Math.ceil(words.length / 2);
         lines = [words.slice(0, half).join(" "), words.slice(half).join(" ")];
-        if (lines[1].length > 38) {
+        if (lines[1].length > 34) {
           let third = Math.ceil(words.length / 3);
           lines = [
             words.slice(0, third).join(" "),
@@ -452,19 +476,18 @@ router.post('/generate-image-with-overlay', async (req, res) => {
           ];
         }
       }
-      // Shrink if too long
-      if (lines.some(l => l.length > 30)) fontSize = 32;
-      if (lines.some(l => l.length > 38)) fontSize = minFont;
+      if (lines.some(l => l.length > 28)) fontSize = 27;
+      if (lines.some(l => l.length > 36)) fontSize = minFont;
 
-      const boxWidth = Math.min(1020, Math.max(570, Math.max(...lines.map(l => l.length)) * (fontSize * 0.62) + hPad*2));
-      const boxHeight = lines.length * (fontSize + 12) + vPad*2;
+      const boxWidth = Math.min(900, Math.max(450, Math.max(...lines.map(l => l.length)) * (fontSize * 0.62) + hPad*2));
+      const boxHeight = lines.length * (fontSize + 10) + vPad*2;
       return { lines, fontSize, boxWidth, boxHeight, hPad, vPad };
     }
     const { lines: headlineLines, fontSize: headlineFont, boxWidth, boxHeight, hPad, vPad } = fitHeadline(headlineWithPunct);
-    const boxX = (1200 - boxWidth) / 2, boxY = 92;
-    const boxRx = 22; // rounded but not pill
+    const boxX = (1200 - boxWidth) / 2, boxY = 90;
+    const boxRx = 10; // slightly rounded, mostly square
 
-    // --- CTA LOGIC ---
+    // --- CTA logic
     function getCtaText(text) {
       let str = (text || "").trim();
       str = str.replace(/[.!?,]+$/, "");
@@ -477,27 +500,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
     let ctaText = getCtaText(cta);
     let showCta = !!ctaText;
-
-    // --- CTA Wrap and Font ---
     function fitCta(text) {
-      const maxWidth = 290, maxFont = 22, minFont = 15, vPad = 18, hPad = 30;
+      const maxWidth = 265, maxFont = 19, minFont = 13, vPad = 13, hPad = 25;
       let fontSize = maxFont;
       let words = text.split(" ");
       let lines = [];
       if (words.length <= 4) lines = [text];
       else lines = [words.slice(0, 3).join(" "), words.slice(3).join(" ")];
-      if (lines.some(l => l.length > 20)) fontSize = 17;
-      if (lines.some(l => l.length > 28)) fontSize = minFont;
-      const boxWidth = Math.min(450, Math.max(205, Math.max(...lines.map(l => l.length)) * (fontSize * 0.62) + hPad*2));
-      const boxHeight = lines.length * (fontSize + 9) + vPad*2;
+      if (lines.some(l => l.length > 17)) fontSize = 16;
+      if (lines.some(l => l.length > 24)) fontSize = minFont;
+      const boxWidth = Math.min(410, Math.max(145, Math.max(...lines.map(l => l.length)) * (fontSize * 0.61) + hPad*2));
+      const boxHeight = lines.length * (fontSize + 8) + vPad*2;
       return { lines, fontSize, boxWidth, boxHeight, hPad, vPad };
     }
     const { lines: ctaLines, fontSize: ctaFont, boxWidth: ctaBoxWidth, boxHeight: ctaBoxH, hPad: ctaH, vPad: ctaV } = fitCta(ctaText);
-    const ctaBoxX = (1200 - ctaBoxWidth) / 2, ctaBoxY = boxY + boxHeight + 30;
-
-    // Box colors
-    const boxColor = Math.random() > 0.5 ? "#fff" : "#111";
-    const textColor = boxColor === "#fff" ? "#111" : "#fff";
+    const ctaBoxX = (1200 - ctaBoxWidth) / 2, ctaBoxY = boxY + boxHeight + 26;
 
     function escapeForSVG(text) {
       return String(text)
@@ -509,8 +526,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // --- SVG ASSEMBLE ---
-    const frameWidth = 36;
-    const imgX = frameWidth, imgY = frameWidth, imgW = 1200 - frameWidth*2, imgH = 627 - frameWidth*2;
+    const imgX = totalBorder, imgY = totalBorder, imgW = 1200 - totalBorder * 2, imgH = 627 - totalBorder * 2;
 
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
@@ -527,7 +543,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   ).join("\n")}
   <!-- CTA Button -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxWidth}" height="${ctaBoxH}" rx="12" fill="${boxColor}" opacity="1" />
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxWidth}" height="${ctaBoxH}" rx="8" fill="${boxColor}" opacity="1" />
     ${ctaLines.map((line, i) =>
       `<text x="${ctaBoxX + ctaBoxWidth/2}" y="${ctaBoxY + ctaV + (i+1)*ctaFont + i*5 - 5}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
     ).join("\n")}
@@ -536,14 +552,23 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <rect x="0" y="570" width="1200" height="57" fill="${frameColor}" />
 </svg>`;
 
-    // --- Compose SVG on Image ---
+    // Compose SVG on Image (not strictly necessary since image is clipped)
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(genDir, fileName);
 
-    const outBuffer = await sharp(baseImage)
-      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    const outBuffer = await sharp({
+      create: {
+        width: 1200,
+        height: 627,
+        channels: 3,
+        background: frameColor
+      }
+    })
+      .composite([
+        { input: Buffer.from(svg), top: 0, left: 0 }
+      ])
       .jpeg({ quality: 98 })
       .toBuffer();
 
@@ -558,5 +583,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
