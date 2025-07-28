@@ -1,4 +1,6 @@
 // routes/ai.js
+require("@fontsource/bodoni-moda");
+
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -365,16 +367,16 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (FONT-FIXED, CENTERED, GLASS) ==========
 const fs = require('fs');
 const path = require('path');
 
-// Add these at the top of your file if not already present:
+// Load ONLY Bodoni Moda and Cinzel
 const bodoniFontPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.woff2');
 const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/files/cinzel-latin-700-normal.woff2');
 const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
 const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
 
+// ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR, FITTED) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -401,11 +403,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgW = svgW - (borderW + borderGap) * 2;
     const imgH = svgH - (borderW + borderGap) * 2;
 
-    // FONT FAMILIES: Bodoni Moda, Cinzel, Impact/Arial Black
+    // Use only Bodoni Moda or Cinzel (no Impact, never boxes)
     const fontOptions = [
       { name: 'Bodoni Moda', base64: bodoniFontBase64, css: 'Bodoni Moda, serif' },
-      { name: 'Cinzel', base64: cinzelFontBase64, css: 'Cinzel, serif' },
-      { name: 'Impact', base64: null, css: 'Impact, Arial Black, sans-serif' }
+      { name: 'Cinzel', base64: cinzelFontBase64, css: 'Cinzel, serif' }
     ];
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
@@ -414,13 +415,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const textColors = ["#fff", "#edead9"];
     const textColor = textColors[Math.floor(Math.random() * textColors.length)];
 
-    // Helper for SVG text wrapping and font size fitting
+    // --- Text fitting and wrapping ---
     function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
-      let words = text.split(" ");
       let lines = [];
       while (font >= minFont) {
         lines = [];
+        let words = text.split(" ");
         let line = "";
         for (let word of words) {
           if ((line + " " + word).trim().length * font * 0.54 > maxWidth && line) {
@@ -432,25 +433,25 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         }
         if (line) lines.push(line.trim());
         if (lines.length <= maxLines) break;
-        font -= 4;
+        font -= 2;
       }
       return { font, lines };
     }
 
     // Headline logic
     const headlineMaxW = 900, headlineMaxLines = 2;
-    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 64, 30);
-    const headlineBoxH = 55 + headlineLines.length * headlineFont;
-    const headlineBoxW = headlineMaxW + 34;
+    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 60, 30);
+    const headlineBoxH = 44 + headlineLines.length * headlineFont;
+    const headlineBoxW = headlineMaxW + 30;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
     const headlineBoxY = 80;
 
     // CTA logic
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, "."); // basic fix
     const ctaMaxW = 480, ctaMaxLines = 2;
-    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 38, 22);
-    const ctaBoxH = 32 + ctaLines.length * ctaFont;
-    const ctaBoxW = ctaMaxW + 32;
+    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 36, 20);
+    const ctaBoxH = 28 + ctaLines.length * ctaFont;
+    const ctaBoxW = ctaMaxW + 26;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
     const ctaBoxY = headlineBoxY + headlineBoxH + 40;
 
@@ -487,7 +488,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // SVG font-face if using embedded fonts
+    // SVG font-face (for full compatibility)
     let svgFontFace = '';
     if (fontPick.base64) {
       svgFontFace = `
@@ -522,31 +523,39 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <!-- Glassmorph headline -->
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
   <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38"/>
-  ${headlineLines.map((line, i) =>
-    `<text x="${svgW/2}" y="${headlineBoxY + (headlineBoxH/2) - (headlineLines.length-1)*headlineFont/2 + i*headlineFont}"
-      text-anchor="middle"
-      font-family="${fontFamily}"
-      font-size="${headlineFont}"
-      font-weight="bold"
-      fill="${textColor}"
-      dominant-baseline="middle"
-      alignment-baseline="middle"
+  ${
+    headlineLines.map((line, i) =>
+      `<text
+        x="${svgW/2}"
+        y="${headlineBoxY + (headlineBoxH/2) - ((headlineLines.length-1)/2)*headlineFont + i*headlineFont}"
+        text-anchor="middle"
+        font-family="'${fontPick.name}', ${fontFamily}"
+        font-size="${headlineFont}"
+        font-weight="bold"
+        fill="${textColor}"
+        dominant-baseline="middle"
+        alignment-baseline="middle"
       >${escapeForSVG(line)}</text>`
-  ).join("\n")}
+    ).join("\n")
+  }
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
   <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19" fill="#ffffff38"/>
-  ${ctaLines.map((line, i) =>
-    `<text x="${svgW/2}" y="${ctaBoxY + (ctaBoxH/2) - (ctaLines.length-1)*ctaFont/2 + i*ctaFont}"
-      text-anchor="middle"
-      font-family="${fontFamily}"
-      font-size="${ctaFont}"
-      font-weight="bold"
-      fill="${textColor}"
-      dominant-baseline="middle"
-      alignment-baseline="middle"
+  ${
+    ctaLines.map((line, i) =>
+      `<text
+        x="${svgW/2}"
+        y="${ctaBoxY + (ctaBoxH/2) - ((ctaLines.length-1)/2)*ctaFont + i*ctaFont}"
+        text-anchor="middle"
+        font-family="'${fontPick.name}', ${fontFamily}"
+        font-size="${ctaFont}"
+        font-weight="bold"
+        fill="${textColor}"
+        dominant-baseline="middle"
+        alignment-baseline="middle"
       >${escapeForSVG(line)}</text>`
-  ).join("\n")}
+    ).join("\n")
+  }
 </svg>`;
 
     // --- Compose SVG on Image ---
