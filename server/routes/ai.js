@@ -398,7 +398,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
     const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
     const HEADLINE_BOX_Y = 62;
-    const HEADLINE_FONT_SIZE = 44;
+    const HEADLINE_FONT_SIZE = 45;
     const HEADLINE_MAX_WORDS = 5;
 
     // CTA params
@@ -463,9 +463,17 @@ const ctaTextColor = "#181b20";
         .replace(/'/g, "&apos;");
     }
 
+    // Define your three border colors (beige, black, navy)
+const borderColors = ['#edead9', '#191919', '#193356'];
+const borderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+
     // --- Compose SVG ---
-    const svg = `
+ const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
+  <!-- Outer border -->
+  <rect x="8" y="8" width="${svgW-16}" height="${svgH-16}" fill="none" stroke="${borderColor}" stroke-width="6" rx="30"/>
+  <!-- Inner border -->
+  <rect x="26" y="26" width="${svgW-52}" height="${svgH-52}" fill="none" stroke="${borderColor}" stroke-width="3.3" rx="20"/>
   <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
   <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" />
   <!-- Glassmorph headline -->
