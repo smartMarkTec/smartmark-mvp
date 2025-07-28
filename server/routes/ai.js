@@ -377,44 +377,49 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return res.status(400).json({ error: "imageUrl required" });
     }
 
- // === 1. Generate overlay text with AI (4-5 words, punctuation, proper capitalization) ===
+// === 1. Generate overlay text with AI (4-5 words, punctuation, proper capitalization) ===
 let headline = "GET RESULTS WITH SMARTMARK!";
 let ctaText = "FREE CONSULTATION INCLUDED.";
 try {
-  const prompt = `
-You are a top-tier Facebook ad copywriter and creative director.
+  // Build a focused, relevant, non-salesy prompt for GPT:
+  const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+  const betterPrompt = `
+You are an expert Facebook ad copywriter, skilled at short, memorable, and relatable copy (not aggressive or salesy). You always keep the text on brand, relevant to the business or offer, and never generic. Don't mention houses, home, or real estate unless obviously related. Use only what the user provides. Be creative but keep it light and confident.
 
-Output in minified JSON ONLY (no markdown, no explanation).
-Required fields:
-- "headline": Write a high-converting, direct call-to-action headline for the image overlay. Use 4–5 words, capitalize first letter of each word, include proper punctuation if appropriate (usually a period or exclamation mark).
-- "cta_box": Write a short, benefit-driven or informational subtitle for the small box below. Also 4–5 words, proper punctuation, capitalize first letter of each word. This can highlight urgency, a feature, or value.
+Output ONLY valid minified JSON, no markdown or comments. Required fields:
+- "headline": Write a punchy, 4–5 word call-to-action for an ad image. Capitalize first letter of each word, use punctuation (period or exclamation mark), and keep it friendly—not hard-sell.
+- "cta_box": Write a concise, 4–5 word subtitle for a small box below. Can highlight a benefit, unique angle, or simple instruction, always relevant to the input.
 
-Example:
-{"headline":"Book Your Free Demo Today!","cta_box":"No Credit Card Required."}
-
+Business Context:
 ${customContext ? "Training context:\n" + customContext : ""}
 Survey answers:
-${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n')}
+${mainInfo}
 Website URL: ${url}
-  `;
+`;
+
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
     messages: [
       { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
-      { role: "user", content: prompt }
+      { role: "user", content: betterPrompt }
     ],
     max_tokens: 120
   });
   const raw = response.choices?.[0]?.message?.content?.trim();
-  const parsed = JSON.parse(raw);
+
+  // Parse and sanitize
+  let parsed = {};
+  try {
+    parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+  } catch (e) { parsed = {}; }
   if (parsed.headline) headline = parsed.headline;
   if (parsed.cta_box) ctaText = parsed.cta_box;
 } catch (e) {
   console.warn("OpenAI overlay fallback:", e.message);
 }
-// --- ALL CAPS for overlay text ---
 headline = String(headline).toUpperCase();
 ctaText = String(ctaText).toUpperCase();
+
 
 
     // Download and fit main image
