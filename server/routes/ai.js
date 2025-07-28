@@ -366,6 +366,7 @@ Industry: ${industry}
 });
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (GLASSMORPHISM EFFECT, BORDERLESS TEXT BOXES) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -392,12 +393,14 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgW = svgW - (borderW + borderGap) * 2;
     const imgH = svgH - (borderW + borderGap) * 2;
 
-    // Font + wrap logic
+    // STRICT FONT & COLOR LOGIC
     const fontFamilies = [
-      "Helvetica,Arial,sans-serif",
-      "Futura,Arial,sans-serif"
+      "Impact",
+      "Bodoni Moda"
     ];
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
+    const textColors = ["#fff", "#edead9"];
+    const textColor = textColors[Math.floor(Math.random() * textColors.length)];
 
     function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
@@ -493,7 +496,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   ${headlineLines.map((line, i) =>
     `<text x="${svgW/2}" y="${headlineBoxY + 42 + i*headlineFont}" text-anchor="middle"
       font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold"
-      fill="#181818" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+      fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
   ).join("\n")}
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
@@ -501,7 +504,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   ${ctaLines.map((line, i) =>
     `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle"
       font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold"
-      fill="#181818" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+      fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
   ).join("\n")}
 </svg>`;
 
@@ -536,6 +539,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
