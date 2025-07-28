@@ -463,19 +463,24 @@ const ctaTextColor = "#181b20";
         .replace(/'/g, "&apos;");
     }
 
-    // Define your three border colors (beige, black, navy)
-const borderColors = ['#edead9', '#191919', '#193356'];
-const borderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+   // Pick two distinct colors for borders
+const borderColors = ['#edead9', '#191919', '#193356']; // beige, black, navy
+let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+// Ensure colors are not the same
+while (innerBorderColor === outerBorderColor) {
+  innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+}
 
-    // --- Compose SVG ---
- const svg = `
+// --- Compose SVG ---
+const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <!-- Outer border -->
-  <rect x="8" y="8" width="${svgW-16}" height="${svgH-16}" fill="none" stroke="${borderColor}" stroke-width="6" rx="30"/>
+  <rect x="7" y="7" width="${svgW-14}" height="${svgH-14}" fill="none" stroke="${outerBorderColor}" stroke-width="10" rx="34"/>
   <!-- Inner border -->
-  <rect x="26" y="26" width="${svgW-52}" height="${svgH-52}" fill="none" stroke="${borderColor}" stroke-width="3.3" rx="20"/>
+  <rect x="27" y="27" width="${svgW-54}" height="${svgH-54}" fill="none" stroke="${innerBorderColor}" stroke-width="5" rx="20"/>
   <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" />
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX+8}" y="${imgY+8}" width="${imgW-16}" height="${imgH-16}" />
   <!-- Glassmorph headline -->
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" opacity="0.97"/>
   <rect x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" rx="22" fill="#ffffff38"/>
