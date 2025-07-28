@@ -2,9 +2,7 @@ import React, { useState } from "react";
 import { FaEdit, FaArrowLeft, FaArrowRight, FaSyncAlt, FaTimes } from "react-icons/fa";
 
 const API_BASE = "/api";
-// Add this:
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
-
 
 const QUESTIONS = [
   { question: "Website URL", key: "url", type: "text", placeholder: "https://yourbusiness.com" },
@@ -23,6 +21,20 @@ const QUESTIONS = [
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
 const DARK_BG = "#181b20";
+
+// --- These should always match your backend (keep in sync) ---
+const SERIOUS_INDUSTRIES = [
+  "medicine","medical","doctor","dentist","health","hospital","hospice",
+  "law","legal","lawyer","attorney","finance","financial","accounting","bank","banking",
+  "insurance","hvac","plumbing","electrician","contractor",
+  "roofing","construction","real estate","security","consulting"
+];
+const isSeriousIndustry = industry => {
+  if (!industry) return false;
+  return SERIOUS_INDUSTRIES.some(kw =>
+    industry.toLowerCase().includes(kw)
+  );
+};
 
 function LoadingSpinner() {
   return (
@@ -47,7 +59,6 @@ function LoadingSpinner() {
   );
 }
 
-// Fullscreen modal for image view
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
@@ -68,19 +79,18 @@ function ImageModal({ open, imageUrl, onClose }) {
           <FaTimes size={20} />
         </button>
         <img
-  src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
-  alt="Full Ad"
-  style={{
-    display: "block",
-    maxWidth: "90vw",
-    maxHeight: "82vh",
-    borderRadius: 16,
-    background: "#222",
-    margin: "40px 28px 28px 28px",
-    boxShadow: "0 8px 38px #000b"
-  }}
-/>
-
+          src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
+          alt="Full Ad"
+          style={{
+            display: "block",
+            maxWidth: "90vw",
+            maxHeight: "82vh",
+            borderRadius: 16,
+            background: "#222",
+            margin: "40px 28px 28px 28px",
+            boxShadow: "0 8px 38px #000b"
+          }}
+        />
       </div>
     </div>
   );
@@ -134,18 +144,18 @@ const AdPreviewCard = ({
           title="Click to view larger"
         >
           <img
-  src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
-  alt="Ad Preview"
-  style={{
-    maxWidth: "100%",
-    maxHeight: 270,
-    borderRadius: 12,
-    background: "#282d33",
-    boxShadow: "0 2px 14px #1114",
-    objectFit: "contain",
-    transition: "box-shadow 0.15s"
-  }}
-/>
+            src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
+            alt="Ad Preview"
+            style={{
+              maxWidth: "100%",
+              maxHeight: 270,
+              borderRadius: 12,
+              background: "#282d33",
+              boxShadow: "0 2px 14px #1114",
+              objectFit: "contain",
+              transition: "box-shadow 0.15s"
+            }}
+          />
 
           <button
             style={{
@@ -325,64 +335,130 @@ export default function FormPage() {
     setTouched(true);
   };
 
-const handleRegenerateImage = async () => {
-  setImageLoading(true);
-  setImageUrl("");
-  try {
-    const token = getRandomString();
-    setLastRegenerateToken(token);
+  // -----------------------
+  // MAIN AI GENERATE BUTTON
+  // -----------------------
+  const handleGenerate = async () => {
+    setLoading(true);
+    setResult(null);
+    setImageUrl("");
+    setError("");
+    try {
+      const toSend = { ...answers };
+      const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers: toSend, url: answers.url || "" })
+      });
+      const data = await res.json();
 
-    // Always get new campaign copy/overlay for current answers
-    const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers, url: answers.url || "" })
-    });
-    const data = await res.json();
+      // Store overlay text as well
+      setResult({
+        headline: data.headline || "",
+        body: data.body || "",
+        image_overlay_text: data.image_overlay_text || ""
+      });
 
-    // Get a new image
-    const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: answers.url || "",
-        industry: answers.industry || "",
-        regenerateToken: token
-      })
-    });
-    const imgData = await imgRes.json();
-    const stockImageUrl = imgData.imageUrl || "";
-
-    // Overlay new image with *fresh* overlay text, always passing industry
-    if (stockImageUrl && data.image_overlay_text) {
-      const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+      // Step 1: Generate a new stock image
+      setImageLoading(true);
+      const token = getRandomString();
+      setLastRegenerateToken(token);
+      const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageUrl: stockImageUrl,
-          headline: data.image_overlay_text,
-          cta: answers.offer || data.headline || "",
-          industry: answers.industry || ""
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
         })
       });
+      const imgData = await imgRes.json();
+      const stockImageUrl = imgData.imageUrl || "";
 
-      const overlayData = await overlayRes.json();
-      setImageUrl(overlayData.imageUrl || stockImageUrl);
-    } else {
-      setImageUrl(stockImageUrl);
+      // Step 2: Overlay logic — pass "industry" to backend always
+      if (stockImageUrl && data.image_overlay_text) {
+        const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl: stockImageUrl,
+            headline: data.image_overlay_text,
+            cta: answers.offer || data.headline || "",
+            industry: answers.industry || ""
+          })
+        });
+
+        const overlayData = await overlayRes.json();
+        setImageUrl(overlayData.imageUrl || stockImageUrl);
+      } else {
+        setImageUrl(stockImageUrl);
+      }
+      setImageLoading(false);
+    } catch (err) {
+      setError("Failed to generate campaign: " + (err.message || ""));
+      setLoading(false);
     }
+    setLoading(false);
+  };
 
-    // Update state for preview
-    setResult({
-      headline: data.headline || "",
-      body: data.body || "",
-      image_overlay_text: data.image_overlay_text || ""
-    });
-  } catch (err) {
+  // Regenerate always uses current industry/answers (syncs with backend for overlays)
+  const handleRegenerateImage = async () => {
+    setImageLoading(true);
     setImageUrl("");
-  }
-  setImageLoading(false);
-};
+    try {
+      const token = getRandomString();
+      setLastRegenerateToken(token);
+
+      const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, url: answers.url || "" })
+      });
+      const data = await res.json();
+
+      // Get a new image
+      const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
+        })
+      });
+      const imgData = await imgRes.json();
+      const stockImageUrl = imgData.imageUrl || "";
+
+      // Overlay new image with fresh overlay text, always passing industry
+      if (stockImageUrl && data.image_overlay_text) {
+        const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            imageUrl: stockImageUrl,
+            headline: data.image_overlay_text,
+            cta: answers.offer || data.headline || "",
+            industry: answers.industry || ""
+          })
+        });
+
+        const overlayData = await overlayRes.json();
+        setImageUrl(overlayData.imageUrl || stockImageUrl);
+      } else {
+        setImageUrl(stockImageUrl);
+      }
+
+      // Update state for preview
+      setResult({
+        headline: data.headline || "",
+        body: data.body || "",
+        image_overlay_text: data.image_overlay_text || ""
+      });
+    } catch (err) {
+      setImageUrl("");
+    }
+    setImageLoading(false);
+  };
 
   // Modal open/close handlers
   const handleImageClick = (url) => {
