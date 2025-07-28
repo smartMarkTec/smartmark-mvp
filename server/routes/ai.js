@@ -399,11 +399,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgW = svgW - (borderW + borderGap) * 2;
     const imgH = svgH - (borderW + borderGap) * 2;
 
-    // Load fonts
-    const bodoniFontPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.woff2');
-    const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/files/cinzel-latin-700-normal.woff2');
-    const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
-    const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
+    // Use only Bodoni Moda or Cinzel (no Impact, never boxes)
     const fontOptions = [
       { name: 'Bodoni Moda', base64: bodoniFontBase64, css: 'Bodoni Moda, serif' },
       { name: 'Cinzel', base64: cinzelFontBase64, css: 'Cinzel, serif' }
@@ -411,78 +407,64 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
 
- function fitFontSizeStrict(text, maxWidth, maxLines, maxFont, minFont) {
-  let font = maxFont;
-  let lines = [];
-  while (font >= minFont) {
-    lines = [];
-    let words = text.split(" ");
-    let line = "";
-    for (let word of words) {
-      let testLine = line ? line + " " + word : word;
-      let estWidth = testLine.length * font * 0.54; // Tighter estimation
-      // If a *single word* is too long, force-break the word
-      if (word.length * font * 0.54 > maxWidth) {
-        // Break word in chunks
-        let part = "";
-        for (let c of word) {
-          let testPart = part + c;
-          if (testPart.length * font * 0.54 > maxWidth && part) {
-            if (line) lines.push(line.trim());
-            lines.push(part);
-            part = c;
-            line = "";
-          } else {
-            part = testPart;
+    // ---- FONT FIT/WRAP ----
+    function fitFontSizeStrict(text, maxWidth, maxLines, maxFont, minFont) {
+      let font = maxFont;
+      let lines = [];
+      while (font >= minFont) {
+        lines = [];
+        let line = "";
+        let words = text.split(" ");
+        for (let i = 0; i < words.length; i++) {
+          let word = words[i];
+          let testLine = line ? line + " " + word : word;
+          let estWidth = testLine.length * font * 0.54;
+          // Force-break any word too long for a line
+          if (word.length * font * 0.54 > maxWidth) {
+            for (let j = 0; j < word.length; j++) {
+              let testPart = (line ? line + " " : "") + word[j];
+              if (testPart.length * font * 0.54 > maxWidth && line) {
+                lines.push(line.trim());
+                line = word[j];
+              } else {
+                line = (line ? line + "" : "") + word[j];
+              }
+            }
+            continue;
           }
-        }
-        if (part) {
-          if (line) {
-            line += " " + part;
+          if (estWidth > maxWidth && line) {
             lines.push(line.trim());
-            line = "";
+            line = word;
           } else {
-            lines.push(part);
+            line = testLine;
           }
         }
-      } else if (estWidth > maxWidth && line) {
-        lines.push(line.trim());
-        line = word;
-      } else {
-        line = testLine;
+        if (line) lines.push(line.trim());
+        const allFit = lines.every(l => l.length * font * 0.54 <= maxWidth + 1);
+        if (lines.length <= maxLines && allFit) break;
+        font -= 2;
       }
+      // Final chop to maxLines with ellipsis
+      if (lines.length > maxLines) {
+        lines = lines.slice(0, maxLines);
+        lines[maxLines-1] = lines[maxLines-1].replace(/\.*$/, '') + "...";
+      }
+      return { font, lines };
     }
-    if (line) lines.push(line.trim());
-    const allFit = lines.every(l => l.length * font * 0.54 <= maxWidth + 1);
-    if (lines.length <= maxLines && allFit) break;
-    font -= 2;
-  }
-  // Final strict chop to maxLines, with ellipsis if needed
-  if (lines.length > maxLines) {
-    lines = lines.slice(0, maxLines);
-    lines[maxLines-1] = lines[maxLines-1].replace(/\.*$/, '') + "...";
-  }
-  return { font, lines };
-}
 
-
-    // HEADLINE (force small font for test)
-    // Use slightly smaller fonts
-const headlineMaxW = 900;
-const headlineMaxLines = 4;
-const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline, headlineMaxW, headlineMaxLines, 30, 13);
-
+    // -------- Headline logic (force wrap, decent size) --------
+    const headlineMaxW = 900;
+    const headlineMaxLines = 4;
+    const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline, headlineMaxW, headlineMaxLines, 40, 14);
     const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
     const headlineBoxW = headlineMaxW + 30;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
     const headlineBoxY = 80;
 
-    // CTA
+    // -------- CTA logic --------
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
     const ctaMaxW = 480, ctaMaxLines = 3;
-    const { font: ctaFont, lines: ctaLines } = fitFontSizeStrict(
-      ctaText, ctaMaxW, ctaMaxLines, 20, 12 // also very small
-    );
+    const { font: ctaFont, lines: ctaLines } = fitFontSizeStrict(ctaText, ctaMaxW, ctaMaxLines, 30, 14);
     const ctaBoxH = 22 + ctaLines.length * (ctaFont + 8);
     const ctaBoxW = ctaMaxW + 26;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
@@ -518,15 +500,11 @@ const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline,
       const [r, g, b] = data;
       return 0.299*r + 0.587*g + 0.114*b;
     }
-
-    // Check headline/cta region brightness
     const headlineBrightness = await getAverageBrightness(headlineImg);
     const ctaBrightness = await getAverageBrightness(ctaImg);
 
-    // Set text color: use black if light bg, white/beige if dark
     const getTextColor = brightness =>
       brightness > 170 ? "#222" : ["#fff", "#edead9"][Math.floor(Math.random()*2)];
-
     const headlineTextColor = getTextColor(headlineBrightness);
     const ctaTextColor = getTextColor(ctaBrightness);
 
@@ -641,5 +619,6 @@ const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline,
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
