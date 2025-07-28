@@ -398,7 +398,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
     const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
     const HEADLINE_BOX_Y = 62;
-    const HEADLINE_FONT_SIZE = 43;
+    const HEADLINE_FONT_SIZE = 44;
     const HEADLINE_MAX_WORDS = 5;
 
     // CTA params
@@ -450,11 +450,8 @@ const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS).toUpperCase();
       const [r, g, b] = data;
       return 0.299*r + 0.587*g + 0.114*b;
     }
-    const headlineBrightness = await getAverageBrightness(headlineImg);
-    const ctaBrightness = await getAverageBrightness(ctaImg);
-    const getTextColor = brightness => brightness > 170 ? "#222" : ["#fff", "#edead9"][Math.floor(Math.random()*2)];
-    const headlineTextColor = getTextColor(headlineBrightness);
-    const ctaTextColor = getTextColor(ctaBrightness);
+   const headlineTextColor = "#181b20";
+const ctaTextColor = "#181b20";
 
     // SVG helper
     function escapeForSVG(text) {
