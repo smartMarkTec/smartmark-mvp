@@ -365,10 +365,10 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (modern double border, modern square text boxes, big centered font) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (MODERN BORDER + FILL LOGIC) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
-    let {
+    const {
       imageUrl,
       headline,
       subheadline = "",
@@ -376,139 +376,94 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       footer = "",
       color = "#225bb3",
       footerColor = "#FFD700",
-      industry = "",
-      promo = ""
+      industry = ""
     } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
 
-    // If promo exists, correct grammar/punctuation with GPT
-    if (promo && promo.length > 2) {
-      try {
-        const prompt = `Rewrite this promo sentence so it is a complete, grammatically correct, and persuasive sentence. Output only the improved sentence:\n\n"${promo}"`;
-        const gptRes = await openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 36,
-          temperature: 0.4
-        });
-        cta = gptRes.choices?.[0]?.message?.content?.trim() || promo;
-      } catch (e) {}
-    }
-
-    // Download and fit image landscape, frame all sides
+    // Download image and fit
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    const totalBorder = 48; // Even all around
     let baseImage = await sharp(imgRes.data)
-      .resize(1200 - totalBorder * 2, 627 - totalBorder * 2, { fit: 'cover' })
+      .resize(1100, 550, { fit: 'cover' })
       .toBuffer();
 
-    // --- Border Designs ---
-    const framePalette = [
-      "#1D3557", "#18181B", "#57606f", "#444444", "#E6D3A3", "#212121"
+    // -------- BORDER DESIGN --------
+    // Pattern 1: Off-white/black double lines
+    // Pattern 2: Beige/grey double lines
+    const borderThemes = [
+      {
+        outer: "#EDEBE6",
+        inner: "#18181B",
+        bg: "#636875"
+      },
+      {
+        outer: "#F7EEDD",
+        inner: "#CFC6AE",
+        bg: "#B6B0A2"
+      }
     ];
-    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
-    const frameColor = pick(framePalette);
+    const theme = borderThemes[Math.floor(Math.random() * borderThemes.length)];
 
-    // Favorite double-line border (keeps style from your screenshot)
-    const borderSVG1 = `
-      <rect x="10" y="10" width="1180" height="607" fill="none" stroke="#fff" stroke-width="5"/>
-      <rect x="30" y="30" width="1140" height="567" fill="none" stroke="#fff" stroke-width="3"/>
-    `;
+    // Picture & border dims
+    const borderW = 32;
+    const borderGap = 12;
+    const svgW = 1200, svgH = 627;
+    const imgX = borderW + borderGap, imgY = borderW + borderGap;
+    const imgW = svgW - (borderW + borderGap) * 2;
+    const imgH = svgH - (borderW + borderGap) * 2;
 
-    // New modern double-border (inner line is colored, outer is white, slightly offset for depth)
-    const borderSVG2 = `
-      <rect x="10" y="10" width="1180" height="607" fill="none" stroke="#fff" stroke-width="5"/>
-      <rect x="36" y="36" width="1128" height="555" fill="none" stroke="${frameColor}" stroke-width="4"/>
-    `;
-
-    // Pick one at random for variety (can also set just to borderSVG1 if you want it always)
-    const decorations = Math.random() < 0.5 ? borderSVG1 : borderSVG2;
-
-    // --- Box styling ---
-    const boxColor = "#f7efe3";
-    const textColor = "#191919";
+    // --------- BOX & FONT ---------
+    // Beige box color
+    const boxColor = "#F7EEDD";
+    const textColor = "#1A1A1A";
     const fontFamilies = [
       "Helvetica,Arial,sans-serif",
       "Futura,Arial,sans-serif"
     ];
-    const fontFamily = pick(fontFamilies);
+    const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
 
-    // --- Headline logic ---
-    function completeSentence(str) {
-      if (!str) return "";
-      str = str.trim();
-      if (!/[.?!]$/.test(str)) {
-        const exclaimWords = ["now", "today", "free", "call", "visit", "sale", "save", "book", "deal", "increase"];
-        const lastWord = str.split(/\s+/).pop().toLowerCase();
-        str += exclaimWords.includes(lastWord) ? "!" : ".";
-      }
-      return str.charAt(0).toUpperCase() + str.slice(1);
-    }
-    const headlineWithPunct = completeSentence(headline);
-
-    // Headline: Large, boxy, square (rx=8), centered
-    function fitHeadline(text) {
-      // Font bigger than before, fills box but not touching
-      const maxWidth = 820, maxFont = 44, minFont = 27, vPad = 27, hPad = 38;
-      let fontSize = maxFont;
+    // Auto font sizing for headline to fill box (but never overflow)
+    function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
+      let font = maxFont;
       let words = text.split(" ");
       let lines = [];
-      if (words.length <= 5) lines = [text];
-      else {
-        let half = Math.ceil(words.length / 2);
-        lines = [words.slice(0, half).join(" "), words.slice(half).join(" ")];
-        if (lines[1].length > 30) {
-          let third = Math.ceil(words.length / 3);
-          lines = [
-            words.slice(0, third).join(" "),
-            words.slice(third, third*2).join(" "),
-            words.slice(third*2).join(" ")
-          ];
+      while (font >= minFont) {
+        lines = [];
+        let line = "";
+        for (let word of words) {
+          if ((line + " " + word).trim().length * font * 0.55 > maxWidth && line) {
+            lines.push(line.trim());
+            line = word;
+          } else {
+            line += " " + word;
+          }
         }
+        if (line) lines.push(line.trim());
+        if (lines.length <= maxLines) break;
+        font -= 4;
       }
-      if (lines.some(l => l.length > 28)) fontSize = 36;
-      if (lines.some(l => l.length > 36)) fontSize = minFont;
-
-      const boxWidth = Math.min(920, Math.max(480, Math.max(...lines.map(l => l.length)) * (fontSize * 0.62) + hPad*2));
-      const boxHeight = lines.length * (fontSize + 14) + vPad*2;
-      return { lines, fontSize, boxWidth, boxHeight, hPad, vPad };
+      return { font, lines };
     }
-    const { lines: headlineLines, fontSize: headlineFont, boxWidth, boxHeight, hPad, vPad } = fitHeadline(headlineWithPunct);
-    const boxX = (1200 - boxWidth) / 2, boxY = 82;
-    const boxRx = 8; // modern square
 
-    // --- CTA logic
-    function getCtaText(text) {
-      let str = (text || "").trim();
-      str = str.replace(/[.!?,]+$/, "");
-      let words = str.split(/\s+/);
-      if (words.length > 6) words = words.slice(0, 6);
-      str = words.join(" ");
-      if (!/[.?!]$/.test(str)) str += ".";
-      if (str.length < 3) str = "Learn more.";
-      return str.charAt(0).toUpperCase() + str.slice(1);
-    }
-    let ctaText = getCtaText(cta);
-    let showCta = !!ctaText;
-    function fitCta(text) {
-      const maxWidth = 390, maxFont = 26, minFont = 18, vPad = 17, hPad = 34;
-      let fontSize = maxFont;
-      let words = text.split(" ");
-      let lines = [];
-      if (words.length <= 5) lines = [text];
-      else lines = [words.slice(0, 4).join(" "), words.slice(4).join(" ")];
-      if (lines.some(l => l.length > 18)) fontSize = 20;
-      if (lines.some(l => l.length > 28)) fontSize = minFont;
-      const boxWidth = Math.min(450, Math.max(160, Math.max(...lines.map(l => l.length)) * (fontSize * 0.61) + hPad*2));
-      const boxHeight = lines.length * (fontSize + 9) + vPad*2;
-      return { lines, fontSize, boxWidth, boxHeight, hPad, vPad };
-    }
-    const { lines: ctaLines, fontSize: ctaFont, boxWidth: ctaBoxWidth, boxHeight: ctaBoxH, hPad: ctaH, vPad: ctaV } = fitCta(ctaText);
-    const ctaBoxX = (1200 - ctaBoxWidth) / 2, ctaBoxY = boxY + boxHeight + 35;
-    const ctaBoxRx = 8;
+    // HEADLINE box sizing/logic
+    const headlineMaxW = 830, headlineMaxLines = 2;
+    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 62, 34);
+    const headlineBoxH = 65 + headlineLines.length * headlineFont;
+    const headlineBoxW = headlineMaxW + 28;
+    const headlineBoxX = svgW / 2 - headlineBoxW / 2;
+    const headlineBoxY = 70;
 
+    // CTA sizing/logic
+    const ctaText = (cta || "Learn more.").replace(/[.]+$/, "."); // basic fix
+    const ctaMaxW = 460, ctaMaxLines = 2;
+    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 36, 22);
+    const ctaBoxH = 35 + ctaLines.length * ctaFont;
+    const ctaBoxW = ctaMaxW + 28;
+    const ctaBoxX = svgW / 2 - ctaBoxW / 2;
+    const ctaBoxY = headlineBoxY + headlineBoxH + 36;
+
+    // -------- SVG --------
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -518,34 +473,47 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // --- SVG ASSEMBLE ---
-    const imgX = totalBorder, imgY = totalBorder, imgW = 1200 - totalBorder * 2, imgH = 627 - totalBorder * 2;
+    // SVG for double-border all sides
+    const borderSvg = `
+      <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="${theme.bg}" rx="22"/>
+      <rect x="${borderW/2}" y="${borderW/2}" width="${svgW-borderW}" height="${svgH-borderW}" fill="none" stroke="${theme.outer}" stroke-width="7" rx="16"/>
+      <rect x="${borderW+borderGap/2}" y="${borderW+borderGap/2}" width="${svgW-(borderW+borderGap)}" height="${svgH-(borderW+borderGap)}" fill="none" stroke="${theme.inner}" stroke-width="5" rx="10"/>
+    `;
 
+    // SVG image insert
+    const imgSvg = `<image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />`;
+
+    // Headline box & text (slightly rounded corners)
+    const headlineBoxSvg = `
+      <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="17" fill="${boxColor}" />
+      ${headlineLines.map((line, i) =>
+        `<text x="${svgW/2}" y="${headlineBoxY + 36 + i*headlineFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+      ).join("\n")}
+    `;
+
+    // CTA box & text (slightly rounded)
+    const ctaBoxSvg = `
+      <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="13" fill="${boxColor}" />
+      ${ctaLines.map((line, i) =>
+        `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+      ).join("\n")}
+    `;
+
+    // Compose SVG
     const svg = `
-<svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <rect x="0" y="0" width="1200" height="627" fill="${frameColor}" rx="0"/>
-  ${decorations}
-  <clipPath id="imgClip">
-    <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="0"/>
-  </clipPath>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
-  <!-- Headline Box -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" opacity="1"/>
-  ${headlineLines.map((line, i) =>
-    `<text x="${boxX + boxWidth/2}" y="${boxY + vPad + (i+1)*headlineFont + i*10 - 10}" text-anchor="middle" dominant-baseline="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
-  ).join("\n")}
-  <!-- CTA Button -->
-  ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxWidth}" height="${ctaBoxH}" rx="${ctaBoxRx}" fill="${boxColor}" opacity="1" />
-    ${ctaLines.map((line, i) =>
-      `<text x="${ctaBoxX + ctaBoxWidth/2}" y="${ctaBoxY + ctaV + (i+1)*ctaFont + i*7 - 7}" text-anchor="middle" dominant-baseline="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
-    ).join("\n")}
-  ` : ""}
-  <!-- Footer (optional, keeps border bottom filled) -->
-  <rect x="0" y="570" width="1200" height="57" fill="${frameColor}" />
+<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <clipPath id="imgClip">
+      <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="14"/>
+    </clipPath>
+  </defs>
+  ${borderSvg}
+  ${imgSvg}
+  ${headlineBoxSvg}
+  ${ctaBoxSvg}
 </svg>`;
 
-    // Compose SVG on Image (not strictly necessary since image is clipped)
+    // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
@@ -553,10 +521,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     const outBuffer = await sharp({
       create: {
-        width: 1200,
-        height: 627,
+        width: svgW,
+        height: svgH,
         channels: 3,
-        background: frameColor
+        background: theme.bg
       }
     })
       .composite([
@@ -570,7 +538,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const publicUrl = `/generated/${fileName}`;
     console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl, mainText: headlineWithPunct, secondaryText: ctaText });
+    return res.json({ imageUrl: publicUrl });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
