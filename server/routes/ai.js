@@ -453,20 +453,20 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // -------- Headline logic (force wrap, decent size) --------
-    // -------- Headline logic (wider box, slightly smaller font) --------
-const headlineMaxW = 1050;         // Was 900, now 1050px wide
+const headlineMaxW = 900;         // Not too wide
 const headlineMaxLines = 4;
 const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(
   headline,
   headlineMaxW,
   headlineMaxLines,
-  36,   // Max font size down a bit (was 40)
+  36,   // Max font size for clean look
   14
 );
-const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
-const headlineBoxW = headlineMaxW + 38;    // Make box wider too (+38 for nice margin)
+// More vertical padding: Increase per-line space and box padding
+const headlineBoxH = 64 + headlineLines.length * (headlineFont + 18); // 64 top padding, +18 line space
+const headlineBoxW = headlineMaxW + 30;    // Slight margin on sides
 const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-const headlineBoxY = 80;
+const headlineBoxY = 70;                   // Push headline a little lower if you like
 
     // -------- CTA logic --------
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
