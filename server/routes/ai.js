@@ -365,72 +365,51 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (GLASSMORPHISM, MODERN BORDER + TEXT WRAP) ==========
+// ========== AI: GENERATE IMAGE WITH GLASSMORPHIC BOXES, STRONG BLUR, NO FRAME ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
       imageUrl,
       headline,
-      subheadline = "",
       cta,
-      footer = "",
-      color = "#225bb3",
-      footerColor = "#FFD700",
       industry = ""
     } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
 
-    // Download image and fit
+    // Download and fit image
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
     let baseImage = await sharp(imgRes.data)
       .resize(1100, 550, { fit: 'cover' })
       .toBuffer();
 
-    // -------- BORDER DESIGN (modern, glass style, double) --------
-    // Colors: background, border, glass tints
-    const borderThemes = [
-      {
-        bg: "#636875",
-        border1: "rgba(255,255,255,0.37)",
-        border2: "rgba(255,255,255,0.16)"
-      },
-      {
-        bg: "#C0B4A7",
-        border1: "rgba(255,255,255,0.44)",
-        border2: "rgba(0,0,0,0.08)"
-      }
-    ];
-    const theme = borderThemes[Math.floor(Math.random() * borderThemes.length)];
+    // --- Sizing ---
+    const svgW = 1200, svgH = 627;
+    const imgX = 50, imgY = 40;
+    const imgW = svgW - 2 * imgX;
+    const imgH = svgH - 2 * imgY;
 
-    // --- Box Glass (same as border but higher alpha)
-    const glassFill = "rgba(255,255,255,0.34)";
-    const glassBorder = "rgba(255,255,255,0.60)";
-    const glassShadow = "rgba(0,0,0,0.12)";
-
-    // --- SVG BLUR FILTER for glass effect ---
+    // --- Glassmorphism Colors & Filter ---
+    const glassFill = "rgba(255,255,255,0.12)"; // ultra-light, for iOS-style glass
+    const glassStroke = "rgba(255,255,255,0.65)";
+    // Much stronger blur!
     const glassFilter = `
-      <filter id="glass" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="12" result="blur"/>
-        <feComponentTransfer in="blur" result="blur2">
-          <feFuncA type="linear" slope="0.5"/>
-        </feComponentTransfer>
+      <filter id="glass" x="-50%" y="-50%" width="200%" height="200%">
+        <feGaussianBlur stdDeviation="24" result="blur"/>
+        <feColorMatrix type="matrix"
+          values="1 0 0 0 0
+                  0 1 0 0 0
+                  0 0 1 0 0
+                  0 0 0 0.33 0"/>
         <feMerge>
-          <feMergeNode in="blur2"/>
+          <feMergeNode />
           <feMergeNode in="SourceGraphic"/>
         </feMerge>
       </filter>
     `;
 
-    // -------- SIZING --------
-    const svgW = 1200, svgH = 627;
-    const borderW = 32, borderGap = 14;
-    const imgX = borderW + borderGap, imgY = borderW + borderGap;
-    const imgW = svgW - (borderW + borderGap) * 2;
-    const imgH = svgH - (borderW + borderGap) * 2;
-
-    // --------- FONT/WRAP ---------
+    // --- Fonts/wrapping ---
     const fontFamilies = [
       "Helvetica,Arial,sans-serif",
       "Futura,Arial,sans-serif"
@@ -438,7 +417,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontFamily = fontFamilies[Math.floor(Math.random() * fontFamilies.length)];
     const textColor = "#181818";
 
-    // Smart font sizing and wrap (NEVER overflow)
     function fitFontSize(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
       let words = text.split(" ");
@@ -447,7 +425,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         lines = [];
         let line = "";
         for (let word of words) {
-          if ((line + " " + word).trim().length * font * 0.52 > maxWidth && line) {
+          if ((line + " " + word).trim().length * font * 0.53 > maxWidth && line) {
             lines.push(line.trim());
             line = word;
           } else {
@@ -461,24 +439,23 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { font, lines };
     }
 
-    // Headline box
+    // Headline
     const headlineMaxW = 850, headlineMaxLines = 2;
-    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 62, 30);
-    const headlineBoxH = 56 + headlineLines.length * headlineFont;
-    const headlineBoxW = headlineMaxW + 34;
+    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 66, 30);
+    const headlineBoxH = 52 + headlineLines.length * headlineFont;
+    const headlineBoxW = headlineMaxW + 36;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-    const headlineBoxY = 76;
+    const headlineBoxY = 92;
 
-    // CTA box
+    // CTA
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
-    const ctaMaxW = 480, ctaMaxLines = 2;
-    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 36, 20);
-    const ctaBoxH = 36 + ctaLines.length * ctaFont;
-    const ctaBoxW = ctaMaxW + 30;
+    const ctaMaxW = 420, ctaMaxLines = 2;
+    const { font: ctaFont, lines: ctaLines } = fitFontSize(ctaText, ctaMaxW, ctaMaxLines, 40, 20);
+    const ctaBoxH = 32 + ctaLines.length * ctaFont;
+    const ctaBoxW = ctaMaxW + 32;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
-    const ctaBoxY = headlineBoxY + headlineBoxH + 38;
+    const ctaBoxY = headlineBoxY + headlineBoxH + 40;
 
-    // --- SVG escape
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -488,54 +465,33 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // -------- SVG for double glass border (full wrap) --------
-    const borderSvg = `
-      <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="${theme.bg}" rx="25"/>
-      <rect x="${borderW/2}" y="${borderW/2}" width="${svgW-borderW}" height="${svgH-borderW}"
-        fill="none" stroke="${theme.border1}" stroke-width="10" rx="17" filter="url(#glass)"/>
-      <rect x="${borderW+borderGap/2}" y="${borderW+borderGap/2}" width="${svgW-(borderW+borderGap)}" height="${svgH-(borderW+borderGap)}"
-        fill="none" stroke="${theme.border2}" stroke-width="7" rx="13" filter="url(#glass)"/>
-    `;
-
-    // SVG image
-    const imgSvg = `<image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />`;
-
-    // --------- GLASSMORPHIC HEADLINE/CTA BOXES ---------
-    // Modern, blurred, glassy, with glass border
-    const headlineBoxSvg = `
-      <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}"
-        rx="16" fill="${glassFill}" stroke="${glassBorder}" stroke-width="3"
-        filter="url(#glass)" />
-      ${headlineLines.map((line, i) =>
-        `<text x="${svgW/2}" y="${headlineBoxY + 36 + i*headlineFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
-      ).join("\n")}
-    `;
-
-    const ctaBoxSvg = `
-      <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}"
-        rx="13" fill="${glassFill}" stroke="${glassBorder}" stroke-width="3"
-        filter="url(#glass)" />
-      ${ctaLines.map((line, i) =>
-        `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
-      ).join("\n")}
-    `;
-
-    // Compose SVG
+    // Compose SVG: just the image and glass boxes (NO BORDER)
     const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <clipPath id="imgClip">
-      <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="14"/>
+      <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="18"/>
     </clipPath>
     ${glassFilter}
   </defs>
-  ${borderSvg}
-  ${imgSvg}
-  ${headlineBoxSvg}
-  ${ctaBoxSvg}
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
+  <g>
+    <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}"
+      rx="22" fill="${glassFill}" stroke="${glassStroke}" stroke-width="3" filter="url(#glass)" />
+    ${headlineLines.map((line, i) =>
+      `<text x="${svgW/2}" y="${headlineBoxY + 38 + i*headlineFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+    ).join("\n")}
+  </g>
+  <g>
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}"
+      rx="15" fill="${glassFill}" stroke="${glassStroke}" stroke-width="3" filter="url(#glass)" />
+    ${ctaLines.map((line, i) =>
+      `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}" dominant-baseline="middle">${escapeForSVG(line)}</text>`
+    ).join("\n")}
+  </g>
 </svg>`;
 
-    // --- Compose SVG on Image ---
+    // --- Compose on disk ---
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
@@ -546,7 +502,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         width: svgW,
         height: svgH,
         channels: 3,
-        background: theme.bg
+        background: "#ECE9E3"
       }
     })
       .composite([
@@ -558,7 +514,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     fs.writeFileSync(filePath, outBuffer);
 
     const publicUrl = `/generated/${fileName}`;
-    console.log("Glassmorphism overlay image saved at:", filePath, "and served as:", publicUrl);
+    console.log("Glass overlay image saved at:", filePath, "and served as:", publicUrl);
 
     return res.json({ imageUrl: publicUrl });
   } catch (err) {
@@ -566,7 +522,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 
 module.exports = router;
