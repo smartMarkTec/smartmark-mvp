@@ -18,11 +18,12 @@ const QUESTIONS = [
   { question: "What action do you want people to take after seeing your ad?", key: "cta", type: "text", placeholder: "e.g. Order online" },
 ];
 
+// --- Only this changed to match your backend font! ---
+const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
 const DARK_BG = "#181b20";
 
-// --- These should always match your backend (keep in sync) ---
 const SERIOUS_INDUSTRIES = [
   "medicine","medical","doctor","dentist","health","hospital","hospice",
   "law","legal","lawyer","attorney","finance","financial","accounting","bank","banking",
@@ -88,7 +89,8 @@ function ImageModal({ open, imageUrl, onClose }) {
             borderRadius: 16,
             background: "#222",
             margin: "40px 28px 28px 28px",
-            boxShadow: "0 8px 38px #000b"
+            boxShadow: "0 8px 38px #000b",
+            fontFamily: AD_FONT
           }}
         />
       </div>
@@ -112,7 +114,8 @@ const AdPreviewCard = ({
       alignItems: "flex-start",
       position: "relative",
       boxShadow: "0 2px 18px 0 #1115",
-      marginBottom: 6
+      marginBottom: 6,
+      fontFamily: AD_FONT
     }}
   >
     <span style={{
@@ -153,7 +156,8 @@ const AdPreviewCard = ({
               background: "#282d33",
               boxShadow: "0 2px 14px #1114",
               objectFit: "contain",
-              transition: "box-shadow 0.15s"
+              transition: "box-shadow 0.15s",
+              fontFamily: AD_FONT
             }}
           />
 
@@ -195,7 +199,7 @@ const AdPreviewCard = ({
             color: "#555",
             fontWeight: 700,
             fontSize: 22,
-            fontFamily: MODERN_FONT,
+            fontFamily: AD_FONT,
             letterSpacing: 1
           }}
         >
@@ -216,7 +220,7 @@ const AdPreviewCard = ({
           color: "#555",
           fontWeight: 700,
           fontSize: 22,
-          fontFamily: MODERN_FONT,
+          fontFamily: AD_FONT,
           letterSpacing: 1
         }}
       >
@@ -264,6 +268,12 @@ const AdPreviewCard = ({
     </button>
   </div>
 );
+
+// ...rest of your file is unchanged!...
+
+// [the rest of your FormPage code follows, unchanged, same as you pasted above]
+// Just copy the above update in and you’re done!
+
 
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
