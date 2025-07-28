@@ -372,7 +372,6 @@ const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/
 const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
 const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR, FITTED) ==========
 // ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR, FITTED, WRAPPED) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
@@ -413,7 +412,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         let line = "";
         for (let word of words) {
           let testLine = line ? line + " " + word : word;
-          let estWidth = testLine.length * font * 0.6; // Slightly more space per char
+          let estWidth = testLine.length * font * 0.6;
           if (estWidth > maxWidth && line) {
             lines.push(line.trim());
             line = word;
@@ -449,14 +448,16 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { font, lines: forcedLines };
     }
 
-   // Headline logic: force up to 6 lines, shrink font if needed, box grows in height
-const headlineMaxW = 980; // slightly less wide, forces more wrap
-const headlineMaxLines = 6;
-const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline, headlineMaxW, headlineMaxLines, 46, 16);
-const headlineBoxH = 38 + headlineLines.length * (headlineFont + 12);
-const headlineBoxW = headlineMaxW + 32;
-const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-const headlineBoxY = 68;
+    // ---- HEADLINE ----
+    const headlineMaxW = 1040;    // Wide box, but not full width, forces wrap!
+    const headlineMaxLines = 5;   // Up to 5 lines max for super-long text
+    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 42, 18);
+
+    // Box size: height grows with # lines
+    const headlineBoxH = 36 + headlineLines.length * (headlineFont + 14);
+    const headlineBoxW = headlineMaxW + 40;
+    const headlineBoxX = svgW / 2 - headlineBoxW / 2;
+    const headlineBoxY = 65;
 
     // ---- CTA ----
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
@@ -524,8 +525,8 @@ const headlineBoxY = 68;
       `;
     }
 
-// --- Compose SVG ---
-const svg = `
+    // --- Compose SVG ---
+    const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <clipPath id="imgClip">
@@ -548,14 +549,14 @@ const svg = `
     headlineLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${headlineBoxY + (headlineFont + 16) + i*(headlineFont + 12)}"
+        y="${headlineBoxY + 38 + i * (headlineFont + 14)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${headlineFont}"
         font-weight="bold"
         fill="${headlineTextColor}"
-        dominant-baseline="middle"
         alignment-baseline="middle"
+        dominant-baseline="middle"
       >${escapeForSVG(line)}</text>`
     ).join("\n")
   }
@@ -566,19 +567,18 @@ const svg = `
     ctaLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${ctaBoxY + (ctaFont + 10) + i*(ctaFont + 10)}"
+        y="${ctaBoxY + 18 + i * (ctaFont + 12)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${ctaFont}"
         font-weight="bold"
         fill="${ctaTextColor}"
-        dominant-baseline="middle"
         alignment-baseline="middle"
+        dominant-baseline="middle"
       >${escapeForSVG(line)}</text>`
     ).join("\n")
   }
 </svg>`;
-
 
     // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
@@ -611,5 +611,8 @@ const svg = `
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
+module.exports = router;
+
 
 module.exports = router;
