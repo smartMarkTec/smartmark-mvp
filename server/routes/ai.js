@@ -507,16 +507,20 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // --- SVG ASSEMBLE ---
-    const svg = `
+ // --- SVG ASSEMBLE (PERFECT FRAME FILL, no gaps) ---
+const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  <!-- Picture Frame: full border, pointy corners -->
+  <!-- Picture Frame: full border, pointy corners, covers all edges -->
   <rect x="0" y="0" width="1200" height="627" fill="${frameColor}" rx="0"/>
-  <!-- Image area inside the frame -->
+  <!-- Image area inside the frame, clipped so no edge bleed -->
   <clipPath id="imgClip">
     <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="0"/>
   </clipPath>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
+  <g>
+    <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
+    <!-- Optional: overlay a solid border rectangle to force any edge color -->
+    <rect x="0" y="0" width="1200" height="627" fill="none" stroke="${frameColor}" stroke-width="${frameWidth}" rx="0"/>
+  </g>
   <!-- Headline Box (random: solid white or black, pointy) -->
   <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="0" fill="${mode.boxColor}" opacity="1.0" />
   ${headlineLines.map((line, i) =>
@@ -533,6 +537,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <rect x="0" y="570" width="1200" height="57" fill="#222" />
   <text x="72" y="608" font-family="${fontFamily}" font-size="30" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
+
 
     // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
