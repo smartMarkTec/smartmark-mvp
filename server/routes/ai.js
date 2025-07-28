@@ -9,7 +9,7 @@ const { v4: uuidv4 } = require('uuid');
 
 // --- Load text-to-svg for pixel-perfect text measurement ---
 const TextToSVG = require('text-to-svg');
-const bodoniTtfPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.ttf');
+const bodoniTtfPath = path.join(__dirname, '../fonts/bodoni-moda-latin-700-normal.ttf');
 const textToSvg = TextToSVG.loadSync(bodoniTtfPath); // Always use the same font for overlay
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
@@ -370,12 +370,11 @@ Industry: ${industry}
   }
 });
 
-
-// Load ONLY Bodoni Moda and Cinzel
-const bodoniFontPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.woff');
-const cinzelFontPath = path.join(__dirname, '../node_modules/@fontsource/cinzel/files/cinzel-latin-700-normal.woff');
-const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
-const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
+// Load ONLY Bodoni Moda and Cinzel for SVG font-face embedding (used in the SVG, optional for now)
+const bodoniWoffPath = path.join(__dirname, '../fonts/bodoni-moda-latin-700-normal.woff');
+const cinzelWoffPath = path.join(__dirname, '../fonts/cinzel-latin-700-normal.woff');
+const bodoniFontBase64 = fs.existsSync(bodoniWoffPath) ? fs.readFileSync(bodoniWoffPath).toString('base64') : '';
+const cinzelFontBase64 = fs.existsSync(cinzelWoffPath) ? fs.readFileSync(cinzelWoffPath).toString('base64') : '';
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (PIXEL-PERFECT FIT WITH text-to-svg) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
