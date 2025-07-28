@@ -377,25 +377,34 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return res.status(400).json({ error: "imageUrl required" });
     }
 
-// === 1. Generate overlay text with AI (4-5 words, punctuation, proper capitalization) ===
+// === 1. Generate overlay text with AI (4-5 words, relevant, proper punctuation, no fluff) ===
 let headline = "GET RESULTS WITH SMARTMARK!";
 let ctaText = "FREE CONSULTATION INCLUDED.";
 try {
-  // Build a focused, relevant, non-salesy prompt for GPT:
+  // Build GPT input from user form values (answers)
   const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+  // Use URL as additional context, but not as main content
+  const contextForAi = [
+    customContext ? "Training context:\n" + customContext : "",
+    mainInfo,
+    url ? `Website: ${url}` : ""
+  ].filter(Boolean).join('\n');
+
+  // ---- STRICT FOCUSED PROMPT ----
   const betterPrompt = `
-You are an expert Facebook ad copywriter, skilled at short, memorable, and relatable copy (not aggressive or salesy). You always keep the text on brand, relevant to the business or offer, and never generic. Don't mention houses, home, or real estate unless obviously related. Use only what the user provides. Be creative but keep it light and confident.
+You are an expert at writing ultra-short, memorable, and friendly Facebook ad overlays for businesses. 
+1. Use ONLY the specific business details provided by the user below (name, description, industry, product, goal, etc). If they mention marketing, leads, clients, bookings, use that! 
+2. DO NOT use any generic, vague, or unrelated phrases ("discover something new", "explore our finds", etc.).
+3. Never mention real estate, homes, or any off-topic unless that's what the user wrote.
+4. Focus on what the business actually does, offers, or wants the user to do (ex: "Book A Free Marketing Call!", "Grow Your Client List Today.", "Get More Bookings Instantly!", etc).
+5. Write **headline**: 4–5 words, punchy, relevant, friendly, not hard-sell. Use proper punctuation (period or exclamation mark). No hashtags.
+6. Write **cta_box**: 4–5 words, more specific, like a benefit, time-limited offer, or what happens next ("No Credit Card Needed.", "Results In 7 Days.", "100% Satisfaction Guarantee.", "See Real Results.").
+7. NEVER say "discover something new", "explore our latest finds", "homes", "house", or anything generic unless user literally wrote that.
+8. Output valid minified JSON, nothing else.
 
-Output ONLY valid minified JSON, no markdown or comments. Required fields:
-- "headline": Write a punchy, 4–5 word call-to-action for an ad image. Capitalize first letter of each word, use punctuation (period or exclamation mark), and keep it friendly—not hard-sell.
-- "cta_box": Write a concise, 4–5 word subtitle for a small box below. Can highlight a benefit, unique angle, or simple instruction, always relevant to the input.
-
-Business Context:
-${customContext ? "Training context:\n" + customContext : ""}
-Survey answers:
-${mainInfo}
-Website URL: ${url}
-`;
+User's business info:
+${contextForAi}
+  `;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -406,8 +415,6 @@ Website URL: ${url}
     max_tokens: 120
   });
   const raw = response.choices?.[0]?.message?.content?.trim();
-
-  // Parse and sanitize
   let parsed = {};
   try {
     parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
@@ -419,6 +426,7 @@ Website URL: ${url}
 }
 headline = String(headline).toUpperCase();
 ctaText = String(ctaText).toUpperCase();
+
 
 
 
