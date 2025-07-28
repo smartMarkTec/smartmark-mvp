@@ -457,7 +457,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
 
     // Headline logic
     const headlineMaxW = 900, headlineMaxLines = 2;
-    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 54, 28);
+    const { font: headlineFont, lines: headlineLines } = fitFontSize(headline, headlineMaxW, headlineMaxLines, 50, 24);
     const headlineBoxH = 44 + headlineLines.length * headlineFont;
     const headlineBoxW = headlineMaxW + 30;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
