@@ -526,8 +526,8 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       `;
     }
 
-    // --- Compose SVG ---
-    const svg = `
+// --- Compose SVG ---
+const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <clipPath id="imgClip">
@@ -550,14 +550,14 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     headlineLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${headlineBoxY + (headlineFont + 16) + i*(headlineFont + 14)}"
+        y="${headlineBoxY + 32 + i * (headlineFont + 14)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${headlineFont}"
         font-weight="bold"
         fill="${headlineTextColor}"
-        dominant-baseline="middle"
         alignment-baseline="middle"
+        dominant-baseline="middle"
       >${escapeForSVG(line)}</text>`
     ).join("\n")
   }
@@ -568,18 +568,19 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     ctaLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${ctaBoxY + (ctaFont + 10) + i*(ctaFont + 10)}"
+        y="${ctaBoxY + 18 + i * (ctaFont + 12)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${ctaFont}"
         font-weight="bold"
         fill="${ctaTextColor}"
-        dominant-baseline="middle"
         alignment-baseline="middle"
+        dominant-baseline="middle"
       >${escapeForSVG(line)}</text>`
     ).join("\n")
   }
 </svg>`;
+
 
     // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
