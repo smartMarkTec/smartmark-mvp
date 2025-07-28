@@ -445,7 +445,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const headlineMaxW = 900;
     const headlineMaxLines = 4;
     const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(
-      headline, headlineMaxW, headlineMaxLines, 18, 10 // super small for test!
+      headline, headlineMaxW, headlineMaxLines, 32, 16 // super small for test!
     );
     const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
     const headlineBoxW = headlineMaxW + 30;
@@ -456,7 +456,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
     const ctaMaxW = 480, ctaMaxLines = 3;
     const { font: ctaFont, lines: ctaLines } = fitFontSizeStrict(
-      ctaText, ctaMaxW, ctaMaxLines, 16, 8 // also very small
+      ctaText, ctaMaxW, ctaMaxLines, 20, 12 // also very small
     );
     const ctaBoxH = 22 + ctaLines.length * (ctaFont + 8);
     const ctaBoxW = ctaMaxW + 26;
