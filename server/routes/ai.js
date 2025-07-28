@@ -387,20 +387,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(mainW, mainH, { fit: 'cover' })
       .toBuffer();
 
-    // SVG canvas
+    // SVG canvas size
     const svgW = 1200, svgH = 627;
 
-    // Helpers
-    function escapeForSVG(text) {
-      return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&apos;");
+    // Font sizing
+    function getBoxForText(lines, fontSize, paddingX, paddingY) {
+      const metrics = lines.map(line => textToSvg.getMetrics(line, { fontSize }));
+      const width = Math.max(...metrics.map(m => m.width));
+      const height = lines.length * (fontSize + 10) - 10; // 10px vertical spacing
+      return {
+        width: width + 2 * paddingX,
+        height: height + 2 * paddingY
+      };
     }
 
-    // Font sizing (fit/shrink text to box, multiple lines)
+    // Find best font size that fits max width/lines
     function fitLines(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont, lines = [];
       while (font >= minFont) {
@@ -417,13 +418,9 @@ router.post('/generate-image-with-overlay', async (req, res) => {
           }
         }
         if (line) lines.push(line.trim());
-        if (
-          lines.length <= maxLines &&
-          lines.every(l => textToSvg.getMetrics(l, { fontSize: font }).width <= maxWidth)
-        ) break;
+        if (lines.length <= maxLines && lines.every(l => textToSvg.getMetrics(l, { fontSize: font }).width <= maxWidth)) break;
         font -= 2;
       }
-      // Ellipsis if still over maxLines
       if (lines.length > maxLines) {
         lines = lines.slice(0, maxLines);
         lines[maxLines - 1] = lines[maxLines - 1] + "...";
@@ -431,34 +428,39 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return { font, lines };
     }
 
-    // Headline: measure, fit, and box
+    // Headline
     const paddingX = 32, paddingY = 16;
     const maxBoxW = svgW - 96;
     const maxLines = 3;
     const { font: headlineFont, lines: headlineLines } = fitLines(headline, maxBoxW - 2 * paddingX, maxLines, 54, 18);
-    // Now, recalculate the ACTUAL box width needed (largest line, this font)
-    const headlineWidths = headlineLines.map(line => textToSvg.getMetrics(line, { fontSize: headlineFont }).width);
-    const headlineBoxWidth = Math.max(...headlineWidths) + 2 * paddingX;
-    const headlineBoxHeight = headlineLines.length * (headlineFont + 10) - 10 + 2 * paddingY;
-    const headlineBoxX = svgW / 2 - headlineBoxWidth / 2;
+    const headlineBox = getBoxForText(headlineLines, headlineFont, paddingX, paddingY);
+    const headlineBoxX = svgW / 2 - headlineBox.width / 2;
     const headlineBoxY = 52;
 
-    // CTA box: same logic, smaller max width/lines/font
+    // CTA
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
     const { font: ctaFont, lines: ctaLines } = fitLines(ctaText, maxBoxW / 1.6 - 2 * paddingX, 2, 32, 14);
-    const ctaWidths = ctaLines.map(line => textToSvg.getMetrics(line, { fontSize: ctaFont }).width);
-    const ctaBoxWidth = Math.max(...ctaWidths) + 2 * paddingX;
-    const ctaBoxHeight = ctaLines.length * (ctaFont + 10) - 10 + 2 * (paddingY - 6);
-    const ctaBoxX = svgW / 2 - ctaBoxWidth / 2;
-    const ctaBoxY = headlineBoxY + headlineBoxHeight + 28;
+    const ctaBox = getBoxForText(ctaLines, ctaFont, paddingX, paddingY - 6);
+    const ctaBoxX = svgW / 2 - ctaBox.width / 2;
+    const ctaBoxY = headlineBoxY + headlineBox.height + 28;
 
-    // SVG (GLASSY boxes remain!)
+    // SVG for overlay
+    function escapeForSVG(text) {
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&apos;");
+    }
+
+    // --- Compose SVG ---
     const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
   <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="50" y="50" width="${mainW}" height="${mainH}" />
   <!-- Headline Box -->
-  <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxWidth}" height="${headlineBoxHeight}" rx="26" fill="#fff9" />
+  <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBox.width}" height="${headlineBox.height}" rx="26" fill="#fff9" />
   ${headlineLines.map((line, i) =>
     `<text
       x="${svgW / 2}"
@@ -471,7 +473,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       dominant-baseline="middle"
     >${escapeForSVG(line)}</text>`).join('\n')}
   <!-- CTA Box -->
-  <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxWidth}" height="${ctaBoxHeight}" rx="19" fill="#fff8" />
+  <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBox.width}" height="${ctaBox.height}" rx="19" fill="#fff8" />
   ${ctaLines.map((line, i) =>
     `<text
       x="${svgW / 2}"
@@ -517,6 +519,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
