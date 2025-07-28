@@ -1,6 +1,4 @@
 // routes/ai.js
-require("@fontsource/bodoni-moda");
-
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
