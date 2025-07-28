@@ -1,3 +1,4 @@
+// routes/ai.js
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -6,13 +7,10 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
+// --- Load text-to-svg for pixel-perfect text measurement ---
 const TextToSVG = require('text-to-svg');
-const dejavuFontPath = path.join(__dirname, '../fonts/DejaVuSerif-Bold.ttf');
-const textToSvg = TextToSVG.loadSync(dejavuFontPath);
-
-const fontPick = { name: 'DejaVu Serif', css: 'DejaVu Serif, serif' };
-const fontFamily = fontPick.css;
-let svgFontFace = ''; // No need to embed, just use font metrics
+const bodoniTtfPath = path.join(__dirname, '../node_modules/@fontsource/bodoni-moda/files/bodoni-moda-latin-700-normal.ttf');
+const textToSvg = TextToSVG.loadSync(bodoniTtfPath); // Always use the same font for overlay
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
 const dataDir = path.join(__dirname, '../data');
@@ -372,10 +370,10 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (PIXEL-PERFECT FIT WITH text-to-svg) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (FIXED FONT/BOX, ARIAL, GLASSMORPH) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
-    const { imageUrl, headline, cta, industry = "" } = req.body;
+    const { imageUrl, headline, cta } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
@@ -387,84 +385,79 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(mainW, mainH, { fit: 'cover' })
       .toBuffer();
 
-    // SVG canvas size
+    // Layout
     const svgW = 1200, svgH = 627;
-    const imgLeft = 50, imgTop = 50, imgW = mainW, imgH = mainH;
+    const borderW = 32, borderGap = 12;
+    const imgX = borderW + borderGap, imgY = borderW + borderGap;
+    const imgW = svgW - (borderW + borderGap) * 2;
+    const imgH = svgH - (borderW + borderGap) * 2;
 
-    // ========== Text Fitting Helpers ==========
-    function fitTextToBox(text, maxWidth, maxLines, maxFont, minFont) {
-      let font = maxFont;
-      let lines = [];
-      while (font >= minFont) {
-        lines = [];
-        let words = text.split(" ");
-        let line = "";
-        for (let word of words) {
-          let testLine = line ? line + " " + word : word;
-          const width = textToSvg.getMetrics(testLine, { fontSize: font }).width;
-          if (width > maxWidth && line) {
-            lines.push(line.trim());
-            line = word;
-          } else {
-            line = testLine;
-          }
-        }
-        if (line) lines.push(line.trim());
-        const allFit = lines.every(l => textToSvg.getMetrics(l, { fontSize: font }).width <= maxWidth);
-        if (lines.length <= maxLines && allFit) break;
-        font -= 2;
+    // Font/box params
+    const fontPick = { name: 'Arial', css: 'Arial, sans-serif' };
+    const fontFamily = fontPick.css;
+
+    // Headline fixed params
+    const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
+    const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
+    const HEADLINE_BOX_Y = 62;
+    const HEADLINE_FONT_SIZE = 40;
+    const HEADLINE_MAX_WORDS = 5;
+
+    // CTA params
+    const CTA_BOX_W = 540, CTA_BOX_H = 70;
+    const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
+    const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
+    const CTA_FONT_SIZE = 26;
+    const CTA_MAX_WORDS = 5;
+
+    // === Format headline & CTA ===
+    function trimToWords(str, max) {
+      let arr = String(str).split(/\s+/).filter(Boolean);
+      if (arr.length > max) {
+        return arr.slice(0, max).join(' ') + '...';
       }
-      if (lines.length > maxLines) {
-        lines = lines.slice(0, maxLines);
-        lines[maxLines - 1] += "...";
-      }
-      return { font, lines };
+      return arr.join(' ');
     }
 
-    // ========== HEADLINE ==========
-    const boxPadX = 32, boxPadY = 16;
-    const headlineMaxW = imgW - 2 * boxPadX;
-    const headlineMaxLines = 3;
-    const headlineMinFont = 18, headlineMaxFont = 56;
-    const { font: headlineFont, lines: headlineLines } = fitTextToBox(
-      headline,
-      headlineMaxW,
-      headlineMaxLines,
-      headlineMaxFont,
-      headlineMinFont
-    );
-    const headlineBoxW = Math.min(
-      Math.max(...headlineLines.map(l => textToSvg.getMetrics(l, { fontSize: headlineFont }).width)) + 2 * boxPadX,
-      imgW
-    );
-    const headlineBoxH = headlineLines.length * (headlineFont + 8) + 2 * boxPadY;
-    const headlineBoxX = imgLeft + (imgW / 2 - headlineBoxW / 2);
-    const headlineBoxY = imgTop + 10;
+    const headlineText = trimToWords(headline, HEADLINE_MAX_WORDS);
+    const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS);
 
-    // ========== CTA ==========
-    const ctaMaxW = imgW * 0.7;
-    const ctaMaxLines = 2;
-    const ctaMaxFont = 32, ctaMinFont = 13;
-    const ctaTextFinal = (cta || "Learn more").replace(/[.]+$/, ".");
-    const { font: ctaFont, lines: ctaLines } = fitTextToBox(
-      ctaTextFinal,
-      ctaMaxW - 2 * boxPadX,
-      ctaMaxLines,
-      ctaMaxFont,
-      ctaMinFont
-    );
-    const ctaBoxW = Math.min(
-      Math.max(...ctaLines.map(l => textToSvg.getMetrics(l, { fontSize: ctaFont }).width)) + 2 * boxPadX,
-      imgW * 0.95
-    );
-    const ctaBoxH = ctaLines.length * (ctaFont + 8) + 2 * boxPadY;
-    const ctaBoxX = imgLeft + (imgW / 2 - ctaBoxW / 2);
-    const ctaBoxY = headlineBoxY + headlineBoxH + 24;
+    // Glassmorph blur for headline box
+    const blurStrength = 15;
+    const headlineImg = await sharp(baseImage)
+      .extract({
+        left: Math.max(0, Math.round(HEADLINE_BOX_X - imgX)),
+        top: Math.max(0, Math.round(HEADLINE_BOX_Y - imgY)),
+        width: Math.round(HEADLINE_BOX_W),
+        height: Math.round(HEADLINE_BOX_H)
+      })
+      .blur(blurStrength)
+      .toBuffer();
 
-    // ========== Glassmorphism and SVG Drawing (DO NOT TOUCH) ==========
-    // ... (YOUR EXISTING OVERLAY, BLUR, SVG, etc. code here)
+    // Glassmorph blur for CTA
+    const ctaImg = await sharp(baseImage)
+      .extract({
+        left: Math.max(0, Math.round(CTA_BOX_X - imgX)),
+        top: Math.max(0, Math.round(CTA_BOX_Y - imgY)),
+        width: Math.round(CTA_BOX_W),
+        height: Math.round(CTA_BOX_H)
+      })
+      .blur(blurStrength)
+      .toBuffer();
 
-    // Escape helper for SVG
+    // Helper for brightness
+    async function getAverageBrightness(imgBuffer) {
+      const { data } = await sharp(imgBuffer).resize(1, 1).raw().toBuffer({ resolveWithObject: true });
+      const [r, g, b] = data;
+      return 0.299*r + 0.587*g + 0.114*b;
+    }
+    const headlineBrightness = await getAverageBrightness(headlineImg);
+    const ctaBrightness = await getAverageBrightness(ctaImg);
+    const getTextColor = brightness => brightness > 170 ? "#222" : ["#fff", "#edead9"][Math.floor(Math.random()*2)];
+    const headlineTextColor = getTextColor(headlineBrightness);
+    const ctaTextColor = getTextColor(ctaBrightness);
+
+    // SVG helper
     function escapeForSVG(text) {
       return String(text)
         .replace(/&/g, "&amp;")
@@ -474,41 +467,44 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // Compose SVG (leave your existing glass morph logic unchanged)
+    // --- Compose SVG ---
     const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgLeft}" y="${imgTop}" width="${imgW}" height="${imgH}" />
-  <!-- Headline Box -->
-  <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="26" fill="#fff9" />
-  ${headlineLines.map((line, i) =>
-    `<text
-      x="${svgW / 2}"
-      y="${headlineBoxY + boxPadY + (i * (headlineFont + 8)) + headlineFont/2}"
-      text-anchor="middle"
-      font-family="'${fontPick.name}', ${fontFamily}"
-      font-size="${headlineFont}"
-      font-weight="bold"
-      fill="#333"
-      dominant-baseline="middle"
-    >${escapeForSVG(line)}</text>`).join('\n')}
-  <!-- CTA Box -->
-  <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19" fill="#fff8" />
-  ${ctaLines.map((line, i) =>
-    `<text
-      x="${svgW / 2}"
-      y="${ctaBoxY + boxPadY + (i * (ctaFont + 8)) + ctaFont/2}"
-      text-anchor="middle"
-      font-family="'${fontPick.name}', ${fontFamily}"
-      font-size="${ctaFont}"
-      font-weight="bold"
-      fill="#222"
-      dominant-baseline="middle"
-    >${escapeForSVG(line)}</text>`).join('\n')}
-</svg>
-`;
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" />
+  <!-- Glassmorph headline -->
+  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" opacity="0.97"/>
+  <rect x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" rx="22" fill="#ffffff38"/>
+  <text
+    x="${svgW/2}"
+    y="${HEADLINE_BOX_Y + HEADLINE_BOX_H/2 + HEADLINE_FONT_SIZE/3}"
+    text-anchor="middle"
+    font-family="Arial, sans-serif"
+    font-size="${HEADLINE_FONT_SIZE}"
+    font-weight="bold"
+    fill="${headlineTextColor}"
+    alignment-baseline="middle"
+    dominant-baseline="middle"
+    letter-spacing="1"
+  >${escapeForSVG(headlineText)}</text>
+  <!-- Glassmorph CTA -->
+  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" opacity="0.97"/>
+  <rect x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" rx="19" fill="#ffffff38"/>
+  <text
+    x="${svgW/2}"
+    y="${CTA_BOX_Y + CTA_BOX_H/2 + CTA_FONT_SIZE/3}"
+    text-anchor="middle"
+    font-family="Arial, sans-serif"
+    font-size="${CTA_FONT_SIZE}"
+    font-weight="bold"
+    fill="${ctaTextColor}"
+    alignment-baseline="middle"
+    dominant-baseline="middle"
+    letter-spacing="0.5"
+  >${escapeForSVG(ctaText)}</text>
+</svg>`;
 
-    // Save SVG as image (no change)
+    // --- Compose SVG on Image ---
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
@@ -531,7 +527,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     fs.writeFileSync(filePath, outBuffer);
 
     const publicUrl = `/generated/${fileName}`;
-    console.log("Overlay image saved at:", filePath, "and served as:", publicUrl);
+    console.log("Glass overlay image saved at:", filePath, "and served as:", publicUrl);
 
     return res.json({ imageUrl: publicUrl });
   } catch (err) {
@@ -539,5 +535,3 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
-module.exports = router;
