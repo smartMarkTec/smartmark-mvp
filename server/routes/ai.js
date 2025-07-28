@@ -373,14 +373,10 @@ const bodoniFontBase64 = fs.readFileSync(bodoniFontPath).toString('base64');
 const cinzelFontBase64 = fs.readFileSync(cinzelFontPath).toString('base64');
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR, FITTED) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (STRICT FONT, COLOR, FITTED, WRAPPED) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
-    const {
-      imageUrl,
-      headline,
-      cta,
-      industry = ""
-    } = req.body;
+    const { imageUrl, headline, cta, industry = "" } = req.body;
     if (!imageUrl || !headline) {
       return res.status(400).json({ error: "imageUrl and headline are required." });
     }
@@ -399,7 +395,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgW = svgW - (borderW + borderGap) * 2;
     const imgH = svgH - (borderW + borderGap) * 2;
 
-    // Use only Bodoni Moda or Cinzel (no Impact, never boxes)
+    // Font
     const fontOptions = [
       { name: 'Bodoni Moda', base64: bodoniFontBase64, css: 'Bodoni Moda, serif' },
       { name: 'Cinzel', base64: cinzelFontBase64, css: 'Cinzel, serif' }
@@ -407,31 +403,17 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
 
-    // ---- FONT FIT/WRAP ----
-    function fitFontSizeStrict(text, maxWidth, maxLines, maxFont, minFont) {
+    // --- FORCE WRAP AND FIT ---
+    function fitFontLines(text, maxWidth, maxLines, maxFont, minFont) {
       let font = maxFont;
       let lines = [];
       while (font >= minFont) {
         lines = [];
-        let line = "";
         let words = text.split(" ");
-        for (let i = 0; i < words.length; i++) {
-          let word = words[i];
+        let line = "";
+        for (let word of words) {
           let testLine = line ? line + " " + word : word;
-          let estWidth = testLine.length * font * 0.54;
-          // Force-break any word too long for a line
-          if (word.length * font * 0.54 > maxWidth) {
-            for (let j = 0; j < word.length; j++) {
-              let testPart = (line ? line + " " : "") + word[j];
-              if (testPart.length * font * 0.54 > maxWidth && line) {
-                lines.push(line.trim());
-                line = word[j];
-              } else {
-                line = (line ? line + "" : "") + word[j];
-              }
-            }
-            continue;
-          }
+          let estWidth = testLine.length * font * 0.6; // Slightly more space per char
           if (estWidth > maxWidth && line) {
             lines.push(line.trim());
             line = word;
@@ -440,47 +422,54 @@ router.post('/generate-image-with-overlay', async (req, res) => {
           }
         }
         if (line) lines.push(line.trim());
-        const allFit = lines.every(l => l.length * font * 0.54 <= maxWidth + 1);
+        let allFit = lines.every(l => l.length * font * 0.6 <= maxWidth);
         if (lines.length <= maxLines && allFit) break;
         font -= 2;
       }
-      // Final chop to maxLines with ellipsis
-      if (lines.length > maxLines) {
-        lines = lines.slice(0, maxLines);
-        lines[maxLines-1] = lines[maxLines-1].replace(/\.*$/, '') + "...";
+      // Make sure no line exceeds maxWidth (force-wrap again if needed)
+      let forcedLines = [];
+      for (let l of lines) {
+        let curr = "";
+        for (let w of l.split(" ")) {
+          let testLine = curr ? curr + " " + w : w;
+          let estWidth = testLine.length * font * 0.6;
+          if (estWidth > maxWidth && curr) {
+            forcedLines.push(curr);
+            curr = w;
+          } else {
+            curr = testLine;
+          }
+        }
+        if (curr) forcedLines.push(curr);
       }
-      return { font, lines };
+      if (forcedLines.length > maxLines) {
+        forcedLines = forcedLines.slice(0, maxLines);
+        forcedLines[maxLines-1] = forcedLines[maxLines-1].replace(/\.*$/, '') + "...";
+      }
+      return { font, lines: forcedLines };
     }
 
-    // -------- Headline logic (force wrap, decent size) --------
-// --- Headline logic: Fixed width, auto-wrap, box auto-height, font auto-shrink ---
-const headlineMaxW = 900;
-const headlineMaxLines = 5; // Increase if you want up to 5 lines
-const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(
-  headline,
-  headlineMaxW,
-  headlineMaxLines,
-  36,   // Max font size
-  16    // Min font size
-);
+    // ---- HEADLINE ----
+    const headlineMaxW = 1040;    // WIDER for wrapping
+    const headlineMaxLines = 5;   // Up to 5 lines max
+    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 42, 18);
 
-// Always wrap, no matter how long
-const headlineBoxW = headlineMaxW + 30; // fixed width
-const headlineBoxH = 36 + headlineLines.length * (headlineFont + 14); // auto-height per line, extra padding
-const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-const headlineBoxY = 70;
-          // Push headline a little lower if you like
+    // Box size: height grows with # lines
+    const headlineBoxH = 36 + headlineLines.length * (headlineFont + 14);
+    const headlineBoxW = headlineMaxW + 40;
+    const headlineBoxX = svgW / 2 - headlineBoxW / 2;
+    const headlineBoxY = 65;
 
-    // -------- CTA logic --------
+    // ---- CTA ----
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
-    const ctaMaxW = 480, ctaMaxLines = 3;
-    const { font: ctaFont, lines: ctaLines } = fitFontSizeStrict(ctaText, ctaMaxW, ctaMaxLines, 30, 14);
-    const ctaBoxH = 22 + ctaLines.length * (ctaFont + 8);
+    const ctaMaxW = 540, ctaMaxLines = 3;
+    const { font: ctaFont, lines: ctaLines } = fitFontLines(ctaText, ctaMaxW, ctaMaxLines, 30, 14);
+    const ctaBoxH = 24 + ctaLines.length * (ctaFont + 10);
     const ctaBoxW = ctaMaxW + 26;
     const ctaBoxX = svgW / 2 - ctaBoxW / 2;
-    const ctaBoxY = headlineBoxY + headlineBoxH + 40;
+    const ctaBoxY = headlineBoxY + headlineBoxH + 34;
 
-    // Extract/blur image regions for glass boxes
+    // --- Glassmorph region extract/blur ---
     const blurStrength = 15;
     const headlineImg = await sharp(baseImage)
       .extract({
@@ -501,20 +490,15 @@ const headlineBoxY = 70;
       .blur(blurStrength)
       .toBuffer();
 
-    // Helper to get average brightness
+    // Helper for brightness
     async function getAverageBrightness(imgBuffer) {
-      const { data } = await sharp(imgBuffer)
-        .resize(1, 1)
-        .raw()
-        .toBuffer({ resolveWithObject: true });
+      const { data } = await sharp(imgBuffer).resize(1, 1).raw().toBuffer({ resolveWithObject: true });
       const [r, g, b] = data;
       return 0.299*r + 0.587*g + 0.114*b;
     }
     const headlineBrightness = await getAverageBrightness(headlineImg);
     const ctaBrightness = await getAverageBrightness(ctaImg);
-
-    const getTextColor = brightness =>
-      brightness > 170 ? "#222" : ["#fff", "#edead9"][Math.floor(Math.random()*2)];
+    const getTextColor = brightness => brightness > 170 ? "#222" : ["#fff", "#edead9"][Math.floor(Math.random()*2)];
     const headlineTextColor = getTextColor(headlineBrightness);
     const ctaTextColor = getTextColor(ctaBrightness);
 
@@ -527,8 +511,7 @@ const headlineBoxY = 70;
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&apos;");
     }
-
-    // SVG font-face (for full compatibility)
+    // SVG font-face
     let svgFontFace = '';
     if (fontPick.base64) {
       svgFontFace = `
@@ -543,7 +526,7 @@ const headlineBoxY = 70;
       `;
     }
 
-    // Compose SVG
+    // --- Compose SVG ---
     const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -564,20 +547,19 @@ const headlineBoxY = 70;
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
   <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38"/>
   ${
-   headlineLines.map((line, i) =>
-  `<text
-    x="${svgW/2}"
-    y="${headlineBoxY + (headlineFont + 14)*i + headlineFont + 8}"
-    text-anchor="middle"
-    font-family="'${fontPick.name}', ${fontFamily}"
-    font-size="${headlineFont}"
-    font-weight="bold"
-    fill="${headlineTextColor}"
-    dominant-baseline="middle"
-    alignment-baseline="middle"
-  >${escapeForSVG(line)}</text>`
-).join("\n")
-
+    headlineLines.map((line, i) =>
+      `<text
+        x="${svgW/2}"
+        y="${headlineBoxY + (headlineFont + 16) + i*(headlineFont + 14)}"
+        text-anchor="middle"
+        font-family="'${fontPick.name}', ${fontFamily}"
+        font-size="${headlineFont}"
+        font-weight="bold"
+        fill="${headlineTextColor}"
+        dominant-baseline="middle"
+        alignment-baseline="middle"
+      >${escapeForSVG(line)}</text>`
+    ).join("\n")
   }
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
@@ -586,7 +568,7 @@ const headlineBoxY = 70;
     ctaLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${ctaBoxY + (ctaBoxH/2) - ((ctaLines.length-1)/2)*ctaFont + i*ctaFont}"
+        y="${ctaBoxY + (ctaFont + 10) + i*(ctaFont + 10)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${ctaFont}"
@@ -630,6 +612,5 @@ const headlineBoxY = 70;
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
