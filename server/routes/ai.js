@@ -369,7 +369,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (TIMES NEW ROMAN, GLASSMORPH, 1-2 LINES) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (FIXED FONT/BOX, ARIAL, GLASSMORPH) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, headline, cta } = req.body;
@@ -394,35 +394,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // Font/box params
     const fontFamily = 'Times New Roman, Times, serif';
 
-    // --- HEADLINE: Word split logic ---
-    const MAX_WORDS_PER_LINE = 7;
-    const MAX_TOTAL_WORDS = 9;
-
-    function splitHeadlineToLines(str, maxLine, maxTotal) {
-      let arr = String(str).split(/\s+/).filter(Boolean);
-      arr = arr.slice(0, maxTotal); // Limit total
-      if (arr.length <= maxLine) return [arr.join(' ')];
-      return [
-        arr.slice(0, maxLine).join(' '),
-        arr.slice(maxLine).join(' ')
-      ];
-    }
-
-    const headlineLines = splitHeadlineToLines(headline, MAX_WORDS_PER_LINE, MAX_TOTAL_WORDS);
-    const HEADLINE_LINE_HEIGHT = 50;
-    const HEADLINE_BOX_W = 956;
-    const HEADLINE_BOX_H = headlineLines.length === 1 ? 85 : 145; // Increase for 2 lines
+    // Headline fixed params
+    const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
     const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
     const HEADLINE_BOX_Y = 62;
     const HEADLINE_FONT_SIZE = 45;
+    const HEADLINE_MAX_WORDS = 5;
 
-    // --- CTA ---
+    // CTA params
     const CTA_BOX_W = 540, CTA_BOX_H = 70;
     const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
     const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
     const CTA_FONT_SIZE = 26;
     const CTA_MAX_WORDS = 5;
 
+    // === Format headline & CTA ===
     function trimToWords(str, max) {
       let arr = String(str).split(/\s+/).filter(Boolean);
       if (arr.length > max) {
@@ -431,7 +417,9 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return arr.join(' ');
     }
 
-    const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS).toUpperCase();
+    const headlineText = trimToWords(headline, HEADLINE_MAX_WORDS).toUpperCase();
+const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS).toUpperCase();
+
 
     // Glassmorph blur for headline box
     const blurStrength = 15;
@@ -456,9 +444,14 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .blur(blurStrength)
       .toBuffer();
 
-    // Black font
-    const headlineTextColor = "#181b20";
-    const ctaTextColor = "#181b20";
+    // Helper for brightness
+    async function getAverageBrightness(imgBuffer) {
+      const { data } = await sharp(imgBuffer).resize(1, 1).raw().toBuffer({ resolveWithObject: true });
+      const [r, g, b] = data;
+      return 0.299*r + 0.587*g + 0.114*b;
+    }
+   const headlineTextColor = "#181b20";
+const ctaTextColor = "#181b20";
 
     // SVG helper
     function escapeForSVG(text) {
@@ -470,32 +463,19 @@ router.post('/generate-image-with-overlay', async (req, res) => {
         .replace(/'/g, "&apos;");
     }
 
-    // Pick two distinct colors for borders
-    const borderColors = ['#edead9', '#191919', '#193356']; // beige, black, navy
-    let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-    let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-    while (innerBorderColor === outerBorderColor) {
-      innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-    }
+   // Pick two distinct colors for borders
+const borderColors = ['#edead9', '#191919', '#193356']; // beige, black, navy
+let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+// Ensure colors are not the same
+while (innerBorderColor === outerBorderColor) {
+  innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+}
 
-    // --- Multiline SVG for headline ---
-    const headlineTextSvg = headlineLines.map((line, i) => `
-      <text
-        x="${svgW/2}"
-        y="${HEADLINE_BOX_Y + 40 + i * HEADLINE_LINE_HEIGHT}"
-        text-anchor="middle"
-        font-family="${fontFamily}"
-        font-size="${HEADLINE_FONT_SIZE}"
-        font-weight="bold"
-        fill="${headlineTextColor}"
-        alignment-baseline="middle"
-        dominant-baseline="middle"
-        letter-spacing="1"
-      >${escapeForSVG(line.toUpperCase())}</text>
-    `).join('\n');
 
-    // --- Compose SVG ---
-    const svg = `
+
+// --- Compose SVG ---
+const svg = `
 <svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
   <!-- Outer border -->
   <rect x="7" y="7" width="${svgW-14}" height="${svgH-14}" fill="none" stroke="${outerBorderColor}" stroke-width="10" rx="34"/>
@@ -506,7 +486,18 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <!-- Glassmorph headline -->
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" opacity="0.97"/>
   <rect x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" rx="22" fill="#ffffff38"/>
-  ${headlineTextSvg}
+  <text
+    x="${svgW/2}"
+    y="${HEADLINE_BOX_Y + HEADLINE_BOX_H/2 + HEADLINE_FONT_SIZE/3}"
+    text-anchor="middle"
+    font-family="${fontFamily}"
+    font-size="${HEADLINE_FONT_SIZE}"
+    font-weight="bold"
+    fill="${headlineTextColor}"
+    alignment-baseline="middle"
+    dominant-baseline="middle"
+    letter-spacing="1"
+  >${escapeForSVG(headlineText)}</text>
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" opacity="0.97"/>
   <rect x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" rx="19" fill="#ffffff38"/>
@@ -555,6 +546,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
