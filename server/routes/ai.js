@@ -439,7 +439,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const ctaBoxY = headlineBoxY + headlineBoxH + 40;
 
     // Extract/blur image regions for glass boxes
-    const blurStrength = 28; // Increase for more glass
+    const blurStrength = 15; // Increase for more glass
     // Headline
     const headlineImg = await sharp(baseImage)
       .extract({
