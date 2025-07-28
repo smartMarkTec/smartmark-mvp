@@ -366,14 +366,16 @@ const handleGenerate = async () => {
     // Step 2: If overlay text exists, overlay on image
     if (stockImageUrl && data.image_overlay_text) {
       const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageUrl: stockImageUrl,
-          headline: data.image_overlay_text, // This is the GPT overlay!
-          cta: answers.offer || data.headline || ""
-        })
-      });
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    imageUrl: stockImageUrl,
+    headline: result.image_overlay_text,
+    cta: answers.offer || result.headline || "",
+    industry: answers.industry || ""   // ADD THIS
+  })
+});
+
       const overlayData = await overlayRes.json();
       setImageUrl(overlayData.imageUrl || stockImageUrl);
     } else {
@@ -410,15 +412,17 @@ const handleRegenerateImage = async () => {
 
     // If overlay text exists, overlay on image (***IMPORTANT FIX BELOW***)
     if (stockImageUrl && result?.image_overlay_text) {
-      const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageUrl: stockImageUrl,
-          headline: result.image_overlay_text, // <- use overlay text, NOT just headline
-          cta: answers.offer || result.headline || ""
-        })
-      });
+  const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    imageUrl: stockImageUrl,
+    headline: data.image_overlay_text,
+    cta: answers.offer || data.headline || "",
+    industry: answers.industry || ""   // ADD THIS
+  })
+});
+
       const overlayData = await overlayRes.json();
       setImageUrl(overlayData.imageUrl || stockImageUrl);
     } else {
