@@ -392,13 +392,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgH = svgH - (borderW + borderGap) * 2;
 
     // Font/box params
-    const fontFamily = 'Arial, Helvetica, sans-serif';
+    const fontFamily = 'Impact, Haettenschweiler, Arial Narrow Bold, sans-serif';
 
     // Headline fixed params
     const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
     const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
     const HEADLINE_BOX_Y = 62;
-    const HEADLINE_FONT_SIZE = 40;
+    const HEADLINE_FONT_SIZE = 45;
     const HEADLINE_MAX_WORDS = 5;
 
     // CTA params
