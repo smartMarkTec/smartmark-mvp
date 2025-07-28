@@ -394,19 +394,35 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // Font/box params
     const fontFamily = 'Times New Roman, Times, serif';
 
-    // Headline fixed params
-    const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
-    const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
-    const HEADLINE_BOX_Y = 62;
-    const HEADLINE_FONT_SIZE = 45;
-    const HEADLINE_MAX_WORDS = 5;
+    // --- HEADLINE: Word split logic ---
+const MAX_WORDS_PER_LINE = 7;
+const MAX_TOTAL_WORDS = 9;
 
-    // CTA params
-    const CTA_BOX_W = 540, CTA_BOX_H = 70;
-    const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
-    const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
-    const CTA_FONT_SIZE = 26;
-    const CTA_MAX_WORDS = 5;
+function splitHeadlineToLines(str, maxLine, maxTotal) {
+  let arr = String(str).split(/\s+/).filter(Boolean);
+  arr = arr.slice(0, maxTotal); // Limit total
+  if (arr.length <= maxLine) return [arr.join(' ')];
+  return [
+    arr.slice(0, maxLine).join(' '),
+    arr.slice(maxLine).join(' ')
+  ];
+}
+
+const headlineLines = splitHeadlineToLines(headline, MAX_WORDS_PER_LINE, MAX_TOTAL_WORDS);
+const HEADLINE_LINE_HEIGHT = 50;
+const HEADLINE_BOX_W = 956;
+const HEADLINE_BOX_H = headlineLines.length === 1 ? 85 : 145; // Increase for 2 lines
+const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
+const HEADLINE_BOX_Y = 62;
+const HEADLINE_FONT_SIZE = 45;
+
+// --- CTA (no changes needed here unless you want multi-line CTA too) ---
+const CTA_BOX_W = 540, CTA_BOX_H = 70;
+const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
+// Move CTA further down if headline has two lines
+const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
+const CTA_FONT_SIZE = 26;
+const CTA_MAX_WORDS = 5;
 
     // === Format headline & CTA ===
     function trimToWords(str, max) {
