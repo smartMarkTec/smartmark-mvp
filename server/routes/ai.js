@@ -449,13 +449,21 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // ---- HEADLINE ----
-    const headlineMaxW = 1040;    // WIDER for wrapping
-    const headlineMaxLines = 5;   // Up to 5 lines max
-    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 44, 16);
+    // Set to be a bit narrower to avoid image overflow, with padding
+    const headlineMaxW = 920;      // 920px, always fits nicely
+    const headlineMaxLines = 4;    // Max 4 lines for big headlines
+    const { font: headlineFont, lines: headlineLines } = fitFontLines(headline, headlineMaxW, headlineMaxLines, 42, 16);
+
+    // Truncate extra-long text (safety)
+    let headlineDisplayLines = [...headlineLines];
+    if (headlineDisplayLines.length > headlineMaxLines) {
+      headlineDisplayLines = headlineDisplayLines.slice(0, headlineMaxLines);
+      headlineDisplayLines[headlineMaxLines-1] += "...";
+    }
 
     // Box size: height grows with # lines
-    const headlineBoxH = 38 + headlineLines.length * (headlineFont + 12);
-    const headlineBoxW = headlineMaxW + 40;
+    const headlineBoxH = 40 + headlineDisplayLines.length * (headlineFont + 14);
+    const headlineBoxW = headlineMaxW + 36;  // Add just enough padding
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
     const headlineBoxY = 62;
 
@@ -546,10 +554,10 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
   <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38"/>
   ${
-    headlineLines.map((line, i) =>
+    headlineDisplayLines.map((line, i) =>
       `<text
         x="${svgW/2}"
-        y="${headlineBoxY + 36 + i * (headlineFont + 12)}"
+        y="${headlineBoxY + 36 + i * (headlineFont + 14)}"
         text-anchor="middle"
         font-family="'${fontPick.name}', ${fontFamily}"
         font-size="${headlineFont}"
@@ -611,5 +619,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
+
 
 module.exports = router;
