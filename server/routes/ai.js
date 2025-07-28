@@ -411,42 +411,67 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fontPick = fontOptions[Math.floor(Math.random() * fontOptions.length)];
     const fontFamily = fontPick.css;
 
-    // --- TEXT FITTING + GLASS BOX SIZING STRICT ---
-    function fitFontSizeStrict(text, maxWidth, maxLines, maxFont, minFont) {
-      let font = maxFont;
-      let lines = [];
-      let safe = false;
-      while (font >= minFont && !safe) {
-        lines = [];
-        let words = text.split(" ");
-        let line = "";
-        for (let word of words) {
-          let testLine = line ? line + " " + word : word;
-          let estWidth = testLine.length * font * 0.52;
-          if (estWidth > maxWidth && line) {
-            lines.push(line.trim());
-            line = word;
+ function fitFontSizeStrict(text, maxWidth, maxLines, maxFont, minFont) {
+  let font = maxFont;
+  let lines = [];
+  while (font >= minFont) {
+    lines = [];
+    let words = text.split(" ");
+    let line = "";
+    for (let word of words) {
+      let testLine = line ? line + " " + word : word;
+      let estWidth = testLine.length * font * 0.54; // Tighter estimation
+      // If a *single word* is too long, force-break the word
+      if (word.length * font * 0.54 > maxWidth) {
+        // Break word in chunks
+        let part = "";
+        for (let c of word) {
+          let testPart = part + c;
+          if (testPart.length * font * 0.54 > maxWidth && part) {
+            if (line) lines.push(line.trim());
+            lines.push(part);
+            part = c;
+            line = "";
           } else {
-            line = testLine;
+            part = testPart;
           }
         }
-        if (line) lines.push(line.trim());
-        safe = lines.length <= maxLines && lines.every(l => l.length * font * 0.52 <= maxWidth);
-        if (!safe) font -= 2;
+        if (part) {
+          if (line) {
+            line += " " + part;
+            lines.push(line.trim());
+            line = "";
+          } else {
+            lines.push(part);
+          }
+        }
+      } else if (estWidth > maxWidth && line) {
+        lines.push(line.trim());
+        line = word;
+      } else {
+        line = testLine;
       }
-      if (lines.length > maxLines) {
-        lines = lines.slice(0, maxLines);
-        lines[maxLines-1] = lines[maxLines-1].replace(/\.*$/, '') + "...";
-      }
-      return { font, lines };
     }
+    if (line) lines.push(line.trim());
+    const allFit = lines.every(l => l.length * font * 0.54 <= maxWidth + 1);
+    if (lines.length <= maxLines && allFit) break;
+    font -= 2;
+  }
+  // Final strict chop to maxLines, with ellipsis if needed
+  if (lines.length > maxLines) {
+    lines = lines.slice(0, maxLines);
+    lines[maxLines-1] = lines[maxLines-1].replace(/\.*$/, '') + "...";
+  }
+  return { font, lines };
+}
+
 
     // HEADLINE (force small font for test)
-    const headlineMaxW = 900;
-    const headlineMaxLines = 4;
-    const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(
-      headline, headlineMaxW, headlineMaxLines, 32, 16 // super small for test!
-    );
+    // Use slightly smaller fonts
+const headlineMaxW = 900;
+const headlineMaxLines = 4;
+const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(headline, headlineMaxW, headlineMaxLines, 30, 13);
+
     const headlineBoxH = 32 + headlineLines.length * (headlineFont + 8);
     const headlineBoxW = headlineMaxW + 30;
     const headlineBoxX = svgW / 2 - headlineBoxW / 2;
