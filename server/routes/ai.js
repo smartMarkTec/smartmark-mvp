@@ -365,8 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (serious = visible colored overlay, always neutral boxes) ==========
-// ========== AI: GENERATE IMAGE WITH OVERLAY (serious = visible colored overlay, always neutral boxes) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (FRAME, FONT, HEADLINE/CTA LOGIC) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -389,32 +388,33 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .resize(1200, 627, { fit: 'cover' })
       .toBuffer();
 
-    // ----- Palettes -----
+    // ----- Frame Palette -----
+    const framePalette = [
+      "#1D3557", "#457B9D", "#A8DADC", "#F1FAEE", "#E63946",
+      "#6366F1", "#18181B", "#FBBF24", "#10B981", "#F472B6",
+      "#F59E42", "#E6D3A3", "#57606f", "#444444"
+    ];
+    function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+    const frameColor = pick(framePalette);
+
+    // ----- Overlay Box Palettes -----
     const neutralPalette = [
       "#DEDAD1EE", "#C7C3B4EE", "#BAB6ABEE", "#A8A59CEE", "#B8C0B9EE",
       "#E3DDD5EE", "#949588EE", "#C4CBC7EE", "#B7B9A4EE", "#D3CEC6EE",
       "#99A4A6EE", "#717678EE", "#5A6366EE", "#D6D1C4EE", "#B0B7BEEE",
       "#E7E3DDDD", "#E9E4E0EE", "#4B5054EE", "#818680EE", "#353C41EE"
     ];
-
     const overlayColorPalette = [
-      "#3474E688", // rich blue
-      "#185e8288", // teal-blue
-      "#4B356888", // deep purple
-      "#11182788", // dark navy/charcoal
-      "#00000033"  // very subtle black (20% opacity)
+      "#3474E688", "#185e8288", "#4B356888", "#11182788", "#00000033"
     ];
 
-    function pickFrom(arr) {
-      return arr[Math.floor(Math.random() * arr.length)];
-    }
-
-    // Font family pool (limit to two most popular ad fonts)
+    // Font family pool (only Helvetica, Futura, Impact)
     const fontFamilies = [
-      "Poppins,Arial Black,Arial,sans-serif",
-      "Inter,Arial,sans-serif"
+      "Helvetica,Arial,sans-serif",
+      "Futura,Arial,sans-serif",
+      "Impact,Arial,sans-serif"
     ];
-    const fontFamily = pickFrom(fontFamilies);
+    const fontFamily = pick(fontFamilies);
 
     // --- INDUSTRY LOGIC ---
     const seriousIndustries = [
@@ -427,25 +427,25 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       (industry || "").toLowerCase().includes(kw)
     );
 
-    // --- HEADLINE LOGIC: add punctuation if missing
-    function addHeadlinePunctuation(txt) {
-      let str = txt.trim();
-      // End with period or exclamation if missing
-      if (/[.!?]$/.test(str)) return str;
-      // Logic: if 'now', 'today', 'free', 'call', 'visit', 'sale', 'save', use exclamation, else period
-      const exclaimWords = ["now", "today", "free", "call", "visit", "sale", "save", "book", "deal"];
-      const lastWord = str.split(/\s+/).pop().toLowerCase();
-      if (exclaimWords.includes(lastWord)) return str + "!";
-      // Randomly pick if not obvious
-      return str + (Math.random() > 0.4 ? "." : "!");
+    // --- HEADLINE LOGIC: add punctuation if missing, make a sentence ---
+    function completeSentence(str) {
+      if (!str) return "";
+      str = str.trim();
+      if (!/[.?!]$/.test(str)) {
+        const exclaimWords = ["now", "today", "free", "call", "visit", "sale", "save", "book", "deal", "increase"];
+        const lastWord = str.split(/\s+/).pop().toLowerCase();
+        str += exclaimWords.includes(lastWord) ? "!" : ".";
+      }
+      // Capitalize first letter
+      return str.charAt(0).toUpperCase() + str.slice(1);
     }
-    const headlineWithPunct = addHeadlinePunctuation(headline);
+    const headlineWithPunct = completeSentence(headline);
 
     // --- HEADLINE WRAP ---
     function smartWrap(text, maxLines = 3) {
       if (!text) return [];
       const words = text.trim().split(' ');
-      if (words.length <= maxLines) return words;
+      if (words.length <= maxLines) return [text];
       let lines = [];
       let avg = Math.ceil(words.length / maxLines);
       let used = 0;
@@ -456,76 +456,42 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       }
       return lines;
     }
-    const headlineFont = 52;
+    const headlineFont = 50;
     const headlineLines = smartWrap(headlineWithPunct, 3);
 
-    // --- SUBHEADLINE WRAP ---
-    const subFont = 28;
-    function fitLines(text, fontSize, maxWidth, maxLines = 2) {
-      let words = text.split(' ');
-      let lines = [], currentLine = '';
-      for (let word of words) {
-        let testLine = currentLine ? currentLine + ' ' + word : word;
-        let estWidth = testLine.length * (fontSize * 0.57);
-        if (estWidth > maxWidth && currentLine) {
-          lines.push(currentLine);
-          currentLine = word;
-        } else {
-          currentLine = testLine;
-        }
-      }
-      if (currentLine) lines.push(currentLine);
-      if (lines.length > maxLines) {
-        lines = lines.slice(0, maxLines);
-        let last = lines.length - 1;
-        if (lines[last].length > 5) lines[last] = lines[last].slice(0, -3) + "...";
-      }
-      return lines;
-    }
-    const subLines = subheadline ? fitLines(subheadline, subFont, 700, 2) : [];
-
-    // --- CTA LOGIC: 4-5 words, always fit ---
+    // --- CTA LOGIC: Complete sentence, 4-5 words max, period or exclamation ---
     function getCtaText(text) {
       let str = (text || "").trim();
-      // Remove trailing punctuation
       str = str.replace(/[.!?,]+$/, "");
       let words = str.split(/\s+/);
       if (words.length > 5) words = words.slice(0, 5);
       str = words.join(" ");
-      // Ensure not too short, pad with default if needed
-      if (str.length < 3) str = "Learn More";
-      return str;
+      if (!/[.?!]$/.test(str)) str += ".";
+      if (str.length < 3) str = "Learn more.";
+      // Capitalize first letter
+      return str.charAt(0).toUpperCase() + str.slice(1);
     }
     let ctaText = getCtaText(cta);
     let showCta = !!ctaText;
+
+    // --- Visual Layout ---
+    // "Picture frame": Draw frame, then image, then boxes
+    // Frame = outer rectangle, 32px width, full 1200x627
+    const frameWidth = 32;
+    const imgX = frameWidth, imgY = frameWidth, imgW = 1200 - frameWidth*2, imgH = 627 - frameWidth*2;
+
+    // Headline box
+    const boxColor = pick(neutralPalette);
+    const textColor = "#222";
+    const boxRx = 0; // pointed corners
+    const boxWidth = 940, boxHeight = 160;
+    const boxX = 120;
+    const boxY = 110;
+
+    // CTA box
     const ctaFont = 30;
-    const estCtaWidth = Math.max(160, Math.min(420, ctaText.length * ctaFont * 0.54 + 44));
-    const ctaBoxH = 56, ctaBoxX = 1200 - estCtaWidth - 40, ctaBoxY = 52;
-
-    // --- Overlay and Box Color Logic ---
-    let overlayColor = null, boxColor, textColor;
-    let boxRx = Math.random() < 0.5 ? 12 : 48; // Vary corners
-
-    if (isSerious) {
-      overlayColor = pickFrom(overlayColorPalette);
-      boxColor = pickFrom(neutralPalette);
-      textColor = "#232323";
-    } else {
-      overlayColor = null;
-      boxColor = pickFrom(neutralPalette);
-      textColor = "#232323";
-    }
-
-    // Randomize headline alignment (center or left) for all
-    let align = Math.random() < 0.55 ? "left" : "center";
-    const paddingX = 54, paddingY = 36;
-    const boxWidth = Math.max(...headlineLines.map(line => line.length)) * (headlineFont * 0.59) + paddingX * 2;
-    const boxHeight = headlineLines.length * (headlineFont + 10) + paddingY * 2;
-    const boxX = align === "center"
-      ? 600 - boxWidth / 2
-      : 160;
-    const textX = align === "center" ? 600 : (boxX + paddingX);
-    const boxY = 130;
+    const estCtaWidth = Math.max(180, Math.min(400, ctaText.length * ctaFont * 0.58 + 38));
+    const ctaBoxH = 60, ctaBoxX = 120, ctaBoxY = boxY + boxHeight + 36;
 
     function escapeForSVG(text) {
       return String(text)
@@ -539,24 +505,26 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     // --- SVG ASSEMBLE ---
     const svg = `
 <svg width="1200" height="627" xmlns="http://www.w3.org/2000/svg">
-  ${isSerious && overlayColor ? `
-    <!-- FULLSCREEN TRANSLUCENT BG FILTER (VISIBLE, SERIOUS ONLY) -->
-    <rect x="0" y="0" width="1200" height="627" fill="${overlayColor}" />
-  ` : ""}
+  <!-- Picture Frame -->
+  <rect x="0" y="0" width="1200" height="627" fill="${frameColor}" rx="30"/>
+  <!-- Image area (the real photo) -->
+  <clipPath id="imgClip">
+    <rect x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" rx="22"/>
+  </clipPath>
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
   <!-- Headline Box -->
-  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" />
+  <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}" rx="${boxRx}" fill="${boxColor}" opacity="0.92" />
   ${headlineLines.map((line, i) =>
-    `<text x="${textX}" y="${boxY + paddingY + (i + 1) * headlineFont + i * 6 - 6}" text-anchor="${align === "center" ? "middle" : "start"}" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
+    `<text x="${boxX + boxWidth/2}" y="${boxY + 50 + i*54}" text-anchor="middle" font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(line)}</text>`
   ).join("\n")}
-  ${subLines.length ? subLines.map((line, i) =>
-    `<text x="600" y="${boxY + boxHeight + 46 + i * (subFont + 7)}" text-anchor="middle" font-family="${fontFamily}" font-size="${subFont}" font-weight="bold" fill="#232323">${escapeForSVG(line)}</text>`
-  ).join("\n") : ''}
+  <!-- CTA Button -->
   ${showCta ? `
-    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="0" fill="${boxColor}" />
-    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 36}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
-  ` : ''}
-  <rect x="0" y="570" width="1200" height="60" fill="#222" />
-  <text x="72" y="610" font-family="${fontFamily}" font-size="33" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
+    <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${estCtaWidth}" height="${ctaBoxH}" rx="0" fill="${boxColor}" opacity="0.93" />
+    <text x="${ctaBoxX + estCtaWidth/2}" y="${ctaBoxY + 40}" text-anchor="middle" font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold" fill="${textColor}">${escapeForSVG(ctaText)}</text>
+  ` : ""}
+  <!-- Footer -->
+  <rect x="0" y="570" width="1200" height="58" fill="#222" />
+  <text x="72" y="608" font-family="${fontFamily}" font-size="30" font-weight="bold" fill="${footerColor}">${escapeForSVG(footer)}</text>
 </svg>`;
 
     // --- Compose SVG on Image ---
@@ -565,15 +533,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(genDir, fileName);
 
-    const outBuffer = await sharp(baseImage)
-      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-      .jpeg({ quality: 98 })
-      .toBuffer();
-
-    fs.writeFileSync(filePath, outBuffer);
+    // Compose with frame+svg only (SVG draws photo inline)
+    await sharp(Buffer.from(svg))
+      .jpeg({ quality: 97 })
+      .toFile(filePath);
 
     const publicUrl = `/generated/${fileName}`;
-    console.log("Modern overlay image saved at:", filePath, "and served as:", publicUrl);
+    console.log("Framed overlay image saved at:", filePath, "and served as:", publicUrl);
 
     return res.json({ imageUrl: publicUrl, mainText: headlineWithPunct, secondaryText: ctaText });
   } catch (err) {
@@ -581,6 +547,5 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 module.exports = router;
