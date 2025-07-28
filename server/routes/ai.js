@@ -453,20 +453,23 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // -------- Headline logic (force wrap, decent size) --------
-const headlineMaxW = 900;         // Not too wide
-const headlineMaxLines = 4;
+// --- Headline logic: Fixed width, auto-wrap, box auto-height, font auto-shrink ---
+const headlineMaxW = 900;
+const headlineMaxLines = 5; // Increase if you want up to 5 lines
 const { font: headlineFont, lines: headlineLines } = fitFontSizeStrict(
   headline,
   headlineMaxW,
   headlineMaxLines,
-  36,   // Max font size for clean look
-  14
+  36,   // Max font size
+  16    // Min font size
 );
-// More vertical padding: Increase per-line space and box padding
-const headlineBoxH = 64 + headlineLines.length * (headlineFont + 18); // 64 top padding, +18 line space
-const headlineBoxW = headlineMaxW + 30;    // Slight margin on sides
+
+// Always wrap, no matter how long
+const headlineBoxW = headlineMaxW + 30; // fixed width
+const headlineBoxH = 36 + headlineLines.length * (headlineFont + 14); // auto-height per line, extra padding
 const headlineBoxX = svgW / 2 - headlineBoxW / 2;
-const headlineBoxY = 70;                   // Push headline a little lower if you like
+const headlineBoxY = 70;
+          // Push headline a little lower if you like
 
     // -------- CTA logic --------
     const ctaText = (cta || "Learn more.").replace(/[.]+$/, ".");
@@ -561,19 +564,20 @@ const headlineBoxY = 70;                   // Push headline a little lower if yo
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
   <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38"/>
   ${
-    headlineLines.map((line, i) =>
-      `<text
-        x="${svgW/2}"
-        y="${headlineBoxY + (headlineBoxH/2) - ((headlineLines.length-1)/2)*headlineFont + i*headlineFont}"
-        text-anchor="middle"
-        font-family="'${fontPick.name}', ${fontFamily}"
-        font-size="${headlineFont}"
-        font-weight="bold"
-        fill="${headlineTextColor}"
-        dominant-baseline="middle"
-        alignment-baseline="middle"
-      >${escapeForSVG(line)}</text>`
-    ).join("\n")
+   headlineLines.map((line, i) =>
+  `<text
+    x="${svgW/2}"
+    y="${headlineBoxY + (headlineFont + 14)*i + headlineFont + 8}"
+    text-anchor="middle"
+    font-family="'${fontPick.name}', ${fontFamily}"
+    font-size="${headlineFont}"
+    font-weight="bold"
+    fill="${headlineTextColor}"
+    dominant-baseline="middle"
+    alignment-baseline="middle"
+  >${escapeForSVG(line)}</text>`
+).join("\n")
+
   }
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
