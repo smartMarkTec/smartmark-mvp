@@ -365,7 +365,7 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (GLASSMORPHISM EFFECT) ==========
+// ========== AI: GENERATE IMAGE WITH OVERLAY (GLASSMORPHISM EFFECT, BORDERLESS TEXT BOXES) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const {
@@ -439,7 +439,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const ctaBoxY = headlineBoxY + headlineBoxH + 40;
 
     // Extract/blur image regions for glass boxes
-    const blurStrength = 15; // Increase for more glass
+    const blurStrength = 15; // Glassmorphism strength
     // Headline
     const headlineImg = await sharp(baseImage)
       .extract({
@@ -489,7 +489,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX}" y="${imgY}" width="${imgW}" height="${imgH}" clip-path="url(#imgClip)" />
   <!-- Glassmorph headline -->
   <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" clip-path="url(#headlineClip)" opacity="0.97"/>
-  <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38" stroke="#ffffffb9" stroke-width="2.7"/>
+  <rect x="${headlineBoxX}" y="${headlineBoxY}" width="${headlineBoxW}" height="${headlineBoxH}" rx="22" fill="#ffffff38"/>
   ${headlineLines.map((line, i) =>
     `<text x="${svgW/2}" y="${headlineBoxY + 42 + i*headlineFont}" text-anchor="middle"
       font-family="${fontFamily}" font-size="${headlineFont}" font-weight="bold"
@@ -497,7 +497,7 @@ router.post('/generate-image-with-overlay', async (req, res) => {
   ).join("\n")}
   <!-- Glassmorph CTA -->
   <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" clip-path="url(#ctaClip)" opacity="0.97"/>
-  <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19" fill="#ffffff38" stroke="#ffffffb9" stroke-width="2.2"/>
+  <rect x="${ctaBoxX}" y="${ctaBoxY}" width="${ctaBoxW}" height="${ctaBoxH}" rx="19" fill="#ffffff38"/>
   ${ctaLines.map((line, i) =>
     `<text x="${svgW/2}" y="${ctaBoxY + 22 + i*ctaFont}" text-anchor="middle"
       font-family="${fontFamily}" font-size="${ctaFont}" font-weight="bold"
@@ -536,7 +536,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
   }
 });
-
 
 
 module.exports = router;
