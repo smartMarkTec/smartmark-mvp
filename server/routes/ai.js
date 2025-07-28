@@ -392,13 +392,13 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const imgH = svgH - (borderW + borderGap) * 2;
 
     // Font/box params
-    const fontFamily = 'Impact, Haettenschweiler, Arial Narrow Bold, sans-serif';
+    const fontFamily = 'Times New Roman, Times, serif';
 
     // Headline fixed params
     const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
     const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
     const HEADLINE_BOX_Y = 62;
-    const HEADLINE_FONT_SIZE = 45;
+    const HEADLINE_FONT_SIZE = 43;
     const HEADLINE_MAX_WORDS = 5;
 
     // CTA params
@@ -417,8 +417,9 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       return arr.join(' ');
     }
 
-    const headlineText = trimToWords(headline, HEADLINE_MAX_WORDS);
-    const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS);
+    const headlineText = trimToWords(headline, HEADLINE_MAX_WORDS).toUpperCase();
+const ctaText = trimToWords(cta || "Learn more.", CTA_MAX_WORDS).toUpperCase();
+
 
     // Glassmorph blur for headline box
     const blurStrength = 15;
