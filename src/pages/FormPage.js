@@ -18,7 +18,6 @@ const QUESTIONS = [
   { question: "What action do you want people to take after seeing your ad?", key: "cta", type: "text", placeholder: "e.g. Order online" },
 ];
 
-// --- Only this changed to match your backend font! ---
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
@@ -269,12 +268,6 @@ const AdPreviewCard = ({
   </div>
 );
 
-// ...rest of your file is unchanged!...
-
-// [the rest of your FormPage code follows, unchanged, same as you pasted above]
-// Just copy the above update in and you’re done!
-
-
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
@@ -385,17 +378,16 @@ export default function FormPage() {
       const imgData = await imgRes.json();
       const stockImageUrl = imgData.imageUrl || "";
 
-      // Step 2: Overlay logic — pass "industry" to backend always
-      if (stockImageUrl && data.image_overlay_text) {
+      // Step 2: Always generate overlay if we have an image
+      if (stockImageUrl) {
         const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-  imageUrl: stockImageUrl,
-  answers,            // <-- send the full answers object
-  url: answers.url || ""
-})
-
+            imageUrl: stockImageUrl,
+            answers,
+            url: answers.url || ""
+          })
         });
 
         const overlayData = await overlayRes.json();
@@ -439,17 +431,16 @@ export default function FormPage() {
       const imgData = await imgRes.json();
       const stockImageUrl = imgData.imageUrl || "";
 
-      // Overlay new image with fresh overlay text, always passing industry
-      if (stockImageUrl && data.image_overlay_text) {
+      // Step 2: Always generate overlay if we have an image
+      if (stockImageUrl) {
         const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-  imageUrl: stockImageUrl,
-  answers,            // <-- send the full answers object
-  url: answers.url || ""
-})
-
+            imageUrl: stockImageUrl,
+            answers,
+            url: answers.url || ""
+          })
         });
 
         const overlayData = await overlayRes.json();
