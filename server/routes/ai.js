@@ -378,60 +378,70 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     }
 
     // === 1. Generate overlay text with AI (always relevant to form, not generic, never blank) ===
-    let headline = "";
-    let ctaText = "";
-    try {
-      // Format user answers into context
-      const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-      const contextForAi = [
-        customContext ? "Training context:\n" + customContext : "",
-        mainInfo,
-        url ? `Website: ${url}` : ""
-      ].filter(Boolean).join('\n');
+ // === 1. Generate overlay text with AI (always relevant to form, not generic, never blank) ===
+let headline = "";
+let ctaText = "";
 
-      const betterPrompt = `
-You are an expert Facebook ad copywriter, specializing in ultra-short, punchy, relevant overlays for business ads. 
-1. Use ONLY the business details provided below (name, description, industry, offer, goal, etc). 
-2. NEVER use generic, vague, or off-topic phrases (like "discover something new", "explore our finds", "homes" unless user wrote it).
-3. Summarize the main benefit, call to action, or value proposition in a modern, light, but confident tone (not hard sell, not robotic).
-4. For "headline": 4–5 words, friendly, clear, includes punctuation (period or exclamation mark).
-5. For "cta_box": 4–5 words, concise next step, feature, or benefit.
-6. Output minified JSON only, no extra text.
+try {
+  // Format user answers into context for GPT
+  const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+  const contextForAi = [
+    customContext ? "Training context:\n" + customContext : "",
+    mainInfo,
+    url ? `Website: ${url}` : ""
+  ].filter(Boolean).join('\n');
 
-User-provided business info:
+  const betterPrompt = `
+You are a world-class Facebook ad copywriter, renowned for industry-specific, ultra-short, punchy overlays that convert. 
+TASK:
+1. Study the business details below (businessName, description, industry, offer, goal, etc.).
+2. Write overlay text *as if you're a real human marketer* (never generic, never robotic, never vague).
+3. Headline: 3-5 words, bold, friendly, must sound like it's for THIS business/industry only. E.g. for dentists: "Book Your Appointment Now!" for gyms: "Start Your Fitness Journey!" for restaurants: "Reserve Your Table Tonight!"
+4. CTA: 3-5 words, modern, clear, highlights specific benefit or next step for THIS industry (e.g. "Show Off Your Smile", "Get Results Fast", "Enjoy Fresh Meals").
+5. DO NOT repeat user input verbatim. Reword creatively, but always stay on-topic.
+6. Both fields must be ultra-relevant to the info below—NO generic lines, ever.
+7. OUTPUT: Minified JSON only: {"headline":"...", "cta_box":"..."}
+
+BUSINESS INFO:
 ${contextForAi}
-      `;
+  `;
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
-          { role: "user", content: betterPrompt }
-        ],
-        max_tokens: 120
-      });
-      const raw = response.choices?.[0]?.message?.content?.trim();
-      let parsed = {};
-      try {
-        parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-      } catch (e) { 
-        parsed = {}; 
-        console.warn("Could not parse AI JSON, raw:", raw);
-      }
-      // Always fallback if blank or missing fields:
-      headline = parsed.headline && parsed.headline.trim() 
-        ? parsed.headline 
-        : "BOOK YOUR CALL TODAY!";
-      ctaText = parsed.cta_box && parsed.cta_box.trim() 
-        ? parsed.cta_box 
-        : "SEE REAL RESULTS NOW.";
-    } catch (e) {
-      console.warn("OpenAI overlay fallback:", e.message);
-      headline = "BOOK YOUR CALL TODAY!";
-      ctaText = "SEE REAL RESULTS NOW.";
-    }
-    headline = String(headline).toUpperCase();
-    ctaText = String(ctaText).toUpperCase();
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: "You are a world-class Facebook ad copy and overlay expert. Never say you are an AI. Respond in perfect JSON only." },
+      { role: "user", content: betterPrompt }
+    ],
+    max_tokens: 120
+  });
+
+  const raw = response.choices?.[0]?.message?.content?.trim();
+  let parsed = {};
+  try {
+    parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+  } catch (e) {
+    parsed = {};
+    console.warn("Could not parse AI JSON, raw:", raw);
+  }
+
+  headline = parsed.headline && parsed.headline.trim() 
+    ? parsed.headline 
+    : "RELEVANT AD TEXT ERROR"; // this should never be hit now
+
+  ctaText = parsed.cta_box && parsed.cta_box.trim() 
+    ? parsed.cta_box 
+    : "SEE DETAILS NOW.";      // this should never be hit now
+
+} catch (e) {
+  console.warn("OpenAI overlay fallback:", e.message);
+  headline = "AI TEXT ERROR!";
+  ctaText = "SEE DETAILS NOW.";
+}
+
+// Always uppercase for style
+headline = String(headline).toUpperCase();
+ctaText = String(ctaText).toUpperCase();
+
 
     // === ...the rest of your image processing logic follows as before... ===
 
