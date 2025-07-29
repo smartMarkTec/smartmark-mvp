@@ -407,6 +407,7 @@ TASK:
 1. Write an overlay headline (3-5 words) and CTA (3-6 words) for a stock ad image, based ONLY on this business, industry, and website. 
 2. Headline and CTA must be **highly relevant to THIS business and industry**. Never generic, never vague, never a direct copy of the answers or keywords, but informed by them.
 3. Headline must fit the business/industry (e.g. for dentist: "Brighten Your Smile Today", for gym: "Start Your Fitness Journey"). CTA must be a next step or benefit.
+4. Write a CTA (3-6 words) that MUST end with an exclamation point (!).
 
 Output ONLY valid minified JSON:
 {"headline":"...","cta_box":"..."}
