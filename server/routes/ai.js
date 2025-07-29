@@ -375,7 +375,18 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     const { imageUrl, answers = {}, url = "" } = req.body;
     if (!imageUrl) return res.status(400).json({ error: "imageUrl required" });
 
-    // Gather info
+    // --- Scrape website for extra context ---
+    let websiteKeywords = [];
+    if (url) {
+      try {
+        const websiteText = await getWebsiteText(url);
+        websiteKeywords = await extractKeywords(websiteText);
+      } catch (e) {
+        websiteKeywords = [];
+      }
+    }
+
+    // Prepare context for GPT
     const keysToShow = [
       "industry", "businessName", "url",
       ...Object.keys(answers).filter(k => !["industry", "businessName", "url"].includes(k))
@@ -385,17 +396,24 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .filter(Boolean)
       .join('\n');
 
+    // --- NEW: Add keywords from website to prompt ---
     const prompt = `
-You are a Facebook ad copywriter.
-ONLY use the info below (DO NOT INVENT details, do not hallucinate). The business/industry is always: "${answers.industry || ''}".
-Write overlay text that:
-- Headline: 3-5 words, bold, strong, fits THIS business and industry, not generic, not a direct copy of form, no hashtags.
-- CTA: 3-6 words, a benefit or action for THIS business.
-Output ONLY valid minified JSON: {"headline":"...","cta_box":"..."}
-NO explanations or text outside the JSON.
+You are the best Facebook ad copywriter. You are Jeremy Haynes.
+Below you have:
+- Business info from a form (see below).
+- Website keywords: [${websiteKeywords.join(", ")}]
 
-BUSINESS INFO:
+TASK:
+1. Write an overlay headline (3-5 words) and CTA (3-6 words) for a stock ad image, based ONLY on this business, industry, and website. 
+2. Headline and CTA must be **highly relevant to THIS business and industry**. Never generic, never vague, never a direct copy of the answers or keywords, but informed by them.
+3. Headline must fit the business/industry (e.g. for dentist: "Brighten Your Smile Today", for gym: "Start Your Fitness Journey"). CTA must be a next step or benefit.
+
+Output ONLY valid minified JSON:
+{"headline":"...","cta_box":"..."}
+
+BUSINESS FORM INFO:
 ${formInfo}
+WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
     `.trim();
 
     let headline = "";
@@ -408,7 +426,7 @@ ${formInfo}
           { role: "user", content: prompt }
         ],
         max_tokens: 120,
-        temperature: 0.18,
+        temperature: 0.2,
       });
       const raw = response.choices?.[0]?.message?.content?.trim();
       let parsed = {};
