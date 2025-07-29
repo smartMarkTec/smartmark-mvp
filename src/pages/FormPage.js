@@ -391,11 +391,11 @@ export default function FormPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            imageUrl: stockImageUrl,
-            headline: data.image_overlay_text,
-            cta: answers.offer || data.headline || "",
-            industry: answers.industry || ""
-          })
+  imageUrl: stockImageUrl,
+  answers,            // <-- send the full answers object
+  url: answers.url || ""
+})
+
         });
 
         const overlayData = await overlayRes.json();
@@ -445,11 +445,11 @@ export default function FormPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            imageUrl: stockImageUrl,
-            headline: data.image_overlay_text,
-            cta: answers.offer || data.headline || "",
-            industry: answers.industry || ""
-          })
+  imageUrl: stockImageUrl,
+  answers,            // <-- send the full answers object
+  url: answers.url || ""
+})
+
         });
 
         const overlayData = await overlayRes.json();
