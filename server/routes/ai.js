@@ -369,29 +369,29 @@ Industry: ${industry}
   }
 });
 
-// ========== AI: GENERATE IMAGE WITH OVERLAY (AUTO AI TEXT, 4-5 WORDS, PUNCTUATION) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, answers = {}, url = "" } = req.body;
     if (!imageUrl) {
       return res.status(400).json({ error: "imageUrl required" });
     }
+    // ===== DEBUGGING LOG (NEW) =====
+    console.log("Overlay AI received answers:", JSON.stringify(answers, null, 2));
 
     // === 1. Generate overlay text with AI (always relevant to form, not generic, never blank) ===
- // === 1. Generate overlay text with AI (always relevant to form, not generic, never blank) ===
-let headline = "";
-let ctaText = "";
+    let headline = "";
+    let ctaText = "";
 
-try {
-  // Format user answers into context for GPT
-  const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-  const contextForAi = [
-    customContext ? "Training context:\n" + customContext : "",
-    mainInfo,
-    url ? `Website: ${url}` : ""
-  ].filter(Boolean).join('\n');
+    try {
+      // Format user answers into context for GPT
+      const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      const contextForAi = [
+        customContext ? "Training context:\n" + customContext : "",
+        mainInfo,
+        url ? `Website: ${url}` : ""
+      ].filter(Boolean).join('\n');
 
-  const betterPrompt = `
+      const betterPrompt = `
 You are a world-class Facebook ad copywriter, renowned for industry-specific, ultra-short, punchy overlays that convert. 
 TASK:
 1. Study the business details below (businessName, description, industry, offer, goal, etc.).
@@ -404,43 +404,43 @@ TASK:
 
 BUSINESS INFO:
 ${contextForAi}
-  `;
+      `;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: "You are a world-class Facebook ad copy and overlay expert. Never say you are an AI. Respond in perfect JSON only." },
-      { role: "user", content: betterPrompt }
-    ],
-    max_tokens: 120
-  });
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a world-class Facebook ad copy and overlay expert. Never say you are an AI. Respond in perfect JSON only." },
+          { role: "user", content: betterPrompt }
+        ],
+        max_tokens: 120
+      });
 
-  const raw = response.choices?.[0]?.message?.content?.trim();
-  let parsed = {};
-  try {
-    parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-  } catch (e) {
-    parsed = {};
-    console.warn("Could not parse AI JSON, raw:", raw);
-  }
+      const raw = response.choices?.[0]?.message?.content?.trim();
+      let parsed = {};
+      try {
+        parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+      } catch (e) {
+        parsed = {};
+        console.warn("Could not parse AI JSON, raw:", raw);
+      }
 
-  headline = parsed.headline && parsed.headline.trim() 
-    ? parsed.headline 
-    : "RELEVANT AD TEXT ERROR"; // this should never be hit now
+      headline = parsed.headline && parsed.headline.trim() 
+        ? parsed.headline 
+        : "RELEVANT AD TEXT ERROR"; // this should never be hit now
 
-  ctaText = parsed.cta_box && parsed.cta_box.trim() 
-    ? parsed.cta_box 
-    : "SEE DETAILS NOW.";      // this should never be hit now
+      ctaText = parsed.cta_box && parsed.cta_box.trim() 
+        ? parsed.cta_box 
+        : "SEE DETAILS NOW.";      // this should never be hit now
 
-} catch (e) {
-  console.warn("OpenAI overlay fallback:", e.message);
-  headline = "AI TEXT ERROR!";
-  ctaText = "SEE DETAILS NOW.";
-}
+    } catch (e) {
+      console.warn("OpenAI overlay fallback:", e.message);
+      headline = "AI TEXT ERROR!";
+      ctaText = "SEE DETAILS NOW.";
+    }
 
-// Always uppercase for style
-headline = String(headline).toUpperCase();
-ctaText = String(ctaText).toUpperCase();
+    // Always uppercase for style
+    headline = String(headline).toUpperCase();
+    ctaText = String(ctaText).toUpperCase();
 
 
     // === ...the rest of your image processing logic follows as before... ===
