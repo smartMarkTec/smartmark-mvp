@@ -383,64 +383,75 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     let ctaText = "";
 
     try {
-      // Format user answers into context for GPT
-      const mainInfo = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-      const contextForAi = [
-        customContext ? "Training context:\n" + customContext : "",
-        mainInfo,
-        url ? `Website: ${url}` : ""
-      ].filter(Boolean).join('\n');
+  // Gather user answers—make "Industry" and "Business Name" TOP PRIORITY
+  const industry = answers.industry || "";
+  const businessName = answers.businessName || "";
+  const urlValue = url || answers.url || "";
+  // Only include each answer ONCE for clarity!
+  const restInfo = Object.entries(answers)
+    .filter(([k]) => !["industry", "businessName", "url"].includes(k))
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('\n');
 
-      const betterPrompt = `
-You are a world-class Facebook ad copywriter, renowned for industry-specific, ultra-short, punchy overlays that convert. 
-TASK:
-1. Study the business details below (businessName, description, industry, offer, goal, etc.).
-2. Write overlay text *as if you're a real human marketer* (never generic, never robotic, never vague).
-3. Headline: 3-5 words, bold, friendly, must sound like it's for THIS business/industry only. E.g. for dentists: "Book Your Appointment Now!" for gyms: "Start Your Fitness Journey!" for restaurants: "Reserve Your Table Tonight!"
-4. CTA: 3-5 words, modern, clear, highlights specific benefit or next step for THIS industry (e.g. "Show Off Your Smile", "Get Results Fast", "Enjoy Fresh Meals").
-5. DO NOT repeat user input verbatim. Reword creatively, but always stay on-topic.
-6. Both fields must be ultra-relevant to the info below—NO generic lines, ever.
-7. OUTPUT: Minified JSON only: {"headline":"...", "cta_box":"..."}
+  const contextForAi = [
+    customContext ? "Training context:\n" + customContext : "",
+    industry ? `Industry: ${industry}` : "",
+    businessName ? `Business Name: ${businessName}` : "",
+    urlValue ? `Website: ${urlValue}` : "",
+    restInfo
+  ].filter(Boolean).join('\n');
 
+  const betterPrompt = `
+You are a direct response copywriter for Facebook ads. 
+IMPORTANT: The overlay text must ALWAYS match this exact business and industry:
+- Industry: "${industry}"
+- Business Name: "${businessName}"
+- Website: "${urlValue}"
+You are given REAL answers from a business owner—use ONLY this info to write overlay text. Do not hallucinate.
+INSTRUCTIONS:
+1. Headline: 3-5 words, bold, must clearly fit this business. (E.g. for dentist: "BOOK TEETH CLEANING NOW!")
+2. CTA: 3-6 words, benefit or action relevant to THIS business. (E.g. "SHOW OFF YOUR SMILE")
+3. DO NOT invent gym/fitness/off-topic overlays unless it is a gym.
+4. DO NOT repeat user answers verbatim—rewrite for persuasion, but do not go off-topic.
+5. Output strict JSON: {"headline":"...", "cta_box":"..."}
 BUSINESS INFO:
 ${contextForAi}
-      `;
+`.trim();
 
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are a world-class Facebook ad copy and overlay expert. Never say you are an AI. Respond in perfect JSON only." },
-          { role: "user", content: betterPrompt }
-        ],
-        max_tokens: 120
-      });
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY perfect JSON." },
+      { role: "user", content: betterPrompt }
+    ],
+    max_tokens: 120
+  });
 
-      const raw = response.choices?.[0]?.message?.content?.trim();
-      let parsed = {};
-      try {
-        parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-      } catch (e) {
-        parsed = {};
-        console.warn("Could not parse AI JSON, raw:", raw);
-      }
+  const raw = response.choices?.[0]?.message?.content?.trim();
+  let parsed = {};
+  try {
+    parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+  } catch (e) {
+    parsed = {};
+    console.warn("Could not parse AI JSON, raw:", raw);
+  }
 
-      headline = parsed.headline && parsed.headline.trim() 
-        ? parsed.headline 
-        : "RELEVANT AD TEXT ERROR"; // this should never be hit now
+  headline = parsed.headline && parsed.headline.trim()
+    ? parsed.headline
+    : `RELEVANT ${industry.toUpperCase() || "AD"} TEXT`;
 
-      ctaText = parsed.cta_box && parsed.cta_box.trim() 
-        ? parsed.cta_box 
-        : "SEE DETAILS NOW.";      // this should never be hit now
+  ctaText = parsed.cta_box && parsed.cta_box.trim()
+    ? parsed.cta_box
+    : "SEE DETAILS NOW.";
+} catch (e) {
+  console.warn("OpenAI overlay fallback:", e.message);
+  headline = "AI TEXT ERROR!";
+  ctaText = "SEE DETAILS NOW.";
+}
 
-    } catch (e) {
-      console.warn("OpenAI overlay fallback:", e.message);
-      headline = "AI TEXT ERROR!";
-      ctaText = "SEE DETAILS NOW.";
-    }
-
-    // Always uppercase for style
-    headline = String(headline).toUpperCase();
-    ctaText = String(ctaText).toUpperCase();
+// Always uppercase for style
+headline = String(headline).toUpperCase();
+ctaText = String(ctaText).toUpperCase();
 
 
     // === ...the rest of your image processing logic follows as before... ===
