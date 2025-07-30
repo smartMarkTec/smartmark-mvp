@@ -691,32 +691,36 @@ router.post('/generate-video-ad', async (req, res) => {
 // ---- PICK 5-6 RANDOM CLIPS (prefer 6-8s each, for ~30s total) ----
 let files = [];
 let totalDuration = 0;
-let maxClips = 6;
+const minDuration = 5, maxDuration = 7, maxClips = 6, targetTotal = 30;
 
-const shuffled = videoClips.sort(() => 0.5 - Math.random());
+const candidates = videoClips.filter(v =>
+  v.duration >= minDuration && v.duration <= maxDuration
+);
+const shuffled = candidates.sort(() => 0.5 - Math.random());
 for (let v of shuffled) {
   let best = (v.video_files || []).find(f =>
     f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
   ) || (v.video_files || [])[0];
-  if (best && best.link && v.duration >= 5) {
+  if (best && best.link) {
     files.push({ link: best.link, duration: v.duration });
     totalDuration += v.duration;
-    if (files.length >= maxClips || totalDuration >= 32) break;
+    if (files.length >= maxClips || totalDuration >= targetTotal) break;
   }
 }
-if (files.length < 3) {
-  // fallback: grab any
+if (files.length < 4) {
+  // fallback: grab any that are at least 4s long
   for (let v of videoClips) {
     let best = (v.video_files || []).find(f =>
       f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
     ) || (v.video_files || [])[0];
-    if (best && best.link) {
-      files.push({ link: best.link, duration: v.duration || 5 });
-      totalDuration += v.duration || 5;
-      if (files.length >= maxClips || totalDuration >= 32) break;
+    if (best && best.link && v.duration >= 4) {
+      files.push({ link: best.link, duration: v.duration });
+      totalDuration += v.duration;
+      if (files.length >= maxClips || totalDuration >= targetTotal) break;
     }
   }
 }
+
 if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
 
 
@@ -732,19 +736,21 @@ for (let i = 0; i < files.length; i++) {
 
 
     // Step 3: Generate AI script for correct duration (2.5 words/sec)
-    const wordsTarget = Math.round(totalDuration * 2.5);
-    const scriptPrompt = `
-Write a high-converting Facebook video ad script for a business in the "${industry}" industry. 
-The video is ${Math.round(totalDuration)} seconds long (${files.length} scenes/clips). 
-Your script should match the length (about ${wordsTarget} words), at a natural speaking pace. 
-Use ${files.length} "scenes"—one for each video clip, each scene can be 1–2 sentences. 
-End with a strong call to action. Use business info below.
 
-Business Details:
+    const scriptPrompt = `
+Write a high-converting spoken Facebook video ad script for a business in the "${industry}" industry. 
+The final video is about ${Math.round(totalDuration)} seconds long, made from ${files.length} stock video clips (each is 5–7 seconds). 
+The script should be natural, as if one person is speaking, with no scene numbers, no scene directions, and no director notes. 
+Use a friendly intro, 2–3 unique benefits, then a strong call to action at the end. 
+DO NOT mention scenes or clips—just write exactly what the voiceover should say, about ${wordsTarget} words for a 30s ad. 
+Business info below:
+
 ${Object.entries(answers || {}).map(([k, v]) => `${k}: ${v}`).join('\n')}
 Website: ${url}
-Output only the script, no extra words.
-    `.trim();
+
+Respond with ONLY the spoken script. Do NOT output any numbers, scene notes, or non-spoken text.
+`.trim();
+
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
