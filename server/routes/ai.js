@@ -667,7 +667,7 @@ router.post('/generate-video-ad', async (req, res) => {
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
-    // --- PEXELS VIDEO (3s timeout, only tiny videos) ---
+    // --- PEXELS VIDEO (3s timeout, flexible file selection) ---
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -680,33 +680,52 @@ router.post('/generate-video-ad', async (req, res) => {
       clearTimeout(timeout);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
+    console.log(`[Pexels API] Found ${videoClips.length} videos for "${searchTerm}"`);
+    if (videoClips.length > 0) {
+      // Log first 2 videos' mp4 links for debugging
+      videoClips.slice(0,2).forEach((v, i) => {
+        console.log(`Video #${i+1}:`, JSON.stringify((v.video_files || []).map(f => f.link), null, 2));
+      });
+    }
     if (!videoClips.length) {
       clearTimeout(timeout);
       return res.status(404).json({ error: "No stock videos found" });
     }
     if (timedOut) return;
 
-    // Pick 3–4 random clips, only "tiny" files, 4s each
+    // Pick 3–4 random clips, any .mp4 file, 3–9s each, target ~15s
     let files = [];
     let totalDuration = 0;
-    const maxClips = 4, minDur = 3, maxDur = 5, targetTotal = 15;
-
+    const maxClips = 4, minDur = 3, maxDur = 9, targetTotal = 15;
     const candidates = videoClips.filter(v =>
       v.duration >= minDur && v.duration <= maxDur
     );
     for (let v of candidates.sort(() => 0.5 - Math.random())) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'tiny' && f.link.endsWith('.mp4')
-      ) || (v.video_files || [])[0];
+      let best = (v.video_files || []).find(f => f.link.endsWith('.mp4'));
       if (best && best.link) {
         files.push({ link: best.link, duration: v.duration });
         totalDuration += v.duration;
         if (files.length >= maxClips || totalDuration >= targetTotal) break;
       }
     }
+    // Fallback: if nothing selected, grab *any* mp4 (first 2)
     if (!files.length) {
-      clearTimeout(timeout);
-      return res.status(500).json({ error: "No suitable MP4 clips found" });
+      let fallback = [];
+      for (let v of videoClips) {
+        let mp4 = (v.video_files || []).find(f => f.link.endsWith('.mp4'));
+        if (mp4) {
+          fallback.push({ link: mp4.link, duration: v.duration });
+          if (fallback.length >= 2) break;
+        }
+      }
+      if (fallback.length) {
+        files = fallback;
+        totalDuration = files.reduce((t, f) => t + f.duration, 0);
+        console.log("Falling back to basic MP4 selection:", files.map(f => f.link));
+      } else {
+        clearTimeout(timeout);
+        return res.status(500).json({ error: "No usable MP4 clips found after fallback", videoClips });
+      }
     }
 
     // Start downloads in parallel (short timeout per download)
@@ -799,5 +818,6 @@ ONLY output the spoken script. No notes, no numbers.
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 module.exports = router;
