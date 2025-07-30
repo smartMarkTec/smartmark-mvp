@@ -604,4 +604,171 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
   }
 });
 
+// ===== Music selection helper =====
+// Folder: /server/Music.  Music files should be named like: "pizza.mp3", "gym.mp3", etc.
+function pickMusicFile(keywords = []) {
+  // Try to find a matching music file by keyword
+  const musicDir = path.join(__dirname, '../Music');
+  if (!fs.existsSync(musicDir)) return null;
+  const files = fs.readdirSync(musicDir);
+  // Lowercase filenames for match
+  const filesLower = files.map(f => f.toLowerCase());
+  for (let kw of keywords.map(x => String(x).toLowerCase())) {
+    // Try exact match, then "contains"
+    let idx = filesLower.findIndex(f => f === `${kw}.mp3`);
+    if (idx !== -1) return path.join(musicDir, files[idx]);
+    idx = filesLower.findIndex(f => f.includes(kw) && f.endsWith('.mp3'));
+    if (idx !== -1) return path.join(musicDir, files[idx]);
+  }
+  // Default fallback (optional): first music file in folder
+  if (files.length > 0) return path.join(musicDir, files[0]);
+  return null;
+}
+
+// ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
+const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
+const TTS_VOICE = "alloy"; // OpenAI TTS voice. Others: 'echo', 'nova', 'fable', etc.
+
+const ffmpegPath = 'ffmpeg'; // assumes ffmpeg is installed and in $PATH
+const child_process = require('child_process');
+const util = require('util');
+const exec = util.promisify(child_process.exec);
+
+// Download helper
+async function downloadFile(url, dest) {
+  const writer = fs.createWriteStream(dest);
+  const response = await axios({ url, method: 'GET', responseType: 'stream' });
+  await new Promise((resolve, reject) => {
+    response.data.pipe(writer);
+    let error = null;
+    writer.on('error', err => { error = err; writer.close(); reject(err); });
+    writer.on('close', () => { if (!error) resolve(); });
+  });
+  return dest;
+}
+
+// Main video ad endpoint
+router.post('/generate-video-ad', async (req, res) => {
+  try {
+    const { url = "", industry = "", answers = {} } = req.body;
+
+    // Step 1: Generate keywords for stock videos
+    let videoKeywords = [];
+    if (industry) videoKeywords.push(industry);
+    if (url) {
+      try {
+        const websiteText = await getWebsiteText(url);
+        videoKeywords.push(...(await extractKeywords(websiteText)).slice(0, 2));
+      } catch (e) {}
+    }
+    if (answers && answers.industry) videoKeywords.push(answers.industry);
+
+    // Filter to unique non-empty, limit to 3
+    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
+    const searchTerm = videoKeywords[0] || 'business';
+
+    // Step 2: Search Pexels for video clips
+    let videoClips = [];
+    try {
+      const resp = await axios.get(PEXELS_VIDEO_BASE, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: searchTerm, per_page: 5 }
+      });
+      videoClips = resp.data.videos || [];
+    } catch (err) {
+      return res.status(500).json({ error: "Stock video fetch failed" });
+    }
+    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
+
+    // Pick up to 3 short (5–8s) videos, fallback to longest available
+    let files = [];
+    for (let v of videoClips.slice(0, 3)) {
+      let best = (v.video_files || []).find(f =>
+        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+      ) || (v.video_files || [])[0];
+      if (best) files.push(best.link);
+    }
+    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+
+    // Download videos locally
+    const tempDir = path.join(__dirname, '../tmp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const videoPaths = [];
+    for (let i = 0; i < files.length; i++) {
+      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+      await downloadFile(files[i], dest);
+      videoPaths.push(dest);
+    }
+
+    // Step 3: Generate AI script
+    let prompt = `Write a high-converting video ad script (max 70 words, 20–25 seconds) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
+
+    if (answers && Object.keys(answers).length) {
+      prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+    }
+    if (industry) prompt += `\nIndustry: ${industry}`;
+    if (url) prompt += `\nWebsite: ${url}`;
+    prompt += "\nOutput only the script. Don't say 'Here is the script.'";
+
+    const gptRes = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 150,
+      temperature: 0.6
+    });
+    const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
+
+    // Step 4: TTS Voiceover
+    const ttsRes = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: TTS_VOICE,
+      input: script
+    });
+    const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
+    const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
+    fs.writeFileSync(ttsPath, ttsBuffer);
+
+    // Step 5: Select background music based on keywords
+const musicPath = pickMusicFile(videoKeywords);
+// If you want to see what music file was picked:
+console.log("Music selected:", musicPath);
+
+    // Step 6: Concatenate video, overlay voiceover, export
+    // Make concat list file
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+
+    // Compose final video output path
+    const genDir = path.join(__dirname, '../public/generated');
+    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+    const videoId = uuidv4();
+    const outPath = path.join(genDir, `${videoId}.mp4`);
+
+    // Build ffmpeg concat command
+    // 1. Concatenate, 2. add voiceover as audio, 3. trim to max 30s
+    const ffmpegCmd = [
+  // 1. Concatenate all video clips
+  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+  // 2. If music exists, mix TTS and music (music volume lower); else, just TTS
+  musicPath
+    ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+];
+
+    for (let cmd of ffmpegCmd) await exec(cmd);
+
+    // Optionally: delete temp files
+    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+
+    // Step 7: Return public video URL and script
+    const publicUrl = `/generated/${videoId}.mp4`;
+    return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
+
+  } catch (err) {
+    console.error("Video generation error:", err.message, err?.response?.data || "");
+    return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
+  }
+});
+
+
 module.exports = router;
