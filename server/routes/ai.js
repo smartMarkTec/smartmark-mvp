@@ -47,7 +47,7 @@ router.post('/generate-ad-copy', async (req, res) => {
   if (!description && !businessName && !url) {
     return res.status(400).json({ error: "Please provide at least a description." });
   }
-  let prompt = `You are a world-class direct response copywriter. Write a short, high-converting Facebook ad based on the following description. Be direct, persuasive, no fluff.`;
+  let prompt = `Write only the exact words for a spoken video ad script for this business, no scene directions, no director notes, only what the voiceover should say. Script should be around 110–130 words, spoken naturally in 30 seconds. Make it friendly, confident, and include a brief intro, 2-3 unique benefits, and a call to action at the end. Respond with ONLY the script, nothing else.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite: ${url}`;
@@ -680,7 +680,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // ---- PICK 3-4 CLIPS TO TOTAL ~20 SECONDS ----
+    // ---- PICK 5-6 CLIPS TO TOTAL ~30 SECONDS ----
     function shuffle(arr) {
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -688,34 +688,48 @@ router.post('/generate-video-ad', async (req, res) => {
       }
       return arr;
     }
-    let pickedClips = [];
-    let totalDuration = 0;
-    const minClips = 3, maxClips = 4;
-    shuffle(videoClips);
+// ---- PICK 5-6 RANDOM CLIPS (prefer 6-8s each, for ~30s total) ----
+let files = [];
+let totalDuration = 0;
+let maxClips = 6;
 
-    for (let v of videoClips) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-      ) || (v.video_files || [])[0];
-      if (!best) continue;
-      let dur = v.duration || 0;
-      if (pickedClips.length < maxClips && (totalDuration + dur <= 23 || pickedClips.length < minClips)) {
-        pickedClips.push({ link: best.link, duration: dur });
-        totalDuration += dur;
-      }
-      if (pickedClips.length >= minClips && totalDuration >= 18) break;
+const shuffled = videoClips.sort(() => 0.5 - Math.random());
+for (let v of shuffled) {
+  let best = (v.video_files || []).find(f =>
+    f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+  ) || (v.video_files || [])[0];
+  if (best && best.link && v.duration >= 5) {
+    files.push({ link: best.link, duration: v.duration });
+    totalDuration += v.duration;
+    if (files.length >= maxClips || totalDuration >= 32) break;
+  }
+}
+if (files.length < 3) {
+  // fallback: grab any
+  for (let v of videoClips) {
+    let best = (v.video_files || []).find(f =>
+      f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+    ) || (v.video_files || [])[0];
+    if (best && best.link) {
+      files.push({ link: best.link, duration: v.duration || 5 });
+      totalDuration += v.duration || 5;
+      if (files.length >= maxClips || totalDuration >= 32) break;
     }
-    if (pickedClips.length < minClips) return res.status(500).json({ error: "Not enough video content" });
+  }
+}
+if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+
 
     // Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    const videoPaths = [];
-    for (let i = 0; i < pickedClips.length; i++) {
-      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(pickedClips[i].link, dest);
-      videoPaths.push(dest);
-    }
+   const videoPaths = [];
+for (let i = 0; i < files.length; i++) {
+  const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+  await downloadFile(files[i].link, dest);
+  videoPaths.push(dest);
+}
+
 
     // Step 3: Generate AI script for correct duration (2.5 words/sec)
     const wordsTarget = Math.round(totalDuration * 2.5);
@@ -764,13 +778,12 @@ Output only the script, no extra words.
 
     // Always mix music (volume 0.22) with TTS (volume 1.18), final length matches video clips
     const ffmpegCmd = [
-      // 1. Concatenate all video clips
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      // 2. Mix voice and music, add to video, limit to final video length
-      musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
+  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+  musicPath
+    ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 30 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 30 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+];
+
 
     for (let cmd of ffmpegCmd) await exec(cmd);
 
