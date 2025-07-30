@@ -650,7 +650,7 @@ async function downloadFile(url, dest) {
 // Main video ad endpoint
 router.post('/generate-video-ad', async (req, res) => {
   try {
-    const { url = "", industry = "", answers = {} } = req.body;
+    const { url = "", industry = "", answers = "", regenerateToken = "" } = req.body;
 
     // Step 1: Generate keywords for stock videos
     let videoKeywords = [];
@@ -663,16 +663,16 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (answers && answers.industry) videoKeywords.push(answers.industry);
 
-    // Filter to unique non-empty, limit to 3
+    // Filter unique, limit to 3
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
-    // Step 2: Search Pexels for video clips
+    // Step 2: Search Pexels for 8+ video clips to allow more randomness
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 5 }
+        params: { query: searchTerm, per_page: 10, cb: Date.now() + (regenerateToken || "") }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
@@ -680,9 +680,19 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // Pick up to 3 short (5–8s) videos, fallback to longest available
+    // ---- PICK 3-4 RANDOM CLIPS (prefer 5–8s, fallback to any) ----
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+    const shuffled = shuffle([...videoClips]);
+    const pickedClips = shuffled.slice(0, 4);
+
     let files = [];
-    for (let v of videoClips.slice(0, 3)) {
+    for (let v of pickedClips) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
@@ -700,8 +710,8 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // Step 3: Generate AI script
-    let prompt = `Write a high-converting video ad script (max 70 words, 20–25 seconds) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
+    // Step 3: Generate AI script (length for 20s+)
+    let prompt = `Write a high-converting video ad script (max 75 words, aim for 20-23 seconds spoken at a human pace). Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
 
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -713,8 +723,8 @@ router.post('/generate-video-ad', async (req, res) => {
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 150,
-      temperature: 0.6
+      max_tokens: 180,
+      temperature: 0.7
     });
     const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
 
@@ -729,38 +739,32 @@ router.post('/generate-video-ad', async (req, res) => {
     fs.writeFileSync(ttsPath, ttsBuffer);
 
     // Step 5: Select background music based on keywords
-const musicPath = pickMusicFile(videoKeywords);
-// If you want to see what music file was picked:
-console.log("Music selected:", musicPath);
+    const musicPath = pickMusicFile(videoKeywords);
 
-    // Step 6: Concatenate video, overlay voiceover, export
-    // Make concat list file
+    // Step 6: Concatenate video, overlay voiceover + music, export
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    // Compose final video output path
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // Build ffmpeg concat command
-    // 1. Concatenate, 2. add voiceover as audio, 3. trim to max 30s
+    // Always mix music (volume 0.22) with TTS (volume 1.18), final length 20s
     const ffmpegCmd = [
-  // 1. Concatenate all video clips
-  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-  // 2. If music exists, mix TTS and music (music volume lower); else, just TTS
-  musicPath
-    ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-];
+      // 1. Concatenate all video clips
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+      // 2. Mix voice and music, add to video, limit to 20s
+      musicPath
+        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    ];
 
     for (let cmd of ffmpegCmd) await exec(cmd);
 
-    // Optionally: delete temp files
+    // Delete temp
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Step 7: Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
