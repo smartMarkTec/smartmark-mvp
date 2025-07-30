@@ -282,8 +282,8 @@ export default function FormPage() {
   const [imageUrl, setImageUrl] = useState("");
   const [imageLoading, setImageLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
-const [videoScript, setVideoScript] = useState("");
-const [videoLoading, setVideoLoading] = useState(false);
+  const [videoScript, setVideoScript] = useState("");
+  const [videoLoading, setVideoLoading] = useState(false);
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
@@ -341,22 +341,53 @@ const [videoLoading, setVideoLoading] = useState(false);
     setTouched(true);
   };
 
-   // -----------------------
-  // MAIN AI GENERATE BUTTON
+  // -----------------------
+  // MAIN AI GENERATE BUTTON (image + video parallel)
   // -----------------------
   const handleGenerate = async () => {
     setLoading(true);
     setResult(null);
     setImageUrl("");
+    setVideoUrl("");
+    setVideoScript("");
     setError("");
+    setImageLoading(true);
+    setVideoLoading(true);
+
     try {
       const toSend = { ...answers };
-      const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
+      const token = getRandomString();
+      setLastRegenerateToken(token);
+
+      // Requests in parallel
+      const adCopyPromise = fetch(`${API_BASE}/generate-campaign-assets`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers: toSend, url: answers.url || "" })
-      });
-      const data = await res.json();
+      }).then(res => res.json());
+
+      const imgPromise = fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
+        })
+      }).then(res => res.json());
+
+      const videoPromise = fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answers,
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
+        }),
+      }).then(res => res.json());
+
+      const [data, imgData, videoData] = await Promise.all([adCopyPromise, imgPromise, videoPromise]);
 
       // Store overlay text as well
       setResult({
@@ -365,23 +396,8 @@ const [videoLoading, setVideoLoading] = useState(false);
         image_overlay_text: data.image_overlay_text || ""
       });
 
-      // Step 1: Generate a new stock image
-      setImageLoading(true);
-      const token = getRandomString();
-      setLastRegenerateToken(token);
-      const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers.url || "",
-          industry: answers.industry || "",
-          regenerateToken: token
-        })
-      });
-      const imgData = await imgRes.json();
-      const stockImageUrl = imgData.imageUrl || "";
-
-      // Step 2: Always generate overlay if we have an image
+      // Step 1: Set image
+      let stockImageUrl = imgData.imageUrl || "";
       if (stockImageUrl) {
         const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
           method: "POST",
@@ -399,15 +415,22 @@ const [videoLoading, setVideoLoading] = useState(false);
         setImageUrl(stockImageUrl);
       }
       setImageLoading(false);
+
+      // Step 2: Set video
+      if (videoData.videoUrl) setVideoUrl(videoData.videoUrl.startsWith("http") ? videoData.videoUrl : BACKEND_URL + videoData.videoUrl);
+      setVideoScript(videoData.script || "");
+      setVideoLoading(false);
+
     } catch (err) {
       setError("Failed to generate campaign: " + (err.message || ""));
-      setLoading(false);
+      setImageLoading(false);
+      setVideoLoading(false);
     }
     setLoading(false);
   };
 
   // -----------------------
-  // VIDEO AD GENERATION BUTTON
+  // VIDEO AD GENERATION BUTTON (no change)
   // -----------------------
   const handleGenerateVideo = async () => {
     setVideoLoading(true);
@@ -502,6 +525,7 @@ const [videoLoading, setVideoLoading] = useState(false);
     setModalImg("");
   };
 
+  // ...rest of your component code (JSX return, etc) unchanged...
   return (
   <div
     style={{
