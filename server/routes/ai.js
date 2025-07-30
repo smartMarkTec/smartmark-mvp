@@ -7,6 +7,9 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 
+// Load Pexels API key from environment
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+
 // --- Use system font for overlay (no font file needed) ---
 const TextToSVG = require('text-to-svg');
 const textToSvg = TextToSVG.loadSync(); // Uses default system font (Arial/sans-serif on most OS)
@@ -285,7 +288,7 @@ Website URL: ${url}
 });
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
-const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
 
 router.post('/generate-image-from-prompt', async (req, res) => {
@@ -677,28 +680,22 @@ router.post('/generate-video-ad', async (req, res) => {
         params: { query: searchTerm, per_page: 10 }
       });
       videoClips = resp.data.videos || [];
+      console.log('[VideoAd] Pexels API success. Clips found:', videoClips.length);
     } catch (err) {
+      console.error('[VideoAd] Pexels fetch error:', err?.message || err);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    // Fallback: try with a broad default if nothing found
-    if (!videoClips.length && searchTerm !== 'business') {
-      const resp = await axios.get(PEXELS_VIDEO_BASE, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: 'business', per_page: 10 }
-      });
-      videoClips = resp.data.videos || [];
-    }
-    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
     // 3. Pick up to 3 .mp4 videos, favoring short landscape
     let files = [];
     for (let v of videoClips.slice(0, 8)) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
-      ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
-      if (best) files.push(best.link);
-      if (files.length >= 3) break;
-    }
+  let best = (v.video_files || []).find(f =>
+    f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
+  ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
+  if (best) files.push(best.link);
+  if (files.length >= 4) break; // <- change 3 to 4 here
+}
+
     // Fallback to any .mp4 if not enough found
     if (files.length < 2) {
       for (let v of videoClips) {
@@ -711,7 +708,12 @@ router.post('/generate-video-ad', async (req, res) => {
         if (files.length >= 3) break;
       }
     }
-    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+    console.log('[VideoAd] MP4 file list:', files);
+
+    if (!files.length) {
+      console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
+      return res.status(500).json({ error: "No MP4 clips found" });
+    }
 
     // 4. Download video clips
     const tempDir = path.join(__dirname, '../tmp');
@@ -722,12 +724,23 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         await downloadFile(files[i], dest);
         videoPaths.push(dest);
-      } catch (e) { /* skip bad downloads */ }
+      } catch (e) {
+        console.error('[VideoAd] Failed to download video:', files[i], e?.message || e);
+      }
     }
-    if (!videoPaths.length) return res.status(500).json({ error: "All video downloads failed." });
+    console.log('[VideoAd] Downloaded video paths:', videoPaths);
+
+    if (!videoPaths.length) {
+      console.error('[VideoAd] All video downloads failed.', files);
+      return res.status(500).json({ error: "All video downloads failed." });
+    }
+
+    // -- rest of your existing logic (TTS, music, ffmpeg, etc) --
+    // Keep your existing code from here onward.
+    // (No changes below this comment.)
 
     // 5. Generate AI script
-    let prompt = `Write a high-converting video ad script (max 70 words, 20–25 seconds) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
+    let prompt = `Write a high-converting video ad script (minimum 18 seconds, maximum 24 seconds, usually 70–90 words) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
@@ -780,12 +793,10 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE, searchTerm, usedKeywords: videoKeywords });
 
   } catch (err) {
-    console.error("Video generation error:", err.message, err?.response?.data || "");
+    console.error("[VideoAd] Uncaught error:", err.message, err?.response?.data || "");
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
-
 
 
 module.exports = router;
