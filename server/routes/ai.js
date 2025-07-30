@@ -686,15 +686,6 @@ try {
   return res.status(500).json({ error: "Stock video fetch failed" });
 }
 
-// --- SHUFFLE THE ORDER ---
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-}
-shuffleArray(videoClips);
-
 // 3. Pick exactly 4 random .mp4 videos, favoring short landscape
 function shuffle(arr) {
   for (let i = arr.length - 1; i > 0; i--) {
@@ -808,12 +799,16 @@ Output only the script, nothing else.`;
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    const ffmpegCmd = [
-  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+   const ffmpegCmd = [
+  // Step 1: Concat segments and re-encode for guaranteed total length
+  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${outPath}.temp.mp4"`,
+
+  // Step 2: Overlay TTS (voice) and (optional) music, and limit final to 16.5s
   musicPath
     ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
 ];
+
     for (let cmd of ffmpegCmd) await exec(cmd);
 
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
