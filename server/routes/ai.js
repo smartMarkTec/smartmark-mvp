@@ -798,11 +798,11 @@ Output only the script, nothing else.`;
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
     const ffmpegCmd = [
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 17.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
+  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+  musicPath
+    ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+];
     for (let cmd of ffmpegCmd) await exec(cmd);
 
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
