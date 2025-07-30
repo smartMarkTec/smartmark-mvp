@@ -667,12 +667,12 @@ router.post('/generate-video-ad', async (req, res) => {
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
-    // Step 2: Search Pexels for 8+ video clips to allow more randomness
+    // Step 2: Search Pexels for videos
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 10, cb: Date.now() + (regenerateToken || "") }
+        params: { query: searchTerm, per_page: 15, cb: Date.now() + (regenerateToken || "") }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
@@ -680,7 +680,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // ---- PICK 3-4 RANDOM CLIPS (prefer 5–8s, fallback to any) ----
+    // ---- PICK 3-4 CLIPS TO TOTAL ~20 SECONDS ----
     function shuffle(arr) {
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -688,42 +688,54 @@ router.post('/generate-video-ad', async (req, res) => {
       }
       return arr;
     }
-    const shuffled = shuffle([...videoClips]);
-    const pickedClips = shuffled.slice(0, 4);
+    let pickedClips = [];
+    let totalDuration = 0;
+    const minClips = 3, maxClips = 4;
+    shuffle(videoClips);
 
-    let files = [];
-    for (let v of pickedClips) {
+    for (let v of videoClips) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
-      if (best) files.push(best.link);
+      if (!best) continue;
+      let dur = v.duration || 0;
+      if (pickedClips.length < maxClips && (totalDuration + dur <= 23 || pickedClips.length < minClips)) {
+        pickedClips.push({ link: best.link, duration: dur });
+        totalDuration += dur;
+      }
+      if (pickedClips.length >= minClips && totalDuration >= 18) break;
     }
-    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+    if (pickedClips.length < minClips) return res.status(500).json({ error: "Not enough video content" });
 
     // Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
-    for (let i = 0; i < files.length; i++) {
+    for (let i = 0; i < pickedClips.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(files[i], dest);
+      await downloadFile(pickedClips[i].link, dest);
       videoPaths.push(dest);
     }
 
-    // Step 3: Generate AI script (length for 20s+)
-    let prompt = `Write a high-converting video ad script (max 75 words, aim for 20-23 seconds spoken at a human pace). Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
+    // Step 3: Generate AI script for correct duration (2.5 words/sec)
+    const wordsTarget = Math.round(totalDuration * 2.5);
+    const scriptPrompt = `
+Write a high-converting Facebook video ad script for a business in the "${industry}" industry. 
+The video is ${Math.round(totalDuration)} seconds long (${pickedClips.length} scenes/clips). 
+Your script should match the length (about ${wordsTarget} words), at a natural speaking pace. 
+Use ${pickedClips.length} "scenes"—one for each video clip, each scene can be 1–2 sentences. 
+End with a strong call to action. Use business info below.
 
-    if (answers && Object.keys(answers).length) {
-      prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-    }
-    if (industry) prompt += `\nIndustry: ${industry}`;
-    if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nOutput only the script. Don't say 'Here is the script.'";
+Business Details:
+${Object.entries(answers || {}).map(([k, v]) => `${k}: ${v}`).join('\n')}
+Website: ${url}
+Output only the script, no extra words.
+    `.trim();
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 180,
+      messages: [{ role: 'user', content: scriptPrompt }],
+      max_tokens: 210,
       temperature: 0.7
     });
     const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
@@ -750,14 +762,14 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // Always mix music (volume 0.22) with TTS (volume 1.18), final length 20s
+    // Always mix music (volume 0.22) with TTS (volume 1.18), final length matches video clips
     const ffmpegCmd = [
       // 1. Concatenate all video clips
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      // 2. Mix voice and music, add to video, limit to 20s
+      // 2. Mix voice and music, add to video, limit to final video length
       musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
 
     for (let cmd of ffmpegCmd) await exec(cmd);
@@ -773,6 +785,7 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
