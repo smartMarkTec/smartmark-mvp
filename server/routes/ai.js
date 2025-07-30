@@ -737,6 +737,7 @@ for (let i = 0; i < files.length; i++) {
 
     // Step 3: Generate AI script for correct duration (2.5 words/sec)
 
+    const wordsTarget = Math.round(totalDuration * 2.5);
     const scriptPrompt = `
 Write a high-converting spoken Facebook video ad script for a business in the "${industry}" industry. 
 The final video is about ${Math.round(totalDuration)} seconds long, made from ${files.length} stock video clips (each is 5–7 seconds). 
