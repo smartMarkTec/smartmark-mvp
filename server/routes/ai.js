@@ -735,9 +735,9 @@ for (let i = 0; i < files.length; i++) {
     const wordsTarget = Math.round(totalDuration * 2.5);
     const scriptPrompt = `
 Write a high-converting Facebook video ad script for a business in the "${industry}" industry. 
-The video is ${Math.round(totalDuration)} seconds long (${pickedClips.length} scenes/clips). 
+The video is ${Math.round(totalDuration)} seconds long (${files.length} scenes/clips). 
 Your script should match the length (about ${wordsTarget} words), at a natural speaking pace. 
-Use ${pickedClips.length} "scenes"—one for each video clip, each scene can be 1–2 sentences. 
+Use ${files.length} "scenes"—one for each video clip, each scene can be 1–2 sentences. 
 End with a strong call to action. Use business info below.
 
 Business Details:
