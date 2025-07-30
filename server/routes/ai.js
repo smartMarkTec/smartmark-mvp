@@ -799,3 +799,5 @@ ONLY output the spoken script. No notes, no numbers.
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
+module.exports = router;
