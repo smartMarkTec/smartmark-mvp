@@ -673,21 +673,37 @@ router.post('/generate-video-ad', async (req, res) => {
     const searchTerm = videoKeywords[0] || 'business';
 
     // 2. Search Pexels for video clips
-    let videoClips = [];
-    try {
-      const resp = await axios.get(PEXELS_VIDEO_BASE, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 10 }
-      });
-      videoClips = resp.data.videos || [];
-      console.log('[VideoAd] Pexels API success. Clips found:', videoClips.length);
-    } catch (err) {
-      console.error('[VideoAd] Pexels fetch error:', err?.message || err);
-      return res.status(500).json({ error: "Stock video fetch failed" });
-    }
-    
+let videoClips = [];
+try {
+  const resp = await axios.get(PEXELS_VIDEO_BASE, {
+    headers: { Authorization: PEXELS_API_KEY },
+    params: { query: searchTerm, per_page: 10 }
+  });
+  videoClips = resp.data.videos || [];
+  console.log('[VideoAd] Pexels API success. Clips found:', videoClips.length);
+} catch (err) {
+  console.error('[VideoAd] Pexels fetch error:', err?.message || err);
+  return res.status(500).json({ error: "Stock video fetch failed" });
+}
 
-    // 3. Pick exactly 4 .mp4 videos, favoring short landscape
+// --- SHUFFLE THE ORDER ---
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+shuffleArray(videoClips);
+
+// 3. Pick exactly 4 random .mp4 videos, favoring short landscape
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+shuffle(videoClips);
+
 let files = [];
 for (let v of videoClips) {
   let best = (v.video_files || []).find(f =>
@@ -716,29 +732,24 @@ if (!files.length) {
   return res.status(500).json({ error: "No MP4 clips found" });
 }
 
-// 4. Download and trim each video to exactly 1/4 of total ad length
+// 4. Download and trim each video to exactly 4.125 seconds (for total 16.5s)
+const TOTAL_DURATION = 16.5;
+const SEGMENT_DURATION = TOTAL_DURATION / 4;
 const tempDir = path.join(__dirname, '../tmp');
 if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 const videoPaths = [];
 for (let i = 0; i < files.length; i++) {
   const dest = path.join(tempDir, `${uuidv4()}.mp4`);
   await downloadFile(files[i], dest);
-  videoPaths.push(dest);
-}
 
-// ===== Trim each segment to 4.125 seconds (for ~16.5s ad) =====
-const TOTAL_DURATION = 16.5;
-const SEGMENT_DURATION = TOTAL_DURATION / 4;
-const trimmedPaths = [];
-for (let i = 0; i < videoPaths.length; i++) {
+  // Trim & pad to SEGMENT_DURATION using re-encode for precision
   const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
-  await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${SEGMENT_DURATION} -c copy "${trimmed}"`);
-  trimmedPaths.push(trimmed);
+  await exec(`${ffmpegPath} -y -i "${dest}" -t ${SEGMENT_DURATION} -vf "tpad=stop_mode=clone:stop_duration=${SEGMENT_DURATION}" -c:v libx264 -c:a aac -b:a 192k "${trimmed}"`);
+  videoPaths.push(trimmed);
 }
-videoPaths.length = 0;
-videoPaths.push(...trimmedPaths);
 
-    console.log('[VideoAd] Downloaded video paths:', videoPaths);
+console.log('[VideoAd] Downloaded and trimmed video paths:', videoPaths);
+
 
     if (!videoPaths.length) {
       console.error('[VideoAd] All video downloads failed.', files);
