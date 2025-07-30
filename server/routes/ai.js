@@ -685,49 +685,59 @@ router.post('/generate-video-ad', async (req, res) => {
       console.error('[VideoAd] Pexels fetch error:', err?.message || err);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
+    
 
-    // 3. Pick up to 3 .mp4 videos, favoring short landscape
-    let files = [];
-    for (let v of videoClips.slice(0, 8)) {
+    // 3. Pick exactly 4 .mp4 videos, favoring short landscape
+let files = [];
+for (let v of videoClips) {
   let best = (v.video_files || []).find(f =>
     f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
   ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
   if (best) files.push(best.link);
-  if (files.length >= 4) break; // <- change 3 to 4 here
+  if (files.length >= 4) break;
+}
+if (files.length < 4) {
+  for (let v of videoClips) {
+    for (let f of (v.video_files || [])) {
+      if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
+        files.push(f.link);
+        if (files.length >= 4) break;
+      }
+    }
+    if (files.length >= 4) break;
+  }
+}
+files = files.slice(0, 4); // always exactly 4
+
+console.log('[VideoAd] MP4 file list:', files);
+
+if (!files.length) {
+  console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
+  return res.status(500).json({ error: "No MP4 clips found" });
 }
 
-    // Fallback to any .mp4 if not enough found
-    if (files.length < 2) {
-      for (let v of videoClips) {
-        for (let f of (v.video_files || [])) {
-          if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
-            files.push(f.link);
-            if (files.length >= 3) break;
-          }
-        }
-        if (files.length >= 3) break;
-      }
-    }
-    console.log('[VideoAd] MP4 file list:', files);
+// 4. Download and trim each video to exactly 1/4 of total ad length
+const tempDir = path.join(__dirname, '../tmp');
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+const videoPaths = [];
+for (let i = 0; i < files.length; i++) {
+  const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+  await downloadFile(files[i], dest);
+  videoPaths.push(dest);
+}
 
-    if (!files.length) {
-      console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
-      return res.status(500).json({ error: "No MP4 clips found" });
-    }
+// ===== Trim each segment to 4.125 seconds (for ~16.5s ad) =====
+const TOTAL_DURATION = 16.5;
+const SEGMENT_DURATION = TOTAL_DURATION / 4;
+const trimmedPaths = [];
+for (let i = 0; i < videoPaths.length; i++) {
+  const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
+  await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${SEGMENT_DURATION} -c copy "${trimmed}"`);
+  trimmedPaths.push(trimmed);
+}
+videoPaths.length = 0;
+videoPaths.push(...trimmedPaths);
 
-    // 4. Download video clips
-    const tempDir = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    const videoPaths = [];
-    for (let i = 0; i < files.length; i++) {
-      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      try {
-        await downloadFile(files[i], dest);
-        videoPaths.push(dest);
-      } catch (e) {
-        console.error('[VideoAd] Failed to download video:', files[i], e?.message || e);
-      }
-    }
     console.log('[VideoAd] Downloaded video paths:', videoPaths);
 
     if (!videoPaths.length) {
@@ -740,7 +750,15 @@ router.post('/generate-video-ad', async (req, res) => {
     // (No changes below this comment.)
 
     // 5. Generate AI script
-    let prompt = `Write a high-converting video ad script (minimum 18 seconds, maximum 24 seconds, usually 70–90 words) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
+    // 5. Generate AI script
+let prompt = `Write a high-converting video ad script for this business. 
+Strict rules:
+- Spoken aloud in 15 to 18 seconds (about 40–55 spoken words, not more).
+- The voiceover must fill 15–18 seconds at a normal talking pace.
+- Brief intro, 2–3 unique benefits, clear call to action.
+- Sound friendly, confident, and human.
+Output only the script, nothing else.`;
+
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
@@ -782,7 +800,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
       musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 17.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
         : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 20 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
     for (let cmd of ffmpegCmd) await exec(cmd);
