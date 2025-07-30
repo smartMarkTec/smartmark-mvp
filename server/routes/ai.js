@@ -647,17 +647,14 @@ async function downloadFile(url, dest) {
 }
 
 router.post('/generate-video-ad', async (req, res) => {
-  // --- Timeout guard ---
   let timedOut = false;
   const timeout = setTimeout(() => {
     timedOut = true;
     res.status(504).json({ error: "Video generation timed out (server busy)" });
-  }, 25000);
+  }, 12000); // 12 seconds hard timeout
 
   try {
     const { url = "", industry = "", answers = "", regenerateToken = "" } = req.body;
-
-    // Step 1: Generate keywords for stock videos
     let videoKeywords = [];
     if (industry) videoKeywords.push(industry);
     if (url) {
@@ -667,17 +664,16 @@ router.post('/generate-video-ad', async (req, res) => {
       } catch (e) {}
     }
     if (answers && answers.industry) videoKeywords.push(answers.industry);
-
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
-    // Step 2: Search Pexels for videos (5s timeout)
+    // --- PEXELS VIDEO (3s timeout, only tiny videos) ---
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 15, cb: Date.now() + (regenerateToken || "") },
-        timeout: 5000
+        params: { query: searchTerm, per_page: 10, cb: Date.now() + (regenerateToken || "") },
+        timeout: 3000
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
@@ -690,18 +686,17 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (timedOut) return;
 
-    // ---- PICK 5-6 RANDOM CLIPS (5-7s each, ~30s total) ----
+    // Pick 3–4 random clips, only "tiny" files, 4s each
     let files = [];
     let totalDuration = 0;
-    const minDuration = 5, maxDuration = 7, maxClips = 6, targetTotal = 30;
+    const maxClips = 4, minDur = 3, maxDur = 5, targetTotal = 15;
 
     const candidates = videoClips.filter(v =>
-      v.duration >= minDuration && v.duration <= maxDuration
+      v.duration >= minDur && v.duration <= maxDur
     );
-    const shuffled = candidates.sort(() => 0.5 - Math.random());
-    for (let v of shuffled) {
+    for (let v of candidates.sort(() => 0.5 - Math.random())) {
       let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+        f.quality === 'tiny' && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
       if (best && best.link) {
         files.push({ link: best.link, duration: v.duration });
@@ -709,60 +704,58 @@ router.post('/generate-video-ad', async (req, res) => {
         if (files.length >= maxClips || totalDuration >= targetTotal) break;
       }
     }
-    if (files.length < 4) {
-      for (let v of videoClips) {
-        let best = (v.video_files || []).find(f =>
-          f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-        ) || (v.video_files || [])[0];
-        if (best && best.link && v.duration >= 4) {
-          files.push({ link: best.link, duration: v.duration });
-          totalDuration += v.duration;
-          if (files.length >= maxClips || totalDuration >= targetTotal) break;
-        }
-      }
-    }
     if (!files.length) {
       clearTimeout(timeout);
-      return res.status(500).json({ error: "No MP4 clips found" });
+      return res.status(500).json({ error: "No suitable MP4 clips found" });
     }
-    if (timedOut) return;
 
-    // Download videos locally (parallel & fast)
+    // Start downloads in parallel (short timeout per download)
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    const videoPromises = files.map((f) => {
+    const videoPromises = files.map(f => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      return downloadFile(f.link, dest).then(() => dest);
+      return downloadFile(f.link, dest)
+        .then(() => dest)
+        .catch(() => null);
     });
-    const videoPaths = await Promise.all(videoPromises);
-    if (timedOut) return;
 
-    // Step 3: Generate AI script for correct duration (2.5 words/sec)
-    const wordsTarget = Math.round(totalDuration * 2.5);
+    // While downloading videos, start GPT and TTS in parallel
+    const wordsTarget = Math.round(totalDuration * 2.4);
     const scriptPrompt = `
 Write a high-converting spoken Facebook video ad script for a business in the "${industry}" industry. 
-The final video is about ${Math.round(totalDuration)} seconds long, made from ${files.length} stock video clips (each is 5–7 seconds). 
-The script should be natural, as if one person is speaking, with no scene numbers, no scene directions, and no director notes. 
-Use a friendly intro, 2–3 unique benefits, then a strong call to action at the end. 
-DO NOT mention scenes or clips—just write exactly what the voiceover should say, about ${wordsTarget} words for a 30s ad. 
+The final video is about ${Math.round(totalDuration)} seconds long. Do NOT mention scenes or directions, just exactly what the voiceover should say, about ${wordsTarget} words for a 15s ad. 
 Business info below:
 
 ${Object.entries(answers || {}).map(([k, v]) => `${k}: ${v}`).join('\n')}
 Website: ${url}
 
-Respond with ONLY the spoken script. Do NOT output any numbers, scene notes, or non-spoken text.
+ONLY output the spoken script. No notes, no numbers.
 `.trim();
 
-    const gptRes = await openai.chat.completions.create({
+    const gptPromise = openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: scriptPrompt }],
-      max_tokens: 210,
+      max_tokens: 120,
       temperature: 0.7
-    });
-    if (timedOut) return;
-    const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
+    }).then(gptRes =>
+      gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!"
+    ).catch(() => "Ready to level up your business? Book now!");
 
-    // Step 4: TTS Voiceover
+    // Wait for videos and GPT in parallel
+    const [videoPathsRaw, script] = await Promise.all([
+      Promise.all(videoPromises),
+      gptPromise
+    ]);
+    if (timedOut) return;
+
+    // Filter out failed downloads, must have at least 2 clips
+    const videoPaths = videoPathsRaw.filter(Boolean).slice(0, 4);
+    if (videoPaths.length < 2) {
+      clearTimeout(timeout);
+      return res.status(500).json({ error: "Not enough video clips downloaded" });
+    }
+
+    // Step 4: TTS
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -773,30 +766,27 @@ Respond with ONLY the spoken script. Do NOT output any numbers, scene notes, or 
     fs.writeFileSync(ttsPath, ttsBuffer);
     if (timedOut) return;
 
-    // Step 5: Select background music based on keywords
+    // Step 5: Music
     const musicPath = pickMusicFile(videoKeywords);
 
-    // Step 6: Concatenate video, overlay voiceover + music, export
+    // Step 6: FFmpeg
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
-
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
+    const finalLength = Math.min(targetTotal, totalDuration);
 
-    // Always mix music (volume 0.22) with TTS (volume 1.18), final length matches video clips
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
       musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 30 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 30 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.18[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t ${finalLength} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`
+        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalLength} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`
     ];
-
     for (let cmd of ffmpegCmd) await exec(cmd);
     if (timedOut) return;
 
-    // Delete temp files
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     const publicUrl = `/generated/${videoId}.mp4`;
@@ -809,5 +799,3 @@ Respond with ONLY the spoken script. Do NOT output any numbers, scene notes, or 
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
-module.exports = router;
