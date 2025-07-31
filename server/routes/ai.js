@@ -652,7 +652,7 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", industry = "", answers = {} } = req.body;
 
-    // 1. Advanced search terms – supports ecom and ALL industries
+    // 1. Keywords
     let baseKeywords = [];
     if (industry) baseKeywords.push(industry);
     if (answers && answers.industry) baseKeywords.push(answers.industry);
@@ -661,7 +661,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const isEcom = (kw) =>
       /e-?commerce|online shop|shopify|store|cart|woocommerce|product|merch|retail|sale|boutique/i.test(kw);
 
-    // Industry map – covers common verticals AND e-commerce
+    // Industry map
     const industryMap = {
       dentist: ["dentist", "teeth", "dental", "smile", "tooth"],
       fitness: ["fitness", "workout", "gym", "exercise", "trainer"],
@@ -680,11 +680,10 @@ router.post('/generate-video-ad', async (req, res) => {
       else if (industryMap[key]) searchTerms.push(...industryMap[key]);
       else searchTerms.push(key);
     });
-    // Always include "business", "company", "brand" as last resort
     searchTerms.push("business", "company", "brand");
     searchTerms = Array.from(new Set(searchTerms)).slice(0, 8);
 
-    // 2. Search Pexels for videos, grab up to 3 × 5-8s clips, fallback as needed
+    // 2. Search for videos (try to get at least 3 × 5-8s clips)
     let videoClips = [];
     let attempts = 0;
     for (let term of searchTerms) {
@@ -707,7 +706,7 @@ router.post('/generate-video-ad', async (req, res) => {
       attempts++;
       if (attempts >= 10) break;
     }
-    // Fallback: if still not enough, grab *any* available, shortest first
+    // Fallback: if still not enough, grab *any* available
     if (videoClips.length < 3) {
       const fallbackTerm = searchTerms[0] || industry || "business";
       try {
@@ -721,16 +720,18 @@ router.post('/generate-video-ad', async (req, res) => {
           );
           return !!file;
         });
-        // Shortest clips first, up to needed
         found = found.sort((a, b) => a.duration - b.duration).slice(0, 3 - videoClips.length);
         videoClips.push(...found);
       } catch (e) {}
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick up to 3 video clips, ~5-8s each
+    // 3. Pick up to 3 video clips, pad with repeats if needed
     let files = [];
-    for (let v of videoClips.slice(0, 3)) {
+    let picked = videoClips.slice(0, 3);
+    while (picked.length < 3 && picked.length > 0) picked.push(picked[0]); // pad/repeat first clip
+    if (!picked.length) picked = [videoClips[0]];
+    for (let v of picked) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
@@ -748,16 +749,16 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // 5. Generate script for correct total length (clips × 5s, ~1.1 words/sec)
-    const totalDuration = Math.max(15, 5 * files.length); // e.g. 3 clips = 15s
-    let prompt = `Write a high-converting video ad script for an online business or e-commerce store (if relevant), or any business type otherwise. The script should be a natural voiceover for a ${totalDuration}-second video (max ${Math.round(totalDuration * 1.1)} words). Friendly, confident, real. Brief intro, 2–3 benefits, strong call to action at the end.`;
+    // 5. Script: Always match to 15–18s (clip count × 6s, min 15)
+    const totalDuration = Math.max(15, Math.min(18, 6 * files.length));
+    let prompt = `Write a high-converting video ad script for an online business, e-commerce store, or any business type. Script should be a natural voiceover for a ${totalDuration}-second video (max ${Math.round(totalDuration * 1.1)} words). Friendly, confident, real. Brief intro, 2–3 benefits, strong call to action at the end.`;
 
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
     if (industry) prompt += `\nIndustry: ${industry}`;
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += `\nOutput only the script, with NO intro or outro phrases. Do not say 'Here is the script.'`;
+    prompt += `\nOutput only the script, NO intro/outro text.`;
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -767,7 +768,7 @@ router.post('/generate-video-ad', async (req, res) => {
     });
     const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
 
-    // 6. Generate TTS voiceover (OpenAI)
+    // 6. TTS voiceover
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -787,7 +788,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to totalDuration
+    // FFmpeg: always trim/pad to min 15s, max 18s
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
       `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
@@ -806,5 +807,6 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 module.exports = router;
