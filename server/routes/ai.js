@@ -629,6 +629,7 @@ function pickMusicFile(keywords = []) {
 }
 
 // ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
+// ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
 const TTS_VOICE = "alloy";
 const ffmpegPath = 'ffmpeg';
@@ -653,7 +654,7 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", industry = "", answers = {} } = req.body;
 
-    // 1. Build array of strong keywords from answers
+    // 1. Build keywords
     let videoKeywords = [];
     if (industry) videoKeywords.push(industry);
     if (answers.businessName) videoKeywords.push(answers.businessName);
