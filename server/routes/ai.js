@@ -652,16 +652,15 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", industry = "", answers = {} } = req.body;
 
-    // 1. Keywords
+    // Keywords/industry handling (same as before)
     let baseKeywords = [];
     if (industry) baseKeywords.push(industry);
     if (answers && answers.industry) baseKeywords.push(answers.industry);
 
-    // E-commerce detection
+    // Industry targeting for ecom, etc
     const isEcom = (kw) =>
       /e-?commerce|online shop|shopify|store|cart|woocommerce|product|merch|retail|sale|boutique/i.test(kw);
 
-    // Industry map
     const industryMap = {
       dentist: ["dentist", "teeth", "dental", "smile", "tooth"],
       fitness: ["fitness", "workout", "gym", "exercise", "trainer"],
@@ -683,7 +682,7 @@ router.post('/generate-video-ad', async (req, res) => {
     searchTerms.push("business", "company", "brand");
     searchTerms = Array.from(new Set(searchTerms)).slice(0, 8);
 
-    // 2. Search for videos (try to get at least 3 × 5-8s clips)
+    // 1. Search for videos: always try to get at least 3
     let videoClips = [];
     let attempts = 0;
     for (let term of searchTerms) {
@@ -696,17 +695,18 @@ router.post('/generate-video-ad', async (req, res) => {
         });
       } catch (err) { continue; }
       let found = (resp.data.videos || []).filter(v => {
-        // SD mp4, ~5-8s
+        // SD mp4, any duration (grab all)
         const file = (v.video_files || []).find(f =>
           f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
         );
-        return file && v.duration >= 5 && v.duration <= 8;
+        return !!file;
       });
       videoClips.push(...found);
       attempts++;
       if (attempts >= 10) break;
     }
-    // Fallback: if still not enough, grab *any* available
+
+    // If still not enough, fallback to a generic search term
     if (videoClips.length < 3) {
       const fallbackTerm = searchTerms[0] || industry || "business";
       try {
@@ -720,38 +720,51 @@ router.post('/generate-video-ad', async (req, res) => {
           );
           return !!file;
         });
-        found = found.sort((a, b) => a.duration - b.duration).slice(0, 3 - videoClips.length);
         videoClips.push(...found);
       } catch (e) {}
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick up to 3 video clips, pad with repeats if needed
+    // 2. Pick 3 clips, repeating the best available if there aren't enough
     let files = [];
     let picked = videoClips.slice(0, 3);
-    while (picked.length < 3 && picked.length > 0) picked.push(picked[0]); // pad/repeat first clip
-    if (!picked.length) picked = [videoClips[0]];
-    for (let v of picked) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-      ) || (v.video_files || [])[0];
-      if (best) files.push(best.link);
+    if (picked.length < 3) {
+      for (let i = picked.length; i < 3; i++) picked.push(videoClips[0]);
     }
-    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
 
-    // 4. Download videos locally
+    // 3. Download and collect actual durations
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
-    for (let i = 0; i < files.length; i++) {
+    let durations = [];
+    for (let i = 0; i < picked.length; i++) {
+      const v = picked[i];
+      let best = (v.video_files || []).find(f =>
+        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+      ) || (v.video_files || [])[0];
+      if (!best) continue;
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(files[i], dest);
+      await downloadFile(best.link, dest);
       videoPaths.push(dest);
+      durations.push(v.duration || 0);
     }
 
-    // 5. Script: Always match to 15–18s (clip count × 6s, min 15)
-    const totalDuration = Math.max(15, Math.min(18, 6 * files.length));
-    let prompt = `Write a high-converting video ad script for an online business, e-commerce store, or any business type. Script should be a natural voiceover for a ${totalDuration}-second video (max ${Math.round(totalDuration * 1.1)} words). Friendly, confident, real. Brief intro, 2–3 benefits, strong call to action at the end.`;
+    // 4. Pad or repeat to ensure minimum 15 seconds
+    let totalDuration = durations.reduce((a, b) => a + b, 0);
+    let repeatIndex = 0;
+    while (totalDuration < 15 && videoPaths.length < 9) { // don't exceed 9 clips
+      // Repeat the first (or next) clip
+      videoPaths.push(videoPaths[repeatIndex % videoPaths.length]);
+      durations.push(durations[repeatIndex % durations.length]);
+      totalDuration += durations[repeatIndex % durations.length];
+      repeatIndex++;
+    }
+    // If still short, we will use ffmpeg to pad at the end (freeze last frame)
+    let padSeconds = totalDuration < 15 ? 15 - totalDuration : 0;
+    if (totalDuration < 15) totalDuration = 15;
+
+    // 5. Generate script for the video length
+    let prompt = `Write a high-converting video ad script for an online business, e-commerce store, or any business type. Script should be a natural voiceover for a ${Math.round(totalDuration)}-second video (max ${Math.round(totalDuration * 1.25)} words). Friendly, confident, real. Brief intro, 2–3 benefits, strong call to action at the end.`;
 
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -763,7 +776,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: Math.round(totalDuration * 1.2),
+      max_tokens: Math.round(totalDuration * 1.3),
       temperature: 0.65
     });
     const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
@@ -778,25 +791,32 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concatenate video, overlay voiceover
+    // 7. Concatenate video, overlay voiceover, pad/freeze last frame if needed
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    // Output dir and file
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: always trim/pad to min 15s, max 18s
-    const ffmpegCmd = [
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
-    for (let cmd of ffmpegCmd) await exec(cmd);
+    // FFmpeg: Concat, overlay TTS, pad last frame if needed
+    const concatCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`;
+    await exec(concatCmd);
+
+    // If padding is needed, freeze last frame
+    let padCmd = '';
+    if (padSeconds > 0) {
+      padCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -vf "tpad=stop_mode=clone:stop_duration=${padSeconds}" -c:a copy "${outPath}.padded.mp4"`;
+      await exec(padCmd);
+    }
+
+    // Mix audio, ensure final trim to totalDuration (>=15)
+    const mixCmd = `${ffmpegPath} -y -i "${padSeconds > 0 ? outPath + '.padded.mp4' : outPath + '.temp.mp4'}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${Math.round(totalDuration)} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`;
+    await exec(mixCmd);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [listPath, ttsPath, `${outPath}.temp.mp4`, `${outPath}.padded.mp4`].concat(videoPaths).forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
@@ -807,6 +827,7 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
