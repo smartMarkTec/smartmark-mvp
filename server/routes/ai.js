@@ -695,14 +695,14 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // 5. Generate AI script, length should match (about 15–18s)
-    let prompt = `Write a high-converting video ad script (max 70 words, about 18 seconds) for an ecommerce business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
-    if (answers && Object.keys(answers).length) {
-      prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-    }
-    if (industry) prompt += `\nIndustry: ${industry}`;
-    if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nOutput only the script. Don't say 'Here is the script.'";
+    // 5. Generate AI script, force NO scene directions or stage notes, only voiceover text
+    let prompt = `
+Write ONLY the words the voiceover should say in a Facebook video ad for an ecommerce business. DO NOT include scene directions, stage notes, or any non-spoken text—only the spoken ad script. The script should be about 70 words (15–18 seconds), friendly, confident, and include a brief intro, 2–3 unique benefits, and a strong call to action at the end. 
+Business Details: 
+${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n')}
+${industry ? `Industry: ${industry}` : ""}
+${url ? `Website: ${url}` : ""}
+    `.trim();
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
