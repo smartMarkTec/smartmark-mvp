@@ -667,28 +667,30 @@ router.post('/generate-video-ad', async (req, res) => {
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
-    // 2. Search Pexels for video clips
-    let videoClips = [];
-    try {
-      const resp = await axios.get(PEXELS_VIDEO_BASE, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 5 }
-      });
-      videoClips = resp.data.videos || [];
-    } catch (err) {
-      return res.status(500).json({ error: "Stock video fetch failed" });
-    }
-    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
+  // 2. Search Pexels for video clips
+let videoClips = [];
+try {
+  const resp = await axios.get(PEXELS_VIDEO_BASE, {
+    headers: { Authorization: PEXELS_API_KEY },
+    params: { query: searchTerm, per_page: 3 } // was 5, now 3 for higher match quality
+  });
+  videoClips = resp.data.videos || [];
+} catch (err) {
+  return res.status(500).json({ error: "Stock video fetch failed" });
+}
+if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick up to 3 short videos
-    let files = [];
-    for (let v of videoClips.slice(0, 3)) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-      ) || (v.video_files || [])[0];
-      if (best) files.push(best.link);
-    }
-    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+// 3. Pick up to 2 short videos (was 3)
+let files = [];
+for (let v of videoClips.slice(0, 2)) { // <-- changed from 3 to 2
+  let best = (v.video_files || []).find(f =>
+    f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+  ) || (v.video_files || [])[0];
+  if (best) files.push(best.link);
+}
+if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+
+// ...unchanged...
 
     // 4. Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
@@ -738,10 +740,10 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
     // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to max 30s
-    const ffmpegCmd = [
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 30 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
+   const ffmpegCmd = [
+  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+  `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 15 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+];
     for (let cmd of ffmpegCmd) await exec(cmd);
 
     // Clean up temp files
