@@ -629,9 +629,10 @@ function pickMusicFile(keywords = []) {
 }
 
 // ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
+// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
-const TTS_VOICE = "alloy"; // Options: 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'
-const ffmpegPath = 'ffmpeg'; // Assumes ffmpeg is installed and in $PATH
+const TTS_VOICE = "alloy";
+const ffmpegPath = 'ffmpeg';
 const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
@@ -650,138 +651,87 @@ async function downloadFile(url, dest) {
 
 router.post('/generate-video-ad', async (req, res) => {
   try {
-    const { url = "", industry = "", answers = {} } = req.body;
+    const { url = "", answers = {} } = req.body;
+    // Product type/category (e.g., "fashion", "supplements", etc.)
+    const productType = answers?.industry || answers?.productType || "";
 
-    // Keywords/industry handling (same as before)
-    let baseKeywords = [];
-    if (industry) baseKeywords.push(industry);
-    if (answers && answers.industry) baseKeywords.push(answers.industry);
+    // Always include "ecommerce" in keyword
+    let videoKeywords = ["ecommerce"];
+    if (productType) videoKeywords.push(productType);
 
-    // Industry targeting for ecom, etc
-    const isEcom = (kw) =>
-      /e-?commerce|online shop|shopify|store|cart|woocommerce|product|merch|retail|sale|boutique/i.test(kw);
-
-    const industryMap = {
-      dentist: ["dentist", "teeth", "dental", "smile", "tooth"],
-      fitness: ["fitness", "workout", "gym", "exercise", "trainer"],
-      bbq: ["bbq", "barbecue", "grill", "meat", "smokehouse"],
-      marketing: ["marketing", "social media", "agency", "advertising"],
-      pizza: ["pizza", "pizzeria", "cheese pizza", "slice"],
-      fashion: ["fashion", "clothing", "style", "outfit", "model"],
-      restaurant: ["restaurant", "food", "dining", "meal", "chef"],
-      ecommerce: ["online store", "shopping", "ecommerce", "products", "checkout", "retail"],
-    };
-
-    let searchTerms = [];
-    baseKeywords.forEach(k => {
-      const key = String(k || "").toLowerCase();
-      if (isEcom(key)) searchTerms.push(...industryMap.ecommerce);
-      else if (industryMap[key]) searchTerms.push(...industryMap[key]);
-      else searchTerms.push(key);
-    });
-    searchTerms.push("business", "company", "brand");
-    searchTerms = Array.from(new Set(searchTerms)).slice(0, 8);
-
-    // 1. Search for videos: always try to get at least 3
-    let videoClips = [];
-    let attempts = 0;
-    for (let term of searchTerms) {
-      if (videoClips.length >= 3) break;
-      let resp;
+    // Add extracted site keywords if possible
+    if (url) {
       try {
-        resp = await axios.get(PEXELS_VIDEO_BASE, {
-          headers: { Authorization: PEXELS_API_KEY },
-          params: { query: term, per_page: 10 }
-        });
-      } catch (err) { continue; }
-      let found = (resp.data.videos || []).filter(v => {
-        // SD mp4, any duration (grab all)
-        const file = (v.video_files || []).find(f =>
-          f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-        );
-        return !!file;
-      });
-      videoClips.push(...found);
-      attempts++;
-      if (attempts >= 10) break;
+        const websiteText = await getWebsiteText(url);
+        const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
+        videoKeywords.push(...siteKeywords);
+      } catch (e) {}
     }
 
-    // If still not enough, fallback to a generic search term
-    if (videoClips.length < 3) {
-      const fallbackTerm = searchTerms[0] || industry || "business";
-      try {
-        const resp = await axios.get(PEXELS_VIDEO_BASE, {
-          headers: { Authorization: PEXELS_API_KEY },
-          params: { query: fallbackTerm, per_page: 10 }
-        });
-        let found = (resp.data.videos || []).filter(v => {
-          const file = (v.video_files || []).find(f =>
-            f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-          );
-          return !!file;
-        });
-        videoClips.push(...found);
-      } catch (e) {}
+    // Unique, prioritized, always start with "ecommerce"
+    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
+    const searchTerm = videoKeywords.slice(0, 2).join(" "); // e.g., "ecommerce fashion"
+
+    // 2. Search Pexels for relevant ecomm videos (get 6 for choice)
+    let videoClips = [];
+    try {
+      const resp = await axios.get(PEXELS_VIDEO_BASE, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: searchTerm, per_page: 6 }
+      });
+      videoClips = resp.data.videos || [];
+    } catch (err) {
+      return res.status(500).json({ error: "Stock video fetch failed" });
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 2. Pick 3 clips, repeating the best available if there aren't enough
+    // 3. Pick up to 3 short relevant clips
     let files = [];
-    let picked = videoClips.slice(0, 3);
-    if (picked.length < 3) {
-      for (let i = picked.length; i < 3; i++) picked.push(videoClips[0]);
-    }
-
-    // 3. Download and collect actual durations
-    const tempDir = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    const videoPaths = [];
-    let durations = [];
-    for (let i = 0; i < picked.length; i++) {
-      const v = picked[i];
+    for (let v of videoClips.slice(0, 3)) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
-      if (!best) continue;
+      if (best) files.push(best.link);
+    }
+    if (files.length < 3) { // Always try for 3, else fallback
+      for (let v of videoClips) {
+        if (files.length >= 3) break;
+        let f = (v.video_files || [])[0];
+        if (f && !files.includes(f.link)) files.push(f.link);
+      }
+    }
+    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+
+    // 4. Download locally
+    const tempDir = path.join(__dirname, '../tmp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const videoPaths = [];
+    for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(best.link, dest);
+      await downloadFile(files[i], dest);
       videoPaths.push(dest);
-      durations.push(v.duration || 0);
     }
 
-    // 4. Pad or repeat to ensure minimum 15 seconds
-    let totalDuration = durations.reduce((a, b) => a + b, 0);
-    let repeatIndex = 0;
-    while (totalDuration < 15 && videoPaths.length < 9) { // don't exceed 9 clips
-      // Repeat the first (or next) clip
-      videoPaths.push(videoPaths[repeatIndex % videoPaths.length]);
-      durations.push(durations[repeatIndex % durations.length]);
-      totalDuration += durations[repeatIndex % durations.length];
-      repeatIndex++;
-    }
-    // If still short, we will use ffmpeg to pad at the end (freeze last frame)
-    let padSeconds = totalDuration < 15 ? 15 - totalDuration : 0;
-    if (totalDuration < 15) totalDuration = 15;
+    // 5. Generate GPT script (enforced 15-18s, sales focus, for online store)
+    let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
 
-    // 5. Generate script for the video length
-    let prompt = `Write a high-converting video ad script for an online business, e-commerce store, or any business type. Script should be a natural voiceover for a ${Math.round(totalDuration)}-second video (max ${Math.round(totalDuration * 1.25)} words). Friendly, confident, real. Brief intro, 2–3 benefits, strong call to action at the end.`;
-
+    // Use specific business info if provided
+    if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
-      prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
-    if (industry) prompt += `\nIndustry: ${industry}`;
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += `\nOutput only the script, NO intro/outro text.`;
+    prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: Math.round(totalDuration * 1.3),
+      max_tokens: 110,
       temperature: 0.65
     });
-    const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
+    let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    // 6. TTS voiceover
+    // 6. Generate TTS voiceover
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -791,32 +741,26 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concatenate video, overlay voiceover, pad/freeze last frame if needed
+    // 7. Concat 3 clips, overlay voice, 15-18s duration required
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
+    // Output dir and file
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: Concat, overlay TTS, pad last frame if needed
-    const concatCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`;
-    await exec(concatCmd);
-
-    // If padding is needed, freeze last frame
-    let padCmd = '';
-    if (padSeconds > 0) {
-      padCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -vf "tpad=stop_mode=clone:stop_duration=${padSeconds}" -c:a copy "${outPath}.padded.mp4"`;
-      await exec(padCmd);
-    }
-
-    // Mix audio, ensure final trim to totalDuration (>=15)
-    const mixCmd = `${ffmpegPath} -y -i "${padSeconds > 0 ? outPath + '.padded.mp4' : outPath + '.temp.mp4'}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${Math.round(totalDuration)} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`;
-    await exec(mixCmd);
+    // FFmpeg: concat, add audio, enforce min 15s (trim longer, pad if short)
+    const ffmpegCmd = [
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+      // pad if under 15s, trim if over 18s
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 18 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    ];
+    for (let cmd of ffmpegCmd) await exec(cmd);
 
     // Clean up temp files
-    [listPath, ttsPath, `${outPath}.temp.mp4`, `${outPath}.padded.mp4`].concat(videoPaths).forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
@@ -827,7 +771,5 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
-
 
 module.exports = router;
