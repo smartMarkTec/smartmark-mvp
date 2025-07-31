@@ -686,7 +686,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
 
-    // 3. Pick exactly 4 random .mp4 videos, favoring short landscape
+    // 3. Pick up to 4 random .mp4 videos, favoring short landscape
     function shuffle(arr) {
       for (let i = arr.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -703,6 +703,7 @@ router.post('/generate-video-ad', async (req, res) => {
       if (best) files.push(best.link);
       if (files.length >= 4) break;
     }
+    // If still not 4, add any others
     if (files.length < 4) {
       for (let v of videoClips) {
         for (let f of (v.video_files || [])) {
@@ -714,8 +715,7 @@ router.post('/generate-video-ad', async (req, res) => {
         if (files.length >= 4) break;
       }
     }
-    files = files.slice(0, 4); // always exactly 4
-
+    files = files.slice(0, 4); // max 4
     console.log('[VideoAd] MP4 file list:', files);
 
     if (!files.length) {
@@ -723,9 +723,9 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "No MP4 clips found" });
     }
 
-    // 4. Download and hard-trim each video to exactly 4.125 seconds (for total ~16.5s)
-    const TOTAL_DURATION = 16.5;
-    const SEGMENT_DURATION = TOTAL_DURATION / 4;
+    // 4. Download and trim each video to 5–7s (random per segment, or max length)
+    const MIN_SEGMENT = 5;
+    const MAX_SEGMENT = 7;
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
@@ -734,9 +734,27 @@ router.post('/generate-video-ad', async (req, res) => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFile(files[i], dest);
 
-      // Hard trim & re-encode for concat compatibility
+      // Get original video duration
+      let duration = 0;
+      try {
+        const { stderr } = await exec(`${ffmpegPath} -i "${dest}" -hide_banner`);
+        const durationMatch = stderr.match(/Duration: (\d+):(\d+):([\d.]+)/);
+        if (durationMatch) {
+          duration = Number(durationMatch[1]) * 3600 + Number(durationMatch[2]) * 60 + Number(durationMatch[3]);
+        }
+      } catch (e) {
+        console.warn(`Could not get duration for ${dest}:`, e.message);
+      }
+
+      // Pick random segment duration between 5–7s, but not longer than actual video
+      let segDur = Math.min(
+        MIN_SEGMENT + Math.random() * (MAX_SEGMENT - MIN_SEGMENT),
+        Math.max(2, duration - 0.1) // at least 2 seconds
+      );
+      segDur = Math.round(segDur * 100) / 100; // round to 2 decimals
+
       const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${dest}" -t ${SEGMENT_DURATION} -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${trimmed}"`);
+      await exec(`${ffmpegPath} -y -i "${dest}" -t ${segDur} -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${trimmed}"`);
       videoPaths.push(trimmed);
     }
 
@@ -795,14 +813,14 @@ Output only the script, nothing else.`;
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFMPEG pipeline
+    // FFMPEG pipeline (NO hard -t, video ends with audio or vice versa)
     const ffmpegCmds = [
       // 1. Concat segments with re-encode
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${outPath}.temp.mp4"`,
-      // 2. Overlay TTS (voice) and (optional) music, limit to 16.5s, add faststart for instant playback
+      // 2. Overlay TTS (voice) and (optional) music, let it end when shortest track ends
       musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -c:v libx264 -c:a aac -b:a 192k -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
 
     console.log('[VideoAd] About to run ffmpegCmds:', ffmpegCmds);
