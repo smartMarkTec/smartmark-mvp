@@ -629,18 +629,16 @@ function pickMusicFile(keywords = []) {
 }
 
 // ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
-// ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
-const TTS_VOICE = "alloy";
-const ffmpegPath = 'ffmpeg';
+const TTS_VOICE = "alloy"; // Options: 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'
+const ffmpegPath = 'ffmpeg'; // Assumes ffmpeg is installed and in $PATH
 const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
-// Download helper (5s timeout)
 async function downloadFile(url, dest) {
   const writer = fs.createWriteStream(dest);
-  const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 5000 });
+  const response = await axios({ url, method: 'GET', responseType: 'stream' });
   await new Promise((resolve, reject) => {
     response.data.pipe(writer);
     let error = null;
@@ -654,21 +652,18 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", industry = "", answers = {} } = req.body;
 
-    // 1. Build keywords
+    // 1. Generate video search keywords
     let videoKeywords = [];
     if (industry) videoKeywords.push(industry);
-    if (answers.businessName) videoKeywords.push(answers.businessName);
-    if (answers.mainBenefit) videoKeywords.push(answers.mainBenefit);
-    if (answers.uniqueSellingPoint) videoKeywords.push(answers.uniqueSellingPoint);
-    if (answers.offer) videoKeywords.push(answers.offer);
-
-    // Scrape website for extra keywords
     if (url) {
       try {
         const websiteText = await getWebsiteText(url);
         videoKeywords.push(...(await extractKeywords(websiteText)).slice(0, 2));
       } catch (e) {}
     }
+    if (answers && answers.industry) videoKeywords.push(answers.industry);
+
+    // Filter unique, non-empty, limit to 3
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
@@ -677,125 +672,36 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 10 }
+        params: { query: searchTerm, per_page: 5 }
       });
       videoClips = resp.data.videos || [];
-      console.log('[VideoAd] Pexels API success. Clips found:', videoClips.length);
     } catch (err) {
-      console.error('[VideoAd] Pexels fetch error:', err?.message || err);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
+    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick up to 4 random .mp4 videos, favoring short landscape
-    function shuffle(arr) {
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-      }
-    }
-    shuffle(videoClips);
-
+    // 3. Pick up to 3 short videos
     let files = [];
-    for (let v of videoClips) {
+    for (let v of videoClips.slice(0, 3)) {
       let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
-      ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
+        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+      ) || (v.video_files || [])[0];
       if (best) files.push(best.link);
-      if (files.length >= 4) break;
     }
-    if (files.length < 4) {
-      for (let v of videoClips) {
-        for (let f of (v.video_files || [])) {
-          if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
-            files.push(f.link);
-            if (files.length >= 4) break;
-          }
-        }
-        if (files.length >= 4) break;
-      }
-    }
-    files = files.slice(0, 4);
-    console.log('[VideoAd] MP4 file list:', files);
+    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
 
-    if (!files.length) {
-      console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
-      return res.status(500).json({ error: "No MP4 clips found" });
-    }
-
-    // 4. Download and trim each video to 5–7s (random per segment, or max length)
-    const MIN_SEGMENT = 5;
-    const MAX_SEGMENT = 7;
+    // 4. Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
     const videoPaths = [];
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFile(files[i], dest);
-
-      if (!fs.existsSync(dest)) {
-        console.error(`[File Check] Downloaded video file was NOT created: ${dest}`);
-        continue;
-      } else {
-        console.log(`[File Check] Downloaded video file exists: ${dest}`);
-      }
-
-      // Use ffprobe for duration
-      let duration = 0;
-      try {
-        const { stdout } = await exec(
-          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${dest}"`
-        );
-        duration = parseFloat(stdout.trim());
-      } catch (e) {
-        console.warn(`Could not get duration for ${dest}:`, e.message);
-      }
-
-      let segDur = Math.min(
-        MIN_SEGMENT + Math.random() * (MAX_SEGMENT - MIN_SEGMENT),
-        Math.max(2, duration - 0.1)
-      );
-      segDur = Math.round(segDur * 100) / 100;
-
-      const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${dest}" -t ${segDur} -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${trimmed}"`);
-
-      if (!fs.existsSync(trimmed)) {
-        console.error(`[File Check] Trimmed video file was NOT created: ${trimmed}`);
-        continue;
-      } else {
-        console.log(`[File Check] Trimmed video file exists: ${trimmed}`);
-      }
-
-      videoPaths.push(trimmed);
-    }
-
-    // LOG HERE: Confirm loop exits and what is in videoPaths
-    console.log('[VideoAd] Finished all trims, about to write concat list:', videoPaths);
-
-    if (!videoPaths.length) {
-      console.error('[VideoAd] All video downloads failed.', files);
-      return res.status(500).json({ error: "All video downloads failed." });
-    }
-
-    // Generate concat list in proper format
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
-    if (!fs.existsSync(listPath)) {
-      console.error(`[File Check] Concat list TXT file was NOT created: ${listPath}`);
-    } else {
-      console.log(`[File Check] Concat list TXT file exists: ${listPath}`);
+      videoPaths.push(dest);
     }
 
     // 5. Generate AI script
-    let prompt = `Write a high-converting video ad script for this business. 
-Strict rules:
-- Spoken aloud in 15 to 18 seconds (about 40–55 spoken words, not more).
-- The voiceover must fill 15–18 seconds at a normal talking pace.
-- Brief intro, 2–3 unique benefits, clear call to action.
-- Sound friendly, confident, and human.
-Output only the script, nothing else.`;
-
+    let prompt = `Write a high-converting video ad script (max 70 words, 20–25 seconds) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
@@ -811,7 +717,7 @@ Output only the script, nothing else.`;
     });
     const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
 
-    // 6. TTS Voiceover
+    // 6. Generate TTS voiceover (OpenAI)
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -821,75 +727,36 @@ Output only the script, nothing else.`;
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    if (!fs.existsSync(ttsPath)) {
-      console.error(`[File Check] TTS MP3 file was NOT created: ${ttsPath}`);
-    } else {
-      console.log(`[File Check] TTS MP3 file exists: ${ttsPath}`);
-    }
+    // 7. Concatenate video, overlay voiceover
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    // 7. Music selection
-    const musicPath = pickMusicFile(videoKeywords);
-    console.log("Music selected:", musicPath);
-
-    // 8. Concatenate, mix, export
+    // Output dir and file
     const genDir = path.join(__dirname, '../public/generated');
-    fs.mkdirSync(genDir, { recursive: true }); // Always force-create now!
-    console.log('[VideoAd] Ensured genDir exists:', genDir);
-
+    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    const ffmpegCmds = [
-      // 1. Concat segments with re-encode
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${outPath}.temp.mp4"`,
-      // 2. Overlay TTS (voice) and (optional) music, let it end when shortest track ends
-      musicPath
-        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -c:v libx264 -c:a aac -b:a 192k -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k -movflags +faststart -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to max 30s
+    const ffmpegCmd = [
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 30 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
-
-    console.log('[VideoAd] About to run ffmpegCmds:', ffmpegCmds);
-
-    for (let i = 0; i < ffmpegCmds.length; i++) {
-      try {
-        console.log(`[VideoAd] Running ffmpegCmd[${i}]:`, ffmpegCmds[i]);
-        const { stdout, stderr } = await exec(ffmpegCmds[i]);
-        console.log(`[VideoAd] ffmpegCmd[${i}] finished, stdout:`, stdout, 'stderr:', stderr);
-
-        if (i === 0) {
-          if (!fs.existsSync(`${outPath}.temp.mp4`)) {
-            console.error(`[File Check] Output .temp.mp4 was NOT created: ${outPath}.temp.mp4`);
-          } else {
-            console.log(`[File Check] Output .temp.mp4 exists: ${outPath}.temp.mp4`);
-          }
-        } else if (i === 1) {
-          if (!fs.existsSync(outPath)) {
-            console.error(`[File Check] Final output video was NOT created: ${outPath}`);
-          } else {
-            console.log(`[File Check] Final output video exists: ${outPath}`);
-          }
-        }
-      } catch (e) {
-        console.error(`[VideoAd] ffmpegCmd[${i}] failed:`, e.message, e.stderr || "");
-        throw e;
-      }
-    }
+    for (let cmd of ffmpegCmd) await exec(cmd);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { 
-      try { fs.unlinkSync(p); } catch (e) {}
-    });
+    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
+    // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
-    console.log('[VideoAd] Sending final response:', publicUrl);
-
-    return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE, searchTerm, usedKeywords: videoKeywords });
+    return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
   } catch (err) {
-    console.error("[VideoAd] Uncaught error:", err.message, err?.stderr || "", err?.response?.data || "");
+    console.error("Video generation error:", err.message, err?.response?.data || "");
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
