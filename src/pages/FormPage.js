@@ -97,10 +97,8 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-// AD PREVIEW CARD - Handles both Image and Video
 const AdPreviewCard = ({
-  title, type, headline, body, imageUrl, imageLoading, onRegenerate, onImageClick,
-  videoUrl, videoLoading, videoScript
+  title, type, headline, body, imageUrl, imageLoading, onRegenerate, onImageClick
 }) => (
   <div
     style={{
@@ -128,7 +126,7 @@ const AdPreviewCard = ({
     }}>
       {title}
     </span>
-    {/* IMAGE PREVIEW */}
+    {/* Image Preview */}
     {type === "image" ? (
       imageLoading ? (
         <div style={{ width: "100%", marginBottom: 18 }}>
@@ -161,6 +159,7 @@ const AdPreviewCard = ({
               fontFamily: AD_FONT
             }}
           />
+
           <button
             style={{
               position: "absolute",
@@ -207,82 +206,25 @@ const AdPreviewCard = ({
         </div>
       )
     ) : (
-      // VIDEO PREVIEW
-      videoUrl ? (
-        <div style={{ position: "relative", width: "100%" }}>
-          <video
-            src={videoUrl}
-            controls
-            style={{
-              width: "100%",
-              maxWidth: 350,
-              borderRadius: 12,
-              background: "#282d33",
-              boxShadow: "0 2px 14px #1114",
-              objectFit: "contain",
-              marginBottom: 18
-            }}
-          />
-          <button
-            style={{
-              position: "absolute",
-              top: 18,
-              right: 22,
-              background: "#232c29",
-              color: "#fff",
-              border: "1.5px solid #222",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: "1.07rem",
-              padding: "7px 16px",
-              cursor: videoLoading ? "not-allowed" : "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: 7
-            }}
-            onClick={e => { e.stopPropagation(); onRegenerate(); }}
-            disabled={videoLoading}
-          >
-            <FaSyncAlt style={{ fontSize: 15 }} />
-            {videoLoading ? "Regenerating..." : "Regenerate"}
-          </button>
-          {videoScript && (
-            <div style={{
-              color: "#bababa",
-              background: "#232629",
-              fontSize: "0.98rem",
-              padding: "10px 18px",
-              borderRadius: 12,
-              marginTop: 8,
-              maxWidth: 380,
-              marginLeft: "auto",
-              marginRight: "auto"
-            }}>
-              <b>Script:</b> {videoScript}
-            </div>
-          )}
-        </div>
-      ) : (
-        <div
-          style={{
-            width: "100%",
-            height: 150,
-            background: "#282d33",
-            borderRadius: 10,
-            marginBottom: 20,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "#555",
-            fontWeight: 700,
-            fontSize: 22,
-            fontFamily: AD_FONT,
-            letterSpacing: 1
-          }}
-        >
-          Video goes here
-        </div>
-      )
+      <div
+        style={{
+          width: "100%",
+          height: 150,
+          background: "#282d33",
+          borderRadius: 10,
+          marginBottom: 20,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "#555",
+          fontWeight: 700,
+          fontSize: 22,
+          fontFamily: AD_FONT,
+          letterSpacing: 1
+        }}
+      >
+        Video goes here
+      </div>
     )}
 
     {/* Ad Copy only */}
@@ -399,7 +341,9 @@ export default function FormPage() {
     setTouched(true);
   };
 
+  // -----------------------
   // MAIN AI GENERATE BUTTON (image + video parallel)
+  // -----------------------
   const handleGenerate = async () => {
     setLoading(true);
     setResult(null);
@@ -485,6 +429,34 @@ export default function FormPage() {
     setLoading(false);
   };
 
+  // -----------------------
+  // VIDEO AD GENERATION BUTTON (no change)
+  // -----------------------
+  const handleGenerateVideo = async () => {
+    setVideoLoading(true);
+    setVideoUrl("");
+    setVideoScript("");
+    setError("");
+    try {
+      const res = await fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answers,
+          url: answers.url || "",
+          industry: answers.industry || ""
+        }),
+      });
+      const data = await res.json();
+      if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
+      setVideoScript(data.script || "");
+      setVideoLoading(false);
+    } catch (err) {
+      setError("Failed to generate video ad: " + (err.message || ""));
+      setVideoLoading(false);
+    }
+  };
+
   // Regenerate always uses current industry/answers (syncs with backend for overlays)
   const handleRegenerateImage = async () => {
     setImageLoading(true);
@@ -543,31 +515,6 @@ export default function FormPage() {
     setImageLoading(false);
   };
 
-  // Regenerate Video
-  const handleRegenerateVideo = async () => {
-    setVideoLoading(true);
-    setVideoUrl("");
-    setVideoScript("");
-    setError("");
-    try {
-      const res = await fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          answers,
-          url: answers.url || "",
-          industry: answers.industry || ""
-        }),
-      });
-      const data = await res.json();
-      if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
-      setVideoScript(data.script || "");
-    } catch (err) {
-      setError("Failed to regenerate video ad: " + (err.message || ""));
-    }
-    setVideoLoading(false);
-  };
-
   // Modal open/close handlers
   const handleImageClick = (url) => {
     setModalImg(url);
@@ -578,278 +525,332 @@ export default function FormPage() {
     setModalImg("");
   };
 
+  // ...rest of your component code (JSX return, etc) unchanged...
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: DARK_BG,
+  <div
+    style={{
+      minHeight: "100vh",
+      background: DARK_BG,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      fontFamily: MODERN_FONT,
+      padding: "0 0 60px 0"
+    }}
+  >
+    {/* Fullscreen Modal */}
+    <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
+
+    <div style={{
+      width: "100%",
+      maxWidth: 780,
+      marginTop: 60,
+      marginBottom: 30,
+      background: "#202327",
+      borderRadius: 22,
+      boxShadow: "0 2px 32px #181b2040",
+      padding: "44px 36px 32px 36px",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center"
+    }}>
+      {/* Stationary Q&A Card */}
+      <div style={{
+        width: "100%",
+        minHeight: 180,
+        marginBottom: 34,
+        position: "relative",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        fontFamily: MODERN_FONT,
-        padding: "0 0 60px 0"
-      }}
-    >
-      {/* Fullscreen Modal */}
-      <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
-
-      <div style={{
-        width: "100%",
-        maxWidth: 780,
-        marginTop: 60,
-        marginBottom: 30,
-        background: "#202327",
-        borderRadius: 22,
-        boxShadow: "0 2px 32px #181b2040",
-        padding: "44px 36px 32px 36px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center"
       }}>
-        {/* Stationary Q&A Card */}
+        <div style={{display:"flex", alignItems:"center", gap:22, width:"100%", justifyContent:"center"}}>
+          {/* Back arrow */}
+          {step > 0 && (
+            <button
+              aria-label="Back"
+              onClick={handleBack}
+              style={{
+                border: "none",
+                background: "#232729",
+                borderRadius: 8,
+                width: 38,
+                height: 38,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 2px 7px #0002",
+                cursor: "pointer",
+                marginRight: 2,
+                outline: "none"
+              }}>
+              <FaArrowLeft size={20} color={TEAL} />
+            </button>
+          )}
+          <div style={{
+            color: "#fff",
+            fontWeight: 800,
+            fontSize: "2.04rem",
+            textAlign: "center",
+            lineHeight: 1.15,
+            letterSpacing: "-.4px",
+            minHeight: 52,
+            maxWidth: 540,
+            flex:1
+          }}>
+            {currentQ.question}
+          </div>
+          {/* Forward arrow */}
+          {(!isLast || (isLast && readyToAdvance)) && (
+            <button
+              aria-label="Next"
+              onClick={handleForward}
+              disabled={!readyToAdvance}
+              style={{
+                border: "none",
+                background: readyToAdvance ? TEAL : "#243835",
+                borderRadius: 8,
+                width: 38,
+                height: 38,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: readyToAdvance ? "0 2px 7px #14e7b929" : "0 2px 7px #2229",
+                cursor: readyToAdvance ? "pointer" : "not-allowed",
+                marginLeft: 2,
+                outline: "none",
+                transition: "background 0.2s"
+              }}>
+              <FaArrowRight size={20} color={readyToAdvance ? "#fff" : "#57a091"} />
+            </button>
+          )}
+        </div>
+        {/* Answers */}
         <div style={{
-          width: "100%",
-          minHeight: 180,
-          marginBottom: 34,
-          position: "relative",
+          marginTop: 36,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
+          width: "100%"
         }}>
-          <div style={{display:"flex", alignItems:"center", gap:22, width:"100%", justifyContent:"center"}}>
-            {/* Back arrow */}
-            {step > 0 && (
+          {currentQ.type === "yesno" && (
+            <div style={{display:"flex", gap:18, justifyContent:"center"}}>
               <button
-                aria-label="Back"
-                onClick={handleBack}
                 style={{
-                  border: "none",
-                  background: "#232729",
-                  borderRadius: 8,
-                  width: 38,
-                  height: 38,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: "0 2px 7px #0002",
-                  cursor: "pointer",
-                  marginRight: 2,
-                  outline: "none"
-                }}>
-                <FaArrowLeft size={20} color={TEAL} />
-              </button>
-            )}
-            <div style={{
-              color: "#fff",
-              fontWeight: 800,
-              fontSize: "2.04rem",
-              textAlign: "center",
-              lineHeight: 1.15,
-              letterSpacing: "-.4px",
-              minHeight: 52,
-              maxWidth: 540,
-              flex:1
-            }}>
-              {currentQ.question}
-            </div>
-            {/* Forward arrow */}
-            {(!isLast || (isLast && readyToAdvance)) && (
-              <button
-                aria-label="Next"
-                onClick={handleForward}
-                disabled={!readyToAdvance}
-                style={{
-                  border: "none",
-                  background: readyToAdvance ? TEAL : "#243835",
-                  borderRadius: 8,
-                  width: 38,
-                  height: 38,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  boxShadow: readyToAdvance ? "0 2px 7px #14e7b929" : "0 2px 7px #2229",
-                  cursor: readyToAdvance ? "pointer" : "not-allowed",
-                  marginLeft: 2,
-                  outline: "none",
-                  transition: "background 0.2s"
-                }}>
-                <FaArrowRight size={20} color={readyToAdvance ? "#fff" : "#57a091"} />
-              </button>
-            )}
-          </div>
-          {/* Answers */}
-          <div style={{
-            marginTop: 36,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            width: "100%"
-          }}>
-            {currentQ.type === "yesno" && (
-              <div style={{display:"flex", gap:18, justifyContent:"center"}}>
-                <button
-                  style={{
-                    background: answers[currentQ.key] === "yes" ? TEAL : "#202c28",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 14,
-                    fontWeight: 700,
-                    fontSize: "1.16rem",
-                    padding: "15px 45px",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 10px #1112",
-                    transition: "background 0.15s"
-                  }}
-                  onClick={() => handleAnswer("yes")}
-                >Yes</button>
-                <button
-                  style={{
-                    background: answers[currentQ.key] === "no" ? TEAL : "#202c28",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 14,
-                    fontWeight: 700,
-                    fontSize: "1.16rem",
-                    padding: "15px 45px",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 10px #1112",
-                    transition: "background 0.15s"
-                  }}
-                  onClick={() => handleAnswer("no")}
-                >No</button>
-              </div>
-            )}
-            {currentQ.type === "choices" && (
-              <div style={{display:"flex", gap:18, flexWrap:"wrap", justifyContent:"center"}}>
-                {currentQ.choices.map((c, idx) => (
-                  <button
-                    key={c}
-                    style={{
-                      background: answers[currentQ.key] === c ? TEAL : "#202c28",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 14,
-                      fontWeight: 700,
-                      fontSize: "1.07rem",
-                      padding: "15px 38px",
-                      cursor: "pointer",
-                      marginBottom: 6,
-                      boxShadow: "0 2px 10px #1112",
-                      transition: "background 0.15s"
-                    }}
-                    onClick={() => handleAnswer(c)}
-                  >{c}</button>
-                ))}
-              </div>
-            )}
-            {currentQ.type === "text" && (
-              <input
-                type="text"
-                value={answers[currentQ.key] || ""}
-                onChange={e => handleAnswer(e.target.value)}
-                placeholder={currentQ.placeholder || ""}
-                style={{
-                  background: "#191b1e",
+                  background: answers[currentQ.key] === "yes" ? TEAL : "#202c28",
                   color: "#fff",
                   border: "none",
-                  outline: "none",
-                  borderRadius: 99,
-                  fontWeight: 600,
-                  fontSize: "1.11rem",
-                  padding: "17px 28px",
-                  minWidth: 320,
-                  maxWidth: 420,
-                  boxShadow: "0 2px 8px #0002",
-                  letterSpacing: ".04em",
-                  textAlign: "center"
+                  borderRadius: 14,
+                  fontWeight: 700,
+                  fontSize: "1.16rem",
+                  padding: "15px 45px",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 10px #1112",
+                  transition: "background 0.15s"
                 }}
-                onKeyDown={e => {
-                  if (e.key === "Enter" && (answers[currentQ.key] || "").length > 0) {
-                    handleForward();
-                  }
+                onClick={() => handleAnswer("yes")}
+              >Yes</button>
+              <button
+                style={{
+                  background: answers[currentQ.key] === "no" ? TEAL : "#202c28",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 14,
+                  fontWeight: 700,
+                  fontSize: "1.16rem",
+                  padding: "15px 45px",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 10px #1112",
+                  transition: "background 0.15s"
                 }}
-              />
-            )}
-          </div>
-        </div>
-        <button
-          id="generate-campaign-btn"
-          disabled={!isLast || !readyToAdvance || loading}
-          style={{
-            background: isLast && readyToAdvance ? TEAL : "#26322f",
-            color: isLast && readyToAdvance ? "#fff" : "#87e6d7",
-            border: "none",
-            borderRadius: 12,
-            fontWeight: 700,
-            fontSize: "1.19rem",
-            padding: "17px 66px",
-            cursor: isLast && readyToAdvance && !loading ? "pointer" : "not-allowed",
-            boxShadow: isLast && readyToAdvance ? "0 2px 16px #0cc4be44" : "none",
-            marginBottom: 42,
-            marginTop: 10,
-            fontFamily: MODERN_FONT,
-            transition: "background 0.18s"
-          }}
-          onClick={handleGenerate}
-        >
-          {loading ? "🤖 AI generating..." : "Generate Campaign"}
-        </button>
-        {error && (
-          <div style={{
-            color: "#f35e68",
-            background: "#281d1d",
-            borderRadius: 8,
-            padding: "10px 12px",
-            fontWeight: 700,
-            fontSize: 15,
-            marginTop: -10
-          }}>
-            {error}
-          </div>
-        )}
-        {/* Ad Previews (always visible) */}
-        <div style={{
-          display: "flex",
-          alignItems: "stretch",
-          width: "100%",
-          gap: 0,
-          position: "relative",
-          marginTop: 18,
-          marginBottom: 14
-        }}>
-          {/* IMAGE AD PREVIEW */}
-          <AdPreviewCard
-            title="IMAGE AD PREVIEW"
-            type="image"
-            imageUrl={imageUrl}
-            imageLoading={imageLoading || loading}
-            headline={result?.headline}
-            body={result?.body}
-            onRegenerate={handleRegenerateImage}
-            onImageClick={handleImageClick}
-          />
-          <div style={{
-            width: 2,
-            background: "linear-gradient(180deg, #22d1c6 0%, #0fe8b5 100%)",
-            borderRadius: 8,
-            margin: "0 30px",
-            minHeight: 270,
-            alignSelf: "center"
-          }} />
-          {/* VIDEO AD PREVIEW (no button, just preview + regenerate) */}
-          <div style={{ flex: 1, minWidth: 340, maxWidth: 430 }}>
-            <AdPreviewCard
-              title="VIDEO AD PREVIEW"
-              type="video"
-              headline={result?.headline}
-              videoUrl={videoUrl}
-              videoLoading={videoLoading}
-              videoScript={videoScript}
-              onRegenerate={handleRegenerateVideo}
+                onClick={() => handleAnswer("no")}
+              >No</button>
+            </div>
+          )}
+          {currentQ.type === "choices" && (
+            <div style={{display:"flex", gap:18, flexWrap:"wrap", justifyContent:"center"}}>
+              {currentQ.choices.map((c, idx) => (
+                <button
+                  key={c}
+                  style={{
+                    background: answers[currentQ.key] === c ? TEAL : "#202c28",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 14,
+                    fontWeight: 700,
+                    fontSize: "1.07rem",
+                    padding: "15px 38px",
+                    cursor: "pointer",
+                    marginBottom: 6,
+                    boxShadow: "0 2px 10px #1112",
+                    transition: "background 0.15s"
+                  }}
+                  onClick={() => handleAnswer(c)}
+                >{c}</button>
+              ))}
+            </div>
+          )}
+          {currentQ.type === "text" && (
+            <input
+              type="text"
+              value={answers[currentQ.key] || ""}
+              onChange={e => handleAnswer(e.target.value)}
+              placeholder={currentQ.placeholder || ""}
+              style={{
+                background: "#191b1e",
+                color: "#fff",
+                border: "none",
+                outline: "none",
+                borderRadius: 99,
+                fontWeight: 600,
+                fontSize: "1.11rem",
+                padding: "17px 28px",
+                minWidth: 320,
+                maxWidth: 420,
+                boxShadow: "0 2px 8px #0002",
+                letterSpacing: ".04em",
+                textAlign: "center"
+              }}
+              onKeyDown={e => {
+                if (e.key === "Enter" && (answers[currentQ.key] || "").length > 0) {
+                  handleForward();
+                }
+              }}
             />
+          )}
+        </div>
+      </div>
+      <button
+        id="generate-campaign-btn"
+        disabled={!isLast || !readyToAdvance || loading}
+        style={{
+          background: isLast && readyToAdvance ? TEAL : "#26322f",
+          color: isLast && readyToAdvance ? "#fff" : "#87e6d7",
+          border: "none",
+          borderRadius: 12,
+          fontWeight: 700,
+          fontSize: "1.19rem",
+          padding: "17px 66px",
+          cursor: isLast && readyToAdvance && !loading ? "pointer" : "not-allowed",
+          boxShadow: isLast && readyToAdvance ? "0 2px 16px #0cc4be44" : "none",
+          marginBottom: 42,
+          marginTop: 10,
+          fontFamily: MODERN_FONT,
+          transition: "background 0.18s"
+        }}
+        onClick={handleGenerate}
+      >
+        {loading ? "🤖 AI generating..." : "Generate Campaign"}
+      </button>
+      {error && (
+        <div style={{
+          color: "#f35e68",
+          background: "#281d1d",
+          borderRadius: 8,
+          padding: "10px 12px",
+          fontWeight: 700,
+          fontSize: 15,
+          marginTop: -10
+        }}>
+          {error}
+        </div>
+      )}
+      {/* Ad Previews (always visible) */}
+      <div style={{
+        display: "flex",
+        alignItems: "stretch",
+        width: "100%",
+        gap: 0,
+        position: "relative",
+        marginTop: 18,
+        marginBottom: 14
+      }}>
+        {/* IMAGE AD PREVIEW */}
+        <AdPreviewCard
+          title="IMAGE AD PREVIEW"
+          type="image"
+          imageUrl={imageUrl}
+          imageLoading={imageLoading || loading}
+          headline={result?.headline}
+          body={result?.body}
+          onRegenerate={handleRegenerateImage}
+          onImageClick={handleImageClick}
+        />
+        <div style={{
+          width: 2,
+          background: "linear-gradient(180deg, #22d1c6 0%, #0fe8b5 100%)",
+          borderRadius: 8,
+          margin: "0 30px",
+          minHeight: 270,
+          alignSelf: "center"
+        }} />
+        {/* VIDEO AD PREVIEW & Controls */}
+        <div style={{ flex: 1, minWidth: 340, maxWidth: 430 }}>
+          <AdPreviewCard
+            title="VIDEO AD PREVIEW"
+            type="video"
+            headline={result?.headline}
+          />
+          <div style={{ marginTop: 18, width: "100%" }}>
+            <button
+              style={{
+                background: TEAL,
+                color: "#fff",
+                border: "none",
+                borderRadius: 12,
+                fontWeight: 700,
+                fontSize: "1.09rem",
+                padding: "13px 30px",
+                cursor: "pointer",
+                boxShadow: "0 2px 10px #0cc4be33",
+                marginBottom: 18,
+                marginTop: 5,
+                fontFamily: MODERN_FONT,
+                transition: "background 0.18s"
+              }}
+              onClick={handleGenerateVideo}
+              disabled={videoLoading}
+            >
+              {videoLoading ? "🎬 Generating Video..." : "Generate Video Ad"}
+            </button>
+            {videoLoading && (
+              <div style={{ marginTop: 20 }}>
+                <LoadingSpinner />
+              </div>
+            )}
+            {videoUrl && (
+              <div style={{ marginTop: 14, width: "100%", textAlign: "center" }}>
+                <video
+                  src={videoUrl}
+                  controls
+                  style={{
+                    width: "100%",
+                    maxWidth: 380,
+                    borderRadius: 14,
+                    boxShadow: "0 2px 22px #0007",
+                    marginBottom: 10
+                  }}
+                />
+                {videoScript && (
+                  <div style={{
+                    color: "#bababa",
+                    background: "#232629",
+                    fontSize: "0.98rem",
+                    padding: "10px 18px",
+                    borderRadius: 12,
+                    marginTop: 8,
+                    maxWidth: 380,
+                    marginLeft: "auto",
+                    marginRight: "auto"
+                  }}>
+                    <b>Script:</b> {videoScript}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
     </div>
-  );
-}
+  </div>
+)};
