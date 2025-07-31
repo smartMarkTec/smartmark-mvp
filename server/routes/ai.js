@@ -686,60 +686,61 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
 
-    // 3. Pick exactly 4 random .mp4 videos, favoring short landscape
-    function shuffle(arr) {
-      for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-      }
-    }
-    shuffle(videoClips);
+// 3. Pick exactly 4 random .mp4 videos, favoring short landscape
+function shuffle(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+shuffle(videoClips);
 
-    let files = [];
-    for (let v of videoClips) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
-      ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
-      if (best) files.push(best.link);
-      if (files.length >= 4) break;
-    }
-    if (files.length < 4) {
-      for (let v of videoClips) {
-        for (let f of (v.video_files || [])) {
-          if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
-            files.push(f.link);
-            if (files.length >= 4) break;
-          }
-        }
+let files = [];
+for (let v of videoClips) {
+  let best = (v.video_files || []).find(f =>
+    f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
+  ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
+  if (best) files.push(best.link);
+  if (files.length >= 4) break;
+}
+if (files.length < 4) {
+  for (let v of videoClips) {
+    for (let f of (v.video_files || [])) {
+      if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
+        files.push(f.link);
         if (files.length >= 4) break;
       }
     }
-    files = files.slice(0, 4); // always exactly 4
+    if (files.length >= 4) break;
+  }
+}
+files = files.slice(0, 4); // always exactly 4
 
-    console.log('[VideoAd] MP4 file list:', files);
+console.log('[VideoAd] MP4 file list:', files);
 
-    if (!files.length) {
-      console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
-      return res.status(500).json({ error: "No MP4 clips found" });
-    }
+if (!files.length) {
+  console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
+  return res.status(500).json({ error: "No MP4 clips found" });
+}
 
-    // 4. Download and trim each video to exactly 4.125 seconds (for total 16.5s)
-    const TOTAL_DURATION = 16.5;
-    const SEGMENT_DURATION = TOTAL_DURATION / 4;
-    const tempDir = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    const videoPaths = [];
-    for (let i = 0; i < files.length; i++) {
-      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(files[i], dest);
+// 4. Download and trim each video to exactly 4.125 seconds (for total 16.5s)
+const TOTAL_DURATION = 16.5;
+const SEGMENT_DURATION = TOTAL_DURATION / 4;
+const tempDir = path.join(__dirname, '../tmp');
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+const videoPaths = [];
+for (let i = 0; i < files.length; i++) {
+  const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+  await downloadFile(files[i], dest);
 
-      // Trim & pad to SEGMENT_DURATION using re-encode for precision
-      const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${dest}" -t ${SEGMENT_DURATION} -vf "tpad=stop_mode=clone:stop_duration=${SEGMENT_DURATION}" -c:v libx264 -c:a aac -b:a 192k "${trimmed}"`);
-      videoPaths.push(trimmed);
-    }
+  // Just trim (no tpad)
+  const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
+  await exec(`${ffmpegPath} -y -i "${dest}" -t ${SEGMENT_DURATION} -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${trimmed}"`);
+  videoPaths.push(trimmed);
+}
 
-    console.log('[VideoAd] Downloaded and trimmed video paths:', videoPaths);
+console.log('[VideoAd] Downloaded and trimmed video paths:', videoPaths);
+
 
     if (!videoPaths.length) {
       console.error('[VideoAd] All video downloads failed.', files);
