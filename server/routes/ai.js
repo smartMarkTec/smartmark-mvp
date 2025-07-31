@@ -673,87 +673,81 @@ router.post('/generate-video-ad', async (req, res) => {
     const searchTerm = videoKeywords[0] || 'business';
 
     // 2. Search Pexels for video clips
-let videoClips = [];
-try {
-  const resp = await axios.get(PEXELS_VIDEO_BASE, {
-    headers: { Authorization: PEXELS_API_KEY },
-    params: { query: searchTerm, per_page: 10 }
-  });
-  videoClips = resp.data.videos || [];
-  console.log('[VideoAd] Pexels API success. Clips found:', videoClips.length);
-} catch (err) {
-  console.error('[VideoAd] Pexels fetch error:', err?.message || err);
-  return res.status(500).json({ error: "Stock video fetch failed" });
-}
+    let videoClips = [];
+    try {
+      const resp = await axios.get(PEXELS_VIDEO_BASE, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: searchTerm, per_page: 10 }
+      });
+      videoClips = resp.data.videos || [];
+      console.log('[VideoAd] Pexels API success. Clips found:', videoClips.length);
+    } catch (err) {
+      console.error('[VideoAd] Pexels fetch error:', err?.message || err);
+      return res.status(500).json({ error: "Stock video fetch failed" });
+    }
 
-// 3. Pick exactly 4 random .mp4 videos, favoring short landscape
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-}
-shuffle(videoClips);
+    // 3. Pick exactly 4 random .mp4 videos, favoring short landscape
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+    }
+    shuffle(videoClips);
 
-let files = [];
-for (let v of videoClips) {
-  let best = (v.video_files || []).find(f =>
-    f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
-  ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
-  if (best) files.push(best.link);
-  if (files.length >= 4) break;
-}
-if (files.length < 4) {
-  for (let v of videoClips) {
-    for (let f of (v.video_files || [])) {
-      if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
-        files.push(f.link);
+    let files = [];
+    for (let v of videoClips) {
+      let best = (v.video_files || []).find(f =>
+        f.quality === 'sd' && f.width >= 720 && f.width <= 1920 && f.link.endsWith('.mp4')
+      ) || (v.video_files || []).find(f => f.link.endsWith('.mp4'));
+      if (best) files.push(best.link);
+      if (files.length >= 4) break;
+    }
+    if (files.length < 4) {
+      for (let v of videoClips) {
+        for (let f of (v.video_files || [])) {
+          if (f.link.endsWith('.mp4') && !files.includes(f.link)) {
+            files.push(f.link);
+            if (files.length >= 4) break;
+          }
+        }
         if (files.length >= 4) break;
       }
     }
-    if (files.length >= 4) break;
-  }
-}
-files = files.slice(0, 4); // always exactly 4
+    files = files.slice(0, 4); // always exactly 4
 
-console.log('[VideoAd] MP4 file list:', files);
+    console.log('[VideoAd] MP4 file list:', files);
 
-if (!files.length) {
-  console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
-  return res.status(500).json({ error: "No MP4 clips found" });
-}
+    if (!files.length) {
+      console.error('[VideoAd] No .mp4 files found from Pexels!', JSON.stringify(videoClips, null, 2));
+      return res.status(500).json({ error: "No MP4 clips found" });
+    }
 
-// 4. Download and trim each video to exactly 4.125 seconds (for total 16.5s)
-const TOTAL_DURATION = 16.5;
-const SEGMENT_DURATION = TOTAL_DURATION / 4;
-const tempDir = path.join(__dirname, '../tmp');
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-const videoPaths = [];
-for (let i = 0; i < files.length; i++) {
-  const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-  await downloadFile(files[i], dest);
+    // 4. Download and trim each video to exactly 4.125 seconds (for total 16.5s)
+    const TOTAL_DURATION = 16.5;
+    const SEGMENT_DURATION = TOTAL_DURATION / 4;
+    const tempDir = path.join(__dirname, '../tmp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const videoPaths = [];
+    for (let i = 0; i < files.length; i++) {
+      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+      await downloadFile(files[i], dest);
 
-  // Trim & pad to SEGMENT_DURATION using re-encode for precision
-  const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
-  await exec(`${ffmpegPath} -y -i "${dest}" -t ${SEGMENT_DURATION} -vf "tpad=stop_mode=clone:stop_duration=${SEGMENT_DURATION}" -c:v libx264 -c:a aac -b:a 192k "${trimmed}"`);
-  videoPaths.push(trimmed);
-}
+      // Trim & pad to SEGMENT_DURATION using re-encode for precision
+      const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
+      await exec(`${ffmpegPath} -y -i "${dest}" -t ${SEGMENT_DURATION} -vf "tpad=stop_mode=clone:stop_duration=${SEGMENT_DURATION}" -c:v libx264 -c:a aac -b:a 192k "${trimmed}"`);
+      videoPaths.push(trimmed);
+    }
 
-console.log('[VideoAd] Downloaded and trimmed video paths:', videoPaths);
-
+    console.log('[VideoAd] Downloaded and trimmed video paths:', videoPaths);
 
     if (!videoPaths.length) {
       console.error('[VideoAd] All video downloads failed.', files);
       return res.status(500).json({ error: "All video downloads failed." });
     }
 
-    // -- rest of your existing logic (TTS, music, ffmpeg, etc) --
-    // Keep your existing code from here onward.
-    // (No changes below this comment.)
-
     // 5. Generate AI script
-    // 5. Generate AI script
-let prompt = `Write a high-converting video ad script for this business. 
+    let prompt = `Write a high-converting video ad script for this business. 
 Strict rules:
 - Spoken aloud in 15 to 18 seconds (about 40–55 spoken words, not more).
 - The voiceover must fill 15–18 seconds at a normal talking pace.
@@ -799,28 +793,43 @@ Output only the script, nothing else.`;
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-   const ffmpegCmd = [
-  // Step 1: Concat segments and re-encode for guaranteed total length
-  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${outPath}.temp.mp4"`,
+    // ---- LOGGING AND DEBUGGING FOR FFMPEG STEPS ----
+    const ffmpegCmd = [
+      // Step 1: Concat segments and re-encode for guaranteed total length
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${outPath}.temp.mp4"`,
 
-  // Step 2: Overlay TTS (voice) and (optional) music, and limit final to 16.5s
-  musicPath
-    ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-];
+      // Step 2: Overlay TTS (voice) and (optional) music, and limit final to 16.5s
+      musicPath
+        ? `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -i "${musicPath}" -filter_complex "[1]volume=1.2[aud1];[2]volume=0.22[aud2];[aud1][aud2]amix=inputs=2:duration=shortest[aout]" -map 0:v -map "[aout]" -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+        : `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 16.5 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    ];
 
-    for (let cmd of ffmpegCmd) await exec(cmd);
+    console.log('[VideoAd] About to run ffmpegCmds:', ffmpegCmd);
+
+    for (let i = 0; i < ffmpegCmd.length; i++) {
+      try {
+        console.log(`[VideoAd] Running ffmpegCmd[${i}]:`, ffmpegCmd[i]);
+        await exec(ffmpegCmd[i]);
+        console.log(`[VideoAd] ffmpegCmd[${i}] finished`);
+      } catch (e) {
+        console.error(`[VideoAd] ffmpegCmd[${i}] failed:`, e.message, e.stderr || "");
+        throw e;
+      }
+    }
+
+    console.log('[VideoAd] All ffmpegCmds finished. Ready to respond.');
 
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     const publicUrl = `/generated/${videoId}.mp4`;
+    console.log('[VideoAd] Sending final response:', publicUrl);
+
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE, searchTerm, usedKeywords: videoKeywords });
 
   } catch (err) {
-    console.error("[VideoAd] Uncaught error:", err.message, err?.response?.data || "");
+    console.error("[VideoAd] Uncaught error:", err.message, err?.stderr || "", err?.response?.data || "");
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
 
 module.exports = router;
