@@ -668,7 +668,6 @@ router.post('/generate-video-ad', async (req, res) => {
         videoKeywords.push(...(await extractKeywords(websiteText)).slice(0, 2));
       } catch (e) {}
     }
-    // De-dupe, filter, limit to 3 (prioritize relevance)
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
     const searchTerm = videoKeywords[0] || 'business';
 
@@ -703,7 +702,6 @@ router.post('/generate-video-ad', async (req, res) => {
       if (best) files.push(best.link);
       if (files.length >= 4) break;
     }
-    // If still not 4, add any others
     if (files.length < 4) {
       for (let v of videoClips) {
         for (let f of (v.video_files || [])) {
@@ -715,7 +713,7 @@ router.post('/generate-video-ad', async (req, res) => {
         if (files.length >= 4) break;
       }
     }
-    files = files.slice(0, 4); // max 4
+    files = files.slice(0, 4);
     console.log('[VideoAd] MP4 file list:', files);
 
     if (!files.length) {
@@ -734,27 +732,42 @@ router.post('/generate-video-ad', async (req, res) => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFile(files[i], dest);
 
-      // Get original video duration
+      // --- File existence check after download ---
+      if (!fs.existsSync(dest)) {
+        console.error(`[File Check] Downloaded video file was NOT created: ${dest}`);
+        continue;
+      } else {
+        console.log(`[File Check] Downloaded video file exists: ${dest}`);
+      }
+
+      // Use ffprobe for duration
       let duration = 0;
       try {
-        const { stderr } = await exec(`${ffmpegPath} -i "${dest}" -hide_banner`);
-        const durationMatch = stderr.match(/Duration: (\d+):(\d+):([\d.]+)/);
-        if (durationMatch) {
-          duration = Number(durationMatch[1]) * 3600 + Number(durationMatch[2]) * 60 + Number(durationMatch[3]);
-        }
+        const { stdout } = await exec(
+          `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${dest}"`
+        );
+        duration = parseFloat(stdout.trim());
       } catch (e) {
         console.warn(`Could not get duration for ${dest}:`, e.message);
       }
 
-      // Pick random segment duration between 5–7s, but not longer than actual video
       let segDur = Math.min(
         MIN_SEGMENT + Math.random() * (MAX_SEGMENT - MIN_SEGMENT),
-        Math.max(2, duration - 0.1) // at least 2 seconds
+        Math.max(2, duration - 0.1)
       );
-      segDur = Math.round(segDur * 100) / 100; // round to 2 decimals
+      segDur = Math.round(segDur * 100) / 100;
 
       const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
       await exec(`${ffmpegPath} -y -i "${dest}" -t ${segDur} -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${trimmed}"`);
+
+      // --- File existence check after trim ---
+      if (!fs.existsSync(trimmed)) {
+        console.error(`[File Check] Trimmed video file was NOT created: ${trimmed}`);
+        continue;
+      } else {
+        console.log(`[File Check] Trimmed video file exists: ${trimmed}`);
+      }
+
       videoPaths.push(trimmed);
     }
 
@@ -768,6 +781,11 @@ router.post('/generate-video-ad', async (req, res) => {
     // Generate concat list in proper format
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+    if (!fs.existsSync(listPath)) {
+      console.error(`[File Check] Concat list TXT file was NOT created: ${listPath}`);
+    } else {
+      console.log(`[File Check] Concat list TXT file exists: ${listPath}`);
+    }
 
     // 5. Generate AI script
     let prompt = `Write a high-converting video ad script for this business. 
@@ -803,6 +821,13 @@ Output only the script, nothing else.`;
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
+    // --- File existence check for TTS ---
+    if (!fs.existsSync(ttsPath)) {
+      console.error(`[File Check] TTS MP3 file was NOT created: ${ttsPath}`);
+    } else {
+      console.log(`[File Check] TTS MP3 file exists: ${ttsPath}`);
+    }
+
     // 7. Music selection
     const musicPath = pickMusicFile(videoKeywords);
     console.log("Music selected:", musicPath);
@@ -813,7 +838,6 @@ Output only the script, nothing else.`;
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFMPEG pipeline (NO hard -t, video ends with audio or vice versa)
     const ffmpegCmds = [
       // 1. Concat segments with re-encode
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${outPath}.temp.mp4"`,
@@ -830,6 +854,23 @@ Output only the script, nothing else.`;
         console.log(`[VideoAd] Running ffmpegCmd[${i}]:`, ffmpegCmds[i]);
         await exec(ffmpegCmds[i]);
         console.log(`[VideoAd] ffmpegCmd[${i}] finished`);
+
+        // --- File existence check after each ffmpeg command ---
+        if (i === 0) {
+          // Check .temp.mp4 exists
+          if (!fs.existsSync(`${outPath}.temp.mp4`)) {
+            console.error(`[File Check] Output .temp.mp4 was NOT created: ${outPath}.temp.mp4`);
+          } else {
+            console.log(`[File Check] Output .temp.mp4 exists: ${outPath}.temp.mp4`);
+          }
+        } else if (i === 1) {
+          // Check final video exists
+          if (!fs.existsSync(outPath)) {
+            console.error(`[File Check] Final output video was NOT created: ${outPath}`);
+          } else {
+            console.log(`[File Check] Final output video exists: ${outPath}`);
+          }
+        }
       } catch (e) {
         console.error(`[VideoAd] ffmpegCmd[${i}] failed:`, e.message, e.stderr || "");
         throw e;
@@ -837,7 +878,9 @@ Output only the script, nothing else.`;
     }
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { 
+      try { fs.unlinkSync(p); } catch (e) {}
+    });
 
     const publicUrl = `/generated/${videoId}.mp4`;
     console.log('[VideoAd] Sending final response:', publicUrl);
