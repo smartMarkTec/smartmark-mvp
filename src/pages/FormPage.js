@@ -97,10 +97,10 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-// AD PREVIEW CARD - Handles both Image and Video
+// Main card with image or video preview
 const AdPreviewCard = ({
   title, type, headline, body, imageUrl, imageLoading, onRegenerate, onImageClick,
-  videoUrl, videoLoading, videoScript
+  videoUrl, videoScript, videoLoading, loading
 }) => (
   <div
     style={{
@@ -128,7 +128,7 @@ const AdPreviewCard = ({
     }}>
       {title}
     </span>
-    {/* IMAGE PREVIEW */}
+    {/* Image or Video Preview */}
     {type === "image" ? (
       imageLoading ? (
         <div style={{ width: "100%", marginBottom: 18 }}>
@@ -144,7 +144,7 @@ const AdPreviewCard = ({
             alignItems: "center",
             justifyContent: "center"
           }}
-          onClick={() => onImageClick(imageUrl)}
+          onClick={() => onImageClick && onImageClick(imageUrl)}
           title="Click to view larger"
         >
           <img
@@ -161,6 +161,7 @@ const AdPreviewCard = ({
               fontFamily: AD_FONT
             }}
           />
+
           <button
             style={{
               position: "absolute",
@@ -207,9 +208,12 @@ const AdPreviewCard = ({
         </div>
       )
     ) : (
-      // VIDEO PREVIEW
-      videoUrl ? (
-        <div style={{ position: "relative", width: "100%" }}>
+      videoLoading ? (
+        <div style={{ width: "100%", marginBottom: 18 }}>
+          <LoadingSpinner />
+        </div>
+      ) : videoUrl ? (
+        <div style={{ width: "100%", marginBottom: 18, position: "relative" }}>
           <video
             src={videoUrl}
             controls
@@ -220,7 +224,7 @@ const AdPreviewCard = ({
               background: "#282d33",
               boxShadow: "0 2px 14px #1114",
               objectFit: "contain",
-              marginBottom: 18
+              marginBottom: 10
             }}
           />
           <button
@@ -246,21 +250,6 @@ const AdPreviewCard = ({
             <FaSyncAlt style={{ fontSize: 15 }} />
             {videoLoading ? "Regenerating..." : "Regenerate"}
           </button>
-          {videoScript && (
-            <div style={{
-              color: "#bababa",
-              background: "#232629",
-              fontSize: "0.98rem",
-              padding: "10px 18px",
-              borderRadius: 12,
-              marginTop: 8,
-              maxWidth: 380,
-              marginLeft: "auto",
-              marginRight: "auto"
-            }}>
-              <b>Script:</b> {videoScript}
-            </div>
-          )}
         </div>
       ) : (
         <div
@@ -301,6 +290,25 @@ const AdPreviewCard = ({
         ? body || "Ad copy goes here..."
         : ""}
     </div>
+
+    {/* Video script under video preview */}
+    {type === "video" && videoScript && (
+      <div style={{
+        color: "#bababa",
+        background: "#232629",
+        fontSize: "0.98rem",
+        padding: "10px 18px",
+        borderRadius: 12,
+        marginTop: 8,
+        maxWidth: 380,
+        marginLeft: "auto",
+        marginRight: "auto"
+      }}>
+        <b>Script:</b> {videoScript}
+      </div>
+    )}
+
+    {/* Edit button */}
     <button
       style={{
         position: "absolute",
@@ -399,7 +407,9 @@ export default function FormPage() {
     setTouched(true);
   };
 
+  // -----------------------
   // MAIN AI GENERATE BUTTON (image + video parallel)
+  // -----------------------
   const handleGenerate = async () => {
     setLoading(true);
     setResult(null);
@@ -485,7 +495,7 @@ export default function FormPage() {
     setLoading(false);
   };
 
-  // Regenerate always uses current industry/answers (syncs with backend for overlays)
+  // Regenerate image
   const handleRegenerateImage = async () => {
     setImageLoading(true);
     setImageUrl("");
@@ -543,8 +553,8 @@ export default function FormPage() {
     setImageLoading(false);
   };
 
-  // Regenerate Video
-  const handleRegenerateVideo = async () => {
+  // Regenerate video
+  const handleGenerateVideo = async () => {
     setVideoLoading(true);
     setVideoUrl("");
     setVideoScript("");
@@ -562,10 +572,11 @@ export default function FormPage() {
       const data = await res.json();
       if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
       setVideoScript(data.script || "");
+      setVideoLoading(false);
     } catch (err) {
-      setError("Failed to regenerate video ad: " + (err.message || ""));
+      setError("Failed to generate video ad: " + (err.message || ""));
+      setVideoLoading(false);
     }
-    setVideoLoading(false);
   };
 
   // Modal open/close handlers
@@ -836,18 +847,17 @@ export default function FormPage() {
             minHeight: 270,
             alignSelf: "center"
           }} />
-          {/* VIDEO AD PREVIEW (no button, just preview + regenerate) */}
-          <div style={{ flex: 1, minWidth: 340, maxWidth: 430 }}>
-            <AdPreviewCard
-              title="VIDEO AD PREVIEW"
-              type="video"
-              headline={result?.headline}
-              videoUrl={videoUrl}
-              videoLoading={videoLoading}
-              videoScript={videoScript}
-              onRegenerate={handleRegenerateVideo}
-            />
-          </div>
+          {/* VIDEO AD PREVIEW */}
+          <AdPreviewCard
+            title="VIDEO AD PREVIEW"
+            type="video"
+            headline={result?.headline}
+            videoUrl={videoUrl}
+            videoScript={videoScript}
+            videoLoading={videoLoading}
+            onRegenerate={handleGenerateVideo}
+            loading={loading}
+          />
         </div>
       </div>
     </div>
