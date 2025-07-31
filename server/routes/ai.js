@@ -651,28 +651,18 @@ async function downloadFile(url, dest) {
 
 router.post('/generate-video-ad', async (req, res) => {
   try {
-    const { url = "", answers = {} } = req.body;
-    // Product type/category (e.g., "fashion", "supplements", etc.)
-    const productType = answers?.industry || answers?.productType || "";
+    const { url = "", industry = "", answers = {} } = req.body;
 
-    // Always include "ecommerce" in keyword
-    let videoKeywords = ["ecommerce"];
-    if (productType) videoKeywords.push(productType);
+    // 1. Use e-commerce specific logic for video search keywords
+    let videoKeywords = ["ecommerce", "online shopping"];
+    if (industry) videoKeywords.unshift(industry);
+    if (answers && answers.industry) videoKeywords.unshift(answers.industry);
 
-    // Add extracted site keywords if possible
-    if (url) {
-      try {
-        const websiteText = await getWebsiteText(url);
-        const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
-        videoKeywords.push(...siteKeywords);
-      } catch (e) {}
-    }
+    // Filter unique, non-empty, limit to 2
+    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 2);
+    const searchTerm = videoKeywords.join(" ");
 
-    // Unique, prioritized, always start with "ecommerce"
-    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
-    const searchTerm = videoKeywords.slice(0, 2).join(" "); // e.g., "ecommerce fashion"
-
-    // 2. Search Pexels for relevant ecomm videos (get 6 for choice)
+    // 2. Search Pexels for video clips (get more than 2 to ensure choice)
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -685,24 +675,17 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick up to 3 short relevant clips
+    // 3. Pick exactly 2 short videos (never just 1 long one)
     let files = [];
-    for (let v of videoClips.slice(0, 3)) {
+    for (let v of videoClips.slice(0, 2)) { // <-- Use exactly 2
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
       if (best) files.push(best.link);
     }
-    if (files.length < 3) { // Always try for 3, else fallback
-      for (let v of videoClips) {
-        if (files.length >= 3) break;
-        let f = (v.video_files || [])[0];
-        if (f && !files.includes(f.link)) files.push(f.link);
-      }
-    }
-    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+    if (files.length < 2) return res.status(500).json({ error: "Could not find two suitable MP4 clips" });
 
-    // 4. Download locally
+    // 4. Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -712,26 +695,24 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // 5. Generate GPT script (enforced 15-18s, sales focus, for online store)
-    let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
-
-    // Use specific business info if provided
-    if (productType) prompt += `\nProduct category: ${productType}`;
+    // 5. Generate AI script, length should match (about 15–18s)
+    let prompt = `Write a high-converting video ad script (max 70 words, about 18 seconds) for an ecommerce business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
     if (answers && Object.keys(answers).length) {
-      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
+    if (industry) prompt += `\nIndustry: ${industry}`;
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
+    prompt += "\nOutput only the script. Don't say 'Here is the script.'";
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 110,
-      temperature: 0.65
+      max_tokens: 180,
+      temperature: 0.6
     });
-    let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+    const script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop online now for exclusive deals and fast shipping!";
 
-    // 6. Generate TTS voiceover
+    // 6. Generate TTS voiceover (OpenAI)
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -741,7 +722,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concat 3 clips, overlay voice, 15-18s duration required
+    // 7. Concatenate video, overlay voiceover (ensure at least 15s)
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
@@ -751,10 +732,9 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: concat, add audio, enforce min 15s (trim longer, pad if short)
+    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to 18s min
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      // pad if under 15s, trim if over 18s
       `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 18 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
     for (let cmd of ffmpegCmd) await exec(cmd);
@@ -771,5 +751,6 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 module.exports = router;
