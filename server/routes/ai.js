@@ -652,45 +652,91 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", industry = "", answers = {} } = req.body;
 
-    // 1. Generate video search keywords
-    let videoKeywords = [];
-    if (industry) videoKeywords.push(industry);
-    if (url) {
+    // 1. Advanced search terms – supports ecom and ALL industries
+    let baseKeywords = [];
+    if (industry) baseKeywords.push(industry);
+    if (answers && answers.industry) baseKeywords.push(answers.industry);
+
+    // E-commerce detection
+    const isEcom = (kw) =>
+      /e-?commerce|online shop|shopify|store|cart|woocommerce|product|merch|retail|sale|boutique/i.test(kw);
+
+    // Industry map – covers common verticals AND e-commerce
+    const industryMap = {
+      dentist: ["dentist", "teeth", "dental", "smile", "tooth"],
+      fitness: ["fitness", "workout", "gym", "exercise", "trainer"],
+      bbq: ["bbq", "barbecue", "grill", "meat", "smokehouse"],
+      marketing: ["marketing", "social media", "agency", "advertising"],
+      pizza: ["pizza", "pizzeria", "cheese pizza", "slice"],
+      fashion: ["fashion", "clothing", "style", "outfit", "model"],
+      restaurant: ["restaurant", "food", "dining", "meal", "chef"],
+      ecommerce: ["online store", "shopping", "ecommerce", "products", "checkout", "retail"],
+    };
+
+    let searchTerms = [];
+    baseKeywords.forEach(k => {
+      const key = String(k || "").toLowerCase();
+      if (isEcom(key)) searchTerms.push(...industryMap.ecommerce);
+      else if (industryMap[key]) searchTerms.push(...industryMap[key]);
+      else searchTerms.push(key);
+    });
+    // Always include "business", "company", "brand" as last resort
+    searchTerms.push("business", "company", "brand");
+    searchTerms = Array.from(new Set(searchTerms)).slice(0, 8);
+
+    // 2. Search Pexels for videos, grab up to 3 × 5-8s clips, fallback as needed
+    let videoClips = [];
+    let attempts = 0;
+    for (let term of searchTerms) {
+      if (videoClips.length >= 3) break;
+      let resp;
       try {
-        const websiteText = await getWebsiteText(url);
-        videoKeywords.push(...(await extractKeywords(websiteText)).slice(0, 2));
+        resp = await axios.get(PEXELS_VIDEO_BASE, {
+          headers: { Authorization: PEXELS_API_KEY },
+          params: { query: term, per_page: 10 }
+        });
+      } catch (err) { continue; }
+      let found = (resp.data.videos || []).filter(v => {
+        // SD mp4, ~5-8s
+        const file = (v.video_files || []).find(f =>
+          f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+        );
+        return file && v.duration >= 5 && v.duration <= 8;
+      });
+      videoClips.push(...found);
+      attempts++;
+      if (attempts >= 10) break;
+    }
+    // Fallback: if still not enough, grab *any* available, shortest first
+    if (videoClips.length < 3) {
+      const fallbackTerm = searchTerms[0] || industry || "business";
+      try {
+        const resp = await axios.get(PEXELS_VIDEO_BASE, {
+          headers: { Authorization: PEXELS_API_KEY },
+          params: { query: fallbackTerm, per_page: 10 }
+        });
+        let found = (resp.data.videos || []).filter(v => {
+          const file = (v.video_files || []).find(f =>
+            f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+          );
+          return !!file;
+        });
+        // Shortest clips first, up to needed
+        found = found.sort((a, b) => a.duration - b.duration).slice(0, 3 - videoClips.length);
+        videoClips.push(...found);
       } catch (e) {}
     }
-    if (answers && answers.industry) videoKeywords.push(answers.industry);
+    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // Filter unique, non-empty, limit to 3
-    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 3);
-    const searchTerm = videoKeywords[0] || 'business';
-
-  // 2. Search Pexels for video clips
-let videoClips = [];
-try {
-  const resp = await axios.get(PEXELS_VIDEO_BASE, {
-    headers: { Authorization: PEXELS_API_KEY },
-    params: { query: searchTerm, per_page: 3 } // was 5, now 3 for higher match quality
-  });
-  videoClips = resp.data.videos || [];
-} catch (err) {
-  return res.status(500).json({ error: "Stock video fetch failed" });
-}
-if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
-
-// 3. Pick up to 2 short videos (was 3)
-let files = [];
-for (let v of videoClips.slice(0, 2)) { // <-- changed from 3 to 2
-  let best = (v.video_files || []).find(f =>
-    f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-  ) || (v.video_files || [])[0];
-  if (best) files.push(best.link);
-}
-if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
-
-// ...unchanged...
+    // 3. Pick up to 3 video clips, ~5-8s each
+    let files = [];
+    for (let v of videoClips.slice(0, 3)) {
+      let best = (v.video_files || []).find(f =>
+        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
+      ) || (v.video_files || [])[0];
+      if (best) files.push(best.link);
+    }
+    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
 
     // 4. Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
@@ -702,20 +748,22 @@ if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
       videoPaths.push(dest);
     }
 
-    // 5. Generate AI script
-    let prompt = `Write a high-converting video ad script (max 70 words, 20–25 seconds) for this business. Brief intro, 2–3 unique benefits, clear call to action at the end. Sound friendly, confident, human.`;
+    // 5. Generate script for correct total length (clips × 5s, ~1.1 words/sec)
+    const totalDuration = Math.max(15, 5 * files.length); // e.g. 3 clips = 15s
+    let prompt = `Write a high-converting video ad script for an online business or e-commerce store (if relevant), or any business type otherwise. The script should be a natural voiceover for a ${totalDuration}-second video (max ${Math.round(totalDuration * 1.1)} words). Friendly, confident, real. Brief intro, 2–3 benefits, strong call to action at the end.`;
+
     if (answers && Object.keys(answers).length) {
       prompt += '\n\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
     if (industry) prompt += `\nIndustry: ${industry}`;
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nOutput only the script. Don't say 'Here is the script.'";
+    prompt += `\nOutput only the script, with NO intro or outro phrases. Do not say 'Here is the script.'`;
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 150,
-      temperature: 0.6
+      max_tokens: Math.round(totalDuration * 1.2),
+      temperature: 0.65
     });
     const script = gptRes.choices?.[0]?.message?.content?.trim() || "Ready to level up your business? Book now!";
 
@@ -739,11 +787,11 @@ if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to max 30s
-   const ffmpegCmd = [
-  `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-  `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 15 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-];
+    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to totalDuration
+    const ffmpegCmd = [
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    ];
     for (let cmd of ffmpegCmd) await exec(cmd);
 
     // Clean up temp files
@@ -758,7 +806,5 @@ if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
-
 
 module.exports = router;
