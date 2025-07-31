@@ -769,7 +769,8 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(trimmed);
     }
 
-    console.log('[VideoAd] Downloaded and trimmed video paths:', videoPaths);
+    // LOG HERE: Confirm loop exits and what is in videoPaths
+    console.log('[VideoAd] Finished all trims, about to write concat list:', videoPaths);
 
     if (!videoPaths.length) {
       console.error('[VideoAd] All video downloads failed.', files);
@@ -831,7 +832,7 @@ Output only the script, nothing else.`;
 
     // 8. Concatenate, mix, export
     const genDir = path.join(__dirname, '../public/generated');
-    fs.mkdirSync(genDir, { recursive: true }); // <-- Always force-create now!
+    fs.mkdirSync(genDir, { recursive: true }); // Always force-create now!
     console.log('[VideoAd] Ensured genDir exists:', genDir);
 
     const videoId = uuidv4();
