@@ -98,7 +98,7 @@ function ImageModal({ open, imageUrl, onClose }) {
 }
 
 const AdPreviewCard = ({
-  title, type, headline, body, imageUrl, imageLoading, onRegenerate, onImageClick
+  title, type, headline, body, imageUrl, imageLoading, onRegenerate, onImageClick, videoUrl
 }) => (
   <div
     style={{
@@ -126,7 +126,7 @@ const AdPreviewCard = ({
     }}>
       {title}
     </span>
-    {/* Image Preview */}
+    {/* Image or Video Preview */}
     {type === "image" ? (
       imageLoading ? (
         <div style={{ width: "100%", marginBottom: 18 }}>
@@ -206,25 +206,41 @@ const AdPreviewCard = ({
         </div>
       )
     ) : (
-      <div
-        style={{
-          width: "100%",
-          height: 150,
-          background: "#282d33",
-          borderRadius: 10,
-          marginBottom: 20,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: "#555",
-          fontWeight: 700,
-          fontSize: 22,
-          fontFamily: AD_FONT,
-          letterSpacing: 1
-        }}
-      >
-        Video goes here
-      </div>
+      videoUrl ? (
+        <video
+          src={videoUrl}
+          controls
+          style={{
+            width: "100%",
+            maxWidth: 350,
+            borderRadius: 12,
+            background: "#282d33",
+            boxShadow: "0 2px 14px #1114",
+            objectFit: "contain",
+            marginBottom: 18
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            width: "100%",
+            height: 150,
+            background: "#282d33",
+            borderRadius: 10,
+            marginBottom: 20,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "#555",
+            fontWeight: 700,
+            fontSize: 22,
+            fontFamily: AD_FONT,
+            letterSpacing: 1
+          }}
+        >
+          Video goes here
+        </div>
+      )
     )}
 
     {/* Ad Copy only */}
@@ -786,11 +802,13 @@ export default function FormPage() {
         }} />
         {/* VIDEO AD PREVIEW & Controls */}
         <div style={{ flex: 1, minWidth: 340, maxWidth: 430 }}>
-          <AdPreviewCard
-            title="VIDEO AD PREVIEW"
-            type="video"
-            headline={result?.headline}
-          />
+         <AdPreviewCard
+  title="VIDEO AD PREVIEW"
+  type="video"
+  headline={result?.headline}
+  videoUrl={videoUrl}
+/>
+
           <div style={{ marginTop: 18, width: "100%" }}>
             <button
               style={{
