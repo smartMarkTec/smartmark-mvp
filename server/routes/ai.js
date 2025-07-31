@@ -732,7 +732,6 @@ router.post('/generate-video-ad', async (req, res) => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFile(files[i], dest);
 
-      // --- File existence check after download ---
       if (!fs.existsSync(dest)) {
         console.error(`[File Check] Downloaded video file was NOT created: ${dest}`);
         continue;
@@ -760,7 +759,6 @@ router.post('/generate-video-ad', async (req, res) => {
       const trimmed = path.join(tempDir, `${uuidv4()}-trimmed.mp4`);
       await exec(`${ffmpegPath} -y -i "${dest}" -t ${segDur} -c:v libx264 -c:a aac -b:a 192k -pix_fmt yuv420p "${trimmed}"`);
 
-      // --- File existence check after trim ---
       if (!fs.existsSync(trimmed)) {
         console.error(`[File Check] Trimmed video file was NOT created: ${trimmed}`);
         continue;
@@ -821,7 +819,6 @@ Output only the script, nothing else.`;
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // --- File existence check for TTS ---
     if (!fs.existsSync(ttsPath)) {
       console.error(`[File Check] TTS MP3 file was NOT created: ${ttsPath}`);
     } else {
@@ -834,7 +831,9 @@ Output only the script, nothing else.`;
 
     // 8. Concatenate, mix, export
     const genDir = path.join(__dirname, '../public/generated');
-    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+    fs.mkdirSync(genDir, { recursive: true }); // <-- Always force-create now!
+    console.log('[VideoAd] Ensured genDir exists:', genDir);
+
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
@@ -852,19 +851,16 @@ Output only the script, nothing else.`;
     for (let i = 0; i < ffmpegCmds.length; i++) {
       try {
         console.log(`[VideoAd] Running ffmpegCmd[${i}]:`, ffmpegCmds[i]);
-        await exec(ffmpegCmds[i]);
-        console.log(`[VideoAd] ffmpegCmd[${i}] finished`);
+        const { stdout, stderr } = await exec(ffmpegCmds[i]);
+        console.log(`[VideoAd] ffmpegCmd[${i}] finished, stdout:`, stdout, 'stderr:', stderr);
 
-        // --- File existence check after each ffmpeg command ---
         if (i === 0) {
-          // Check .temp.mp4 exists
           if (!fs.existsSync(`${outPath}.temp.mp4`)) {
             console.error(`[File Check] Output .temp.mp4 was NOT created: ${outPath}.temp.mp4`);
           } else {
             console.log(`[File Check] Output .temp.mp4 exists: ${outPath}.temp.mp4`);
           }
         } else if (i === 1) {
-          // Check final video exists
           if (!fs.existsSync(outPath)) {
             console.error(`[File Check] Final output video was NOT created: ${outPath}`);
           } else {
