@@ -1,9 +1,22 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 /node_modules
-/.pnp
-.pnp.js
+/server/node_modules
+
+# Ignore audio, fonts, and big assets
+server/Music/music/
+server/fonts/
+server/public/generated/
+server/tmp/
+*.mp3
+*.wav
+*.ogg
+*.ttf
+*.woff
+*.woff2
+
+# Ignore data files (if you don't want .txt/.docx tracked)
+server/data/*.txt
+server/data/*.docx
 
 # testing
 /coverage
@@ -23,7 +36,3 @@ yarn-debug.log*
 yarn-error.log*
 
 .env
-
-
-
-
