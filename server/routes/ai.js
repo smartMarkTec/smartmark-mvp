@@ -722,7 +722,14 @@ ${url ? `Website: ${url}` : ""}
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concatenate video, overlay voiceover (ensure at least 15s)
+    // Get duration of voiceover (in seconds)
+    const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
+    const { stdout } = await exec(ffprobeCmd);
+    let duration = parseFloat(stdout.trim());
+    if (!duration || isNaN(duration)) duration = 16;
+    duration = Math.ceil(duration) + 1; // 1 second after audio ends
+
+    // 7. Concatenate video, overlay voiceover, match audio length + 1s
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
@@ -732,10 +739,10 @@ ${url ? `Website: ${url}` : ""}
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to 18s min
+    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to script duration + 1s
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 18 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
     for (let cmd of ffmpegCmd) await exec(cmd);
 
