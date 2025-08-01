@@ -629,7 +629,6 @@ function pickMusicFile(keywords = []) {
 }
 
 // ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
-// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
 const TTS_VOICE = "alloy";
 const ffmpegPath = 'ffmpeg';
@@ -637,9 +636,10 @@ const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
+// Download helper (5s timeout)
 async function downloadFile(url, dest) {
   const writer = fs.createWriteStream(dest);
-  const response = await axios({ url, method: 'GET', responseType: 'stream' });
+  const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 5000 });
   await new Promise((resolve, reject) => {
     response.data.pipe(writer);
     let error = null;
@@ -653,14 +653,28 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", industry = "", answers = {} } = req.body;
 
-    // 1. Use e-commerce specific logic for video search keywords
-    let videoKeywords = ["ecommerce", "online shopping"];
-    if (industry) videoKeywords.unshift(industry);
-    if (answers && answers.industry) videoKeywords.unshift(answers.industry);
+    // 1. Get more accurate video search keywords using GPT
+    let searchTerm = "ecommerce";
+    try {
+      let keywordsPrompt = `
+Given this business, generate a short, highly specific video search term for stock videos that matches the industry and business type, NOT generic, and relevant to e-commerce if possible. One or two words, no punctuation.
+Industry: ${industry}
+Website: ${url}
+Form Info: ${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join(', ')}
+      `.trim();
 
-    // Filter unique, non-empty, limit to 2
-    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 2);
-    const searchTerm = videoKeywords.join(" ");
+      const keywordsRes = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [{ role: "user", content: keywordsPrompt }],
+        max_tokens: 8,
+        temperature: 0.2
+      });
+      const gptTerm = keywordsRes.choices?.[0]?.message?.content?.replace(/[^a-zA-Z0-9 ]/g, "").trim();
+      if (gptTerm && gptTerm.length > 2) searchTerm = gptTerm;
+    } catch (e) {
+      // fallback to e-commerce
+      searchTerm = "ecommerce";
+    }
 
     // 2. Search Pexels for video clips (get more than 3 to ensure choice)
     let videoClips = [];
@@ -734,7 +748,7 @@ ${url ? `Website: ${url}` : ""}
     if (!duration || isNaN(duration)) duration = 16;
     duration = Math.ceil(duration) + 1; // 1 second after audio ends
 
-    // 7. Concatenate video, overlay voiceover, match audio length + 1s
+    // 7. Concatenate video, overlay voiceover, match audio length + 1s (not fixed duration)
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
@@ -744,7 +758,7 @@ ${url ? `Website: ${url}` : ""}
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: 1. concat, 2. add voiceover as audio, 3. trim to script duration + 1s
+    // FFmpeg: concat, add voiceover, trim to voiceover duration + 1s (not before)
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
       `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
