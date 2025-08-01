@@ -660,11 +660,9 @@ router.post('/generate-video-ad', async (req, res) => {
     const { url = "", answers = {} } = req.body;
     const industry = answers?.industry || answers?.productType || "";
 
-    // 1. Build a highly relevant search term for Pexels using industry + ecommerce + website scrape
+    // 1. Build search term for Pexels using industry + ecommerce + website scrape
     let videoKeywords = ["ecommerce"];
     if (industry) videoKeywords.push(industry);
-
-    // Try to extract keywords from the user's website for extra relevance
     if (url) {
       try {
         const websiteText = await getWebsiteText(url);
@@ -672,10 +670,8 @@ router.post('/generate-video-ad', async (req, res) => {
         videoKeywords.push(...siteKeywords);
       } catch (e) {}
     }
-
-    // Unique, prioritized, always start with "ecommerce"
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
-    const searchTerm = videoKeywords.slice(0, 2).join(" "); // e.g., "ecommerce jewelry"
+    const searchTerm = videoKeywords.slice(0, 2).join(" ");
 
     // 2. Fetch videos from Pexels (get 8 to ensure variety)
     let videoClips = [];
@@ -690,7 +686,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick exactly 3 short, unique video clips
+    // 3. Pick 2 or 3 short, unique video clips
     let files = [];
     let usedIds = new Set();
     for (let v of videoClips) {
@@ -703,15 +699,14 @@ router.post('/generate-video-ad', async (req, res) => {
       }
       if (files.length === 3) break;
     }
-    // Fallback: fill to 3 if needed
-    if (files.length < 3) {
-      for (let v of videoClips) {
-        if (files.length >= 3) break;
-        let f = (v.video_files || [])[0];
-        if (f && !files.includes(f.link)) files.push(f.link);
-      }
+    if (files.length < 2) return res.status(500).json({ error: "Could not find enough suitable MP4 clips" });
+
+    // Randomly pick 2 or 3
+    if (files.length === 2 || Math.random() < 0.5) {
+      files = files.slice(0, 2);
+    } else {
+      files = files.slice(0, 3);
     }
-    if (files.length < 3) return res.status(500).json({ error: "Could not find three suitable MP4 clips" });
 
     // 4. Download each video locally
     const tempDir = path.join(__dirname, '../tmp');
@@ -755,11 +750,22 @@ router.post('/generate-video-ad', async (req, res) => {
     const { stdout } = await exec(ffprobeCmd);
     let duration = parseFloat(stdout.trim());
     if (!duration || isNaN(duration)) duration = 16;
-    duration = Math.ceil(duration); // Round up to ensure complete voiceover
+    duration = Math.ceil(duration);
 
-    // 8. Concatenate videos (segment to 3 equal parts)
+    // 8. Trim each video segment to fit total duration
+    // Each segment = total duration / N
+    const segmentDur = Math.max(Math.floor(duration / files.length), 5); // 5+ sec minimum
+    const trimmedPaths = [];
+    for (let i = 0; i < videoPaths.length; i++) {
+      const inPath = videoPaths[i];
+      const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
+      await exec(`${ffmpegPath} -y -i "${inPath}" -t ${segmentDur} -c copy "${trimmed}"`);
+      trimmedPaths.push(trimmed);
+    }
+
+    // 9. Concatenate trimmed videos
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+    fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
     const genDir = path.join(__dirname, '../public/generated');
@@ -775,7 +781,7 @@ router.post('/generate-video-ad', async (req, res) => {
     for (let cmd of ffmpegCmd) await exec(cmd);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Respond with the generated video url and script
     const publicUrl = `/generated/${videoId}.mp4`;
