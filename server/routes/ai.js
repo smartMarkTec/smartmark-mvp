@@ -651,16 +651,13 @@ async function downloadFile(url, dest) {
 
 router.post('/generate-video-ad', async (req, res) => {
   try {
-    // ---- ADDED: Cold start/certainty check ----
     if (!PEXELS_API_KEY || !openai || !ffmpegPath) {
       return res.status(503).json({ error: "Server is waking up, please wait and try again in a few seconds." });
     }
-    // -------------------------------------------
 
     const { url = "", answers = {} } = req.body;
     const industry = answers?.industry || answers?.productType || "";
 
-    // 1. Build search term for Pexels using industry + ecommerce + website scrape
     let videoKeywords = ["ecommerce"];
     if (industry) videoKeywords.push(industry);
     if (url) {
@@ -673,7 +670,7 @@ router.post('/generate-video-ad', async (req, res) => {
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
 
-    // 2. Fetch videos from Pexels (get 8 to ensure variety)
+    // Fetch videos from Pexels
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -686,7 +683,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick 2 or 3 short, unique video clips
+    // Pick 2 or 3 short, unique video clips
     let files = [];
     let usedIds = new Set();
     for (let v of videoClips) {
@@ -708,7 +705,7 @@ router.post('/generate-video-ad', async (req, res) => {
       files = files.slice(0, 3);
     }
 
-    // 4. Download each video locally
+    // Download each video locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -718,7 +715,7 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // 5. Generate script (strictly ad copy, 15–18s, no scene directions)
+    // Generate script (strictly ad copy, 15–18s, no scene directions)
     let prompt = `Write ONLY the exact words for a Facebook video ad for an e-commerce business, selling any type of goods. DO NOT include scene directions, stage notes, or any non-spoken text—only the spoken script. Must be friendly, confident, 15–18 seconds long (45–55 words). Start with a hook, include 2–3 benefits, end with a call to action.`;
     if (industry) prompt += `\nIndustry: ${industry}`;
     if (answers && Object.keys(answers).length) {
@@ -735,7 +732,7 @@ router.post('/generate-video-ad', async (req, res) => {
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    // 6. Generate TTS
+    // Generate TTS
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -745,16 +742,15 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Get duration of voiceover (in seconds)
+    // Get duration of voiceover (in seconds)
     const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
     const { stdout } = await exec(ffprobeCmd);
     let duration = parseFloat(stdout.trim());
     if (!duration || isNaN(duration)) duration = 16;
     duration = Math.ceil(duration);
 
-    // 8. Trim each video segment to fit total duration
-    // Each segment = total duration / N
-    const segmentDur = Math.max(Math.floor(duration / files.length), 5); // 5+ sec minimum
+    // Trim each video segment to fit total duration
+    const segmentDur = Math.max(Math.floor(duration / files.length), 5);
     const trimmedPaths = [];
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
@@ -763,7 +759,14 @@ router.post('/generate-video-ad', async (req, res) => {
       trimmedPaths.push(trimmed);
     }
 
-    // 9. Use ffmpeg xfade for smooth transitions
+    // --- FIX: Define these before using below ---
+    const videoId = uuidv4();
+    const genDir = path.join(__dirname, '../public/generated');
+    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+    const outPath = path.join(genDir, `${videoId}.mp4`);
+    // -------------------------------------------
+
+    // Use ffmpeg xfade for smooth transitions
     let transitionCmd;
     const videoInputs = trimmedPaths.map(p => `-i "${p}"`).join(" ");
     if (trimmedPaths.length === 2) {
@@ -771,20 +774,18 @@ router.post('/generate-video-ad', async (req, res) => {
         + `"[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8},format=yuv420p[v]" `
         + `-map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
     } else if (trimmedPaths.length === 3) {
-      // Two crossfades chained for three segments
       transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex `
         + `"[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8}[v1]; `
         + `[v1][2]xfade=transition=fade:duration=0.8:offset=${(segmentDur*2)-0.8},format=yuv420p[v]" `
         + `-map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
     } else {
-      // fallback: basic concat (should not happen)
       const listPath = path.join(tempDir, `${uuidv4()}.txt`);
       fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
       transitionCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.xfaded.mp4"`;
     }
     await exec(transitionCmd);
 
-    // 10. Overlay voiceover and trim to exactly match TTS duration
+    // Overlay voiceover and trim to exactly match TTS duration
     const finalCmd = `${ffmpegPath} -y -i "${outPath}.xfaded.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} `
       + `-c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`;
     await exec(finalCmd);
