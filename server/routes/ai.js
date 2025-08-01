@@ -628,7 +628,7 @@ function pickMusicFile(keywords = []) {
   return null;
 }
 
-// ========== AI: GENERATE VIDEO AD (PEXELS + OPENAI TTS + FFMPEG) ==========
+// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
 const TTS_VOICE = "alloy";
 const ffmpegPath = 'ffmpeg';
@@ -636,10 +636,10 @@ const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
-// Download helper (5s timeout)
+// Helper to download video files
 async function downloadFile(url, dest) {
   const writer = fs.createWriteStream(dest);
-  const response = await axios({ url, method: 'GET', responseType: 'stream', timeout: 5000 });
+  const response = await axios({ url, method: 'GET', responseType: 'stream' });
   await new Promise((resolve, reject) => {
     response.data.pipe(writer);
     let error = null;
@@ -651,60 +651,63 @@ async function downloadFile(url, dest) {
 
 router.post('/generate-video-ad', async (req, res) => {
   try {
-    const { url = "", industry = "", answers = {} } = req.body;
+    const { url = "", answers = {} } = req.body;
+    const industry = answers?.industry || answers?.productType || "";
 
-    // 1. Get more accurate video search keywords using GPT
-    let searchTerm = "ecommerce";
-    try {
-      let keywordsPrompt = `
-Given this business, generate a short, highly specific video search term for stock videos that matches the industry and business type, NOT generic, and relevant to e-commerce if possible. One or two words, no punctuation.
-Industry: ${industry}
-Website: ${url}
-Form Info: ${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join(', ')}
-      `.trim();
+    // 1. Build a highly relevant search term for Pexels using industry + ecommerce + website scrape
+    let videoKeywords = ["ecommerce"];
+    if (industry) videoKeywords.push(industry);
 
-      const keywordsRes = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: keywordsPrompt }],
-        max_tokens: 8,
-        temperature: 0.2
-      });
-      const gptTerm = keywordsRes.choices?.[0]?.message?.content?.replace(/[^a-zA-Z0-9 ]/g, "").trim();
-      if (gptTerm && gptTerm.length > 2) searchTerm = gptTerm;
-    } catch (e) {
-      // fallback to e-commerce
-      searchTerm = "ecommerce";
+    // Try to extract keywords from the user's website for extra relevance
+    if (url) {
+      try {
+        const websiteText = await getWebsiteText(url);
+        const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
+        videoKeywords.push(...siteKeywords);
+      } catch (e) {}
     }
 
-    // 2. Search Pexels for video clips (get more than 3 to ensure choice)
+    // Unique, prioritized, always start with "ecommerce"
+    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
+    const searchTerm = videoKeywords.slice(0, 2).join(" "); // e.g., "ecommerce jewelry"
+
+    // 2. Fetch videos from Pexels (get 8 to ensure variety)
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 12 }
+        params: { query: searchTerm, per_page: 8 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 3) return res.status(404).json({ error: "Not enough stock videos found" });
+    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
-    // 3. Pick exactly 3 different short videos (never just 1 or 2)
+    // 3. Pick exactly 3 short, unique video clips
     let files = [];
-    let usedVideoIds = new Set();
+    let usedIds = new Set();
     for (let v of videoClips) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
-      if (best && !usedVideoIds.has(v.id)) {
+      if (best && !usedIds.has(v.id)) {
         files.push(best.link);
-        usedVideoIds.add(v.id);
+        usedIds.add(v.id);
       }
       if (files.length === 3) break;
     }
+    // Fallback: fill to 3 if needed
+    if (files.length < 3) {
+      for (let v of videoClips) {
+        if (files.length >= 3) break;
+        let f = (v.video_files || [])[0];
+        if (f && !files.includes(f.link)) files.push(f.link);
+      }
+    }
     if (files.length < 3) return res.status(500).json({ error: "Could not find three suitable MP4 clips" });
 
-    // 4. Download videos locally
+    // 4. Download each video locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -714,24 +717,24 @@ Form Info: ${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join(', ')}
       videoPaths.push(dest);
     }
 
-    // 5. Generate AI script, force NO scene directions or stage notes, only voiceover text
-    let prompt = `
-Write ONLY the words the voiceover should say in a Facebook video ad for an ecommerce business. DO NOT include scene directions, stage notes, or any non-spoken text—only the spoken ad script. The script should be about 70 words (15–18 seconds), friendly, confident, and include a brief intro, 2–3 unique benefits, and a strong call to action at the end. 
-Business Details: 
-${Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n')}
-${industry ? `Industry: ${industry}` : ""}
-${url ? `Website: ${url}` : ""}
-    `.trim();
+    // 5. Generate script (strictly ad copy, 15–18s, no scene directions)
+    let prompt = `Write ONLY the exact words for a Facebook video ad for an e-commerce business, selling any type of goods. DO NOT include scene directions, stage notes, or any non-spoken text—only the spoken script. Must be friendly, confident, 15–18 seconds long (45–55 words). Start with a hook, include 2–3 benefits, end with a call to action.`;
+    if (industry) prompt += `\nIndustry: ${industry}`;
+    if (answers && Object.keys(answers).length) {
+      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+    }
+    if (url) prompt += `\nWebsite: ${url}`;
+    prompt += "\nRespond ONLY with the script. No headings. No intro.";
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 180,
-      temperature: 0.6
+      max_tokens: 110,
+      temperature: 0.65
     });
-    const script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop online now for exclusive deals and fast shipping!";
+    let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    // 6. Generate TTS voiceover (OpenAI)
+    // 6. Generate TTS
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -741,14 +744,17 @@ ${url ? `Website: ${url}` : ""}
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // Get duration of voiceover (in seconds)
+    // 7. Get duration of voiceover (in seconds)
     const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
     const { stdout } = await exec(ffprobeCmd);
     let duration = parseFloat(stdout.trim());
     if (!duration || isNaN(duration)) duration = 16;
-    duration = Math.ceil(duration) + 1; // 1 second after audio ends
+    duration = Math.ceil(duration); // Round up to ensure complete voiceover
 
-    // 7. Concatenate video, overlay voiceover, match audio length + 1s (not fixed duration)
+    // 8. Concatenate videos (segment to 3 equal parts)
+    // Use ffmpeg -t and -ss to split each video into 1/3 of total duration if they're too long,
+    // but if not, just concatenate and let -shortest handle.
+    // (Most Pexels clips are short enough, so this usually "just works".)
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
@@ -758,7 +764,7 @@ ${url ? `Website: ${url}` : ""}
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // FFmpeg: concat, add voiceover, trim to voiceover duration + 1s (not before)
+    // FFmpeg: concat, add audio, trim to exactly match TTS duration
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
       `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
@@ -768,7 +774,7 @@ ${url ? `Website: ${url}` : ""}
     // Clean up temp files
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Return public video URL and script
+    // Respond with the generated video url and script
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
@@ -777,5 +783,6 @@ ${url ? `Website: ${url}` : ""}
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 module.exports = router;
