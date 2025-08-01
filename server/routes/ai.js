@@ -667,21 +667,26 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 6 }
+        params: { query: searchTerm, per_page: 8 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
+    if (videoClips.length < 2) return res.status(404).json({ error: "Not enough stock videos found" });
 
-    // 3. Pick exactly 2 short videos (never just 1 long one)
+    // 3. Pick exactly 2 different short videos (never just 1 long one)
     let files = [];
-    for (let v of videoClips.slice(0, 2)) { // <-- Use exactly 2
+    let usedVideoIds = new Set();
+    for (let v of videoClips) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
-      if (best) files.push(best.link);
+      if (best && !usedVideoIds.has(v.id)) {
+        files.push(best.link);
+        usedVideoIds.add(v.id);
+      }
+      if (files.length === 2) break;
     }
     if (files.length < 2) return res.status(500).json({ error: "Could not find two suitable MP4 clips" });
 
@@ -758,6 +763,7 @@ ${url ? `Website: ${url}` : ""}
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
