@@ -651,6 +651,12 @@ async function downloadFile(url, dest) {
 
 router.post('/generate-video-ad', async (req, res) => {
   try {
+    // ---- ADDED: Cold start/certainty check ----
+    if (!PEXELS_API_KEY || !openai || !ffmpegPath) {
+      return res.status(503).json({ error: "Server is waking up, please wait and try again in a few seconds." });
+    }
+    // -------------------------------------------
+
     const { url = "", answers = {} } = req.body;
     const industry = answers?.industry || answers?.productType || "";
 
@@ -752,9 +758,6 @@ router.post('/generate-video-ad', async (req, res) => {
     duration = Math.ceil(duration); // Round up to ensure complete voiceover
 
     // 8. Concatenate videos (segment to 3 equal parts)
-    // Use ffmpeg -t and -ss to split each video into 1/3 of total duration if they're too long,
-    // but if not, just concatenate and let -shortest handle.
-    // (Most Pexels clips are short enough, so this usually "just works".)
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
