@@ -749,32 +749,33 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!duration || isNaN(duration)) duration = 16;
     duration = Math.ceil(duration);
 
-    // Trim and scale each video segment to fit total duration and resolution
-    const targetWidth = 720, targetHeight = 1280;
-    const segmentDur = Math.max(Math.floor(duration / files.length), 5);
+    // Trim, scale, and re-encode each video to force SAME framerate, timebase, and format
+    const targetWidth = 720, targetHeight = 1280, targetFps = 30; // vertical, 30fps
+    const segmentDur = Math.max(Math.floor(duration / files.length), 5); // 5+ sec minimum
     const trimmedPaths = [];
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      // **Force framerate to 30 for xfade compatibility**
-      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=30" -t ${segmentDur} -r 30 -c:v libx264 -pix_fmt yuv420p -an "${trimmed}"`);
+      // Scale, set framerate, and force pixel format
+      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${targetFps},format=yuv420p" -t ${segmentDur} -c:v libx264 -c:a aac -r ${targetFps} "${trimmed}"`);
       trimmedPaths.push(trimmed);
     }
 
-    // Output path setup
+    // --- Setup output paths ---
     const videoId = uuidv4();
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // Use ffmpeg xfade for smooth transitions (works now)
+    // --- XFADE: works now that all framerate/timebase are forced identical ---
     let transitionCmd;
     const videoInputs = trimmedPaths.map(p => `-i "${p}"`).join(" ");
     if (trimmedPaths.length === 2) {
-      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -pix_fmt yuv420p -shortest "${outPath}.xfaded.mp4"`;
+      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
     } else if (trimmedPaths.length === 3) {
-      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8}[v1];[v1][2]xfade=transition=fade:duration=0.8:offset=${(segmentDur*2)-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -pix_fmt yuv420p -shortest "${outPath}.xfaded.mp4"`;
+      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8}[v1]; [v1][2]xfade=transition=fade:duration=0.8:offset=${(segmentDur*2)-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
     } else {
+      // fallback (should never hit this for 2 or 3 clips)
       const listPath = path.join(tempDir, `${uuidv4()}.txt`);
       fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
       transitionCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.xfaded.mp4"`;
@@ -782,7 +783,7 @@ router.post('/generate-video-ad', async (req, res) => {
     await exec(transitionCmd);
 
     // Overlay voiceover and trim to exactly match TTS duration
-    const finalCmd = `${ffmpegPath} -y -i "${outPath}.xfaded.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`;
+    const finalCmd = `${ffmpegPath} -y -i "${outPath}.xfaded.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
     // Clean up temp files
@@ -797,7 +798,5 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
-
 
 module.exports = router;
