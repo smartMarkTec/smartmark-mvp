@@ -749,15 +749,18 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!duration || isNaN(duration)) duration = 16;
     duration = Math.ceil(duration);
 
-    // Trim each video segment to fit total duration
-    const segmentDur = Math.max(Math.floor(duration / files.length), 5);
-    const trimmedPaths = [];
-    for (let i = 0; i < videoPaths.length; i++) {
-      const inPath = videoPaths[i];
-      const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${inPath}" -t ${segmentDur} -c:v libx264 -c:a aac "${trimmed}"`);
-      trimmedPaths.push(trimmed);
-    }
+    // Trim and scale each video segment to fit total duration and resolution
+const targetWidth = 720, targetHeight = 1280; // Standard vertical ad size
+const segmentDur = Math.max(Math.floor(duration / files.length), 5); // 5+ sec minimum
+const trimmedPaths = [];
+for (let i = 0; i < videoPaths.length; i++) {
+  const inPath = videoPaths[i];
+  const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
+  // Scale to target size before trimming
+  await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2" -t ${segmentDur} -c:v libx264 -c:a aac "${trimmed}"`);
+  trimmedPaths.push(trimmed);
+}
+
 
     // --- FIX: Define these before using below ---
     const videoId = uuidv4();
