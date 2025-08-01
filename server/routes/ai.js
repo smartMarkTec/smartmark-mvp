@@ -759,29 +759,38 @@ router.post('/generate-video-ad', async (req, res) => {
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${inPath}" -t ${segmentDur} -c copy "${trimmed}"`);
+      await exec(`${ffmpegPath} -y -i "${inPath}" -t ${segmentDur} -c:v libx264 -c:a aac "${trimmed}"`);
       trimmedPaths.push(trimmed);
     }
 
-    // 9. Concatenate trimmed videos
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
+    // 9. Use ffmpeg xfade for smooth transitions
+    let transitionCmd;
+    const videoInputs = trimmedPaths.map(p => `-i "${p}"`).join(" ");
+    if (trimmedPaths.length === 2) {
+      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex `
+        + `"[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8},format=yuv420p[v]" `
+        + `-map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
+    } else if (trimmedPaths.length === 3) {
+      // Two crossfades chained for three segments
+      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex `
+        + `"[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8}[v1]; `
+        + `[v1][2]xfade=transition=fade:duration=0.8:offset=${(segmentDur*2)-0.8},format=yuv420p[v]" `
+        + `-map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
+    } else {
+      // fallback: basic concat (should not happen)
+      const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+      fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
+      transitionCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.xfaded.mp4"`;
+    }
+    await exec(transitionCmd);
 
-    // Output dir and file
-    const genDir = path.join(__dirname, '../public/generated');
-    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
-    const videoId = uuidv4();
-    const outPath = path.join(genDir, `${videoId}.mp4`);
-
-    // FFmpeg: concat, add audio, trim to exactly match TTS duration
-    const ffmpegCmd = [
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
-    for (let cmd of ffmpegCmd) await exec(cmd);
+    // 10. Overlay voiceover and trim to exactly match TTS duration
+    const finalCmd = `${ffmpegPath} -y -i "${outPath}.xfaded.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} `
+      + `-c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`;
+    await exec(finalCmd);
 
     // Clean up temp files
-    [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ...trimmedPaths, ttsPath, `${outPath}.xfaded.mp4`, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Respond with the generated video url and script
     const publicUrl = `/generated/${videoId}.mp4`;
@@ -792,6 +801,7 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
