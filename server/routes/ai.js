@@ -662,20 +662,20 @@ router.post('/generate-video-ad', async (req, res) => {
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean))).slice(0, 2);
     const searchTerm = videoKeywords.join(" ");
 
-    // 2. Search Pexels for video clips (get more than 2 to ensure choice)
+    // 2. Search Pexels for video clips (get more than 3 to ensure choice)
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 8 }
+        params: { query: searchTerm, per_page: 12 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 2) return res.status(404).json({ error: "Not enough stock videos found" });
+    if (videoClips.length < 3) return res.status(404).json({ error: "Not enough stock videos found" });
 
-    // 3. Pick exactly 2 different short videos (never just 1 long one)
+    // 3. Pick exactly 3 different short videos (never just 1 or 2)
     let files = [];
     let usedVideoIds = new Set();
     for (let v of videoClips) {
@@ -686,9 +686,9 @@ router.post('/generate-video-ad', async (req, res) => {
         files.push(best.link);
         usedVideoIds.add(v.id);
       }
-      if (files.length === 2) break;
+      if (files.length === 3) break;
     }
-    if (files.length < 2) return res.status(500).json({ error: "Could not find two suitable MP4 clips" });
+    if (files.length < 3) return res.status(500).json({ error: "Could not find three suitable MP4 clips" });
 
     // 4. Download videos locally
     const tempDir = path.join(__dirname, '../tmp');
@@ -763,7 +763,6 @@ ${url ? `Website: ${url}` : ""}
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
 
 
 module.exports = router;
