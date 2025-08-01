@@ -298,14 +298,12 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     if (!searchTerm) {
       return res.status(400).json({ error: "Missing url or industry" });
     }
-
     const gptPrompt = `
 Given this business URL and industry, output only the most relevant 1-2 word search term for a stock photo (such as "gym", "restaurant", "pizza", "doctor", "salon", "fashion", "coffee shop", "bakery"). Do NOT use more than 2 words. Only output the search term. Do not include any quotes or extra words.
 
 URL: ${url}
 Industry: ${industry}
     `.trim();
-
     let keyword = "";
     try {
       const controller = new AbortController();
@@ -326,7 +324,7 @@ Industry: ${industry}
     const perPage = 15;
     let photos = [];
     try {
-      const resp = await axios.get(PEXELS_BASE_URL, {
+      const resp = await axios.get("https://api.pexels.com/v1/search", {
         headers: { Authorization: PEXELS_API_KEY },
         params: {
           query: keyword,
@@ -340,11 +338,9 @@ Industry: ${industry}
       console.error("Pexels fetch error:", err?.message || err);
       return res.status(500).json({ error: "Image search failed" });
     }
-
     if (!photos.length) {
       return res.status(404).json({ error: "No images found for this topic." });
     }
-
     let imgIdx = 0;
     if (regenerateToken) {
       let hash = 0;
@@ -355,9 +351,7 @@ Industry: ${industry}
     } else {
       imgIdx = Math.floor(Math.random() * photos.length);
     }
-
     const img = photos[imgIdx];
-
     return res.json({
       imageUrl: img.src.large2x || img.src.original || img.src.large,
       photographer: img.photographer,
@@ -654,7 +648,6 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!PEXELS_API_KEY || !openai || !ffmpegPath) {
       return res.status(503).json({ error: "Server is waking up, please wait and try again in a few seconds." });
     }
-
     const { url = "", answers = {} } = req.body;
     const industry = answers?.industry || answers?.productType || "";
 
@@ -750,24 +743,23 @@ router.post('/generate-video-ad', async (req, res) => {
     duration = Math.ceil(duration);
 
     // Trim, scale, and re-encode each video to force SAME framerate, timebase, and format
-    const targetWidth = 720, targetHeight = 1280, targetFps = 30; // vertical, 30fps
-    const segmentDur = Math.max(Math.floor(duration / files.length), 5); // 5+ sec minimum
+    const targetWidth = 720, targetHeight = 1280, targetFps = 30;
+    const segmentDur = Math.max(Math.floor(duration / files.length), 5);
     const trimmedPaths = [];
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      // Scale, set framerate, and force pixel format
       await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${targetFps},format=yuv420p" -t ${segmentDur} -c:v libx264 -c:a aac -r ${targetFps} "${trimmed}"`);
       trimmedPaths.push(trimmed);
     }
 
-    // --- Setup output paths ---
+    // Output paths
     const videoId = uuidv4();
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // --- XFADE: works now that all framerate/timebase are forced identical ---
+    // XFADE: works now that all framerate/timebase are forced identical
     let transitionCmd;
     const videoInputs = trimmedPaths.map(p => `-i "${p}"`).join(" ");
     if (trimmedPaths.length === 2) {
@@ -775,7 +767,6 @@ router.post('/generate-video-ad', async (req, res) => {
     } else if (trimmedPaths.length === 3) {
       transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8}[v1]; [v1][2]xfade=transition=fade:duration=0.8:offset=${(segmentDur*2)-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
     } else {
-      // fallback (should never hit this for 2 or 3 clips)
       const listPath = path.join(tempDir, `${uuidv4()}.txt`);
       fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
       transitionCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.xfaded.mp4"`;
@@ -792,7 +783,6 @@ router.post('/generate-video-ad', async (req, res) => {
     // Respond with the generated video url and script
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
-
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
