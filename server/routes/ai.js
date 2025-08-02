@@ -683,7 +683,7 @@ async function downloadFile(url, dest) {
   return dest;
 }
 
-router.post('/generate-video-ad', async (req, res) => {
+router.post('/generate-video-ad', async (req, res, next) => {
   try {
     if (!PEXELS_API_KEY || !openai || !ffmpegPath) {
       return res.status(503).json({ error: "Server warming up, try again shortly." });
@@ -692,7 +692,6 @@ router.post('/generate-video-ad', async (req, res) => {
     const industry = answers?.industry || answers?.productType || "ecommerce";
     const searchTerm = industry;
 
-    // --- Fetch 2 Pexels stock videos ---
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -701,14 +700,12 @@ router.post('/generate-video-ad', async (req, res) => {
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
-      console.error("Pexels fetch error:", err.message || err);
       return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err });
     }
     if (videoClips.length < 2) {
       return res.status(404).json({ error: "No stock videos found" });
     }
 
-    // --- Pick 2 unique SD MP4s ---
     let files = [];
     let usedIds = new Set();
     for (let v of videoClips) {
@@ -725,22 +722,15 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // --- Download videos ---
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      try {
-        await downloadFile(files[i], dest);
-        videoPaths.push(dest);
-      } catch (err) {
-        console.error("Video download error:", err.message || err);
-        return res.status(500).json({ error: "Failed to download stock video", detail: err.message });
-      }
+      await downloadFile(files[i], dest);
+      videoPaths.push(dest);
     }
 
-    // --- Get script (ad copy, ~15s) ---
     let prompt = `Write ONLY the spoken script for a Facebook video ad, about 16 seconds, friendly and confident, start with a hook, 2 benefits, call to action. No scene directions.`;
     if (industry) prompt += `\nIndustry: ${industry}`;
     if (answers && Object.keys(answers).length) {
@@ -759,11 +749,9 @@ router.post('/generate-video-ad', async (req, res) => {
       });
       script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
     } catch (err) {
-      console.error("OpenAI script error:", err.message || err);
       script = "Shop the best products online now!";
     }
 
-    // --- TTS voiceover ---
     let ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await openai.audio.speech.create({
@@ -774,38 +762,27 @@ router.post('/generate-video-ad', async (req, res) => {
       const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
       fs.writeFileSync(ttsPath, ttsBuffer);
     } catch (err) {
-      console.error("OpenAI TTS error:", err.message || err);
       return res.status(500).json({ error: "Voiceover failed", detail: err.message });
     }
 
-    // --- Get voice duration ---
     let duration = 16;
     try {
       const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
       const { stdout } = await exec(ffprobeCmd);
       let d = parseFloat(stdout.trim());
       if (!isNaN(d) && d > 0) duration = Math.ceil(d);
-    } catch (err) {
-      console.error("ffprobe error:", err.message || err);
-    }
+    } catch (err) {}
 
-    // --- Trim and resize each video (snappy edits) ---
     const targetW = 720, targetH = 1280, fps = 30;
     const segmentDur = Math.max(Math.floor(duration / 2), 6);
     const trimmedPaths = [];
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      try {
-        await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -preset veryfast -c:a aac -r ${fps} "${trimmed}"`);
-        trimmedPaths.push(trimmed);
-      } catch (err) {
-        console.error("ffmpeg trim error:", err.message || err);
-        return res.status(500).json({ error: "Video trim/resize failed", detail: err.message });
-      }
+      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -preset veryfast -c:a aac -r ${fps} "${trimmed}"`);
+      trimmedPaths.push(trimmed);
     }
 
-    // --- Concatenate both (re-encode for smooth cut) ---
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
     const videoId = uuidv4();
@@ -813,30 +790,18 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    try {
-      await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
-    } catch (err) {
-      console.error("ffmpeg concat error:", err.message || err);
-      return res.status(500).json({ error: "Video concat failed", detail: err.message });
-    }
+    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
 
-    // --- Overlay voiceover (hard trim to voice duration) ---
-    try {
-      await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
-    } catch (err) {
-      console.error("ffmpeg final mux error:", err.message || err);
-      return res.status(500).json({ error: "Final video/audio mux failed", detail: err.message });
-    }
+    await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
 
-    // --- Clean up ---
     [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // --- Respond (ALWAYS JSON) ---
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
   } catch (err) {
-    console.error("Video generation error:", err?.message || err);
-    return res.status(500).json({
+    // This block CANNOT send plaintext; pass to global error handler if it exists
+    if (res.headersSent) return next(err);
+    res.status(500).json({
       error: "Failed to generate video ad",
       detail: err?.message || "Unknown error"
     });
