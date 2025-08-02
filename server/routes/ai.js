@@ -610,10 +610,10 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
 </svg>`;
 
     // --- Compose SVG on Image ---
-    const genDir = path.join(__dirname, '../../public/generated');
-    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
-    const fileName = `${uuidv4()}.jpg`;
-    const filePath = path.join(genDir, fileName);
+    const generatedPath = path.join(__dirname, '../public/generated');
+if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+const fileName = `${uuidv4()}.jpg`;
+const filePath = path.join(generatedPath, fileName);
 
     const outBuffer = await sharp({
       create: {
@@ -781,10 +781,10 @@ router.post('/generate-video-ad', async (req, res) => {
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
-    const genDir = path.join(__dirname, '../../public/generated');
-    if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
-    const videoId = uuidv4();
-    const outPath = path.join(genDir, `${videoId}.mp4`);
+    const generatedPath = path.join(__dirname, '../public/generated');
+if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+const videoId = uuidv4();
+const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
     // FFmpeg: concat, add audio, enforce min 15s (trim longer, pad if short)
     const ffmpegCmd = [
