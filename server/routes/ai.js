@@ -697,13 +697,16 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 4 }
+        params: { query: searchTerm, per_page: 5 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
+      console.error("Pexels fetch error:", err.message || err);
       return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err });
     }
-    if (videoClips.length < 2) return res.status(404).json({ error: "No stock videos found" });
+    if (videoClips.length < 2) {
+      return res.status(404).json({ error: "No stock videos found" });
+    }
 
     // --- Pick 2 unique SD MP4s ---
     let files = [];
@@ -718,7 +721,9 @@ router.post('/generate-video-ad', async (req, res) => {
       }
       if (files.length === 2) break;
     }
-    if (files.length < 2) return res.status(404).json({ error: "Not enough stock videos found" });
+    if (files.length < 2) {
+      return res.status(404).json({ error: "Not enough stock videos found" });
+    }
 
     // --- Download videos ---
     const tempDir = path.join(__dirname, '../tmp');
@@ -726,8 +731,13 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoPaths = [];
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(files[i], dest);
-      videoPaths.push(dest);
+      try {
+        await downloadFile(files[i], dest);
+        videoPaths.push(dest);
+      } catch (err) {
+        console.error("Video download error:", err.message || err);
+        return res.status(500).json({ error: "Failed to download stock video", detail: err.message });
+      }
     }
 
     // --- Get script (ad copy, ~15s) ---
@@ -749,6 +759,7 @@ router.post('/generate-video-ad', async (req, res) => {
       });
       script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
     } catch (err) {
+      console.error("OpenAI script error:", err.message || err);
       script = "Shop the best products online now!";
     }
 
@@ -763,6 +774,7 @@ router.post('/generate-video-ad', async (req, res) => {
       const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
       fs.writeFileSync(ttsPath, ttsBuffer);
     } catch (err) {
+      console.error("OpenAI TTS error:", err.message || err);
       return res.status(500).json({ error: "Voiceover failed", detail: err.message });
     }
 
@@ -773,7 +785,9 @@ router.post('/generate-video-ad', async (req, res) => {
       const { stdout } = await exec(ffprobeCmd);
       let d = parseFloat(stdout.trim());
       if (!isNaN(d) && d > 0) duration = Math.ceil(d);
-    } catch (err) {}
+    } catch (err) {
+      console.error("ffprobe error:", err.message || err);
+    }
 
     // --- Trim and resize each video (snappy edits) ---
     const targetW = 720, targetH = 1280, fps = 30;
@@ -782,8 +796,13 @@ router.post('/generate-video-ad', async (req, res) => {
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -preset veryfast -c:a aac -r ${fps} "${trimmed}"`);
-      trimmedPaths.push(trimmed);
+      try {
+        await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -preset veryfast -c:a aac -r ${fps} "${trimmed}"`);
+        trimmedPaths.push(trimmed);
+      } catch (err) {
+        console.error("ffmpeg trim error:", err.message || err);
+        return res.status(500).json({ error: "Video trim/resize failed", detail: err.message });
+      }
     }
 
     // --- Concatenate both (re-encode for smooth cut) ---
@@ -794,10 +813,20 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
+    try {
+      await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
+    } catch (err) {
+      console.error("ffmpeg concat error:", err.message || err);
+      return res.status(500).json({ error: "Video concat failed", detail: err.message });
+    }
 
     // --- Overlay voiceover (hard trim to voice duration) ---
-    await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
+    try {
+      await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
+    } catch (err) {
+      console.error("ffmpeg final mux error:", err.message || err);
+      return res.status(500).json({ error: "Final video/audio mux failed", detail: err.message });
+    }
 
     // --- Clean up ---
     [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
@@ -806,7 +835,6 @@ router.post('/generate-video-ad', async (req, res) => {
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
   } catch (err) {
-    // <--- ALWAYS return valid JSON on error!
     console.error("Video generation error:", err?.message || err);
     return res.status(500).json({
       error: "Failed to generate video ad",
@@ -814,7 +842,6 @@ router.post('/generate-video-ad', async (req, res) => {
     });
   }
 });
-
 
 
 
