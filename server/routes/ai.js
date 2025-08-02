@@ -687,14 +687,12 @@ async function downloadFile(url, dest) {
 router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", answers = {} } = req.body;
-    // Product type/category (e.g., "fashion", "supplements", etc.)
     const productType = answers?.industry || answers?.productType || "";
 
     // Always include "ecommerce" in keyword
     let videoKeywords = ["ecommerce"];
     if (productType) videoKeywords.push(productType);
 
-    // Add extracted site keywords if possible
     if (url) {
       try {
         const websiteText = await getWebsiteText(url);
@@ -703,9 +701,8 @@ router.post('/generate-video-ad', async (req, res) => {
       } catch (e) {}
     }
 
-    // Unique, prioritized, always start with "ecommerce"
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
-    const searchTerm = videoKeywords.slice(0, 2).join(" "); // e.g., "ecommerce fashion"
+    const searchTerm = videoKeywords.slice(0, 2).join(" ");
 
     // 2. Search Pexels for relevant ecomm videos (get 6 for choice)
     let videoClips = [];
@@ -718,24 +715,18 @@ router.post('/generate-video-ad', async (req, res) => {
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
+    if (videoClips.length < 2) return res.status(404).json({ error: "Not enough stock videos found" });
 
-    // 3. Pick up to 3 short relevant clips
+    // --- Pick exactly 2 short relevant clips
     let files = [];
-    for (let v of videoClips.slice(0, 3)) {
+    for (let v of videoClips) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
-      if (best) files.push(best.link);
+      if (best && !files.includes(best.link)) files.push(best.link);
+      if (files.length === 2) break;
     }
-    if (files.length < 3) { // Always try for 3, else fallback
-      for (let v of videoClips) {
-        if (files.length >= 3) break;
-        let f = (v.video_files || [])[0];
-        if (f && !files.includes(f.link)) files.push(f.link);
-      }
-    }
-    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
+    if (files.length < 2) return res.status(500).json({ error: "Not enough MP4 clips found" });
 
     // 4. Download locally
     const tempDir = path.join(__dirname, '../tmp');
@@ -750,7 +741,6 @@ router.post('/generate-video-ad', async (req, res) => {
     // 5. Generate GPT script (enforced 15-18s, sales focus, for online store)
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
 
-    // Use specific business info if provided
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
       prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -776,21 +766,48 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concat 3 clips, overlay voice, 15-18s duration required
+    // 7. Concat 2 clips, overlay voice, 15-18s duration required
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
     const generatedPath = path.join(__dirname, '../public/generated');
-if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-const videoId = uuidv4();
-const outPath = path.join(generatedPath, `${videoId}.mp4`);
+    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+    const videoId = uuidv4();
+    const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // FFmpeg: concat, add audio, enforce min 15s (trim longer, pad if short)
+    // --- New: Split duration equally for 2 clips (eg. 16s = 8s + 8s) ---
+    // First, get durations for the two clips
+    const getDurationCmd = (file) => `${ffmpegPath} -i "${file}" 2>&1 | grep "Duration"`;
+    const durationSec = [];
+    for (const vp of videoPaths) {
+      const { stdout } = await exec(getDurationCmd(vp));
+      const match = stdout.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
+      if (match) {
+        const [, h, m, s] = match;
+        durationSec.push(Number(h) * 3600 + Number(m) * 60 + Number(s));
+      } else {
+        durationSec.push(8); // fallback to 8s if not found
+      }
+    }
+    // Total desired = 16s (adjust as needed)
+    const totalDuration = 16;
+    const targetDur = totalDuration / 2;
+
+    // Now, trim each clip to targetDur with ffmpeg
+    for (let i = 0; i < videoPaths.length; i++) {
+      const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -c copy "${trimmedPath}"`);
+      fs.unlinkSync(videoPaths[i]);
+      videoPaths[i] = trimmedPath;
+    }
+    // Rewrite listPath with trimmed videos
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+
+    // FFmpeg: concat, add audio, enforce 16s (no over/under)
     const ffmpegCmd = [
       `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      // pad if under 15s, trim if over 18s
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 18 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
     for (let cmd of ffmpegCmd) await exec(cmd);
 
@@ -806,7 +823,6 @@ const outPath = path.join(generatedPath, `${videoId}.mp4`);
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
 
 
 module.exports = router;
