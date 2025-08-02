@@ -610,7 +610,7 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
 </svg>`;
 
     // --- Compose SVG on Image ---
-    const genDir = path.join(__dirname, '../public/generated');
+    const genDir = path.join(__dirname, 'public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const fileName = `${uuidv4()}.jpg`;
     const filePath = path.join(genDir, fileName);
@@ -781,7 +781,7 @@ router.post('/generate-video-ad', async (req, res) => {
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
-    const genDir = path.join(__dirname, '../public/generated');
+    const genDir = path.join(__dirname, 'public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
