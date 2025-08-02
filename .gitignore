@@ -5,7 +5,12 @@
 # Ignore audio, fonts, and big assets
 server/Music/music/
 server/fonts/
-server/public/generated/
+
+# Allow the generated folder, but ignore its contents except .gitkeep
+server/public/generated/*
+!server/public/generated/
+!server/public/generated/.gitkeep
+
 server/tmp/
 *.mp3
 *.wav
