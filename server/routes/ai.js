@@ -675,7 +675,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const industry = answers?.industry || answers?.productType || "ecommerce";
     const searchTerm = industry;
 
-    // --- Fetch 2 Pexels stock videos (always 2) ---
+    // --- Fetch 2 Pexels stock videos ---
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -688,7 +688,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (videoClips.length < 2) return res.status(404).json({ error: "No stock videos found" });
 
-    // Pick 2 unique SD MP4s
+    // --- Pick 2 unique SD MP4s ---
     let files = [];
     let usedIds = new Set();
     for (let v of videoClips) {
@@ -758,7 +758,7 @@ router.post('/generate-video-ad', async (req, res) => {
       if (!isNaN(d) && d > 0) duration = Math.ceil(d);
     } catch (err) {}
 
-    // --- Trim and resize each video (quick edits, short and snappy) ---
+    // --- Trim and resize each video (snappy edits) ---
     const targetW = 720, targetH = 1280, fps = 30;
     const segmentDur = Math.max(Math.floor(duration / 2), 6);
     const trimmedPaths = [];
@@ -769,7 +769,7 @@ router.post('/generate-video-ad', async (req, res) => {
       trimmedPaths.push(trimmed);
     }
 
-    // --- Concatenate both (re-encode, for smooth transitions) ---
+    // --- Concatenate both (re-encode for smooth cut) ---
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
     const videoId = uuidv4();
@@ -777,10 +777,9 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // Always re-encode to guarantee smooth cut, avoid “copy” if sources vary
     await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
 
-    // --- Overlay voiceover (final cut, hard trim to voice duration) ---
+    // --- Overlay voiceover (hard trim to voice duration) ---
     await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
 
     // --- Clean up ---
@@ -794,10 +793,11 @@ router.post('/generate-video-ad', async (req, res) => {
     console.error("Video generation error:", err?.message || err);
     return res.status(500).json({
       error: "Failed to generate video ad",
-      detail: err.message || "Unknown error"
+      detail: err?.message || "Unknown error"
     });
   }
 });
+
 
 
 
