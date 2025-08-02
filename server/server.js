@@ -33,13 +33,13 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // -------- Serve generated images for AI overlays --------
 app.use('/generated', express.static(path.join(__dirname, '../public/generated')));
 
-const authRoutes = require('../routes/auth');
+const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
-const aiRoutes = require('../routes/ai');
+const aiRoutes = require('./routes/ai');
 app.use('/api', aiRoutes);
 
-const campaignRoutes = require('../routes/campaigns');
+const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
 // Health check
