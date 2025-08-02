@@ -766,53 +766,46 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concat 2 clips, overlay voice, 15-18s duration required
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
-
-    // Output dir and file
+    // --- NEW: Trim both clips and crossfade them for 0.3s ---
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // --- New: Split duration equally for 2 clips (eg. 16s = 8s + 8s) ---
-    // First, get durations for the two clips
-    const getDurationCmd = (file) => `${ffmpegPath} -i "${file}" 2>&1 | grep "Duration"`;
-    const durationSec = [];
-    for (const vp of videoPaths) {
-      const { stdout } = await exec(getDurationCmd(vp));
-      const match = stdout.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
-      if (match) {
-        const [, h, m, s] = match;
-        durationSec.push(Number(h) * 3600 + Number(m) * 60 + Number(s));
-      } else {
-        durationSec.push(8); // fallback to 8s if not found
-      }
-    }
-    // Total desired = 16s (adjust as needed)
     const totalDuration = 16;
     const targetDur = totalDuration / 2;
+    const crossfadeDur = 0.3;
 
-    // Now, trim each clip to targetDur with ffmpeg
+    // Trim each to 8.15s to make room for the crossfade
     for (let i = 0; i < videoPaths.length; i++) {
       const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
-      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -c copy "${trimmedPath}"`);
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur + (i === 1 ? crossfadeDur : 0)} -c copy "${trimmedPath}"`);
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = trimmedPath;
     }
-    // Rewrite listPath with trimmed videos
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    // FFmpeg: concat, add audio, enforce 16s (no over/under)
-    const ffmpegCmd = [
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
-    for (let cmd of ffmpegCmd) await exec(cmd);
+    // FFmpeg crossfade (video+audio)
+    const outTemp = `${outPath}.temp.mp4`;
+    const crossfadeFilter = `
+      [0:v]trim=0:${targetDur},setpts=PTS-STARTPTS[v0];
+      [1:v]trim=0:${targetDur+crossfadeDur},setpts=PTS-STARTPTS[v1];
+      [v0][v1]xfade=transition=fade:duration=${crossfadeDur}:offset=${targetDur - crossfadeDur}[v];
+      [0:a]atrim=0:${targetDur},asetpts=PTS-STARTPTS[a0];
+      [1:a]atrim=0:${targetDur+crossfadeDur},asetpts=PTS-STARTPTS[a1];
+      [a0][a1]acrossfade=d=${crossfadeDur}[a]
+    `.replace(/\s+/g, ' ');
+
+    const crossfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" ` +
+      `-filter_complex "${crossfadeFilter}" -map "[v]" -map "[a]" -c:v libx264 -c:a aac -shortest "${outTemp}"`;
+
+    await exec(crossfadeCmd);
+
+    // Overlay TTS and force exact 16s
+    const finalCmd = `${ffmpegPath} -y -i "${outTemp}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`;
+    await exec(finalCmd);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ttsPath, outTemp].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
@@ -823,6 +816,5 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
 
 module.exports = router;
