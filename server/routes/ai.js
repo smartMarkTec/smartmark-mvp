@@ -664,6 +664,7 @@ function pickMusicFile(keywords = []) {
 
 // ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 // ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
+// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
 const TTS_VOICE = "alloy";
 const ffmpegPath = 'ffmpeg';
@@ -683,61 +684,60 @@ async function downloadFile(url, dest) {
   return dest;
 }
 
-router.post('/generate-video-ad', async (req, res, next) => {
+router.post('/generate-video-ad', async (req, res) => {
   try {
-    // ==== ENVIRONMENT & DEPENDENCY CHECKS ====
-    if (!PEXELS_API_KEY) {
-      console.error("PEXELS_API_KEY missing");
-      return res.status(503).json({ error: "PEXELS API key not set." });
-    }
-    if (!openai || !process.env.OPENAI_API_KEY) {
-      console.error("OpenAI not configured");
-      return res.status(503).json({ error: "OpenAI API key not set." });
-    }
-    // Check ffmpeg presence
-    const { execSync } = require('child_process');
-    try {
-      execSync('ffmpeg -version', { stdio: 'ignore' });
-    } catch (e) {
-      console.error("ffmpeg missing");
-      return res.status(503).json({ error: "ffmpeg is not installed on server." });
-    }
-
-    // ==== VIDEO GENERATION LOGIC ====
     const { url = "", answers = {} } = req.body;
-    const industry = answers?.industry || answers?.productType || "ecommerce";
-    const searchTerm = industry;
+    // Product type/category (e.g., "fashion", "supplements", etc.)
+    const productType = answers?.industry || answers?.productType || "";
 
+    // Always include "ecommerce" in keyword
+    let videoKeywords = ["ecommerce"];
+    if (productType) videoKeywords.push(productType);
+
+    // Add extracted site keywords if possible
+    if (url) {
+      try {
+        const websiteText = await getWebsiteText(url);
+        const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
+        videoKeywords.push(...siteKeywords);
+      } catch (e) {}
+    }
+
+    // Unique, prioritized, always start with "ecommerce"
+    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
+    const searchTerm = videoKeywords.slice(0, 2).join(" "); // e.g., "ecommerce fashion"
+
+    // 2. Search Pexels for relevant ecomm videos (get 6 for choice)
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 5 }
+        params: { query: searchTerm, per_page: 6 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
-      return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err });
+      return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 2) {
-      return res.status(404).json({ error: "No stock videos found" });
-    }
+    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
 
+    // 3. Pick up to 3 short relevant clips
     let files = [];
-    let usedIds = new Set();
-    for (let v of videoClips) {
+    for (let v of videoClips.slice(0, 3)) {
       let best = (v.video_files || []).find(f =>
         f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
       ) || (v.video_files || [])[0];
-      if (best && !usedIds.has(v.id)) {
-        files.push(best.link);
-        usedIds.add(v.id);
+      if (best) files.push(best.link);
+    }
+    if (files.length < 3) { // Always try for 3, else fallback
+      for (let v of videoClips) {
+        if (files.length >= 3) break;
+        let f = (v.video_files || [])[0];
+        if (f && !files.includes(f.link)) files.push(f.link);
       }
-      if (files.length === 2) break;
     }
-    if (files.length < 2) {
-      return res.status(404).json({ error: "Not enough stock videos found" });
-    }
+    if (!files.length) return res.status(500).json({ error: "No MP4 clips found" });
 
+    // 4. Download locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -747,81 +747,66 @@ router.post('/generate-video-ad', async (req, res, next) => {
       videoPaths.push(dest);
     }
 
-    let prompt = `Write ONLY the spoken script for a Facebook video ad, about 16 seconds, friendly and confident, start with a hook, 2 benefits, call to action. No scene directions.`;
-    if (industry) prompt += `\nIndustry: ${industry}`;
+    // 5. Generate GPT script (enforced 15-18s, sales focus, for online store)
+    let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
+
+    // Use specific business info if provided
+    if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
-      prompt += '\nDetails:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nOnly the script, no intro, no extra.";
+    prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
 
-    let script = "";
-    try {
-      const gptRes = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 80,
-        temperature: 0.65
-      });
-      script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
-    } catch (err) {
-      script = "Shop the best products online now!";
-    }
+    const gptRes = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 110,
+      temperature: 0.65
+    });
+    let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    let ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
-    try {
-      const ttsRes = await openai.audio.speech.create({
-        model: 'tts-1',
-        voice: TTS_VOICE,
-        input: script
-      });
-      const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-      fs.writeFileSync(ttsPath, ttsBuffer);
-    } catch (err) {
-      return res.status(500).json({ error: "Voiceover failed", detail: err.message });
-    }
+    // 6. Generate TTS voiceover
+    const ttsRes = await openai.audio.speech.create({
+      model: 'tts-1',
+      voice: TTS_VOICE,
+      input: script
+    });
+    const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
+    const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
+    fs.writeFileSync(ttsPath, ttsBuffer);
 
-    let duration = 16;
-    try {
-      const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
-      const { stdout } = await exec(ffprobeCmd);
-      let d = parseFloat(stdout.trim());
-      if (!isNaN(d) && d > 0) duration = Math.ceil(d);
-    } catch (err) {}
-
-    const targetW = 720, targetH = 1280, fps = 30;
-    const segmentDur = Math.max(Math.floor(duration / 2), 6);
-    const trimmedPaths = [];
-    for (let i = 0; i < videoPaths.length; i++) {
-      const inPath = videoPaths[i];
-      const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -preset veryfast -c:a aac -r ${fps} "${trimmed}"`);
-      trimmedPaths.push(trimmed);
-    }
-
+    // 7. Concat 3 clips, overlay voice, 15-18s duration required
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
-    const videoId = uuidv4();
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+
+    // Output dir and file
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
+    const videoId = uuidv4();
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
+    // FFmpeg: concat, add audio, enforce min 15s (trim longer, pad if short)
+    const ffmpegCmd = [
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+      // pad if under 15s, trim if over 18s
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t 18 -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    ];
+    for (let cmd of ffmpegCmd) await exec(cmd);
 
-    await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
+    // Clean up temp files
+    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
-
+    // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
+
   } catch (err) {
-    if (res.headersSent) return next(err);
-    res.status(500).json({
-      error: "Failed to generate video ad",
-      detail: err?.message || "Unknown error"
-    });
+    console.error("Video generation error:", err.message, err?.response?.data || "");
+    return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
