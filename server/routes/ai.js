@@ -281,12 +281,29 @@ Website text:
     let result;
 
     function tryParseJson(str) {
-      let cleaned = str.replace(/```(json)?/gi, '').replace(/[\r\n]/g, ' ');
-      const jsonMatch = cleaned.match(/\{.*\}/s);
-      if (jsonMatch) cleaned = jsonMatch[0];
-      cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-      return JSON.parse(cleaned);
-    }
+  // Remove all triple backticks and 'json' labels and whitespace
+  let cleaned = String(str)
+    .replace(/```json|```/gi, '')
+    .replace(/^[\s\r\n]+|[\s\r\n]+$/g, '')
+    .trim();
+
+  // If there's anything before the first `{`, strip it
+  const braceIdx = cleaned.indexOf('{');
+  if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
+
+  // Remove trailing commas before } or ]
+  cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+
+  // Only keep the first complete {...} block, even if AI hallucinated text after
+  const braceCount = (cleaned.match(/{/g) || []).length;
+  if (braceCount > 1) {
+    // Naive split on last }
+    const lastBrace = cleaned.lastIndexOf('}');
+    cleaned = cleaned.substring(0, lastBrace + 1);
+  }
+  return JSON.parse(cleaned);
+}
+
 
     try {
       result = tryParseJson(raw);
