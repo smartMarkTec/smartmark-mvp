@@ -672,25 +672,23 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(503).json({ error: "Server warming up, try again shortly." });
     }
     const { url = "", answers = {} } = req.body;
-    const industry = answers?.industry || answers?.productType || "";
+    const industry = answers?.industry || answers?.productType || "ecommerce";
+    const searchTerm = industry;
 
-    // Simple keywords, prefer industry
-    const searchTerm = industry ? industry : "ecommerce";
-
-    // Fetch two stock videos from Pexels
+    // --- Fetch 2 Pexels stock videos (always 2) ---
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 5 }
+        params: { query: searchTerm, per_page: 4 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
-      return res.status(500).json({ error: "Stock video fetch failed" });
+      return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err });
     }
     if (videoClips.length < 2) return res.status(404).json({ error: "No stock videos found" });
 
-    // Pick first 2 unique mp4s
+    // Pick 2 unique SD MP4s
     let files = [];
     let usedIds = new Set();
     for (let v of videoClips) {
@@ -703,8 +701,9 @@ router.post('/generate-video-ad', async (req, res) => {
       }
       if (files.length === 2) break;
     }
+    if (files.length < 2) return res.status(404).json({ error: "Not enough stock videos found" });
 
-    // Download both locally
+    // --- Download videos ---
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -714,7 +713,7 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // Script (ad copy, ~16s)
+    // --- Get script (ad copy, ~15s) ---
     let prompt = `Write ONLY the spoken script for a Facebook video ad, about 16 seconds, friendly and confident, start with a hook, 2 benefits, call to action. No scene directions.`;
     if (industry) prompt += `\nIndustry: ${industry}`;
     if (answers && Object.keys(answers).length) {
@@ -723,43 +722,54 @@ router.post('/generate-video-ad', async (req, res) => {
     if (url) prompt += `\nWebsite: ${url}`;
     prompt += "\nOnly the script, no intro, no extra.";
 
-    const gptRes = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 80,
-      temperature: 0.65
-    });
-    let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+    let script = "";
+    try {
+      const gptRes = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 80,
+        temperature: 0.65
+      });
+      script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+    } catch (err) {
+      script = "Shop the best products online now!";
+    }
 
-    // TTS
-    const ttsRes = await openai.audio.speech.create({
-      model: 'tts-1',
-      voice: TTS_VOICE,
-      input: script
-    });
-    const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-    const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
-    fs.writeFileSync(ttsPath, ttsBuffer);
+    // --- TTS voiceover ---
+    let ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
+    try {
+      const ttsRes = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: TTS_VOICE,
+        input: script
+      });
+      const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
+      fs.writeFileSync(ttsPath, ttsBuffer);
+    } catch (err) {
+      return res.status(500).json({ error: "Voiceover failed", detail: err.message });
+    }
 
-    // Duration
-    const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
-    const { stdout } = await exec(ffprobeCmd);
-    let duration = parseFloat(stdout.trim());
-    if (!duration || isNaN(duration)) duration = 16;
-    duration = Math.ceil(duration);
+    // --- Get voice duration ---
+    let duration = 16;
+    try {
+      const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
+      const { stdout } = await exec(ffprobeCmd);
+      let d = parseFloat(stdout.trim());
+      if (!isNaN(d) && d > 0) duration = Math.ceil(d);
+    } catch (err) {}
 
-    // Trim and resize both videos
+    // --- Trim and resize each video (quick edits, short and snappy) ---
     const targetW = 720, targetH = 1280, fps = 30;
     const segmentDur = Math.max(Math.floor(duration / 2), 6);
     const trimmedPaths = [];
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -c:a aac -r ${fps} "${trimmed}"`);
+      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -preset veryfast -c:a aac -r ${fps} "${trimmed}"`);
       trimmedPaths.push(trimmed);
     }
 
-    // Concatenate both
+    // --- Concatenate both (re-encode, for smooth transitions) ---
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
     const videoId = uuidv4();
@@ -767,23 +777,28 @@ router.post('/generate-video-ad', async (req, res) => {
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`);
+    // Always re-encode to guarantee smooth cut, avoid “copy” if sources vary
+    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c:v libx264 -preset veryfast -c:a aac -r ${fps} -b:a 128k "${outPath}.temp.mp4"`);
 
-    // Overlay voiceover and trim
-    const finalCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-    await exec(finalCmd);
+    // --- Overlay voiceover (final cut, hard trim to voice duration) ---
+    await exec(`${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
 
-    // Clean up temp files
+    // --- Clean up ---
     [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Respond
+    // --- Respond (ALWAYS JSON) ---
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
   } catch (err) {
-    console.error("Video generation error:", err.message, err?.response?.data || "");
-    return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
+    // <--- ALWAYS return valid JSON on error!
+    console.error("Video generation error:", err?.message || err);
+    return res.status(500).json({
+      error: "Failed to generate video ad",
+      detail: err.message || "Unknown error"
+    });
   }
 });
+
 
 
 module.exports = router;
