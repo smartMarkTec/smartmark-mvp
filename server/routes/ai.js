@@ -646,6 +646,7 @@ function pickMusicFile(keywords = []) {
 }
 
 // ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
+// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
 const TTS_VOICE = "alloy";
 const ffmpegPath = 'ffmpeg';
@@ -653,7 +654,6 @@ const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
-// Helper to download video files
 async function downloadFile(url, dest) {
   const writer = fs.createWriteStream(dest);
   const response = await axios({ url, method: 'GET', responseType: 'stream' });
@@ -669,37 +669,28 @@ async function downloadFile(url, dest) {
 router.post('/generate-video-ad', async (req, res) => {
   try {
     if (!PEXELS_API_KEY || !openai || !ffmpegPath) {
-      return res.status(503).json({ error: "Server is waking up, please wait and try again in a few seconds." });
+      return res.status(503).json({ error: "Server warming up, try again shortly." });
     }
     const { url = "", answers = {} } = req.body;
     const industry = answers?.industry || answers?.productType || "";
 
-    let videoKeywords = ["ecommerce"];
-    if (industry) videoKeywords.push(industry);
-    if (url) {
-      try {
-        const websiteText = await getWebsiteText(url);
-        const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
-        videoKeywords.push(...siteKeywords);
-      } catch (e) {}
-    }
-    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
-    const searchTerm = videoKeywords.slice(0, 2).join(" ");
+    // Simple keywords, prefer industry
+    const searchTerm = industry ? industry : "ecommerce";
 
-    // Fetch videos from Pexels
+    // Fetch two stock videos from Pexels
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 8 }
+        params: { query: searchTerm, per_page: 5 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (!videoClips.length) return res.status(404).json({ error: "No stock videos found" });
+    if (videoClips.length < 2) return res.status(404).json({ error: "No stock videos found" });
 
-    // Pick 2 or 3 short, unique video clips
+    // Pick first 2 unique mp4s
     let files = [];
     let usedIds = new Set();
     for (let v of videoClips) {
@@ -710,18 +701,10 @@ router.post('/generate-video-ad', async (req, res) => {
         files.push(best.link);
         usedIds.add(v.id);
       }
-      if (files.length === 3) break;
-    }
-    if (files.length < 2) return res.status(500).json({ error: "Could not find enough suitable MP4 clips" });
-
-    // Randomly pick 2 or 3
-    if (files.length === 2 || Math.random() < 0.5) {
-      files = files.slice(0, 2);
-    } else {
-      files = files.slice(0, 3);
+      if (files.length === 2) break;
     }
 
-    // Download each video locally
+    // Download both locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -731,24 +714,24 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(dest);
     }
 
-    // Generate script (strictly ad copy, 15–18s, no scene directions)
-    let prompt = `Write ONLY the exact words for a Facebook video ad for an e-commerce business, selling any type of goods. DO NOT include scene directions, stage notes, or any non-spoken text—only the spoken script. Must be friendly, confident, 15–18 seconds long (45–55 words). Start with a hook, include 2–3 benefits, end with a call to action.`;
+    // Script (ad copy, ~16s)
+    let prompt = `Write ONLY the spoken script for a Facebook video ad, about 16 seconds, friendly and confident, start with a hook, 2 benefits, call to action. No scene directions.`;
     if (industry) prompt += `\nIndustry: ${industry}`;
     if (answers && Object.keys(answers).length) {
-      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      prompt += '\nDetails:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nRespond ONLY with the script. No headings. No intro.";
+    prompt += "\nOnly the script, no intro, no extra.";
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 110,
+      max_tokens: 80,
       temperature: 0.65
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    // Generate TTS
+    // TTS
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -758,52 +741,42 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // Get duration of voiceover (in seconds)
+    // Duration
     const ffprobeCmd = `ffprobe -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`;
     const { stdout } = await exec(ffprobeCmd);
     let duration = parseFloat(stdout.trim());
     if (!duration || isNaN(duration)) duration = 16;
     duration = Math.ceil(duration);
 
-    // Trim, scale, and re-encode each video to force SAME framerate, timebase, and format
-    const targetWidth = 720, targetHeight = 1280, targetFps = 30;
-    const segmentDur = Math.max(Math.floor(duration / files.length), 5);
+    // Trim and resize both videos
+    const targetW = 720, targetH = 1280, fps = 30;
+    const segmentDur = Math.max(Math.floor(duration / 2), 6);
     const trimmedPaths = [];
     for (let i = 0; i < videoPaths.length; i++) {
       const inPath = videoPaths[i];
       const trimmed = path.join(tempDir, `${uuidv4()}_trimmed.mp4`);
-      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease,pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2,fps=${targetFps},format=yuv420p" -t ${segmentDur} -c:v libx264 -c:a aac -r ${targetFps} "${trimmed}"`);
+      await exec(`${ffmpegPath} -y -i "${inPath}" -vf "scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2,fps=${fps},format=yuv420p" -t ${segmentDur} -c:v libx264 -c:a aac -r ${fps} "${trimmed}"`);
       trimmedPaths.push(trimmed);
     }
 
-    // Output paths
+    // Concatenate both
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
     const videoId = uuidv4();
     const genDir = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(genDir)) fs.mkdirSync(genDir, { recursive: true });
     const outPath = path.join(genDir, `${videoId}.mp4`);
 
-    // XFADE: works now that all framerate/timebase are forced identical
-    let transitionCmd;
-    const videoInputs = trimmedPaths.map(p => `-i "${p}"`).join(" ");
-    if (trimmedPaths.length === 2) {
-      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
-    } else if (trimmedPaths.length === 3) {
-      transitionCmd = `${ffmpegPath} -y ${videoInputs} -filter_complex "[0][1]xfade=transition=fade:duration=0.8:offset=${segmentDur-0.8}[v1]; [v1][2]xfade=transition=fade:duration=0.8:offset=${(segmentDur*2)-0.8},format=yuv420p[v]" -map "[v]" -c:v libx264 -c:a aac -shortest "${outPath}.xfaded.mp4"`;
-    } else {
-      const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-      fs.writeFileSync(listPath, trimmedPaths.map(p => `file '${p}'`).join('\n'));
-      transitionCmd = `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.xfaded.mp4"`;
-    }
-    await exec(transitionCmd);
+    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`);
 
-    // Overlay voiceover and trim to exactly match TTS duration
-    const finalCmd = `${ffmpegPath} -y -i "${outPath}.xfaded.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+    // Overlay voiceover and trim
+    const finalCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${duration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
     // Clean up temp files
-    [...videoPaths, ...trimmedPaths, ttsPath, `${outPath}.xfaded.mp4`, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ...trimmedPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Respond with the generated video url and script
+    // Respond
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
   } catch (err) {
@@ -811,5 +784,6 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 module.exports = router;
