@@ -31,7 +31,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // -------- Serve generated images for AI overlays --------
-app.use('/generated', express.static(path.join(__dirname, '../public/generated')));
+app.use('/generated', express.static(path.join(__dirname, 'public/generated')));
 
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
