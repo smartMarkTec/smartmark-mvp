@@ -685,9 +685,25 @@ async function downloadFile(url, dest) {
 
 router.post('/generate-video-ad', async (req, res, next) => {
   try {
-    if (!PEXELS_API_KEY || !openai || !ffmpegPath) {
-      return res.status(503).json({ error: "Server warming up, try again shortly." });
+    // ==== ENVIRONMENT & DEPENDENCY CHECKS ====
+    if (!PEXELS_API_KEY) {
+      console.error("PEXELS_API_KEY missing");
+      return res.status(503).json({ error: "PEXELS API key not set." });
     }
+    if (!openai || !process.env.OPENAI_API_KEY) {
+      console.error("OpenAI not configured");
+      return res.status(503).json({ error: "OpenAI API key not set." });
+    }
+    // Check ffmpeg presence
+    const { execSync } = require('child_process');
+    try {
+      execSync('ffmpeg -version', { stdio: 'ignore' });
+    } catch (e) {
+      console.error("ffmpeg missing");
+      return res.status(503).json({ error: "ffmpeg is not installed on server." });
+    }
+
+    // ==== VIDEO GENERATION LOGIC ====
     const { url = "", answers = {} } = req.body;
     const industry = answers?.industry || answers?.productType || "ecommerce";
     const searchTerm = industry;
@@ -799,7 +815,6 @@ router.post('/generate-video-ad', async (req, res, next) => {
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
   } catch (err) {
-    // This block CANNOT send plaintext; pass to global error handler if it exists
     if (res.headersSent) return next(err);
     res.status(500).json({
       error: "Failed to generate video ad",
@@ -807,7 +822,6 @@ router.post('/generate-video-ad', async (req, res, next) => {
     });
   }
 });
-
 
 
 module.exports = router;
