@@ -31,15 +31,15 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // -------- Serve generated images for AI overlays --------
-app.use('/generated', express.static(path.join(__dirname, 'public/generated')));
+app.use('/generated', express.static(path.join(__dirname, '../public/generated')));
 
-const authRoutes = require('./routes/auth');
+const authRoutes = require('../routes/auth');
 app.use('/auth', authRoutes);
 
-const aiRoutes = require('./routes/ai');
+const aiRoutes = require('../routes/ai');
 app.use('/api', aiRoutes);
 
-const campaignRoutes = require('./routes/campaigns');
+const campaignRoutes = require('../routes/campaigns');
 app.use('/api', campaignRoutes);
 
 // Health check
@@ -57,12 +57,15 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Error handler
+// Improved global error handler (must be last)
 app.use((err, req, res, next) => {
-  console.error('Unhandled server error:', err);
+  console.error('Unhandled server error:', err?.stack || err);
+  if (res.headersSent) return next(err);
+  res.setHeader('Content-Type', 'application/json');
   res.status(500).json({
     error: 'Internal server error',
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+    detail: err?.message || 'Unknown error',
+    ...(process.env.NODE_ENV !== 'production' && { stack: err?.stack })
   });
 });
 
