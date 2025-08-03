@@ -663,8 +663,6 @@ function pickMusicFile(keywords = []) {
 }
 
 // ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
-// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
-// ========== AI: GENERATE VIDEO AD FOR E-COMMERCE ==========
 const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
 const TTS_VOICE = "alloy";
 const ffmpegPath = 'ffmpeg';
@@ -769,81 +767,76 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-   // --- Get TTS duration (always fallback to 16s if anything fails) ---
-let ttsDuration = 16;
-try {
-  let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
-    ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
-    : 'ffprobe';
+    // --- Get TTS duration (always fallback to 16s if anything fails) ---
+    let ttsDuration = 16;
+    try {
+      let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
+        ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
+        : 'ffprobe';
 
-  // Use ffprobe to get the DURATION of the TTS mp3
-  const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
-  const seconds = parseFloat(stdout.trim());
-  if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
-} catch (e) {
-  console.error("ffprobe error (safe fallback to 16s):", e.message || e);
-  ttsDuration = 16;
-}
+      // Use ffprobe to get the DURATION of the TTS mp3
+      const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
+      const seconds = parseFloat(stdout.trim());
+      if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
+    } catch (e) {
+      console.error("ffprobe error (safe fallback to 16s):", e.message || e);
+      ttsDuration = 16;
+    }
 
-
-    // --- Prepare video clips to match TTS (full script) duration, min 15s ---
     // --- Prepare video clips (scale, pad, no pre-trim!) ---
-const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
-for (let i = 0; i < videoPaths.length; i++) {
-  const scaledPath = videoPaths[i].replace('.mp4', '_scaled.mp4');
-  await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
-  fs.unlinkSync(videoPaths[i]);
-  videoPaths[i] = scaledPath;
-}
-const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
+    for (let i = 0; i < videoPaths.length; i++) {
+      const scaledPath = videoPaths[i].replace('.mp4', '_scaled.mp4');
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
+      fs.unlinkSync(videoPaths[i]);
+      videoPaths[i] = scaledPath;
+    }
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-// ----------- THIS IS THE CRITICAL FIX -----------
-if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-const videoId = uuidv4();
-const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
-const outPath = path.join(generatedPath, `${videoId}.mp4`);
+    // ----------- CRITICAL: Use ffprobe for duration, never ffmpeg -----------
+    let vidAdur = 8; // fallback
+    const fadeDur = 0.3;
+    try {
+      let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
+        ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
+        : 'ffprobe';
+      const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPaths[0]}"`);
+      const seconds = parseFloat(stdout.trim());
+      if (!isNaN(seconds) && seconds > 0) vidAdur = seconds;
+    } catch (e) {
+      console.error('ffprobe vidA error:', e.message || e);
+    }
+    const fadeOffset = Math.max(0, vidAdur - fadeDur);
 
-// SMOOTH XFADE, then hard trim/pad to voiceover length (ttsDuration)
-const fadeDur = 0.3;
-const vidAprobe = await exec(`${ffmpegPath} -i "${videoPaths[0]}" -hide_banner -loglevel error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1`);
-const vidAdur = parseFloat(vidAprobe.stdout.trim());
-const fadeOffset = Math.max(0, vidAdur - fadeDur);
+    // --- Compose and transition videos with xfade
+    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+    const videoId = uuidv4();
+    const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
+    const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
-await exec(xfadeCmd);
+    const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
+    await exec(xfadeCmd);
 
-// FINAL: add TTS and force video to match voiceover duration
-const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-await exec(finalCmd);
+    // FINAL: add TTS and force video to match voiceover duration
+    const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+    await exec(finalCmd);
 
-// Clean up temp files
-[...videoPaths, ttsPath, listPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    // Clean up temp files
+    [...videoPaths, ttsPath, listPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-// Return public video URL and script
-const publicUrl = `/generated/${videoId}.mp4`;
-return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
+    // Return public video URL and script
+    const publicUrl = `/generated/${videoId}.mp4`;
+    return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
-    // Always send JSON, never HTML
     res.status(500).json({
       error: "Failed to generate video ad",
       detail: (err && err.message) || "Unknown error"
     });
   }
 });
-
-// --- Always return JSON for any unhandled errors in this router ---
-router.use((err, req, res, next) => {
-  console.error('AI Route Error:', err?.stack || err);
-  if (res.headersSent) return next(err);
-  res.status(500).json({
-    error: 'AI Internal error',
-    detail: err?.message || 'Unknown error'
-  });
-});
-
 
 
 module.exports = router;
