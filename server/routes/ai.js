@@ -670,95 +670,105 @@ const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
-async function downloadFile(url, dest) {
-  const writer = fs.createWriteStream(dest);
-  const response = await axios({ url, method: 'GET', responseType: 'stream' });
-  await new Promise((resolve, reject) => {
-    response.data.pipe(writer);
-    let error = null;
-    writer.on('error', err => { error = err; writer.close(); reject(err); });
-    writer.on('close', () => { if (!error) resolve(); });
+async function downloadFileWithTimeout(url, dest, timeoutMs = 8000, maxSizeMB = 3) {
+  return new Promise((resolve, reject) => {
+    const writer = fs.createWriteStream(dest);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      writer.close();
+      try { fs.unlinkSync(dest); } catch {}
+      reject(new Error("Download timed out"));
+    }, timeoutMs);
+
+    axios({ url, method: 'GET', responseType: 'stream' })
+      .then(response => {
+        let bytes = 0;
+        response.data.on('data', chunk => {
+          bytes += chunk.length;
+          if (bytes > maxSizeMB * 1024 * 1024 && !timedOut) {
+            timedOut = true;
+            writer.close();
+            try { fs.unlinkSync(dest); } catch {}
+            clearTimeout(timeout);
+            reject(new Error("File too large"));
+          }
+        });
+        response.data.pipe(writer);
+        writer.on('finish', () => {
+          clearTimeout(timeout);
+          if (!timedOut) resolve(dest);
+        });
+        writer.on('error', err => {
+          clearTimeout(timeout);
+          try { fs.unlinkSync(dest); } catch {}
+          if (!timedOut) reject(err);
+        });
+      })
+      .catch(err => {
+        clearTimeout(timeout);
+        try { fs.unlinkSync(dest); } catch {}
+        reject(err);
+      });
   });
-  return dest;
 }
 
-const generatedPath = path.join(__dirname, '../public/generated');
-if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-
 router.post('/generate-video-ad', async (req, res) => {
-  console.log("API hit: /generate-video-ad");
+  console.log("API hit: /generate-video-ad (FAST MODE)");
   try {
     const { url = "", answers = {} } = req.body;
     const productType = answers?.industry || answers?.productType || "";
-    console.log("Step 1: Got body", { url, answers });
 
-    // Always include "ecommerce" in keyword
     let videoKeywords = ["ecommerce"];
     if (productType) videoKeywords.push(productType);
-
     if (url) {
       try {
         const websiteText = await getWebsiteText(url);
         const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
         videoKeywords.push(...siteKeywords);
-        console.log("Step 2: Got keywords from website:", siteKeywords);
-      } catch (e) {
-        console.log("Step 2: Website keyword extraction failed", e.message);
-      }
+      } catch (e) {}
     }
-
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
-    console.log("Step 3: Final searchTerm:", searchTerm);
 
-    // 2. Search Pexels for relevant videos
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 6 }
+        params: { query: searchTerm, per_page: 8 }
       });
       videoClips = resp.data.videos || [];
-      console.log("Step 4: Pexels videoClips count:", videoClips.length);
     } catch (err) {
-      console.log("Step 4: Stock video fetch failed", err.message);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 2) {
-      console.log("Step 4b: Not enough stock videos found");
-      return res.status(404).json({ error: "Not enough stock videos found" });
-    }
-
-    // --- Pick exactly 2 shortest MP4s from all clips ---
+    // 1. Find the shortest two SD 240p MP4s under 8s duration
     let allMp4s = [];
     for (let v of videoClips) {
-      let mp4s = (v.video_files || []).filter(f => f.link.endsWith('.mp4'));
+      let mp4s = (v.video_files || []).filter(f =>
+        f.link.endsWith('.mp4') && f.quality === 'sd' && f.height <= 240 && (f.duration || 8) <= 8
+      );
       for (let m of mp4s) allMp4s.push({ ...m });
     }
-    // If no duration property on mp4, treat as long (999)
     allMp4s.sort((a, b) => ((a.duration || 999) - (b.duration || 999)));
     let files = allMp4s.slice(0, 2).map(m => m.link);
 
-    if (files.length < 2) {
-      console.log("Step 5: Not enough MP4 clips found");
-      return res.status(500).json({ error: "Not enough MP4 clips found" });
-    }
-    console.log("Step 5: Chosen files:", files);
+    if (files.length < 2) return res.status(500).json({ error: "Not enough short SD MP4s found" });
 
-    // 4. Download locally
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFile(files[i], dest);
-      videoPaths.push(dest);
-      console.log("Step 6: Downloaded video", dest);
+      try {
+        await downloadFileWithTimeout(files[i], dest, 8000, 3);
+        videoPaths.push(dest);
+      } catch (e) {
+        return res.status(500).json({ error: "Stock video download too slow or too large" });
+      }
     }
 
-    // 5. Generate GPT script
+    // 2. GPT script (same as before)
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
-
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
       prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -773,9 +783,8 @@ router.post('/generate-video-ad', async (req, res) => {
       temperature: 0.65
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
-    console.log("Step 7: Got GPT script:", script);
 
-    // 6. Generate TTS voiceover
+    // 3. TTS voiceover
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -784,82 +793,51 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
-    console.log("Step 8: Wrote TTS mp3", ttsPath);
 
-    // --- Get TTS duration ---
+    // 4. Get TTS duration
     let ttsDuration = 16;
     try {
-      let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
+      let ffprobePath = ffmpegPath.endsWith('ffmpeg')
         ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
         : 'ffprobe';
-
       const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
       const seconds = parseFloat(stdout.trim());
-      if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
-      console.log("Step 9: TTS duration is", ttsDuration);
-    } catch (e) {
-      console.log("Step 9: ffprobe error (using fallback 16s)", e.message);
-      ttsDuration = 16;
-    }
+      if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 12);
+    } catch {}
+    if (ttsDuration > 16) ttsDuration = 16;
 
-    // --- Prepare video clips (scale, pad, trim to max 10s) ---
+    // 5. Scale, pad, and trim all videos to 7s (just to be safe)
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     for (let i = 0; i < videoPaths.length; i++) {
       const scaledPath = videoPaths[i].replace('.mp4', '_scaled.mp4');
-      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 10 -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 7 -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 28 -an "${scaledPath}"`);
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = scaledPath;
-      console.log("Step 10: Scaled video", scaledPath);
     }
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
-    console.log("Step 11: Wrote list file", listPath);
-
-    // Compose and transition videos with xfade
-    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = uuidv4();
     const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
+    let fadeDur = 0.3, fadeOffset = 6.7; // always fade at last 0.3s of first 7s
 
-    // Get video 1 duration for fade
-    let vidAdur = 8;
-    try {
-      let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
-        ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
-        : 'ffprobe';
-      const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPaths[0]}"`);
-      const seconds = parseFloat(stdout.trim());
-      if (!isNaN(seconds) && seconds > 0) vidAdur = seconds;
-    } catch (e) {
-      console.log("Step 12: ffprobe vidA error", e.message);
-    }
-    const fadeDur = 0.3;
-    const fadeOffset = Math.max(0, vidAdur - fadeDur);
-
-    // Xfade
+    // Xfade two 7s clips (total = 13.7s, TTS will be trimmed to match)
     const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
-    console.log("Step 12b: Running xfadeCmd", xfadeCmd);
     await exec(xfadeCmd);
-    console.log("Step 13: Ran xfadeCmd");
 
-    // FINAL: add TTS and force video to match voiceover duration
-    const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-    console.log("Step 13b: Running finalCmd", finalCmd);
+    // FINAL: add TTS and force video to match voiceover duration (cap at 15s)
+    const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${Math.min(ttsDuration, 15)} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
-    console.log("Step 14: Created final video", outPath);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ttsPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Return public video URL and script
+    // Return video
     const publicUrl = `/generated/${videoId}.mp4`;
-    console.log("Step 15: Success! Returning:", publicUrl);
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
   } catch (err) {
-    console.error("Video generation error:", err.message, err?.response?.data || "");
+    console.error("FAST VIDEO ERROR:", err.message, err?.response?.data || "");
     res.status(500).json({
-      error: "Failed to generate video ad",
+      error: "Failed to generate video ad (fast)",
       detail: (err && err.message) || "Unknown error"
     });
   }
