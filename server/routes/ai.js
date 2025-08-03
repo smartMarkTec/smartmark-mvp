@@ -686,9 +686,11 @@ const generatedPath = path.join(__dirname, '../public/generated');
 if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
 
 router.post('/generate-video-ad', async (req, res) => {
+  console.log("API hit: /generate-video-ad"); // <== TOP LOG
   try {
     const { url = "", answers = {} } = req.body;
     const productType = answers?.industry || answers?.productType || "";
+    console.log("Step 1: Got body", { url, answers });
 
     // Always include "ecommerce" in keyword
     let videoKeywords = ["ecommerce"];
@@ -699,13 +701,17 @@ router.post('/generate-video-ad', async (req, res) => {
         const websiteText = await getWebsiteText(url);
         const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
         videoKeywords.push(...siteKeywords);
-      } catch (e) {}
+        console.log("Step 2: Got keywords from website:", siteKeywords);
+      } catch (e) {
+        console.log("Step 2: Website keyword extraction failed", e.message);
+      }
     }
 
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
+    console.log("Step 3: Final searchTerm:", searchTerm);
 
-    // 2. Search Pexels for relevant ecomm videos (get 6 for choice)
+    // 2. Search Pexels for relevant videos
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -713,10 +719,15 @@ router.post('/generate-video-ad', async (req, res) => {
         params: { query: searchTerm, per_page: 6 }
       });
       videoClips = resp.data.videos || [];
+      console.log("Step 4: Pexels videoClips count:", videoClips.length);
     } catch (err) {
+      console.log("Step 4: Stock video fetch failed", err.message);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 2) return res.status(404).json({ error: "Not enough stock videos found" });
+    if (videoClips.length < 2) {
+      console.log("Step 4b: Not enough stock videos found");
+      return res.status(404).json({ error: "Not enough stock videos found" });
+    }
 
     // --- Pick exactly 2 short relevant clips
     let files = [];
@@ -727,7 +738,11 @@ router.post('/generate-video-ad', async (req, res) => {
       if (best && !files.includes(best.link)) files.push(best.link);
       if (files.length === 2) break;
     }
-    if (files.length < 2) return res.status(500).json({ error: "Not enough MP4 clips found" });
+    if (files.length < 2) {
+      console.log("Step 5: Not enough MP4 clips found");
+      return res.status(500).json({ error: "Not enough MP4 clips found" });
+    }
+    console.log("Step 5: Chosen files:", files);
 
     // 4. Download locally
     const tempDir = path.join(__dirname, '../tmp');
@@ -737,9 +752,10 @@ router.post('/generate-video-ad', async (req, res) => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFile(files[i], dest);
       videoPaths.push(dest);
+      console.log("Step 6: Downloaded video", dest);
     }
 
-    // 5. Generate GPT script (enforced 15-18s, sales focus, for online store)
+    // 5. Generate GPT script
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
 
     if (productType) prompt += `\nProduct category: ${productType}`;
@@ -756,6 +772,7 @@ router.post('/generate-video-ad', async (req, res) => {
       temperature: 0.65
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+    console.log("Step 7: Got GPT script:", script);
 
     // 6. Generate TTS voiceover
     const ttsRes = await openai.audio.speech.create({
@@ -766,20 +783,21 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
+    console.log("Step 8: Wrote TTS mp3", ttsPath);
 
-    // --- Get TTS duration (always fallback to 16s if anything fails) ---
+    // --- Get TTS duration ---
     let ttsDuration = 16;
     try {
       let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
         ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
         : 'ffprobe';
 
-      // Use ffprobe to get the DURATION of the TTS mp3
       const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
       const seconds = parseFloat(stdout.trim());
       if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
+      console.log("Step 9: TTS duration is", ttsDuration);
     } catch (e) {
-      console.error("ffprobe error (safe fallback to 16s):", e.message || e);
+      console.log("Step 9: ffprobe error (using fallback 16s)", e.message);
       ttsDuration = 16;
     }
 
@@ -790,13 +808,20 @@ router.post('/generate-video-ad', async (req, res) => {
       await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = scaledPath;
+      console.log("Step 10: Scaled video", scaledPath);
     }
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+    console.log("Step 11: Wrote list file", listPath);
 
-    // ----------- CRITICAL: Use ffprobe for duration, never ffmpeg -----------
-    let vidAdur = 8; // fallback
-    const fadeDur = 0.3;
+    // Compose and transition videos with xfade
+    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+    const videoId = uuidv4();
+    const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
+    const outPath = path.join(generatedPath, `${videoId}.mp4`);
+
+    // Get video 1 duration for fade
+    let vidAdur = 8;
     try {
       let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
         ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
@@ -805,28 +830,26 @@ router.post('/generate-video-ad', async (req, res) => {
       const seconds = parseFloat(stdout.trim());
       if (!isNaN(seconds) && seconds > 0) vidAdur = seconds;
     } catch (e) {
-      console.error('ffprobe vidA error:', e.message || e);
+      console.log("Step 12: ffprobe vidA error", e.message);
     }
+    const fadeDur = 0.3;
     const fadeOffset = Math.max(0, vidAdur - fadeDur);
-
-    // --- Compose and transition videos with xfade
-    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-    const videoId = uuidv4();
-    const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
-    const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
     const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
     await exec(xfadeCmd);
+    console.log("Step 13: Ran xfadeCmd");
 
     // FINAL: add TTS and force video to match voiceover duration
     const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
+    console.log("Step 14: Created final video", outPath);
 
     // Clean up temp files
     [...videoPaths, ttsPath, listPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
+    console.log("Step 15: Success! Returning:", publicUrl);
     return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
   } catch (err) {
