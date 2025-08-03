@@ -756,14 +756,14 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // 2. Pick two smallest SD .mp4s from DIFFERENT videos
+    // 2. Pick 3 smallest SD .mp4s from DIFFERENT videos
     let files = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
         .filter(f => f.quality === 'sd' && f.link.endsWith('.mp4'))
         .sort((a, b) => (a.width || 9999) - (b.width || 9999));
       if (mp4s[0] && !files.includes(mp4s[0].link)) files.push(mp4s[0].link);
-      if (files.length === 2) break;
+      if (files.length === 3) break;
     }
     if (files.length < 2) {
       console.log("Step 5: Not enough SD MP4 clips found");
@@ -771,23 +771,22 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     console.log("Step 5: Chosen files:", files);
 
-    // 3. Download, scale, and trim both videos to 8 seconds (timeout & size limit)
+    // 3. Download, scale, and trim stock videos
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-    const videoPaths = [];
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
+    let baseClipDur = 8; // Each stock video is 8s
+
+    let videoPaths = [];
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFileWithTimeout(files[i], dest, 8000, 3);
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
-      await exec(`${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`);
+      await exec(`${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t ${baseClipDur} -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`);
       fs.unlinkSync(dest);
       videoPaths.push(scaledPath);
       console.log("Step 6: Scaled & trimmed video", scaledPath);
     }
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
-    console.log("Step 7: Wrote list file", listPath);
 
     // 4. Generate GPT script
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and a call to action for online shoppers. Sound friendly, trustworthy, and conversion-focused.`;
@@ -818,7 +817,7 @@ router.post('/generate-video-ad', async (req, res) => {
     fs.writeFileSync(ttsPath, ttsBuffer);
     console.log("Step 9: Wrote TTS mp3", ttsPath);
 
-    // 6. Get TTS duration
+    // 6. Get TTS duration (force video = TTS duration + 1s, at least 15s)
     let ttsDuration = 16;
     try {
       let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
@@ -833,30 +832,53 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsDuration = 16;
     }
 
-    // --- FINAL: force video to be at least 15s, but if TTS is longer, video = TTS + 1s
+    // 7. Loop/Repeat videos to cover the full script
     let finalDuration = Math.max(ttsDuration + 1, 15);
+    let neededClips = Math.ceil(finalDuration / baseClipDur);
+    let allClips = [];
+    for (let i = 0; i < neededClips; i++) {
+      allClips.push(videoPaths[i % videoPaths.length]);
+    }
 
-    // 7. Xfade and finalize
+    // 8. Write concat list file
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, allClips.map(p => `file '${p}'`).join('\n'));
+    console.log("Step 11: Wrote list file", listPath);
+
+    // 9. Concat videos, xfade, finalize
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = uuidv4();
+    const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
     const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // Xfade
-    const fadeDur = 0.3;
-    const fadeOffset = 8 - fadeDur; // 7.7s if 8s per clip
-    const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
-    console.log("Step 11: Running xfadeCmd", xfadeCmd);
-    await exec(xfadeCmd);
+    // Concat videos
+    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
 
-    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
-    const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-    console.log("Step 12: Running finalCmd", finalCmd);
-    await exec(finalCmd);
+    // Xfade between first two (if only 2, else just use concat)
+    if (allClips.length > 1) {
+      // xfade only first two (for a nice transition)
+      const fadeDur = 0.3;
+      const fadeOffset = baseClipDur - fadeDur;
+      await exec(`${ffmpegPath} -y -i "${allClips[0]}" -i "${allClips[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`);
+      // If more than 2 clips, append rest after xfade
+      if (allClips.length > 2) {
+        // Merge xfade output with the rest
+        const list2Path = path.join(tempDir, `${uuidv4()}.txt`);
+        fs.writeFileSync(list2Path, [tempXfade, ...allClips.slice(2)].map(p => `file '${p}'`).join('\n'));
+        await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${list2Path}" -c copy "${tempConcat}"`);
+        fs.unlinkSync(list2Path);
+      } else {
+        fs.renameSync(tempXfade, tempConcat);
+      }
+    }
+
+    // Final: add TTS and force video to match TTS+1s
+    await exec(`${ffmpegPath} -y -i "${tempConcat}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ttsPath, listPath, tempConcat, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
