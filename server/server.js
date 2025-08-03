@@ -14,6 +14,12 @@ const cors = require('cors');
 const path = require('path');
 const app = express();
 
+// --- FORCE ALL RESPONSES TO JSON (THE CRUCIAL FIX) ---
+app.use((req, res, next) => {
+  res.setHeader('Content-Type', 'application/json');
+  next();
+});
+
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://smartmark-mvp.vercel.app',
