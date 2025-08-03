@@ -787,41 +787,42 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // --- Prepare video clips to match TTS (full script) duration, min 15s ---
-    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
-    const totalDuration = ttsDuration;
-    const targetDur = totalDuration / 2;
+    // --- Prepare video clips (scale, pad, no pre-trim!) ---
+const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
+for (let i = 0; i < videoPaths.length; i++) {
+  const scaledPath = videoPaths[i].replace('.mp4', '_scaled.mp4');
+  await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
+  fs.unlinkSync(videoPaths[i]);
+  videoPaths[i] = scaledPath;
+}
+const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    for (let i = 0; i < videoPaths.length; i++) {
-      const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
-      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`);
-      fs.unlinkSync(videoPaths[i]);
-      videoPaths[i] = trimmedPath;
-    }
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+// ----------- THIS IS THE CRITICAL FIX -----------
+if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+const videoId = uuidv4();
+const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
+const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // Output dir and file
-    // ----------- THIS IS THE CRITICAL FIX: Always use generatedPath -----------
-    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-    const videoId = uuidv4();
-    const outPath = path.join(generatedPath, `${videoId}.mp4`);
+// SMOOTH XFADE, then hard trim/pad to voiceover length (ttsDuration)
+const fadeDur = 0.3;
+const vidAprobe = await exec(`${ffmpegPath} -i "${videoPaths[0]}" -hide_banner -loglevel error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1`);
+const vidAdur = parseFloat(vidAprobe.stdout.trim());
+const fadeOffset = Math.max(0, vidAdur - fadeDur);
 
-    // SMOOTH XFADE
-    const fadeDur = 0.3;
-    const fadeOffset = targetDur - fadeDur;
-    const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an -t ${totalDuration} "${outPath}.temp.mp4"`;
-    await exec(xfadeCmd);
+const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
+await exec(xfadeCmd);
 
-    // Add TTS audio
-    const finalCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-    await exec(finalCmd);
+// FINAL: add TTS and force video to match voiceover duration
+const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+await exec(finalCmd);
 
-    // Clean up temp files
-    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+// Clean up temp files
+[...videoPaths, ttsPath, listPath, tempXfade].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Return public video URL and script
-    const publicUrl = `/generated/${videoId}.mp4`;
-    return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
+// Return public video URL and script
+const publicUrl = `/generated/${videoId}.mp4`;
+return res.json({ videoUrl: publicUrl, script, voice: TTS_VOICE });
 
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
