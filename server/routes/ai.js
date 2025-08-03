@@ -769,22 +769,22 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // --- Get TTS duration (always fallback to 16s if anything fails) ---
-    let ttsDuration = 16;
-    try {
-      let ffprobePath;
-      if (ffmpegPath && ffmpegPath.endsWith('ffmpeg')) {
-        ffprobePath = ffmpegPath.replace(/ffmpeg$/, 'ffprobe');
-      } else {
-        ffprobePath = 'ffprobe';
-      }
-      const { stdout } = await exec(`ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`);
-      const seconds = parseFloat(stdout.trim());
-      if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
-    } catch (e) {
-      console.error("ffprobe error (safe fallback to 16s):", e.message || e);
-      ttsDuration = 16;
-    }
+   // --- Get TTS duration (always fallback to 16s if anything fails) ---
+let ttsDuration = 16;
+try {
+  let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
+    ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
+    : 'ffprobe';
+
+  // Use ffprobe to get the DURATION of the TTS mp3
+  const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
+  const seconds = parseFloat(stdout.trim());
+  if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
+} catch (e) {
+  console.error("ffprobe error (safe fallback to 16s):", e.message || e);
+  ttsDuration = 16;
+}
+
 
     // --- Prepare video clips to match TTS (full script) duration, min 15s ---
     // --- Prepare video clips (scale, pad, no pre-trim!) ---
