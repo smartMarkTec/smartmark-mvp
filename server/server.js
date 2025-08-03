@@ -14,11 +14,13 @@ const cors = require('cors');
 const path = require('path');
 const app = express();
 
+// REMOVE THIS BLOCK ↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓↓
 // --- FORCE ALL RESPONSES TO JSON (THE CRUCIAL FIX) ---
-app.use((req, res, next) => {
-  res.setHeader('Content-Type', 'application/json');
-  next();
-});
+// app.use((req, res, next) => {
+//   res.setHeader('Content-Type', 'application/json');
+//   next();
+// });
+// REMOVE THIS BLOCK ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,

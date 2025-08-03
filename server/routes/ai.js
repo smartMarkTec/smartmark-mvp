@@ -729,15 +729,16 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // --- Pick exactly 2 short relevant clips
-    let files = [];
+    // --- Pick exactly 2 shortest MP4s from all clips ---
+    let allMp4s = [];
     for (let v of videoClips) {
-      let best = (v.video_files || []).find(f =>
-        f.quality === 'sd' && f.width <= 1280 && f.link.endsWith('.mp4')
-      ) || (v.video_files || [])[0];
-      if (best && !files.includes(best.link)) files.push(best.link);
-      if (files.length === 2) break;
+      let mp4s = (v.video_files || []).filter(f => f.link.endsWith('.mp4'));
+      for (let m of mp4s) allMp4s.push({ ...m });
     }
+    // If no duration property on mp4, treat as long (999)
+    allMp4s.sort((a, b) => ((a.duration || 999) - (b.duration || 999)));
+    let files = allMp4s.slice(0, 2).map(m => m.link);
+
     if (files.length < 2) {
       console.log("Step 5: Not enough MP4 clips found");
       return res.status(500).json({ error: "Not enough MP4 clips found" });
@@ -801,11 +802,11 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsDuration = 16;
     }
 
-    // --- Prepare video clips (scale, pad, no pre-trim!) ---
+    // --- Prepare video clips (scale, pad, trim to max 10s) ---
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     for (let i = 0; i < videoPaths.length; i++) {
       const scaledPath = videoPaths[i].replace('.mp4', '_scaled.mp4');
-      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 10 -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${scaledPath}"`);
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = scaledPath;
       console.log("Step 10: Scaled video", scaledPath);
