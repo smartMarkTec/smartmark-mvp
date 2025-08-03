@@ -1,3 +1,12 @@
+// --- GLOBAL ERROR HANDLERS (keep these at the very top!) ---
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+// server/server.js
 require('dotenv').config({ path: './.env' });
 
 const express = require('express');
