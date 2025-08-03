@@ -780,7 +780,6 @@ router.post('/generate-video-ad', async (req, res) => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFileWithTimeout(files[i], dest, 8000, 3);
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
-      // Always trim to 8 seconds for speed, fit, quality
       await exec(`${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`);
       fs.unlinkSync(dest);
       videoPaths.push(scaledPath);
@@ -834,6 +833,9 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsDuration = 16;
     }
 
+    // ** FORCE video to be at least 15 seconds **
+    if (ttsDuration < 15) ttsDuration = 15;
+
     // 7. Xfade and finalize
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
@@ -848,7 +850,7 @@ router.post('/generate-video-ad', async (req, res) => {
     console.log("Step 11: Running xfadeCmd", xfadeCmd);
     await exec(xfadeCmd);
 
-    // FINAL: add TTS and force video to match TTS duration (even if >16s)
+    // FINAL: add TTS and force video to match TTS duration (never less than 15s)
     const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     console.log("Step 12: Running finalCmd", finalCmd);
     await exec(finalCmd);
