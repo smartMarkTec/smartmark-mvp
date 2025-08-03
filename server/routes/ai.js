@@ -766,8 +766,20 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concat 2 clips, overlay voice, 16s duration, ensure sharp/no-freeze/smooth
+    // 7. Concat 2 clips, overlay voice, 15-18s duration required
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+
+    // --- CRITICAL: Trim, scale, re-encode, unify framerate for both videos ---
+    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30, totalDuration = 16;
+    const targetDur = totalDuration / 2;
+
+    for (let i = 0; i < videoPaths.length; i++) {
+      const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
+      // This command trims, scales, enforces yuv420p, and unifies framerate/timebase
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`);
+      fs.unlinkSync(videoPaths[i]);
+      videoPaths[i] = trimmedPath;
+    }
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
@@ -776,36 +788,18 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // --- Trim and scale both videos to 960x540, yuv420p, then xfade ---
-    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540;
-    const totalDuration = 16;
-    const targetDur = totalDuration / 2;
-    const transDur = 0.3; // transition duration
+    // --- SMOOTH XFADE: No freeze, both streams identical properties ---
+    // 7.5s for each video, 0.3s fade
+    const fadeDur = 0.3;
+    const fadeOffset = targetDur - fadeDur; // 7.7 if 8s
 
-    // 1. Trim/scale/format both clips
-    for (let i = 0; i < videoPaths.length; i++) {
-      const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
-      await exec(
-        `${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p" -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`
-      );
-      fs.unlinkSync(videoPaths[i]);
-      videoPaths[i] = trimmedPath;
-    }
+    // Use xfade for instant, smooth transition, video only (voice is added later)
+    const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an -t ${totalDuration} "${outPath}.temp.mp4"`;
+    await exec(xfadeCmd);
 
-    // 2. Use xfade for smooth quick transition (no freeze, fade=0.3s)
-    // Build ffmpeg filter string
-    const xfadeOffset = targetDur - transDur; // transition starts at end of first
-    const xfadeFilter = `[0:v][1:v]xfade=transition=fade:duration=${transDur}:offset=${xfadeOffset},format=yuv420p[v]`;
-
-    // If you want audio crossfade, it's more complex, for now only smooth video fade
-    await exec(
-      `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "${xfadeFilter}" -map "[v]" -an -t ${totalDuration} "${outPath}.temp.mp4"`
-    );
-
-    // 3. Add the TTS audio
-    await exec(
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v copy -c:a aac -b:a 192k "${outPath}"`
-    );
+    // Add voice audio
+    const finalCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+    await exec(finalCmd);
 
     // Clean up temp files
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
@@ -819,6 +813,7 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
+
 
 
 module.exports = router;
