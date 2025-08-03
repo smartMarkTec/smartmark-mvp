@@ -778,7 +778,7 @@ router.post('/generate-video-ad', async (req, res) => {
       } else {
         ffprobePath = 'ffprobe';
       }
-      const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
+      const { stdout } = await exec(`ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`);
       const seconds = parseFloat(stdout.trim());
       if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
     } catch (e) {
