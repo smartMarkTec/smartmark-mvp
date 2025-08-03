@@ -670,6 +670,28 @@ const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
+// CTA normalizer
+function normalizeCTA(input) {
+  if (!input) return "Get Started";
+  const t = input.toLowerCase();
+  if (t.includes("visit")) return "Visit Us!";
+  if (t.includes("order")) return "Order Online";
+  if (t.includes("buy")) return "Buy Now";
+  if (t.includes("sign up")) return "Sign Up Today";
+  if (t.includes("call")) return "Call Now";
+  if (t.includes("learn")) return "Learn More";
+  if (t.includes("book")) return "Book Now";
+  if (t.includes("join")) return "Join Now";
+  if (/^(i|we)\s*want|should|can|please|try|interested|contact|reach/.test(t)) return "Get Started";
+  return input
+    .replace(/^(i|we)\s*want (them|you) to\s*/i, '')
+    .replace(/^to\s+/i, '')
+    .replace(/[\.\!]+$/, '')
+    .trim()
+    .replace(/^\w/, c => c.toUpperCase())
+    + "!";
+}
+
 // Download with timeout and file size limit (FAST/Safe)
 async function downloadFileWithTimeout(url, dest, timeoutMs = 8000, maxSizeMB = 3) {
   return new Promise((resolve, reject) => {
@@ -719,11 +741,8 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", answers = {} } = req.body;
     const productType = answers?.industry || answers?.productType || "";
-    // Fallback CTA overlay
-    const overlayText =
-      answers?.cta && answers.cta.length < 32
-        ? answers.cta
-        : "Order Now!";
+    // Use normalized CTA for overlay and script
+    const overlayText = normalizeCTA(answers?.cta);
 
     // Step 1: Keywords for Pexels
     let videoKeywords = ["ecommerce"];
@@ -783,7 +802,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Step 5: Generate GPT script (mention CTA)
-    let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
+    let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this exact call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
       prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
