@@ -766,20 +766,24 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concat 2 clips, overlay voice, 15-18s duration required
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    // ============ NEW: Calculate TTS audio duration ============
+    // Use ffprobe to get TTS duration
+    const { stdout: ttsProbeOut } = await exec(`${ffmpegPath.replace('ffmpeg', 'ffprobe')} -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`);
+    let ttsDuration = parseFloat(ttsProbeOut.trim());
+    if (isNaN(ttsDuration) || ttsDuration < 15) ttsDuration = 15;
 
-    // --- CRITICAL: Trim, scale, re-encode, unify framerate for both videos ---
-    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30, totalDuration = 16;
+    // 7. Prepare video clips to match ttsDuration (always at least 15s, split evenly)
+    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
+    const totalDuration = ttsDuration;
     const targetDur = totalDuration / 2;
 
     for (let i = 0; i < videoPaths.length; i++) {
       const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
-      // This command trims, scales, enforces yuv420p, and unifies framerate/timebase
       await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -r ${FRAMERATE} -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`);
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = trimmedPath;
     }
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
@@ -789,15 +793,14 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
     // --- SMOOTH XFADE: No freeze, both streams identical properties ---
-    // 7.5s for each video, 0.3s fade
     const fadeDur = 0.3;
-    const fadeOffset = targetDur - fadeDur; // 7.7 if 8s
+    const fadeOffset = targetDur - fadeDur;
 
-    // Use xfade for instant, smooth transition, video only (voice is added later)
+    // xfade transition, video only
     const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an -t ${totalDuration} "${outPath}.temp.mp4"`;
     await exec(xfadeCmd);
 
-    // Add voice audio
+    // Add TTS voiceover for full script
     const finalCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
@@ -813,7 +816,5 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
-
 
 module.exports = router;
