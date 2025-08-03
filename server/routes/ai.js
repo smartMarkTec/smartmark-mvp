@@ -833,8 +833,8 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsDuration = 16;
     }
 
-    // ** FORCE video to be at least 15 seconds **
-    if (ttsDuration < 15) ttsDuration = 15;
+    // --- FINAL: force video to be at least 15s, but if TTS is longer, video = TTS + 1s
+    let finalDuration = Math.max(ttsDuration + 1, 15);
 
     // 7. Xfade and finalize
     const generatedPath = path.join(__dirname, '../public/generated');
@@ -850,8 +850,8 @@ router.post('/generate-video-ad', async (req, res) => {
     console.log("Step 11: Running xfadeCmd", xfadeCmd);
     await exec(xfadeCmd);
 
-    // FINAL: add TTS and force video to match TTS duration (never less than 15s)
-    const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
+    const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     console.log("Step 12: Running finalCmd", finalCmd);
     await exec(finalCmd);
 
