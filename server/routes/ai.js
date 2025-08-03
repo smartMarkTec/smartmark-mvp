@@ -848,7 +848,7 @@ router.post('/generate-video-ad', async (req, res) => {
     console.log("Step 11: Running xfadeCmd", xfadeCmd);
     await exec(xfadeCmd);
 
-    // FINAL: add TTS and force video to match voiceover duration (ALWAYS ensures script finishes before video)
+    // FINAL: add TTS and force video to match TTS duration (even if >16s)
     const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     console.log("Step 12: Running finalCmd", finalCmd);
     await exec(finalCmd);
