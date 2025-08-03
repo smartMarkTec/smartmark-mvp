@@ -766,13 +766,21 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // ============ NEW: Calculate TTS audio duration ============
-    // Use ffprobe to get TTS duration
-    const { stdout: ttsProbeOut } = await exec(`${ffmpegPath.replace('ffmpeg', 'ffprobe')} -i "${ttsPath}" -show_entries format=duration -v quiet -of csv="p=0"`);
-    let ttsDuration = parseFloat(ttsProbeOut.trim());
-    if (isNaN(ttsDuration) || ttsDuration < 15) ttsDuration = 15;
+    // --- Get TTS duration (always fallback to 16s if anything fails) ---
+    let ttsDuration = 16;
+    try {
+      const ffprobePath =
+        ffmpegPath.endsWith('ffmpeg')
+          ? ffmpegPath.replace('ffmpeg', 'ffprobe')
+          : 'ffprobe';
+      const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
+      const seconds = parseFloat(stdout.trim());
+      if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
+    } catch (e) {
+      ttsDuration = 16;
+    }
 
-    // 7. Prepare video clips to match ttsDuration (always at least 15s, split evenly)
+    // --- Prepare video clips to match TTS (full script) duration, min 15s ---
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     const totalDuration = ttsDuration;
     const targetDur = totalDuration / 2;
@@ -792,15 +800,13 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // --- SMOOTH XFADE: No freeze, both streams identical properties ---
+    // SMOOTH XFADE
     const fadeDur = 0.3;
     const fadeOffset = targetDur - fadeDur;
-
-    // xfade transition, video only
     const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an -t ${totalDuration} "${outPath}.temp.mp4"`;
     await exec(xfadeCmd);
 
-    // Add TTS voiceover for full script
+    // Add TTS audio
     const finalCmd = `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
@@ -813,7 +819,7 @@ router.post('/generate-video-ad', async (req, res) => {
 
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
-    return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
+    return res.status(500).json({ error: "Failed to generate video ad", detail: (err && err.message) || "Unknown error" });
   }
 });
 
