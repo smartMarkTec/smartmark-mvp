@@ -776,7 +776,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // --- Split duration equally for 2 clips (e.g. 16s = 8s + 8s) ---
+    // --- New: Split duration equally for 2 clips (eg. 16s = 8s + 8s) ---
     // First, get durations for the two clips
     const getDurationCmd = (file) => `${ffmpegPath} -i "${file}" 2>&1 | grep "Duration"`;
     const durationSec = [];
@@ -794,26 +794,26 @@ router.post('/generate-video-ad', async (req, res) => {
     const totalDuration = 16;
     const targetDur = totalDuration / 2;
 
-    // Now, trim each clip to targetDur with ffmpeg
+    // --- Only this loop is changed: trim and resize each clip to 960x540/yuv420p ---
+    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540;
     for (let i = 0; i < videoPaths.length; i++) {
       const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
-      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -c copy "${trimmedPath}"`);
+      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT},format=yuv420p" -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`);
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = trimmedPath;
     }
+    // Rewrite listPath with trimmed videos
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    // --- SMOOTH 0.3s CROSSFADE BETWEEN CLIPS ---
-    // ffmpeg complex filter for crossfade
-    const tempConcat = outPath + '.temp.mp4';
-    const crossfadeCmd = [
-      `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=0.3:offset=${targetDur-0.3},format=yuv420p[v]" -map "[v]" -an -t ${totalDuration} "${tempConcat}"`,
-      // add audio (voiceover), make sure duration matches
-      `${ffmpegPath} -y -i "${tempConcat}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
+    // FFmpeg: concat, add audio, enforce 16s (no over/under)
+    const ffmpegCmd = [
+      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
     ];
-    for (let cmd of crossfadeCmd) await exec(cmd);
+    for (let cmd of ffmpegCmd) await exec(cmd);
 
     // Clean up temp files
-    [...videoPaths, ttsPath, listPath, tempConcat].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
