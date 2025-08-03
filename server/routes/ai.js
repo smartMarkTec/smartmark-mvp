@@ -833,6 +833,16 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
+// --- Always return JSON for any unhandled errors in this router ---
+router.use((err, req, res, next) => {
+  console.error('AI Route Error:', err?.stack || err);
+  if (res.headersSent) return next(err);
+  res.status(500).json({
+    error: 'AI Internal error',
+    detail: err?.message || 'Unknown error'
+  });
+});
+
 
 
 module.exports = router;
