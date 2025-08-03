@@ -769,14 +769,17 @@ router.post('/generate-video-ad', async (req, res) => {
     // --- Get TTS duration (always fallback to 16s if anything fails) ---
     let ttsDuration = 16;
     try {
-      const ffprobePath =
-        ffmpegPath.endsWith('ffmpeg')
-          ? ffmpegPath.replace('ffmpeg', 'ffprobe')
-          : 'ffprobe';
+      let ffprobePath;
+      if (ffmpegPath && ffmpegPath.endsWith('ffmpeg')) {
+        ffprobePath = ffmpegPath.replace(/ffmpeg$/, 'ffprobe');
+      } else {
+        ffprobePath = 'ffprobe';
+      }
       const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
       const seconds = parseFloat(stdout.trim());
       if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
     } catch (e) {
+      console.error("ffprobe error (safe fallback to 16s):", e.message || e);
       ttsDuration = 16;
     }
 
