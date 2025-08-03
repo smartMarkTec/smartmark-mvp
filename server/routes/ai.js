@@ -686,7 +686,7 @@ const generatedPath = path.join(__dirname, '../public/generated');
 if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
 
 router.post('/generate-video-ad', async (req, res) => {
-  console.log("API hit: /generate-video-ad"); // <== TOP LOG
+  console.log("API hit: /generate-video-ad");
   try {
     const { url = "", answers = {} } = req.body;
     const productType = answers?.industry || answers?.productType || "";
@@ -835,12 +835,15 @@ router.post('/generate-video-ad', async (req, res) => {
     const fadeDur = 0.3;
     const fadeOffset = Math.max(0, vidAdur - fadeDur);
 
+    // Xfade
     const xfadeCmd = `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`;
+    console.log("Step 12b: Running xfadeCmd", xfadeCmd);
     await exec(xfadeCmd);
     console.log("Step 13: Ran xfadeCmd");
 
     // FINAL: add TTS and force video to match voiceover duration
     const finalCmd = `${ffmpegPath} -y -i "${tempXfade}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${ttsDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+    console.log("Step 13b: Running finalCmd", finalCmd);
     await exec(finalCmd);
     console.log("Step 14: Created final video", outPath);
 
