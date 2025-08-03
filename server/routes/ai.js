@@ -719,14 +719,13 @@ router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", answers = {} } = req.body;
     const productType = answers?.industry || answers?.productType || "";
+    // Fallback CTA overlay
     const overlayText =
       answers?.cta && answers.cta.length < 32
         ? answers.cta
         : "Order Now!";
 
-    console.log("Step 1: Got body", { url, answers });
-
-    // Keywords for Pexels
+    // Step 1: Keywords for Pexels
     let videoKeywords = ["ecommerce"];
     if (productType) videoKeywords.push(productType);
     if (url) {
@@ -734,16 +733,12 @@ router.post('/generate-video-ad', async (req, res) => {
         const websiteText = await getWebsiteText(url);
         const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
         videoKeywords.push(...siteKeywords);
-        console.log("Step 2: Got keywords from website:", siteKeywords);
-      } catch (e) {
-        console.log("Step 2: Website keyword extraction failed", e.message);
-      }
+      } catch (e) {}
     }
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
-    console.log("Step 3: Final searchTerm:", searchTerm);
 
-    // 1. Search Pexels for relevant SD videos
+    // Step 2: Fetch videos
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -751,17 +746,14 @@ router.post('/generate-video-ad', async (req, res) => {
         params: { query: searchTerm, per_page: 6 }
       });
       videoClips = resp.data.videos || [];
-      console.log("Step 4: Pexels videoClips count:", videoClips.length);
     } catch (err) {
-      console.log("Step 4: Stock video fetch failed", err.message);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
     if (videoClips.length < 2) {
-      console.log("Step 4b: Not enough stock videos found");
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // 2. Pick two smallest SD .mp4s from DIFFERENT videos
+    // Step 3: Pick two smallest SD .mp4s from DIFFERENT videos
     let files = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
@@ -771,12 +763,10 @@ router.post('/generate-video-ad', async (req, res) => {
       if (files.length === 2) break;
     }
     if (files.length < 2) {
-      console.log("Step 5: Not enough SD MP4 clips found");
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
-    console.log("Step 5: Chosen files:", files);
 
-    // 3. Download, scale, and trim both videos to 8 seconds (timeout & size limit)
+    // Step 4: Download, scale, trim to 8s
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -785,13 +775,14 @@ router.post('/generate-video-ad', async (req, res) => {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       await downloadFileWithTimeout(files[i], dest, 8000, 3);
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
-      await exec(`${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`);
+      await exec(
+        `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
+      );
       fs.unlinkSync(dest);
       videoPaths.push(scaledPath);
-      console.log("Step 6: Scaled & trimmed video", scaledPath);
     }
 
-    // 4. Generate GPT script (mention CTA)
+    // Step 5: Generate GPT script (mention CTA)
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -807,9 +798,8 @@ router.post('/generate-video-ad', async (req, res) => {
       temperature: 0.65
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
-    console.log("Step 8: Got GPT script:", script);
 
-    // 5. Generate TTS voiceover
+    // Step 6: Generate TTS voiceover
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -818,9 +808,8 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
-    console.log("Step 9: Wrote TTS mp3", ttsPath);
 
-    // 6. Get TTS duration
+    // Step 7: Get TTS duration
     let ttsDuration = 16;
     try {
       let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
@@ -829,9 +818,7 @@ router.post('/generate-video-ad', async (req, res) => {
       const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
       const seconds = parseFloat(stdout.trim());
       if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
-      console.log("Step 10: TTS duration is", ttsDuration);
     } catch (e) {
-      console.log("Step 10: ffprobe error (using fallback 16s)", e.message);
       ttsDuration = 16;
     }
 
@@ -844,63 +831,43 @@ router.post('/generate-video-ad', async (req, res) => {
     while (videoPaths.length < clipsNeeded) {
       videoPaths.push(videoPaths[videoPaths.length - 1]);
     }
-
-    // Write concat list file for the needed length
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
-    console.log("Step 7: Wrote list file", listPath);
 
-    // 7. Concat, Xfade, and finalize
+    // Concat videos
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = uuidv4();
     const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
     const tempOverlay = path.join(generatedPath, `${videoId}.overlay.mp4`);
-    const tempXfade = path.join(generatedPath, `${videoId}.temp.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
-
-    // 1. Concat the videos
     await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
 
-    // 2. Crossfade between first 2, then concat
-    if (clipsNeeded > 1) {
-      const fadeDur = 0.3;
-      const fadeOffset = 8 - fadeDur; // 7.7s
-      await exec(`${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "[0:v][1:v]xfade=transition=fade:duration=${fadeDur}:offset=${fadeOffset},format=yuv420p[v]" -map "[v]" -an "${tempXfade}"`);
-      // If more clips, make a list: xfade output + repeated
-      if (clipsNeeded > 2) {
-        const repeatList = path.join(tempDir, `${uuidv4()}.txt`);
-        const repeatFiles = [tempXfade].concat(videoPaths.slice(2, clipsNeeded));
-        fs.writeFileSync(repeatList, repeatFiles.map(p => `file '${p}'`).join('\n'));
-        await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${repeatList}" -c copy "${tempConcat}"`);
-        fs.unlinkSync(repeatList);
-      } else {
-        fs.renameSync(tempXfade, tempConcat); // Just use the xfade
-      }
+    // --- Overlay text, handle font fallback
+    let fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+    let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+    try {
+      await exec(overlayCmd);
+    } catch (e) {
+      // Fallback: No fontfile (use default sans)
+      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+      await exec(overlayCmd);
     }
 
-    // 3. Overlay CTA text (centered, bold, fade in/out on last segment)
-    // We'll fade in at start of last 8s (or shorter), show for 4s, fade out
-    const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'; // default on Linux
-    const showOverlay = `[in]drawtext=fontfile=${fontfile}:text='${overlayText.replace(/:/g, '\\:').replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'[out]`;
-
-    await exec(`${ffmpegPath} -y -i "${tempConcat}" -vf "${showOverlay}" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`);
-
-    // 4. FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
+    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
     const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-    console.log("Step 12: Running finalCmd", finalCmd);
     await exec(finalCmd);
 
     // Clean up temp files
-    [tempConcat, tempOverlay, tempXfade, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    [tempConcat, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
-    console.log("Step 13: Success! Returning:", publicUrl);
     return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
 
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
+    // Always return JSON
     res.status(500).json({
       error: "Failed to generate video ad",
       detail: (err && err.message) || "Unknown error"
