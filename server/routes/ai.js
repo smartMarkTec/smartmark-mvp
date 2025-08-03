@@ -766,7 +766,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // 7. Concat 2 clips, overlay voice, 15-18s duration required
+    // 7. Concat 2 clips, overlay voice, 16s duration, ensure sharp/no-freeze/smooth
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
@@ -776,41 +776,36 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoId = uuidv4();
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
-    // --- New: Split duration equally for 2 clips (eg. 16s = 8s + 8s) ---
-    // First, get durations for the two clips
-    const getDurationCmd = (file) => `${ffmpegPath} -i "${file}" 2>&1 | grep "Duration"`;
-    const durationSec = [];
-    for (const vp of videoPaths) {
-      const { stdout } = await exec(getDurationCmd(vp));
-      const match = stdout.match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
-      if (match) {
-        const [, h, m, s] = match;
-        durationSec.push(Number(h) * 3600 + Number(m) * 60 + Number(s));
-      } else {
-        durationSec.push(8); // fallback to 8s if not found
-      }
-    }
-    // Total desired = 16s (adjust as needed)
+    // --- Trim and scale both videos to 960x540, yuv420p, then xfade ---
+    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540;
     const totalDuration = 16;
     const targetDur = totalDuration / 2;
+    const transDur = 0.3; // transition duration
 
-    // --- Only this loop is changed: trim and resize each clip to 960x540/yuv420p ---
-    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540;
+    // 1. Trim/scale/format both clips
     for (let i = 0; i < videoPaths.length; i++) {
       const trimmedPath = videoPaths[i].replace('.mp4', '_trimmed.mp4');
-      await exec(`${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT},format=yuv420p" -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`);
+      await exec(
+        `${ffmpegPath} -y -i "${videoPaths[i]}" -t ${targetDur} -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p" -c:v libx264 -preset veryfast -crf 22 -an "${trimmedPath}"`
+      );
       fs.unlinkSync(videoPaths[i]);
       videoPaths[i] = trimmedPath;
     }
-    // Rewrite listPath with trimmed videos
-    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
-    // FFmpeg: concat, add audio, enforce 16s (no over/under)
-    const ffmpegCmd = [
-      `${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${outPath}.temp.mp4"`,
-      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${totalDuration} -c:v libx264 -c:a aac -b:a 192k -vf "scale=trunc(iw/2)*2:trunc(ih/2)*2" "${outPath}"`
-    ];
-    for (let cmd of ffmpegCmd) await exec(cmd);
+    // 2. Use xfade for smooth quick transition (no freeze, fade=0.3s)
+    // Build ffmpeg filter string
+    const xfadeOffset = targetDur - transDur; // transition starts at end of first
+    const xfadeFilter = `[0:v][1:v]xfade=transition=fade:duration=${transDur}:offset=${xfadeOffset},format=yuv420p[v]`;
+
+    // If you want audio crossfade, it's more complex, for now only smooth video fade
+    await exec(
+      `${ffmpegPath} -y -i "${videoPaths[0]}" -i "${videoPaths[1]}" -filter_complex "${xfadeFilter}" -map "[v]" -an -t ${totalDuration} "${outPath}.temp.mp4"`
+    );
+
+    // 3. Add the TTS audio
+    await exec(
+      `${ffmpegPath} -y -i "${outPath}.temp.mp4" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v copy -c:a aac -b:a 192k "${outPath}"`
+    );
 
     // Clean up temp files
     [...videoPaths, ttsPath, listPath, `${outPath}.temp.mp4`].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
@@ -824,7 +819,6 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate video ad", detail: err.message });
   }
 });
-
 
 
 module.exports = router;
