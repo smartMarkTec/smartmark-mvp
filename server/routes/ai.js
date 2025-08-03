@@ -684,6 +684,9 @@ async function downloadFile(url, dest) {
   return dest;
 }
 
+const generatedPath = path.join(__dirname, '../public/generated');
+if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+
 router.post('/generate-video-ad', async (req, res) => {
   try {
     const { url = "", answers = {} } = req.body;
@@ -798,7 +801,7 @@ router.post('/generate-video-ad', async (req, res) => {
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
 
     // Output dir and file
-    const generatedPath = path.join(__dirname, '../public/generated');
+    // ----------- THIS IS THE CRITICAL FIX: Always use generatedPath -----------
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = uuidv4();
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
@@ -822,8 +825,14 @@ router.post('/generate-video-ad', async (req, res) => {
 
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
-    return res.status(500).json({ error: "Failed to generate video ad", detail: (err && err.message) || "Unknown error" });
+    // Always send JSON, never HTML
+    res.status(500).json({
+      error: "Failed to generate video ad",
+      detail: (err && err.message) || "Unknown error"
+    });
   }
 });
+
+
 
 module.exports = router;
