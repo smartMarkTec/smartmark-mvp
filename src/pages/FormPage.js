@@ -191,13 +191,20 @@ export default function FormPage() {
       // Requests in parallel
       // Defensive JSON handler
 const safeJson = async (res) => {
-  try {
-    return await res.json();
-  } catch {
+  const contentType = res.headers.get('content-type');
+  if (contentType && contentType.includes('application/json')) {
+    try {
+      return await res.json();
+    } catch (e) {
+      return { error: "Malformed JSON", detail: e.message };
+    }
+  } else {
+    // fallback: plain text or HTML error
     const text = await res.text();
     return { error: "Non-JSON response", detail: text };
   }
 };
+
 
 const adCopyPromise = fetch(`${API_BASE}/generate-campaign-assets`, {
   method: "POST",
