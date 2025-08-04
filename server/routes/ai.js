@@ -944,4 +944,18 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
+// ...all your route code above...
+
+// --- Global error handler: always return JSON for unhandled errors ---
+router.use((err, req, res, next) => {
+  console.error("Global API Error Handler:", err?.stack || err);
+  res.status(500).json({
+    error: "Internal server error",
+    detail: err?.message || "Unknown error"
+  });
+});
+
+module.exports = router;
+
+
 module.exports = router;
