@@ -744,6 +744,14 @@ function shuffleArray(arr) {
   }
 }
 
+// Helper: shuffle an array in place
+function shuffleArray(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
 router.post('/generate-video-ad', async (req, res) => {
   console.log("API hit: /generate-video-ad");
   try {
@@ -751,7 +759,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const productType = answers?.industry || answers?.productType || "";
     const overlayText = normalizeCTA(answers?.cta);
 
-    // Step 1: Keywords for Pexels
+    // 1. Keywords for Pexels
     let videoKeywords = ["ecommerce"];
     if (productType) videoKeywords.push(productType);
     if (url) {
@@ -764,7 +772,7 @@ router.post('/generate-video-ad', async (req, res) => {
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
 
-    // Step 2: Fetch videos
+    // 2. Fetch and shuffle
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -775,11 +783,8 @@ router.post('/generate-video-ad', async (req, res) => {
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 3) {
-      return res.status(404).json({ error: "Not enough stock videos found" });
-    }
+    if (videoClips.length < 3) return res.status(404).json({ error: "Not enough stock videos found" });
 
-    // Step 3: Shuffle videos, pick 3 smallest SD mp4s from DIFFERENT videos
     let candidates = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
@@ -787,13 +792,12 @@ router.post('/generate-video-ad', async (req, res) => {
         .sort((a, b) => (a.width || 9999) - (b.width || 9999));
       if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
     }
+    // ---- Shuffle right here so every run is random
     shuffleArray(candidates);
     const files = candidates.slice(0, 3);
-    if (files.length < 3) {
-      return res.status(500).json({ error: "Not enough SD MP4 clips found" });
-    }
+    if (files.length < 3) return res.status(500).json({ error: "Not enough SD MP4 clips found" });
 
-    // Step 4: Download, scale, trim
+    // 3. Download, scale, trim
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -809,7 +813,7 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths.push(scaledPath);
     }
 
-    // Step 5: Generate GPT script (mention CTA)
+    // 4. GPT script
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this exact call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -826,7 +830,7 @@ router.post('/generate-video-ad', async (req, res) => {
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    // Step 6: Generate TTS voiceover
+    // 5. TTS
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -836,7 +840,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // Step 7: Get TTS duration
+    // 6. Get TTS duration
     let ttsDuration = 16;
     try {
       let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
@@ -844,13 +848,11 @@ router.post('/generate-video-ad', async (req, res) => {
         : 'ffprobe';
       const { stdout } = await exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`);
       const seconds = parseFloat(stdout.trim());
-      if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
-    } catch (e) {
-      ttsDuration = 16;
-    }
+      if (!isNaN(seconds) && seconds > 0) ttsDuration = seconds;
+    } catch (e) { ttsDuration = 16; }
 
-    // FINAL: force video to match TTS (script) duration + 1s, at least 15s
-    let finalDuration = Math.max(ttsDuration + 1, 15);
+    // FINAL: video duration is script duration + 1s
+    let finalDuration = Math.ceil(ttsDuration) + 1;
     const secondsPerClip = 8;
     let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
     // Repeat last clip as needed to pad
@@ -875,7 +877,6 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       await exec(overlayCmd);
     } catch (e) {
-      // Fallback: No fontfile (use default sans)
       overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
       await exec(overlayCmd);
     }
@@ -893,12 +894,12 @@ router.post('/generate-video-ad', async (req, res) => {
 
   } catch (err) {
     console.error("Video generation error:", err.message, err?.response?.data || "");
-    // Always return JSON
     res.status(500).json({
       error: "Failed to generate video ad",
       detail: (err && err.message) || "Unknown error"
     });
   }
 });
+
 
 module.exports = router;
