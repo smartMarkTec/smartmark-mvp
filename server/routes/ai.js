@@ -960,7 +960,7 @@ const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
 const safeOverlayText = String(overlayText)
   .replace(/[\n\r:"]/g, " ")
   .replace(/'/g, "")
-  .replace(/[^a-zA-Z0-9\s!]/g, "") // keep it clean for FFmpeg shell
+  .replace(/[^a-zA-Z0-9\s!]/g, ""); // keep it clean for FFmpeg shell
 
 let overlayCmd;
 if (fs.existsSync(fontfile)) {
@@ -972,7 +972,8 @@ if (fs.existsSync(fontfile)) {
 
 try {
   console.log("Step 9: ffmpeg overlay (robust font handling)...");
-  await withTimeout(exec(overlayCmd), 20000, "ffmpeg overlay timed out");
+  console.log("FFmpeg overlay command:", overlayCmd); // <-- Log command for debug
+  await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out"); // 60s timeout!
 } catch (e) {
   console.error("Text overlay failed:", e.message);
   return res.status(500).json({ error: "Text overlay failed", detail: e.message });
