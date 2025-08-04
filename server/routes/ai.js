@@ -750,12 +750,13 @@ router.post('/generate-video-ad', async (req, res) => {
   // --- Hard timeout: 55s max, always return JSON ---
   let finished = false;
   const timer = setTimeout(() => {
-    if (finished) return;
-    finished = true;
-    res.status(500).json({
-      error: "Video generation timed out",
-      detail: "The server took too long to process your video. Please try again with different inputs or try again later."
-    });
+    if (!finished) {
+      finished = true;
+      res.status(500).json({
+        error: "Video generation timed out",
+        detail: "The server took too long to process your video. Please try again with different inputs or try again later."
+      });
+    }
   }, 55000); // 55 seconds
 
   try {
@@ -789,13 +790,11 @@ router.post('/generate-video-ad', async (req, res) => {
       videoClips = resp.data.videos || [];
       console.log("[AI] Stock videos fetched:", videoClips.length);
     } catch (err) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
+      clearTimeout(timer); if (!finished) { finished = true; }
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
     if (videoClips.length < 3) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
+      clearTimeout(timer); if (!finished) { finished = true; }
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
@@ -810,8 +809,7 @@ router.post('/generate-video-ad', async (req, res) => {
     console.log("[AI] Video candidates found:", candidates.length);
 
     if (candidates.length < 3) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
+      clearTimeout(timer); if (!finished) { finished = true; }
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
     shuffleArray(candidates);
@@ -841,6 +839,9 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // --- STEP 5: Generate TTS ---
+    // --- CREATE TMP DIR IF IT DOESN'T EXIST ---
+    const tempDir = path.join(__dirname, '../tmp');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     let ttsPath = "";
     let ttsDuration = 16;
     try {
@@ -850,7 +851,7 @@ router.post('/generate-video-ad', async (req, res) => {
         input: script
       });
       const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-      ttsPath = path.join(__dirname, '../tmp', `${uuidv4()}.mp3`);
+      ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
       fs.writeFileSync(ttsPath, ttsBuffer);
       // --- Probe for duration
       let ffprobePath = ffmpegPath.endsWith('ffmpeg')
@@ -865,16 +866,13 @@ router.post('/generate-video-ad', async (req, res) => {
         console.warn("[AI] ffprobe failed, using fallback duration:", err.message);
       }
     } catch (e) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
+      clearTimeout(timer); if (!finished) { finished = true; }
       console.error("[AI] TTS generation failed:", e.message);
       return res.status(500).json({ error: "TTS generation failed", detail: e.message });
     }
     const finalDuration = Math.max(ttsDuration + 2, 15);
 
     // --- STEP 6: Download, scale, trim videos in parallel ---
-    const tempDir = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     const firstTwoLength = 8;
     const lastClipLength = Math.max(finalDuration - 16, 2);
@@ -896,8 +894,7 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths = await Promise.all([0, 1, 2].map(processVideo));
       videoPaths.forEach((p, i) => console.log(`[AI] Video ${i + 1} processed:`, p));
     } catch (e) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
+      clearTimeout(timer); if (!finished) { finished = true; }
       console.error("[AI] Video download/scale failed:", e.message);
       return res.status(500).json({ error: "Video download/processing failed", detail: e.message });
     }
@@ -916,8 +913,7 @@ router.post('/generate-video-ad', async (req, res) => {
       await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
       console.log("[AI] Videos concatenated");
     } catch (e) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
+      clearTimeout(timer); if (!finished) { finished = true; }
       console.error("[AI] ffmpeg concat failed:", e.message);
       return res.status(500).json({ error: "ffmpeg concat failed", detail: e.message });
     }
@@ -934,19 +930,14 @@ router.post('/generate-video-ad', async (req, res) => {
       console.log("[AI] Fallback text overlay complete");
     }
 
-    // --- STEP 9: Combine with TTS audio (robust logging) ---
+    // --- STEP 9: Combine with TTS audio ---
     try {
-      // Log file existence
-      console.log("[AI] About to mux:", tempOverlay, ttsPath, "->", outPath);
-      console.log("[AI] Does video exist?", fs.existsSync(tempOverlay));
-      console.log("[AI] Does audio exist?", fs.existsSync(ttsPath));
       const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-      const { stdout, stderr } = await exec(finalCmd);
-      console.log("[AI] TTS + video muxed, output:", outPath, stdout, stderr);
+      await exec(finalCmd);
+      console.log("[AI] TTS + video muxed, output:", outPath);
     } catch (e) {
-      if (finished) return;
-      finished = true; clearTimeout(timer);
-      console.error("[AI] ffmpeg mux failed:", e.message, e.stdout, e.stderr, e.cmd || "", e);
+      clearTimeout(timer); if (!finished) { finished = true; }
+      console.error("[AI] ffmpeg mux failed:", e.message);
       return res.status(500).json({ error: "ffmpeg mux failed", detail: e.message });
     }
 
@@ -954,14 +945,12 @@ router.post('/generate-video-ad', async (req, res) => {
     [tempConcat, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // --- SUCCESS: Respond with video URL ---
-    if (finished) return;
-    finished = true; clearTimeout(timer);
+    clearTimeout(timer); if (!finished) { finished = true; }
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
 
   } catch (err) {
-    if (finished) return;
-    finished = true; clearTimeout(timer);
+    clearTimeout(timer); if (!finished) { finished = true; }
     console.error("[AI] Video generation error:", err.message, err?.response?.data || "");
     res.status(500).json({
       error: "Failed to generate video ad",
@@ -969,5 +958,6 @@ router.post('/generate-video-ad', async (req, res) => {
     });
   }
 });
+
 
 module.exports = router;
