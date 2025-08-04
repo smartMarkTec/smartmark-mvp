@@ -953,18 +953,17 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Video concat failed", detail: e.message });
     }
 
-// --- Overlay text, always use fontfile absolute path (Render-safe)
+// --- Overlay text, always use fontfile absolute path (Render-safe, no fontconfig)
 const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':use_fontconfig=0:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
 
 try {
-  console.log("Step 9: ffmpeg overlay (fontfile absolute path)...");
+  console.log("Step 9: ffmpeg overlay (fontfile, use_fontconfig=0)...");
   await withTimeout(exec(overlayCmd), 20000, "ffmpeg overlay timed out");
 } catch (e) {
   console.error("Text overlay failed:", e.message);
   return res.status(500).json({ error: "Text overlay failed", detail: e.message });
 }
-
 
 
     // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
