@@ -747,6 +747,10 @@ function shuffleArray(array) {
 router.post('/generate-video-ad', async (req, res) => {
   console.log("[AI] API hit: /generate-video-ad");
 
+  const tempDir = path.join(__dirname, '../tmp');
+if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
+
   // --- Hard timeout: 55s max, always return JSON ---
   let finished = false;
   const timer = setTimeout(() => {
