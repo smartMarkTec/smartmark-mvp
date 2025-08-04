@@ -762,53 +762,43 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 6 }
+        params: { query: searchTerm, per_page: 8 }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
-    if (videoClips.length < 2) {
+    if (videoClips.length < 3) {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // Step 3: Pick two smallest SD .mp4s from DIFFERENT videos
+    // Step 3: Pick three smallest SD .mp4s from DIFFERENT videos
     let files = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
         .filter(f => f.quality === 'sd' && f.link.endsWith('.mp4'))
         .sort((a, b) => (a.width || 9999) - (b.width || 9999));
       if (mp4s[0] && !files.includes(mp4s[0].link)) files.push(mp4s[0].link);
-      if (files.length === 2) break;
+      if (files.length === 3) break;
     }
-    if (files.length < 2) {
+    if (files.length < 3) {
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
 
-    // Step 4: Download, scale, trim to 8s
+    // Step 4: Download, scale, trim the first two to 8s, last to fill remainder
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
-    for (let i = 0; i < files.length; i++) {
-      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFileWithTimeout(files[i], dest, 8000, 3);
-      const scaledPath = dest.replace('.mp4', '_scaled.mp4');
-      await exec(
-        `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
-      );
-      fs.unlinkSync(dest);
-      videoPaths.push(scaledPath);
-    }
 
-    // Step 5: Generate GPT script (mention CTA)
+    // Generate script & audio first, so we know how long the video should be
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this exact call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
       prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nRespond ONLY with the actual ad script (do NOT include any headings, notes, or extra words). No intro, no explanation. ONLY the spoken ad script.";
+    prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -818,7 +808,7 @@ router.post('/generate-video-ad', async (req, res) => {
     });
     let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
 
-    // Step 6: Generate TTS voiceover
+    // Step 5: Generate TTS voiceover
     const ttsRes = await openai.audio.speech.create({
       model: 'tts-1',
       voice: TTS_VOICE,
@@ -828,7 +818,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
-    // Step 7: Get TTS duration
+    // Step 6: Get TTS duration (seconds)
     let ttsDuration = 16;
     try {
       let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
@@ -840,20 +830,29 @@ router.post('/generate-video-ad', async (req, res) => {
     } catch (e) {
       ttsDuration = 16;
     }
+    // Add buffer, just like you wanted
+    const finalDuration = Math.max(ttsDuration + 2, 15);
 
-    // --- FINAL: force video to match TTS (script) duration + 1s, at least 15s
-    let finalDuration = Math.max(ttsDuration + 1, 15);
-    const secondsPerClip = 8;
-    let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
+    // First 2 clips: always 8s each, last: fill the rest
+    const firstTwoLength = 8;
+    const lastClipLength = Math.max(finalDuration - 16, 2); // at least 2s for last clip
 
-    // Repeat last clip as needed to pad
-    while (videoPaths.length < clipsNeeded) {
-      videoPaths.push(videoPaths[videoPaths.length - 1]);
+    for (let i = 0; i < 3; i++) {
+      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+      await downloadFileWithTimeout(files[i], dest, 8000, 3);
+      const scaledPath = dest.replace('.mp4', '_scaled.mp4');
+      let duration = (i < 2) ? firstTwoLength : lastClipLength;
+      await exec(
+        `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t ${duration} -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
+      );
+      fs.unlinkSync(dest);
+      videoPaths.push(scaledPath);
     }
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
 
-    // Concat videos
+    // --- Concat videos
+    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
+
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = uuidv4();
@@ -862,21 +861,18 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
     await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
 
-    // --- Overlay text, handle font fallback
+    // --- Overlay text (unchanged from your working version)
     let fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
     try {
       await exec(overlayCmd);
     } catch (e) {
-      // Fallback: No fontfile (use default sans)
       overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
       await exec(overlayCmd);
     }
 
-    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
-const buffer = 2.0; // 1s extra to avoid audio cutoff
-const audioDur = ttsDuration + buffer;
-const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -t ${audioDur} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+    // FINAL: add TTS and force video to match (TTS + buffer)
+    const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
     // Clean up temp files
