@@ -800,6 +800,7 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       videoClips = resp.data.videos || [];
     } catch (err) {
+      console.error("FFMPEG ERROR: Pexels fetch failed", err?.response?.data || err.message || err);
       return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err?.toString() });
     }
     if (videoClips.length < 3) {
@@ -831,6 +832,7 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         await withTimeout(downloadFileWithTimeout(files[i], dest, 12000, 5), 15000, "Download step timed out");
       } catch (e) {
+        console.error("FFMPEG ERROR: Download step failed", e);
         return res.status(500).json({ error: "Stock video download failed", detail: e.message });
       }
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
@@ -844,6 +846,7 @@ router.post('/generate-video-ad', async (req, res) => {
         );
       } catch (e) {
         fs.unlinkSync(dest);
+        console.error("FFMPEG ERROR: Scaling step failed", e.stderr || e.message || e);
         return res.status(500).json({ error: "Video scaling failed", detail: e.message });
       }
       fs.unlinkSync(dest);
@@ -873,6 +876,7 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
     } catch (e) {
+      console.error("FFMPEG ERROR: GPT script gen failed", e);
       return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
     }
 
@@ -892,6 +896,7 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
       fs.writeFileSync(ttsPath, ttsBuffer);
     } catch (e) {
+      console.error("FFMPEG ERROR: TTS step failed", e);
       return res.status(500).json({ error: "TTS generation failed", detail: e.message });
     }
 
@@ -936,6 +941,7 @@ router.post('/generate-video-ad', async (req, res) => {
         "ffmpeg concat timed out"
       );
     } catch (e) {
+      console.error("FFMPEG ERROR: concat step failed", e.stderr || e.message || e);
       return res.status(500).json({ error: "Video concat failed", detail: e.message });
     }
 
@@ -956,6 +962,7 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out");
     } catch (e) {
+      console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
       return res.status(500).json({ error: "Text overlay failed", detail: e.message });
     }
 
@@ -967,11 +974,24 @@ router.post('/generate-video-ad', async (req, res) => {
         "ffmpeg mux timed out"
       );
     } catch (e) {
+      console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
       return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
     }
 
-    if (!fs.existsSync(outPath)) {
-      return res.status(500).json({ error: "Video output file missing after render" });
+    // ----------- CRITICAL: Wait for output file -----------
+    let videoReady = false;
+    for (let i = 0; i < 30; i++) {
+      try {
+        const stats = fs.statSync(outPath);
+        if (stats.size > 200000) { // >200KB = likely real video, not an empty file
+          videoReady = true;
+          break;
+        }
+      } catch {}
+      await new Promise(res => setTimeout(res, 200));
+    }
+    if (!videoReady) {
+      return res.status(500).json({ error: "Video output file not ready after mux" });
     }
 
     // Clean up temp files
@@ -982,11 +1002,13 @@ router.post('/generate-video-ad', async (req, res) => {
     return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
 
   } catch (err) {
+    console.error("Video route error:", err);
     res.status(500).json({
       error: "Failed to generate video ad",
       detail: (err && err.message) || "Unknown error"
     });
   }
 });
+
 
 module.exports = router;
