@@ -189,32 +189,44 @@ export default function FormPage() {
       setLastRegenerateToken(token);
 
       // Requests in parallel
-      const adCopyPromise = fetch(`${API_BASE}/generate-campaign-assets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: toSend, url: answers.url || "" })
-      }).then(res => res.json());
+      // Defensive JSON handler
+const safeJson = async (res) => {
+  try {
+    return await res.json();
+  } catch {
+    const text = await res.text();
+    return { error: "Non-JSON response", detail: text };
+  }
+};
 
-      const imgPromise = fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers.url || "",
-          industry: answers.industry || "",
-          regenerateToken: token
-        })
-      }).then(res => res.json());
+const adCopyPromise = fetch(`${API_BASE}/generate-campaign-assets`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ answers: toSend, url: answers.url || "" })
+}).then(safeJson);
 
-      const videoPromise = fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          answers,
-          url: answers.url || "",
-          industry: answers.industry || "",
-          regenerateToken: token
-        }),
-      }).then(res => res.json());
+const imgPromise = fetch(`${API_BASE}/generate-image-from-prompt`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    url: answers.url || "",
+    industry: answers.industry || "",
+    regenerateToken: token
+  })
+}).then(safeJson);
+
+const videoPromise = fetch(`${API_BASE}/generate-video-ad`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    answers,
+    url: answers.url || "",
+    industry: answers.industry || "",
+    regenerateToken: token
+  }),
+}).then(safeJson);
+
+
 
       const [data, imgData, videoData] = await Promise.all([adCopyPromise, imgPromise, videoPromise]);
 

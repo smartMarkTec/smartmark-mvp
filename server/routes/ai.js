@@ -241,19 +241,20 @@ Website homepage text:
 });
 
 router.post('/generate-campaign-assets', async (req, res) => {
-  const { answers = {}, url = "" } = req.body;
-  if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
-    return res.status(400).json({ error: "Missing answers" });
-  }
+  try {
+    const { answers = {}, url = "" } = req.body;
+    if (!answers || typeof answers !== "object" || Object.keys(answers).length === 0) {
+      return res.status(400).json({ error: "Missing answers" });
+    }
 
-  const websiteText = await getWebsiteText(url);
-  const safeWebsiteText = (websiteText && websiteText.length > 100)
-    ? websiteText
-    : '[WEBSITE TEXT UNAVAILABLE]';
+    const websiteText = await getWebsiteText(url).catch(() => '');
+    const safeWebsiteText = (websiteText && websiteText.length > 100)
+      ? websiteText
+      : '[WEBSITE TEXT UNAVAILABLE]';
 
-  let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+    let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
 
-  const prompt = `
+    const prompt = `
 You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script, image_overlay_text.
 
 Rules for "image_overlay_text":
@@ -268,43 +269,48 @@ Website text:
 """${safeWebsiteText}"""
 `;
 
-  // Clean parser
-  function tryParseJson(str) {
-    try {
-      let cleaned = String(str)
-        .replace(/```json|```/gi, '')
-        .replace(/^[\s\r\n]+|[\s\r\n]+$/g, '')
-        .trim();
+    // Clean parser
+    function tryParseJson(str) {
+      try {
+        let cleaned = String(str)
+          .replace(/```json|```/gi, '')
+          .replace(/^[\s\r\n]+|[\s\r\n]+$/g, '')
+          .trim();
 
-      const braceIdx = cleaned.indexOf('{');
-      if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
-      cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-      const braceCount = (cleaned.match(/{/g) || []).length;
-      if (braceCount > 1) {
-        const lastBrace = cleaned.lastIndexOf('}');
-        cleaned = cleaned.substring(0, lastBrace + 1);
+        const braceIdx = cleaned.indexOf('{');
+        if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
+        cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+        const braceCount = (cleaned.match(/{/g) || []).length;
+        if (braceCount > 1) {
+          const lastBrace = cleaned.lastIndexOf('}');
+          cleaned = cleaned.substring(0, lastBrace + 1);
+        }
+        return JSON.parse(cleaned);
+      } catch {
+        return null;
       }
-      return JSON.parse(cleaned);
-    } catch {
-      return null;
     }
-  }
 
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [
-        { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
-        { role: "user", content: prompt }
-      ],
-      max_tokens: 750
-    });
-    const raw = response.choices?.[0]?.message?.content?.trim();
-    const result = tryParseJson(raw);
+    let raw, result;
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a world-class Facebook ad copy, creative, and script expert. Never say you are an AI." },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 750
+      });
+      raw = response.choices?.[0]?.message?.content?.trim();
+      result = tryParseJson(raw);
+    } catch (err) {
+      console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
+      return res.status(500).json({ error: "AI error", detail: err.message });
+    }
 
     if (result && typeof result === "object") {
       // Always supply all fields
-      res.json({
+      return res.json({
         headline: result.headline || "",
         body: result.body || "",
         image_prompt: result.image_prompt || "",
@@ -314,17 +320,18 @@ Website text:
     } else {
       // AI did not return JSON, send a safe fallback
       console.error("Parse error! AI output was:", raw);
-      res.status(500).json({
+      return res.status(500).json({
         error: "Failed to parse AI response",
         aiRaw: raw || "",
         example: '{"headline":"...","body":"...","image_prompt":"...","video_script":"...","image_overlay_text":"..."}'
       });
     }
   } catch (err) {
-    console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
-    res.status(500).json({ error: "AI error", detail: err.message });
+    console.error("Unhandled campaign assets error:", err?.response?.data || err.message);
+    return res.status(500).json({ error: "Unhandled error", detail: err.message });
   }
 });
+
 
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
