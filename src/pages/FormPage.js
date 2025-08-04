@@ -97,8 +97,6 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-
-
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
@@ -284,6 +282,38 @@ export default function FormPage() {
       setVideoLoading(false);
     } catch (err) {
       setError("Failed to generate video ad: " + (err.message || ""));
+      setVideoLoading(false);
+    }
+  };
+
+  // -----------------------
+  // VIDEO REGENERATE HANDLER (NEW)
+  // -----------------------
+  const handleRegenerateVideo = async () => {
+    setVideoLoading(true);
+    setVideoUrl("");
+    setVideoScript("");
+    setError("");
+    try {
+      const token = getRandomString();
+      setLastRegenerateToken(token);
+
+      const res = await fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          answers,
+          url: answers.url || "",
+          industry: answers.industry || "",
+          regenerateToken: token
+        }),
+      });
+      const data = await res.json();
+      if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
+      setVideoScript(data.script || "");
+      setVideoLoading(false);
+    } catch (err) {
+      setError("Failed to regenerate video ad: " + (err.message || ""));
       setVideoLoading(false);
     }
   };
@@ -785,7 +815,7 @@ export default function FormPage() {
             overflow: "hidden",
             position: "relative"
           }}>
-            {/* "Facebook" header strip */}
+            {/* "Facebook" header strip with Regenerate Button */}
             <div style={{
               background: "#f5f6fa",
               padding: "11px 20px",
@@ -793,9 +823,35 @@ export default function FormPage() {
               fontWeight: 700,
               color: "#495a68",
               fontSize: 16,
-              letterSpacing: 0.08
+              letterSpacing: 0.08,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
             }}>
-              Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
+              <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+              <button
+                style={{
+                  background: "#1ad6b7",
+                  color: "#222",
+                  border: "none",
+                  borderRadius: 12,
+                  fontWeight: 700,
+                  fontSize: "1.01rem",
+                  padding: "6px 20px",
+                  cursor: videoLoading ? "not-allowed" : "pointer",
+                  marginLeft: 8,
+                  boxShadow: "0 2px 7px #19e5b733",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7
+                }}
+                onClick={handleRegenerateVideo}
+                disabled={videoLoading}
+                title="Regenerate Video Ad"
+              >
+                <FaSyncAlt style={{ fontSize: 16 }} />
+                {videoLoading ? "Regenerating..." : "Regenerate"}
+              </button>
             </div>
             {/* Video Preview */}
             <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
