@@ -670,28 +670,6 @@ const child_process = require('child_process');
 const util = require('util');
 const exec = util.promisify(child_process.exec);
 
-// CTA normalizer
-function normalizeCTA(input) {
-  if (!input) return "Get Started";
-  const t = input.toLowerCase();
-  if (t.includes("visit")) return "Visit Us!";
-  if (t.includes("order")) return "Order Online";
-  if (t.includes("buy")) return "Buy Now";
-  if (t.includes("sign up")) return "Sign Up Today";
-  if (t.includes("call")) return "Call Now";
-  if (t.includes("learn")) return "Learn More";
-  if (t.includes("book")) return "Book Now";
-  if (t.includes("join")) return "Join Now";
-  if (/^(i|we)\s*want|should|can|please|try|interested|contact|reach/.test(t)) return "Get Started";
-  return input
-    .replace(/^(i|we)\s*want (them|you) to\s*/i, '')
-    .replace(/^to\s+/i, '')
-    .replace(/[\.\!]+$/, '')
-    .trim()
-    .replace(/^\w/, c => c.toUpperCase())
-    + "!";
-}
-
 // Download with timeout and file size limit (FAST/Safe)
 async function downloadFileWithTimeout(url, dest, timeoutMs = 10000, maxSizeMB = 5) {
   return new Promise((resolve, reject) => {
@@ -736,18 +714,44 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 10000, maxSizeMB =
   });
 }
 
-// Helper: shuffle an array in place
-function shuffleArray(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
+// Helper: shuffle with token for regen
+function getDeterministicShuffle(arr, seed) {
+  // Fisher-Yates shuffle with hash as seed
+  let array = [...arr];
+  let random = seedrandom(seed);
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
   }
+  return array;
+}
+const seedrandom = require('seedrandom');
+
+// --- CTA Normalizer ---
+function normalizeCTA(input) {
+  if (!input) return "Get Started";
+  const t = input.toLowerCase();
+  if (t.includes("visit")) return "Visit Us!";
+  if (t.includes("order")) return "Order Online";
+  if (t.includes("buy")) return "Buy Now";
+  if (t.includes("sign up")) return "Sign Up Today";
+  if (t.includes("call")) return "Call Now";
+  if (t.includes("learn")) return "Learn More";
+  if (t.includes("book")) return "Book Now";
+  if (t.includes("join")) return "Join Now";
+  if (/^(i|we)\s*want|should|can|please|try|interested|contact|reach/.test(t)) return "Get Started";
+  return input
+    .replace(/^(i|we)\s*want (them|you) to\s*/i, '')
+    .replace(/^to\s+/i, '')
+    .replace(/[\.\!]+$/, '')
+    .trim()
+    .replace(/^\w/, c => c.toUpperCase())
+    + "!";
 }
 
 router.post('/generate-video-ad', async (req, res) => {
-  console.log("API hit: /generate-video-ad");
   try {
-    const { url = "", answers = {} } = req.body;
+    const { url = "", answers = {}, regenerateToken = "" } = req.body;
     const productType = answers?.industry || answers?.productType || "";
     const overlayText = normalizeCTA(answers?.cta);
 
@@ -769,7 +773,7 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: searchTerm, per_page: 8 }
+        params: { query: searchTerm, per_page: 12, cb: Date.now() + (regenerateToken || "") }
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
@@ -779,7 +783,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // Step 3: Shuffle videos, pick 3 smallest SD mp4s from DIFFERENT videos
+    // Step 3: Shuffle with regenerateToken, pick 3 smallest SD mp4s from DIFFERENT videos
     let candidates = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
@@ -787,11 +791,12 @@ router.post('/generate-video-ad', async (req, res) => {
         .sort((a, b) => (a.width || 9999) - (b.width || 9999));
       if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
     }
-    shuffleArray(candidates);
-    const files = candidates.slice(0, 3);
-    if (files.length < 3) {
+    if (candidates.length < 3) {
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
+    // Use deterministic shuffle so regen always gets different set
+    const shuffled = getDeterministicShuffle(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
+    const files = shuffled.slice(0, 3);
 
     // Step 4: Download, scale, trim
     const tempDir = path.join(__dirname, '../tmp');
@@ -799,8 +804,8 @@ router.post('/generate-video-ad', async (req, res) => {
     const videoPaths = [];
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     for (let i = 0; i < files.length; i++) {
-      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFileWithTimeout(files[i], dest, 10000, 5);
+      const dest = path.join(tempDir, `${require('uuid').v4()}.mp4`);
+      await downloadFileWithTimeout(files[i], dest, 12000, 5);
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
       await exec(
         `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
@@ -833,7 +838,7 @@ router.post('/generate-video-ad', async (req, res) => {
       input: script
     });
     const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-    const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
+    const ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
     fs.writeFileSync(ttsPath, ttsBuffer);
 
     // Step 7: Get TTS duration
@@ -857,13 +862,13 @@ router.post('/generate-video-ad', async (req, res) => {
     while (videoPaths.length < clipsNeeded) {
       videoPaths.push(videoPaths[videoPaths.length - 1]);
     }
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
+    const listPath = path.join(tempDir, `${require('uuid').v4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
 
     // Concat videos
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-    const videoId = uuidv4();
+    const videoId = require('uuid').v4();
     const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
     const tempOverlay = path.join(generatedPath, `${videoId}.overlay.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
