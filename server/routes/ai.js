@@ -777,7 +777,7 @@ router.post('/generate-video-ad', async (req, res) => {
       });
       videoClips = resp.data.videos || [];
     } catch (err) {
-      return res.status(500).json({ error: "Stock video fetch failed" });
+      return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err?.toString() });
     }
     if (videoClips.length < 3) {
       return res.status(404).json({ error: "Not enough stock videos found" });
@@ -805,11 +805,20 @@ router.post('/generate-video-ad', async (req, res) => {
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${require('uuid').v4()}.mp4`);
-      await downloadFileWithTimeout(files[i], dest, 12000, 5);
+      try {
+        await downloadFileWithTimeout(files[i], dest, 12000, 5);
+      } catch (e) {
+        return res.status(500).json({ error: "Stock video download failed", detail: e.message });
+      }
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
-      await exec(
-        `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
-      );
+      try {
+        await exec(
+          `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
+        );
+      } catch (e) {
+        fs.unlinkSync(dest);
+        return res.status(500).json({ error: "Video scaling failed", detail: e.message });
+      }
       fs.unlinkSync(dest);
       videoPaths.push(scaledPath);
     }
@@ -823,23 +832,33 @@ router.post('/generate-video-ad', async (req, res) => {
     if (url) prompt += `\nWebsite: ${url}`;
     prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
 
-    const gptRes = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 110,
-      temperature: 0.65
-    });
-    let script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+    let script;
+    try {
+      const gptRes = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 110,
+        temperature: 0.65
+      });
+      script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+    } catch (e) {
+      return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
+    }
 
     // Step 6: Generate TTS voiceover
-    const ttsRes = await openai.audio.speech.create({
-      model: 'tts-1',
-      voice: TTS_VOICE,
-      input: script
-    });
-    const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-    const ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
-    fs.writeFileSync(ttsPath, ttsBuffer);
+    let ttsPath;
+    try {
+      const ttsRes = await openai.audio.speech.create({
+        model: 'tts-1',
+        voice: TTS_VOICE,
+        input: script
+      });
+      const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
+      ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
+      fs.writeFileSync(ttsPath, ttsBuffer);
+    } catch (e) {
+      return res.status(500).json({ error: "TTS generation failed", detail: e.message });
+    }
 
     // Step 7: Get TTS duration
     let ttsDuration = 16;
@@ -872,7 +891,11 @@ router.post('/generate-video-ad', async (req, res) => {
     const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
     const tempOverlay = path.join(generatedPath, `${videoId}.overlay.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
-    await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
+    try {
+      await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
+    } catch (e) {
+      return res.status(500).json({ error: "Video concat failed", detail: e.message });
+    }
 
     // --- Overlay text, handle font fallback
     let fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
@@ -882,12 +905,24 @@ router.post('/generate-video-ad', async (req, res) => {
     } catch (e) {
       // Fallback: No fontfile (use default sans)
       overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
-      await exec(overlayCmd);
+      try {
+        await exec(overlayCmd);
+      } catch (e2) {
+        return res.status(500).json({ error: "Text overlay failed", detail: e2.message });
+      }
     }
 
     // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
-    const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-    await exec(finalCmd);
+    try {
+      await exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`);
+    } catch (e) {
+      return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
+    }
+
+    // Check that the final output exists
+    if (!fs.existsSync(outPath)) {
+      return res.status(500).json({ error: "Video output file missing after render" });
+    }
 
     // Clean up temp files
     [tempConcat, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
