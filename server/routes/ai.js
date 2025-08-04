@@ -831,7 +831,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
-    const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
+    const TARGET_WIDTH = 720, TARGET_HEIGHT = 404, FRAMERATE = 30;
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${require('uuid').v4()}.mp4`);
       try {
