@@ -764,6 +764,8 @@ function normalizeCTA(input) {
 }
 
 router.post('/generate-video-ad', async (req, res) => {
+  // Always force JSON response header (for ALL responses)
+  res.setHeader('Content-Type', 'application/json');
   try {
     console.log("Step 1: Starting video ad generation...");
 
@@ -803,7 +805,8 @@ router.post('/generate-video-ad', async (req, res) => {
       console.error("FFMPEG ERROR: Pexels fetch failed", err?.response?.data || err.message || err);
       return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err?.toString() });
     }
-    if (videoClips.length < 3) {
+    if (!videoClips || videoClips.length < 3) {
+      console.error('PEXELS returned too few videos. Response:', videoClips);
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
@@ -967,17 +970,16 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Final mux: add TTS audio to video
-try {
-  await withTimeout(
-    exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
-    90000, // <-- Increase from 25000 to 90000 (90 seconds)
-    "ffmpeg mux timed out"
-  );
-} catch (e) {
-  console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
-  return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
-}
-
+    try {
+      await withTimeout(
+        exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
+        90000,
+        "ffmpeg mux timed out"
+      );
+    } catch (e) {
+      console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
+      return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
+    }
 
     // ----------- CRITICAL: Wait for output file -----------
     let videoReady = false;
@@ -1003,13 +1005,17 @@ try {
     return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
 
   } catch (err) {
+    // Always send valid JSON even on crash
     console.error("Video route error:", err);
-    res.status(500).json({
-      error: "Failed to generate video ad",
-      detail: (err && err.message) || "Unknown error"
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: "Failed to generate video ad",
+        detail: (err && err.message) || "Unknown error"
+      });
+    }
   }
 });
+
 
 
 module.exports = router;
