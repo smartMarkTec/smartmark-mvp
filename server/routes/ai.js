@@ -747,7 +747,7 @@ function shuffleArray(array) {
 router.post('/generate-video-ad', async (req, res) => {
   console.log("[AI] API hit: /generate-video-ad");
 
-  // --- Hard timeout: 55s max, always return JSON ---
+  // --- Hard timeout: 70s max, always return JSON ---
   let finished = false;
   const timer = setTimeout(() => {
     if (!finished) {
@@ -757,7 +757,11 @@ router.post('/generate-video-ad', async (req, res) => {
         detail: "The server took too long to process your video. Please try again with different inputs or try again later."
       });
     }
-  }, 55000); // 55 seconds
+  }, 70000); // 70 seconds
+
+  // --- ALWAYS create tmp dir first ---
+  const tempDir = path.join(__dirname, '../tmp');
+  if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
   try {
     const { url = "", answers = {} } = req.body;
@@ -839,9 +843,6 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // --- STEP 5: Generate TTS ---
-    // --- CREATE TMP DIR IF IT DOESN'T EXIST ---
-    const tempDir = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     let ttsPath = "";
     let ttsDuration = 16;
     try {
@@ -958,6 +959,5 @@ router.post('/generate-video-ad', async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;
