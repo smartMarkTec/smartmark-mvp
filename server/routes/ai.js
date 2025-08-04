@@ -862,23 +862,19 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
     await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
 
-    // --- Overlay text, handle font fallback
-    // Overlay fades in over 2s, then fades out over 1.5s, appears at end of video
-    const overlayFadeIn = 2.0;
-    const overlayFadeOut = 1.5;
-    const overlayTotal = overlayFadeIn + overlayFadeOut;
-    const overlayStart = Math.max(finalDuration - overlayTotal, 0.1);
+    // --- Overlay text (show at last 5s, fade in 1s, fade out 1s)
     let fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayStart+overlayTotal})':alpha='if(lt(t,${overlayStart}),0, if(lt(t,${overlayStart+overlayFadeIn}), (t-(${overlayStart}))/2, if(lt(t,${overlayStart+overlayFadeIn}),1, if(lt(t,${overlayStart+overlayTotal}), 1-(t-(${overlayStart+overlayFadeIn}))/1.5, 0))))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+    let overlayAppear = Math.max(finalDuration - 5, 0.1);
+    let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayAppear},${overlayAppear+5})':alpha='if(lt(t,${overlayAppear}),0, if(lt(t,${overlayAppear+1}), (t-(${overlayAppear}))/1, if(lt(t,${overlayAppear+4}),1, 1-(t-(${overlayAppear+4}))/1 )))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
     try {
       await exec(overlayCmd);
     } catch (e) {
       // Fallback: No fontfile (use default sans)
-      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayStart+overlayTotal})':alpha='if(lt(t,${overlayStart}),0, if(lt(t,${overlayStart+overlayFadeIn}), (t-(${overlayStart}))/2, if(lt(t,${overlayStart+overlayFadeIn}),1, if(lt(t,${overlayStart+overlayTotal}), 1-(t-(${overlayStart+overlayFadeIn}))/1.5, 0))))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayAppear},${overlayAppear+5})':alpha='if(lt(t,${overlayAppear}),0, if(lt(t,${overlayAppear+1}), (t-(${overlayAppear}))/1, if(lt(t,${overlayAppear+4}),1, 1-(t-(${overlayAppear+4}))/1 )))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
       await exec(overlayCmd);
     }
 
-    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
+    // FINAL: add TTS and force video to match TTS duration (ALWAYS script finishes)
     const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
