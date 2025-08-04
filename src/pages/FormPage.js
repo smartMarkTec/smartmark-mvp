@@ -287,36 +287,37 @@ export default function FormPage() {
   };
 
   // -----------------------
-  // VIDEO REGENERATE HANDLER (NEW)
-  // -----------------------
-  const handleRegenerateVideo = async () => {
-    setVideoLoading(true);
-    setVideoUrl("");
-    setVideoScript("");
-    setError("");
-    try {
-      const token = getRandomString();
-      setLastRegenerateToken(token);
+// VIDEO REGENERATE HANDLER (UPDATED)
+// -----------------------
+const handleRegenerateVideo = async () => {
+  setVideoLoading(true);
+  setVideoUrl("");
+  setVideoScript("");
+  setError("");
+  try {
+    // Generate a NEW random token every time to ensure you get a new set of videos
+    const token = getRandomString();
+    setLastRegenerateToken(token);
 
-      const res = await fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          answers,
-          url: answers.url || "",
-          industry: answers.industry || "",
-          regenerateToken: token
-        }),
-      });
-      const data = await res.json();
-      if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
-      setVideoScript(data.script || "");
-      setVideoLoading(false);
-    } catch (err) {
-      setError("Failed to regenerate video ad: " + (err.message || ""));
-      setVideoLoading(false);
-    }
-  };
+    const res = await fetch(`${API_BASE}/generate-video-ad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answers,
+        url: answers.url || "",
+        industry: answers.industry || "",
+        regenerateToken: token // <-- this is the key: always a fresh value
+      }),
+    });
+    const data = await res.json();
+    if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
+    setVideoScript(data.script || "");
+  } catch (err) {
+    setError("Failed to regenerate video ad: " + (err.message || ""));
+  }
+  setVideoLoading(false);
+};
+
 
   // Regenerate always uses current industry/answers (syncs with backend for overlays)
   const handleRegenerateImage = async () => {
