@@ -772,7 +772,6 @@ router.post('/generate-video-ad', async (req, res) => {
     const overlayText = normalizeCTA(answers?.cta);
 
     // Step 1: Keywords for Pexels
-    console.log("Step 2: Building video keywords...");
     let videoKeywords = ["ecommerce"];
     if (productType) videoKeywords.push(productType);
     if (url) {
@@ -788,10 +787,9 @@ router.post('/generate-video-ad', async (req, res) => {
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
     console.log("Step 3: Pexels search term:", searchTerm);
 
-    // Step 2: Fetch videos
+    // Step 2: Fetch videos from Pexels
     let videoClips = [];
     try {
-      console.log("Step 4: Fetching videos from Pexels...");
       const resp = await withTimeout(
         axios.get(PEXELS_VIDEO_BASE, {
           headers: { Authorization: PEXELS_API_KEY },
@@ -802,15 +800,13 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       videoClips = resp.data.videos || [];
     } catch (err) {
-      console.error("Pexels fetch failed:", err.message);
       return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err?.toString() });
     }
     if (videoClips.length < 3) {
-      console.error("Not enough stock videos found");
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // Step 3: Shuffle with regenerateToken, pick 3 smallest SD mp4s from DIFFERENT videos
+    // Step 3: Pick 3 smallest SD mp4s from DIFFERENT videos, shuffled deterministically by token
     let candidates = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
@@ -819,15 +815,13 @@ router.post('/generate-video-ad', async (req, res) => {
       if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
     }
     if (candidates.length < 3) {
-      console.error("Not enough SD MP4 clips found");
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
-    // Use deterministic shuffle so regen always gets different set
+    // Deterministic shuffle for regen
     const shuffled = getDeterministicShuffle(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
     const files = shuffled.slice(0, 3);
 
-    // Step 4: Download, scale, trim
-    console.log("Step 5: Downloading, scaling videos...");
+    // Step 4: Download, scale, trim (8s each, 720x404)
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const videoPaths = [];
@@ -837,7 +831,6 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         await withTimeout(downloadFileWithTimeout(files[i], dest, 12000, 5), 15000, "Download step timed out");
       } catch (e) {
-        console.error("Video download failed:", e.message);
         return res.status(500).json({ error: "Stock video download failed", detail: e.message });
       }
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
@@ -851,7 +844,6 @@ router.post('/generate-video-ad', async (req, res) => {
         );
       } catch (e) {
         fs.unlinkSync(dest);
-        console.error("Video scaling failed:", e.message);
         return res.status(500).json({ error: "Video scaling failed", detail: e.message });
       }
       fs.unlinkSync(dest);
@@ -859,7 +851,6 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Step 5: Generate GPT script (mention CTA)
-    console.log("Step 6: Generating GPT script...");
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this exact call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -882,12 +873,10 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
     } catch (e) {
-      console.error("GPT script generation failed:", e.message);
       return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
     }
 
     // Step 6: Generate TTS voiceover
-    console.log("Step 7: Generating TTS audio...");
     let ttsPath;
     try {
       const ttsRes = await withTimeout(
@@ -903,7 +892,6 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
       fs.writeFileSync(ttsPath, ttsBuffer);
     } catch (e) {
-      console.error("TTS generation failed:", e.message);
       return res.status(500).json({ error: "TTS generation failed", detail: e.message });
     }
 
@@ -924,7 +912,7 @@ router.post('/generate-video-ad', async (req, res) => {
       ttsDuration = 16;
     }
 
-    // FINAL: force video to match TTS (script) duration + 1s, at least 15s
+    // Force video to match TTS duration + 1s, min 15s
     let finalDuration = Math.max(ttsDuration + 1, 15);
     const secondsPerClip = 8;
     let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
@@ -934,7 +922,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const listPath = path.join(tempDir, `${require('uuid').v4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
 
-    // Concat videos
+    // Concat
     const generatedPath = path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = require('uuid').v4();
@@ -942,60 +930,47 @@ router.post('/generate-video-ad', async (req, res) => {
     const tempOverlay = path.join(generatedPath, `${videoId}.overlay.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
     try {
-      console.log("Step 8: ffmpeg concat...");
       await withTimeout(
         exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`),
         20000,
         "ffmpeg concat timed out"
       );
     } catch (e) {
-      console.error("Video concat failed:", e.message);
       return res.status(500).json({ error: "Video concat failed", detail: e.message });
     }
 
-// --- Overlay text (robust, works on Render even if font missing)
-const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-
-// Sanitize overlayText for FFmpeg (NO newlines, quotes, or colons)
-const safeOverlayText = String(overlayText)
-  .replace(/[\n\r:"]/g, " ")
-  .replace(/'/g, "")
-  .replace(/[^a-zA-Z0-9\s!]/g, ""); // keep it clean for FFmpeg shell
-
-let overlayCmd;
-if (fs.existsSync(fontfile)) {
-  overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
-} else {
-  console.warn("Font file missing, using default FFmpeg font.");
-  overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
-}
-
-try {
-  console.log("Step 9: ffmpeg overlay (robust font handling)...");
-  console.log("FFmpeg overlay command:", overlayCmd); // <-- Log command for debug
-  await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out"); // 60s timeout!
-} catch (e) {
-  console.error("Text overlay failed:", e.message);
-  return res.status(500).json({ error: "Text overlay failed", detail: e.message });
-}
-
-
-    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
+    // Overlay text during last 25% of video
+    const overlayStart = (finalDuration * 0.75).toFixed(2);
+    const overlayEnd = finalDuration.toFixed(2);
+    const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+    const safeOverlayText = String(overlayText)
+      .replace(/[\n\r:"]/g, " ")
+      .replace(/'/g, "")
+      .replace(/[^a-zA-Z0-9\s!]/g, "");
+    let overlayCmd;
+    if (fs.existsSync(fontfile)) {
+      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+    } else {
+      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+    }
     try {
-      console.log("Step 10: ffmpeg final mux...");
+      await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out");
+    } catch (e) {
+      return res.status(500).json({ error: "Text overlay failed", detail: e.message });
+    }
+
+    // Final mux: add TTS audio to video
+    try {
       await withTimeout(
         exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
         25000,
         "ffmpeg mux timed out"
       );
     } catch (e) {
-      console.error("Final mux (video+audio) failed:", e.message);
       return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
     }
 
-    // Check that the final output exists
     if (!fs.existsSync(outPath)) {
-      console.error("Video output file missing after render");
       return res.status(500).json({ error: "Video output file missing after render" });
     }
 
@@ -1004,17 +979,14 @@ try {
 
     // Return public video URL and script
     const publicUrl = `/generated/${videoId}.mp4`;
-    console.log("Step 11: Video ad generated successfully!", publicUrl);
     return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
 
   } catch (err) {
-    console.error("Video generation error:", err.message, err?.response?.data || "");
     res.status(500).json({
       error: "Failed to generate video ad",
       detail: (err && err.message) || "Unknown error"
     });
   }
 });
-
 
 module.exports = router;
