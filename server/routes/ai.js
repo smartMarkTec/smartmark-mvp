@@ -268,6 +268,28 @@ Website text:
 """${safeWebsiteText}"""
 `;
 
+  // Clean parser
+  function tryParseJson(str) {
+    try {
+      let cleaned = String(str)
+        .replace(/```json|```/gi, '')
+        .replace(/^[\s\r\n]+|[\s\r\n]+$/g, '')
+        .trim();
+
+      const braceIdx = cleaned.indexOf('{');
+      if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
+      cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+      const braceCount = (cleaned.match(/{/g) || []).length;
+      if (braceCount > 1) {
+        const lastBrace = cleaned.lastIndexOf('}');
+        cleaned = cleaned.substring(0, lastBrace + 1);
+      }
+      return JSON.parse(cleaned);
+    } catch {
+      return null;
+    }
+  }
+
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -278,54 +300,32 @@ Website text:
       max_tokens: 750
     });
     const raw = response.choices?.[0]?.message?.content?.trim();
-    let result;
+    const result = tryParseJson(raw);
 
-    function tryParseJson(str) {
-  // Remove all triple backticks and 'json' labels and whitespace
-  let cleaned = String(str)
-    .replace(/```json|```/gi, '')
-    .replace(/^[\s\r\n]+|[\s\r\n]+$/g, '')
-    .trim();
-
-  // If there's anything before the first `{`, strip it
-  const braceIdx = cleaned.indexOf('{');
-  if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
-
-  // Remove trailing commas before } or ]
-  cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-
-  // Only keep the first complete {...} block, even if AI hallucinated text after
-  const braceCount = (cleaned.match(/{/g) || []).length;
-  if (braceCount > 1) {
-    // Naive split on last }
-    const lastBrace = cleaned.lastIndexOf('}');
-    cleaned = cleaned.substring(0, lastBrace + 1);
-  }
-  return JSON.parse(cleaned);
-}
-
-
-    try {
-      result = tryParseJson(raw);
-      result.headline = result.headline || "";
-      result.body = result.body || "";
-      result.image_prompt = result.image_prompt || "";
-      result.video_script = result.video_script || "";
-      result.image_overlay_text = result.image_overlay_text || "";
-    } catch (e) {
-      console.error("Parse error! Raw AI output was:", raw);
-      return res.status(500).json({
+    if (result && typeof result === "object") {
+      // Always supply all fields
+      res.json({
+        headline: result.headline || "",
+        body: result.body || "",
+        image_prompt: result.image_prompt || "",
+        video_script: result.video_script || "",
+        image_overlay_text: result.image_overlay_text || ""
+      });
+    } else {
+      // AI did not return JSON, send a safe fallback
+      console.error("Parse error! AI output was:", raw);
+      res.status(500).json({
         error: "Failed to parse AI response",
-        raw,
-        parseError: e.message
+        aiRaw: raw || "",
+        example: '{"headline":"...","body":"...","image_prompt":"...","video_script":"...","image_overlay_text":"..."}'
       });
     }
-    res.json(result);
   } catch (err) {
     console.error("Ad Campaign AI Error:", err?.response?.data || err.message);
     res.status(500).json({ error: "AI error", detail: err.message });
   }
 });
+
 
 // ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
 
