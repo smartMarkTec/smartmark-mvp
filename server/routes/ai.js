@@ -967,16 +967,17 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Final mux: add TTS audio to video
-    try {
-      await withTimeout(
-        exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
-        25000,
-        "ffmpeg mux timed out"
-      );
-    } catch (e) {
-      console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
-    }
+try {
+  await withTimeout(
+    exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
+    90000, // <-- Increase from 25000 to 90000 (90 seconds)
+    "ffmpeg mux timed out"
+  );
+} catch (e) {
+  console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
+  return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
+}
+
 
     // ----------- CRITICAL: Wait for output file -----------
     let videoReady = false;
