@@ -745,23 +745,33 @@ function shuffleArray(array) {
 }
 
 router.post('/generate-video-ad', async (req, res) => {
+  console.log("[AI] API hit: /generate-video-ad");
+
   let finished = false;
-  const timer = setTimeout(() => {
+  const done = (result) => {
     if (!finished) {
       finished = true;
-      res.status(500).json({
-        error: "Video generation timed out",
-        detail: "The server took too long to process your video. Please try again with different inputs or try again later."
-      });
+      clearTimeout(timer);
+      res.json(result);
     }
-  }, 70000);
+  };
+  const fail = (err, detail) => {
+    if (!finished) {
+      finished = true;
+      clearTimeout(timer);
+      res.status(500).json({ error: err, detail });
+    }
+  };
+  const timer = setTimeout(() => {
+    fail("Video generation timed out", "Server took too long. Try again.");
+  }, 80000); // 80 seconds hard limit
 
   try {
     const { url = "", answers = {} } = req.body;
     const productType = answers?.industry || answers?.productType || "";
     const overlayText = normalizeCTA(answers?.cta);
 
-    // --- STEP 1: Keywords ---
+    // Step 1: Keywords
     let videoKeywords = ["ecommerce"];
     if (productType) videoKeywords.push(productType);
     if (url) {
@@ -769,15 +779,13 @@ router.post('/generate-video-ad', async (req, res) => {
         const websiteText = await getWebsiteText(url);
         const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
         videoKeywords.push(...siteKeywords);
-      } catch (e) {
-        console.warn("[AI] Could not extract site keywords:", e.message);
-      }
+      } catch (e) {}
     }
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
     const searchTerm = videoKeywords.slice(0, 2).join(" ");
     console.log("[AI] Pexels search term:", searchTerm);
 
-    // --- STEP 2: Fetch stock video ---
+    // Step 2: Fetch stock video
     let videoClips = [];
     try {
       const resp = await axios.get(PEXELS_VIDEO_BASE, {
@@ -787,21 +795,13 @@ router.post('/generate-video-ad', async (req, res) => {
       videoClips = resp.data.videos || [];
       console.log("[AI] Stock videos fetched:", videoClips.length);
     } catch (err) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        return res.status(500).json({ error: "Stock video fetch failed" });
-      }
+      return fail("Stock video fetch failed", err.message);
     }
     if (videoClips.length < 3) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        return res.status(404).json({ error: "Not enough stock videos found" });
-      }
+      return fail("Not enough stock videos found", "");
     }
 
-    // --- STEP 3: Pick 3 random smallest SD .mp4s from different videos ---
+    // Step 3: Pick 3 random smallest SD .mp4s from different videos
     let candidates = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
@@ -809,19 +809,13 @@ router.post('/generate-video-ad', async (req, res) => {
         .sort((a, b) => (a.width || 9999) - (b.width || 9999));
       if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
     }
-    console.log("[AI] Video candidates found:", candidates.length);
-
     if (candidates.length < 3) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        return res.status(500).json({ error: "Not enough SD MP4 clips found" });
-      }
+      return fail("Not enough SD MP4 clips found", "");
     }
     shuffleArray(candidates);
     const files = candidates.slice(0, 3);
 
-    // --- STEP 4: GPT script generation ---
+    // Step 4: GPT script generation
     let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this exact call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -844,8 +838,7 @@ router.post('/generate-video-ad', async (req, res) => {
       console.warn("[AI] GPT script fallback:", e.message);
     }
 
-    // --- STEP 5: Generate TTS ---
-    // --- CREATE TMP DIR IF IT DOESN'T EXIST ---
+    // Step 5: Generate TTS
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     let ttsPath = "";
@@ -859,7 +852,6 @@ router.post('/generate-video-ad', async (req, res) => {
       const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
       ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
       fs.writeFileSync(ttsPath, ttsBuffer);
-      // --- Probe for duration
       let ffprobePath = ffmpegPath.endsWith('ffmpeg')
         ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
         : 'ffprobe';
@@ -872,23 +864,18 @@ router.post('/generate-video-ad', async (req, res) => {
         console.warn("[AI] ffprobe failed, using fallback duration:", err.message);
       }
     } catch (e) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        console.error("[AI] TTS generation failed:", e.message);
-        return res.status(500).json({ error: "TTS generation failed", detail: e.message });
-      }
+      return fail("TTS generation failed", e.message);
     }
     const finalDuration = Math.max(ttsDuration + 2, 15);
 
-    // --- STEP 6: Download, scale, trim videos in parallel ---
+    // Step 6: Download, scale, trim videos in parallel
     const TARGET_WIDTH = 960, TARGET_HEIGHT = 540, FRAMERATE = 30;
     const firstTwoLength = 8;
     const lastClipLength = Math.max(finalDuration - 16, 2);
 
     async function processVideo(i) {
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
-      await downloadFileWithTimeout(files[i], dest, 12000, 5); // 12s timeout, 5MB max
+      await downloadFileWithTimeout(files[i], dest, 18000, 8); // more time, 8MB max
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
       let duration = (i < 2) ? firstTwoLength : lastClipLength;
       await exec(
@@ -903,15 +890,10 @@ router.post('/generate-video-ad', async (req, res) => {
       videoPaths = await Promise.all([0, 1, 2].map(processVideo));
       videoPaths.forEach((p, i) => console.log(`[AI] Video ${i + 1} processed:`, p));
     } catch (e) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        console.error("[AI] Video download/scale failed:", e.message);
-        return res.status(500).json({ error: "Video download/processing failed", detail: e.message });
-      }
+      return fail("Video download/processing failed", e.message);
     }
 
-    // --- STEP 7: Concat videos ---
+    // Step 7: Concat videos
     const listPath = path.join(tempDir, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.map(p => `file '${p}'`).join('\n'));
     const generatedPath = path.join(__dirname, '../public/generated');
@@ -925,15 +907,10 @@ router.post('/generate-video-ad', async (req, res) => {
       await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
       console.log("[AI] Videos concatenated");
     } catch (e) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        console.error("[AI] ffmpeg concat failed:", e.message);
-        return res.status(500).json({ error: "ffmpeg concat failed", detail: e.message });
-      }
+      return fail("ffmpeg concat failed", e.message);
     }
 
-    // --- STEP 8: Overlay text ---
+    // Step 8: Overlay text
     let fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g, "\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
     try {
@@ -945,41 +922,24 @@ router.post('/generate-video-ad', async (req, res) => {
       console.log("[AI] Fallback text overlay complete");
     }
 
-    // --- STEP 9: Combine with TTS audio ---
+    // Step 9: Combine with TTS audio
     try {
       const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
       await exec(finalCmd);
       console.log("[AI] TTS + video muxed, output:", outPath);
     } catch (e) {
-      if (!finished) {
-        finished = true;
-        clearTimeout(timer);
-        console.error("[AI] ffmpeg mux failed:", e.message);
-        return res.status(500).json({ error: "ffmpeg mux failed", detail: e.message });
-      }
+      return fail("ffmpeg mux failed", e.message);
     }
 
-    // --- Clean up temp files ---
+    // Clean up temp files
     [tempConcat, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // --- SUCCESS: Respond with video URL ---
-    if (!finished) {
-      finished = true;
-      clearTimeout(timer);
-      const publicUrl = `/generated/${videoId}.mp4`;
-      return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
-    }
+    // SUCCESS: Respond with video URL
+    done({ videoUrl: `/generated/${videoId}.mp4`, script, overlayText, voice: TTS_VOICE });
   } catch (err) {
-    if (!finished) {
-      finished = true;
-      clearTimeout(timer);
-      console.error("[AI] Video generation error:", err.message, err?.response?.data || "");
-      return res.status(500).json({
-        error: "Failed to generate video ad",
-        detail: (err && err.message) || "Unknown error"
-      });
-    }
+    fail("Failed to generate video ad", (err && err.message) || "Unknown error");
   }
 });
+
 
 module.exports = router;
