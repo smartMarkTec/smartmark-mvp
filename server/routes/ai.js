@@ -808,7 +808,7 @@ router.post('/generate-video-ad', async (req, res) => {
       prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
     }
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
+    prompt += "\nRespond ONLY with the actual ad script (do NOT include any headings, notes, or extra words). No intro, no explanation. ONLY the spoken ad script.";
 
     const gptRes = await openai.chat.completions.create({
       model: 'gpt-4o',
@@ -862,19 +862,18 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
     await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
 
-    // --- Overlay text (show at last 5s, fade in 1s, fade out 1s)
+    // --- Overlay text, handle font fallback
     let fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    let overlayAppear = Math.max(finalDuration - 5, 0.1);
-    let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayAppear},${overlayAppear+5})':alpha='if(lt(t,${overlayAppear}),0, if(lt(t,${overlayAppear+1}), (t-(${overlayAppear}))/1, if(lt(t,${overlayAppear+4}),1, 1-(t-(${overlayAppear+4}))/1 )))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+    let overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile=${fontfile}:text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
     try {
       await exec(overlayCmd);
     } catch (e) {
       // Fallback: No fontfile (use default sans)
-      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayAppear},${overlayAppear+5})':alpha='if(lt(t,${overlayAppear}),0, if(lt(t,${overlayAppear+1}), (t-(${overlayAppear}))/1, if(lt(t,${overlayAppear+4}),1, 1-(t-(${overlayAppear+4}))/1 )))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${overlayText.replace(/'/g,"\\'")}':fontcolor=white:fontsize=64:box=1:boxcolor=black@0.5:boxborderw=15:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${finalDuration-8},${finalDuration-4})':alpha='if(lt(t,${finalDuration-8}),0, if(lt(t,${finalDuration-4}), (t-(${finalDuration-8}))/${4}, 1-(t-(${finalDuration-4}))/4 ))'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
       await exec(overlayCmd);
     }
 
-    // FINAL: add TTS and force video to match TTS duration (ALWAYS script finishes)
+    // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
     const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
