@@ -981,3 +981,5 @@ router.post('/generate-video-ad', async (req, res) => {
     }
   }
 });
+
+module.exports = router;
