@@ -736,6 +736,14 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 8000, maxSizeMB = 
   });
 }
 
+// --- Shuffle helper OUTSIDE route ---
+function shuffleArray(array) {
+  for (let i = array.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+}
+
 router.post('/generate-video-ad', async (req, res) => {
   console.log("API hit: /generate-video-ad");
   try {
@@ -772,30 +780,20 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // Step 3: Pick three smallest SD .mp4s from DIFFERENT videos
- // Step 3: Pick 3 random smallest SD .mp4s from DIFFERENT videos
-function shuffleArray(array) {
-  for (let i = array.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [array[i], array[j]] = [array[j], array[i]];
-  }
-}
-
-let files = [];
-let candidates = [];
-for (let v of videoClips) {
-  let mp4s = (v.video_files || [])
-    .filter(f => f.quality === 'sd' && f.link.endsWith('.mp4'))
-    .sort((a, b) => (a.width || 9999) - (b.width || 9999));
-  if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
-}
-if (candidates.length < 3) {
-  return res.status(500).json({ error: "Not enough SD MP4 clips found" });
-}
-// Shuffle for randomness
-shuffleArray(candidates);
-files = candidates.slice(0, 3);
-
+    // Step 3: Pick 3 random smallest SD .mp4s from DIFFERENT videos
+    let files = [];
+    let candidates = [];
+    for (let v of videoClips) {
+      let mp4s = (v.video_files || [])
+        .filter(f => f.quality === 'sd' && f.link.endsWith('.mp4'))
+        .sort((a, b) => (a.width || 9999) - (b.width || 9999));
+      if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
+    }
+    if (candidates.length < 3) {
+      return res.status(500).json({ error: "Not enough SD MP4 clips found" });
+    }
+    shuffleArray(candidates);
+    files = candidates.slice(0, 3);
 
     // Step 4: Download, scale, trim the first two to 8s, last to fill remainder
     const tempDir = path.join(__dirname, '../tmp');
