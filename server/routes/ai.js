@@ -874,7 +874,9 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // FINAL: add TTS and force video to match (TTS + 1s) or 15s minimum
-    const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
+const buffer = 2.0; // 1s extra to avoid audio cutoff
+const audioDur = ttsDuration + buffer;
+const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -t ${audioDur} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
     await exec(finalCmd);
 
     // Clean up temp files
