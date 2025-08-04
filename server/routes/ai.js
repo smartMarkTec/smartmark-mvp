@@ -747,20 +747,15 @@ function shuffleArray(array) {
 router.post('/generate-video-ad', async (req, res) => {
   console.log("[AI] API hit: /generate-video-ad");
 
-  const tempDir = path.join(__dirname, '../tmp');
-if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-
-
   // --- Hard timeout: 55s max, always return JSON ---
   let finished = false;
   const timer = setTimeout(() => {
-    if (!finished) {
-      finished = true;
-      res.status(500).json({
-        error: "Video generation timed out",
-        detail: "The server took too long to process your video. Please try again with different inputs or try again later."
-      });
-    }
+    if (finished) return;
+    finished = true;
+    res.status(500).json({
+      error: "Video generation timed out",
+      detail: "The server took too long to process your video. Please try again with different inputs or try again later."
+    });
   }, 55000); // 55 seconds
 
   try {
@@ -794,11 +789,13 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
       videoClips = resp.data.videos || [];
       console.log("[AI] Stock videos fetched:", videoClips.length);
     } catch (err) {
-      clearTimeout(timer); if (!finished) { finished = true; }
+      if (finished) return;
+      finished = true; clearTimeout(timer);
       return res.status(500).json({ error: "Stock video fetch failed" });
     }
     if (videoClips.length < 3) {
-      clearTimeout(timer); if (!finished) { finished = true; }
+      if (finished) return;
+      finished = true; clearTimeout(timer);
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
@@ -813,7 +810,8 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     console.log("[AI] Video candidates found:", candidates.length);
 
     if (candidates.length < 3) {
-      clearTimeout(timer); if (!finished) { finished = true; }
+      if (finished) return;
+      finished = true; clearTimeout(timer);
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
     shuffleArray(candidates);
@@ -867,7 +865,8 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
         console.warn("[AI] ffprobe failed, using fallback duration:", err.message);
       }
     } catch (e) {
-      clearTimeout(timer); if (!finished) { finished = true; }
+      if (finished) return;
+      finished = true; clearTimeout(timer);
       console.error("[AI] TTS generation failed:", e.message);
       return res.status(500).json({ error: "TTS generation failed", detail: e.message });
     }
@@ -897,7 +896,8 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
       videoPaths = await Promise.all([0, 1, 2].map(processVideo));
       videoPaths.forEach((p, i) => console.log(`[AI] Video ${i + 1} processed:`, p));
     } catch (e) {
-      clearTimeout(timer); if (!finished) { finished = true; }
+      if (finished) return;
+      finished = true; clearTimeout(timer);
       console.error("[AI] Video download/scale failed:", e.message);
       return res.status(500).json({ error: "Video download/processing failed", detail: e.message });
     }
@@ -916,7 +916,8 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
       await exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`);
       console.log("[AI] Videos concatenated");
     } catch (e) {
-      clearTimeout(timer); if (!finished) { finished = true; }
+      if (finished) return;
+      finished = true; clearTimeout(timer);
       console.error("[AI] ffmpeg concat failed:", e.message);
       return res.status(500).json({ error: "ffmpeg concat failed", detail: e.message });
     }
@@ -933,14 +934,19 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
       console.log("[AI] Fallback text overlay complete");
     }
 
-    // --- STEP 9: Combine with TTS audio ---
+    // --- STEP 9: Combine with TTS audio (robust logging) ---
     try {
+      // Log file existence
+      console.log("[AI] About to mux:", tempOverlay, ttsPath, "->", outPath);
+      console.log("[AI] Does video exist?", fs.existsSync(tempOverlay));
+      console.log("[AI] Does audio exist?", fs.existsSync(ttsPath));
       const finalCmd = `${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`;
-      await exec(finalCmd);
-      console.log("[AI] TTS + video muxed, output:", outPath);
+      const { stdout, stderr } = await exec(finalCmd);
+      console.log("[AI] TTS + video muxed, output:", outPath, stdout, stderr);
     } catch (e) {
-      clearTimeout(timer); if (!finished) { finished = true; }
-      console.error("[AI] ffmpeg mux failed:", e.message);
+      if (finished) return;
+      finished = true; clearTimeout(timer);
+      console.error("[AI] ffmpeg mux failed:", e.message, e.stdout, e.stderr, e.cmd || "", e);
       return res.status(500).json({ error: "ffmpeg mux failed", detail: e.message });
     }
 
@@ -948,12 +954,14 @@ if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     [tempConcat, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
     // --- SUCCESS: Respond with video URL ---
-    clearTimeout(timer); if (!finished) { finished = true; }
+    if (finished) return;
+    finished = true; clearTimeout(timer);
     const publicUrl = `/generated/${videoId}.mp4`;
     return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
 
   } catch (err) {
-    clearTimeout(timer); if (!finished) { finished = true; }
+    if (finished) return;
+    finished = true; clearTimeout(timer);
     console.error("[AI] Video generation error:", err.message, err?.response?.data || "");
     res.status(500).json({
       error: "Failed to generate video ad",
