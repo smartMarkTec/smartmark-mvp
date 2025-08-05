@@ -867,7 +867,6 @@ router.post('/generate-video-ad', async (req, res) => {
     const { url = "", answers = {}, regenerateToken = "" } = req.body;
     const productType = answers?.industry || answers?.productType || "";
    const overlayText = normalizeShortCTA(answers?.cta);
-    const userCTA = answers?.cta || "";
 
     // -------- CATEGORY MAPPING APPLIED HERE --------
     const { category, pexels } = mapIndustry(productType);
@@ -1002,7 +1001,7 @@ Never include any scene directions, stage directions, SFX, music notes, or anyth
       console.error("FFMPEG ERROR: TTS step failed", e);
       return res.status(500).json({ error: "TTS generation failed", detail: e.message });
     }
-// Step 7: Get TTS duration
+// ----- Step 1: Get TTS duration -----
 let ttsDuration = 16;
 try {
   let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
@@ -1014,23 +1013,22 @@ try {
     "ffprobe step timed out"
   );
   const seconds = parseFloat(stdout.trim());
-  if (!isNaN(seconds) && seconds > 0) ttsDuration = Math.max(seconds, 15);
+  if (!isNaN(seconds) && seconds > 0) ttsDuration = seconds;
 } catch (e) {
   ttsDuration = 16;
 }
 
-// Final video duration: at least 16s, always 1s after TTS
-let finalDuration = Math.max(ttsDuration + 2, 16);
+// --- Step 2: Always set video to ttsDuration + 2, minimum 15s
+let finalDuration = Math.max(ttsDuration + 2, 15);
 const secondsPerClip = 8;
 let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
-// Pad videoPaths to fill required length
 while (videoPaths.length < clipsNeeded) {
   videoPaths.push(videoPaths[videoPaths.length - 1]);
 }
 const listPath = path.join(tempDir, `${require('uuid').v4()}.txt`);
 fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
 
-// Concat clips (as before)
+// ----- Step 3: Concatenate video files -----
 const generatedPath = path.join(__dirname, '../public/generated');
 if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
 const videoId = require('uuid').v4();
@@ -1050,7 +1048,7 @@ try {
   return res.status(500).json({ error: "Video concat failed", detail: e.message });
 }
 
-// Trim to exact finalDuration (so video always matches TTS+1s, min 16s)
+// --- Step 4: Trim the video to finalDuration (ttsDuration + 2, min 15s) ---
 try {
   await withTimeout(
     exec(`${ffmpegPath} -y -i "${tempConcat}" -t ${finalDuration} -c copy "${tempTrimmed}"`),
@@ -1062,9 +1060,9 @@ try {
   return res.status(500).json({ error: "Video trim failed", detail: e.message });
 }
 
-// Centered, large, ALL CAPS overlay text with fade in/out, no background box
+// --- Step 5: Continue with overlay and mux as before, using tempTrimmed for the rest ---
 const overlayStart = (finalDuration * 0.75).toFixed(2);
-const overlayEnd = (ttsDuration + 1).toFixed(2); // Video ends 1s after TTS
+const overlayEnd = (ttsDuration + 1.5).toFixed(2); // Overlay until 1.5s after TTS ends
 const fadeInDur = 0.4;
 const fadeOutDur = 0.5;
 const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
@@ -1074,7 +1072,6 @@ const safeOverlayText = String(overlayText)
   .replace(/'/g, "")
   .replace(/[^A-Z0-9\s!]/g, "");
 
-// Only the centered text, no box
 let overlayCmd = fs.existsSync(fontfile)
   ? `${ffmpegPath} -y -i "${tempTrimmed}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset superfast -pix_fmt yuv420p -an "${tempOverlay}"`
   : `${ffmpegPath} -y -i "${tempTrimmed}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset superfast -pix_fmt yuv420p -an "${tempOverlay}"`;
@@ -1086,7 +1083,7 @@ try {
   return res.status(500).json({ error: "Text overlay failed", detail: e.message });
 }
 
-// Final mux: add TTS audio to video
+// --- Mux audio with video as before ---
 try {
   await withTimeout(
     exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -preset superfast -crf 24 -c:a aac -b:a 192k "${outPath}"`),
@@ -1097,6 +1094,7 @@ try {
   console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
   return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
 }
+
 
 // ----------- CRITICAL: Wait for output file -----------
 let videoReady = false;
