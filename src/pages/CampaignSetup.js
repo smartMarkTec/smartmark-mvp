@@ -330,7 +330,7 @@ const CampaignSetup = () => {
           fontFamily: MODERN_FONT,
         }}
       >
-        ← Back
+        ←
       </button>
 
       <button
