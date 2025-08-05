@@ -678,6 +678,92 @@ const util = require('util');
 const exec = util.promisify(child_process.exec);
 const seedrandom = require('seedrandom');
 
+// ---- CATEGORY MAPPING ----
+const INDUSTRY_MAP = [
+  {
+    names: [
+      "clothing","fashion","accessory","apparel","shoes","jewelry","watches","bags","handbags","backpacks","luggage","hats","sunglasses"
+    ],
+    category: "Fashion & Accessories",
+    pexels: "fashion clothing accessories"
+  },
+  {
+    names: [
+      "makeup","cosmetics","skincare","haircare","perfume","fragrance","grooming","beauty"
+    ],
+    category: "Beauty & Personal Care",
+    pexels: "makeup beauty skincare"
+  },
+  {
+    names: [
+      "gym","fitness","workout","sports","exercise","weights","protein","supplement","outdoor","yoga","biking","running","health coaching","wellness","coach","personal trainer"
+    ],
+    category: "Fitness, Sports & Outdoors",
+    pexels: "fitness gym workout exercise"
+  },
+  {
+    names: [
+      "furniture","home","decor","kitchen","appliance","bedding","bath","art","lamp","rugs","cookware","table","sofa","bed"
+    ],
+    category: "Home, Kitchen & Decor",
+    pexels: "home kitchen decor"
+  },
+  {
+    names: [
+      "phone","tablet","laptop","computer","electronics","gadgets","wearable","smartwatch","headphones","camera","drone","tech","device"
+    ],
+    category: "Electronics & Gadgets",
+    pexels: "electronics gadgets tech"
+  },
+  {
+    names: [
+      "snack","food","meal kit","grocery","coffee","tea","alcohol","wine","beer","spirits","beverage","drink"
+    ],
+    category: "Food & Beverage",
+    pexels: "food drink meal"
+  },
+  {
+    names: [
+      "baby","kids","toys","stroller","child","children","pet","dog","cat","animal","pet food","pet toy"
+    ],
+    category: "Baby, Kids & Pets",
+    pexels: "kids baby pets toys"
+  },
+  {
+    names: [
+      "vitamin","supplement","medical","health","wellness","mental","therapy","life coach","coaching","self-care","personal development"
+    ],
+    category: "Health & Wellness",
+    pexels: "wellness health happy"
+  },
+  {
+    names: [
+      "art","craft","diy","music","instrument","collectible","hobby","painting","drawing"
+    ],
+    category: "Arts, Crafts & Hobbies",
+    pexels: "art craft hobby"
+  },
+  {
+    names: [
+      "course","ebook","subscription","box","event","ticket","digital","learning","online"
+    ],
+    category: "Digital, Subscription & Services",
+    pexels: "digital online learning"
+  }
+];
+
+// Map function (returns {category, pexels})
+function mapIndustry(inputRaw = "") {
+  const input = String(inputRaw || "").toLowerCase();
+  for (const cat of INDUSTRY_MAP) {
+    if (cat.names.some(keyword => input.includes(keyword))) {
+      return { category: cat.category, pexels: cat.pexels };
+    }
+  }
+  // fallback to generic
+  return { category: "General E-Commerce", pexels: "shopping ecommerce online" };
+}
+
 // Helper to timeout any promise
 function withTimeout(promise, ms, errorMsg = "Timeout") {
   return Promise.race([
@@ -687,7 +773,7 @@ function withTimeout(promise, ms, errorMsg = "Timeout") {
 }
 
 // Download with timeout and file size limit (FAST/Safe)
-async function downloadFileWithTimeout(url, dest, timeoutMs = 10000, maxSizeMB = 5) {
+async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB = 5) {
   return new Promise((resolve, reject) => {
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
@@ -764,7 +850,6 @@ function normalizeCTA(input) {
 }
 
 router.post('/generate-video-ad', async (req, res) => {
-  // Always force JSON response header (for ALL responses)
   res.setHeader('Content-Type', 'application/json');
   try {
     console.log("Step 1: Starting video ad generation...");
@@ -773,9 +858,12 @@ router.post('/generate-video-ad', async (req, res) => {
     const productType = answers?.industry || answers?.productType || "";
     const overlayText = normalizeCTA(answers?.cta);
 
+    // -------- CATEGORY MAPPING APPLIED HERE --------
+    const { category, pexels } = mapIndustry(productType);
+
     // Step 1: Keywords for Pexels
-    let videoKeywords = ["ecommerce"];
-    if (productType) videoKeywords.push(productType);
+    let videoKeywords = [pexels];
+    if (productType && !pexels.includes(productType.toLowerCase())) videoKeywords.push(productType);
     if (url) {
       try {
         const websiteText = await withTimeout(getWebsiteText(url), 8000, "Website text fetch timed out");
@@ -797,7 +885,7 @@ router.post('/generate-video-ad', async (req, res) => {
           headers: { Authorization: PEXELS_API_KEY },
           params: { query: searchTerm, per_page: 40, cb: Date.now() + (regenerateToken || "") }
         }),
-        12000,
+        30000,
         "Pexels API timed out"
       );
       videoClips = resp.data.videos || [];
@@ -833,7 +921,7 @@ router.post('/generate-video-ad', async (req, res) => {
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${require('uuid').v4()}.mp4`);
       try {
-        await withTimeout(downloadFileWithTimeout(files[i], dest, 12000, 5), 15000, "Download step timed out");
+        await withTimeout(downloadFileWithTimeout(files[i], dest, 30000, 5), 30000, "Download step timed out");
       } catch (e) {
         console.error("FFMPEG ERROR: Download step failed", e);
         return res.status(500).json({ error: "Stock video download failed", detail: e.message });
@@ -844,7 +932,7 @@ router.post('/generate-video-ad', async (req, res) => {
           exec(
             `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
           ),
-          20000,
+          30000,
           "ffmpeg scaling timed out"
         );
       } catch (e) {
