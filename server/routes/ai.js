@@ -954,25 +954,36 @@ router.post('/generate-video-ad', async (req, res) => {
 const boxColor = neutralColors[Math.floor(Math.random() * neutralColors.length)];
 const boxAlpha = 0.92;
 
-const overlayStart = (finalDuration * 0.75).toFixed(2);
-const overlayEnd = finalDuration.toFixed(2);
-const fadeInDur = 0.4;   // fade in (seconds)
-const fadeOutDur = 0.5;  // fade out (seconds)
-const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+// Always all-caps overlay text
 const safeOverlayText = String(overlayText)
+  .toUpperCase()
   .replace(/[\n\r:"]/g, " ")
   .replace(/'/g, "")
-  .replace(/[^a-zA-Z0-9\s!]/g, "");
+  .replace(/[^A-Z0-9\s!]/g, "");
 
-// Remove :radius=33 from drawbox:
+// Centered, large box + text
+const overlayStart = (finalDuration * 0.75).toFixed(2);
+const overlayEnd = (ttsDuration + 1.5).toFixed(2);  // Video ends 1.5s after TTS
+const fadeInDur = 0.4;
+const fadeOutDur = 0.5;
+const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+
+// Center box dimensions
+const boxW = 540, boxH = 100;
+const boxX = `(w/2-${boxW/2})`;
+const boxY = `(h/2-${boxH/2})`;
+
+// Only a single, centered, neutral box behind the text, with fade in/out
 let overlayCmd = fs.existsSync(fontfile)
   ? `${ffmpegPath} -y -i "${tempConcat}" -vf \
-"drawbox=x=(w/2-215):y=(h/2-44):w=430:h=88:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})', \
- drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=42:box=0:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" \
+"drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})', \
+ drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" \
+-t ${overlayEnd} \
 -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`
   : `${ffmpegPath} -y -i "${tempConcat}" -vf \
-"drawbox=x=(w/2-215):y=(h/2-44):w=430:h=88:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})', \
- drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=42:box=0:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" \
+"drawbox=x=${boxX}:y=${boxY}:w=${boxW}:h=${boxH}:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})', \
+ drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" \
+-t ${overlayEnd} \
 -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
 
 try {
@@ -981,6 +992,8 @@ try {
   console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
   return res.status(500).json({ error: "Text overlay failed", detail: e.message });
 }
+
+// When you mux in audio, remember to also use -t ${overlayEnd} so the final video ends 1.5s after the script finishes.
 
 
 
