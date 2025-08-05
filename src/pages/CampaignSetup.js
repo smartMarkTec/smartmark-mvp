@@ -16,10 +16,11 @@ const getUserKey = (email, cashapp) =>
 const calculateFees = (budget) => {
   const parsed = parseFloat(budget);
   if (isNaN(parsed) || parsed <= 0) return { fee: 0, total: 0 };
-  const fee = parsed * 0.10 + 45;
+  const fee = 25; // Flat $25 per campaign
   const total = parsed + fee;
   return { fee, total };
 };
+
 
 const btnStyle = {
   padding: "0.7rem 1.6rem",
@@ -750,6 +751,34 @@ const CampaignSetup = () => {
               Campaign launched! ID: {launchResult.campaignId || "--"}
             </div>
           )}
+          {launched && metrics && (
+  <div
+    style={{
+      background: "#191d1f",
+      borderRadius: "1rem",
+      padding: "1.6rem 1.7rem",
+      color: "#a8e8a8",
+      fontWeight: 600,
+      marginTop: 32,
+      width: "100%",
+      maxWidth: 600,
+      boxShadow: "0 2px 16px #163a1f18"
+    }}
+  >
+    <div style={{ fontSize: "1.22rem", fontWeight: 800, color: "#fff", marginBottom: 10 }}>
+      Campaign: {form.campaignName || "—"}
+    </div>
+    <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
+    <div>Clicks: <b>{metrics.clicks ?? "--"}</b></div>
+    <div>Cost per Result: <b>
+      {metrics.spend && metrics.results
+        ? `$${(metrics.spend / metrics.results).toFixed(2)}`
+        : "--"}
+    </b></div>
+    <div>Spend: <b>{metrics.spend ? `$${metrics.spend}` : "--"}</b></div>
+  </div>
+)}
+
         </div>
       </div>
       {/* Pause Modal */}
