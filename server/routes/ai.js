@@ -989,11 +989,13 @@ if (fs.existsSync(fontfile)) {
 -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
 }
 try {
-  await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out");
+  await withTimeout(exec(overlayCmd), 120000, "ffmpeg overlay timed out");
 } catch (e) {
   console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
+  // You can also return the video without overlay if you want "fail gracefully"
   return res.status(500).json({ error: "Text overlay failed", detail: e.message });
 }
+
 
 
     // Final mux: add TTS audio to video
