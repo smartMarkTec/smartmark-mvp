@@ -795,7 +795,7 @@ router.post('/generate-video-ad', async (req, res) => {
       const resp = await withTimeout(
         axios.get(PEXELS_VIDEO_BASE, {
           headers: { Authorization: PEXELS_API_KEY },
-          params: { query: searchTerm, per_page: 12, cb: Date.now() + (regenerateToken || "") }
+          params: { query: searchTerm, per_page: 40, cb: Date.now() + (regenerateToken || "") }
         }),
         12000,
         "Pexels API timed out"
@@ -972,7 +972,7 @@ router.post('/generate-video-ad', async (req, res) => {
     // Final mux: add TTS audio to video
     try {
       await withTimeout(
-        exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -t ${finalDuration} -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
+        exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
         90000,
         "ffmpeg mux timed out"
       );
