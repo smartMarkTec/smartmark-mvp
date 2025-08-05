@@ -309,21 +309,13 @@ const CampaignSetup = () => {
         overflowX: "hidden"
       }}
     >
-      {/* Fixed Logo + Back */}
-      <div style={{
-        position: "fixed",
-        top: 28,
-        left: 38,
-        zIndex: 98,
-      }}>
-        <SmartMarkLogoButton />
-      </div>
+   
       <button
         onClick={() => navigate('/form')}
         style={{
           position: "fixed",
-          top: 32,
-          left: 108,
+          top: 28,
+          left: 38,
           background: "#202824e0",
           color: "#fff",
           border: "none",
@@ -334,12 +326,36 @@ const CampaignSetup = () => {
           letterSpacing: "0.7px",
           cursor: "pointer",
           boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
-          zIndex: 20,
+          zIndex: 98,
           fontFamily: MODERN_FONT,
         }}
       >
         ← Back
       </button>
+
+      <button
+  onClick={() => navigate("/")}
+  style={{
+    position: "fixed",
+    top: 32,
+    right: 38,
+    background: "#232528e0",
+    color: "#fff",
+    border: "none",
+    borderRadius: "1.3rem",
+    padding: "0.72rem 1.8rem",
+    fontWeight: 700,
+    fontSize: "1.08rem",
+    letterSpacing: "0.7px",
+    cursor: "pointer",
+    boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
+    zIndex: 99,
+    fontFamily: MODERN_FONT,
+  }}
+>
+  Home
+</button>
+
 
       {/* MAIN CONTENT */}
       <div
