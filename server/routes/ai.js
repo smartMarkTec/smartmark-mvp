@@ -1008,7 +1008,7 @@ try {
 }
 
 // Final video duration: at least 16s, always 1s after TTS
-let finalDuration = Math.max(ttsDuration + 1, 16);
+let finalDuration = Math.max(ttsDuration + 2, 16);
 const secondsPerClip = 8;
 let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
 // Pad videoPaths to fill required length
