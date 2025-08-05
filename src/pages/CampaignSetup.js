@@ -64,9 +64,6 @@ const CampaignSetup = () => {
   const [form, setForm] = useState({});
   const [userKey, setUserKey] = useState("");
   const [budget, setBudget] = useState("");
-  const [adCopy, setAdCopy] = useState("");
-  const [adImage, setAdImage] = useState("");
-  const [description, setDescription] = useState("");
   // --- Facebook Connect Button State (New) ---
   const [fbConnected, setFbConnected] = useState(false);
   // Accordion states for Ad Account and Page
@@ -634,161 +631,90 @@ const CampaignSetup = () => {
             </div>
           )}
 
-          {/* Ad Creative & Copy */}
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: "0.7rem",
-              alignItems: "center",
-              background: "#222528",
-              borderRadius: "1.2rem",
-              padding: "2rem 1.5rem",
-              marginTop: "1.6rem",
-            }}
-          >
-            {/* Campaign Name */}
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Campaign Name</label>
-            <input
-              type="text"
-              value={form.campaignName || ""}
-              onChange={e => setForm({ ...form, campaignName: e.target.value })}
-              placeholder="Name your campaign"
-              style={{
-                padding: "0.8rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1px solid #c6c6c6",
-                fontSize: "1.11rem",
-                width: "100%",
-                marginBottom: "1rem",
-              }}
-            />
+          {/* Campaign Name & Budget Only */}
+<div
+  style={{
+    display: "flex",
+    flexDirection: "column",
+    gap: "0.7rem",
+    alignItems: "center",
+    background: "#222528",
+    borderRadius: "1.2rem",
+    padding: "2rem 1.5rem",
+    marginTop: "1.6rem",
+  }}
+>
+  {/* Campaign Name */}
+  <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Campaign Name</label>
+  <input
+    type="text"
+    value={form.campaignName || ""}
+    onChange={e => setForm({ ...form, campaignName: e.target.value })}
+    placeholder="Name your campaign"
+    style={{
+      padding: "0.8rem 1.1rem",
+      borderRadius: "1.1rem",
+      border: "1px solid #c6c6c6",
+      fontSize: "1.11rem",
+      width: "100%",
+      marginBottom: "1rem",
+    }}
+  />
 
-            <label style={{ color: "#fff", fontWeight: 600 }}>Campaign Budget ($)</label>
-            <input
-              type="number"
-              placeholder="Enter budget (minimum $3)"
-              min={3}
-              step={1}
-              value={budget}
-              onChange={e => setBudget(e.target.value)}
-              style={{
-                padding: "0.8rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1px solid #c6c6c6",
-                fontSize: "1.11rem",
-                width: "100%",
-                marginBottom: "1rem",
-              }}
-            />
-            {budget && Number(budget) > 0 && (
-              <div style={{
-                marginTop: "-0.7rem",
-                marginBottom: "0.5rem",
-                fontWeight: 700,
-                color: "#1ec885",
-                fontSize: "1.05rem",
-                textAlign: "left",
-                letterSpacing: "0.03em",
-                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              }}>
-                Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
-              </div>
-            )}
+  <label style={{ color: "#fff", fontWeight: 600 }}>Campaign Budget ($)</label>
+  <input
+    type="number"
+    placeholder="Enter budget (minimum $3)"
+    min={3}
+    step={1}
+    value={budget}
+    onChange={e => setBudget(e.target.value)}
+    style={{
+      padding: "0.8rem 1.1rem",
+      borderRadius: "1.1rem",
+      border: "1px solid #c6c6c6",
+      fontSize: "1.11rem",
+      width: "100%",
+      marginBottom: "1rem",
+    }}
+  />
+  {budget && Number(budget) > 0 && (
+    <div style={{
+      marginTop: "-0.7rem",
+      marginBottom: "0.5rem",
+      fontWeight: 700,
+      color: "#1ec885",
+      fontSize: "1.05rem",
+      textAlign: "left",
+      letterSpacing: "0.03em",
+      fontFamily: "'Poppins', 'Times New Roman', Times, serif",
+    }}>
+      Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
+    </div>
+  )}
 
-            <div style={{ color: "#afeca3", fontWeight: 600 }}>
-              SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
-            </div>
-            {budget && Number(budget) >= 3 && (
-              <div
-                style={{
-                  marginTop: "0.7rem",
-                  color: "#ffe066",
-                  background: "#1c1c1e",
-                  borderRadius: "0.8rem",
-                  padding: "0.75rem 1rem",
-                  fontWeight: 700,
-                  textAlign: "center",
-                  fontSize: "1.13rem",
-                  border: "1px solid #2b2923"
-                }}
-              >
-                Pay (${fee.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
-              </div>
-            )}
+  <div style={{ color: "#afeca3", fontWeight: 600 }}>
+    SmartMark Fee: <span style={{ color: "#12cf5a" }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
+  </div>
+  {budget && Number(budget) >= 3 && (
+    <div
+      style={{
+        marginTop: "0.7rem",
+        color: "#ffe066",
+        background: "#1c1c1e",
+        borderRadius: "0.8rem",
+        padding: "0.75rem 1rem",
+        fontWeight: 700,
+        textAlign: "center",
+        fontSize: "1.13rem",
+        border: "1px solid #2b2923"
+      }}
+    >
+      Pay (${fee.toFixed(2)}) to <span style={{ color: "#12cf5a" }}>$Wknowles20</span>
+    </div>
+  )}
+</div>
 
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1.3rem" }}>Ad Description</label>
-            <textarea
-              rows={3}
-              value={description}
-              onChange={e => setDescription(e.target.value)}
-              placeholder="Describe your business or promo"
-              style={{
-                padding: "0.8rem",
-                borderRadius: "0.9rem",
-                border: "1px solid #ddd",
-                fontSize: "1.08rem",
-                width: "100%",
-                marginBottom: "1rem",
-                resize: "vertical",
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleGenerateAdCopy}
-              style={{
-                background: "#1adf72",
-                color: "#222",
-                border: "none",
-                borderRadius: "1.1rem",
-                padding: "0.7rem 1.7rem",
-                fontWeight: 700,
-                fontSize: "1.05rem",
-                marginBottom: "1rem",
-                cursor: "pointer",
-                fontFamily: MODERN_FONT,
-              }}
-            >
-              Generate Ad Copy with AI
-            </button>
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1rem" }}>Ad Copy</label>
-            <textarea
-              rows={3}
-              value={adCopy}
-              onChange={e => setAdCopy(e.target.value)}
-              placeholder="Paste or write your ad copy"
-              style={{
-                padding: "0.8rem",
-                borderRadius: "0.9rem",
-                border: "1px solid #ddd",
-                fontSize: "1.08rem",
-                width: "100%",
-                marginBottom: "1rem",
-                resize: "vertical",
-              }}
-            />
-            <label style={{ color: "#fff", fontWeight: 600, marginTop: "1rem" }}>Ad Image</label>
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept="image/*"
-              onChange={handleImageUpload}
-              style={{ marginBottom: "1rem" }}
-            />
-            {adImage && (
-              <img
-                src={adImage}
-                alt="Ad preview"
-                style={{
-                  maxWidth: 320,
-                  maxHeight: 180,
-                  borderRadius: "1.1rem",
-                  marginBottom: "1.2rem",
-                  objectFit: "cover",
-                }}
-              />
-            )}
-          </div>
           {/* LAUNCH BUTTON */}
           <button
             type="button"
