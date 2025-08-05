@@ -46,8 +46,19 @@ const CampaignSetup = () => {
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
+  // --- Get creative/copy data from FormPage (if present) ---
+const {
+  imageUrl,
+  videoUrl,
+  headline,
+  body,
+  videoScript,
+  answers
+} = location.state || {};
+
 
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
@@ -194,35 +205,45 @@ const CampaignSetup = () => {
   );
 
   const handleLaunch = async () => {
-    setLoading(true);
-    try {
-      const acctId = selectedAccount.replace("act_", "");
-      const safeBudget = Math.max(3, Number(budget) || 0);
-      const payload = {
-        form: {
-          ...form,
-        },
-        budget: safeBudget,
-        campaignType: form?.campaignType || "Website Traffic",
-        pageId: selectedPageId,
-        aiAudience: form?.aiAudience,
-      };
-      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Server error");
-      setLaunched(true);
-      setLaunchResult(json);
-      setTimeout(() => setLaunched(false), 1500);
-    } catch (err) {
-      alert("Failed to launch campaign: " + (err.message || ""));
-      console.error(err);
-    }
-    setLoading(false);
-  };
+  setLoading(true);
+  try {
+    const acctId = selectedAccount.replace("act_", "");
+    const safeBudget = Math.max(3, Number(budget) || 0);
+    const payload = {
+      form: {
+        ...form,
+      },
+      budget: safeBudget,
+      campaignType: form?.campaignType || "Website Traffic",
+      pageId: selectedPageId,
+      aiAudience: form?.aiAudience,
+      // ----------- Add these fields -----------
+      creative: {
+        headline,
+        body,
+        imageUrl,
+        videoUrl,
+        videoScript
+      },
+      answers // optional: send all original answers for audit/debug
+    };
+    const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Server error");
+    setLaunched(true);
+    setLaunchResult(json);
+    setTimeout(() => setLaunched(false), 1500);
+  } catch (err) {
+    alert("Failed to launch campaign: " + (err.message || ""));
+    console.error(err);
+  }
+  setLoading(false);
+};
+
 
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
@@ -499,30 +520,28 @@ const CampaignSetup = () => {
         </div>
 
         {/* LAUNCH BUTTON */}
-        <button
-          type="button"
-          onClick={handleLaunch}
-          disabled={loading || !canLaunch}
-          style={{
-            background: DARK_GREEN,
-            color: "#fff",
-            fontWeight: 800,
-            borderRadius: "1.2rem",
-            border: "none",
-            padding: "1.1rem 2.4rem",
-            fontSize: "1.18rem",
-            cursor: loading || !canLaunch ? "not-allowed" : "pointer",
-            marginTop: "1.7rem",
-            width: "100%",
-            opacity: loading || !canLaunch ? 0.65 : 1,
-            fontFamily: MODERN_FONT,
-            boxShadow: "0 2px 18px 0 #15713717",
-            transition: "background 0.19s"
-          }}
-          title={!canLaunch ? "Fill in all required fields. Budget must be $3+." : ""}
-        >
-          {loading ? "Launching..." : "Launch Campaign"}
-        </button>
+       <button
+  onClick={handleLaunch}
+  disabled={loading}
+  style={{
+    background: "#14e7b9",
+    color: "#181b20",
+    border: "none",
+    borderRadius: 13,
+    fontWeight: 700,
+    fontSize: "1.19rem",
+    padding: "18px 72px",
+    marginBottom: 18,
+    marginTop: 2,
+    fontFamily: MODERN_FONT,
+    boxShadow: "0 2px 16px #0cc4be24",
+    cursor: loading ? "not-allowed" : "pointer",
+    transition: "background 0.18s"
+  }}
+>
+  {loading ? "Launching..." : "Launch"}
+</button>
+
 
         {launched && launchResult && (
           <div style={{
