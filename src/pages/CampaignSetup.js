@@ -716,7 +716,7 @@ const CampaignSetup = () => {
   )}
 </div>
 
-       {/* LAUNCH BUTTON */}
+{/* LAUNCH BUTTON */}
 <button
   type="button"
   onClick={handleLaunch}
@@ -740,6 +740,7 @@ const CampaignSetup = () => {
 >
   {loading ? "Launching..." : "Launch Campaign"}
 </button>
+
 {launched && launchResult && (
   <div style={{
     color: "#1eea78",
@@ -751,35 +752,36 @@ const CampaignSetup = () => {
     Campaign launched! ID: {launchResult.campaignId || "--"}
   </div>
 )}
-{selectedCampaignId && (
-  <div
-    style={{
-      background: "#191d1f",
-      borderRadius: "1rem",
-      padding: "1.6rem 1.7rem",
-      color: "#a8e8a8",
-      fontWeight: 600,
-      marginTop: 32,
-      width: "100%",
-      maxWidth: 600,
-      boxShadow: "0 2px 16px #163a1f18"
-    }}
-  >
-    <div style={{ fontSize: "1.22rem", fontWeight: 800, color: "#fff", marginBottom: 10 }}>
-      Campaign: {form.campaignName || "—"}
-    </div>
-    <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
-    <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
-    <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-    <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
-    <div>Results: <b>{metrics?.results ?? "--"}</b></div>
-    <div>Cost per Result: <b>
-      {metrics?.spend && metrics?.results
-        ? `$${(metrics.spend / metrics.results).toFixed(2)}`
-        : "--"}
-    </b></div>
+
+/* === Always-Visible Metrics Pane === */
+<div
+  style={{
+    background: "#191d1f",
+    borderRadius: "1rem",
+    padding: "1.6rem 1.7rem",
+    color: "#a8e8a8",
+    fontWeight: 600,
+    marginTop: 32,
+    width: "100%",
+    maxWidth: 600,
+    boxShadow: "0 2px 16px #163a1f18"
+  }}
+>
+  <div style={{ fontSize: "1.22rem", fontWeight: 800, color: "#fff", marginBottom: 10 }}>
+    Campaign: {form?.campaignName || "—"}
   </div>
-)}
+  <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
+  <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
+  <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
+  <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
+  <div>Results: <b>{metrics?.results ?? "--"}</b></div>
+  <div>Cost per Result: <b>
+    {metrics?.spend && metrics?.results
+      ? `$${(metrics.spend / metrics.results).toFixed(2)}`
+      : "--"}
+  </b></div>
+</div>
+
 
 
     </div>
