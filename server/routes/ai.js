@@ -928,12 +928,12 @@ router.post('/generate-video-ad', async (req, res) => {
       const scaledPath = dest.replace('.mp4', '_scaled.mp4');
       try {
         await withTimeout(
-          exec(
-            `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 8 -r ${FRAMERATE} -c:v libx264 -preset ultrafast -crf 24 -an "${scaledPath}"`
-          ),
-          30000,
-          "ffmpeg scaling timed out"
-        );
+  exec(
+    `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 6 -r ${FRAMERATE} -c:v libx264 -preset superfast -crf 24 -an "${scaledPath}"`
+  ),
+  18000,
+  "ffmpeg scaling timed out"
+);
       } catch (e) {
         fs.unlinkSync(dest);
         console.error("FFMPEG ERROR: Scaling step failed", e.stderr || e.message || e);
@@ -1050,8 +1050,8 @@ const safeOverlayText = String(overlayText)
 
 // Only the centered text, no box
 let overlayCmd = fs.existsSync(fontfile)
-  ? `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`
-  : `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+  ? `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset superfast -pix_fmt yuv420p -an "${tempOverlay}"`
+  : `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset superfast -pix_fmt yuv420p -an "${tempOverlay}"`;
 
 try {
   await withTimeout(exec(overlayCmd), 120000, "ffmpeg overlay timed out");
@@ -1064,11 +1064,11 @@ try {
 
     // Final mux: add TTS audio to video
     try {
-      await withTimeout(
-        exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
-        180000,
-        "ffmpeg mux timed out"
-      );
+   await withTimeout(
+  exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -preset superfast -crf 24 -c:a aac -b:a 192k "${outPath}"`),
+  25000,
+  "ffmpeg mux timed out"
+);
     } catch (e) {
       console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
       return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
