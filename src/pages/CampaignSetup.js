@@ -1,7 +1,8 @@
 // src/pages/CampaignSetup.js
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
@@ -52,8 +53,8 @@ const CampaignSetup = () => {
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
 
-  // --- Always show selectors, but keep as state in case of later tweaks ---
-  const [showSelectors, setShowSelectors] = useState(true);
+  // Dropdown open state (always open as per your request)
+  const [dropdownOpen, setDropdownOpen] = useState(true);
 
   // --- Pause/Play state ---
   const [isPaused, setIsPaused] = useState(false);
@@ -211,12 +212,7 @@ const CampaignSetup = () => {
 
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
-    setSelectedCampaignId("");
-    setBudget("");
-    setLaunched(false);
-    setLaunchResult(null);
-    setMetrics(null);
-    setForm({});
+    navigate('/form');
   };
 
   const canLaunch = !!(
@@ -309,56 +305,54 @@ const CampaignSetup = () => {
         overflowX: "hidden"
       }}
     >
-   
+      {/* Top Bar */}
       <div
-  style={{
-    width: "100%",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    padding: "32px 36px 0 36px", // Top, right, bottom, left
-    boxSizing: "border-box",
-  }}
->
-  <button
-    onClick={() => navigate(-1)}
-    style={{
-      background: "#202824e0",
-      color: "#fff",
-      border: "none",
-      borderRadius: "1.3rem",
-      padding: "0.72rem 1.8rem",
-      fontWeight: 700,
-      fontSize: "1.08rem",
-      letterSpacing: "0.7px",
-      cursor: "pointer",
-      boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
-      fontFamily: MODERN_FONT,
-    }}
-  >
-    ← Back
-  </button>
-  <button
-    onClick={() => navigate('/')}
-    style={{
-      background: "#232828",
-      color: "#fff",
-      border: "none",
-      borderRadius: "1.3rem",
-      padding: "0.72rem 1.8rem",
-      fontWeight: 700,
-      fontSize: "1.08rem",
-      letterSpacing: "0.7px",
-      cursor: "pointer",
-      boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
-      fontFamily: MODERN_FONT,
-    }}
-  >
-    Home
-  </button>
-</div>
-
-
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "32px 36px 0 36px",
+          boxSizing: "border-box",
+        }}
+      >
+        <button
+          onClick={() => navigate(-1)}
+          style={{
+            background: "#202824e0",
+            color: "#fff",
+            border: "none",
+            borderRadius: "1.3rem",
+            padding: "0.72rem 1.8rem",
+            fontWeight: 700,
+            fontSize: "1.08rem",
+            letterSpacing: "0.7px",
+            cursor: "pointer",
+            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
+            fontFamily: MODERN_FONT,
+          }}
+        >
+          ← Back
+        </button>
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            background: "#232828",
+            color: "#fff",
+            border: "none",
+            borderRadius: "1.3rem",
+            padding: "0.72rem 1.8rem",
+            fontWeight: 700,
+            fontSize: "1.08rem",
+            letterSpacing: "0.7px",
+            cursor: "pointer",
+            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
+            fontFamily: MODERN_FONT,
+          }}
+        >
+          Home
+        </button>
+      </div>
 
       {/* MAIN CONTENT */}
       <div
@@ -375,7 +369,7 @@ const CampaignSetup = () => {
           minHeight: "92vh"
         }}
       >
-        {/* LEFT PANE: Facebook connect, Payment, Campaign name, Campaign budget */}
+        {/* LEFT PANE */}
         <main style={{
           background: "#232528e6",
           borderRadius: "2.2rem",
@@ -390,6 +384,7 @@ const CampaignSetup = () => {
           alignItems: "center",
           marginBottom: isMobile ? 30 : 0,
           position: "relative",
+          minHeight: "600px", // ensure left panel height for match
         }}>
           {/* Facebook Connect */}
           <button
@@ -440,7 +435,6 @@ const CampaignSetup = () => {
               Add/Manage Payment Method
             </button>
           )}
-
           {/* CAMPAIGN NAME */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
@@ -556,7 +550,7 @@ const CampaignSetup = () => {
           )}
         </main>
 
-        {/* RIGHT PANE: Metrics + Selectors, always shown */}
+        {/* RIGHT PANE: Metrics & Dropdown */}
         <aside style={{
           flex: 1,
           display: "flex",
@@ -568,7 +562,7 @@ const CampaignSetup = () => {
           minWidth: isMobile ? "100vw" : 400,
           maxWidth: 430,
         }}>
-          {/* Metrics Pane */}
+          {/* Metrics Pane with Campaign Dropdown */}
           <div
             style={{
               background: "#1b1e22f7",
@@ -582,75 +576,154 @@ const CampaignSetup = () => {
               display: "flex",
               flexDirection: "column",
               gap: "0.8rem",
-              alignItems: "flex-start"
+              alignItems: "flex-start",
+              minHeight: "600px", // match left minHeight
             }}
           >
-            <div style={{
-              display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center"
-            }}>
-              <div style={{
-                fontSize: "1.23rem",
-                fontWeight: 800,
-                color: "#fff",
-                marginBottom: 2,
-                letterSpacing: ".08em"
-              }}>
-                Campaign: {form?.campaignName || "—"}
-              </div>
-              <div style={{ display: "flex", gap: "0.7rem" }}>
-                <button
-                  onClick={handlePauseUnpause}
-                  disabled={loading || !selectedCampaignId}
+            {/* Campaign Dropdown + Buttons */}
+            <div style={{ width: "100%", marginBottom: 6 }}>
+              <div
+                style={{
+                  display: "flex", width: "100%",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12
+                }}>
+                <div
                   style={{
-                    background: isPaused ? "#22dd7f" : "#ffd966",
-                    color: "#181b20",
-                    border: "none",
-                    borderRadius: 9,
-                    fontWeight: 900,
-                    fontSize: 22,
-                    width: 36, height: 36,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}
-                  title={isPaused ? "Play" : "Pause"}
-                >
-                  {isPaused ? "▶️" : "⏸️"}
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={loading || !selectedCampaignId}
-                  style={{
-                    background: "#f44336",
+                    fontSize: "1.23rem",
+                    fontWeight: 800,
                     color: "#fff",
-                    border: "none",
-                    borderRadius: 9,
-                    fontWeight: 900,
-                    fontSize: 19,
-                    width: 36, height: 36,
-                    cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center"
+                    cursor: "pointer",
+                    gap: 9,
                   }}
-                  title="Delete"
+                  onClick={() => setDropdownOpen((o) => !o)}
                 >
-                  🗑️
-                </button>
+                  <FaChevronDown
+                    style={{
+                      transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      marginRight: 7,
+                      transition: "transform 0.18s"
+                    }}
+                  />
+                  {selectedCampaignId
+                    ? (campaigns.find(c => c.id === selectedCampaignId)?.name || "Campaign")
+                    : "Campaigns"}
+                </div>
+                <div style={{ display: "flex", gap: "0.7rem" }}>
+                  <button
+                    onClick={handlePauseUnpause}
+                    disabled={loading || !selectedCampaignId}
+                    style={{
+                      background: isPaused ? "#22dd7f" : "#ffd966",
+                      color: "#181b20",
+                      border: "none",
+                      borderRadius: 9,
+                      fontWeight: 900,
+                      fontSize: 22,
+                      width: 36, height: 36,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}
+                    title={isPaused ? "Play" : "Pause"}
+                  >
+                    {isPaused ? <FaPlay /> : <FaPause />}
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={loading || !selectedCampaignId}
+                    style={{
+                      background: "#f44336",
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 9,
+                      fontWeight: 900,
+                      fontSize: 19,
+                      width: 36, height: 36,
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}
+                    title="Delete"
+                  >
+                    <FaTrash />
+                  </button>
+                  {campaigns.length < 2 && (
+                    <button
+                      onClick={handleNewCampaign}
+                      style={{
+                        background: "#19c37d",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 9,
+                        fontWeight: 900,
+                        fontSize: 22,
+                        width: 36, height: 36,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center"
+                      }}
+                      title="New Campaign"
+                    >
+                      <FaPlus />
+                    </button>
+                  )}
+                </div>
               </div>
+              {/* Dropdown for campaign selection */}
+              {dropdownOpen && (
+                <div style={{
+                  width: "100%",
+                  background: "#232a28",
+                  borderRadius: "0.8rem",
+                  marginBottom: 6,
+                  marginTop: 1,
+                  padding: "0.7rem 0.4rem",
+                  boxShadow: "0 2px 12px #193a2a13"
+                }}>
+                  {campaigns.map(c => (
+                    <div
+                      key={c.id}
+                      style={{
+                        color: c.id === selectedCampaignId ? "#1ec885" : "#fff",
+                        fontWeight: c.id === selectedCampaignId ? 800 : 600,
+                        fontSize: "1.09rem",
+                        cursor: "pointer",
+                        padding: "0.35rem 0.8rem",
+                        borderRadius: 8,
+                        marginBottom: 2,
+                        background: c.id === selectedCampaignId ? "#1c3938" : "transparent"
+                      }}
+                      onClick={() => setSelectedCampaignId(c.id)}
+                    >
+                      {c.name || c.id}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
-            <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
-            <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-            <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
-            <div>Results: <b>{metrics?.results ?? "--"}</b></div>
-            <div>Cost per Result: <b>
-              {metrics?.spend && metrics?.results
-                ? `$${(metrics.spend / metrics.results).toFixed(2)}`
-                : "--"}
-            </b></div>
-            {/* Always shown Ad Account & Page Selectors */}
+            {/* Metrics for selected campaign */}
+            {selectedCampaignId && (
+              <>
+                <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
+                <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
+                <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
+                <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
+                <div>Results: <b>{metrics?.results ?? "--"}</b></div>
+                <div>Cost per Result: <b>
+                  {metrics?.spend && metrics?.results
+                    ? `$${(metrics.spend / metrics.results).toFixed(2)}`
+                    : "--"}
+                </b></div>
+              </>
+            )}
+            {/* Ad Account & Page Selectors */}
             <div style={{
               width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
               display: "flex", flexDirection: "column", gap: 14
