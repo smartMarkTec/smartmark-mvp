@@ -964,14 +964,14 @@ const safeOverlayText = String(overlayText)
   .replace(/'/g, "")
   .replace(/[^a-zA-Z0-9\s!]/g, "");
 
-// Only a single neutral rounded box behind the text, with fade in/out
+// Remove :radius=33 from drawbox:
 let overlayCmd = fs.existsSync(fontfile)
   ? `${ffmpegPath} -y -i "${tempConcat}" -vf \
-"drawbox=x=(w/2-215):y=(h/2-44):w=430:h=88:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})':radius=33, \
+"drawbox=x=(w/2-215):y=(h/2-44):w=430:h=88:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})', \
  drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=42:box=0:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" \
 -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`
   : `${ffmpegPath} -y -i "${tempConcat}" -vf \
-"drawbox=x=(w/2-215):y=(h/2-44):w=430:h=88:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})':radius=33, \
+"drawbox=x=(w/2-215):y=(h/2-44):w=430:h=88:color=${boxColor}@${boxAlpha}:t=fill:enable='between(t,${overlayStart},${overlayEnd})', \
  drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=42:box=0:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" \
 -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
 
@@ -979,7 +979,6 @@ try {
   await withTimeout(exec(overlayCmd), 120000, "ffmpeg overlay timed out");
 } catch (e) {
   console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
-  // You can also return the video without overlay if you want "fail gracefully"
   return res.status(500).json({ error: "Text overlay failed", detail: e.message });
 }
 
