@@ -379,70 +379,7 @@ const CampaignSetup = () => {
             </button>
           )}
 
-          {/* Ad Account & Page */}
-          {fbConnected && (
-            <div style={{
-              width: "100%",
-              background: "#242628",
-              borderRadius: "1.8rem",
-              boxShadow: "0 2px 16px #193a3a16",
-              padding: "1.4rem 1.2rem",
-              marginBottom: "0.7rem",
-            }}>
-              <div style={{
-                display: "flex",
-                gap: "1rem",
-                justifyContent: "space-between",
-                marginBottom: 18
-              }}>
-                <div style={{ fontWeight: 700, fontSize: "1.11rem", color: "#fff" }}>Ad Account</div>
-                <div style={{ fontWeight: 700, fontSize: "1.11rem", color: "#fff" }}>Facebook Page</div>
-              </div>
-              <div style={{
-                display: "flex",
-                gap: "1.1rem",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}>
-                <select
-                  value={selectedAccount}
-                  onChange={e => setSelectedAccount(e.target.value)}
-                  style={{
-                    padding: "0.75rem",
-                    borderRadius: "1.1rem",
-                    fontSize: "1.07rem",
-                    width: "50%",
-                    outline: "none",
-                    border: "1.5px solid #2e5c44",
-                    background: "#2c2f33",
-                    color: "#c7fbe3",
-                  }}>
-                  {adAccounts.map(ac => (
-                    <option key={ac.id} value={ac.id.replace("act_", "")}>
-                      {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={selectedPageId}
-                  onChange={e => setSelectedPageId(e.target.value)}
-                  style={{
-                    padding: "0.75rem",
-                    borderRadius: "1.1rem",
-                    fontSize: "1.07rem",
-                    width: "48%",
-                    outline: "none",
-                    border: "1.5px solid #2e5c44",
-                    background: "#2c2f33",
-                    color: "#c7fbe3",
-                  }}>
-                  {pages.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          )}
+          {/* --- Removed Ad Account & Page from here --- */}
 
           {/* Campaign Name & Budget */}
           <div
@@ -587,6 +524,71 @@ const CampaignSetup = () => {
               gap: "0.6rem"
             }}
           >
+            {/* --- Ad Account & Page Dropdowns (now in Metrics box) --- */}
+            {fbConnected && (
+              <div style={{
+                width: "100%",
+                background: "#242628",
+                borderRadius: "1.8rem",
+                boxShadow: "0 2px 16px #193a3a16",
+                padding: "1.2rem 1rem 0.8rem 1rem",
+                marginBottom: "1.2rem",
+              }}>
+                <div style={{
+                  display: "flex",
+                  gap: "1rem",
+                  justifyContent: "space-between",
+                  marginBottom: 12
+                }}>
+                  <div style={{ fontWeight: 700, fontSize: "1.08rem", color: "#fff" }}>Ad Account</div>
+                  <div style={{ fontWeight: 700, fontSize: "1.08rem", color: "#fff" }}>Facebook Page</div>
+                </div>
+                <div style={{
+                  display: "flex",
+                  gap: "1.1rem",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}>
+                  <select
+                    value={selectedAccount}
+                    onChange={e => setSelectedAccount(e.target.value)}
+                    style={{
+                      padding: "0.75rem",
+                      borderRadius: "1.1rem",
+                      fontSize: "1.07rem",
+                      width: "50%",
+                      outline: "none",
+                      border: "1.5px solid #2e5c44",
+                      background: "#2c2f33",
+                      color: "#c7fbe3",
+                    }}>
+                    {adAccounts.map(ac => (
+                      <option key={ac.id} value={ac.id.replace("act_", "")}>
+                        {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={selectedPageId}
+                    onChange={e => setSelectedPageId(e.target.value)}
+                    style={{
+                      padding: "0.75rem",
+                      borderRadius: "1.1rem",
+                      fontSize: "1.07rem",
+                      width: "48%",
+                      outline: "none",
+                      border: "1.5px solid #2e5c44",
+                      background: "#2c2f33",
+                      color: "#c7fbe3",
+                    }}>
+                    {pages.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
             <div style={{
               fontSize: "1.23rem",
               fontWeight: 800,
