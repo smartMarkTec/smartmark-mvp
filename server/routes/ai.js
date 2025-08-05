@@ -366,7 +366,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const { url = "", industry = "", regenerateToken = "" } = req.body;
     const keyword = getImageKeyword(industry, url);
 
-    const perPage = 15;
+    const perPage = 100;
     let photos = [];
     try {
       const resp = await axios.get("https://api.pexels.com/v1/search", {
@@ -882,7 +882,7 @@ router.post('/generate-video-ad', async (req, res) => {
       const resp = await withTimeout(
         axios.get(PEXELS_VIDEO_BASE, {
           headers: { Authorization: PEXELS_API_KEY },
-          params: { query: searchTerm, per_page: 40, cb: Date.now() + (regenerateToken || "") }
+          params: { query: searchTerm, per_page: 70, cb: Date.now() + (regenerateToken || "") }
         }),
         30000,
         "Pexels API timed out"
