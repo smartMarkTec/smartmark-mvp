@@ -7,8 +7,20 @@ import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
 const ACCENT_GREEN = "#1ec885";
-const LIGHT_BG = "#34373d";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
+const BG_GRADIENT = "linear-gradient(135deg,#232a24 0%,#34373d 100%)";
+
+// ----------- Responsive Helper ------------
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
+  React.useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isMobile;
+};
+// ------------------------------------------
 
 const getUserKey = (email, cashapp) =>
   `smartmark_user_${(email || "").trim().toLowerCase()}_${(cashapp || "").trim().toLowerCase()}`;
@@ -22,12 +34,7 @@ const calculateFees = (budget) => {
 };
 
 const CampaignSetup = () => {
-  useEffect(() => {
-    if (window.location.hash === '#_=_') {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-  }, []);
-
+  const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
   const [form, setForm] = useState({});
@@ -46,19 +53,18 @@ const CampaignSetup = () => {
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
-  // --- Get creative/copy data from FormPage (if present) ---
-const {
-  imageUrl,
-  videoUrl,
-  headline,
-  body,
-  videoScript,
-  answers
-} = location.state || {};
 
+  // --- Get creative/copy data from FormPage (if present) ---
+  const {
+    imageUrl,
+    videoUrl,
+    headline,
+    body,
+    videoScript,
+    answers
+  } = location.state || {};
 
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
@@ -130,27 +136,6 @@ const {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  const pauseCampaign = async () => {
-    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
-    fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-      .then(res => res.json())
-      .then(data => setCampaignStatus(data.status || data.effective_status || "PAUSED"));
-  };
-
-  const unpauseCampaign = async () => {
-    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
-    fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-      .then(res => res.json())
-      .then(data => setCampaignStatus(data.status || data.effective_status || "ACTIVE"));
-  };
-
-  const cancelCampaign = async () => {
-    await fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
-    fetch(`${backendUrl}/auth/facebook/adaccount/${selectedAccount}/campaign/${selectedCampaignId}/details`)
-      .then(res => res.json())
-      .then(data => setCampaignStatus(data.status || data.effective_status || "ARCHIVED"));
-  };
-
   useEffect(() => {
     if (fbConnected && selectedAccount) {
       const acctId = selectedAccount.replace("act_", "");
@@ -205,45 +190,43 @@ const {
   );
 
   const handleLaunch = async () => {
-  setLoading(true);
-  try {
-    const acctId = selectedAccount.replace("act_", "");
-    const safeBudget = Math.max(3, Number(budget) || 0);
-    const payload = {
-      form: {
-        ...form,
-      },
-      budget: safeBudget,
-      campaignType: form?.campaignType || "Website Traffic",
-      pageId: selectedPageId,
-      aiAudience: form?.aiAudience,
-      // ----------- Add these fields -----------
-      creative: {
-        headline,
-        body,
-        imageUrl,
-        videoUrl,
-        videoScript
-      },
-      answers // optional: send all original answers for audit/debug
-    };
-    const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "Server error");
-    setLaunched(true);
-    setLaunchResult(json);
-    setTimeout(() => setLaunched(false), 1500);
-  } catch (err) {
-    alert("Failed to launch campaign: " + (err.message || ""));
-    console.error(err);
-  }
-  setLoading(false);
-};
-
+    setLoading(true);
+    try {
+      const acctId = selectedAccount.replace("act_", "");
+      const safeBudget = Math.max(3, Number(budget) || 0);
+      const payload = {
+        form: {
+          ...form,
+        },
+        budget: safeBudget,
+        campaignType: form?.campaignType || "Website Traffic",
+        pageId: selectedPageId,
+        aiAudience: form?.aiAudience,
+        creative: {
+          headline,
+          body,
+          imageUrl,
+          videoUrl,
+          videoScript
+        },
+        answers // optional: send all original answers for audit/debug
+      };
+      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Server error");
+      setLaunched(true);
+      setLaunchResult(json);
+      setTimeout(() => setLaunched(false), 1500);
+    } catch (err) {
+      alert("Failed to launch campaign: " + (err.message || ""));
+      console.error(err);
+    }
+    setLoading(false);
+  };
 
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
@@ -274,21 +257,29 @@ const {
 
   const { fee, total } = calculateFees(budget);
 
-  // ---- UI ----
+  // ----------- UI -------------
   return (
     <div
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(135deg,#232a24 0%,#34373d 100%)",
+        minWidth: "100vw",
+        background: BG_GRADIENT,
+        fontFamily: MODERN_FONT,
+        padding: isMobile ? "0" : "0 0 0 0",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        fontFamily: MODERN_FONT,
-        letterSpacing: 0.1,
-        paddingBottom: "5vh",
+        justifyContent: "flex-start",
+        overflowX: "hidden"
       }}
     >
-      <div style={{ position: "fixed", top: 30, right: 36, zIndex: 99 }}>
+      {/* Fixed Logo + Back button */}
+      <div style={{
+        position: "fixed",
+        top: 28,
+        left: 38,
+        zIndex: 98,
+      }}>
         <SmartMarkLogoButton />
       </div>
       <button
@@ -296,7 +287,7 @@ const {
         style={{
           position: "fixed",
           top: 32,
-          left: 72,
+          left: 108,
           background: "#202824e0",
           color: "#fff",
           border: "none",
@@ -313,286 +304,311 @@ const {
       >
         ← Back
       </button>
-      <main style={{
-        marginTop: "6rem",
-        width: "100%",
-        maxWidth: 520,
-        background: "#232528e6",
-        borderRadius: "2.4rem",
-        boxShadow: "0 12px 52px 0 rgba(30,200,133,0.13)",
-        padding: "3.5rem 2.5rem",
-        display: "flex",
-        flexDirection: "column",
-        gap: "2.4rem",
-        alignItems: "center"
-      }}>
-        {/* Facebook Connect */}
-        <button
-          onClick={() => window.location.href = `${backendUrl}/auth/facebook`}
-          style={{
-            padding: "1.15rem 2.8rem",
-            borderRadius: "1.5rem",
-            border: "none",
-            background: fbConnected ? ACCENT_GREEN : "#1877F2",
-            color: "#fff",
-            fontWeight: 800,
-            fontSize: "1.25rem",
-            boxShadow: "0 2px 12px #1877f233",
-            letterSpacing: "1px",
-            cursor: "pointer",
-            marginBottom: 10,
-            fontFamily: MODERN_FONT,
-            width: "100%",
-            maxWidth: 370,
-            transition: "background 0.23s"
-          }}
-        >
-          {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-        </button>
-        {fbConnected && (
+
+      {/* MAIN CONTENT GRID */}
+      <div
+        style={{
+          width: "100vw",
+          maxWidth: "1550px",
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          alignItems: "flex-start",
+          justifyContent: "center",
+          marginTop: isMobile ? 80 : 90,
+          gap: isMobile ? 32 : 64,
+          padding: isMobile ? "0 4vw" : "0 36px",
+          minHeight: "92vh"
+        }}
+      >
+        {/* LEFT: Campaign Setup Form */}
+        <main style={{
+          background: "#232528e6",
+          borderRadius: "2.2rem",
+          boxShadow: "0 12px 52px 0 rgba(30,200,133,0.13)",
+          padding: isMobile ? "2.4rem 1.2rem" : "3.7rem 2.6rem",
+          minWidth: isMobile ? "99vw" : 500,
+          maxWidth: isMobile ? "100vw" : 540,
+          flex: "0 1 520px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "2.3rem",
+          alignItems: "center",
+          marginBottom: isMobile ? 30 : 0,
+        }}>
+          {/* Facebook Connect */}
           <button
-            onClick={openFbPaymentPopup}
+            onClick={() => window.location.href = `${backendUrl}/auth/facebook`}
             style={{
-              marginTop: 4,
-              padding: "0.72rem 1.5rem",
-              borderRadius: "1.1rem",
-              background: "#fff",
-              color: "#1877F2",
-              fontWeight: 700,
+              padding: "1.15rem 2.8rem",
+              borderRadius: "1.5rem",
               border: "none",
+              background: fbConnected ? ACCENT_GREEN : "#1877F2",
+              color: "#fff",
+              fontWeight: 800,
+              fontSize: "1.25rem",
+              boxShadow: "0 2px 12px #1877f233",
+              letterSpacing: "1px",
               cursor: "pointer",
+              marginBottom: 10,
               fontFamily: MODERN_FONT,
-              fontSize: "1.01rem",
-              boxShadow: "0 2px 8px #1877f233"
+              width: "100%",
+              maxWidth: 370,
+              transition: "background 0.23s"
             }}
           >
-            Add/Manage Payment Method
+            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
-        )}
-
-        {/* Ad Account & Page */}
-        {fbConnected && (
-          <div style={{
-            width: "100%",
-            background: "#242628",
-            borderRadius: "1.8rem",
-            boxShadow: "0 2px 16px #193a3a16",
-            padding: "1.4rem 1.2rem",
-            marginBottom: "0.7rem",
-          }}>
-            <div style={{
-              display: "flex",
-              gap: "1rem",
-              justifyContent: "space-between",
-              marginBottom: 18
-            }}>
-              <div style={{ fontWeight: 700, fontSize: "1.11rem", color: "#fff" }}>Ad Account</div>
-              <div style={{ fontWeight: 700, fontSize: "1.11rem", color: "#fff" }}>Facebook Page</div>
-            </div>
-            <div style={{
-              display: "flex",
-              gap: "1.1rem",
-              alignItems: "center",
-              justifyContent: "space-between",
-            }}>
-              <select
-                value={selectedAccount}
-                onChange={e => setSelectedAccount(e.target.value)}
-                style={{
-                  padding: "0.75rem",
-                  borderRadius: "1.1rem",
-                  fontSize: "1.07rem",
-                  width: "50%",
-                  outline: "none",
-                  border: "1.5px solid #2e5c44",
-                  background: "#2c2f33",
-                  color: "#c7fbe3",
-                }}>
-                {adAccounts.map(ac => (
-                  <option key={ac.id} value={ac.id.replace("act_", "")}>
-                    {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={selectedPageId}
-                onChange={e => setSelectedPageId(e.target.value)}
-                style={{
-                  padding: "0.75rem",
-                  borderRadius: "1.1rem",
-                  fontSize: "1.07rem",
-                  width: "48%",
-                  outline: "none",
-                  border: "1.5px solid #2e5c44",
-                  background: "#2c2f33",
-                  color: "#c7fbe3",
-                }}>
-                {pages.map(p => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-        )}
-
-        {/* Campaign Name & Budget */}
-        <div
-          style={{
-            background: "#252c26e6",
-            borderRadius: "1.7rem",
-            padding: "2.5rem 2rem",
-            marginTop: "1rem",
-            boxShadow: "0 2px 32px #181b2045",
-            width: "100%",
-            maxWidth: 500,
-            display: "flex",
-            flexDirection: "column",
-            gap: "1.2rem",
-          }}
-        >
-          <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>Campaign Name</label>
-          <input
-            type="text"
-            value={form.campaignName || ""}
-            onChange={e => setForm({ ...form, campaignName: e.target.value })}
-            placeholder="Name your campaign"
-            style={{
-              padding: "1rem 1.1rem",
-              borderRadius: "1.1rem",
-              border: "1.2px solid #57dfa9",
-              fontSize: "1.14rem",
-              background: "#1c2120",
-              color: "#b3f1d6",
-              marginBottom: "1rem",
-              outline: "none"
-            }}
-          />
-          <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>Campaign Budget ($)</label>
-          <input
-            type="number"
-            placeholder="Enter budget (minimum $3)"
-            min={3}
-            step={1}
-            value={budget}
-            onChange={e => setBudget(e.target.value)}
-            style={{
-              padding: "1rem 1.1rem",
-              borderRadius: "1.1rem",
-              border: "1.2px solid #57dfa9",
-              fontSize: "1.14rem",
-              background: "#1c2120",
-              color: "#b3f1d6",
-              marginBottom: "1rem",
-              outline: "none"
-            }}
-          />
-          {budget && Number(budget) > 0 && (
-            <div style={{
-              marginTop: "-0.6rem",
-              fontWeight: 700,
-              color: ACCENT_GREEN,
-              fontSize: "1.06rem",
-              letterSpacing: "0.04em"
-            }}>
-              Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
-            </div>
-          )}
-          <div style={{ color: "#afeca3", fontWeight: 700 }}>
-            SmartMark Fee: <span style={{ color: ACCENT_GREEN }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
-          </div>
-          {budget && Number(budget) >= 3 && (
-            <div
+          {fbConnected && (
+            <button
+              onClick={openFbPaymentPopup}
               style={{
-                marginTop: "0.7rem",
-                color: "#ffe066",
-                background: "#1c1c1e",
-                borderRadius: "0.9rem",
-                padding: "0.8rem 1.1rem",
+                marginTop: 4,
+                padding: "0.72rem 1.5rem",
+                borderRadius: "1.1rem",
+                background: "#fff",
+                color: "#1877F2",
                 fontWeight: 700,
-                textAlign: "center",
-                fontSize: "1.13rem",
-                border: "1.2px solid #2b2923"
+                border: "none",
+                cursor: "pointer",
+                fontFamily: MODERN_FONT,
+                fontSize: "1.01rem",
+                boxShadow: "0 2px 8px #1877f233"
               }}
             >
-              Pay (${fee.toFixed(2)}) to <span style={{ color: ACCENT_GREEN }}>$Wknowles20</span>
+              Add/Manage Payment Method
+            </button>
+          )}
+
+          {/* Ad Account & Page */}
+          {fbConnected && (
+            <div style={{
+              width: "100%",
+              background: "#242628",
+              borderRadius: "1.8rem",
+              boxShadow: "0 2px 16px #193a3a16",
+              padding: "1.4rem 1.2rem",
+              marginBottom: "0.7rem",
+            }}>
+              <div style={{
+                display: "flex",
+                gap: "1rem",
+                justifyContent: "space-between",
+                marginBottom: 18
+              }}>
+                <div style={{ fontWeight: 700, fontSize: "1.11rem", color: "#fff" }}>Ad Account</div>
+                <div style={{ fontWeight: 700, fontSize: "1.11rem", color: "#fff" }}>Facebook Page</div>
+              </div>
+              <div style={{
+                display: "flex",
+                gap: "1.1rem",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}>
+                <select
+                  value={selectedAccount}
+                  onChange={e => setSelectedAccount(e.target.value)}
+                  style={{
+                    padding: "0.75rem",
+                    borderRadius: "1.1rem",
+                    fontSize: "1.07rem",
+                    width: "50%",
+                    outline: "none",
+                    border: "1.5px solid #2e5c44",
+                    background: "#2c2f33",
+                    color: "#c7fbe3",
+                  }}>
+                  {adAccounts.map(ac => (
+                    <option key={ac.id} value={ac.id.replace("act_", "")}>
+                      {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={selectedPageId}
+                  onChange={e => setSelectedPageId(e.target.value)}
+                  style={{
+                    padding: "0.75rem",
+                    borderRadius: "1.1rem",
+                    fontSize: "1.07rem",
+                    width: "48%",
+                    outline: "none",
+                    border: "1.5px solid #2e5c44",
+                    background: "#2c2f33",
+                    color: "#c7fbe3",
+                  }}>
+                  {pages.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
-        </div>
 
-        {/* LAUNCH BUTTON */}
-       <button
-  onClick={handleLaunch}
-  disabled={loading}
-  style={{
-    background: "#14e7b9",
-    color: "#181b20",
-    border: "none",
-    borderRadius: 13,
-    fontWeight: 700,
-    fontSize: "1.19rem",
-    padding: "18px 72px",
-    marginBottom: 18,
-    marginTop: 2,
-    fontFamily: MODERN_FONT,
-    boxShadow: "0 2px 16px #0cc4be24",
-    cursor: loading ? "not-allowed" : "pointer",
-    transition: "background 0.18s"
-  }}
->
-  {loading ? "Launching..." : "Launch"}
-</button>
-
-
-        {launched && launchResult && (
-          <div style={{
-            color: "#1eea78",
-            fontWeight: 800,
-            marginTop: "1.2rem",
-            fontSize: "1.15rem",
-            textShadow: "0 2px 8px #0a893622"
-          }}>
-            Campaign launched! ID: {launchResult.campaignId || "--"}
+          {/* Campaign Name & Budget */}
+          <div
+            style={{
+              background: "#252c26e6",
+              borderRadius: "1.7rem",
+              padding: "2.5rem 2rem",
+              marginTop: "1rem",
+              boxShadow: "0 2px 32px #181b2045",
+              width: "100%",
+              maxWidth: 500,
+              display: "flex",
+              flexDirection: "column",
+              gap: "1.2rem",
+            }}
+          >
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>Campaign Name</label>
+            <input
+              type="text"
+              value={form.campaignName || ""}
+              onChange={e => setForm({ ...form, campaignName: e.target.value })}
+              placeholder="Name your campaign"
+              style={{
+                padding: "1rem 1.1rem",
+                borderRadius: "1.1rem",
+                border: "1.2px solid #57dfa9",
+                fontSize: "1.14rem",
+                background: "#1c2120",
+                color: "#b3f1d6",
+                marginBottom: "1rem",
+                outline: "none"
+              }}
+            />
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>Campaign Budget ($)</label>
+            <input
+              type="number"
+              placeholder="Enter budget (minimum $3)"
+              min={3}
+              step={1}
+              value={budget}
+              onChange={e => setBudget(e.target.value)}
+              style={{
+                padding: "1rem 1.1rem",
+                borderRadius: "1.1rem",
+                border: "1.2px solid #57dfa9",
+                fontSize: "1.14rem",
+                background: "#1c2120",
+                color: "#b3f1d6",
+                marginBottom: "1rem",
+                outline: "none"
+              }}
+            />
+            {budget && Number(budget) > 0 && (
+              <div style={{
+                marginTop: "-0.6rem",
+                fontWeight: 700,
+                color: ACCENT_GREEN,
+                fontSize: "1.06rem",
+                letterSpacing: "0.04em"
+              }}>
+                Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
+              </div>
+            )}
+            <div style={{ color: "#afeca3", fontWeight: 700 }}>
+              SmartMark Fee: <span style={{ color: ACCENT_GREEN }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
+            </div>
+            {budget && Number(budget) >= 3 && (
+              <div
+                style={{
+                  marginTop: "0.7rem",
+                  color: "#ffe066",
+                  background: "#1c1c1e",
+                  borderRadius: "0.9rem",
+                  padding: "0.8rem 1.1rem",
+                  fontWeight: 700,
+                  textAlign: "center",
+                  fontSize: "1.13rem",
+                  border: "1.2px solid #2b2923"
+                }}
+              >
+                Pay (${fee.toFixed(2)}) to <span style={{ color: ACCENT_GREEN }}>$Wknowles20</span>
+              </div>
+            )}
           </div>
-        )}
+          <button
+            onClick={handleLaunch}
+            disabled={loading}
+            style={{
+              background: "#14e7b9",
+              color: "#181b20",
+              border: "none",
+              borderRadius: 13,
+              fontWeight: 700,
+              fontSize: "1.19rem",
+              padding: "18px 72px",
+              marginBottom: 18,
+              marginTop: 2,
+              fontFamily: MODERN_FONT,
+              boxShadow: "0 2px 16px #0cc4be24",
+              cursor: loading ? "not-allowed" : "pointer",
+              transition: "background 0.18s"
+            }}
+          >
+            {loading ? "Launching..." : "Launch"}
+          </button>
+          {launched && launchResult && (
+            <div style={{
+              color: "#1eea78",
+              fontWeight: 800,
+              marginTop: "1.2rem",
+              fontSize: "1.15rem",
+              textShadow: "0 2px 8px #0a893622"
+            }}>
+              Campaign launched! ID: {launchResult.campaignId || "--"}
+            </div>
+          )}
+        </main>
 
-        {/* Metrics Pane: always visible */}
-        <div
-          style={{
-            background: "#1b1e22f7",
-            borderRadius: "1.4rem",
-            padding: "2rem 2.3rem",
-            color: "#e7f8ec",
-            fontWeight: 700,
-            marginTop: 18,
-            width: "100%",
-            maxWidth: 460,
-            boxShadow: "0 2px 24px #183a2a13",
-            display: "flex",
-            flexDirection: "column",
-            gap: "0.6rem"
-          }}
-        >
-          <div style={{
-            fontSize: "1.23rem",
-            fontWeight: 800,
-            color: "#fff",
-            marginBottom: 12,
-            letterSpacing: ".08em"
-          }}>
-            Campaign: {form?.campaignName || "—"}
+        {/* RIGHT: Metrics and Summary */}
+        <aside style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: isMobile ? "center" : "flex-start",
+          width: isMobile ? "100vw" : "100%",
+          marginTop: isMobile ? 36 : 0,
+          gap: "2.5rem",
+        }}>
+          {/* Metrics Pane */}
+          <div
+            style={{
+              background: "#1b1e22f7",
+              borderRadius: "1.4rem",
+              padding: isMobile ? "2rem 1.2rem" : "2.7rem 2.7rem",
+              color: "#e7f8ec",
+              fontWeight: 700,
+              width: isMobile ? "97vw" : 460,
+              maxWidth: "99vw",
+              boxShadow: "0 2px 24px #183a2a13",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.6rem"
+            }}
+          >
+            <div style={{
+              fontSize: "1.23rem",
+              fontWeight: 800,
+              color: "#fff",
+              marginBottom: 12,
+              letterSpacing: ".08em"
+            }}>
+              Campaign: {form?.campaignName || "—"}
+            </div>
+            <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
+            <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
+            <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
+            <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
+            <div>Results: <b>{metrics?.results ?? "--"}</b></div>
+            <div>Cost per Result: <b>
+              {metrics?.spend && metrics?.results
+                ? `$${(metrics.spend / metrics.results).toFixed(2)}`
+                : "--"}
+            </b></div>
           </div>
-          <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
-          <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
-          <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-          <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
-          <div>Results: <b>{metrics?.results ?? "--"}</b></div>
-          <div>Cost per Result: <b>
-            {metrics?.spend && metrics?.results
-              ? `$${(metrics.spend / metrics.results).toFixed(2)}`
-              : "--"}
-          </b></div>
-        </div>
-      </main>
+        </aside>
+      </div>
       {/* Pause Modal */}
       {showPauseModal && (
         <div style={{
