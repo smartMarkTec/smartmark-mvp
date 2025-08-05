@@ -1019,7 +1019,7 @@ try {
 }
 
 // --- Step 2: Always set video to ttsDuration + 2, minimum 15s
-let finalDuration = Math.max(ttsDuration + 2, 15);
+let finalDuration = Math.max(ttsDuration + 3.5, 15);
 const secondsPerClip = 8;
 let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
 while (videoPaths.length < clipsNeeded) {
