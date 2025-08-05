@@ -334,39 +334,37 @@ Website text:
 
 
 
-// ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + GPT-4o) ==========
+// ========== AI: GENERATE IMAGE FROM PROMPT (PEXELS + CATEGORY MAP) ==========
 
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
+
+// Image-specific keyword mapping for max relevance
+const IMAGE_KEYWORD_MAP = [
+  { match: ["protein powder","protein","supplement","muscle","fitness","gym"], keyword: "gym workout" },
+  { match: ["clothing","fashion","apparel","accessory"], keyword: "fashion model" },
+  { match: ["makeup","cosmetic","skincare"], keyword: "makeup application" },
+  { match: ["hair","shampoo"], keyword: "hair care" },
+  { match: ["food","pizza","burger","meal","snack"], keyword: "delicious food" },
+  { match: ["baby","kids","toys"], keyword: "happy children" },
+  { match: ["pet","dog","cat"], keyword: "pet dog cat" },
+  { match: ["electronics","phone","laptop","tech"], keyword: "tech gadgets" },
+  { match: ["home","kitchen","decor"], keyword: "modern home" },
+  { match: ["art","painting","craft"], keyword: "painting art" },
+  { match: ["coffee","cafe"], keyword: "coffee shop" },
+];
+
+function getImageKeyword(industry = "", url = "") {
+  const input = `${industry} ${url}`.toLowerCase();
+  for (const row of IMAGE_KEYWORD_MAP) {
+    if (row.match.some(m => input.includes(m))) return row.keyword;
+  }
+  return industry || "ecommerce";
+}
 
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = "", industry = "", regenerateToken = "" } = req.body;
-    let searchTerm = industry || url;
-    if (!searchTerm) {
-      return res.status(400).json({ error: "Missing url or industry" });
-    }
-    const gptPrompt = `
-Given this business URL and industry, output only the most relevant 1-2 word search term for a stock photo (such as "gym", "restaurant", "pizza", "doctor", "salon", "fashion", "coffee shop", "bakery"). Do NOT use more than 2 words. Only output the search term. Do not include any quotes or extra words.
-
-URL: ${url}
-Industry: ${industry}
-    `.trim();
-    let keyword = "";
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3500);
-      const gptRes = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [{ role: "user", content: gptPrompt }],
-        max_tokens: 6,
-        temperature: 0.35
-      }, { signal: controller.signal });
-      clearTimeout(timeout);
-      keyword = gptRes.choices?.[0]?.message?.content?.trim().replace(/["'.]/g, "");
-      if (!keyword) keyword = industry || url;
-    } catch (e) {
-      keyword = industry || url;
-    }
+    const keyword = getImageKeyword(industry, url);
 
     const perPage = 15;
     let photos = [];
@@ -412,6 +410,7 @@ Industry: ${industry}
     res.status(500).json({ error: "Failed to fetch stock image", detail: err.message });
   }
 });
+
 
 // ========== AI: GENERATE IMAGE WITH OVERLAY (AUTO AI TEXT, 4-5 WORDS, PUNCTUATION) ==========
 router.post('/generate-image-with-overlay', async (req, res) => {
@@ -1067,7 +1066,7 @@ try {
     try {
       await withTimeout(
         exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -c:a aac -b:a 192k "${outPath}"`),
-        90000,
+        180000,
         "ffmpeg mux timed out"
       );
     } catch (e) {
