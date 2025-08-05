@@ -452,6 +452,7 @@ TASK:
 3. Headline must fit the business/industry (e.g. for dentist: "Brighten Your Smile Today", for gym: "Start Your Fitness Journey"). CTA must be a next step or benefit.
 4. Write a CTA (3-6 words) that MUST end with an exclamation point (!).
 
+
 Output ONLY valid minified JSON:
 {"headline":"...","cta_box":"..."}
 
@@ -826,27 +827,37 @@ function getDeterministicShuffle(arr, seed) {
   return array;
 }
 
-// --- CTA Normalizer ---
-function normalizeCTA(input) {
-  if (!input) return "Get Started";
+function normalizeShortCTA(input) {
+  if (!input) return "Learn More!";
   const t = input.toLowerCase();
-  if (t.includes("visit")) return "Visit Us!";
-  if (t.includes("order")) return "Order Online";
-  if (t.includes("buy")) return "Buy Now";
-  if (t.includes("sign up")) return "Sign Up Today";
-  if (t.includes("call")) return "Call Now";
-  if (t.includes("learn")) return "Learn More";
-  if (t.includes("book")) return "Book Now";
-  if (t.includes("join")) return "Join Now";
-  if (/^(i|we)\s*want|should|can|please|try|interested|contact|reach/.test(t)) return "Get Started";
+
+  // Common CTA detection and replacement
+  if (t.includes("website") || t.includes("purchase")) return "Visit Our Website!";
+  if (t.includes("buy")) return "Buy Now!";
+  if (t.includes("order")) return "Order Now!";
+  if (t.includes("shop")) return "Shop Now!";
+  if (t.includes("sign up") || t.includes("signup")) return "Sign Up!";
+  if (t.includes("call")) return "Call Now!";
+  if (t.includes("learn")) return "Learn More!";
+  if (t.includes("book")) return "Book Now!";
+  if (t.includes("join")) return "Join Now!";
+  if (t.includes("try")) return "Try It Now!";
+  if (t.includes("contact")) return "Contact Us!";
+  if (t.includes("start")) return "Get Started!";
+  if (t.includes("check out")) return "Check Us Out!";
+  if (t.includes("subscribe")) return "Subscribe Now!";
+
+  // Remove any trailing periods, keep short, capitalize first
   return input
-    .replace(/^(i|we)\s*want (them|you) to\s*/i, '')
-    .replace(/^to\s+/i, '')
-    .replace(/[\.\!]+$/, '')
+    .replace(/^(visit|make|please|try|interested|contact|reach|check out|order|shop|buy|learn|call|book|join|sign up|subscribe|start)\s*(our)?\s*(website|site|now|today|us)?/i, "")
+    .replace(/[\.\!]+$/, "")
     .trim()
-    .replace(/^\w/, c => c.toUpperCase())
-    + "!";
+    .split(" ")
+    .slice(0, 5) // max 5 words
+    .join(" ")
+    .replace(/^\w/, c => c.toUpperCase()) + "!";
 }
+
 
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -855,7 +866,8 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const { url = "", answers = {}, regenerateToken = "" } = req.body;
     const productType = answers?.industry || answers?.productType || "";
-    const overlayText = normalizeCTA(answers?.cta);
+   const overlayText = normalizeShortCTA(answers?.cta);
+    const userCTA = answers?.cta || "";
 
     // -------- CATEGORY MAPPING APPLIED HERE --------
     const { category, pexels } = mapIndustry(productType);
