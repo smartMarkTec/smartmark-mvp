@@ -963,14 +963,8 @@ const safeOverlayText = String(overlayText)
 
 // Only the centered text, no box
 let overlayCmd = fs.existsSync(fontfile)
-  ? `${ffmpegPath} -y -i "${tempConcat}" -vf \
-drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))' \
--t ${overlayEnd} \
--c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`
-  : `${ffmpegPath} -y -i "${tempConcat}" -vf \
-drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))' \
--t ${overlayEnd} \
--c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+  ? `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`
+  : `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
 
 try {
   await withTimeout(exec(overlayCmd), 120000, "ffmpeg overlay timed out");
