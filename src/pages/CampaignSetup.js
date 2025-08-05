@@ -716,42 +716,42 @@ const CampaignSetup = () => {
   )}
 </div>
 
-          {/* LAUNCH BUTTON */}
-          <button
-            type="button"
-            onClick={handleLaunch}
-            disabled={loading || !canLaunch}
-            style={{
-              background: DARK_GREEN,
-              color: "#fff",
-              fontWeight: 700,
-              borderRadius: "1.1rem",
-              border: "none",
-              padding: "1rem 2.4rem",
-              fontSize: "1.14rem",
-              cursor: loading || !canLaunch ? "not-allowed" : "pointer",
-              marginTop: "2.2rem",
-              width: "100%",
-              opacity: loading || !canLaunch ? 0.75 : 1,
-              fontFamily: MODERN_FONT,
-              boxShadow: "0 2px 18px 0 #15713717"
-            }}
-            title={!canLaunch ? "Fill in all required fields. Budget must be $3+." : ""}
-          >
-            {loading ? "Launching..." : "Launch Campaign"}
-          </button>
-          {launched && launchResult && (
-            <div style={{
-              color: "#1eea78",
-              fontWeight: 800,
-              marginTop: "1.2rem",
-              fontSize: "1.16rem",
-              textShadow: "0 2px 8px #0a893622"
-            }}>
-              Campaign launched! ID: {launchResult.campaignId || "--"}
-            </div>
-          )}
-          {launched && metrics && (
+         {/* LAUNCH BUTTON */}
+<button
+  type="button"
+  onClick={handleLaunch}
+  disabled={loading || !canLaunch}
+  style={{
+    background: DARK_GREEN,
+    color: "#fff",
+    fontWeight: 700,
+    borderRadius: "1.1rem",
+    border: "none",
+    padding: "1rem 2.4rem",
+    fontSize: "1.14rem",
+    cursor: loading || !canLaunch ? "not-allowed" : "pointer",
+    marginTop: "2.2rem",
+    width: "100%",
+    opacity: loading || !canLaunch ? 0.75 : 1,
+    fontFamily: MODERN_FONT,
+    boxShadow: "0 2px 18px 0 #15713717"
+  }}
+  title={!canLaunch ? "Fill in all required fields. Budget must be $3+." : ""}
+>
+  {loading ? "Launching..." : "Launch Campaign"}
+</button>
+{launched && launchResult && (
+  <div style={{
+    color: "#1eea78",
+    fontWeight: 800,
+    marginTop: "1.2rem",
+    fontSize: "1.16rem",
+    textShadow: "0 2px 8px #0a893622"
+  }}>
+    Campaign launched! ID: {launchResult.campaignId || "--"}
+  </div>
+)}
+{selectedCampaignId && metrics && (
   <div
     style={{
       background: "#191d1f",
@@ -779,42 +779,42 @@ const CampaignSetup = () => {
   </div>
 )}
 
+    </div>
+  </div>
+  {/* Pause Modal */}
+  {showPauseModal && (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+      background: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+    }}>
+      <div style={{
+        background: '#24262b', borderRadius: 16, padding: 32, minWidth: 340, boxShadow: "0 8px 40px #000a"
+      }}>
+        <div style={{fontWeight: 700, fontSize: 20, marginBottom: 24, color:'#fff'}}>
+          Are you sure you want to pause this campaign?
+        </div>
+        <div style={{display: 'flex', justifyContent: 'flex-end', gap: 16}}>
+          <button
+            onClick={() => setShowPauseModal(false)}
+            style={{background:'#e74c3c', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
+          >
+            No
+          </button>
+          <button
+            onClick={async () => {
+              setShowPauseModal(false);
+              await pauseCampaign();
+            }}
+            style={{background:'#21b16d', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
+          >
+            Yes, Pause
+          </button>
         </div>
       </div>
-      {/* Pause Modal */}
-      {showPauseModal && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          background: 'rgba(0,0,0,0.32)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-        }}>
-          <div style={{
-            background: '#24262b', borderRadius: 16, padding: 32, minWidth: 340, boxShadow: "0 8px 40px #000a"
-          }}>
-            <div style={{fontWeight: 700, fontSize: 20, marginBottom: 24, color:'#fff'}}>
-              Are you sure you want to pause this campaign?
-            </div>
-            <div style={{display: 'flex', justifyContent: 'flex-end', gap: 16}}>
-              <button
-                onClick={() => setShowPauseModal(false)}
-                style={{background:'#e74c3c', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
-              >
-                No
-              </button>
-              <button
-                onClick={async () => {
-                  setShowPauseModal(false);
-                  await pauseCampaign();
-                }}
-                style={{background:'#21b16d', color:'#fff', border:'none', padding:'0.6rem 1.5rem', borderRadius:12, fontWeight:700, cursor:'pointer'}}
-              >
-                Yes, Pause
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
-  );
+  )}
+</div>
+);
 };
 
 export default CampaignSetup;
