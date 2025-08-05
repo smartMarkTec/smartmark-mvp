@@ -770,14 +770,17 @@ const CampaignSetup = () => {
     </div>
     <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
     <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
+    <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
+    <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
+    <div>Results: <b>{metrics?.results ?? "--"}</b></div>
     <div>Cost per Result: <b>
       {metrics?.spend && metrics?.results
         ? `$${(metrics.spend / metrics.results).toFixed(2)}`
         : "--"}
     </b></div>
-    <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
   </div>
 )}
+
 
     </div>
   </div>
