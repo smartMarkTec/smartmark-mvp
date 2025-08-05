@@ -716,7 +716,7 @@ const CampaignSetup = () => {
   )}
 </div>
 
-         {/* LAUNCH BUTTON */}
+       {/* LAUNCH BUTTON */}
 <button
   type="button"
   onClick={handleLaunch}
@@ -751,7 +751,7 @@ const CampaignSetup = () => {
     Campaign launched! ID: {launchResult.campaignId || "--"}
   </div>
 )}
-{selectedCampaignId && metrics && (
+{selectedCampaignId && (
   <div
     style={{
       background: "#191d1f",
@@ -768,14 +768,14 @@ const CampaignSetup = () => {
     <div style={{ fontSize: "1.22rem", fontWeight: 800, color: "#fff", marginBottom: 10 }}>
       Campaign: {form.campaignName || "—"}
     </div>
-    <div>Impressions: <b>{metrics.impressions ?? "--"}</b></div>
-    <div>Clicks: <b>{metrics.clicks ?? "--"}</b></div>
+    <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
+    <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
     <div>Cost per Result: <b>
-      {metrics.spend && metrics.results
+      {metrics?.spend && metrics?.results
         ? `$${(metrics.spend / metrics.results).toFixed(2)}`
         : "--"}
     </b></div>
-    <div>Spend: <b>{metrics.spend ? `$${metrics.spend}` : "--"}</b></div>
+    <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
   </div>
 )}
 
