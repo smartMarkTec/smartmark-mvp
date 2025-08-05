@@ -948,26 +948,53 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Video concat failed", detail: e.message });
     }
 
-    // Overlay text during last 25% of video
-    const overlayStart = (finalDuration * 0.75).toFixed(2);
-    const overlayEnd = finalDuration.toFixed(2);
-    const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-    const safeOverlayText = String(overlayText)
-      .replace(/[\n\r:"]/g, " ")
-      .replace(/'/g, "")
-      .replace(/[^a-zA-Z0-9\s!]/g, "");
-    let overlayCmd;
-    if (fs.existsSync(fontfile)) {
-      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
-    } else {
-      overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=40:box=1:boxcolor=black@0.5:boxborderw=7:shadowcolor=black:shadowx=2:shadowy=2:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'" -c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
-    }
-    try {
-      await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out");
-    } catch (e) {
-      console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Text overlay failed", detail: e.message });
-    }
+    // -------- Modern glass-style CTA box with random neutral color --------
+const neutralColors = [
+  "#eae9e6", // light taupe
+  "#22242c", // blue-black
+  "#dedede", // off-white
+  "#2c2d33", // slate gray
+  "#bdbbbb", // stone
+  "#19222e", // dark blue-gray
+  "#edead9", // cream
+  "#393e46", // dark neutral
+];
+const boxColor = neutralColors[Math.floor(Math.random() * neutralColors.length)];
+const boxAlpha = 0.86;
+
+// Overlay text during last 25% of video (MODERN glass style box)
+const overlayStart = (finalDuration * 0.75).toFixed(2);
+const overlayEnd = finalDuration.toFixed(2);
+const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"; // Replace with your font if you want
+const safeOverlayText = String(overlayText)
+  .replace(/[\n\r:"]/g, " ")
+  .replace(/'/g, "")
+  .replace(/[^a-zA-Z0-9\s!🛒📦⚡]/g, "");
+let overlayCmd;
+if (fs.existsSync(fontfile)) {
+  overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf \
+"drawbox=x=(w/2-228):y=(h/2-56):w=456:h=112:color=black@0.18:t=fill, \
+ drawbox=x=(w/2-222):y=(h/2-50):w=444:h=100:color=white@0.07:t=fill, \
+ drawbox=x=(w/2-220):y=(h/2-48):w=440:h=95:color=${boxColor}@${boxAlpha}:t=fill, \
+ drawbox=x=(w/2-220):y=(h/2-48):w=440:h=95:color=black@0.11:t=1, \
+ drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'" \
+-c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+} else {
+  overlayCmd = `${ffmpegPath} -y -i "${tempConcat}" -vf \
+"drawbox=x=(w/2-228):y=(h/2-56):w=456:h=112:color=black@0.18:t=fill, \
+ drawbox=x=(w/2-222):y=(h/2-50):w=444:h=100:color=white@0.07:t=fill, \
+ drawbox=x=(w/2-220):y=(h/2-48):w=440:h=95:color=${boxColor}@${boxAlpha}:t=fill, \
+ drawbox=x=(w/2-220):y=(h/2-48):w=440:h=95:color=black@0.11:t=1, \
+ drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'" \
+-c:v libx264 -crf 24 -preset veryfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+}
+try {
+  await withTimeout(exec(overlayCmd), 60000, "ffmpeg overlay timed out");
+} catch (e) {
+  console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
+  return res.status(500).json({ error: "Text overlay failed", detail: e.message });
+}
+
 
     // Final mux: add TTS audio to video
     try {
