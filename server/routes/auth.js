@@ -138,13 +138,20 @@ let targeting = {
 if (aiAudience && aiAudience.location) {
   const loc = aiAudience.location.toLowerCase();
   if (loc.includes("texas")) {
-    targeting.geo_locations = { countries: ["US"], regions: [{ key: "3886" }] };
+    targeting.geo_locations = { regions: [{ key: "3886" }] };
+  } else if (loc.includes("california")) {
+    targeting.geo_locations = { regions: [{ key: "3841" }] };
   } else if (loc.includes("usa") || loc.includes("united states")) {
     targeting.geo_locations = { countries: ["US"] };
-  } else if (loc.match(/[a-z]+/)) {
-    targeting.geo_locations = { countries: [aiAudience.location.toUpperCase()] };
+  } else if (/^[a-z]{2}$/i.test(aiAudience.location.trim())) {
+    // For country codes like "CA", "GB"
+    targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
+  } else {
+    // Default: use countries with upper-case
+    targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
   }
 }
+
 
 if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
   const [min, max] = aiAudience.ageRange.split('-').map(Number);
