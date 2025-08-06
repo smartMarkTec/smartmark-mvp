@@ -211,53 +211,91 @@ if (aiAudience && aiAudience.interests) {
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
     }
 
-    // === 2. VIDEO UPLOAD (if base64 provided) ===
-    if (adVideo && adVideo.startsWith("data:")) {
-      const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
-      if (!matches) throw new Error("Invalid video data.");
-      const base64Video = matches[2];
+  // === 2. VIDEO UPLOAD (support both base64 and remote URLs) ===
+if (adVideo && adVideo.startsWith("data:")) {
+  const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+  if (!matches) throw new Error("Invalid video data.");
+  const base64Video = matches[2];
 
-      // Upload the video to Facebook
-      const uploadRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-        new URLSearchParams({
-          access_token: userToken,
-          file_type: "MP4",
-          upload_phase: "start",
-          // If needed: 'name': campaignName
-        }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
-      const uploadSessionId = uploadRes.data.upload_session_id;
+  // Upload the video to Facebook (as before)
+  const uploadRes = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      file_type: "MP4",
+      upload_phase: "start"
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  const uploadSessionId = uploadRes.data.upload_session_id;
 
-      // Now transfer the base64 video to Facebook (chunk upload, here simplified as one part)
-      await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-        new URLSearchParams({
-          access_token: userToken,
-          upload_phase: "transfer",
-          upload_session_id: uploadSessionId,
-          video_file_chunk: Buffer.from(base64Video, 'base64'),
-        }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
+  // Now transfer the base64 video to Facebook (chunk upload, simplified)
+  await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      upload_phase: "transfer",
+      upload_session_id: uploadSessionId,
+      video_file_chunk: Buffer.from(base64Video, 'base64'),
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
 
-      // Finish the upload
-      const finishRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-        new URLSearchParams({
-          access_token: userToken,
-          upload_phase: "finish",
-          upload_session_id: uploadSessionId
-        }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
-      videoId = finishRes.data.video_id;
-    } else if (adVideo && adVideo.startsWith("https://")) {
-      // If you already have a Facebook-hosted video_id, set videoId here
-      // (You'll need to manage this on the frontend/backend)
-      videoId = adVideo; // Or extract FB video ID if available
-    }
+  // Finish the upload
+  const finishRes = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      upload_phase: "finish",
+      upload_session_id: uploadSessionId
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  videoId = finishRes.data.video_id;
+
+} else if (adVideo && adVideo.startsWith("http")) {
+  // --- NEW: handle remote video URL ---
+  const response = await axios.get(adVideo, { responseType: 'arraybuffer' });
+  const base64Video = Buffer.from(response.data, 'binary').toString('base64');
+
+  // Upload the video to Facebook (same process)
+  const uploadRes = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      file_type: "MP4",
+      upload_phase: "start"
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  const uploadSessionId = uploadRes.data.upload_session_id;
+
+  await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      upload_phase: "transfer",
+      upload_session_id: uploadSessionId,
+      video_file_chunk: Buffer.from(base64Video, 'base64'),
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+
+  const finishRes = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      upload_phase: "finish",
+      upload_session_id: uploadSessionId
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  videoId = finishRes.data.video_id;
+} else if (adVideo && adVideo.startsWith("https://")) {
+  // You can add logic here if Facebook already hosted (advanced), else fallback:
+  videoId = adVideo;
+}
+
 
     // === 3. Budget ===
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
