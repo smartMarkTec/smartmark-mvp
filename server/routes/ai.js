@@ -1116,9 +1116,23 @@ if (!videoReady) {
 [tempConcat, tempTrimmed, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
 // Return public video URL and script
-const publicUrl = `/generated/${videoId}.mp4`;
-return res.json({ videoUrl: publicUrl, script, overlayText, voice: TTS_VOICE });
+const publicVideoUrl = `/generated/${videoId}.mp4`;
+// const publicImageUrl = `/generated/${imageId}.jpg`; // If image is generated in same route
 
+return res.json({
+  videoUrl: publicVideoUrl,
+  // imageUrl: publicImageUrl, // Add when available!
+  video: {
+    url: publicVideoUrl,
+    script,
+    overlayText,
+    voice: TTS_VOICE
+  },
+  // image: { url: publicImageUrl }, // Add when available!
+  script,
+  overlayText,
+  voice: TTS_VOICE
+});
 
   } catch (err) {
     // Always send valid JSON even on crash
