@@ -977,39 +977,46 @@ const handleRegenerateVideo = async () => {
 
       {/* CONTINUE BUTTON: Centered under the previews */}
 <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 18 }}>
-  <button
-    style={{
-      background: "#14e7b9",
-      color: "#181b20",
-      border: "none",
-      borderRadius: 13,
-      fontWeight: 700,
-      fontSize: "1.19rem",
-      padding: "18px 72px",
-      marginBottom: 18,
-      marginTop: 2,
-      fontFamily: MODERN_FONT,
-      boxShadow: "0 2px 16px #0cc4be24",
-      cursor: "pointer",
-      transition: "background 0.18s"
-    }}
-    onClick={() => {
-      if (imageUrl) localStorage.setItem("smartmark_last_image_url", imageUrl);
-      if (videoUrl) localStorage.setItem("smartmark_last_video_url", videoUrl);
-      navigate("/setup", {
-        state: {
-          imageUrl,        // AI-generated image URL (with overlay)
-          videoUrl,        // AI-generated video URL
-          headline: result?.headline,
-          body: result?.body,
-          videoScript,
-          answers          // All user answers (full survey)
-        }
-      });
-    }}
-  >
-    Continue
-  </button>
+<button
+  style={{
+    background: "#14e7b9",
+    color: "#181b20",
+    border: "none",
+    borderRadius: 13,
+    fontWeight: 700,
+    fontSize: "1.19rem",
+    padding: "18px 72px",
+    marginBottom: 18,
+    marginTop: 2,
+    fontFamily: MODERN_FONT,
+    boxShadow: "0 2px 16px #0cc4be24",
+    cursor: "pointer",
+    transition: "background 0.18s"
+  }}
+  onClick={() => {
+    // Always store and send ABSOLUTE URLs
+    let imgUrlToSend = imageUrl;
+    let vidUrlToSend = videoUrl;
+    // If relative, prepend backend
+    if (imgUrlToSend && !/^https?:\/\//.test(imgUrlToSend)) imgUrlToSend = BACKEND_URL + imgUrlToSend;
+    if (vidUrlToSend && !/^https?:\/\//.test(vidUrlToSend)) vidUrlToSend = BACKEND_URL + vidUrlToSend;
+    if (imgUrlToSend) localStorage.setItem("smartmark_last_image_url", imgUrlToSend);
+    if (vidUrlToSend) localStorage.setItem("smartmark_last_video_url", vidUrlToSend);
+    navigate("/setup", {
+      state: {
+        imageUrl: imgUrlToSend,
+        videoUrl: vidUrlToSend,
+        headline: result?.headline,
+        body: result?.body,
+        videoScript,
+        answers
+      }
+    });
+  }}
+>
+  Continue
+</button>
+
 </div>
 
 

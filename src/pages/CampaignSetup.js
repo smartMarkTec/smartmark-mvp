@@ -882,32 +882,66 @@ useEffect(() => {
                 </select>
               </div>
 
-              {/* MEDIA PREVIEW: Video & Image */}
-{/* MEDIA PREVIEW: Video & Image */}
+   {/* MEDIA PREVIEW: Video & Image */}
 {(mediaImageUrl || mediaVideoUrl) && (
-  <div style={{ display: "flex", gap: "18px", margin: "22px 0 0 0", alignItems: "center" }}>
+  <div
+    style={{
+      display: "flex",
+      flexDirection: mediaImageUrl && mediaVideoUrl ? "row" : "column",
+      gap: "18px",
+      margin: "22px 0 0 0",
+      alignItems: "center",
+      justifyContent: "center"
+    }}
+  >
     {mediaImageUrl && (
-      <a href={mediaImageUrl} target="_blank" rel="noopener noreferrer">
+      <a
+        href={mediaImageUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        tabIndex={0}
+        aria-label="Open ad image in new tab"
+        style={{ outline: "none" }}
+      >
         <img
           src={mediaImageUrl}
           alt="Ad Creative"
           style={{
-            width: 110,
-            height: 110,
-            borderRadius: 14,
+            width: 120,
+            height: 120,
+            borderRadius: 16,
             objectFit: "cover",
-            boxShadow: "0 2px 10px rgba(30,200,133,0.13)",
+            boxShadow: "0 2px 18px 0 rgba(30,200,133,0.19)",
             border: "2.2px solid #1ec885",
-            cursor: "pointer"
+            cursor: "pointer",
+            transition: "transform 0.16s cubic-bezier(.4,2.5,.7,1.4), box-shadow 0.13s",
           }}
+          onMouseOver={e => e.currentTarget.style.transform = "scale(1.07)"}
+          onMouseOut={e => e.currentTarget.style.transform = "scale(1)"}
         />
       </a>
     )}
     {mediaVideoUrl && (
-      <VideoPreviewBox videoUrl={mediaVideoUrl} />
+      <div
+        style={{
+          width: 140,
+          height: 120,
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "#232a24",
+          boxShadow: "0 2px 18px 0 rgba(30,200,133,0.12)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          border: "2.2px solid #1ec885",
+        }}
+      >
+        <VideoPreviewBox videoUrl={mediaVideoUrl} />
+      </div>
     )}
   </div>
 )}
+
 
               <div>
                 <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
