@@ -52,6 +52,16 @@ const CampaignSetup = () => {
   const [loading, setLoading] = useState(false);
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
+  // --- Media preview state for video & image (from navigation state, fallback to empty string) ---
+const [mediaImageUrl, setMediaImageUrl] = useState("");
+const [mediaVideoUrl, setMediaVideoUrl] = useState("");
+
+useEffect(() => {
+  setMediaImageUrl(location.state?.imageUrl || "");
+  setMediaVideoUrl(location.state?.videoUrl || "");
+}, [location.state]);
+
+
 
   // Dropdown open state (always open as per your request)
   const [dropdownOpen, setDropdownOpen] = useState(true);
@@ -752,6 +762,48 @@ const CampaignSetup = () => {
                   ))}
                 </select>
               </div>
+
+              {/* MEDIA PREVIEW: Video & Image */}
+{(mediaImageUrl || mediaVideoUrl) && (
+  <div style={{ display: "flex", gap: "18px", margin: "22px 0 0 0", alignItems: "center" }}>
+    {mediaImageUrl && (
+      <a href={mediaImageUrl} target="_blank" rel="noopener noreferrer">
+        <img
+          src={mediaImageUrl}
+          alt="Ad Creative"
+          style={{
+            width: 110,
+            height: 110,
+            borderRadius: 14,
+            objectFit: "cover",
+            boxShadow: "0 2px 10px rgba(30,200,133,0.13)",
+            border: "2.2px solid #1ec885",
+            cursor: "pointer"
+          }}
+        />
+      </a>
+    )}
+    {mediaVideoUrl && (
+      <a href={mediaVideoUrl} target="_blank" rel="noopener noreferrer">
+        <video
+          src={mediaVideoUrl}
+          style={{
+            width: 110,
+            height: 110,
+            borderRadius: 14,
+            objectFit: "cover",
+            boxShadow: "0 2px 10px rgba(30,200,133,0.13)",
+            border: "2.2px solid #1ec885",
+            cursor: "pointer"
+          }}
+          controls
+        />
+      </a>
+    )}
+  </div>
+)}
+
+
               <div>
                 <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
                 <select
