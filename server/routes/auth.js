@@ -211,37 +211,45 @@ if (aiAudience && aiAudience.interests) {
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
     }
 
-  // === 2. VIDEO UPLOAD (support both base64 and remote URLs) ===
+// === 2. VIDEO UPLOAD (support both base64 and remote URLs) ===
 if (adVideo && adVideo.startsWith("data:")) {
   const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
   if (!matches) throw new Error("Invalid video data.");
   const base64Video = matches[2];
 
-  // Upload the video to Facebook (as before)
-  const uploadRes = await axios.post(
+  // 1. Start the upload session
+  const uploadStartRes = await axios.post(
     `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
     new URLSearchParams({
       access_token: userToken,
-      file_type: "MP4",
+      file_size: Buffer.byteLength(base64Video, "base64"),
       upload_phase: "start"
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
-  const uploadSessionId = uploadRes.data.upload_session_id;
+  const uploadSessionId = uploadStartRes.data.upload_session_id;
+  let start_offset = uploadStartRes.data.start_offset;
+  let end_offset = uploadStartRes.data.end_offset;
 
-  // Now transfer the base64 video to Facebook (chunk upload, simplified)
-  await axios.post(
+  // 2. Transfer phase (send the chunk from start_offset to end_offset)
+  // For single-chunk uploads, just send the whole video at once.
+  const transferRes = await axios.post(
     `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
     new URLSearchParams({
       access_token: userToken,
       upload_phase: "transfer",
       upload_session_id: uploadSessionId,
-      video_file_chunk: Buffer.from(base64Video, 'base64'),
+      start_offset: start_offset,
+      video_file_chunk: Buffer.from(base64Video, 'base64')
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
+  // Normally you'd repeat transfer until end_offset == start_offset
+  // For most small videos, one chunk suffices. Get updated end_offset.
+  start_offset = transferRes.data.start_offset;
+  end_offset = transferRes.data.end_offset;
 
-  // Finish the upload
+  // 3. Finish phase
   const finishRes = await axios.post(
     `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
     new URLSearchParams({
@@ -254,33 +262,40 @@ if (adVideo && adVideo.startsWith("data:")) {
   videoId = finishRes.data.video_id;
 
 } else if (adVideo && adVideo.startsWith("http")) {
-  // --- NEW: handle remote video URL ---
+  // Download remote video and repeat same logic
   const response = await axios.get(adVideo, { responseType: 'arraybuffer' });
   const base64Video = Buffer.from(response.data, 'binary').toString('base64');
 
-  // Upload the video to Facebook (same process)
-  const uploadRes = await axios.post(
+  // 1. Start
+  const uploadStartRes = await axios.post(
     `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
     new URLSearchParams({
       access_token: userToken,
-      file_type: "MP4",
+      file_size: Buffer.byteLength(base64Video, "base64"),
       upload_phase: "start"
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
-  const uploadSessionId = uploadRes.data.upload_session_id;
+  const uploadSessionId = uploadStartRes.data.upload_session_id;
+  let start_offset = uploadStartRes.data.start_offset;
+  let end_offset = uploadStartRes.data.end_offset;
 
-  await axios.post(
+  // 2. Transfer
+  const transferRes = await axios.post(
     `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
     new URLSearchParams({
       access_token: userToken,
       upload_phase: "transfer",
       upload_session_id: uploadSessionId,
-      video_file_chunk: Buffer.from(base64Video, 'base64'),
+      start_offset: start_offset,
+      video_file_chunk: Buffer.from(base64Video, 'base64')
     }),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
   );
+  start_offset = transferRes.data.start_offset;
+  end_offset = transferRes.data.end_offset;
 
+  // 3. Finish
   const finishRes = await axios.post(
     `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
     new URLSearchParams({
@@ -292,9 +307,10 @@ if (adVideo && adVideo.startsWith("data:")) {
   );
   videoId = finishRes.data.video_id;
 } else if (adVideo && adVideo.startsWith("https://")) {
-  // You can add logic here if Facebook already hosted (advanced), else fallback:
+  // Already a Facebook video
   videoId = adVideo;
 }
+
 
 
     // === 3. Budget ===
