@@ -216,7 +216,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     const videoBuffer = Buffer.from(base64Video, "base64");
     const totalBytes = videoBuffer.length;
 
-    // 1. Start session
+    // 1. Start upload session
     const startRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
       new URLSearchParams({
@@ -230,7 +230,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     let start_offset = parseInt(startRes.data.start_offset, 10);
     let end_offset = parseInt(startRes.data.end_offset, 10);
 
-    // 2. Transfer chunks
+    // 2. Transfer chunks (chunked upload)
     while (start_offset < end_offset) {
       const chunk = videoBuffer.slice(start_offset, end_offset);
       const form = new FormData();
@@ -249,7 +249,7 @@ if (adVideo && adVideo.startsWith("data:")) {
       end_offset = parseInt(transferRes.data.end_offset, 10);
     }
 
-    // 3. Finish phase—**videoId is returned here if successful**
+    // 3. Finish phase
     const finishRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
       new URLSearchParams({
@@ -262,11 +262,15 @@ if (adVideo && adVideo.startsWith("data:")) {
     console.log("[launch-campaign] FB finishRes data:", finishRes.data);
 
     videoId = finishRes.data.video_id || null;
+
+    // --- FINAL DIAGNOSTICS ---
     if (!videoId) {
-      // Extra debug: Dump the full finish response to help diagnose
-      throw new Error(
-        "No videoId returned after finish phase! " + JSON.stringify(finishRes.data)
-      );
+      // Facebook rejected the file or failed to process it as an ad video.
+      // Dump file info for you to debug format/duration/size issues.
+      console.error("[launch-campaign] Video upload failed: No videoId returned after finish phase!");
+      console.error("[launch-campaign] Try with a <5MB, 10-15s, H.264 MP4. Check the file with ffmpeg -i yourfile.mp4.");
+      console.error("[launch-campaign] You can also test upload at: https://developers.facebook.com/tools/explorer/");
+      throw new Error("No videoId returned after finish phase! " + JSON.stringify(finishRes.data));
     }
     console.log("[launch-campaign] Uploaded videoId:", videoId);
   } catch (e) {
@@ -274,6 +278,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     videoId = null; // Continue with just image if needed
   }
 }
+
 
 
   // --- log final state ---
