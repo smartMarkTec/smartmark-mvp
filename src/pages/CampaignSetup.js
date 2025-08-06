@@ -357,40 +357,64 @@ useEffect(() => {
     parseFloat(budget) >= 3
   );
 
-  const handleLaunch = async () => {
-    setLoading(true);
-    try {
-      const acctId = selectedAccount.replace("act_", "");
-      const safeBudget = Math.max(3, Number(budget) || 0);
-  const payload = {
-  form: { ...form },
-  budget: safeBudget,
-  campaignType: form?.campaignType || "Website Traffic",
-  pageId: selectedPageId,
-  aiAudience: form?.aiAudience,
-  adCopy: headline,         // Use the main headline or body as ad copy
-  adImage: imageUrl,        // base64 or URL for image
-  adVideo: videoUrl,        // base64 or FB video ID/URL
-  answers
+  // Utility to fetch and convert a URL to base64
+async function urlToBase64(url) {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result);
+    reader.readAsDataURL(blob);
+  });
+}
+
+const handleLaunch = async () => {
+  setLoading(true);
+  try {
+    const acctId = selectedAccount.replace("act_", "");
+    const safeBudget = Math.max(3, Number(budget) || 0);
+
+    // Convert image/video to base64 if they're not already
+    let adImage = imageUrl;
+    let adVideo = videoUrl;
+
+    if (adImage && !adImage.startsWith("data:")) {
+      adImage = await urlToBase64(adImage);
+    }
+    if (adVideo && !adVideo.startsWith("data:")) {
+      adVideo = await urlToBase64(adVideo);
+    }
+
+    const payload = {
+      form: { ...form },
+      budget: safeBudget,
+      campaignType: form?.campaignType || "Website Traffic",
+      pageId: selectedPageId,
+      aiAudience: form?.aiAudience,
+      adCopy: headline,
+      adImage,
+      adVideo,
+      answers
+    };
+
+    const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Server error");
+    setLaunched(true);
+    setLaunchResult(json);
+    setTimeout(() => setLaunched(false), 1500);
+  } catch (err) {
+    alert("Failed to launch campaign: " + (err.message || ""));
+    console.error(err);
+  }
+  setLoading(false);
 };
 
-const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(payload),
-});
-
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Server error");
-      setLaunched(true);
-      setLaunchResult(json);
-      setTimeout(() => setLaunched(false), 1500);
-    } catch (err) {
-      alert("Failed to launch campaign: " + (err.message || ""));
-      console.error(err);
-    }
-    setLoading(false);
-  };
 
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
