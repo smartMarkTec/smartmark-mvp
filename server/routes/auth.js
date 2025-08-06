@@ -208,53 +208,56 @@ try {
 
     // VIDEO (chunked upload is best)
     if (adVideo && adVideo.startsWith("data:")) {
-      const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
-      if (!matches) throw new Error("Invalid video data.");
-      const base64Video = matches[2];
-      const videoBuffer = Buffer.from(base64Video, "base64");
-      // Chunked upload (see prior logic; 5MB per chunk)
-      const uploadStartRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-        new URLSearchParams({
-          access_token: userToken,
-          file_size: videoBuffer.length,
-          upload_phase: "start"
-        }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
-      const uploadSessionId = uploadStartRes.data.upload_session_id;
-      let start_offset = parseInt(uploadStartRes.data.start_offset, 10);
-      let end_offset = parseInt(uploadStartRes.data.end_offset, 10);
-      while (start_offset < videoBuffer.length) {
-        const chunk = videoBuffer.slice(start_offset, end_offset);
-        const chunkBase64 = chunk.toString('base64');
-        const transferRes = await axios.post(
-          `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-          new URLSearchParams({
-            access_token: userToken,
-            upload_phase: "transfer",
-            upload_session_id: uploadSessionId,
-            start_offset: start_offset,
-            video_file_chunk: chunkBase64
-          }),
-          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-        );
-        start_offset = parseInt(transferRes.data.start_offset, 10);
-        end_offset = parseInt(transferRes.data.end_offset, 10);
-        if (start_offset >= videoBuffer.length || start_offset === end_offset) break;
-      }
-      // Finish
-      const finishRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-        new URLSearchParams({
-          access_token: userToken,
-          upload_phase: "finish",
-          upload_session_id: uploadSessionId
-        }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
-      videoId = finishRes.data.video_id;
-    }
+  const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+  if (!matches) throw new Error("Invalid video data.");
+  const base64Video = matches[2];
+  const videoBuffer = Buffer.from(base64Video, "base64");
+
+  // 1. Start the upload session
+  const startRes = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      file_size: videoBuffer.length,
+      upload_phase: "start"
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  const uploadSessionId = startRes.data.upload_session_id;
+  let start_offset = startRes.data.start_offset;
+  let end_offset = startRes.data.end_offset;
+
+  // 2. Chunked upload (use FormData for binary)
+  while (start_offset !== end_offset) {
+    const chunk = videoBuffer.slice(Number(start_offset), Number(end_offset));
+    const form = new FormData();
+    form.append('access_token', userToken);
+    form.append('upload_phase', 'transfer');
+    form.append('upload_session_id', uploadSessionId);
+    form.append('start_offset', start_offset);
+    form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
+
+    const transferRes = await axios.post(
+      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+      form,
+      { headers: form.getHeaders() }
+    );
+    start_offset = transferRes.data.start_offset;
+    end_offset = transferRes.data.end_offset;
+  }
+
+  // 3. Finish phase
+  const finishRes = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+    new URLSearchParams({
+      access_token: userToken,
+      upload_phase: "finish",
+      upload_session_id: uploadSessionId
+    }),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+  );
+  videoId = finishRes.data.video_id;
+}
 
     // 2. Create Campaign
     const campaignRes = await axios.post(
