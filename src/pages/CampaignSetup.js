@@ -56,10 +56,19 @@ const CampaignSetup = () => {
 const [mediaImageUrl, setMediaImageUrl] = useState("");
 const [mediaVideoUrl, setMediaVideoUrl] = useState("");
 
+// Always use navigation state if present, otherwise fallback to localStorage
 useEffect(() => {
-  setMediaImageUrl(location.state?.imageUrl || "");
-  setMediaVideoUrl(location.state?.videoUrl || "");
+  let img = location.state?.imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+  let vid = location.state?.videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
+
+  setMediaImageUrl(img);
+  setMediaVideoUrl(vid);
+
+  // Update localStorage if coming from navigation
+  if (location.state?.imageUrl) localStorage.setItem("smartmark_last_image_url", location.state.imageUrl);
+  if (location.state?.videoUrl) localStorage.setItem("smartmark_last_video_url", location.state.videoUrl);
 }, [location.state]);
+
 
 
 
