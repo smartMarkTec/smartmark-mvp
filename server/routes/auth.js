@@ -303,23 +303,61 @@ if (adVideo && adVideo.startsWith("data:")) {
     );
     const campaignId = campaignRes.data.id;
 
-    // === 5. Create ad set ===
-    const adSetRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-      {
-        name: `${campaignName} - ${new Date().toISOString()}`,
-        campaign_id: campaignId,
-        daily_budget: dailyBudgetCents,
-        billing_event: "IMPRESSIONS",
-        optimization_goal: "LINK_CLICKS",
-        bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-        status: "ACTIVE",
-        start_time: new Date(Date.now() + 60 * 1000).toISOString(),
-        end_time: null,
-        targeting,
-      },
-      { params: { access_token: userToken } }
-    );
+    // === Placement selection logic ===
+
+// These are the defaults for image-only ads (broadest, excludes video-only placements)
+let publisher_platforms = ["facebook", "instagram"];
+let facebook_positions = ["feed"];
+let audience_network_positions = [];
+let instagram_positions = ["stream"];
+
+if (adVideo && !adImage) {
+  // VIDEO ONLY: target all placements that support video
+  publisher_platforms = ["facebook", "audience_network", "instagram"];
+  facebook_positions = ["feed", "instream_video"];
+  audience_network_positions = ["rewarded_video"]; // <- video only!
+  instagram_positions = ["stream", "reels", "story"];
+} else if (adImage && !adVideo) {
+  // IMAGE ONLY: no video placements
+  publisher_platforms = ["facebook", "instagram"];
+  facebook_positions = ["feed"];
+  audience_network_positions = []; // don't include rewarded_video
+  instagram_positions = ["stream"];
+} else if (adImage && adVideo) {
+  // BOTH: Only use placements that support both, or default to video placements
+  publisher_platforms = ["facebook", "audience_network", "instagram"];
+  facebook_positions = ["feed", "instream_video"];
+  audience_network_positions = ["rewarded_video"];
+  instagram_positions = ["stream", "reels", "story"];
+}
+
+// Now, add these to your targeting object:
+targeting = {
+  ...targeting,
+  publisher_platforms,
+  facebook_positions,
+  audience_network_positions,
+  instagram_positions,
+};
+
+// === 5. Create ad set ===
+const adSetRes = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+  {
+    name: `${campaignName} - ${new Date().toISOString()}`,
+    campaign_id: campaignId,
+    daily_budget: dailyBudgetCents,
+    billing_event: "IMPRESSIONS",
+    optimization_goal: "LINK_CLICKS",
+    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+    status: "ACTIVE",
+    start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+    end_time: null,
+    targeting, // <-- targeting object now has correct placements!
+  },
+  { params: { access_token: userToken } }
+);
+
     const adSetId = adSetRes.data.id;
 
     // === 6. Create ad creative (IMAGE or VIDEO) ===
