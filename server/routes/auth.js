@@ -107,7 +107,7 @@ router.post('/login', async (req, res) => {
 });
 
 
-// ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests, IMAGE or VIDEO) ======
+// ====== LAUNCH CAMPAIGN (Create separate ad sets for image and video) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
@@ -115,8 +115,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
   const { form = {}, budget, adCopy, adImage, adVideo, campaignType, pageId, aiAudience: aiAudienceRaw } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
-
-  // ===== 1. Parse AI Audience =====
   let aiAudience = null;
   try {
     if (typeof aiAudienceRaw === "string") {
@@ -124,17 +122,15 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     } else if (typeof aiAudienceRaw === "object" && aiAudienceRaw !== null) {
       aiAudience = aiAudienceRaw;
     }
-  } catch {
-    aiAudience = null;
-  }
+  } catch { aiAudience = null; }
 
- // ===== 2. Build Targeting =====
-let targeting = {
-  geo_locations: { countries: ["US"] },
-  age_min: 18,
-  age_max: 65,
-  targeting_automation: { advantage_audience: 0 },
-};
+  // === Build targeting as you did before ===
+  let targeting = {
+    geo_locations: { countries: ["US"] },
+    age_min: 18,
+    age_max: 65,
+    targeting_automation: { advantage_audience: 0 },
+  };
 
 if (aiAudience && aiAudience.location) {
   const loc = aiAudience.location.toLowerCase();
@@ -188,10 +184,11 @@ if (aiAudience && aiAudience.interests) {
 }
 
 
-  try {
-    let imageHash = null;
-    let videoId = null;
-    // === 1. IMAGE UPLOAD (if base64 provided) ===
+try {
+    // 1. Upload creatives
+    let imageHash = null, videoId = null;
+
+    // IMAGE
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
       if (!matches) throw new Error("Invalid image data.");
@@ -200,10 +197,7 @@ if (aiAudience && aiAudience.interests) {
         `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
         new URLSearchParams({ bytes: base64Data }),
         {
-          headers: {
-            Authorization: undefined,
-            'Content-Type': 'application/x-www-form-urlencoded'
-          },
+          headers: { Authorization: undefined, 'Content-Type': 'application/x-www-form-urlencoded' },
           params: { access_token: userToken }
         }
       );
@@ -212,85 +206,57 @@ if (aiAudience && aiAudience.interests) {
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
     }
 
-// === 2. VIDEO UPLOAD (chunked, correct multipart/form-data) ===
-if (adVideo && adVideo.startsWith("data:")) {
-  const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
-  if (!matches) throw new Error("Invalid video data.");
-  const base64Video = matches[2];
-  const videoBuffer = Buffer.from(base64Video, "base64");
-
-  // 1. Start upload session
-  const uploadStartRes = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-    new URLSearchParams({
-      access_token: userToken,
-      file_size: videoBuffer.length,
-      upload_phase: "start"
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  );
-  const uploadSessionId = uploadStartRes.data.upload_session_id;
-  let start_offset = parseInt(uploadStartRes.data.start_offset, 10);
-  let end_offset = parseInt(uploadStartRes.data.end_offset, 10);
-
-  // 2. Chunked upload using FormData for each chunk
-  while (start_offset < videoBuffer.length) {
-    // slice the chunk according to the offsets
-    const chunk = videoBuffer.slice(start_offset, end_offset);
-    // FormData is required for 'video_file_chunk'
-    const formData = new FormData();
-    formData.append('access_token', userToken);
-    formData.append('upload_phase', 'transfer');
-    formData.append('upload_session_id', uploadSessionId);
-    formData.append('start_offset', String(start_offset));
-    formData.append('video_file_chunk', chunk, {
-      filename: "video.mp4",
-      contentType: "video/mp4",
-      knownLength: chunk.length
-    });
-
-    const transferRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-      formData,
-      { headers: formData.getHeaders() }
-    );
-
-    start_offset = parseInt(transferRes.data.start_offset, 10);
-    end_offset = parseInt(transferRes.data.end_offset, 10);
-    // If done
-    if (start_offset === end_offset) break;
-  }
-
-  // 3. Finish
-  const finishRes = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-    new URLSearchParams({
-      access_token: userToken,
-      upload_phase: "finish",
-      upload_session_id: uploadSessionId
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  );
-  videoId = finishRes.data.video_id;
-
-} else if (adVideo && adVideo.startsWith("http")) {
-  // Download remote video and use chunk upload logic (repeat above)
-  const response = await axios.get(adVideo, { responseType: 'arraybuffer' });
-  const videoBuffer = Buffer.from(response.data, 'binary');
-  // ...repeat logic above with FormData
-} else if (adVideo && adVideo.startsWith("https://")) {
-  // Already a Facebook video
-  videoId = adVideo;
-}
-
-
-    // === 3. Budget ===
-    let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
-    if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
-      return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
+    // VIDEO (chunked upload is best)
+    if (adVideo && adVideo.startsWith("data:")) {
+      const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+      if (!matches) throw new Error("Invalid video data.");
+      const base64Video = matches[2];
+      const videoBuffer = Buffer.from(base64Video, "base64");
+      // Chunked upload (see prior logic; 5MB per chunk)
+      const uploadStartRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          file_size: videoBuffer.length,
+          upload_phase: "start"
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      const uploadSessionId = uploadStartRes.data.upload_session_id;
+      let start_offset = parseInt(uploadStartRes.data.start_offset, 10);
+      let end_offset = parseInt(uploadStartRes.data.end_offset, 10);
+      while (start_offset < videoBuffer.length) {
+        const chunk = videoBuffer.slice(start_offset, end_offset);
+        const chunkBase64 = chunk.toString('base64');
+        const transferRes = await axios.post(
+          `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+          new URLSearchParams({
+            access_token: userToken,
+            upload_phase: "transfer",
+            upload_session_id: uploadSessionId,
+            start_offset: start_offset,
+            video_file_chunk: chunkBase64
+          }),
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        start_offset = parseInt(transferRes.data.start_offset, 10);
+        end_offset = parseInt(transferRes.data.end_offset, 10);
+        if (start_offset >= videoBuffer.length || start_offset === end_offset) break;
+      }
+      // Finish
+      const finishRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          upload_phase: "finish",
+          upload_session_id: uploadSessionId
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      videoId = finishRes.data.video_id;
     }
 
-    // === 4. Create campaign ===
+    // 2. Create Campaign
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -303,89 +269,35 @@ if (adVideo && adVideo.startsWith("data:")) {
     );
     const campaignId = campaignRes.data.id;
 
-    // === Placement selection logic ===
+    let adSetIds = [], creativeIds = [], adIds = [];
+    let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
 
-// These are the defaults for image-only ads (broadest, excludes video-only placements)
-let publisher_platforms = ["facebook", "instagram"];
-let facebook_positions = ["feed"];
-let audience_network_positions = [];
-let instagram_positions = ["stream"];
-
-if (adVideo && !adImage) {
-  // VIDEO ONLY: target all placements that support video
-  publisher_platforms = ["facebook", "audience_network", "instagram"];
-  facebook_positions = ["feed", "instream_video"];
-  audience_network_positions = ["rewarded_video"]; // <- video only!
-  instagram_positions = ["stream", "reels", "story"];
-} else if (adImage && !adVideo) {
-  // IMAGE ONLY: no video placements
-  publisher_platforms = ["facebook", "instagram"];
-  facebook_positions = ["feed"];
-  audience_network_positions = []; // don't include rewarded_video
-  instagram_positions = ["stream"];
-} else if (adImage && adVideo) {
-  // BOTH: Only use placements that support both, or default to video placements
-  publisher_platforms = ["facebook", "audience_network", "instagram"];
-  facebook_positions = ["feed", "instream_video"];
-  audience_network_positions = ["rewarded_video"];
-  instagram_positions = ["stream", "reels", "story"];
-}
-
-// Now, add these to your targeting object:
-targeting = {
-  ...targeting,
-  publisher_platforms,
-  facebook_positions,
-  audience_network_positions,
-  instagram_positions,
-};
-
-// === 5. Create ad set ===
-const adSetRes = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-  {
-    name: `${campaignName} - ${new Date().toISOString()}`,
-    campaign_id: campaignId,
-    daily_budget: dailyBudgetCents,
-    billing_event: "IMPRESSIONS",
-    optimization_goal: "LINK_CLICKS",
-    bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-    status: "ACTIVE",
-    start_time: new Date(Date.now() + 60 * 1000).toISOString(),
-    end_time: null,
-    targeting, // <-- targeting object now has correct placements!
-  },
-  { params: { access_token: userToken } }
-);
-
-    const adSetId = adSetRes.data.id;
-
-    // === 6. Create ad creative (IMAGE or VIDEO) ===
-    let creativeRes;
-    if (videoId) {
-      // VIDEO AD CREATIVE
-      creativeRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+    // 3. For each creative, create an ad set and ad
+    if (imageHash) {
+      // Image Ad Set
+      let imgAdSetRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
         {
-          name: `${campaignName} - ${new Date().toISOString()}`,
-          object_story_spec: {
-            page_id: pageId,
-            video_data: {
-              video_id: videoId,
-              message: adCopy,
-              title: campaignName,
-              description: form.description || ""
-            }
-          }
+          name: `${campaignName} (Image) - ${new Date().toISOString()}`,
+          campaign_id: campaignId,
+          daily_budget: dailyBudgetCents,
+          billing_event: "IMPRESSIONS",
+          optimization_goal: "LINK_CLICKS",
+          bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+          status: "ACTIVE",
+          start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+          targeting: { ...targeting, publisher_platforms: ["facebook", "instagram"], facebook_positions: ["feed"], audience_network_positions: [], instagram_positions: ["stream"] },
         },
         { params: { access_token: userToken } }
       );
-    } else if (imageHash) {
-      // IMAGE AD CREATIVE
-      creativeRes = await axios.post(
+      let adSetId = imgAdSetRes.data.id;
+      adSetIds.push(adSetId);
+
+      // Create Ad Creative for Image
+      let creativeRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
         {
-          name: `${campaignName} - ${new Date().toISOString()}`,
+          name: `${campaignName} (Image) - ${new Date().toISOString()}`,
           object_story_spec: {
             page_id: pageId,
             link_data: {
@@ -398,31 +310,88 @@ const adSetRes = await axios.post(
         },
         { params: { access_token: userToken } }
       );
-    } else {
-      throw new Error("Ad image or video required.");
+      let creativeId = creativeRes.data.id;
+      creativeIds.push(creativeId);
+
+      // Create Ad for Image
+      let adRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+        {
+          name: `${campaignName} (Image) - ${new Date().toISOString()}`,
+          adset_id: adSetId,
+          creative: { creative_id: creativeId },
+          status: "ACTIVE"
+        },
+        { params: { access_token: userToken } }
+      );
+      adIds.push(adRes.data.id);
     }
-    const creativeId = creativeRes.data.id;
 
-    // === 7. Create ad ===
-    const adRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-      {
-        name: `${campaignName} - ${new Date().toISOString()}`,
-        adset_id: adSetId,
-        creative: { creative_id: creativeId },
-        status: "ACTIVE"
-      },
-      { params: { access_token: userToken } }
-    );
+    if (videoId) {
+      // Video Ad Set
+      let vidAdSetRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+        {
+          name: `${campaignName} (Video) - ${new Date().toISOString()}`,
+          campaign_id: campaignId,
+          daily_budget: dailyBudgetCents,
+          billing_event: "IMPRESSIONS",
+          optimization_goal: "LINK_CLICKS",
+          bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+          status: "ACTIVE",
+          start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+          targeting: { ...targeting, publisher_platforms: ["facebook", "audience_network", "instagram"], facebook_positions: ["feed", "instream_video"], audience_network_positions: ["rewarded_video"], instagram_positions: ["stream", "reels", "story"] },
+        },
+        { params: { access_token: userToken } }
+      );
+      let adSetId = vidAdSetRes.data.id;
+      adSetIds.push(adSetId);
 
+      // Create Ad Creative for Video
+      let creativeRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+        {
+          name: `${campaignName} (Video) - ${new Date().toISOString()}`,
+          object_story_spec: {
+            page_id: pageId,
+            video_data: {
+              video_id: videoId,
+              message: adCopy,
+              title: campaignName,
+              description: form.description || "",
+              link: form.url || "https://your-smartmark-site.com"
+            }
+          }
+        },
+        { params: { access_token: userToken } }
+      );
+      let creativeId = creativeRes.data.id;
+      creativeIds.push(creativeId);
+
+      // Create Ad for Video
+      let adRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+        {
+          name: `${campaignName} (Video) - ${new Date().toISOString()}`,
+          adset_id: adSetId,
+          creative: { creative_id: creativeId },
+          status: "ACTIVE"
+        },
+        { params: { access_token: userToken } }
+      );
+      adIds.push(adRes.data.id);
+    }
+
+    // Done
     res.json({
       success: true,
       campaignId,
-      adSetId,
-      creativeId,
-      adId: adRes.data.id,
+      adSetIds,
+      creativeIds,
+      adIds,
       campaignStatus: "ACTIVE"
     });
+
   } catch (err) {
     let errorMsg = "Failed to launch campaign.";
     if (err.response && err.response.data && err.response.data.error) {
