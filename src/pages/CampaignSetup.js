@@ -32,6 +32,71 @@ const calculateFees = (budget) => {
   return { fee, total };
 };
 
+// Put the VideoPreviewBox function RIGHT HERE!
+function VideoPreviewBox({ videoUrl }) {
+  const [playing, setPlaying] = useState(false);
+  const videoRef = useRef(null);
+
+  const togglePlay = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!videoRef.current) return;
+    if (playing) {
+      videoRef.current.pause();
+    } else {
+      videoRef.current.play();
+    }
+    setPlaying(!playing);
+  };
+
+  // When the video ends, reset play icon
+  const onEnded = () => setPlaying(false);
+
+  return (
+    <div
+      style={{
+        width: 110, height: 110, borderRadius: 14,
+        overflow: "hidden", cursor: "pointer",
+        boxShadow: "0 2px 10px rgba(30,200,133,0.13)",
+        border: "2.2px solid #1ec885",
+        background: "#191f1b",
+        position: "relative",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center"
+      }}
+      onClick={togglePlay}
+      title={playing ? "Pause" : "Play"}
+    >
+      <video
+        ref={videoRef}
+        src={videoUrl}
+        width={110}
+        height={110}
+        style={{ objectFit: "cover", borderRadius: 14, background: "#232a24" }}
+        controls={false}
+        onEnded={onEnded}
+        preload="metadata"
+        tabIndex={-1}
+      />
+      {/* Overlay Play icon if not playing */}
+      {!playing && (
+        <div style={{
+          position: "absolute",
+          left: 0, top: 0, width: "100%", height: "100%",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          pointerEvents: "none", zIndex: 2
+        }}>
+          <svg width="34" height="34" fill="#fff" style={{ opacity: 0.78 }}>
+            <polygon points="8,7 28,17 8,27" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 const CampaignSetup = () => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
@@ -55,6 +120,8 @@ const CampaignSetup = () => {
   // --- Media preview state for video & image (from navigation state, fallback to empty string) ---
 const [mediaImageUrl, setMediaImageUrl] = useState("");
 const [mediaVideoUrl, setMediaVideoUrl] = useState("");
+
+
 
 // Always use navigation state if present, otherwise fallback to localStorage
 useEffect(() => {
@@ -773,6 +840,7 @@ useEffect(() => {
               </div>
 
               {/* MEDIA PREVIEW: Video & Image */}
+{/* MEDIA PREVIEW: Video & Image */}
 {(mediaImageUrl || mediaVideoUrl) && (
   <div style={{ display: "flex", gap: "18px", margin: "22px 0 0 0", alignItems: "center" }}>
     {mediaImageUrl && (
@@ -793,25 +861,10 @@ useEffect(() => {
       </a>
     )}
     {mediaVideoUrl && (
-      <a href={mediaVideoUrl} target="_blank" rel="noopener noreferrer">
-        <video
-          src={mediaVideoUrl}
-          style={{
-            width: 110,
-            height: 110,
-            borderRadius: 14,
-            objectFit: "cover",
-            boxShadow: "0 2px 10px rgba(30,200,133,0.13)",
-            border: "2.2px solid #1ec885",
-            cursor: "pointer"
-          }}
-          controls
-        />
-      </a>
+      <VideoPreviewBox videoUrl={mediaVideoUrl} />
     )}
   </div>
 )}
-
 
               <div>
                 <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
