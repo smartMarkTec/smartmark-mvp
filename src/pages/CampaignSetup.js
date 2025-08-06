@@ -362,26 +362,24 @@ useEffect(() => {
     try {
       const acctId = selectedAccount.replace("act_", "");
       const safeBudget = Math.max(3, Number(budget) || 0);
-      const payload = {
-        form: { ...form },
-        budget: safeBudget,
-        campaignType: form?.campaignType || "Website Traffic",
-        pageId: selectedPageId,
-        aiAudience: form?.aiAudience,
-        creative: {
-          headline,
-          body,
-          imageUrl,
-          videoUrl,
-          videoScript
-        },
-        answers
-      };
-      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+  const payload = {
+  form: { ...form },
+  budget: safeBudget,
+  campaignType: form?.campaignType || "Website Traffic",
+  pageId: selectedPageId,
+  aiAudience: form?.aiAudience,
+  adCopy: headline,         // Use the main headline or body as ad copy
+  adImage: imageUrl,        // base64 or URL for image
+  adVideo: videoUrl,        // base64 or FB video ID/URL
+  answers
+};
+
+const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(payload),
+});
+
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
       setLaunched(true);
