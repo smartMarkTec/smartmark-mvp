@@ -32,7 +32,6 @@ const calculateFees = (budget) => {
   return { fee, total };
 };
 
-// Put the VideoPreviewBox function RIGHT HERE!
 function VideoPreviewBox({ videoUrl }) {
   const [playing, setPlaying] = useState(false);
   const videoRef = useRef(null);
@@ -49,14 +48,26 @@ function VideoPreviewBox({ videoUrl }) {
     setPlaying(!playing);
   };
 
+  // Allow entering fullscreen via double click
+  const enterFullScreen = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (videoRef.current && videoRef.current.requestFullscreen) {
+      videoRef.current.requestFullscreen();
+    }
+  };
+
   // When the video ends, reset play icon
   const onEnded = () => setPlaying(false);
 
   return (
     <div
       style={{
-        width: 110, height: 110, borderRadius: 14,
-        overflow: "hidden", cursor: "pointer",
+        width: 110,
+        height: 110,
+        borderRadius: 14,
+        overflow: "hidden",
+        cursor: "pointer",
         boxShadow: "0 2px 10px rgba(30,200,133,0.13)",
         border: "2.2px solid #1ec885",
         background: "#191f1b",
@@ -67,14 +78,15 @@ function VideoPreviewBox({ videoUrl }) {
       }}
       onClick={togglePlay}
       title={playing ? "Pause" : "Play"}
+      onDoubleClick={enterFullScreen}
     >
       <video
         ref={videoRef}
         src={videoUrl}
         width={110}
         height={110}
-        style={{ objectFit: "cover", borderRadius: 14, background: "#232a24" }}
-        controls={false}
+        style={{ objectFit: "cover", width: "100%", height: "100%", borderRadius: 14, background: "#232a24" }}
+        controls={false} // disables controls, we handle play/pause/fullscreen via click/double-click
         onEnded={onEnded}
         preload="metadata"
         tabIndex={-1}
@@ -92,9 +104,40 @@ function VideoPreviewBox({ videoUrl }) {
           </svg>
         </div>
       )}
+      {/* Optional: add a fullscreen icon/button in the corner if you want */}
+      <button
+        onClick={enterFullScreen}
+        style={{
+          position: "absolute",
+          bottom: 7,
+          right: 7,
+          zIndex: 3,
+          background: "rgba(24,84,49,0.81)",
+          border: "none",
+          borderRadius: 5,
+          color: "#fff",
+          padding: 3,
+          cursor: "pointer",
+          opacity: 0.8
+        }}
+        tabIndex={-1}
+        title="Fullscreen"
+      >
+        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
+          <rect x="3" y="3" width="5" height="2" rx="1" fill="white"/>
+          <rect x="3" y="3" width="2" height="5" rx="1" fill="white"/>
+          <rect x="15" y="3" width="2" height="5" rx="1" fill="white"/>
+          <rect x="12" y="3" width="5" height="2" rx="1" fill="white"/>
+          <rect x="3" y="15" width="5" height="2" rx="1" fill="white"/>
+          <rect x="3" y="12" width="2" height="5" rx="1" fill="white"/>
+          <rect x="15" y="12" width="2" height="5" rx="1" fill="white"/>
+          <rect x="12" y="15" width="5" height="2" rx="1" fill="white"/>
+        </svg>
+      </button>
     </div>
   );
 }
+
 
 
 const CampaignSetup = () => {
