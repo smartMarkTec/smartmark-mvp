@@ -1129,7 +1129,7 @@ return res.json({
     voice: TTS_VOICE
   },
   // image: { url: publicImageUrl }, // Add when available!
-  script,
+  script,   
   overlayText,
   voice: TTS_VOICE
 });
