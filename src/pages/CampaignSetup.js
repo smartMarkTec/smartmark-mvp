@@ -4,6 +4,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
+import { FaExpand } from "react-icons/fa";
+
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
@@ -163,6 +165,8 @@ const CampaignSetup = () => {
   // --- Media preview state for video & image (from navigation state, fallback to empty string) ---
 const [mediaImageUrl, setMediaImageUrl] = useState("");
 const [mediaVideoUrl, setMediaVideoUrl] = useState("");
+const [showImageModal, setShowImageModal] = useState(false);
+const [modalImg, setModalImg] = useState("");
 
 
 
@@ -894,37 +898,67 @@ useEffect(() => {
       justifyContent: "center"
     }}
   >
+    {/* IMAGE PREVIEW WITH FULLSCREEN BUTTON */}
     {mediaImageUrl && (
-      <a
-        href={mediaImageUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        tabIndex={0}
-        aria-label="Open ad image in new tab"
-        style={{ outline: "none" }}
+      <div
+        style={{
+          position: "relative",
+          width: 120,
+          height: 120,
+          borderRadius: 16,
+          overflow: "hidden",
+          background: "#232a24",
+          boxShadow: "0 2px 18px 0 rgba(30,200,133,0.19)",
+          border: "2.2px solid #1ec885",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
       >
         <img
           src={mediaImageUrl}
           alt="Ad Creative"
           style={{
-            width: 120,
-            height: 120,
-            borderRadius: 16,
+            width: "100%",
+            height: "100%",
             objectFit: "cover",
-            boxShadow: "0 2px 18px 0 rgba(30,200,133,0.19)",
-            border: "2.2px solid #1ec885",
-            cursor: "pointer",
-            transition: "transform 0.16s cubic-bezier(.4,2.5,.7,1.4), box-shadow 0.13s",
+            borderRadius: 16,
+            display: "block"
           }}
-          onMouseOver={e => e.currentTarget.style.transform = "scale(1.07)"}
-          onMouseOut={e => e.currentTarget.style.transform = "scale(1)"}
         />
-      </a>
+        {/* Fullscreen Button */}
+        <button
+          style={{
+            position: "absolute",
+            bottom: 7,
+            right: 7,
+            background: "rgba(24,84,49,0.93)",
+            border: "none",
+            borderRadius: 7,
+            padding: 7,
+            cursor: "pointer",
+            color: "#fff",
+            fontSize: 16,
+            zIndex: 2,
+            display: "flex",
+            alignItems: "center",
+            boxShadow: "0 1px 7px #20292777"
+          }}
+          onClick={() => {
+            setModalImg(mediaImageUrl);
+            setShowImageModal(true);
+          }}
+          aria-label="Fullscreen Image"
+        >
+          <FaExpand />
+        </button>
+      </div>
     )}
+    {/* VIDEO PREVIEW */}
     {mediaVideoUrl && (
       <div
         style={{
-          width: 140,
+          width: 120,
           height: 120,
           borderRadius: 16,
           overflow: "hidden",
@@ -934,75 +968,138 @@ useEffect(() => {
           alignItems: "center",
           justifyContent: "center",
           border: "2.2px solid #1ec885",
+          position: "relative"
         }}
       >
         <VideoPreviewBox videoUrl={mediaVideoUrl} />
       </div>
     )}
+    {/* IMAGE FULLSCREEN MODAL */}
+    <ImageModal
+      open={showImageModal}
+      imageUrl={modalImg}
+      onClose={() => setShowImageModal(false)}
+    />
   </div>
 )}
 
-
-              <div>
-                <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
-                <select
-                  value={selectedPageId}
-                  onChange={e => setSelectedPageId(e.target.value)}
-                  style={{
-                    padding: "0.7rem",
-                    borderRadius: "1.1rem",
-                    fontSize: "1.07rem",
-                    width: "100%",
-                    outline: "none",
-                    border: "1.5px solid #2e5c44",
-                    background: "#2c2f33",
-                    color: "#c7fbe3",
-                    marginTop: 5
-                  }}>
-                  <option value="">Select a page</option>
-                  {pages.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-        </aside>
+<div>
+  <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
+  <select
+    value={selectedPageId}
+    onChange={e => setSelectedPageId(e.target.value)}
+    style={{
+      padding: "0.7rem",
+      borderRadius: "1.1rem",
+      fontSize: "1.07rem",
+      width: "100%",
+      outline: "none",
+      border: "1.5px solid #2e5c44",
+      background: "#2c2f33",
+      color: "#c7fbe3",
+      marginTop: 5
+    }}>
+    <option value="">Select a page</option>
+    {pages.map(p => (
+      <option key={p.id} value={p.id}>{p.name}</option>
+    ))}
+  </select>
+</div>
+</div>
+</div>
+</aside>
+</div>
+{/* Pause Modal */}
+{showPauseModal && (
+  <div style={{
+    position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+    background: 'rgba(0,0,0,0.34)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+  }}>
+    <div style={{
+      background: '#24262b', borderRadius: 18, padding: 36, minWidth: 370, boxShadow: "0 10px 44px #000a"
+    }}>
+      <div style={{ fontWeight: 800, fontSize: 22, marginBottom: 28, color: '#fff' }}>
+        Are you sure you want to pause this campaign?
       </div>
-      {/* Pause Modal */}
-      {showPauseModal && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-          background: 'rgba(0,0,0,0.34)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-        }}>
-          <div style={{
-            background: '#24262b', borderRadius: 18, padding: 36, minWidth: 370, boxShadow: "0 10px 44px #000a"
-          }}>
-            <div style={{ fontWeight: 800, fontSize: 22, marginBottom: 28, color: '#fff' }}>
-              Are you sure you want to pause this campaign?
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 22 }}>
-              <button
-                onClick={() => setShowPauseModal(false)}
-                style={{ background: '#e74c3c', color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
-              >
-                No
-              </button>
-              <button
-                onClick={async () => {
-                  setShowPauseModal(false);
-                  await handlePauseUnpause();
-                }}
-                style={{ background: ACCENT_GREEN, color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
-              >
-                Yes, Pause
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 22 }}>
+        <button
+          onClick={() => setShowPauseModal(false)}
+          style={{ background: '#e74c3c', color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
+        >
+          No
+        </button>
+        <button
+          onClick={async () => {
+            setShowPauseModal(false);
+            await handlePauseUnpause();
+          }}
+          style={{ background: ACCENT_GREEN, color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
+        >
+          Yes, Pause
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+</div>
+);
+};
+
+// Image Modal Component (put above or below CampaignSetup, or in the same file)
+function ImageModal({ open, imageUrl, onClose }) {
+  if (!open) return null;
+  return (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 1005,
+      background: "rgba(16,22,21,0.85)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center"
+    }}>
+      <div style={{
+        position: "relative",
+        maxWidth: "88vw",
+        maxHeight: "88vh",
+        borderRadius: 18,
+        background: "#191e20",
+        padding: 0,
+        boxShadow: "0 10px 60px #000c"
+      }}>
+        <img
+          src={imageUrl}
+          alt="Full Screen Ad"
+          style={{
+            maxWidth: "84vw",
+            maxHeight: "80vh",
+            display: "block",
+            borderRadius: 14,
+            background: "#101312"
+          }}
+        />
+        <button
+          style={{
+            position: "absolute",
+            top: 12,
+            right: 18,
+            background: "#212f29",
+            border: "none",
+            color: "#fff",
+            borderRadius: 11,
+            padding: "9px 17px",
+            fontWeight: 700,
+            fontSize: 15,
+            cursor: "pointer",
+            boxShadow: "0 1px 6px #1ec88530"
+          }}
+          onClick={onClose}
+        >
+          Close
+        </button>
+      </div>
     </div>
   );
-};
+}
 
 export default CampaignSetup;
