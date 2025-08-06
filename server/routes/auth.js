@@ -254,23 +254,25 @@ if (adVideo && adVideo.startsWith("data:")) {
       if (start_offset === end_offset) break;
     }
 
-    // 3. Finish phase
-    const finishRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-      new URLSearchParams({
-        access_token: userToken,
-        upload_phase: "finish",
-        upload_session_id: uploadSessionId
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    videoId = finishRes.data.video_id;
-    if (!videoId) throw new Error("No videoId returned after finish phase!");
-    console.log("[launch-campaign] Uploaded videoId:", videoId);
-  } catch (e) {
-    console.error("[launch-campaign] Video upload failed:", e.message || e);
-    videoId = null; // Continue with just image if needed
-  }
+   // 3. Finish phase
+const finishRes = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+  new URLSearchParams({
+    access_token: userToken,
+    upload_phase: "finish",
+    upload_session_id: uploadSessionId
+  }),
+  { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+);
+console.log("[launch-campaign] FB finishRes data:", finishRes.data); // <--- added debug
+videoId = finishRes.data.video_id;
+if (!videoId) throw new Error("No videoId returned after finish phase! " + JSON.stringify(finishRes.data));
+console.log("[launch-campaign] Uploaded videoId:", videoId);
+} catch (e) {
+  console.error("[launch-campaign] Video upload failed:", e.message || e);
+  videoId = null; // Continue with just image if needed
+}
+
 }
 
 
