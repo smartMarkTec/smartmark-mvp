@@ -127,58 +127,58 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     aiAudience = null;
   }
 
-  // ===== 2. Build Targeting =====
-  let targeting = {
-    geo_locations: { countries: ["US"] },
-    age_min: 18,
-    age_max: 65,
-    targeting_automation: { advantage_audience: 0 },
-  };
+ // ===== 2. Build Targeting =====
+let targeting = {
+  geo_locations: { countries: ["US"] },
+  age_min: 18,
+  age_max: 65,
+  targeting_automation: { advantage_audience: 0 },
+};
 
-  if (aiAudience && aiAudience.location) {
-    const loc = aiAudience.location.toLowerCase();
-    if (loc.includes("texas")) {
-      targeting.geo_locations = { regions: [{ key: "3886" }] };
-    } else if (loc.includes("usa") || loc.includes("united states")) {
-      targeting.geo_locations = { countries: ["US"] };
-    } else if (loc.match(/[a-z]+/)) {
-      targeting.geo_locations = { countries: [aiAudience.location.toUpperCase()] };
-    }
+if (aiAudience && aiAudience.location) {
+  const loc = aiAudience.location.toLowerCase();
+  if (loc.includes("texas")) {
+    targeting.geo_locations = { countries: ["US"], regions: [{ key: "3886" }] };
+  } else if (loc.includes("usa") || loc.includes("united states")) {
+    targeting.geo_locations = { countries: ["US"] };
+  } else if (loc.match(/[a-z]+/)) {
+    targeting.geo_locations = { countries: [aiAudience.location.toUpperCase()] };
   }
+}
 
-  if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
-    const [min, max] = aiAudience.ageRange.split('-').map(Number);
-    targeting.age_min = min;
-    targeting.age_max = max;
-  }
+if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
+  const [min, max] = aiAudience.ageRange.split('-').map(Number);
+  targeting.age_min = min;
+  targeting.age_max = max;
+}
 
-  // --- Interests: Lookup FB Interest IDs ---
-  if (aiAudience && aiAudience.interests) {
-    const interestNames = aiAudience.interests.split(',').map(s => s.trim()).filter(Boolean);
-    const fbInterestIds = [];
-    for (let name of interestNames) {
-      try {
-        const fbRes = await axios.get(
-          'https://graph.facebook.com/v18.0/search',
-          {
-            params: {
-              type: 'adinterest',
-              q: name,
-              access_token: userToken
-            }
+if (aiAudience && aiAudience.interests) {
+  const interestNames = aiAudience.interests.split(',').map(s => s.trim()).filter(Boolean);
+  const fbInterestIds = [];
+  for (let name of interestNames) {
+    try {
+      const fbRes = await axios.get(
+        'https://graph.facebook.com/v18.0/search',
+        {
+          params: {
+            type: 'adinterest',
+            q: name,
+            access_token: userToken
           }
-        );
-        if (fbRes.data && fbRes.data.data && fbRes.data.data.length > 0) {
-          fbInterestIds.push({ id: fbRes.data.data[0].id, name: fbRes.data.data[0].name });
         }
-      } catch (e) {
-        console.warn("FB interest search failed for:", name, e.message);
+      );
+      if (fbRes.data && fbRes.data.data && fbRes.data.data.length > 0) {
+        fbInterestIds.push(fbRes.data.data[0].id);
       }
-    }
-    if (fbInterestIds.length > 0) {
-      targeting.flexible_spec = [{ interests: fbInterestIds }];
+    } catch (e) {
+      console.warn("FB interest search failed for:", name, e.message);
     }
   }
+  if (fbInterestIds.length > 0) {
+    targeting.flexible_spec = [{ interests: fbInterestIds.map(id => ({ id })) }];
+  }
+}
+
 
   try {
     let imageHash = null;
