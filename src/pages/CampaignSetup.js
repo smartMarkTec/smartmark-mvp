@@ -1,6 +1,6 @@
 // src/pages/CampaignSetup.js
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
