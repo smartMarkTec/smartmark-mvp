@@ -3,6 +3,7 @@ const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
 const db = require('../db'); // LOWDB
+const FormData = require('form-data');
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
@@ -211,13 +212,12 @@ if (aiAudience && aiAudience.interests) {
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
     }
 
-// === 2. VIDEO UPLOAD (chunked, robust for Facebook) ===
+// === 2. VIDEO UPLOAD (chunked, correct multipart/form-data) ===
 if (adVideo && adVideo.startsWith("data:")) {
   const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
   if (!matches) throw new Error("Invalid video data.");
   const base64Video = matches[2];
   const videoBuffer = Buffer.from(base64Video, "base64");
-  const chunkSize = 5 * 1024 * 1024; // 5 MB
 
   // 1. Start upload session
   const uploadStartRes = await axios.post(
@@ -233,25 +233,32 @@ if (adVideo && adVideo.startsWith("data:")) {
   let start_offset = parseInt(uploadStartRes.data.start_offset, 10);
   let end_offset = parseInt(uploadStartRes.data.end_offset, 10);
 
-  // 2. Upload chunks using offsets from transfer response
+  // 2. Chunked upload using FormData for each chunk
   while (start_offset < videoBuffer.length) {
+    // slice the chunk according to the offsets
     const chunk = videoBuffer.slice(start_offset, end_offset);
-    const chunkBase64 = chunk.toString('base64');
+    // FormData is required for 'video_file_chunk'
+    const formData = new FormData();
+    formData.append('access_token', userToken);
+    formData.append('upload_phase', 'transfer');
+    formData.append('upload_session_id', uploadSessionId);
+    formData.append('start_offset', String(start_offset));
+    formData.append('video_file_chunk', chunk, {
+      filename: "video.mp4",
+      contentType: "video/mp4",
+      knownLength: chunk.length
+    });
+
     const transferRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-      new URLSearchParams({
-        access_token: userToken,
-        upload_phase: "transfer",
-        upload_session_id: uploadSessionId,
-        start_offset: start_offset,
-        video_file_chunk: chunkBase64
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      formData,
+      { headers: formData.getHeaders() }
     );
+
     start_offset = parseInt(transferRes.data.start_offset, 10);
     end_offset = parseInt(transferRes.data.end_offset, 10);
-    // Stop if done
-    if (start_offset >= videoBuffer.length || start_offset === end_offset) break;
+    // If done
+    if (start_offset === end_offset) break;
   }
 
   // 3. Finish
@@ -267,16 +274,15 @@ if (adVideo && adVideo.startsWith("data:")) {
   videoId = finishRes.data.video_id;
 
 } else if (adVideo && adVideo.startsWith("http")) {
-  // Download remote video and use chunk upload logic
+  // Download remote video and use chunk upload logic (repeat above)
   const response = await axios.get(adVideo, { responseType: 'arraybuffer' });
   const videoBuffer = Buffer.from(response.data, 'binary');
-  const chunkSize = 5 * 1024 * 1024;
-  // ...repeat logic above
-  // For brevity, extract this chunk upload to a helper if you need!
+  // ...repeat logic above with FormData
 } else if (adVideo && adVideo.startsWith("https://")) {
   // Already a Facebook video
   videoId = adVideo;
 }
+
 
     // === 3. Budget ===
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
