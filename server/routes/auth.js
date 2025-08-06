@@ -204,60 +204,73 @@ try {
       const imgData = fbImageRes.data.images;
       imageHash = Object.values(imgData)[0]?.hash;
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
+      console.log("[launch-campaign] Uploaded imageHash:", imageHash);
     }
 
-    // VIDEO (chunked upload is best)
+    // VIDEO (chunked upload is best, with logging/error handling)
     if (adVideo && adVideo.startsWith("data:")) {
-  const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
-  if (!matches) throw new Error("Invalid video data.");
-  const base64Video = matches[2];
-  const videoBuffer = Buffer.from(base64Video, "base64");
+      try {
+        const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+        if (!matches) throw new Error("Invalid video data.");
+        const base64Video = matches[2];
+        const videoBuffer = Buffer.from(base64Video, "base64");
 
-  // 1. Start the upload session
-  const startRes = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-    new URLSearchParams({
-      access_token: userToken,
-      file_size: videoBuffer.length,
-      upload_phase: "start"
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  );
-  const uploadSessionId = startRes.data.upload_session_id;
-  let start_offset = startRes.data.start_offset;
-  let end_offset = startRes.data.end_offset;
+        // 1. Start the upload session
+        const startRes = await axios.post(
+          `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+          new URLSearchParams({
+            access_token: userToken,
+            file_size: videoBuffer.length,
+            upload_phase: "start"
+          }),
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        const uploadSessionId = startRes.data.upload_session_id;
+        let start_offset = startRes.data.start_offset;
+        let end_offset = startRes.data.end_offset;
 
-  // 2. Chunked upload (use FormData for binary)
-  while (start_offset !== end_offset) {
-    const chunk = videoBuffer.slice(Number(start_offset), Number(end_offset));
-    const form = new FormData();
-    form.append('access_token', userToken);
-    form.append('upload_phase', 'transfer');
-    form.append('upload_session_id', uploadSessionId);
-    form.append('start_offset', start_offset);
-    form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
+        // 2. Chunked upload (use FormData for binary)
+        while (start_offset !== end_offset) {
+          const chunk = videoBuffer.slice(Number(start_offset), Number(end_offset));
+          const form = new FormData();
+          form.append('access_token', userToken);
+          form.append('upload_phase', 'transfer');
+          form.append('upload_session_id', uploadSessionId);
+          form.append('start_offset', start_offset);
+          form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
 
-    const transferRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-      form,
-      { headers: form.getHeaders() }
-    );
-    start_offset = transferRes.data.start_offset;
-    end_offset = transferRes.data.end_offset;
-  }
+          const transferRes = await axios.post(
+            `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+            form,
+            { headers: form.getHeaders() }
+          );
+          start_offset = transferRes.data.start_offset;
+          end_offset = transferRes.data.end_offset;
+        }
 
-  // 3. Finish phase
-  const finishRes = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-    new URLSearchParams({
-      access_token: userToken,
-      upload_phase: "finish",
-      upload_session_id: uploadSessionId
-    }),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-  );
-  videoId = finishRes.data.video_id;
-}
+        // 3. Finish phase
+        const finishRes = await axios.post(
+          `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+          new URLSearchParams({
+            access_token: userToken,
+            upload_phase: "finish",
+            upload_session_id: uploadSessionId
+          }),
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+        );
+        videoId = finishRes.data.video_id;
+        console.log("[launch-campaign] Uploaded videoId:", videoId);
+      } catch (e) {
+        console.error("[launch-campaign] Video upload failed:", e.message || e);
+        videoId = null; // Continue with just image if needed
+      }
+    }
+
+    // --- log final state ---
+    console.log(`[launch-campaign] Finished uploads | imageHash: ${imageHash} | videoId: ${videoId}`);
+
+    // (continue your campaign/ad set logic below here...)
+
 
     // 2. Create Campaign
     const campaignRes = await axios.post(
