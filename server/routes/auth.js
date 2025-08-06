@@ -254,7 +254,7 @@ if (adVideo && adVideo.startsWith("data:")) {
       if (start_offset === end_offset) break;
     }
 
-  // 3. Finish phase
+// 3. Finish phase (with retries to fetch videoId)
 const finishRes = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
   new URLSearchParams({
@@ -267,24 +267,32 @@ const finishRes = await axios.post(
 console.log("[launch-campaign] FB finishRes data:", finishRes.data);
 
 videoId = finishRes.data.video_id;
-
-// Fallback: if not returned, query the session with GET
 if (!videoId) {
-  // Wait a bit for FB to process (optional, but helps with async delay)
-  await new Promise(res => setTimeout(res, 1500));
-  const statusRes = await axios.get(
-    `https://graph.facebook.com/v18.0/${uploadSessionId}`,
-    { params: { access_token: userToken, fields: "video_id,status" } }
-  );
-  videoId = statusRes.data.video_id;
-  console.log("[launch-campaign] Fetched videoId after finish phase:", statusRes.data);
+  // Facebook may take time to register the video_id. Retry GET up to 3x.
+  for (let i = 0; i < 3 && !videoId; i++) {
+    await new Promise(res => setTimeout(res, 1500));
+    try {
+      const statusRes = await axios.get(
+        `https://graph.facebook.com/v18.0/${uploadSessionId}`,
+        { params: { access_token: userToken, fields: "video_id,status" } }
+      );
+      videoId = statusRes.data.video_id;
+      if (videoId) {
+        console.log("[launch-campaign] Fetched videoId after finish phase (retry):", statusRes.data);
+        break;
+      }
+    } catch (e) {
+      console.error(`[launch-campaign] VideoId GET attempt ${i + 1} failed:`, e.response?.data || e.message);
+    }
+  }
 }
-if (!videoId) throw new Error("No videoId returned after finish phase! " + JSON.stringify(finishRes.data));
+if (!videoId) throw new Error("No videoId returned after finish phase, even after retries! " + JSON.stringify(finishRes.data));
 console.log("[launch-campaign] Uploaded videoId:", videoId);
 } catch (e) {
   console.error("[launch-campaign] Video upload failed:", e.message || e);
   videoId = null; // Continue with just image if needed
 }
+
 
 
 }
