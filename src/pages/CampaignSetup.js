@@ -358,6 +358,7 @@ useEffect(() => {
   );
 
   // Utility to fetch and convert a URL to base64
+// Utility to fetch and convert a URL to base64
 async function urlToBase64(url) {
   const res = await fetch(url);
   const blob = await res.blob();
@@ -374,10 +375,11 @@ const handleLaunch = async () => {
     const acctId = selectedAccount.replace("act_", "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    // Convert image/video to base64 if they're not already
-    let adImage = imageUrl;
-    let adVideo = videoUrl;
+    // --- NEW LOGIC: Try all sources, fallback to localStorage ---
+    let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+    let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
 
+    // Convert to base64 if not already
     if (adImage && !adImage.startsWith("data:")) {
       adImage = await urlToBase64(adImage);
     }
@@ -385,16 +387,20 @@ const handleLaunch = async () => {
       adVideo = await urlToBase64(adVideo);
     }
 
+    // DEBUG: Log the first 80 characters for each to confirm
+    console.log("LAUNCH adImage:", adImage ? adImage.slice(0, 80) : "NONE");
+    console.log("LAUNCH adVideo:", adVideo ? adVideo.slice(0, 80) : "NONE");
+
     const payload = {
       form: { ...form },
       budget: safeBudget,
       campaignType: form?.campaignType || "Website Traffic",
       pageId: selectedPageId,
-      aiAudience: form?.aiAudience,
-      adCopy: headline,
-      adImage,
-      adVideo,
-      answers
+      aiAudience: form?.aiAudience || answers?.aiAudience || "",
+      adCopy: headline || body || "",
+      adImage: adImage || "",
+      adVideo: adVideo || "",
+      answers: answers || {}
     };
 
     const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
@@ -414,6 +420,8 @@ const handleLaunch = async () => {
   }
   setLoading(false);
 };
+
+
 
 
   const openFbPaymentPopup = () => {
