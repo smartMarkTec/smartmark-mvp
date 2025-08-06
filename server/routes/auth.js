@@ -106,16 +106,16 @@ router.post('/login', async (req, res) => {
 });
 
 
-// ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests) ======
+// ====== LAUNCH CAMPAIGN (AI Targeting: Age, Location, Interests, IMAGE or VIDEO) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  const { form = {}, budget, adCopy, adImage, campaignType, pageId, aiAudience: aiAudienceRaw } = req.body;
+  const { form = {}, budget, adCopy, adImage, adVideo, campaignType, pageId, aiAudience: aiAudienceRaw } = req.body;
   const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
 
-  // ===== 1. Parse AI Audience (from frontend or fallback) =====
+  // ===== 1. Parse AI Audience =====
   let aiAudience = null;
   try {
     if (typeof aiAudienceRaw === "string") {
@@ -127,28 +127,25 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     aiAudience = null;
   }
 
-  // ===== 2. Build Targeting Dynamically =====
+  // ===== 2. Build Targeting =====
   let targeting = {
     geo_locations: { countries: ["US"] },
     age_min: 18,
     age_max: 65,
-    targeting_automation: { advantage_audience: 0 }, // DISABLE Advantage Audience!
+    targeting_automation: { advantage_audience: 0 },
   };
 
-  // --- Location ---
   if (aiAudience && aiAudience.location) {
     const loc = aiAudience.location.toLowerCase();
     if (loc.includes("texas")) {
-      targeting.geo_locations = { regions: [{ key: "3886" }] }; // Example: Texas
+      targeting.geo_locations = { regions: [{ key: "3886" }] };
     } else if (loc.includes("usa") || loc.includes("united states")) {
       targeting.geo_locations = { countries: ["US"] };
     } else if (loc.match(/[a-z]+/)) {
-      // Add more mappings for other states/countries as needed!
       targeting.geo_locations = { countries: [aiAudience.location.toUpperCase()] };
     }
   }
 
-  // --- Age ---
   if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
     const [min, max] = aiAudience.ageRange.split('-').map(Number);
     targeting.age_min = min;
@@ -183,18 +180,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     }
   }
 
-  // --- (OPTIONAL) Genders, Demographics, etc ---
-  // If your AI adds "men"/"women"/"male"/"female" to demographic, you could:
-  /*
-  if (aiAudience && aiAudience.demographic) {
-    if (aiAudience.demographic.toLowerCase().includes("men")) targeting.genders = [1];
-    if (aiAudience.demographic.toLowerCase().includes("women")) targeting.genders = [2];
-  }
-  */
-
   try {
-    // 1. Upload image (to Facebook)
-    let imageHash;
+    let imageHash = null;
+    let videoId = null;
+    // === 1. IMAGE UPLOAD (if base64 provided) ===
     if (adImage && adImage.startsWith("data:")) {
       const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
       if (!matches) throw new Error("Invalid image data.");
@@ -213,17 +202,63 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       const imgData = fbImageRes.data.images;
       imageHash = Object.values(imgData)[0]?.hash;
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
-    } else {
-      throw new Error("Ad image required and must be base64 Data URL.");
     }
 
-    // 2. Budget (Facebook minimum: $3.00/day)
+    // === 2. VIDEO UPLOAD (if base64 provided) ===
+    if (adVideo && adVideo.startsWith("data:")) {
+      const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+      if (!matches) throw new Error("Invalid video data.");
+      const base64Video = matches[2];
+
+      // Upload the video to Facebook
+      const uploadRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          file_type: "MP4",
+          upload_phase: "start",
+          // If needed: 'name': campaignName
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      const uploadSessionId = uploadRes.data.upload_session_id;
+
+      // Now transfer the base64 video to Facebook (chunk upload, here simplified as one part)
+      await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          upload_phase: "transfer",
+          upload_session_id: uploadSessionId,
+          video_file_chunk: Buffer.from(base64Video, 'base64'),
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+
+      // Finish the upload
+      const finishRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          upload_phase: "finish",
+          upload_session_id: uploadSessionId
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      videoId = finishRes.data.video_id;
+    } else if (adVideo && adVideo.startsWith("https://")) {
+      // If you already have a Facebook-hosted video_id, set videoId here
+      // (You'll need to manage this on the frontend/backend)
+      videoId = adVideo; // Or extract FB video ID if available
+    }
+
+    // === 3. Budget ===
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
     if (!Number.isInteger(dailyBudgetCents) || dailyBudgetCents < 300) {
       return res.status(400).json({ error: "Budget must be at least $3.00 USD per day" });
     }
 
-    // 3. Create campaign
+    // === 4. Create campaign ===
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -236,7 +271,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 4. Create ad set (now with AI-powered targeting!)
+    // === 5. Create ad set ===
     const adSetRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
       {
@@ -255,26 +290,50 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const adSetId = adSetRes.data.id;
 
-    // 5. Create ad creative
-    const creativeRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-      {
-        name: `${campaignName} - ${new Date().toISOString()}`,
-        object_story_spec: {
-          page_id: pageId,
-          link_data: {
-            message: adCopy,
-            link: form.url || "https://your-smartmark-site.com",
-            image_hash: imageHash,
-            description: form.description || ""
+    // === 6. Create ad creative (IMAGE or VIDEO) ===
+    let creativeRes;
+    if (videoId) {
+      // VIDEO AD CREATIVE
+      creativeRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+        {
+          name: `${campaignName} - ${new Date().toISOString()}`,
+          object_story_spec: {
+            page_id: pageId,
+            video_data: {
+              video_id: videoId,
+              message: adCopy,
+              title: campaignName,
+              description: form.description || ""
+            }
           }
-        }
-      },
-      { params: { access_token: userToken } }
-    );
+        },
+        { params: { access_token: userToken } }
+      );
+    } else if (imageHash) {
+      // IMAGE AD CREATIVE
+      creativeRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+        {
+          name: `${campaignName} - ${new Date().toISOString()}`,
+          object_story_spec: {
+            page_id: pageId,
+            link_data: {
+              message: adCopy,
+              link: form.url || "https://your-smartmark-site.com",
+              image_hash: imageHash,
+              description: form.description || ""
+            }
+          }
+        },
+        { params: { access_token: userToken } }
+      );
+    } else {
+      throw new Error("Ad image or video required.");
+    }
     const creativeId = creativeRes.data.id;
 
-    // 6. Create ad
+    // === 7. Create ad ===
     const adRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
       {
