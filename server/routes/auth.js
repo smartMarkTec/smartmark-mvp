@@ -185,123 +185,122 @@ if (aiAudience && aiAudience.interests) {
 
 
 try {
-    // 1. Upload creatives
-    let imageHash = null, videoId = null;
+  // 1. Upload creatives
+  let imageHash = null, videoId = null;
 
-    // IMAGE
-    if (adImage && adImage.startsWith("data:")) {
-      const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
-      if (!matches) throw new Error("Invalid image data.");
-      const base64Data = matches[2];
-      const fbImageRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
-        new URLSearchParams({ bytes: base64Data }),
-        {
-          headers: { Authorization: undefined, 'Content-Type': 'application/x-www-form-urlencoded' },
-          params: { access_token: userToken }
-        }
-      );
-      const imgData = fbImageRes.data.images;
-      imageHash = Object.values(imgData)[0]?.hash;
-      if (!imageHash) throw new Error("Failed to upload image to Facebook.");
-      console.log("[launch-campaign] Uploaded imageHash:", imageHash);
-    }
-
-    // VIDEO (chunked upload is best, with logging/error handling)
-// VIDEO (chunked upload, fully robust for Facebook)
-if (adVideo && adVideo.startsWith("data:")) {
-  try {
-    const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
-    if (!matches) throw new Error("Invalid video data.");
-    const base64Video = matches[2];
-    const videoBuffer = Buffer.from(base64Video, "base64");
-    const totalBytes = videoBuffer.length;
-
-    // 1. Start session
-    const startRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-      new URLSearchParams({
-        access_token: userToken,
-        file_size: totalBytes,
-        upload_phase: "start"
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    const uploadSessionId = startRes.data.upload_session_id;
-    let start_offset = parseInt(startRes.data.start_offset, 10);
-    let end_offset = parseInt(startRes.data.end_offset, 10);
-
-    // 2. Transfer chunks until done
-    while (true) {
-      const chunk = videoBuffer.slice(start_offset, end_offset);
-      const form = new FormData();
-      form.append('access_token', userToken);
-      form.append('upload_phase', 'transfer');
-      form.append('upload_session_id', uploadSessionId);
-      form.append('start_offset', start_offset.toString());
-      form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
-
-      // Await transfer and get new offsets
-      const transferRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-        form,
-        { headers: form.getHeaders() }
-      );
-      start_offset = parseInt(transferRes.data.start_offset, 10);
-      end_offset = parseInt(transferRes.data.end_offset, 10);
-
-      // Done when start_offset === end_offset
-      if (start_offset === end_offset) break;
-    }
-
-// 3. Finish phase (with retries to fetch videoId)
-const finishRes = await axios.post(
-  `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
-  new URLSearchParams({
-    access_token: userToken,
-    upload_phase: "finish",
-    upload_session_id: uploadSessionId
-  }),
-  { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-);
-console.log("[launch-campaign] FB finishRes data:", finishRes.data);
-
-videoId = finishRes.data.video_id;
-if (!videoId) {
-  // Facebook may take time to register the video_id. Retry GET up to 3x.
-  for (let i = 0; i < 3 && !videoId; i++) {
-    await new Promise(res => setTimeout(res, 1500));
-    try {
-      const statusRes = await axios.get(
-        `https://graph.facebook.com/v18.0/${uploadSessionId}`,
-        { params: { access_token: userToken, fields: "video_id,status" } }
-      );
-      videoId = statusRes.data.video_id;
-      if (videoId) {
-        console.log("[launch-campaign] Fetched videoId after finish phase (retry):", statusRes.data);
-        break;
+  // IMAGE
+  if (adImage && adImage.startsWith("data:")) {
+    const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
+    if (!matches) throw new Error("Invalid image data.");
+    const base64Data = matches[2];
+    const fbImageRes = await axios.post(
+      `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
+      new URLSearchParams({ bytes: base64Data }),
+      {
+        headers: { Authorization: undefined, 'Content-Type': 'application/x-www-form-urlencoded' },
+        params: { access_token: userToken }
       }
+    );
+    const imgData = fbImageRes.data.images;
+    imageHash = Object.values(imgData)[0]?.hash;
+    if (!imageHash) throw new Error("Failed to upload image to Facebook.");
+    console.log("[launch-campaign] Uploaded imageHash:", imageHash);
+  }
+
+  // VIDEO (chunked upload, fully robust for Facebook)
+  if (adVideo && adVideo.startsWith("data:")) {
+    try {
+      const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+      if (!matches) throw new Error("Invalid video data.");
+      const base64Video = matches[2];
+      const videoBuffer = Buffer.from(base64Video, "base64");
+      const totalBytes = videoBuffer.length;
+
+      // 1. Start session
+      const startRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          file_size: totalBytes,
+          upload_phase: "start"
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      const uploadSessionId = startRes.data.upload_session_id;
+      let start_offset = parseInt(startRes.data.start_offset, 10);
+      let end_offset = parseInt(startRes.data.end_offset, 10);
+
+      // 2. Transfer chunks until done
+      while (true) {
+        const chunk = videoBuffer.slice(start_offset, end_offset);
+        const form = new FormData();
+        form.append('access_token', userToken);
+        form.append('upload_phase', 'transfer');
+        form.append('upload_session_id', uploadSessionId);
+        form.append('start_offset', start_offset.toString());
+        form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
+
+        // Await transfer and get new offsets
+        const transferRes = await axios.post(
+          `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+          form,
+          { headers: form.getHeaders() }
+        );
+        start_offset = parseInt(transferRes.data.start_offset, 10);
+        end_offset = parseInt(transferRes.data.end_offset, 10);
+
+        // Done when start_offset === end_offset
+        if (start_offset === end_offset) break;
+      }
+
+      // 3. Finish phase (with retries to fetch videoId)
+      const finishRes = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        new URLSearchParams({
+          access_token: userToken,
+          upload_phase: "finish",
+          upload_session_id: uploadSessionId
+        }),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+      );
+      console.log("[launch-campaign] FB finishRes data:", finishRes.data);
+
+      videoId = finishRes.data.video_id;
+      if (!videoId) {
+        // Facebook may take time to register the video_id. Retry GET up to 3x.
+        for (let i = 0; i < 3 && !videoId; i++) {
+          await new Promise(res => setTimeout(res, 1500));
+          try {
+            const statusRes = await axios.get(
+              `https://graph.facebook.com/v18.0/${uploadSessionId}`,
+              { params: { access_token: userToken, fields: "video_id,status" } }
+            );
+            videoId = statusRes.data.video_id;
+            if (videoId) {
+              console.log("[launch-campaign] Fetched videoId after finish phase (retry):", statusRes.data);
+              break;
+            }
+          } catch (e) {
+            console.error(`[launch-campaign] VideoId GET attempt ${i + 1} failed:`, e.response?.data || e.message);
+          }
+        }
+      }
+      if (!videoId) throw new Error("No videoId returned after finish phase, even after retries! " + JSON.stringify(finishRes.data));
+      console.log("[launch-campaign] Uploaded videoId:", videoId);
     } catch (e) {
-      console.error(`[launch-campaign] VideoId GET attempt ${i + 1} failed:`, e.response?.data || e.message);
+      console.error("[launch-campaign] Video upload failed:", e.message || e);
+      videoId = null; // Continue with just image if needed
     }
   }
-}
-if (!videoId) throw new Error("No videoId returned after finish phase, even after retries! " + JSON.stringify(finishRes.data));
-console.log("[launch-campaign] Uploaded videoId:", videoId);
-} catch (e) {
-  console.error("[launch-campaign] Video upload failed:", e.message || e);
-  videoId = null; // Continue with just image if needed
-}
+
+  // --- log final state ---
+  console.log(`[launch-campaign] Finished uploads | imageHash: ${imageHash || "null"} | videoId: ${videoId || "null"}`);
+
+  // (continue your campaign/ad set logic below here...)
+
+  // ...the rest of your code below remains unchanged...
 
 
-
-}
-
-
-    // --- log final state ---
-    console.log(`[launch-campaign] Finished uploads | imageHash: ${imageHash} | videoId: ${videoId}`);
-
-    // (continue your campaign/ad set logic below here...)
 
 
     // 2. Create Campaign
