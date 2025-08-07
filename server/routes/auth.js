@@ -226,6 +226,30 @@ if (adVideo && adVideo.startsWith("data:")) {
     const pageToken = page ? page.access_token : null;
     if (!pageToken) throw new Error('Could not find page access token for video upload.');
 
+    // --- 1.1 DEBUG: Check if the token has pages_manage_metadata ---
+    try {
+      const debugRes = await axios.get(
+        `https://graph.facebook.com/debug_token`,
+        {
+          params: {
+            input_token: pageToken,
+            access_token: `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`,
+          },
+        }
+      );
+      if (
+        !debugRes.data.data.is_valid ||
+        !debugRes.data.data.scopes.includes('pages_manage_metadata')
+      ) {
+        throw new Error('Page access token is missing required permissions: pages_manage_metadata. Please remove and re-add the app, then approve all permissions for your page.');
+      }
+    } catch (permCheckErr) {
+      throw new Error(
+        "Page token is missing the required 'pages_manage_metadata' permission. " +
+        "Remove and re-add the app, make sure all permissions are granted, and select the right page."
+      );
+    }
+
     const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
     if (!matches) throw new Error("Invalid video data.");
     const base64Video = matches[2];
