@@ -214,6 +214,7 @@ try {
   }
 
 // VIDEO (chunked upload, robust for Facebook advideos)
+// VIDEO (chunked upload, robust for Facebook advideos)
 if (adVideo && adVideo.startsWith("data:")) {
   try {
     // --- 1. Get the PAGE access token (not user token!) ---
@@ -226,7 +227,27 @@ if (adVideo && adVideo.startsWith("data:")) {
     const pageToken = page ? page.access_token : null;
     if (!pageToken) throw new Error('Could not find page access token for video upload.');
 
-    // --- 1.1 DEBUG: Check if the token has pages_manage_metadata ---
+    // --- 1.1 Check if the user is an ADMIN on the page ---
+    // Get user ID from /me endpoint
+    const meRes = await axios.get(
+      `https://graph.facebook.com/v18.0/me`,
+      { params: { access_token: userToken, fields: 'id,name' } }
+    );
+    const userId = meRes.data.id;
+
+    // Check Page roles
+    const rolesRes = await axios.get(
+      `https://graph.facebook.com/v18.0/${pageId}/roles`,
+      { params: { access_token: pageToken } }
+    );
+    const admins = (rolesRes.data.data || []).filter(r => r.role === 'ADMIN');
+    const isAdmin = admins.some(a => a.id === userId);
+
+    if (!isAdmin) {
+      throw new Error("You must be an ADMIN of the Facebook Page to upload video ads. Check your Page Roles in Facebook Settings.");
+    }
+
+    // --- 1.2 DEBUG: Check if the token has pages_manage_metadata ---
     try {
       const debugRes = await axios.get(
         `https://graph.facebook.com/debug_token`,
@@ -250,13 +271,14 @@ if (adVideo && adVideo.startsWith("data:")) {
       );
     }
 
+    // --- 2. Upload video (same as before) ---
     const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
     if (!matches) throw new Error("Invalid video data.");
     const base64Video = matches[2];
     const videoBuffer = Buffer.from(base64Video, "base64");
     const totalBytes = videoBuffer.length;
 
-    // --- 2. Start upload session with PAGE token ---
+    // --- 3. Start upload session with PAGE token ---
     const startRes = await axios.post(
       `https://graph.facebook.com/v18.0/advideos?access_token=${pageToken}`,
       new URLSearchParams({
@@ -269,7 +291,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     let start_offset = parseInt(startRes.data.start_offset, 10);
     let end_offset = parseInt(startRes.data.end_offset, 10);
 
-    // --- 3. Transfer chunks ---
+    // --- 4. Transfer chunks ---
     while (start_offset < end_offset) {
       const chunk = videoBuffer.slice(start_offset, end_offset);
       const form = new FormData();
@@ -287,7 +309,7 @@ if (adVideo && adVideo.startsWith("data:")) {
       end_offset = parseInt(transferRes.data.end_offset, 10);
     }
 
-    // --- 4. Finish phase ---
+    // --- 5. Finish phase ---
     const finishRes = await axios.post(
       `https://graph.facebook.com/v18.0/advideos?access_token=${pageToken}`,
       new URLSearchParams({
@@ -307,6 +329,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     videoId = null; // Continue with just image if needed
   }
 }
+
 
 
 
