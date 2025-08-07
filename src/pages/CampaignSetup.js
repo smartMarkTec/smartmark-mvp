@@ -480,7 +480,7 @@ const handleLaunch = async () => {
         }}
       >
         <button
-          onClick={() => navigate(-1)}
+           onClick={() => navigate(-1)}
           style={{
             background: "#202824e0",
             color: "#fff",
