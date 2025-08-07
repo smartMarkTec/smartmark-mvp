@@ -6,7 +6,7 @@ const API_BASE = "/api";
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
 const QUESTIONS = [
-  { question: "Website URL", key: "url", type: "text", placeholder: "https://yourbusiness.com" },
+  { question: " Website URL", key: "url", type: "text", placeholder: "https://yourbusiness.com" },
   { question: "Business/Industry", key: "industry", type: "text", placeholder: "e.g. Pizza restaurant, Fashion store" },
   { question: "Business Name", key: "businessName", type: "text", placeholder: "e.g. Joe's Pizza" },
   { question: "Describe your ideal customer in one sentence.", key: "idealCustomer", type: "text", placeholder: "e.g. Working moms in Dallas" },
