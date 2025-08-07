@@ -19,12 +19,10 @@ const FB_SCOPES = [
   'pages_show_list',
   'public_profile',
   'read_insights',
-  'business_management'
+  'business_management',
+  'ads_management',    // <-- add this
+  'ads_read'           // <-- and this
 ];
-
-
-
-
 
 
 
