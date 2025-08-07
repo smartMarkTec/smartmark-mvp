@@ -167,6 +167,9 @@ const [mediaImageUrl, setMediaImageUrl] = useState("");
 const [mediaVideoUrl, setMediaVideoUrl] = useState("");
 const [showImageModal, setShowImageModal] = useState(false);
 const [modalImg, setModalImg] = useState("");
+const [cashapp, setCashapp] = useState(localStorage.getItem("smartmark_login_username") || "");
+const [email, setEmail] = useState(localStorage.getItem("smartmark_login_password") || "");
+
 
 
 
@@ -674,6 +677,53 @@ const handleLaunch = async () => {
                   width: "100%"
                 }}
               >
+
+<div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6, margin: "8px 0" }}>
+    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3 }}>Your CashApp:</label>
+    <input
+      type="text"
+      placeholder="CashApp username"
+      value={cashapp}
+      onChange={e => {
+        setCashapp(e.target.value);
+        localStorage.setItem("smartmark_login_username", e.target.value);
+      }}
+      style={{
+        padding: "0.74rem 1rem",
+        borderRadius: "0.85rem",
+        border: "1.2px solid #57dfa9",
+        fontSize: "1.09rem",
+        background: "#1c2120",
+        color: "#b3f1d6",
+        marginBottom: 3,
+        width: "100%"
+      }}
+      autoComplete="username"
+    />
+    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3, marginTop: 4 }}>Your Email:</label>
+    <input
+      type="email"
+      placeholder="Email address"
+      value={email}
+      onChange={e => {
+        setEmail(e.target.value);
+        localStorage.setItem("smartmark_login_password", e.target.value);
+      }}
+      style={{
+        padding: "0.74rem 1rem",
+        borderRadius: "0.85rem",
+        border: "1.2px solid #57dfa9",
+        fontSize: "1.09rem",
+        background: "#1c2120",
+        color: "#b3f1d6",
+        marginBottom: 3,
+        width: "100%"
+      }}
+      autoComplete="email"
+    />
+  </div>
+</div>
                 Pay (${fee.toFixed(2)}) to <span style={{ color: ACCENT_GREEN }}>$Wknowles20</span>
               </div>
             )}
