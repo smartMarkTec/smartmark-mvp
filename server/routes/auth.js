@@ -13,11 +13,11 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const FB_SCOPES = [
   'ads_management',
   'ads_read',
-  'public_profile',
   'pages_show_list',
   'pages_read_engagement',
-  'pages_manage_posts'
+  'public_profile'
 ];
+
 
 
 
