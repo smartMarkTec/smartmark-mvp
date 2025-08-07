@@ -6,7 +6,6 @@ import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "re
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 import { FaExpand } from "react-icons/fa";
 
-
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
 const ACCENT_GREEN = "#1ec885";
@@ -140,20 +139,45 @@ function VideoPreviewBox({ videoUrl }) {
   );
 }
 
+// ==================== PERSISTENT STATE SECTION STARTS HERE ====================
 
+const FB_CONN_KEY = "smartmark_fb_connected";
+const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000; // 2.5 days in ms
 
 const CampaignSetup = () => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
-  const [form, setForm] = useState({});
+
+  // --- Persistent State (Auto Save + Restore) ---
+  const [form, setForm] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {};
+    } catch { return {}; }
+  });
+  const [budget, setBudget] = useState(() => localStorage.getItem("smartmark_last_budget") || "");
+  const [cashapp, setCashapp] = useState(() => localStorage.getItem("smartmark_login_username") || "");
+  const [email, setEmail] = useState(() => localStorage.getItem("smartmark_login_password") || "");
+  const [selectedAccount, setSelectedAccount] = useState(() => localStorage.getItem("smartmark_last_selected_account") || "");
+  const [selectedPageId, setSelectedPageId] = useState(() => localStorage.getItem("smartmark_last_selected_pageId") || "");
+  const [fbConnected, setFbConnected] = useState(() => {
+    const conn = localStorage.getItem(FB_CONN_KEY);
+    if (conn) {
+      const { connected, time } = JSON.parse(conn);
+      if (connected && Date.now() - time < FB_CONN_MAX_AGE) {
+        return true;
+      } else {
+        localStorage.removeItem(FB_CONN_KEY);
+        return false;
+      }
+    }
+    return false;
+  });
+
+  // Other UI state (not needed to persist)
   const [userKey, setUserKey] = useState("");
-  const [budget, setBudget] = useState("");
-  const [fbConnected, setFbConnected] = useState(false);
   const [adAccounts, setAdAccounts] = useState([]);
-  const [selectedAccount, setSelectedAccount] = useState("");
   const [pages, setPages] = useState([]);
-  const [selectedPageId, setSelectedPageId] = useState("");
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [metrics, setMetrics] = useState(null);
@@ -162,16 +186,25 @@ const CampaignSetup = () => {
   const [loading, setLoading] = useState(false);
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
-  // --- Media preview state for video & image (from navigation state, fallback to empty string) ---
-const [mediaImageUrl, setMediaImageUrl] = useState("");
-const [mediaVideoUrl, setMediaVideoUrl] = useState("");
-const [showImageModal, setShowImageModal] = useState(false);
-const [modalImg, setModalImg] = useState("");
-const [cashapp, setCashapp] = useState(localStorage.getItem("smartmark_login_username") || "");
-const [email, setEmail] = useState(localStorage.getItem("smartmark_login_password") || "");
+  const [mediaImageUrl, setMediaImageUrl] = useState("");
+  const [mediaVideoUrl, setMediaVideoUrl] = useState("");
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [modalImg, setModalImg] = useState("");
 
+// =============== AUTO-SAVE/RESTORE ================
+  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
+  useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
+  useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
+  useEffect(() => { localStorage.setItem("smartmark_login_password", email); }, [email]);
+  useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
+  useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
+  useEffect(() => {
+    if (fbConnected) {
+      localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+    }
+  }, [fbConnected]);
 
-
+// ============= YOUR COMPONENT CONTINUES AS USUAL FROM HERE =============
 
 // Always use navigation state if present, otherwise fallback to localStorage
 useEffect(() => {
@@ -552,55 +585,60 @@ const handleLaunch = async () => {
           position: "relative",
           minHeight: "600px", // ensure left panel height for match
         }}>
-          {/* Facebook Connect */}
-          <button
-            onClick={() => window.location.href = `${backendUrl}/auth/facebook`}
-            style={{
-              padding: "1.15rem 2.8rem",
-              borderRadius: "1.5rem",
-              border: "none",
-              background: fbConnected ? ACCENT_GREEN : "#1877F2",
-              color: "#fff",
-              fontWeight: 800,
-              fontSize: "1.25rem",
-              boxShadow: "0 2px 12px #1877f233",
-              letterSpacing: "1px",
-              cursor: "pointer",
-              fontFamily: MODERN_FONT,
-              width: "100%",
-              maxWidth: 370,
-              margin: "0 auto",
-              display: "block",
-              transition: "background 0.23s"
-            }}
-          >
-            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-          </button>
-          {fbConnected && (
-            <button
-              onClick={openFbPaymentPopup}
-              style={{
-                marginTop: 16,
-                padding: "0.72rem 1.5rem",
-                borderRadius: "1.1rem",
-                background: "#fff",
-                color: "#1877F2",
-                fontWeight: 700,
-                border: "none",
-                cursor: "pointer",
-                fontFamily: MODERN_FONT,
-                fontSize: "1.01rem",
-                boxShadow: "0 2px 8px #1877f233",
-                width: "100%",
-                maxWidth: 370,
-                marginLeft: "auto",
-                marginRight: "auto",
-                display: "block"
-              }}
-            >
-              Add/Manage Payment Method
-            </button>
-          )}
+         {/* Facebook Connect */}
+<button
+  onClick={() => {
+    window.location.href = `${backendUrl}/auth/facebook`;
+    setFbConnected(true);
+    localStorage.setItem("smartmark_fb_connected", JSON.stringify({ connected: 1, time: Date.now() }));
+  }}
+  style={{
+    padding: "1.15rem 2.8rem",
+    borderRadius: "1.5rem",
+    border: "none",
+    background: fbConnected ? ACCENT_GREEN : "#1877F2",
+    color: "#fff",
+    fontWeight: 800,
+    fontSize: "1.25rem",
+    boxShadow: "0 2px 12px #1877f233",
+    letterSpacing: "1px",
+    cursor: "pointer",
+    fontFamily: MODERN_FONT,
+    width: "100%",
+    maxWidth: 370,
+    margin: "0 auto",
+    display: "block",
+    transition: "background 0.23s"
+  }}
+>
+  {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
+</button>
+{fbConnected && (
+  <button
+    onClick={openFbPaymentPopup}
+    style={{
+      marginTop: 16,
+      padding: "0.72rem 1.5rem",
+      borderRadius: "1.1rem",
+      background: "#fff",
+      color: "#1877F2",
+      fontWeight: 700,
+      border: "none",
+      cursor: "pointer",
+      fontFamily: MODERN_FONT,
+      fontSize: "1.01rem",
+      boxShadow: "0 2px 8px #1877f233",
+      width: "100%",
+      maxWidth: 370,
+      marginLeft: "auto",
+      marginRight: "auto",
+      display: "block"
+    }}
+  >
+    Add/Manage Payment Method
+  </button>
+)}
+
           {/* CAMPAIGN NAME */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
