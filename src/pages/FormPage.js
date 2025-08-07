@@ -648,7 +648,9 @@ return (
       padding: "44px 36px 32px 36px",
       display: "flex",
       flexDirection: "column",
-      alignItems: "center"
+      alignItems: "center",      // <-- Make sure this is here!
+    marginLeft: "auto",        // <-- Add this!
+    marginRight: "auto",       // <-- Add this!
     }}>
       {/* Stationary Q&A Card */}
       <div style={{
