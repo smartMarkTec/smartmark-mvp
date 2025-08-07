@@ -15,8 +15,10 @@ const FB_SCOPES = [
   'ads_read',
   'pages_show_list',
   'pages_read_engagement',
+  'pages_manage_ads',
   'public_profile'
 ];
+
 
 
 
