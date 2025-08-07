@@ -208,6 +208,7 @@ try {
   }
 
  // VIDEO (chunked upload, robust for Facebook advideos)
+// VIDEO (chunked upload, correct endpoint)
 if (adVideo && adVideo.startsWith("data:")) {
   try {
     const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
@@ -216,9 +217,9 @@ if (adVideo && adVideo.startsWith("data:")) {
     const videoBuffer = Buffer.from(base64Video, "base64");
     const totalBytes = videoBuffer.length;
 
-    // 1. Start upload session
+    // --- 1. Start upload session (NO accountId in URL) ---
     const startRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+      `https://graph.facebook.com/v18.0/advideos`,
       new URLSearchParams({
         access_token: userToken,
         file_size: totalBytes,
@@ -230,7 +231,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     let start_offset = parseInt(startRes.data.start_offset, 10);
     let end_offset = parseInt(startRes.data.end_offset, 10);
 
-    // 2. Transfer chunks (chunked upload)
+    // --- 2. Transfer chunks ---
     while (start_offset < end_offset) {
       const chunk = videoBuffer.slice(start_offset, end_offset);
       const form = new FormData();
@@ -241,7 +242,7 @@ if (adVideo && adVideo.startsWith("data:")) {
       form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
 
       const transferRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+        `https://graph.facebook.com/v18.0/advideos`,
         form,
         { headers: form.getHeaders() }
       );
@@ -249,9 +250,9 @@ if (adVideo && adVideo.startsWith("data:")) {
       end_offset = parseInt(transferRes.data.end_offset, 10);
     }
 
-    // 3. Finish phase
+    // --- 3. Finish (NO accountId in URL) ---
     const finishRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/advideos`,
+      `https://graph.facebook.com/v18.0/advideos`,
       new URLSearchParams({
         access_token: userToken,
         upload_phase: "finish",
@@ -259,17 +260,11 @@ if (adVideo && adVideo.startsWith("data:")) {
       }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
     );
-    console.log("[launch-campaign] FB finishRes data:", finishRes.data);
 
+    console.log("[launch-campaign] FB finishRes data:", finishRes.data);
     videoId = finishRes.data.video_id || null;
 
-    // --- FINAL DIAGNOSTICS ---
     if (!videoId) {
-      // Facebook rejected the file or failed to process it as an ad video.
-      // Dump file info for you to debug format/duration/size issues.
-      console.error("[launch-campaign] Video upload failed: No videoId returned after finish phase!");
-      console.error("[launch-campaign] Try with a <5MB, 10-15s, H.264 MP4. Check the file with ffmpeg -i yourfile.mp4.");
-      console.error("[launch-campaign] You can also test upload at: https://developers.facebook.com/tools/explorer/");
       throw new Error("No videoId returned after finish phase! " + JSON.stringify(finishRes.data));
     }
     console.log("[launch-campaign] Uploaded videoId:", videoId);
@@ -278,6 +273,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     videoId = null; // Continue with just image if needed
   }
 }
+
 
 
 
