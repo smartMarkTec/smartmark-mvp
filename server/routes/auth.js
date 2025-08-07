@@ -11,12 +11,17 @@ const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const FB_SCOPES = [
-  'ads_management',
-  'ads_read',
-  'pages_show_list',
+  'pages_manage_engagement',
+  'pages_manage_metadata',
+  'pages_manage_posts',
   'pages_read_engagement',
-  'public_profile'
+  'pages_read_user_content',
+  'pages_show_list',
+  'public_profile',
+  'read_insights',
+  'business_management'
 ];
+
 
 
 
