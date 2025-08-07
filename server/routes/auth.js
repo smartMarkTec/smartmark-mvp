@@ -107,10 +107,24 @@ router.post('/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: 'Username and password required' });
   await db.read();
-  const user = db.data.users.find(u => u.username === username && u.password === password);
-  if (!user)
-    return res.status(401).json({ error: 'Invalid login' });
-  res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
+  let user = db.data.users.find(u => u.username === username && u.password === password);
+
+if (!user) {
+  // Auto-register if user not found (JIT registration)
+  // You need to decide what to save for cashtag/email
+  // Here, just use username for both, and password for email
+  user = {
+    username,
+    email: password,     // treat password field as email for now (since that's your flow)
+    cashtag: username,   // or customize as needed
+    password
+  };
+  db.data.users.push(user);
+  await db.write();
+}
+
+res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
+
 });
 
 // ====== LAUNCH CAMPAIGN (Create separate ad sets for image and video) ======
