@@ -645,49 +645,26 @@ const handleRegenerateVideo = async () => {
         marginBottom: 14,
         position: "relative"
       }}>
-        {/* Ad Preview Header */}
-        <div style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 14
-        }}>
-          <div style={{
-            fontSize: 20,
-            fontWeight: 800,
-            color: "#fff",
-            letterSpacing: 0.2,
-            borderBottom: "2px solid #19e5b7",
-            paddingBottom: 3,
-            width: "fit-content"
-          }}>
-            Ad Preview
-          </div>
-          {/* Regenerate button, appears top right */}
-          <button
-            style={{
-              background: "#1ad6b7",
-              color: "#222",
-              border: "none",
-              borderRadius: 12,
-              fontWeight: 700,
-              fontSize: "1.01rem",
-              padding: "10px 23px",
-              cursor: imageLoading ? "not-allowed" : "pointer",
-              marginLeft: 18,
-              boxShadow: "0 2px 7px #19e5b733",
-              display: "flex",
-              alignItems: "center",
-              gap: 7
-            }}
-            onClick={handleRegenerateImage}
-            disabled={imageLoading}
-            title="Regenerate Image Ad"
-          >
-            <FaSyncAlt style={{ fontSize: 16 }} />
-            {imageLoading ? "Regenerating..." : "Regenerate"}
-          </button>
-        </div>
+      <div style={{
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 14
+}}>
+  <div style={{
+    fontSize: 20,
+    fontWeight: 800,
+    color: "#fff",
+    letterSpacing: 0.2,
+    borderBottom: "2px solid #19e5b7",
+    paddingBottom: 3,
+    width: "fit-content"
+  }}>
+    Ad Preview
+  </div>
+  {/* REMOVE the button here */}
+</div>
+
         {/* Facebook Style Ad Previews */}
 <div style={{
   display: "flex",
