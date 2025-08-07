@@ -217,52 +217,48 @@ if (adVideo && adVideo.startsWith("data:")) {
     const videoBuffer = Buffer.from(base64Video, "base64");
     const totalBytes = videoBuffer.length;
 
-    // --- 1. Start upload session (NO accountId in URL) ---
-    const startRes = await axios.post(
-      `https://graph.facebook.com/v18.0/advideos`,
-      new URLSearchParams({
-        access_token: userToken,
-        file_size: totalBytes,
-        upload_phase: "start"
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    const uploadSessionId = startRes.data.upload_session_id;
-    let start_offset = parseInt(startRes.data.start_offset, 10);
-    let end_offset = parseInt(startRes.data.end_offset, 10);
+ // --- 1. Start upload session ---
+const startRes = await axios.post(
+  `https://graph.facebook.com/v18.0/advideos?access_token=${userToken}`,
+  new URLSearchParams({
+    file_size: totalBytes,
+    upload_phase: "start"
+  }),
+  { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+);
+const uploadSessionId = startRes.data.upload_session_id;
+let start_offset = parseInt(startRes.data.start_offset, 10);
+let end_offset = parseInt(startRes.data.end_offset, 10);
 
-    // --- 2. Transfer chunks ---
-    while (start_offset < end_offset) {
-      const chunk = videoBuffer.slice(start_offset, end_offset);
-      const form = new FormData();
-      form.append('access_token', userToken);
-      form.append('upload_phase', 'transfer');
-      form.append('upload_session_id', uploadSessionId);
-      form.append('start_offset', start_offset.toString());
-      form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
+// --- 2. Transfer chunks ---
+while (start_offset < end_offset) {
+  const chunk = videoBuffer.slice(start_offset, end_offset);
+  const form = new FormData();
+  form.append('upload_phase', 'transfer');
+  form.append('upload_session_id', uploadSessionId);
+  form.append('start_offset', start_offset.toString());
+  form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
 
-      const transferRes = await axios.post(
-        `https://graph.facebook.com/v18.0/advideos`,
-        form,
-        { headers: form.getHeaders() }
-      );
-      start_offset = parseInt(transferRes.data.start_offset, 10);
-      end_offset = parseInt(transferRes.data.end_offset, 10);
-    }
+  const transferRes = await axios.post(
+    `https://graph.facebook.com/v18.0/advideos?access_token=${userToken}`,
+    form,
+    { headers: form.getHeaders() }
+  );
+  start_offset = parseInt(transferRes.data.start_offset, 10);
+  end_offset = parseInt(transferRes.data.end_offset, 10);
+}
 
-    // --- 3. Finish (NO accountId in URL) ---
-    const finishRes = await axios.post(
-      `https://graph.facebook.com/v18.0/advideos`,
-      new URLSearchParams({
-        access_token: userToken,
-        upload_phase: "finish",
-        upload_session_id: uploadSessionId
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
+// --- 3. Finish phase ---
+const finishRes = await axios.post(
+  `https://graph.facebook.com/v18.0/advideos?access_token=${userToken}`,
+  new URLSearchParams({
+    upload_phase: "finish",
+    upload_session_id: uploadSessionId
+  }),
+  { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+);
+videoId = finishRes.data.video_id || null;
 
-    console.log("[launch-campaign] FB finishRes data:", finishRes.data);
-    videoId = finishRes.data.video_id || null;
 
     if (!videoId) {
       throw new Error("No videoId returned after finish phase! " + JSON.stringify(finishRes.data));
