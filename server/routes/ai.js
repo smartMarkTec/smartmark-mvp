@@ -617,7 +617,7 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
 </svg>`;
 
     // --- Compose SVG on Image ---
-    const generatedPath = path.join(__dirname, '../public/generated');
+    const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
 if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
 const fileName = `${uuidv4()}.jpg`;
 const filePath = path.join(generatedPath, fileName);
@@ -1029,7 +1029,7 @@ const listPath = path.join(tempDir, `${require('uuid').v4()}.txt`);
 fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
 
 // ----- Step 3: Concatenate video files -----
-const generatedPath = path.join(__dirname, '../public/generated');
+const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
 if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
 const videoId = require('uuid').v4();
 const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
