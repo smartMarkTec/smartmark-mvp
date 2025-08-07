@@ -41,6 +41,7 @@ function LoadingSpinner() {
   // Dots animation
   return (
     <div style={{
+
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150
     }}>
       <div style={{
@@ -208,6 +209,8 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
 
+
+  
 
   // Restore on mount
 React.useEffect(() => {
@@ -583,7 +586,7 @@ const handleRegenerateVideo = async () => {
   };
 
   // ...rest of your component code (JSX return, etc) unchanged...
-  return (
+return (
   <div
     style={{
       minHeight: "100vh",
@@ -592,9 +595,45 @@ const handleRegenerateVideo = async () => {
       flexDirection: "column",
       alignItems: "center",
       fontFamily: MODERN_FONT,
-      padding: "0 0 60px 0"
+      padding: "0 0 60px 0",
+      position: "relative", // Make sure this is here for absolute positioning
     }}
   >
+    {/* Home Button Top Right */}
+    <button
+      style={{
+        position: "absolute",
+        top: 24,
+        right: 38,
+        padding: "10px 30px",
+        fontWeight: 700,
+        fontSize: "1.18rem",
+        background: "#222c27",
+        color: "#fff",
+        border: "none",
+        borderRadius: 20,
+        boxShadow: "0 2px 12px #0003",
+        cursor: "pointer",
+        letterSpacing: "1.1px",
+        zIndex: 1001,
+        opacity: 0.92,
+        transition: "background 0.15s, color 0.15s",
+      }}
+      onMouseOver={e => {
+        e.target.style.background = "#293e35";
+        e.target.style.color = "#14e7b9";
+      }}
+      onMouseOut={e => {
+        e.target.style.background = "#222c27";
+        e.target.style.color = "#fff";
+      }}
+      onClick={() => navigate("/")}
+    >
+      Home
+    </button>
+    {/* The rest of your FormPage JSX goes below */}
+
+  
     {/* Fullscreen Modal */}
     <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
 
