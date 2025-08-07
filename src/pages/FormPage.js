@@ -38,27 +38,70 @@ const isSeriousIndustry = industry => {
 };
 
 function LoadingSpinner() {
+  // Dots animation
   return (
     <div style={{
-      display: "flex", alignItems: "center", justifyContent: "center", width: "100%", height: 150
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150
     }}>
       <div style={{
-        border: "4px solid #19e5b7",
-        borderTop: "4px solid #23262a",
-        borderRadius: "50%",
-        width: 44,
+        color: "#b0b8bc",
+        fontWeight: 500,
+        fontSize: "0.99rem",
+        marginBottom: 10,
+        letterSpacing: 0.08
+      }}>
+        This could take up to 2 minutes <span role="img" aria-label="robot">🤖</span>
+      </div>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
         height: 44,
-        animation: "spin 1s linear infinite"
-      }} />
-      <style>{`
-        @keyframes spin {
-          0% { transform: rotate(0deg);}
-          100% { transform: rotate(360deg);}
-        }
-      `}</style>
+        fontSize: 34,
+        fontWeight: 700,
+        letterSpacing: 1
+      }}>
+        <Dotty />
+      </div>
     </div>
   );
 }
+
+// Three dots animation component
+function Dotty() {
+  return (
+    <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
+      <span className="dotty-dot" style={dotStyle(0)}>.</span>
+      <span className="dotty-dot" style={dotStyle(1)}>.</span>
+      <span className="dotty-dot" style={dotStyle(2)}>.</span>
+      <style>
+        {`
+          @keyframes bounceDot {
+            0% { transform: translateY(0);}
+            30% { transform: translateY(-7px);}
+            60% { transform: translateY(0);}
+          }
+          .dotty-dot {
+            display: inline-block;
+            animation: bounceDot 1.2s infinite;
+          }
+          .dotty-dot:nth-child(2) { animation-delay: 0.15s;}
+          .dotty-dot:nth-child(3) { animation-delay: 0.3s;}
+        `}
+      </style>
+    </span>
+  );
+}
+
+function dotStyle(n) {
+  return {
+    display: "inline-block",
+    margin: "0 3px",
+    fontSize: 36,
+    color: "#29efb9",
+    animationDelay: `${n * 0.13}s`
+  };
+}
+
 
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
@@ -165,6 +208,21 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
 
+
+  // Restore on mount
+React.useEffect(() => {
+  const state = loadFormState();
+  if (state) {
+    setAnswers(state.answers || {});
+    setResult(state.result || null);
+    setImageUrl(state.imageUrl || "");
+    setVideoUrl(state.videoUrl || "");
+    setVideoScript(state.videoScript || "");
+    setMediaType(state.mediaType || "both");
+  }
+}, []);
+
+
   // Helper for skipping conditional questions
   const getNextVisibleStep = (currentStep, direction = 1) => {
     let s = currentStep + direction;
@@ -185,6 +243,33 @@ export default function FormPage() {
       return null;
     }
   }
+
+  const CAMPAIGN_SAVE_KEY = "smartmark_form_state_v2";
+const CAMPAIGN_SAVE_TTL = 24 * 60 * 60 * 1000; // 1 day in ms
+
+function saveFormState(data) {
+  localStorage.setItem(CAMPAIGN_SAVE_KEY, JSON.stringify({ ...data, _savedAt: Date.now() }));
+}
+
+function loadFormState() {
+  const raw = localStorage.getItem(CAMPAIGN_SAVE_KEY);
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw);
+    if (!obj._savedAt || (Date.now() - obj._savedAt > CAMPAIGN_SAVE_TTL)) {
+      localStorage.removeItem(CAMPAIGN_SAVE_KEY);
+      return null;
+    }
+    return obj;
+  } catch {
+    return null;
+  }
+}
+
+function clearFormState() {
+  localStorage.removeItem(CAMPAIGN_SAVE_KEY);
+}
+
 
   // Show generate only if on last *visible* question
   const isLast = (() => {
@@ -220,109 +305,134 @@ export default function FormPage() {
   // -----------------------
   // MAIN AI GENERATE BUTTON (image + video parallel)
   // -----------------------
-  const handleGenerate = async () => {
-    setLoading(true);
-    setResult(null);
-    setImageUrl("");
-    setVideoUrl("");
-    setVideoScript("");
-    setError("");
-    setImageLoading(true);
-    setVideoLoading(true);
+const handleGenerate = async () => {
+  setLoading(true);
+  setResult(null);
+  setImageUrl("");
+  setVideoUrl("");
+  setVideoScript("");
+  setError("");
+  setImageLoading(true);
+  setVideoLoading(true);
 
-    try {
-      const toSend = { ...answers };
-      const token = getRandomString();
-      setLastRegenerateToken(token);
+  let overlayData = null;
+  let stockImageUrl = "";
 
-      // Requests in parallel
-      // Defensive JSON handler
-const safeJson = async (res) => {
-  const contentType = res.headers.get('content-type');
-  if (contentType && contentType.includes('application/json')) {
-    try {
-      return await res.json();
-    } catch (e) {
-      return { error: "Malformed JSON", detail: e.message };
-    }
-  } else {
-    // fallback: plain text or HTML error
-    const text = await res.text();
-    return { error: "Non-JSON response", detail: text };
-  }
-};
+  try {
+    const toSend = { ...answers };
+    const token = getRandomString();
+    setLastRegenerateToken(token);
 
+    // Requests in parallel
+    const safeJson = async (res) => {
+      const contentType = res.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        try { return await res.json(); }
+        catch (e) { return { error: "Malformed JSON", detail: e.message }; }
+      } else {
+        const text = await res.text();
+        return { error: "Non-JSON response", detail: text };
+      }
+    };
 
-const adCopyPromise = fetch(`${API_BASE}/generate-campaign-assets`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ answers: toSend, url: answers.url || "" })
-}).then(safeJson);
+    const adCopyPromise = fetch(`${API_BASE}/generate-campaign-assets`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers: toSend, url: answers.url || "" })
+    }).then(safeJson);
 
-const imgPromise = fetch(`${API_BASE}/generate-image-from-prompt`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    url: answers.url || "",
-    industry: answers.industry || "",
-    regenerateToken: token
-  })
-}).then(safeJson);
+    const imgPromise = fetch(`${API_BASE}/generate-image-from-prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: answers.url || "",
+        industry: answers.industry || "",
+        regenerateToken: token
+      })
+    }).then(safeJson);
 
-const videoPromise = fetch(`${API_BASE}/generate-video-ad`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    answers,
-    url: answers.url || "",
-    industry: answers.industry || "",
-    regenerateToken: token
-  }),
-}).then(safeJson);
+    const videoPromise = fetch(`${API_BASE}/generate-video-ad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        answers,
+        url: answers.url || "",
+        industry: answers.industry || "",
+        regenerateToken: token
+      }),
+    }).then(safeJson);
 
+    const [data, imgData, videoData] = await Promise.all([adCopyPromise, imgPromise, videoPromise]);
 
+    setResult({
+      headline: data.headline || "",
+      body: data.body || "",
+      image_overlay_text: data.image_overlay_text || ""
+    });
 
-      const [data, imgData, videoData] = await Promise.all([adCopyPromise, imgPromise, videoPromise]);
+    stockImageUrl = imgData.imageUrl || "";
 
-      // Store overlay text as well
-      setResult({
-        headline: data.headline || "",
-        body: data.body || "",
-        image_overlay_text: data.image_overlay_text || ""
+    if (stockImageUrl) {
+      const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: stockImageUrl,
+          answers,
+          url: answers.url || ""
+        })
       });
 
-      // Step 1: Set image
-      let stockImageUrl = imgData.imageUrl || "";
-      if (stockImageUrl) {
-        const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            imageUrl: stockImageUrl,
-            answers,
-            url: answers.url || ""
-          })
-        });
+      overlayData = await overlayRes.json();
+      setImageUrl(overlayData.imageUrl || stockImageUrl);
 
-        const overlayData = await overlayRes.json();
-        setImageUrl(overlayData.imageUrl || stockImageUrl);
-      } else {
-        setImageUrl(stockImageUrl);
-      }
-      setImageLoading(false);
+      // Save state here after overlay image is ready
+      saveFormState({
+        answers,
+        result: {
+          headline: data.headline || "",
+          body: data.body || "",
+          image_overlay_text: data.image_overlay_text || ""
+        },
+        imageUrl: overlayData.imageUrl || stockImageUrl || "",
+        videoUrl: videoData.videoUrl ? (videoData.videoUrl.startsWith("http") ? videoData.videoUrl : BACKEND_URL + videoData.videoUrl) : "",
+        videoScript: videoData.script || "",
+        mediaType
+      });
 
-      // Step 2: Set video
-      if (videoData.videoUrl) setVideoUrl(videoData.videoUrl.startsWith("http") ? videoData.videoUrl : BACKEND_URL + videoData.videoUrl);
-      setVideoScript(videoData.script || "");
-      setVideoLoading(false);
+    } else {
+      setImageUrl(stockImageUrl);
 
-    } catch (err) {
-      setError("Failed to generate campaign: " + (err.message || ""));
-      setImageLoading(false);
-      setVideoLoading(false);
+      // Save state here if no image
+      saveFormState({
+        answers,
+        result: {
+          headline: data.headline || "",
+          body: data.body || "",
+          image_overlay_text: data.image_overlay_text || ""
+        },
+        imageUrl: stockImageUrl || "",
+        videoUrl: videoData.videoUrl ? (videoData.videoUrl.startsWith("http") ? videoData.videoUrl : BACKEND_URL + videoData.videoUrl) : "",
+        videoScript: videoData.script || "",
+        mediaType
+      });
     }
-    setLoading(false);
-  };
+    setImageLoading(false);
+
+    // Step 2: Set video
+    if (videoData.videoUrl) setVideoUrl(videoData.videoUrl.startsWith("http") ? videoData.videoUrl : BACKEND_URL + videoData.videoUrl);
+    setVideoScript(videoData.script || "");
+    setVideoLoading(false);
+
+  } catch (err) {
+    setError("Failed to generate campaign: " + (err.message || ""));
+    setImageLoading(false);
+    setVideoLoading(false);
+  }
+
+  setLoading(false);
+};
+
 
   // -----------------------
   // VIDEO AD GENERATION BUTTON (no change)
