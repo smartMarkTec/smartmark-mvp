@@ -14,8 +14,11 @@ const FB_SCOPES = [
   'ads_management',
   'ads_read',
   'public_profile',
-  'pages_show_list'
+  'pages_show_list',
+  'pages_manage_ads',
+  'pages_manage_metadata'
 ];
+
 
 let userTokens = {};
 
