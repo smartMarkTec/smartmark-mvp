@@ -265,9 +265,10 @@ videoId = finishRes.data.video_id || null;
     }
     console.log("[launch-campaign] Uploaded videoId:", videoId);
   } catch (e) {
-    console.error("[launch-campaign] Video upload failed:", e.message || e);
-    videoId = null; // Continue with just image if needed
-  }
+  console.error("[launch-campaign] Video upload failed:", e?.response?.data || e?.message || e);
+  videoId = null; // Continue with just image if needed
+}
+
 }
 
 
