@@ -222,6 +222,25 @@ React.useEffect(() => {
   }
 }, []);
 
+// Save videoUrl and videoScript to localStorage whenever they update
+React.useEffect(() => {
+  // Don't save if nothing to save yet
+  if (!videoUrl && !videoScript) return;
+  // Load the rest of the state (answers, image, etc.)
+  const prev = loadFormState() || {};
+  saveFormState({
+    ...prev,
+    answers: prev.answers || answers,
+    result: prev.result || result,
+    imageUrl: prev.imageUrl || imageUrl,
+    videoUrl,
+    videoScript,
+    mediaType: prev.mediaType || mediaType,
+  });
+  // eslint-disable-next-line
+}, [videoUrl, videoScript]);
+
+
 
   // Helper for skipping conditional questions
   const getNextVisibleStep = (currentStep, direction = 1) => {
