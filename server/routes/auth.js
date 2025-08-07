@@ -20,11 +20,9 @@ const FB_SCOPES = [
   'public_profile',
   'read_insights',
   'business_management',
-  'ads_management',    // <-- add this
-  'ads_read'           // <-- and this
+  'ads_management',
+  'ads_read'
 ];
-
-
 
 let userTokens = {};
 
@@ -114,7 +112,6 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid login' });
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
-
 
 // ====== LAUNCH CAMPAIGN (Create separate ad sets for image and video) ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
@@ -447,8 +444,90 @@ if (adVideo && adVideo.startsWith("data:")) {
   }
 });
 
+// ====== FACEBOOK API TEST ROUTES (for permissions/feature validation) ======
 
+// Test pages_manage_metadata (update page about)
+router.post('/facebook/test-pages-manage-metadata/:pageId', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { pageId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const result = await axios.post(
+      `https://graph.facebook.com/v18.0/${pageId}`,
+      { about: "SmartMark API permission test" },
+      { params: { access_token: userToken } }
+    );
+    res.json(result.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || "pages_manage_metadata test failed" });
+  }
+});
 
+// Test read_insights
+router.get('/facebook/test-read-insights/:pageId', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { pageId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const result = await axios.get(
+      `https://graph.facebook.com/v18.0/${pageId}/insights`,
+      { params: { metric: 'page_impressions', access_token: userToken } }
+    );
+    res.json(result.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || "read_insights test failed" });
+  }
+});
+
+// Test pages_read_user_content (read conversations)
+router.get('/facebook/test-pages-read-user-content/:pageId', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { pageId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const result = await axios.get(
+      `https://graph.facebook.com/v18.0/${pageId}/conversations`,
+      { params: { access_token: userToken } }
+    );
+    res.json(result.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || "pages_read_user_content test failed" });
+  }
+});
+
+// Test pages_manage_posts (create a post)
+router.post('/facebook/test-pages-manage-posts/:pageId', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { pageId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const result = await axios.post(
+      `https://graph.facebook.com/v18.0/${pageId}/feed`,
+      { message: "SmartMark test post" },
+      { params: { access_token: userToken } }
+    );
+    res.json(result.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || "pages_manage_posts test failed" });
+  }
+});
+
+// Test pages_manage_engagement (reply to a comment)
+router.post('/facebook/test-pages-manage-engagement/:commentId', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { commentId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const result = await axios.post(
+      `https://graph.facebook.com/v18.0/${commentId}/comments`,
+      { message: "SmartMark test reply" },
+      { params: { access_token: userToken } }
+    );
+    res.json(result.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || "pages_manage_engagement test failed" });
+  }
+});
 
 
 // --- CAMPAIGN MGMT (unchanged, just tightened error handling) --- //
