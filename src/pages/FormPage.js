@@ -689,288 +689,316 @@ const handleRegenerateVideo = async () => {
           </button>
         </div>
         {/* Facebook Style Ad Previews */}
-        <div style={{
+<div style={{
+  display: "flex",
+  justifyContent: "center",
+  gap: 34,
+  flexWrap: "wrap",
+  width: "100%"
+}}>
+  {/* IMAGE AD PREVIEW */}
+  <div style={{
+    background: "#fff",
+    borderRadius: 13,
+    boxShadow: "0 2px 24px #16242714",
+    minWidth: 340,
+    maxWidth: 390,
+    flex: 1,
+    marginBottom: 20,
+    padding: "0px 0px 14px 0px",
+    border: "1.5px solid #eaeaea",
+    fontFamily: AD_FONT,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    position: "relative"
+  }}>
+    {/* "Facebook" header strip */}
+    <div style={{
+      background: "#f5f6fa",
+      padding: "11px 20px",
+      borderBottom: "1px solid #e0e4eb",
+      fontWeight: 700,
+      color: "#495a68",
+      fontSize: 16,
+      letterSpacing: 0.08,
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center"
+    }}>
+      <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+      {/* Move regenerate button to top right inside card */}
+      <button
+        style={{
+          background: "#1ad6b7",
+          color: "#222",
+          border: "none",
+          borderRadius: 12,
+          fontWeight: 700,
+          fontSize: "1.01rem",
+          padding: "6px 20px",
+          cursor: imageLoading ? "not-allowed" : "pointer",
+          marginLeft: 8,
+          boxShadow: "0 2px 7px #19e5b733",
           display: "flex",
+          alignItems: "center",
+          gap: 7
+        }}
+        onClick={handleRegenerateImage}
+        disabled={imageLoading}
+        title="Regenerate Image Ad"
+      >
+        <FaSyncAlt style={{ fontSize: 16 }} />
+        {imageLoading ? "Regenerating..." : "Regenerate"}
+      </button>
+    </div>
+    {/* Ad Image Preview */}
+    <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {imageLoading ? (
+        <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
+      ) : imageUrl ? (
+        <img
+          src={imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl}
+          alt="Ad Preview"
+          style={{
+            width: "100%",
+            maxHeight: 220,
+            objectFit: "cover",
+            borderRadius: 0,
+            cursor: "pointer"
+          }}
+          onClick={() => handleImageClick(imageUrl)}
+          title="Click to view larger"
+        />
+      ) : (
+        <div style={{
+          height: 220,
+          width: "100%",
+          background: "#e9ecef",
+          color: "#a9abb0",
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
           justifyContent: "center",
-          gap: 34,
-          flexWrap: "wrap",
-          width: "100%"
+          fontSize: 22
+        }}>Image goes here</div>
+      )}
+    </div>
+    {/* Headline & Body */}
+    <div style={{ padding: "17px 18px 4px 18px" }}>
+      <div style={{
+        color: "#191c1e",
+        fontWeight: 800,
+        fontSize: 17,
+        marginBottom: 5,
+        fontFamily: AD_FONT
+      }}>
+        {result?.headline || "Don't Miss Our Limited-Time Offer"}
+      </div>
+      <div style={{
+        color: "#3a4149",
+        fontSize: 15,
+        fontWeight: 600,
+        marginBottom: 3,
+        minHeight: 18
+      }}>
+        {result?.body || "Ad copy goes here..."}
+      </div>
+    </div>
+    {/* CTA Bar */}
+    <div style={{
+      padding: "8px 18px",
+      marginTop: 2
+    }}>
+      <button style={{
+        background: "#14e7b9",
+        color: "#181b20",
+        fontWeight: 700,
+        border: "none",
+        borderRadius: 9,
+        padding: "8px 20px",
+        fontSize: 15,
+        cursor: "pointer"
+      }}>Learn More</button>
+    </div>
+    {/* (Edit button now bottom right) */}
+    <button
+      style={{
+        position: "absolute",
+        bottom: 10,
+        right: 18,
+        background: "#f3f6f7",
+        color: "#12cbb8",
+        border: "none",
+        borderRadius: 8,
+        fontWeight: 700,
+        fontSize: "1.05rem",
+        padding: "5px 14px",
+        cursor: "pointer",
+        boxShadow: "0 1px 3px #2bcbb828",
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        zIndex: 2
+      }}
+      onClick={() => {}}
+    >
+      <FaEdit style={{ fontSize: 15 }} />
+      Edit
+    </button>
+  </div>
+  {/* VIDEO AD PREVIEW */}
+  <div style={{
+    background: "#fff",
+    borderRadius: 13,
+    boxShadow: "0 2px 24px #16242714",
+    minWidth: 340,
+    maxWidth: 390,
+    flex: 1,
+    marginBottom: 20,
+    padding: "0px 0px 14px 0px",
+    border: "1.5px solid #eaeaea",
+    fontFamily: AD_FONT,
+    display: "flex",
+    flexDirection: "column",
+    overflow: "hidden",
+    position: "relative"
+  }}>
+    {/* "Facebook" header strip with Regenerate Button */}
+    <div style={{
+      background: "#f5f6fa",
+      padding: "11px 20px",
+      borderBottom: "1px solid #e0e4eb",
+      fontWeight: 700,
+      color: "#495a68",
+      fontSize: 16,
+      letterSpacing: 0.08,
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center"
+    }}>
+      <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+      <button
+        style={{
+          background: "#1ad6b7",
+          color: "#222",
+          border: "none",
+          borderRadius: 12,
+          fontWeight: 700,
+          fontSize: "1.01rem",
+          padding: "6px 20px",
+          cursor: videoLoading ? "not-allowed" : "pointer",
+          marginLeft: 8,
+          boxShadow: "0 2px 7px #19e5b733",
+          display: "flex",
+          alignItems: "center",
+          gap: 7
+        }}
+        onClick={handleRegenerateVideo}
+        disabled={videoLoading}
+        title="Regenerate Video Ad"
+      >
+        <FaSyncAlt style={{ fontSize: 16 }} />
+        {videoLoading ? "Regenerating..." : "Regenerate"}
+      </button>
+    </div>
+    {/* Video Preview */}
+    <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {videoLoading ? (
+        <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
+      ) : videoUrl ? (
+        <video
+          src={videoUrl}
+          controls
+          style={{
+            width: "100%",
+            maxHeight: 220,
+            borderRadius: 0,
+            background: "#111"
+          }}
+        />
+      ) : (
+        <div style={{
+          height: 220,
+          width: "100%",
+          background: "#e9ecef",
+          color: "#a9abb0",
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 22
+        }}>Video goes here</div>
+      )}
+    </div>
+    {/* Headline */}
+    <div style={{ padding: "17px 18px 4px 18px" }}>
+      <div style={{
+        color: "#191c1e",
+        fontWeight: 800,
+        fontSize: 17,
+        marginBottom: 5,
+        fontFamily: AD_FONT
+      }}>
+        {result?.headline || "Welcome New Customers Instantly!"}
+      </div>
+      {/* Only show script if there is a video */}
+      {videoScript && (
+        <div style={{
+          color: "#3a4149",
+          fontSize: 15,
+          fontWeight: 600,
+          marginBottom: 3,
+          minHeight: 18
         }}>
-          {/* IMAGE AD PREVIEW */}
-          <div style={{
-            background: "#fff",
-            borderRadius: 13,
-            boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
-            flex: 1,
-            marginBottom: 20,
-            padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea",
-            fontFamily: AD_FONT,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative"
-          }}>
-            {/* "Facebook" header strip */}
-            <div style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08
-            }}>
-              Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
-            </div>
-            {/* Ad Image Preview */}
-            <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {imageLoading ? (
-                <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
-              ) : imageUrl ? (
-                <img
-                  src={imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl}
-                  alt="Ad Preview"
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    objectFit: "cover",
-                    borderRadius: 0,
-                    cursor: "pointer"
-                  }}
-                  onClick={() => handleImageClick(imageUrl)}
-                  title="Click to view larger"
-                />
-              ) : (
-                <div style={{
-                  height: 220,
-                  width: "100%",
-                  background: "#e9ecef",
-                  color: "#a9abb0",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22
-                }}>Image goes here</div>
-              )}
-            </div>
-            {/* Headline & Body */}
-            <div style={{ padding: "17px 18px 4px 18px" }}>
-              <div style={{
-                color: "#191c1e",
-                fontWeight: 800,
-                fontSize: 17,
-                marginBottom: 5,
-                fontFamily: AD_FONT
-              }}>
-                {result?.headline || "Don't Miss Our Limited-Time Offer"}
-              </div>
-              <div style={{
-                color: "#3a4149",
-                fontSize: 15,
-                fontWeight: 600,
-                marginBottom: 3,
-                minHeight: 18
-              }}>
-                {result?.body || "Ad copy goes here..."}
-              </div>
-            </div>
-            {/* CTA Bar */}
-            <div style={{
-              padding: "8px 18px",
-              marginTop: 2
-            }}>
-              <button style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer"
-              }}>Learn More</button>
-            </div>
-            {/* (Edit button shrunk and below content, not blocking text) */}
-            <button
-              style={{
-                position: "absolute",
-                bottom: 10,
-                left: 18,
-                background: "#f3f6f7",
-                color: "#12cbb8",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: "1.05rem",
-                padding: "5px 14px",
-                cursor: "pointer",
-                boxShadow: "0 1px 3px #2bcbb828",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                zIndex: 2
-              }}
-              onClick={() => {}}
-            >
-              <FaEdit style={{ fontSize: 15 }} />
-              Edit
-            </button>
-          </div>
-          {/* VIDEO AD PREVIEW */}
-          <div style={{
-            background: "#fff",
-            borderRadius: 13,
-            boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
-            flex: 1,
-            marginBottom: 20,
-            padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea",
-            fontFamily: AD_FONT,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative"
-          }}>
-            {/* "Facebook" header strip with Regenerate Button */}
-            <div style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center"
-            }}>
-              <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
-              <button
-                style={{
-                  background: "#1ad6b7",
-                  color: "#222",
-                  border: "none",
-                  borderRadius: 12,
-                  fontWeight: 700,
-                  fontSize: "1.01rem",
-                  padding: "6px 20px",
-                  cursor: videoLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8,
-                  boxShadow: "0 2px 7px #19e5b733",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7
-                }}
-                onClick={handleRegenerateVideo}
-                disabled={videoLoading}
-                title="Regenerate Video Ad"
-              >
-                <FaSyncAlt style={{ fontSize: 16 }} />
-                {videoLoading ? "Regenerating..." : "Regenerate"}
-              </button>
-            </div>
-            {/* Video Preview */}
-            <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {videoLoading ? (
-                <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
-              ) : videoUrl ? (
-                <video
-                  src={videoUrl}
-                  controls
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    borderRadius: 0,
-                    background: "#111"
-                  }}
-                />
-              ) : (
-                <div style={{
-                  height: 220,
-                  width: "100%",
-                  background: "#e9ecef",
-                  color: "#a9abb0",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22
-                }}>Video goes here</div>
-              )}
-            </div>
-            {/* Headline */}
-            <div style={{ padding: "17px 18px 4px 18px" }}>
-              <div style={{
-                color: "#191c1e",
-                fontWeight: 800,
-                fontSize: 17,
-                marginBottom: 5,
-                fontFamily: AD_FONT
-              }}>
-                {result?.headline || "Welcome New Customers Instantly!"}
-              </div>
-              {/* Only show script if there is a video */}
-              {videoScript && (
-                <div style={{
-                  color: "#3a4149",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  marginBottom: 3,
-                  minHeight: 18
-                }}>
-                  <b>Script:</b> {videoScript}
-                </div>
-              )}
-            </div>
-            {/* CTA Bar */}
-            <div style={{
-              padding: "8px 18px",
-              marginTop: 2
-            }}>
-              <button style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer"
-              }}>Learn More</button>
-            </div>
-            {/* (Edit button shrunk and below content, not blocking text) */}
-            <button
-              style={{
-                position: "absolute",
-                bottom: 10,
-                left: 18,
-                background: "#f3f6f7",
-                color: "#12cbb8",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: "1.05rem",
-                padding: "5px 14px",
-                cursor: "pointer",
-                boxShadow: "0 1px 3px #2bcbb828",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                zIndex: 2
-              }}
-              onClick={() => {}}
-            >
-              <FaEdit style={{ fontSize: 15 }} />
-              Edit
-            </button>
-          </div>
+          <b>Script:</b> {videoScript}
         </div>
+      )}
+    </div>
+    {/* CTA Bar */}
+    <div style={{
+      padding: "8px 18px",
+      marginTop: 2
+    }}>
+      <button style={{
+        background: "#14e7b9",
+        color: "#181b20",
+        fontWeight: 700,
+        border: "none",
+        borderRadius: 9,
+        padding: "8px 20px",
+        fontSize: 15,
+        cursor: "pointer"
+      }}>Learn More</button>
+    </div>
+    {/* (Edit button now bottom right) */}
+    <button
+      style={{
+        position: "absolute",
+        bottom: 10,
+        right: 18,
+        background: "#f3f6f7",
+        color: "#12cbb8",
+        border: "none",
+        borderRadius: 8,
+        fontWeight: 700,
+        fontSize: "1.05rem",
+        padding: "5px 14px",
+        cursor: "pointer",
+        boxShadow: "0 1px 3px #2bcbb828",
+        display: "flex",
+        alignItems: "center",
+        gap: 5,
+        zIndex: 2
+      }}
+      onClick={() => {}}
+    >
+      <FaEdit style={{ fontSize: 15 }} />
+      Edit
+    </button>
+  </div>
+</div>
+
       </div>
 
       
