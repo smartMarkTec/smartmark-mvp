@@ -454,91 +454,38 @@ async function urlToBase64(url) {
 }
 
 // CampaignSetup.js — REPLACE the whole handleLaunch with this
+// === REPLACE the whole handleLaunch function with this ===
 const handleLaunch = async () => {
   setLoading(true);
   try {
     const acctId = selectedAccount.replace("act_", "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    // Pull freshest media we know about
+    // Use creatives already shown on this page (coming from FormPage)
     let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
     let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
 
-    // --- PREFLIGHT (exact spot) ---
-    const wantImage = mediaSelection === "image" || mediaSelection === "both";
-    const wantVideo = mediaSelection === "video" || mediaSelection === "both";
-
-    if (wantImage && !adImage) {
-      setLoading(false);
-      alert("You selected Image, but no image is available. Go back to Form and generate one.");
-      return;
-    }
-    if (wantVideo && !adVideo) {
-      // If we don't already have a video, we’ll *try* to generate one below.
-      // If you want to *require* an existing video instead, uncomment next 3 lines:
-      // setLoading(false);
-      // alert("You selected Video, but no video is available. Go back to Form and generate one.");
-      // return;
-    }
-    // --- end PREFLIGHT ---
-
-    // 1) Generate/ensure video exists (ONLY if user selected video)
-    let fbVideoId = null;
-    if (wantVideo) {
-      try {
-        const genRes = await fetch(`${backendUrl}/api/generate-video-ad`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: form?.url || form?.website || "",
-            answers: { ...form, industry: form?.industry, cta: form?.cta || "Learn More!" },
-            fbAdAccountId: acctId,                    // numbers only
-            userAccessToken: fbUserToken || undefined // only if we captured one
-          })
-        });
-        const genJson = await genRes.json();
-        if (!genRes.ok) throw new Error(genJson?.error || "Video generation failed");
-
-        // update local media URL if returned
-        if (genJson?.videoUrl) {
-          adVideo = `${backendUrl}${genJson.videoUrl}`;
-          setMediaVideoUrl(adVideo);
-          localStorage.setItem("smartmark_last_video_url", adVideo);
-        }
-        // capture ad-account video asset id (for creative)
-        if (genJson?.fbVideoId) {
-          fbVideoId = genJson.fbVideoId;
-        }
-      } catch (e) {
-        console.warn("Video gen/upload warning:", e?.message || e);
-        // continue — backend can still try to upload if we pass base64
-      }
-    }
-
-    // 2) Convert assets to base64 only if we’re going to use them
-    if (wantImage && adImage && !adImage.startsWith("data:")) {
+    // Convert to base64 only if not already data: URLs
+    if (adImage && !adImage.startsWith("data:")) {
       adImage = await urlToBase64(adImage);
     }
-    if (wantVideo && adVideo && !adVideo.startsWith("data:")) {
+    if (adVideo && !adVideo.startsWith("data:")) {
       adVideo = await urlToBase64(adVideo);
     }
 
-    // 3) Build payload for backend launch
     const payload = {
       form: { ...form },
       budget: safeBudget,
       campaignType: form?.campaignType || "Website Traffic",
       pageId: selectedPageId,
-      aiAudience: form?.aiAudience || (typeof answers?.aiAudience === "string" ? answers.aiAudience : answers?.aiAudience) || "",
-      adCopy: headline || body || "",
-      adImage: wantImage ? (adImage || "") : "", // don’t send if not needed
-      adVideo: wantVideo ? (adVideo || "") : "", // don’t send if not needed
-      fbVideoId: fbVideoId || undefined,
+      aiAudience: form?.aiAudience || answers?.aiAudience || "",
+      adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+      adImage: adImage || "",
+      adVideo: adVideo || "",
       answers: answers || {},
       mediaSelection // "image" | "video" | "both"
     };
 
-    // 4) Launch
     const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -547,7 +494,6 @@ const handleLaunch = async () => {
 
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "Server error");
-
     setLaunched(true);
     setLaunchResult(json);
     setTimeout(() => setLaunched(false), 1500);
@@ -557,7 +503,6 @@ const handleLaunch = async () => {
   }
   setLoading(false);
 };
-
 
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
