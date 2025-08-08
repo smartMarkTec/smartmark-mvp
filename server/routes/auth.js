@@ -388,28 +388,53 @@ if (activeCount >= 2) {
       let adSetId = vidAdSetRes.data.id;
       adSetIds.push(adSetId);
 
-     // --- REPLACE the whole "Create Ad Creative for Video" block with this ---
+// ----- Build video_data with a thumbnail (first frame if available) -----
+let videoData = {
+  video_id: videoId,
+  message: adCopy || "",
+  title: campaignName,
+  // Use a proper CTA instead of 'link' field
+  call_to_action: {
+    type: "LEARN_MORE",
+    value: { link: form.url || "https://your-smartmark-site.com" }
+  }
+};
+
+// Try to pull the first-frame thumbnail Facebook generated for this video
+let thumbUrl = null;
+try {
+  const thumbRes = await axios.get(
+    `https://graph.facebook.com/v18.0/${videoId}/thumbnails`,
+    { params: { access_token: userToken, fields: 'uri,is_preferred' } }
+  );
+  const thumbs = thumbRes.data?.data || [];
+  const preferred = thumbs.find(t => t.is_preferred) || thumbs[0];
+  thumbUrl = preferred?.uri || null;
+} catch (e) {
+  console.warn("[launch-campaign] Could not fetch video thumbnails:", e?.response?.data || e?.message || e);
+}
+
+// FB requires one of image_url OR image_hash on video_data
+if (thumbUrl) {
+  videoData.image_url = thumbUrl;
+} else if (imageHash) {
+  // fallback to your uploaded image asset
+  videoData.image_hash = imageHash;
+}
+
+// ----- Create Ad Creative for Video (no description field) -----
 let creativeRes = await axios.post(
   `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
   {
     name: `${campaignName} (Video) - ${new Date().toISOString()}`,
     object_story_spec: {
       page_id: pageId,
-      video_data: {
-        video_id: videoId,
-        message: adCopy || (form.description || ""),
-        title: campaignName,
-        // NOTE: DO NOT include "description" here; FB rejects it for video_data
-        // Optional: include a link via call_to_action if you want
-        call_to_action: {
-          type: "LEARN_MORE",
-          value: { link: form.url || "https://your-smartmark-site.com" }
-        }
-      }
+      video_data: videoData
     }
   },
   { params: { access_token: userToken } }
 );
+
 
       let creativeId = creativeRes.data.id;
       creativeIds.push(creativeId);
