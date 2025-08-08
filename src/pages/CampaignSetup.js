@@ -191,6 +191,39 @@ const CampaignSetup = () => {
   const [mediaVideoUrl, setMediaVideoUrl] = useState("");
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
+  const [campaignCount, setCampaignCount] = useState(0);
+
+  useEffect(() => {
+  if (!selectedAccount) return;
+
+  const acctId = selectedAccount.replace("act_", "");
+  fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
+    .then(res => res.json())
+    .then(data => {
+      if (Array.isArray(data)) {
+        const activeCount = data.filter(c => c.status === "ACTIVE").length;
+        setCampaignCount(activeCount);
+      }
+    })
+    .catch(err => console.error("Error fetching campaigns:", err));
+}, [selectedAccount]);
+
+
+  
+  const [mediaSelection, setMediaSelection] = useState(() =>
+ 
+  (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+);
+useEffect(() => {
+  if (location.state?.mediaSelection) {
+    const v = String(location.state.mediaSelection).toLowerCase();
+    setMediaSelection(v);
+    localStorage.setItem("smartmark_media_selection", v);
+  }
+  // eslint-disable-next-line
+}, [location.state?.mediaSelection]);
+
+
 
 // =============== AUTO-SAVE/RESTORE ================
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
@@ -420,69 +453,92 @@ async function urlToBase64(url) {
   });
 }
 
+// CampaignSetup.js — REPLACE the whole handleLaunch with this
 const handleLaunch = async () => {
   setLoading(true);
   try {
     const acctId = selectedAccount.replace("act_", "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    // Try to ensure we have latest media URLs
+    // Pull freshest media we know about
     let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
     let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
 
-    // 1) Generate/ensure video exists AND (if token present) upload to Ad Account library
-    let fbVideoId = null;
-    try {
-      const genRes = await fetch(`${backendUrl}/api/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: form?.url || form?.website || "",
-          answers: { ...form, industry: form?.industry, cta: form?.cta || "Learn More!" },
-          fbAdAccountId: acctId,                    // numbers only
-          userAccessToken: fbUserToken || undefined // only if we captured one
-        })
-      });
-      const genJson = await genRes.json();
-      if (!genRes.ok) throw new Error(genJson?.error || "Video generation failed");
+    // --- PREFLIGHT (exact spot) ---
+    const wantImage = mediaSelection === "image" || mediaSelection === "both";
+    const wantVideo = mediaSelection === "video" || mediaSelection === "both";
 
-      // update local media URL if returned
-      if (genJson?.videoUrl) {
-        adVideo = `${backendUrl}${genJson.videoUrl}`;
-        setMediaVideoUrl(adVideo);
-        localStorage.setItem("smartmark_last_video_url", adVideo);
+    if (wantImage && !adImage) {
+      setLoading(false);
+      alert("You selected Image, but no image is available. Go back to Form and generate one.");
+      return;
+    }
+    if (wantVideo && !adVideo) {
+      // If we don't already have a video, we’ll *try* to generate one below.
+      // If you want to *require* an existing video instead, uncomment next 3 lines:
+      // setLoading(false);
+      // alert("You selected Video, but no video is available. Go back to Form and generate one.");
+      // return;
+    }
+    // --- end PREFLIGHT ---
+
+    // 1) Generate/ensure video exists (ONLY if user selected video)
+    let fbVideoId = null;
+    if (wantVideo) {
+      try {
+        const genRes = await fetch(`${backendUrl}/api/generate-video-ad`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: form?.url || form?.website || "",
+            answers: { ...form, industry: form?.industry, cta: form?.cta || "Learn More!" },
+            fbAdAccountId: acctId,                    // numbers only
+            userAccessToken: fbUserToken || undefined // only if we captured one
+          })
+        });
+        const genJson = await genRes.json();
+        if (!genRes.ok) throw new Error(genJson?.error || "Video generation failed");
+
+        // update local media URL if returned
+        if (genJson?.videoUrl) {
+          adVideo = `${backendUrl}${genJson.videoUrl}`;
+          setMediaVideoUrl(adVideo);
+          localStorage.setItem("smartmark_last_video_url", adVideo);
+        }
+        // capture ad-account video asset id (for creative)
+        if (genJson?.fbVideoId) {
+          fbVideoId = genJson.fbVideoId;
+        }
+      } catch (e) {
+        console.warn("Video gen/upload warning:", e?.message || e);
+        // continue — backend can still try to upload if we pass base64
       }
-      // capture ad-account video asset id (for creative)
-      if (genJson?.fbVideoId) {
-        fbVideoId = genJson.fbVideoId;
-      }
-    } catch (e) {
-      console.warn("Video gen/upload warning:", e?.message || e);
-      // carry on; backend launch can still upload if needed
     }
 
-    // Convert assets to base64 (your existing logic)
-    if (adImage && !adImage.startsWith("data:")) {
+    // 2) Convert assets to base64 only if we’re going to use them
+    if (wantImage && adImage && !adImage.startsWith("data:")) {
       adImage = await urlToBase64(adImage);
     }
-    if (adVideo && !adVideo.startsWith("data:")) {
+    if (wantVideo && adVideo && !adVideo.startsWith("data:")) {
       adVideo = await urlToBase64(adVideo);
     }
 
-    // 2) Launch campaign using your existing endpoint
+    // 3) Build payload for backend launch
     const payload = {
       form: { ...form },
       budget: safeBudget,
       campaignType: form?.campaignType || "Website Traffic",
       pageId: selectedPageId,
-      aiAudience: form?.aiAudience || (answers?.aiAudience || ""),
+      aiAudience: form?.aiAudience || (typeof answers?.aiAudience === "string" ? answers.aiAudience : answers?.aiAudience) || "",
       adCopy: headline || body || "",
-      adImage: adImage || "",
-      adVideo: adVideo || "",
-      fbVideoId: fbVideoId || "", // <--- NEW: pass through if we have it
-      answers: answers || {}
+      adImage: wantImage ? (adImage || "") : "", // don’t send if not needed
+      adVideo: wantVideo ? (adVideo || "") : "", // don’t send if not needed
+      fbVideoId: fbVideoId || undefined,
+      answers: answers || {},
+      mediaSelection // "image" | "video" | "both"
     };
 
+    // 4) Launch
     const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -491,6 +547,7 @@ const handleLaunch = async () => {
 
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || "Server error");
+
     setLaunched(true);
     setLaunchResult(json);
     setTimeout(() => setLaunched(false), 1500);
@@ -500,8 +557,6 @@ const handleLaunch = async () => {
   }
   setLoading(false);
 };
-
-
 
 
   const openFbPaymentPopup = () => {
@@ -811,27 +866,29 @@ const handleLaunch = async () => {
             )}
           </div>
 
-          <button
-            onClick={handleLaunch}
-            disabled={loading}
-            style={{
-              background: "#14e7b9",
-              color: "#181b20",
-              border: "none",
-              borderRadius: 13,
-              fontWeight: 700,
-              fontSize: "1.19rem",
-              padding: "18px 72px",
-              marginBottom: 18,
-              marginTop: 2,
-              fontFamily: MODERN_FONT,
-              boxShadow: "0 2px 16px #0cc4be24",
-              cursor: loading ? "not-allowed" : "pointer",
-              transition: "background 0.18s"
-            }}
-          >
-            {loading ? "Launching..." : "Launch"}
-          </button>
+         <button
+  onClick={handleLaunch}
+  disabled={loading || campaignCount >= 2}
+  style={{
+    background: campaignCount >= 2 ? "#ccc" : "#14e7b9",
+    color: "#181b20",
+    border: "none",
+    borderRadius: 13,
+    fontWeight: 700,
+    fontSize: "1.19rem",
+    padding: "18px 72px",
+    marginBottom: 18,
+    marginTop: 2,
+    fontFamily: MODERN_FONT,
+    boxShadow: "0 2px 16px #0cc4be24",
+    cursor: loading || campaignCount >= 2 ? "not-allowed" : "pointer",
+    transition: "background 0.18s",
+    opacity: loading || campaignCount >= 2 ? 0.6 : 1
+  }}
+>
+  {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
+</button>
+
           {launched && launchResult && (
             <div style={{
               color: "#1eea78",
