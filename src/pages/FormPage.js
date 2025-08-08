@@ -24,6 +24,11 @@ const CONVO_QUESTIONS = [
 
 // ============ Helper Components ===============
 
+function handleModalClose() {
+  setShowModal(false);
+  setModalImg("");
+}
+
 function LoadingSpinner() {
   return (
     <div style={{
