@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaEdit, FaSyncAlt, FaTimes } from "react-icons/fa";
+import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
 
-// ============ Constants and Config ============
+// ============ Constants ============
 const API_BASE = "/api";
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
@@ -10,7 +10,6 @@ const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
 const DARK_BG = "#181b20";
 
-// Your marketing questions
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
@@ -19,15 +18,10 @@ const CONVO_QUESTIONS = [
   { key: "mainProblem", question: "What's the main problem your customer wants solved?" },
   { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
   { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
-  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" }
+  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
 ];
 
 // ============ Helper Components ===============
-
-function handleModalClose() {
-  setShowModal(false);
-  setModalImg("");
-}
 
 function LoadingSpinner() {
   return (
@@ -161,7 +155,6 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     </div>
   );
 }
-
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
@@ -170,17 +163,18 @@ function getRandomString() {
 export default function FormPage() {
   const navigate = useNavigate();
   const inputRef = useRef();
+  const chatBoxRef = useRef();
 
-  // --------------- State -----------------
+  // --- State ---
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `Let's get started! There will be about 8 quick questions. ${CONVO_QUESTIONS[0].question}` }
+    { from: "gpt", text: `👋 Hey, I'm your AI Marketing Assistant. We'll go through about 8 quick questions to create your ad campaign. You can ask me anything about marketing, or correct an answer anytime! \n\n${CONVO_QUESTIONS[0].question}` }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Ad preview state (leave unchanged, for previews)
+  // Ad preview state
   const [mediaType, setMediaType] = useState("both");
   const [result, setResult] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
@@ -193,15 +187,14 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
 
-  // ----------- Chat Scroll ---------
-  const chatBoxRef = useRef();
+  // --- Scroll chat to bottom when new message ---
   useEffect(() => {
     if (chatBoxRef.current) {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
   }, [chatHistory]);
 
-  // ======= Correction/Smart Handler ======
+  // ========== Smart Chat Assistant Logic ==========
   function detectCorrection(text) {
     return /(?:actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)/i.test(text);
   }
@@ -212,7 +205,7 @@ export default function FormPage() {
     }
     return null;
   }
-
+  // Handles both Q&A and assistant-style answers
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
@@ -220,23 +213,36 @@ export default function FormPage() {
     const value = input.trim();
     if (!value) return;
 
-    // Handle corrections (NLP-like)
+    // --- Conversational "ask anything" mode ---
+    if (step < CONVO_QUESTIONS.length && value.match(/\?/)) {
+      setChatHistory(ch => [
+        ...ch,
+        { from: "user", text: value },
+        {
+          from: "gpt", text: getMarketingExpertAnswer(value)
+        }
+      ]);
+      setInput("");
+      return;
+    }
+
+    // --- Corrections (NLP-like) ---
     if (detectCorrection(value)) {
-      let keyToUpdate = findCorrectionKey(value) || (step > 0 ? CONVO_QUESTIONS[step-1].key : null);
+      let keyToUpdate = findCorrectionKey(value) || (step > 0 ? CONVO_QUESTIONS[step - 1].key : null);
       if (keyToUpdate) {
         setAnswers(prev => ({ ...prev, [keyToUpdate]: value.replace(/^(actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)\s*/i, "") }));
         setChatHistory(ch => [
           ...ch,
           { from: "user", text: value },
-          { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
+          { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Let me know if anything else needs to change or just keep going!` }
         ]);
         setInput("");
         return;
       }
     }
 
-    // Save answer
-    let newAnswers = { ...answers, [currentQ.key]: value };
+    // --- Save answer and ask next or confirm ---
+    let newAnswers = { ...answers, [currentQ?.key]: value };
     setAnswers(newAnswers);
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
@@ -251,7 +257,7 @@ export default function FormPage() {
       nextStep += 1;
     }
 
-    // If done, ask for confirmation
+    // --- Campaign confirmation ---
     if (!CONVO_QUESTIONS[nextStep]) {
       setChatHistory(ch => [
         ...ch,
@@ -269,16 +275,14 @@ export default function FormPage() {
     setStep(nextStep);
   }
 
-  // ----- Confirmation & Generate -----
+  // Generate campaign when user says "yes" at confirmation step
   useEffect(() => {
     if (step === CONVO_QUESTIONS.length && chatHistory.length > 2) {
       const lastUser = chatHistory.filter(m => m.from === "user").slice(-1)[0]?.text?.toLowerCase();
-      if (lastUser === "yes" || lastUser === "y" || lastUser?.includes("go ahead")) {
+      if (["yes", "y", "go ahead", "generate", "create"].some(v => lastUser?.includes(v))) {
         setLoading(true);
-        setChatHistory(ch => [...ch, { from: "gpt", text: "Awesome! Creating your campaign now..." }]);
-        // Replace this block with your real async API/generate logic!
+        setChatHistory(ch => [...ch, { from: "gpt", text: "🚀 Awesome! Creating your campaign now..." }]);
         setTimeout(async () => {
-          // ----------- Your generation logic (ad copy, image, video) -----------
           const token = getRandomString();
           const [data, imgData, videoData] = await Promise.all([
             fetch(`${API_BASE}/generate-campaign-assets`, {
@@ -307,28 +311,88 @@ export default function FormPage() {
           setVideoScript(videoData.script || "");
           setChatHistory(ch => [
             ...ch,
-            { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
+            { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below, or ask me for feedback or ideas anytime." }
           ]);
           setLoading(false);
-        }, 1800);
+        }, 1200);
       }
-      if (lastUser === "no" || lastUser === "n") {
+      if (["no", "n"].some(v => lastUser === v)) {
         setChatHistory(ch => [
           ...ch,
-          { from: "gpt", text: "No problem! What would you like to change or add? Type your correction or update below." }
+          { from: "gpt", text: "No problem! Tell me what you want to change or ask about, and I’ll help you update it." }
         ]);
       }
     }
     // eslint-disable-next-line
   }, [chatHistory, step]);
 
-  // ============= Render ===============
+  // Marketing expert style "AI" responses
+  function getMarketingExpertAnswer(userQuestion) {
+    // Very basic rules, you can add more logic or even call OpenAI for this!
+    if (/target|audien/i.test(userQuestion)) return "To define your target audience, focus on age, location, interests, and needs. Can you tell me a bit more about your ideal customer?";
+    if (/budget|cost|price/i.test(userQuestion)) return "The ideal ad budget depends on your goals and location. I suggest starting small and scaling as you see positive results.";
+    if (/what.*you.*do/i.test(userQuestion)) return "I’m your AI marketing assistant! I’ll help you launch effective ad campaigns, generate creative, and answer any marketing questions.";
+    if (/what.*is.*best ad/i.test(userQuestion)) return "The best ad is one that speaks directly to your ideal customer’s needs, offers clear value, and has a compelling call to action.";
+    if (/offer|promotion/i.test(userQuestion)) return "A limited-time discount or free bonus often drives more conversions. What kind of offers have worked for you before?";
+    if (/facebook|social|platform/i.test(userQuestion)) return "Facebook and Instagram work great for most local businesses. Do you want your ads to run on both, or just one platform?";
+    if (/what.*next/i.test(userQuestion)) return "Once you’ve filled out these questions, I’ll generate ad previews you can review and edit!";
+    // Default fallback:
+    return "That's a great question! As your marketing assistant, I recommend clear messaging, knowing your customer, and testing different creatives. Want me to help you with a specific idea?";
+  }
+
+  function handleModalClose() {
+    setShowModal(false);
+    setModalImg("");
+  }
+
+  // --- Regenerate Handlers (you can keep as before) ---
+  async function handleRegenerateImage() {
+    setImageLoading(true);
+    setImageUrl("");
+    try {
+      const token = getRandomString();
+      setLastRegenerateToken(token);
+      const res = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...answers, regenerateToken: token })
+      });
+      const data = await res.json();
+      setImageUrl(data.imageUrl || "");
+    } catch {
+      setImageUrl("");
+    }
+    setImageLoading(false);
+  }
+  async function handleRegenerateVideo() {
+    setVideoLoading(true);
+    setVideoUrl("");
+    setVideoScript("");
+    try {
+      const token = getRandomString();
+      setLastRegenerateToken(token);
+      const res = await fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...answers, regenerateToken: token })
+      });
+      const data = await res.json();
+      setVideoUrl(data.videoUrl || "");
+      setVideoScript(data.script || "");
+    } catch {
+      setVideoUrl("");
+      setVideoScript("");
+    }
+    setVideoLoading(false);
+  }
+
+  // ============ Render =============
   return (
     <div style={{
       background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
       display: "flex", flexDirection: "column", alignItems: "center"
     }}>
-      {/* ---------- Home btn ---------- */}
+      {/* Home Button */}
       <button
         style={{
           position: "absolute", top: 24, right: 38, padding: "10px 30px",
@@ -339,11 +403,11 @@ export default function FormPage() {
         onClick={() => navigate("/")}
       >Home</button>
 
-      {/* ---- Chat Panel, scrollable, prompt always visible --- */}
+      {/* ---- Chat Panel --- */}
       <div style={{
-        width: "100%", maxWidth: 480, minHeight: 340, marginTop: 54, marginBottom: 26,
+        width: "100%", maxWidth: 520, minHeight: 320, marginTop: 54,
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
-        padding: "32px 24px 18px 24px", display: "flex", flexDirection: "column", alignItems: "center"
+        padding: "30px 24px 18px 24px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
         {/* Progress bar */}
         {step < CONVO_QUESTIONS.length &&
@@ -353,8 +417,8 @@ export default function FormPage() {
         }
         {/* Scrollable chat history */}
         <div ref={chatBoxRef} style={{
-          width: "100%", height: 160, maxHeight: 160, overflowY: "auto",
-          marginBottom: 16, paddingRight: 4, background: "#191b22", borderRadius: 12
+          width: "100%", height: 158, maxHeight: 158, overflowY: "auto",
+          marginBottom: 10, paddingRight: 4, background: "#191b22", borderRadius: 12
         }}>
           {chatHistory.map((msg, i) => (
             <div key={i}
@@ -368,15 +432,16 @@ export default function FormPage() {
                 borderRadius: msg.from === "gpt" ? "14px 18px 18px 7px" : "16px 12px 7px 17px",
                 padding: "10px 18px",
                 maxWidth: "96%",
-                display: "inline-block"
+                display: "inline-block",
+                whiteSpace: "pre-line"
               }}>
               {msg.text}
             </div>
           ))}
         </div>
-        {/* Prompt bar */}
+        {/* Prompt bar with arrow send */}
         {!loading && step <= CONVO_QUESTIONS.length &&
-          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
+          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 7 }}>
             <input
               ref={inputRef}
               value={input}
@@ -386,7 +451,7 @@ export default function FormPage() {
               placeholder={
                 step < CONVO_QUESTIONS.length
                   ? CONVO_QUESTIONS[step]?.question
-                  : "Type yes to generate, or say what to change..."
+                  : "Type yes to generate, or ask me for ideas..."
               }
               style={{
                 flex: 1,
@@ -400,174 +465,333 @@ export default function FormPage() {
                 color: "#fff",
                 boxShadow: "0 1.5px 8px #1acbb932"
               }}
+              onKeyDown={e => {
+                if (e.key === "Enter") handleUserInput(e);
+              }}
             />
             <button type="submit"
               style={{
-                background: "#14e7b9",
+                background: TEAL,
                 color: "#181b20",
                 border: "none",
                 borderRadius: 12,
                 fontWeight: 700,
-                fontSize: "1.08rem",
-                padding: "0 26px",
-                cursor: "pointer"
+                fontSize: "1.2rem",
+                width: 48, height: 48, minWidth: 48, minHeight: 48,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
               }}
               disabled={loading}
-            >Send</button>
+              aria-label="Send"
+              tabIndex={0}
+            ><FaArrowUp /></button>
           </form>
         }
         {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI thinking...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
+      </div>
 
-        {/* --- Ad Previews (after Q&A is complete) --- */}
-        {result && (
-          <>
+      {/* --- Ad Previews (after Q&A is complete) --- */}
+      {result && (
+        <div style={{
+          width: "100%",
+          maxWidth: 830,
+          margin: "32px 0 24px 0",
+          background: "#202327",
+          borderRadius: 22,
+          boxShadow: "0 2px 32px #181b2040",
+          padding: "44px 36px 32px 36px",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center"
+        }}>
+          <div style={{
+            color: "#fff",
+            fontWeight: 800,
+            fontSize: "2.01rem",
+            letterSpacing: 0.2,
+            marginBottom: 18,
+            textAlign: "center"
+          }}>
+            Ad Preview
+          </div>
+          <div style={{
+            width: "100%",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center"
+          }}>
             <div style={{
-              width: "100%",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              margin: "32px 0 24px 0"
+              color: "#98f7e5",
+              fontWeight: 700,
+              fontSize: "1.13rem",
+              letterSpacing: 0.15,
+              textAlign: "center",
+              marginBottom: 2
             }}>
+              Choose
+            </div>
+            <div style={{ marginBottom: 3, marginTop: 3 }}>
+              <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
+            </div>
+          </div>
+          {/* Facebook Style Ad Previews */}
+          <div style={{
+            display: "flex",
+            justifyContent: "center",
+            gap: 34,
+            flexWrap: "wrap",
+            width: "100%"
+          }}>
+            {(mediaType === "image" || mediaType === "both") && (
+              // IMAGE AD PREVIEW CARD
               <div style={{
-                color: "#fff",
-                fontWeight: 800,
-                fontSize: "2.01rem",
-                letterSpacing: 0.2,
-                marginBottom: 18,
-                textAlign: "center"
-              }}>
-                Ad Preview
-              </div>
-              <div style={{
-                width: "100%",
+                background: "#fff",
+                borderRadius: 13,
+                boxShadow: "0 2px 24px #16242714",
+                minWidth: 340,
+                maxWidth: 390,
+                flex: 1,
+                marginBottom: 20,
+                padding: "0px 0px 14px 0px",
+                border: "1.5px solid #eaeaea",
+                fontFamily: AD_FONT,
                 display: "flex",
                 flexDirection: "column",
-                alignItems: "center"
+                overflow: "hidden",
+                position: "relative"
               }}>
+                {/* "Facebook" header strip */}
                 <div style={{
-                  color: "#98f7e5",
+                  background: "#f5f6fa",
+                  padding: "11px 20px",
+                  borderBottom: "1px solid #e0e4eb",
                   fontWeight: 700,
-                  fontSize: "1.13rem",
-                  letterSpacing: 0.15,
-                  textAlign: "center",
-                  marginBottom: 2
-                }}>
-                  Choose
-                </div>
-                <div style={{ marginBottom: 3, marginTop: 3 }}>
-                  <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
-                </div>
-              </div>
-            </div>
-            {/* Facebook Style Ad Previews */}
-            <div style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: 34,
-              flexWrap: "wrap",
-              width: "100%"
-            }}>
-              {(mediaType === "image" || mediaType === "both") && (
-                // IMAGE AD PREVIEW CARD
-                <div style={{
-                  background: "#fff",
-                  borderRadius: 13,
-                  boxShadow: "0 2px 24px #16242714",
-                  minWidth: 340,
-                  maxWidth: 390,
-                  flex: 1,
-                  marginBottom: 20,
-                  padding: "0px 0px 14px 0px",
-                  border: "1.5px solid #eaeaea",
-                  fontFamily: AD_FONT,
+                  color: "#495a68",
+                  fontSize: 16,
+                  letterSpacing: 0.08,
                   display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                  position: "relative"
+                  justifyContent: "space-between",
+                  alignItems: "center"
                 }}>
-                  {/* "Facebook" header strip */}
-                  <div style={{
-                    background: "#f5f6fa",
-                    padding: "11px 20px",
-                    borderBottom: "1px solid #e0e4eb",
-                    fontWeight: 700,
-                    color: "#495a68",
-                    fontSize: 16,
-                    letterSpacing: 0.08,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center"
-                  }}>
-                    <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
-                    {/* Move regenerate button to top right inside card */}
-                    <button
+                  <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+                  <button
+                    style={{
+                      background: "#1ad6b7",
+                      color: "#222",
+                      border: "none",
+                      borderRadius: 12,
+                      fontWeight: 700,
+                      fontSize: "1.01rem",
+                      padding: "6px 20px",
+                      cursor: imageLoading ? "not-allowed" : "pointer",
+                      marginLeft: 8,
+                      boxShadow: "0 2px 7px #19e5b733",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 7
+                    }}
+                    onClick={handleRegenerateImage}
+                    disabled={imageLoading}
+                    title="Regenerate Image Ad"
+                  >
+                    <FaSyncAlt style={{ fontSize: 16 }} />
+                    {imageLoading ? "Regenerating..." : "Regenerate"}
+                  </button>
+                </div>
+                {/* Ad Image Preview */}
+                <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {imageLoading ? (
+                    <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
+                  ) : imageUrl ? (
+                    <img
+                      src={imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl}
+                      alt="Ad Preview"
                       style={{
-                        background: "#1ad6b7",
-                        color: "#222",
-                        border: "none",
-                        borderRadius: 12,
-                        fontWeight: 700,
-                        fontSize: "1.01rem",
-                        padding: "6px 20px",
-                        cursor: imageLoading ? "not-allowed" : "pointer",
-                        marginLeft: 8,
-                        boxShadow: "0 2px 7px #19e5b733",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 7
-                      }}
-                      onClick={handleRegenerateImage}
-                      disabled={imageLoading}
-                      title="Regenerate Image Ad"
-                    >
-                      <FaSyncAlt style={{ fontSize: 16 }} />
-                      {imageLoading ? "Regenerating..." : "Regenerate"}
-                    </button>
-                  </div>
-                  {/* Ad Image Preview */}
-                  <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {imageLoading ? (
-                      <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
-                    ) : imageUrl ? (
-                      <img
-                        src={imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl}
-                        alt="Ad Preview"
-                        style={{
-                          width: "100%",
-                          maxHeight: 220,
-                          objectFit: "cover",
-                          borderRadius: 0,
-                          cursor: "pointer"
-                        }}
-                        onClick={() => handleImageClick(imageUrl)}
-                        title="Click to view larger"
-                      />
-                    ) : (
-                      <div style={{
-                        height: 220,
                         width: "100%",
-                        background: "#e9ecef",
-                        color: "#a9abb0",
-                        fontWeight: 700,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 22
-                      }}>Image goes here</div>
-                    )}
-                  </div>
-                  {/* Headline & Body */}
-                  <div style={{ padding: "17px 18px 4px 18px" }}>
+                        maxHeight: 220,
+                        objectFit: "cover",
+                        borderRadius: 0,
+                        cursor: "pointer"
+                      }}
+                      onClick={() => { setModalImg(imageUrl); setShowModal(true); }}
+                      title="Click to view larger"
+                    />
+                  ) : (
                     <div style={{
-                      color: "#191c1e",
-                      fontWeight: 800,
-                      fontSize: 17,
-                      marginBottom: 5,
-                      fontFamily: AD_FONT
-                    }}>
-                      {result?.headline || "Don't Miss Our Limited-Time Offer"}
-                    </div>
+                      height: 220,
+                      width: "100%",
+                      background: "#e9ecef",
+                      color: "#a9abb0",
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 22
+                    }}>Image goes here</div>
+                  )}
+                </div>
+                {/* Headline & Body */}
+                <div style={{ padding: "17px 18px 4px 18px" }}>
+                  <div style={{
+                    color: "#191c1e",
+                    fontWeight: 800,
+                    fontSize: 17,
+                    marginBottom: 5,
+                    fontFamily: AD_FONT
+                  }}>
+                    {result?.headline || "Don't Miss Our Limited-Time Offer"}
+                  </div>
+                  <div style={{
+                    color: "#3a4149",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    marginBottom: 3,
+                    minHeight: 18
+                  }}>
+                    {result?.body || "Ad copy goes here..."}
+                  </div>
+                </div>
+                {/* CTA Bar */}
+                <div style={{
+                  padding: "8px 18px",
+                  marginTop: 2
+                }}>
+                  <button style={{
+                    background: "#14e7b9",
+                    color: "#181b20",
+                    fontWeight: 700,
+                    border: "none",
+                    borderRadius: 9,
+                    padding: "8px 20px",
+                    fontSize: 15,
+                    cursor: "pointer"
+                  }}>Learn More</button>
+                </div>
+                {/* (Edit button now bottom right) */}
+                <button
+                  style={{
+                    position: "absolute",
+                    bottom: 10,
+                    right: 18,
+                    background: "#f3f6f7",
+                    color: "#12cbb8",
+                    border: "none",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: "1.05rem",
+                    padding: "5px 14px",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 3px #2bcbb828",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    zIndex: 2
+                  }}
+                  onClick={() => {}}
+                >
+                  <FaEdit style={{ fontSize: 15 }} />
+                  Edit
+                </button>
+              </div>
+            )}
+            {(mediaType === "video" || mediaType === "both") && (
+              // VIDEO AD PREVIEW CARD
+              <div style={{
+                background: "#fff",
+                borderRadius: 13,
+                boxShadow: "0 2px 24px #16242714",
+                minWidth: 340,
+                maxWidth: 390,
+                flex: 1,
+                marginBottom: 20,
+                padding: "0px 0px 14px 0px",
+                border: "1.5px solid #eaeaea",
+                fontFamily: AD_FONT,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+                position: "relative"
+              }}>
+                {/* "Facebook" header strip with Regenerate Button */}
+                <div style={{
+                  background: "#f5f6fa",
+                  padding: "11px 20px",
+                  borderBottom: "1px solid #e0e4eb",
+                  fontWeight: 700,
+                  color: "#495a68",
+                  fontSize: 16,
+                  letterSpacing: 0.08,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center"
+                }}>
+                  <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+                  <button
+                    style={{
+                      background: "#1ad6b7",
+                      color: "#222",
+                      border: "none",
+                      borderRadius: 12,
+                      fontWeight: 700,
+                      fontSize: "1.01rem",
+                      padding: "6px 20px",
+                      cursor: videoLoading ? "not-allowed" : "pointer",
+                      marginLeft: 8,
+                      boxShadow: "0 2px 7px #19e5b733",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 7
+                    }}
+                    onClick={handleRegenerateVideo}
+                    disabled={videoLoading}
+                    title="Regenerate Video Ad"
+                  >
+                    <FaSyncAlt style={{ fontSize: 16 }} />
+                    {videoLoading ? "Regenerating..." : "Regenerate"}
+                  </button>
+                </div>
+                {/* Video Preview */}
+                <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  {videoLoading ? (
+                    <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
+                  ) : videoUrl ? (
+                    <video
+                      src={videoUrl}
+                      controls
+                      style={{
+                        width: "100%",
+                        maxHeight: 220,
+                        borderRadius: 0,
+                        background: "#111"
+                      }}
+                    />
+                  ) : (
+                    <div style={{
+                      height: 220,
+                      width: "100%",
+                      background: "#e9ecef",
+                      color: "#a9abb0",
+                      fontWeight: 700,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 22
+                    }}>Video goes here</div>
+                  )}
+                </div>
+                {/* Headline */}
+                <div style={{ padding: "17px 18px 4px 18px" }}>
+                  <div style={{
+                    color: "#191c1e",
+                    fontWeight: 800,
+                    fontSize: 17,
+                    marginBottom: 5,
+                    fontFamily: AD_FONT
+                  }}>
+                    {result?.headline || "Welcome New Customers Instantly!"}
+                  </div>
+                  {/* Only show script if there is a video */}
+                  {videoScript && (
                     <div style={{
                       color: "#3a4149",
                       fontSize: 15,
@@ -575,254 +799,100 @@ export default function FormPage() {
                       marginBottom: 3,
                       minHeight: 18
                     }}>
-                      {result?.body || "Ad copy goes here..."}
+                      <b>Script:</b> {videoScript}
                     </div>
-                  </div>
-                  {/* CTA Bar */}
-                  <div style={{
-                    padding: "8px 18px",
-                    marginTop: 2
-                  }}>
-                    <button style={{
-                      background: "#14e7b9",
-                      color: "#181b20",
-                      fontWeight: 700,
-                      border: "none",
-                      borderRadius: 9,
-                      padding: "8px 20px",
-                      fontSize: 15,
-                      cursor: "pointer"
-                    }}>Learn More</button>
-                  </div>
-                  {/* (Edit button now bottom right) */}
-                  <button
-                    style={{
-                      position: "absolute",
-                      bottom: 10,
-                      right: 18,
-                      background: "#f3f6f7",
-                      color: "#12cbb8",
-                      border: "none",
-                      borderRadius: 8,
-                      fontWeight: 700,
-                      fontSize: "1.05rem",
-                      padding: "5px 14px",
-                      cursor: "pointer",
-                      boxShadow: "0 1px 3px #2bcbb828",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 5,
-                      zIndex: 2
-                    }}
-                    onClick={() => {}}
-                  >
-                    <FaEdit style={{ fontSize: 15 }} />
-                    Edit
-                  </button>
+                  )}
                 </div>
-              )}
-              {(mediaType === "video" || mediaType === "both") && (
-                // VIDEO AD PREVIEW CARD
+                {/* CTA Bar */}
                 <div style={{
-                  background: "#fff",
-                  borderRadius: 13,
-                  boxShadow: "0 2px 24px #16242714",
-                  minWidth: 340,
-                  maxWidth: 390,
-                  flex: 1,
-                  marginBottom: 20,
-                  padding: "0px 0px 14px 0px",
-                  border: "1.5px solid #eaeaea",
-                  fontFamily: AD_FONT,
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                  position: "relative"
+                  padding: "8px 18px",
+                  marginTop: 2
                 }}>
-                  {/* "Facebook" header strip with Regenerate Button */}
-                  <div style={{
-                    background: "#f5f6fa",
-                    padding: "11px 20px",
-                    borderBottom: "1px solid #e0e4eb",
+                  <button style={{
+                    background: "#14e7b9",
+                    color: "#181b20",
                     fontWeight: 700,
-                    color: "#495a68",
-                    fontSize: 16,
-                    letterSpacing: 0.08,
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center"
-                  }}>
-                    <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
-                    <button
-                      style={{
-                        background: "#1ad6b7",
-                        color: "#222",
-                        border: "none",
-                        borderRadius: 12,
-                        fontWeight: 700,
-                        fontSize: "1.01rem",
-                        padding: "6px 20px",
-                        cursor: videoLoading ? "not-allowed" : "pointer",
-                        marginLeft: 8,
-                        boxShadow: "0 2px 7px #19e5b733",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 7
-                      }}
-                      onClick={handleRegenerateVideo}
-                      disabled={videoLoading}
-                      title="Regenerate Video Ad"
-                    >
-                      <FaSyncAlt style={{ fontSize: 16 }} />
-                      {videoLoading ? "Regenerating..." : "Regenerate"}
-                    </button>
-                  </div>
-                  {/* Video Preview */}
-                  <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    {videoLoading ? (
-                      <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
-                    ) : videoUrl ? (
-                      <video
-                        src={videoUrl}
-                        controls
-                        style={{
-                          width: "100%",
-                          maxHeight: 220,
-                          borderRadius: 0,
-                          background: "#111"
-                        }}
-                      />
-                    ) : (
-                      <div style={{
-                        height: 220,
-                        width: "100%",
-                        background: "#e9ecef",
-                        color: "#a9abb0",
-                        fontWeight: 700,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 22
-                      }}>Video goes here</div>
-                    )}
-                  </div>
-                  {/* Headline */}
-                  <div style={{ padding: "17px 18px 4px 18px" }}>
-                    <div style={{
-                      color: "#191c1e",
-                      fontWeight: 800,
-                      fontSize: 17,
-                      marginBottom: 5,
-                      fontFamily: AD_FONT
-                    }}>
-                      {result?.headline || "Welcome New Customers Instantly!"}
-                    </div>
-                    {/* Only show script if there is a video */}
-                    {videoScript && (
-                      <div style={{
-                        color: "#3a4149",
-                        fontSize: 15,
-                        fontWeight: 600,
-                        marginBottom: 3,
-                        minHeight: 18
-                      }}>
-                        <b>Script:</b> {videoScript}
-                      </div>
-                    )}
-                  </div>
-                  {/* CTA Bar */}
-                  <div style={{
-                    padding: "8px 18px",
-                    marginTop: 2
-                  }}>
-                    <button style={{
-                      background: "#14e7b9",
-                      color: "#181b20",
-                      fontWeight: 700,
-                      border: "none",
-                      borderRadius: 9,
-                      padding: "8px 20px",
-                      fontSize: 15,
-                      cursor: "pointer"
-                    }}>Learn More</button>
-                  </div>
-                  {/* (Edit button now bottom right) */}
-                  <button
-                    style={{
-                      position: "absolute",
-                      bottom: 10,
-                      right: 18,
-                      background: "#f3f6f7",
-                      color: "#12cbb8",
-                      border: "none",
-                      borderRadius: 8,
-                      fontWeight: 700,
-                      fontSize: "1.05rem",
-                      padding: "5px 14px",
-                      cursor: "pointer",
-                      boxShadow: "0 1px 3px #2bcbb828",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 5,
-                      zIndex: 2
-                    }}
-                    onClick={() => {}}
-                  >
-                    <FaEdit style={{ fontSize: 15 }} />
-                    Edit
-                  </button>
+                    border: "none",
+                    borderRadius: 9,
+                    padding: "8px 20px",
+                    fontSize: 15,
+                    cursor: "pointer"
+                  }}>Learn More</button>
                 </div>
-              )}
-            </div>
-
-            {/* CONTINUE BUTTON: Centered under the previews */}
-            <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 18 }}>
-              <button
-                style={{
-                  background: "#14e7b9",
-                  color: "#181b20",
-                  border: "none",
-                  borderRadius: 13,
-                  fontWeight: 700,
-                  fontSize: "1.19rem",
-                  padding: "18px 72px",
-                  marginBottom: 18,
-                  marginTop: 2,
-                  fontFamily: MODERN_FONT,
-                  boxShadow: "0 2px 16px #0cc4be24",
-                  cursor: "pointer",
-                  transition: "background 0.18s"
-                }}
-                onClick={() => {
-                  // Always store and send ABSOLUTE URLs
-                  let imgUrlToSend = imageUrl;
-                  let vidUrlToSend = videoUrl;
-                  // If relative, prepend backend
-                  if (imgUrlToSend && !/^https?:\/\//.test(imgUrlToSend)) imgUrlToSend = BACKEND_URL + imgUrlToSend;
-                  if (vidUrlToSend && !/^https?:\/\//.test(vidUrlToSend)) vidUrlToSend = BACKEND_URL + vidUrlToSend;
-                  if (imgUrlToSend) localStorage.setItem("smartmark_last_image_url", imgUrlToSend);
-                  if (vidUrlToSend) localStorage.setItem("smartmark_last_video_url", vidUrlToSend);
-                  navigate("/setup", {
-                    state: {
-                      imageUrl: imgUrlToSend,
-                      videoUrl: vidUrlToSend,
-                      headline: result?.headline,
-                      body: result?.body,
-                      videoScript,
-                      answers
-                    }
-                  });
-                }}
-              >
-                Continue
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* Modal for full image preview */}
-        <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
-      </div>
+                {/* (Edit button now bottom right) */}
+                <button
+                  style={{
+                    position: "absolute",
+                    bottom: 10,
+                    right: 18,
+                    background: "#f3f6f7",
+                    color: "#12cbb8",
+                    border: "none",
+                    borderRadius: 8,
+                    fontWeight: 700,
+                    fontSize: "1.05rem",
+                    padding: "5px 14px",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 3px #2bcbb828",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    zIndex: 2
+                  }}
+                  onClick={() => {}}
+                >
+                  <FaEdit style={{ fontSize: 15 }} />
+                  Edit
+                </button>
+              </div>
+            )}
+          </div>
+          {/* CONTINUE BUTTON: Centered under the previews */}
+          <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 18 }}>
+            <button
+              style={{
+                background: "#14e7b9",
+                color: "#181b20",
+                border: "none",
+                borderRadius: 13,
+                fontWeight: 700,
+                fontSize: "1.19rem",
+                padding: "18px 72px",
+                marginBottom: 18,
+                marginTop: 2,
+                fontFamily: MODERN_FONT,
+                boxShadow: "0 2px 16px #0cc4be24",
+                cursor: "pointer",
+                transition: "background 0.18s"
+              }}
+              onClick={() => {
+                // Always store and send ABSOLUTE URLs
+                let imgUrlToSend = imageUrl;
+                let vidUrlToSend = videoUrl;
+                // If relative, prepend backend
+                if (imgUrlToSend && !/^https?:\/\//.test(imgUrlToSend)) imgUrlToSend = BACKEND_URL + imgUrlToSend;
+                if (vidUrlToSend && !/^https?:\/\//.test(vidUrlToSend)) vidUrlToSend = BACKEND_URL + vidUrlToSend;
+                if (imgUrlToSend) localStorage.setItem("smartmark_last_image_url", imgUrlToSend);
+                if (vidUrlToSend) localStorage.setItem("smartmark_last_video_url", vidUrlToSend);
+                navigate("/setup", {
+                  state: {
+                    imageUrl: imgUrlToSend,
+                    videoUrl: vidUrlToSend,
+                    headline: result?.headline,
+                    body: result?.body,
+                    videoScript,
+                    answers
+                  }
+                });
+              }}
+            >
+              Continue
+            </button>
+          </div>
+          {/* Modal for full image preview */}
+          <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
+        </div>
+      )}
     </div>
   );
 }
