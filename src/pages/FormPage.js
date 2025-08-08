@@ -1,16 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaEdit, FaSyncAlt, FaArrowUp, FaTimes } from "react-icons/fa";
+import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
 
-// --- Constants ---
+// ========== Constants ==========
 const API_BASE = "/api";
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
 const DARK_BG = "#181b20";
-
-// Up to 20 flexible questions!
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
@@ -20,18 +18,59 @@ const CONVO_QUESTIONS = [
   { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
   { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
   { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
-  // Add more up to 20!
+  // Add more up to 20 if desired
 ];
 
-// --- Helper Components ---
+// ========== Helper Functions/Components ==========
+
 function LoadingSpinner() {
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 120 }}>
-      <div style={{ color: "#b0b8bc", fontWeight: 500, fontSize: "0.97rem", marginBottom: 10 }}>This could take up to 2 minutes 🤖</div>
-      <div style={{ fontSize: 32, color: "#14e7b9" }}>● ● ●</div>
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150
+    }}>
+      <div style={{ color: "#b0b8bc", fontWeight: 500, fontSize: "0.99rem", marginBottom: 10 }}>
+        This could take up to 2 minutes <span role="img" aria-label="robot">🤖</span>
+      </div>
+      <Dotty />
     </div>
   );
 }
+
+function Dotty() {
+  return (
+    <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
+      <span className="dotty-dot" style={dotStyle(0)}>.</span>
+      <span className="dotty-dot" style={dotStyle(1)}>.</span>
+      <span className="dotty-dot" style={dotStyle(2)}>.</span>
+      <style>
+        {`
+        @keyframes bounceDot {
+          0% { transform: translateY(0);}
+          30% { transform: translateY(-7px);}
+          60% { transform: translateY(0);}
+        }
+        .dotty-dot {
+          display: inline-block;
+          animation: bounceDot 1.2s infinite;
+        }
+        .dotty-dot:nth-child(2) { animation-delay: 0.15s;}
+        .dotty-dot:nth-child(3) { animation-delay: 0.3s;}
+        `}
+      </style>
+    </span>
+  );
+}
+
+function dotStyle(n) {
+  return {
+    display: "inline-block",
+    margin: "0 3px",
+    fontSize: 36,
+    color: "#29efb9",
+    animationDelay: `${n * 0.13}s`
+  };
+}
+
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
@@ -69,6 +108,7 @@ function ImageModal({ open, imageUrl, onClose }) {
     </div>
   );
 }
+
 function MediaTypeToggle({ mediaType, setMediaType }) {
   const choices = [
     { key: "image", label: "Image" },
@@ -77,7 +117,11 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
   ];
   return (
     <div style={{
-      display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "16px 0 14px 0"
+      display: "flex",
+      gap: 16,
+      justifyContent: "center",
+      alignItems: "center",
+      margin: "18px 0 14px 0"
     }}>
       {choices.map((choice) => (
         <button
@@ -85,16 +129,16 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
           onClick={() => setMediaType(choice.key)}
           style={{
             fontWeight: 800,
-            fontSize: "1.14rem",
-            padding: "9px 26px",
+            fontSize: "1.18rem",
+            padding: "10px 28px",
             borderRadius: 12,
             border: "none",
             background: mediaType === choice.key ? "#1ad6b7" : "#23292c",
             color: mediaType === choice.key ? "#181b20" : "#bcfff6",
             cursor: "pointer",
             boxShadow: mediaType === choice.key ? "0 2px 18px #1ad6b773" : "none",
-            transform: mediaType === choice.key ? "scale(1.07)" : "scale(1)",
-            transition: "all 0.13s",
+            transform: mediaType === choice.key ? "scale(1.09)" : "scale(1)",
+            transition: "all 0.15s",
             outline: mediaType === choice.key ? "3px solid #14e7b9" : "none"
           }}
         >
@@ -104,24 +148,32 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     </div>
   );
 }
+
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
 
-// --- Main Page ---
+function isGenerateTrigger(input) {
+  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
+}
+
+// =========== Main Component ============
 export default function FormPage() {
   const navigate = useNavigate();
   const inputRef = useRef();
+  const chatBoxRef = useRef();
 
-  // --- State ---
+  // --------------- State -----------------
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
-    { from: "gpt", text: CONVO_QUESTIONS[0].question }
+    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [generating, setGenerating] = useState(false);
+
+  // Ad preview state
   const [mediaType, setMediaType] = useState("both");
   const [result, setResult] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
@@ -133,81 +185,55 @@ export default function FormPage() {
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
-  const chatBoxRef = useRef();
+  const [awaitingContinue, setAwaitingContinue] = useState(false);
+const [awaitingGenerate, setAwaitingGenerate] = useState(false);
 
-  // --- Scroll chat to bottom on update
+function userSaysContinue(val) {
+  return /^(yes|yep|ready|continue|next|ok|sure)$/i.test(val.trim());
+}
+function userSaysGenerate(val) {
+  return /^(yes|yep|ready|let's do it|generate|go ahead|ok|i am ready|im ready|lets do it)$/i.test(val.trim());
+}
+function isOffTopic(val) {
+  // Customize as needed for your ad manager
+  return /(who are you|how does|what do you do|agency|ad manager|work|help|support|feature|question)/i.test(val);
+}
+function getOffTopicAnswer(val) {
+  // Replace with smarter GPT logic or your gpt.js lookup if desired
+  return "I'm your AI Ad Manager. I help create and manage your ad campaigns automatically! Ready for the next question?";
+}
+
+
+
+  // Scroll chat to bottom on update
   useEffect(() => {
-    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    }
   }, [chatHistory]);
 
-  // --- Correction/Smart Handler
-  function detectCorrection(text) {
-    return /(?:actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)/i.test(text);
-  }
-  function findCorrectionKey(text) {
-    for (let q of CONVO_QUESTIONS) {
-      if (text.toLowerCase().includes(q.key)) return q.key;
-      if (text.toLowerCase().includes(q.question.split(" ")[0].toLowerCase())) return q.key;
-    }
-    return null;
+  function handleModalClose() {
+    setShowModal(false);
+    setModalImg("");
   }
 
-  // --- AI General Responses (basic personality)
-  function getGPTReply(userText) {
-    // Basic hardcoded answers for generic questions
-    const txt = userText.toLowerCase();
-    if (/what.*you.*do/.test(txt)) return "I'm your AI Ad Manager. I help you launch great ads, generate ad copy, and handle campaign questions. Ready when you are!";
-    if (/who.*are.*you/.test(txt)) return "I'm an AI ads manager, here to create, improve, and manage your marketing campaigns. Ask me anything!";
-    if (/help|support/.test(txt)) return "I can help with your ad campaign, generate ideas, or answer any marketing questions!";
-    if (/hi|hello|hey/.test(txt)) return "Hey! Let's get started. Ask me anything about your campaign.";
-    // You can expand this as much as you want
-    return "Let's continue! Just answer the question or let me know if you want to change anything.";
-  }
-
-  // --- Chat Logic
-  async function handleUserInput(e) {
+// ---- AI Q&A: Check for GPT chat before stepping to next Q
+async function handleUserInput(e) {
   e.preventDefault();
   if (loading) return;
-  const currentQ = CONVO_QUESTIONS[step];
   const value = input.trim();
   if (!value) return;
 
-  // Correction/NLP logic
-  if (detectCorrection(value)) {
-    let keyToUpdate = findCorrectionKey(value) || (step > 0 ? CONVO_QUESTIONS[step-1].key : null);
-    if (keyToUpdate) {
-      setAnswers(prev => ({ ...prev, [keyToUpdate]: value.replace(/^(actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)\s*/i, "") }));
-      setChatHistory(ch => [
-        ...ch,
-        { from: "user", text: value },
-        { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
-      ]);
-      setInput("");
-      return;
-    }
-  }
-
-  // ----- MAKE THIS PART SMARTER -----
-  // List of trigger phrases
-  const triggerWords = [
-    "yes", "y", "yeah", "i'm ready", "ready", "let's go", "do it", "generate", "go ahead", "run it", "start", "let's start", "launch", "send it"
-  ];
-  const valueNorm = value.toLowerCase().replace(/[^a-z\s]/g, '').trim();
-  // Look for the last GPT prompt
-  const isAtGeneratePrompt = chatHistory
-    .slice(-2)
-    .some(
-      msg =>
-        msg.from === "gpt" &&
-        msg.text &&
-        msg.text.toLowerCase().includes("are you ready for me to generate your campaign")
-    );
-  if (isAtGeneratePrompt && triggerWords.some(word => valueNorm.includes(word))) {
-    setChatHistory(ch => [...ch, { from: "user", text: value }]);
-    setInput("");
+  // 1. "Ready to generate?" positive answer triggers campaign
+  if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
     setLoading(true);
-    setChatHistory(ch => [...ch, { from: "gpt", text: "Great! Generating your campaign now..." }]);
-    // GENERATE!
+    setGenerating(true);
+    setChatHistory(ch => [
+      ...ch,
+      { from: "user", text: value },
+      { from: "gpt", text: "AI generating..." }
+    ]);
+    setInput("");
     setTimeout(async () => {
       const token = getRandomString();
       const [data, imgData, videoData] = await Promise.all([
@@ -224,7 +250,7 @@ export default function FormPage() {
         fetch(`${API_BASE}/generate-video-ad`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...answers, regenerateToken: token }),
+          body: JSON.stringify({ ...answers, regenerateToken: token })
         }).then(res => res.json())
       ]);
       setResult({
@@ -235,97 +261,140 @@ export default function FormPage() {
       setImageUrl(imgData.imageUrl || "");
       setVideoUrl(videoData.videoUrl || "");
       setVideoScript(videoData.script || "");
+      setGenerating(false);
+      setLoading(false);
       setChatHistory(ch => [
         ...ch,
         { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
       ]);
-      setLoading(false);
-    }, 1500);
+    }, 1600);
     return;
   }
 
-  // Save answer
-  if (step < CONVO_QUESTIONS.length) {
-    let newAnswers = { ...answers, [currentQ.key]: value };
-    setAnswers(newAnswers);
-    setChatHistory(ch => [...ch, { from: "user", text: value }]);
-    setInput("");
-
-    // Find next step (skipping conditional questions)
-    let nextStep = step + 1;
-    while (
-      CONVO_QUESTIONS[nextStep] &&
-      CONVO_QUESTIONS[nextStep].conditional &&
-      newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
-    ) {
-      nextStep += 1;
-    }
-
-    // If done, prompt for confirmation
-    if (!CONVO_QUESTIONS[nextStep]) {
-      setChatHistory(ch => [
-        ...ch,
-        { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
-      ]);
-      setStep(nextStep);
-      return;
-    }
-
-    // Ask next question
+  // 2. If at confirmation step but answer is not "yes"
+  if (step === CONVO_QUESTIONS.length) {
     setChatHistory(ch => [
       ...ch,
-      { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
+      { from: "user", text: value },
+      { from: "gpt", text: "Let's continue! Just answer the question or let me know if you want to change anything." }
     ]);
-    setStep(nextStep);
+    setInput("");
     return;
   }
 
-  // Smart AI personality response to general question
-  setChatHistory(ch => [...ch, { from: "user", text: value }, { from: "gpt", text: getGPTReply(value) }]);
+  // 3. If off-topic (AI Ad Manager Q&A), answer and then re-ask current Q
+  if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
+    const resp = await fetch(`${API_BASE}/gpt-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: value, context: { answers } })
+    });
+    const { reply } = await resp.json();
+    setChatHistory(ch => [
+      ...ch,
+      { from: "user", text: value },
+      { from: "gpt", text: reply },
+      { from: "gpt", text: CONVO_QUESTIONS[step]?.question }
+    ]);
+    setInput("");
+    return;
+  }
+
+  // 4. If user input looks like a correction
+  if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
+    const lastQ = step > 0 ? CONVO_QUESTIONS[step - 1] : null;
+    const keyToUpdate = lastQ ? lastQ.key : null;
+    if (keyToUpdate) {
+      setAnswers(prev => ({
+        ...prev,
+        [keyToUpdate]: value.replace(/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)\s*/i, "")
+      }));
+      setChatHistory(ch => [
+        ...ch,
+        { from: "user", text: value },
+        { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
+      ]);
+      setInput("");
+      return;
+    }
+  }
+
+  // 5. Normal Q&A: update answer, move to next Q
+  const currentQ = CONVO_QUESTIONS[step];
+  let newAnswers = { ...answers, [currentQ.key]: value };
+  setAnswers(newAnswers);
+  setChatHistory(ch => [...ch, { from: "user", text: value }]);
   setInput("");
+
+  // Conditional skip logic
+  let nextStep = step + 1;
+  while (
+    CONVO_QUESTIONS[nextStep] &&
+    CONVO_QUESTIONS[nextStep].conditional &&
+    newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
+  ) {
+    nextStep += 1;
+  }
+
+  // If last Q, ask for confirmation
+  if (!CONVO_QUESTIONS[nextStep]) {
+    setChatHistory(ch => [
+      ...ch,
+      { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
+    ]);
+    setStep(nextStep);
+    setAwaitingGenerate && setAwaitingGenerate(true); // if using
+    return;
+  }
+
+  // Otherwise, ask next question
+  setStep(nextStep);
+  setChatHistory(ch => [
+    ...ch,
+    { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
+  ]);
 }
 
+  // --- Handlers for modal image, regenerate, etc. ---
+  function handleImageClick(url) {
+    setShowModal(true);
+    setModalImg(url);
+  }
 
-  // --- Regenerate Image Ad
   async function handleRegenerateImage() {
     setImageLoading(true);
     const token = getRandomString();
-    const imgData = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+    const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ...answers, regenerateToken: token })
-    }).then(res => res.json());
-    setImageUrl(imgData.imageUrl || "");
+    });
+    const data = await resp.json();
+    setImageUrl(data.imageUrl || "");
     setImageLoading(false);
   }
 
-  // --- Regenerate Video Ad
   async function handleRegenerateVideo() {
     setVideoLoading(true);
     const token = getRandomString();
-    const videoData = await fetch(`${API_BASE}/generate-video-ad`, {
+    const resp = await fetch(`${API_BASE}/generate-video-ad`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...answers, regenerateToken: token }),
-    }).then(res => res.json());
-    setVideoUrl(videoData.videoUrl || "");
-    setVideoScript(videoData.script || "");
+      body: JSON.stringify({ ...answers, regenerateToken: token })
+    });
+    const data = await resp.json();
+    setVideoUrl(data.videoUrl || "");
+    setVideoScript(data.script || "");
     setVideoLoading(false);
   }
 
-  // --- Modal Close
-  function handleModalClose() {
-    setShowModal(false);
-    setModalImg("");
-  }
-
-  // --- Render ---
+  // ========== Render ==========
   return (
     <div style={{
       background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
       display: "flex", flexDirection: "column", alignItems: "center"
     }}>
-      {/* Home Button */}
+      {/* Home btn */}
       <button
         style={{
           position: "absolute", top: 24, right: 38, padding: "10px 30px",
@@ -336,26 +405,24 @@ export default function FormPage() {
         onClick={() => navigate("/")}
       >Home</button>
 
-      {/* --- Chatbox and Ad UI --- */}
+      {/* ---- Chat Panel, slightly larger, scrollable --- */}
       <div style={{
-        width: "100%", maxWidth: 550, minHeight: 320, marginTop: 54,
-        background: "#202327", borderRadius: 20, boxShadow: "0 2px 32px #181b2040",
-        padding: "38px 24px 28px 24px", display: "flex", flexDirection: "column", alignItems: "center"
+        width: "100%", maxWidth: 510, minHeight: 370, marginTop: 54, marginBottom: 26,
+        background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
+        padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
-        {/* Chatbox Title */}
+        {/* Chat Header */}
         <div style={{
-          width: "100%", marginBottom: 14,
-          textAlign: "center", color: "#7fffe2",
-          fontWeight: 900, fontSize: 20, letterSpacing: 1.3,
-          borderRadius: 13
-        }}>AI Ad Manager</div>
-
+          color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2
+        }}>
+          AI Ad Manager
+        </div>
         {/* Scrollable chat history */}
         <div ref={chatBoxRef} style={{
-          width: "100%", height: 184, maxHeight: 184, overflowY: "auto",
-          marginBottom: 14, paddingRight: 4, background: "#191b22", borderRadius: 14
+          width: "100%", height: 160, maxHeight: 180, overflowY: "auto",
+          marginBottom: 16, paddingRight: 4, background: "#191b22", borderRadius: 12
         }}>
-          {chatHistory.map((msg, i) => (
+          {chatHistory.slice(-20).map((msg, i) => (
             <div key={i}
               style={{
                 textAlign: msg.from === "gpt" ? "left" : "right",
@@ -374,7 +441,7 @@ export default function FormPage() {
           ))}
         </div>
         {/* Prompt bar */}
-        {!loading &&
+        {!loading && step <= CONVO_QUESTIONS.length &&
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
             <input
               ref={inputRef}
@@ -385,7 +452,7 @@ export default function FormPage() {
               placeholder={
                 step < CONVO_QUESTIONS.length
                   ? CONVO_QUESTIONS[step]?.question
-                  : "Type yes to generate, or ask anything..."
+                  : "Type yes to generate, or say what to change..."
               }
               style={{
                 flex: 1,
@@ -407,60 +474,92 @@ export default function FormPage() {
                 border: "none",
                 borderRadius: 12,
                 fontWeight: 700,
-                fontSize: "1.17rem",
+                fontSize: "1.35rem",
                 padding: "0 22px",
                 cursor: "pointer"
               }}
               disabled={loading}
+              tabIndex={0}
               aria-label="Send"
             >
               <FaArrowUp />
             </button>
           </form>
         }
-        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI thinking...</div>}
+        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI generating...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
       </div>
 
-      {/* Media Type Toggle */}
+      {/* MediaTypeToggle above previews */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* --- Ad Previews Section --- */}
+      {/* Ad Previews — always shown */}
       <div style={{
-        display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap",
-        width: "100%", margin: "18px 0 12px 0"
+        display: "flex",
+        justifyContent: "center",
+        gap: 34,
+        flexWrap: "wrap",
+        width: "100%"
       }}>
         {(mediaType === "image" || mediaType === "both") && (
           <div style={{
-            background: "#fff", borderRadius: 13, boxShadow: "0 2px 24px #16242714",
-            minWidth: 340, maxWidth: 390, flex: 1, marginBottom: 20, padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea", fontFamily: AD_FONT, display: "flex",
-            flexDirection: "column", overflow: "hidden", position: "relative"
+            background: "#fff",
+            borderRadius: 13,
+            boxShadow: "0 2px 24px #16242714",
+            minWidth: 340,
+            maxWidth: 390,
+            flex: 1,
+            marginBottom: 20,
+            padding: "0px 0px 14px 0px",
+            border: "1.5px solid #eaeaea",
+            fontFamily: AD_FONT,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            position: "relative"
           }}>
             <div style={{
-              background: "#f5f6fa", padding: "11px 20px", borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700, color: "#495a68", fontSize: 16, letterSpacing: 0.08,
-              display: "flex", justifyContent: "space-between", alignItems: "center"
+              background: "#f5f6fa",
+              padding: "11px 20px",
+              borderBottom: "1px solid #e0e4eb",
+              fontWeight: 700,
+              color: "#495a68",
+              fontSize: 16,
+              letterSpacing: 0.08,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
             }}>
               <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
               <button
                 style={{
-                  background: "#1ad6b7", color: "#222", border: "none",
-                  borderRadius: 12, fontWeight: 700, fontSize: "1.01rem",
-                  padding: "6px 20px", cursor: imageLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8, boxShadow: "0 2px 7px #19e5b733", display: "flex", alignItems: "center", gap: 7
+                  background: "#1ad6b7",
+                  color: "#222",
+                  border: "none",
+                  borderRadius: 12,
+                  fontWeight: 700,
+                  fontSize: "1.01rem",
+                  padding: "6px 20px",
+                  cursor: imageLoading ? "not-allowed" : "pointer",
+                  marginLeft: 8,
+                  boxShadow: "0 2px 7px #19e5b733",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7
                 }}
                 onClick={handleRegenerateImage}
                 disabled={imageLoading}
                 title="Regenerate Image Ad"
               >
                 <FaSyncAlt style={{ fontSize: 16 }} />
-                {imageLoading ? "Regenerating..." : "Regenerate"}
+                {imageLoading || generating ? <Dotty /> : "Regenerate"}
               </button>
             </div>
             <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {imageLoading ? (
-                <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
+              {imageLoading || generating ? (
+                <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Dotty />
+                </div>
               ) : imageUrl ? (
                 <img
                   src={imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl}
@@ -472,7 +571,7 @@ export default function FormPage() {
                     borderRadius: 0,
                     cursor: "pointer"
                   }}
-                  onClick={() => { setShowModal(true); setModalImg(imageUrl); }}
+                  onClick={() => handleImageClick(imageUrl)}
                   title="Click to view larger"
                 />
               ) : (
@@ -491,18 +590,28 @@ export default function FormPage() {
             </div>
             <div style={{ padding: "17px 18px 4px 18px" }}>
               <div style={{
-                color: "#191c1e", fontWeight: 800, fontSize: 17,
-                marginBottom: 5, fontFamily: AD_FONT
+                color: "#191c1e",
+                fontWeight: 800,
+                fontSize: 17,
+                marginBottom: 5,
+                fontFamily: AD_FONT
               }}>
                 {result?.headline || "Don't Miss Our Limited-Time Offer"}
               </div>
               <div style={{
-                color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18
+                color: "#3a4149",
+                fontSize: 15,
+                fontWeight: 600,
+                marginBottom: 3,
+                minHeight: 18
               }}>
                 {result?.body || "Ad copy goes here..."}
               </div>
             </div>
-            <div style={{ padding: "8px 18px", marginTop: 2 }}>
+            <div style={{
+              padding: "8px 18px",
+              marginTop: 2
+            }}>
               <button style={{
                 background: "#14e7b9",
                 color: "#181b20",
@@ -516,12 +625,24 @@ export default function FormPage() {
             </div>
             <button
               style={{
-                position: "absolute", bottom: 10, right: 18, background: "#f3f6f7",
-                color: "#12cbb8", border: "none", borderRadius: 8, fontWeight: 700,
-                fontSize: "1.05rem", padding: "5px 14px", cursor: "pointer",
-                boxShadow: "0 1px 3px #2bcbb828", display: "flex", alignItems: "center", gap: 5, zIndex: 2
+                position: "absolute",
+                bottom: 10,
+                right: 18,
+                background: "#f3f6f7",
+                color: "#12cbb8",
+                border: "none",
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: "1.05rem",
+                padding: "5px 14px",
+                cursor: "pointer",
+                boxShadow: "0 1px 3px #2bcbb828",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                zIndex: 2
               }}
-              onClick={() => { }}
+              onClick={() => {}}
             >
               <FaEdit style={{ fontSize: 15 }} />
               Edit
@@ -530,35 +651,63 @@ export default function FormPage() {
         )}
         {(mediaType === "video" || mediaType === "both") && (
           <div style={{
-            background: "#fff", borderRadius: 13, boxShadow: "0 2px 24px #16242714",
-            minWidth: 340, maxWidth: 390, flex: 1, marginBottom: 20, padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea", fontFamily: AD_FONT, display: "flex",
-            flexDirection: "column", overflow: "hidden", position: "relative"
+            background: "#fff",
+            borderRadius: 13,
+            boxShadow: "0 2px 24px #16242714",
+            minWidth: 340,
+            maxWidth: 390,
+            flex: 1,
+            marginBottom: 20,
+            padding: "0px 0px 14px 0px",
+            border: "1.5px solid #eaeaea",
+            fontFamily: AD_FONT,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            position: "relative"
           }}>
             <div style={{
-              background: "#f5f6fa", padding: "11px 20px", borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700, color: "#495a68", fontSize: 16, letterSpacing: 0.08,
-              display: "flex", justifyContent: "space-between", alignItems: "center"
+              background: "#f5f6fa",
+              padding: "11px 20px",
+              borderBottom: "1px solid #e0e4eb",
+              fontWeight: 700,
+              color: "#495a68",
+              fontSize: 16,
+              letterSpacing: 0.08,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
             }}>
               <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
               <button
                 style={{
-                  background: "#1ad6b7", color: "#222", border: "none",
-                  borderRadius: 12, fontWeight: 700, fontSize: "1.01rem",
-                  padding: "6px 20px", cursor: videoLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8, boxShadow: "0 2px 7px #19e5b733", display: "flex", alignItems: "center", gap: 7
+                  background: "#1ad6b7",
+                  color: "#222",
+                  border: "none",
+                  borderRadius: 12,
+                  fontWeight: 700,
+                  fontSize: "1.01rem",
+                  padding: "6px 20px",
+                  cursor: videoLoading ? "not-allowed" : "pointer",
+                  marginLeft: 8,
+                  boxShadow: "0 2px 7px #19e5b733",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7
                 }}
                 onClick={handleRegenerateVideo}
                 disabled={videoLoading}
                 title="Regenerate Video Ad"
               >
                 <FaSyncAlt style={{ fontSize: 16 }} />
-                {videoLoading ? "Regenerating..." : "Regenerate"}
+                {videoLoading || generating ? <Dotty /> : "Regenerate"}
               </button>
             </div>
             <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              {videoLoading ? (
-                <div style={{ width: "100%", height: 220 }}><LoadingSpinner /></div>
+              {videoLoading || generating ? (
+                <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Dotty />
+                </div>
               ) : videoUrl ? (
                 <video
                   src={videoUrl}
@@ -586,20 +735,30 @@ export default function FormPage() {
             </div>
             <div style={{ padding: "17px 18px 4px 18px" }}>
               <div style={{
-                color: "#191c1e", fontWeight: 800, fontSize: 17,
-                marginBottom: 5, fontFamily: AD_FONT
+                color: "#191c1e",
+                fontWeight: 800,
+                fontSize: 17,
+                marginBottom: 5,
+                fontFamily: AD_FONT
               }}>
                 {result?.headline || "Welcome New Customers Instantly!"}
               </div>
               {videoScript && (
                 <div style={{
-                  color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18
+                  color: "#3a4149",
+                  fontSize: 15,
+                  fontWeight: 600,
+                  marginBottom: 3,
+                  minHeight: 18
                 }}>
                   <b>Script:</b> {videoScript}
                 </div>
               )}
             </div>
-            <div style={{ padding: "8px 18px", marginTop: 2 }}>
+            <div style={{
+              padding: "8px 18px",
+              marginTop: 2
+            }}>
               <button style={{
                 background: "#14e7b9",
                 color: "#181b20",
@@ -613,12 +772,24 @@ export default function FormPage() {
             </div>
             <button
               style={{
-                position: "absolute", bottom: 10, right: 18, background: "#f3f6f7",
-                color: "#12cbb8", border: "none", borderRadius: 8, fontWeight: 700,
-                fontSize: "1.05rem", padding: "5px 14px", cursor: "pointer",
-                boxShadow: "0 1px 3px #2bcbb828", display: "flex", alignItems: "center", gap: 5, zIndex: 2
+                position: "absolute",
+                bottom: 10,
+                right: 18,
+                background: "#f3f6f7",
+                color: "#12cbb8",
+                border: "none",
+                borderRadius: 8,
+                fontWeight: 700,
+                fontSize: "1.05rem",
+                padding: "5px 14px",
+                cursor: "pointer",
+                boxShadow: "0 1px 3px #2bcbb828",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                zIndex: 2
               }}
-              onClick={() => { }}
+              onClick={() => {}}
             >
               <FaEdit style={{ fontSize: 15 }} />
               Edit
@@ -628,7 +799,7 @@ export default function FormPage() {
       </div>
 
       {/* Continue Button */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8 }}>
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 18 }}>
         <button
           style={{
             background: "#14e7b9",
@@ -646,7 +817,6 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            // Always store and send ABSOLUTE URLs
             let imgUrlToSend = imageUrl;
             let vidUrlToSend = videoUrl;
             if (imgUrlToSend && !/^https?:\/\//.test(imgUrlToSend)) imgUrlToSend = BACKEND_URL + imgUrlToSend;
@@ -668,8 +838,6 @@ export default function FormPage() {
           Continue
         </button>
       </div>
-
-      {/* Modal for full image preview */}
       <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
     </div>
   );
