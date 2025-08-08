@@ -890,16 +890,20 @@ setVideoUrl(
             if (vidUrlToSend && !/^https?:\/\//.test(vidUrlToSend)) vidUrlToSend = BACKEND_URL + vidUrlToSend;
             if (imgUrlToSend) localStorage.setItem("smartmark_last_image_url", imgUrlToSend);
             if (vidUrlToSend) localStorage.setItem("smartmark_last_video_url", vidUrlToSend);
+        
+            localStorage.setItem("smartmark_media_selection", mediaType);
             navigate("/setup", {
-              state: {
-                imageUrl: imgUrlToSend,
-                videoUrl: vidUrlToSend,
-                headline: result?.headline,
-                body: result?.body,
-                videoScript,
-                answers
-              }
-            });
+  state: {
+    imageUrl: imgUrlToSend,
+    videoUrl: vidUrlToSend,
+    headline: result?.headline,
+    body: result?.body,
+    videoScript,
+    answers,
+    mediaSelection: mediaType // <-- pass user's choice: "image" | "video" | "both"
+  }
+});
+
           }}
         >
           Continue
