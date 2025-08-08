@@ -47,7 +47,7 @@ router.get('/facebook/callback', async (req, res) => {
     });
     const accessToken = tokenRes.data.access_token;
     userTokens['singleton'] = accessToken;
-    res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
+   res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1&fb_user_token=${encodeURIComponent(accessToken)}`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
     res.status(500).send('Failed to authenticate with Facebook.');
@@ -144,6 +144,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     }
   } catch { aiAudience = null; }
 
+  const mediaSelection = (req.body.mediaSelection || "both").toLowerCase();
+const wantImage = mediaSelection === "image" || mediaSelection === "both";
+const wantVideo = mediaSelection === "video" || mediaSelection === "both";
+
+
   // === Build targeting as you did before ===
   let targeting = {
     geo_locations: { countries: ["US"] },
@@ -209,7 +214,8 @@ try {
   let imageHash = null, videoId = null;
 
   // IMAGE
-  if (adImage && adImage.startsWith("data:")) {
+  // IMAGE (only if needed)
+if (wantImage && adImage && adImage.startsWith("data:")) {
     const matches = adImage.match(/^data:(image\/\w+);base64,(.+)$/);
     if (!matches) throw new Error("Invalid image data.");
     const base64Data = matches[2];
@@ -227,137 +233,69 @@ try {
     console.log("[launch-campaign] Uploaded imageHash:", imageHash);
   }
 
-// VIDEO (chunked upload, robust for Facebook advideos)
-// VIDEO (chunked upload, robust for Facebook advideos)
-if (adVideo && adVideo.startsWith("data:")) {
+// ===== VIDEO: prefer fbVideoId from client; else upload to AD ACCOUNT library =====
+const fbVideoIdFromClient = req.body.fbVideoId;
+if (fbVideoIdFromClient) {
+  videoId = fbVideoIdFromClient; // already in the ad account library
+  console.log("[launch-campaign] Using client-provided fbVideoId:", videoId);
+} else if (adVideo && adVideo.startsWith("data:")) {
   try {
-    // --- 1. Get the PAGE access token (not user token!) ---
-    const pagesRes = await axios.get(
-      `https://graph.facebook.com/v18.0/me/accounts`,
-      { params: { access_token: userToken, fields: 'id,name,access_token' } }
-    );
-    const pages = pagesRes.data.data || [];
-    const page = pages.find(p => p.id === pageId);
-    const pageToken = page ? page.access_token : null;
-    if (!pageToken) throw new Error('Could not find page access token for video upload.');
-
-    // --- 1.1 Check if the user is an ADMIN on the page ---
-    // Get user ID from /me endpoint
-    const meRes = await axios.get(
-      `https://graph.facebook.com/v18.0/me`,
-      { params: { access_token: userToken, fields: 'id,name' } }
-    );
-    const userId = meRes.data.id;
-
-    // Check Page roles
-    const rolesRes = await axios.get(
-      `https://graph.facebook.com/v18.0/${pageId}/roles`,
-      { params: { access_token: pageToken } }
-    );
-    const admins = (rolesRes.data.data || []).filter(r => r.role === 'ADMIN');
-    const isAdmin = admins.some(a => a.id === userId);
-
-    if (!isAdmin) {
-      throw new Error("You must be an ADMIN of the Facebook Page to upload video ads. Check your Page Roles in Facebook Settings.");
-    }
-
-    // --- 1.2 DEBUG: Check if the token has pages_manage_metadata ---
-    try {
-      const debugRes = await axios.get(
-        `https://graph.facebook.com/debug_token`,
-        {
-          params: {
-            input_token: pageToken,
-            access_token: `${FACEBOOK_APP_ID}|${FACEBOOK_APP_SECRET}`,
-          },
-        }
-      );
-      if (
-        !debugRes.data.data.is_valid ||
-        !debugRes.data.data.scopes.includes('pages_manage_metadata')
-      ) {
-        throw new Error('Page access token is missing required permissions: pages_manage_metadata. Please remove and re-add the app, then approve all permissions for your page.');
-      }
-    } catch (permCheckErr) {
-      throw new Error(
-        "Page token is missing the required 'pages_manage_metadata' permission. " +
-        "Remove and re-add the app, make sure all permissions are granted, and select the right page."
-      );
-    }
-
-    // --- 2. Upload video (same as before) ---
-    const matches = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
-    if (!matches) throw new Error("Invalid video data.");
-    const base64Video = matches[2];
+    // Convert base64 -> Buffer
+    const matchesVid = adVideo.match(/^data:(video\/\w+);base64,(.+)$/);
+    if (!matchesVid) throw new Error("Invalid video data.");
+    const base64Video = matchesVid[2];
     const videoBuffer = Buffer.from(base64Video, "base64");
-    const totalBytes = videoBuffer.length;
 
-    // --- 3. Start upload session with PAGE token ---
-    const startRes = await axios.post(
-      `https://graph.facebook.com/v18.0/advideos?access_token=${pageToken}`,
-      new URLSearchParams({
-        file_size: totalBytes,
-        upload_phase: "start"
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+    // Upload to Ad Account library via multipart (source)
+    const form = new FormData();
+    form.append("source", videoBuffer, { filename: "smartmark-video.mp4", contentType: "video/mp4" });
+    form.append("name", "SmartMark Generated Video");
+    form.append("description", "Uploaded by SmartMark");
+
+    const up = await axios.post(
+      `https://graph.facebook.com/v23.0/act_${accountId}/advideos`,
+      form,
+      {
+        headers: form.getHeaders(),
+        params: { access_token: userToken }
+      }
     );
-    const uploadSessionId = startRes.data.upload_session_id;
-    let start_offset = parseInt(startRes.data.start_offset, 10);
-    let end_offset = parseInt(startRes.data.end_offset, 10);
-
-    // --- 4. Transfer chunks ---
-    while (start_offset < end_offset) {
-      const chunk = videoBuffer.slice(start_offset, end_offset);
-      const form = new FormData();
-      form.append('upload_phase', 'transfer');
-      form.append('upload_session_id', uploadSessionId);
-      form.append('start_offset', start_offset.toString());
-      form.append('video_file_chunk', chunk, { filename: 'video.mp4' });
-
-      const transferRes = await axios.post(
-        `https://graph.facebook.com/v18.0/advideos?access_token=${pageToken}`,
-        form,
-        { headers: form.getHeaders() }
-      );
-      start_offset = parseInt(transferRes.data.start_offset, 10);
-      end_offset = parseInt(transferRes.data.end_offset, 10);
-    }
-
-    // --- 5. Finish phase ---
-    const finishRes = await axios.post(
-      `https://graph.facebook.com/v18.0/advideos?access_token=${pageToken}`,
-      new URLSearchParams({
-        upload_phase: "finish",
-        upload_session_id: uploadSessionId
-      }),
-      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-    );
-    videoId = finishRes.data.video_id || null;
-
-    if (!videoId) {
-      throw new Error("No videoId returned after finish phase! " + JSON.stringify(finishRes.data));
-    }
-    console.log("[launch-campaign] Uploaded videoId:", videoId);
+    videoId = up?.data?.id || null;
+    if (!videoId) throw new Error("No video id returned from /advideos.");
+    console.log("[launch-campaign] Uploaded video to Ad Account. videoId:", videoId);
   } catch (e) {
-    console.error("[launch-campaign] Video upload failed:", e?.response?.data || e?.message || e);
-    videoId = null; // Continue with just image if needed
+    console.error("[launch-campaign] Ad Account video upload failed:", e?.response?.data || e?.message || e);
+    videoId = null; // continue with image-only if needed
   }
 }
 
+// --- log final state ---
+console.log(`[launch-campaign] Finished uploads | imageHash: ${imageHash || "null"} | videoId: ${videoId || "null"}`);
 
+if ((wantImage && !imageHash) && (wantVideo && !videoId)) {
+  return res.status(400).json({
+    error: "No usable creatives. You asked for image/video but the corresponding asset is missing."
+  });
+}
 
-
-
-
-  // --- log final state ---
-  console.log(`[launch-campaign] Finished uploads | imageHash: ${imageHash || "null"} | videoId: ${videoId || "null"}`);
 
   // (continue your campaign/ad set logic below here...)
 
   // ...the rest of your code below remains unchanged...
 
 
+// --- Enforce max 2 active campaigns on this ad account ---
+const existing = await axios.get(
+  `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+  { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
+);
+const activeCount = (existing.data?.data || []).filter(
+  c => !["ARCHIVED", "DELETED"].includes((c.effective_status || "").toUpperCase())
+).length;
 
+if (activeCount >= 2) {
+  return res.status(400).json({ error: "Limit reached: maximum of 2 active campaigns per user." });
+}
 
     // 2. Create Campaign
     const campaignRes = await axios.post(
@@ -376,7 +314,7 @@ if (adVideo && adVideo.startsWith("data:")) {
     let dailyBudgetCents = Math.round(parseFloat(budget) * 100);
 
     // 3. For each creative, create an ad set and ad
-    if (imageHash) {
+   if (wantImage && imageHash) {
       // Image Ad Set
       let imgAdSetRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
@@ -430,7 +368,7 @@ if (adVideo && adVideo.startsWith("data:")) {
       adIds.push(adRes.data.id);
     }
 
-    if (videoId) {
+   if (wantVideo && videoId) {
       // Video Ad Set
       let vidAdSetRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
