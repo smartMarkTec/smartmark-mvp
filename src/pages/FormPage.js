@@ -166,115 +166,125 @@ export default function FormPage() {
 
   // --- Chat Logic
   async function handleUserInput(e) {
-    e.preventDefault();
-    if (loading) return;
-    const currentQ = CONVO_QUESTIONS[step];
-    const value = input.trim();
-    if (!value) return;
+  e.preventDefault();
+  if (loading) return;
+  const currentQ = CONVO_QUESTIONS[step];
+  const value = input.trim();
+  if (!value) return;
 
-    // Correction/NLP logic
-    if (detectCorrection(value)) {
-      let keyToUpdate = findCorrectionKey(value) || (step > 0 ? CONVO_QUESTIONS[step-1].key : null);
-      if (keyToUpdate) {
-        setAnswers(prev => ({ ...prev, [keyToUpdate]: value.replace(/^(actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)\s*/i, "") }));
-        setChatHistory(ch => [
-          ...ch,
-          { from: "user", text: value },
-          { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
-        ]);
-        setInput("");
-        return;
-      }
-    }
-
-    // Handle "yes" to generate prompt
-    const isAtGeneratePrompt = chatHistory.some(
-      (msg, idx) =>
-        msg.text?.toLowerCase().includes("are you ready for me to generate your campaign") &&
-        idx === chatHistory.length - 2 // Only if it's the latest prompt before input
-    );
-    if (isAtGeneratePrompt && /^yes|y$/i.test(value)) {
-      setChatHistory(ch => [...ch, { from: "user", text: value }]);
-      setInput("");
-      setLoading(true);
-      setChatHistory(ch => [...ch, { from: "gpt", text: "Great! Generating your campaign now..." }]);
-      // GENERATE!
-      setTimeout(async () => {
-        const token = getRandomString();
-        const [data, imgData, videoData] = await Promise.all([
-          fetch(`${API_BASE}/generate-campaign-assets`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ answers })
-          }).then(res => res.json()),
-          fetch(`${API_BASE}/generate-image-from-prompt`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...answers, regenerateToken: token })
-          }).then(res => res.json()),
-          fetch(`${API_BASE}/generate-video-ad`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ ...answers, regenerateToken: token }),
-          }).then(res => res.json())
-        ]);
-        setResult({
-          headline: data.headline || "",
-          body: data.body || "",
-          image_overlay_text: data.image_overlay_text || ""
-        });
-        setImageUrl(imgData.imageUrl || "");
-        setVideoUrl(videoData.videoUrl || "");
-        setVideoScript(videoData.script || "");
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
-        ]);
-        setLoading(false);
-      }, 1500);
-      return;
-    }
-
-    // Save answer
-    if (step < CONVO_QUESTIONS.length) {
-      let newAnswers = { ...answers, [currentQ.key]: value };
-      setAnswers(newAnswers);
-      setChatHistory(ch => [...ch, { from: "user", text: value }]);
-      setInput("");
-
-      // Find next step (skipping conditional questions)
-      let nextStep = step + 1;
-      while (
-        CONVO_QUESTIONS[nextStep] &&
-        CONVO_QUESTIONS[nextStep].conditional &&
-        newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
-      ) {
-        nextStep += 1;
-      }
-
-      // If done, prompt for confirmation
-      if (!CONVO_QUESTIONS[nextStep]) {
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
-        ]);
-        setStep(nextStep);
-        return;
-      }
-
-      // Ask next question
+  // Correction/NLP logic
+  if (detectCorrection(value)) {
+    let keyToUpdate = findCorrectionKey(value) || (step > 0 ? CONVO_QUESTIONS[step-1].key : null);
+    if (keyToUpdate) {
+      setAnswers(prev => ({ ...prev, [keyToUpdate]: value.replace(/^(actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)\s*/i, "") }));
       setChatHistory(ch => [
         ...ch,
-        { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
+        { from: "user", text: value },
+        { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
+      ]);
+      setInput("");
+      return;
+    }
+  }
+
+  // ----- MAKE THIS PART SMARTER -----
+  // List of trigger phrases
+  const triggerWords = [
+    "yes", "y", "yeah", "i'm ready", "ready", "let's go", "do it", "generate", "go ahead", "run it", "start", "let's start", "launch", "send it"
+  ];
+  const valueNorm = value.toLowerCase().replace(/[^a-z\s]/g, '').trim();
+  // Look for the last GPT prompt
+  const isAtGeneratePrompt = chatHistory
+    .slice(-2)
+    .some(
+      msg =>
+        msg.from === "gpt" &&
+        msg.text &&
+        msg.text.toLowerCase().includes("are you ready for me to generate your campaign")
+    );
+  if (isAtGeneratePrompt && triggerWords.some(word => valueNorm.includes(word))) {
+    setChatHistory(ch => [...ch, { from: "user", text: value }]);
+    setInput("");
+    setLoading(true);
+    setChatHistory(ch => [...ch, { from: "gpt", text: "Great! Generating your campaign now..." }]);
+    // GENERATE!
+    setTimeout(async () => {
+      const token = getRandomString();
+      const [data, imgData, videoData] = await Promise.all([
+        fetch(`${API_BASE}/generate-campaign-assets`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answers })
+        }).then(res => res.json()),
+        fetch(`${API_BASE}/generate-image-from-prompt`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...answers, regenerateToken: token })
+        }).then(res => res.json()),
+        fetch(`${API_BASE}/generate-video-ad`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...answers, regenerateToken: token }),
+        }).then(res => res.json())
+      ]);
+      setResult({
+        headline: data.headline || "",
+        body: data.body || "",
+        image_overlay_text: data.image_overlay_text || ""
+      });
+      setImageUrl(imgData.imageUrl || "");
+      setVideoUrl(videoData.videoUrl || "");
+      setVideoScript(videoData.script || "");
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
+      ]);
+      setLoading(false);
+    }, 1500);
+    return;
+  }
+
+  // Save answer
+  if (step < CONVO_QUESTIONS.length) {
+    let newAnswers = { ...answers, [currentQ.key]: value };
+    setAnswers(newAnswers);
+    setChatHistory(ch => [...ch, { from: "user", text: value }]);
+    setInput("");
+
+    // Find next step (skipping conditional questions)
+    let nextStep = step + 1;
+    while (
+      CONVO_QUESTIONS[nextStep] &&
+      CONVO_QUESTIONS[nextStep].conditional &&
+      newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
+    ) {
+      nextStep += 1;
+    }
+
+    // If done, prompt for confirmation
+    if (!CONVO_QUESTIONS[nextStep]) {
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
       ]);
       setStep(nextStep);
       return;
     }
 
-    // Smart AI personality response to general question
-    setChatHistory(ch => [...ch, { from: "user", text: value }, { from: "gpt", text: getGPTReply(value) }]);
-    setInput("");
+    // Ask next question
+    setChatHistory(ch => [
+      ...ch,
+      { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
+    ]);
+    setStep(nextStep);
+    return;
   }
+
+  // Smart AI personality response to general question
+  setChatHistory(ch => [...ch, { from: "user", text: value }, { from: "gpt", text: getGPTReply(value) }]);
+  setInput("");
+}
+
 
   // --- Regenerate Image Ad
   async function handleRegenerateImage() {
