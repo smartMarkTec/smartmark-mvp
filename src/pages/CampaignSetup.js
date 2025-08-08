@@ -669,7 +669,7 @@ const handleLaunch = async () => {
             </label>
             <input
               type="number"
-              placeholder="Enter budget (minimum $3)"
+              placeholder="Enter budget (minimum $2)"
               min={3}
               step={1}
               value={budget}
@@ -700,7 +700,7 @@ const handleLaunch = async () => {
             <div style={{ color: "#afeca3", fontWeight: 700, marginBottom: 8 }}>
               SmartMark Fee: <span style={{ color: ACCENT_GREEN }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
             </div>
-            {budget && Number(budget) >= 3 && (
+            {budget && Number(budget) >= 2 && (
               <div
                 style={{
                   marginTop: "0.7rem",
