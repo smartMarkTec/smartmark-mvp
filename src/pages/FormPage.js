@@ -166,9 +166,11 @@ export default function FormPage() {
   // --------------- State -----------------
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
-  const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` }
-  ]);
+const [chatHistory, setChatHistory] = useState([
+  { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
+  { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+]);
+
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -187,6 +189,8 @@ export default function FormPage() {
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
   const [awaitingContinue, setAwaitingContinue] = useState(false);
 const [awaitingGenerate, setAwaitingGenerate] = useState(false);
+const [awaitingReady, setAwaitingReady] = useState(true);
+
 
 function userSaysContinue(val) {
   return /^(yes|yep|ready|continue|next|ok|sure)$/i.test(val.trim());
@@ -223,6 +227,50 @@ async function handleUserInput(e) {
   if (loading) return;
   const value = input.trim();
   if (!value) return;
+
+  // If waiting for "ready"
+  if (awaitingReady) {
+    setChatHistory(ch => [...ch, { from: "user", text: value }]);
+    if (/^(yes|yep|ready|start|go|let'?s go|let'?s start|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
+      setAwaitingReady(false);
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: CONVO_QUESTIONS[0].question }
+      ]);
+      setStep(0);
+      setInput("");
+      return;
+    } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }
+      ]);
+      setInput("");
+      return;
+    } else if (isOffTopic(value)) {
+      // Off-topic Q (who are you etc)
+      const resp = await fetch(`${API_BASE}/gpt-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: value })
+      });
+      const { reply } = await resp.json();
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: reply },
+        { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+      ]);
+      setInput("");
+      return;
+    } else {
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }
+      ]);
+      setInput("");
+      return;
+    }
+  }
 
   // 1. "Ready to generate?" positive answer triggers campaign
   if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
@@ -282,23 +330,22 @@ async function handleUserInput(e) {
     return;
   }
 
-// 3. If off-topic (AI Ad Manager Q&A), answer, then wait for user input
-if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
-  const resp = await fetch(`${API_BASE}/gpt-chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: value, context: { answers } })
-  });
-  const { reply } = await resp.json();
-  setChatHistory(ch => [
-    ...ch,
-    { from: "user", text: value },
-    { from: "gpt", text: reply }
-  ]);
-  setInput("");
-  return;
-}
-
+  // 3. If off-topic (AI Ad Manager Q&A), answer, then wait for user input
+  if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
+    const resp = await fetch(`${API_BASE}/gpt-chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: value, context: { answers } })
+    });
+    const { reply } = await resp.json();
+    setChatHistory(ch => [
+      ...ch,
+      { from: "user", text: value },
+      { from: "gpt", text: reply }
+    ]);
+    setInput("");
+    return;
+  }
 
   // 4. If user input looks like a correction
   if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
@@ -354,6 +401,8 @@ if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\b
     { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
   ]);
 }
+
+
 
   // --- Handlers for modal image, regenerate, etc. ---
   function handleImageClick(url) {
