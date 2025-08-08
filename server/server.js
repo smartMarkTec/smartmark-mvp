@@ -60,6 +60,10 @@ app.use('/api', aiRoutes);
 const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
+const gptChatRoutes = require('./routes/gpt');
+app.use('/api/gpt-chat', gptChatRoutes);
+
+
 // Health check
 app.get('/healthz', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
