@@ -282,23 +282,23 @@ async function handleUserInput(e) {
     return;
   }
 
-  // 3. If off-topic (AI Ad Manager Q&A), answer and then re-ask current Q
-  if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
-    const resp = await fetch(`${API_BASE}/gpt-chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: value, context: { answers } })
-    });
-    const { reply } = await resp.json();
-    setChatHistory(ch => [
-      ...ch,
-      { from: "user", text: value },
-      { from: "gpt", text: reply },
-      { from: "gpt", text: CONVO_QUESTIONS[step]?.question }
-    ]);
-    setInput("");
-    return;
-  }
+// 3. If off-topic (AI Ad Manager Q&A), answer, then wait for user input
+if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
+  const resp = await fetch(`${API_BASE}/gpt-chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: value, context: { answers } })
+  });
+  const { reply } = await resp.json();
+  setChatHistory(ch => [
+    ...ch,
+    { from: "user", text: value },
+    { from: "gpt", text: reply }
+  ]);
+  setInput("");
+  return;
+}
+
 
   // 4. If user input looks like a correction
   if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
