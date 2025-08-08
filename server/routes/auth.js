@@ -388,24 +388,29 @@ if (activeCount >= 2) {
       let adSetId = vidAdSetRes.data.id;
       adSetIds.push(adSetId);
 
-      // Create Ad Creative for Video
-      let creativeRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-        {
-          name: `${campaignName} (Video) - ${new Date().toISOString()}`,
-          object_story_spec: {
-            page_id: pageId,
-            video_data: {
-              video_id: videoId,
-              message: adCopy,
-              title: campaignName,
-              description: form.description || "",
-              link: form.url || "https://your-smartmark-site.com"
-            }
-          }
-        },
-        { params: { access_token: userToken } }
-      );
+     // --- REPLACE the whole "Create Ad Creative for Video" block with this ---
+let creativeRes = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+  {
+    name: `${campaignName} (Video) - ${new Date().toISOString()}`,
+    object_story_spec: {
+      page_id: pageId,
+      video_data: {
+        video_id: videoId,
+        message: adCopy || (form.description || ""),
+        title: campaignName,
+        // NOTE: DO NOT include "description" here; FB rejects it for video_data
+        // Optional: include a link via call_to_action if you want
+        call_to_action: {
+          type: "LEARN_MORE",
+          value: { link: form.url || "https://your-smartmark-site.com" }
+        }
+      }
+    }
+  },
+  { params: { access_token: userToken } }
+);
+
       let creativeId = creativeRes.data.id;
       creativeIds.push(creativeId);
 
