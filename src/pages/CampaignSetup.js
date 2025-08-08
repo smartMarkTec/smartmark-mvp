@@ -178,6 +178,7 @@ const CampaignSetup = () => {
   const [userKey, setUserKey] = useState("");
   const [adAccounts, setAdAccounts] = useState([]);
   const [pages, setPages] = useState([]);
+  const [fbUserToken, setFbUserToken] = useState(() => localStorage.getItem("smartmark_fb_user_token") || "");
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [metrics, setMetrics] = useState(null);
@@ -259,17 +260,31 @@ useEffect(() => {
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get("facebook_connected") === "1") {
-      setFbConnected(true);
-      if (userKey) {
-        localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
-      }
-      window.history.replaceState({}, document.title, "/setup");
+useEffect(() => {
+  const params = new URLSearchParams(location.search);
+
+  // Set connected flag
+  if (params.get("facebook_connected") === "1") {
+    setFbConnected(true);
+    if (userKey) {
+      localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
     }
-    // eslint-disable-next-line
-  }, [location, userKey]);
+  }
+
+  // OPTIONAL: capture a short-lived user token if your backend sends it back
+  const tokenFromCallback = params.get("fb_user_token");
+  if (tokenFromCallback) {
+    setFbUserToken(tokenFromCallback);
+    localStorage.setItem("smartmark_fb_user_token", tokenFromCallback);
+  }
+
+  // Clean URL
+  if (params.get("facebook_connected") === "1" || tokenFromCallback) {
+    window.history.replaceState({}, document.title, "/setup");
+  }
+  // eslint-disable-next-line
+}, [location, userKey]);
+
 
   useEffect(() => {
     if (fbConnected && userKey) {
@@ -411,11 +426,42 @@ const handleLaunch = async () => {
     const acctId = selectedAccount.replace("act_", "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    // --- NEW LOGIC: Try all sources, fallback to localStorage ---
+    // Try to ensure we have latest media URLs
     let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
     let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
 
-    // Convert to base64 if not already
+    // 1) Generate/ensure video exists AND (if token present) upload to Ad Account library
+    let fbVideoId = null;
+    try {
+      const genRes = await fetch(`${backendUrl}/api/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: form?.url || form?.website || "",
+          answers: { ...form, industry: form?.industry, cta: form?.cta || "Learn More!" },
+          fbAdAccountId: acctId,                    // numbers only
+          userAccessToken: fbUserToken || undefined // only if we captured one
+        })
+      });
+      const genJson = await genRes.json();
+      if (!genRes.ok) throw new Error(genJson?.error || "Video generation failed");
+
+      // update local media URL if returned
+      if (genJson?.videoUrl) {
+        adVideo = `${backendUrl}${genJson.videoUrl}`;
+        setMediaVideoUrl(adVideo);
+        localStorage.setItem("smartmark_last_video_url", adVideo);
+      }
+      // capture ad-account video asset id (for creative)
+      if (genJson?.fbVideoId) {
+        fbVideoId = genJson.fbVideoId;
+      }
+    } catch (e) {
+      console.warn("Video gen/upload warning:", e?.message || e);
+      // carry on; backend launch can still upload if needed
+    }
+
+    // Convert assets to base64 (your existing logic)
     if (adImage && !adImage.startsWith("data:")) {
       adImage = await urlToBase64(adImage);
     }
@@ -423,19 +469,17 @@ const handleLaunch = async () => {
       adVideo = await urlToBase64(adVideo);
     }
 
-    // DEBUG: Log the first 80 characters for each to confirm
-    console.log("LAUNCH adImage:", adImage ? adImage.slice(0, 80) : "NONE");
-    console.log("LAUNCH adVideo:", adVideo ? adVideo.slice(0, 80) : "NONE");
-
+    // 2) Launch campaign using your existing endpoint
     const payload = {
       form: { ...form },
       budget: safeBudget,
       campaignType: form?.campaignType || "Website Traffic",
       pageId: selectedPageId,
-      aiAudience: form?.aiAudience || answers?.aiAudience || "",
+      aiAudience: form?.aiAudience || (answers?.aiAudience || ""),
       adCopy: headline || body || "",
       adImage: adImage || "",
       adVideo: adVideo || "",
+      fbVideoId: fbVideoId || "", // <--- NEW: pass through if we have it
       answers: answers || {}
     };
 
