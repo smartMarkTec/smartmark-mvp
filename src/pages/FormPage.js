@@ -307,7 +307,15 @@ async function handleUserInput(e) {
         image_overlay_text: data.image_overlay_text || ""
       });
       setImageUrl(imgData.imageUrl || "");
-      setVideoUrl(videoData.videoUrl || "");
+setVideoUrl(
+  videoData.videoUrl
+    ? (videoData.videoUrl.startsWith('http')
+      ? videoData.videoUrl
+      : BACKEND_URL + videoData.videoUrl)
+    : ""
+);
+
+
       setVideoScript(videoData.script || "");
       setGenerating(false);
       setLoading(false);
@@ -432,7 +440,17 @@ async function handleUserInput(e) {
       body: JSON.stringify({ ...answers, regenerateToken: token })
     });
     const data = await resp.json();
-    setVideoUrl(data.videoUrl || "");
+   setVideoUrl(
+  data.videoUrl
+    ? (data.videoUrl.startsWith('http')
+      ? data.videoUrl
+      : BACKEND_URL + data.videoUrl)
+    : ""
+);
+
+
+
+
     setVideoScript(data.script || "");
     setVideoLoading(false);
   }
