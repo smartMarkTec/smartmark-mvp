@@ -1,11 +1,16 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaEdit, FaSyncAlt, FaTimes } from "react-icons/fa";
 
+// ============ Constants and Config ============
 const API_BASE = "/api";
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
+const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
+const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
+const TEAL = "#14e7b9";
+const DARK_BG = "#181b20";
 
-// New: Conversational Q&A sequence for chat
+// Your marketing questions
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
@@ -14,32 +19,12 @@ const CONVO_QUESTIONS = [
   { key: "mainProblem", question: "What's the main problem your customer wants solved?" },
   { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
   { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
-  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
-  { key: "objection", question: "What's a common objection customers have?" },
-  { key: "uniqueSellingPoint", question: "What makes you different? (Unique selling point)" },
-  { key: "cta", question: "What action do you want people to take after seeing your ad?" },
+  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" }
 ];
 
-const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const TEAL = "#14e7b9";
-const DARK_BG = "#181b20";
-
-const SERIOUS_INDUSTRIES = [
-  "medicine","medical","doctor","dentist","health","hospital","hospice",
-  "law","legal","lawyer","attorney","finance","financial","accounting","bank","banking",
-  "insurance","hvac","plumbing","electrician","contractor",
-  "roofing","construction","real estate","security","consulting"
-];
-const isSeriousIndustry = industry => {
-  if (!industry) return false;
-  return SERIOUS_INDUSTRIES.some(kw =>
-    industry.toLowerCase().includes(kw)
-  );
-};
+// ============ Helper Components ===============
 
 function LoadingSpinner() {
-  // Dots animation
   return (
     <div style={{
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150
@@ -61,37 +46,30 @@ function LoadingSpinner() {
         fontWeight: 700,
         letterSpacing: 1
       }}>
-        <Dotty />
+        <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
+          <span className="dotty-dot" style={dotStyle(0)}>.</span>
+          <span className="dotty-dot" style={dotStyle(1)}>.</span>
+          <span className="dotty-dot" style={dotStyle(2)}>.</span>
+          <style>
+            {`
+            @keyframes bounceDot {
+              0% { transform: translateY(0);}
+              30% { transform: translateY(-7px);}
+              60% { transform: translateY(0);}
+            }
+            .dotty-dot {
+              display: inline-block;
+              animation: bounceDot 1.2s infinite;
+            }
+            .dotty-dot:nth-child(2) { animation-delay: 0.15s;}
+            .dotty-dot:nth-child(3) { animation-delay: 0.3s;}
+          `}
+          </style>
+        </span>
       </div>
     </div>
   );
 }
-
-function Dotty() {
-  return (
-    <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
-      <span className="dotty-dot" style={dotStyle(0)}>.</span>
-      <span className="dotty-dot" style={dotStyle(1)}>.</span>
-      <span className="dotty-dot" style={dotStyle(2)}>.</span>
-      <style>
-        {`
-          @keyframes bounceDot {
-            0% { transform: translateY(0);}
-            30% { transform: translateY(-7px);}
-            60% { transform: translateY(0);}
-          }
-          .dotty-dot {
-            display: inline-block;
-            animation: bounceDot 1.2s infinite;
-          }
-          .dotty-dot:nth-child(2) { animation-delay: 0.15s;}
-          .dotty-dot:nth-child(3) { animation-delay: 0.3s;}
-        `}
-      </style>
-    </span>
-  );
-}
-
 function dotStyle(n) {
   return {
     display: "inline-block",
@@ -101,7 +79,6 @@ function dotStyle(n) {
     animationDelay: `${n * 0.13}s`
   };
 }
-
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
@@ -139,12 +116,6 @@ function ImageModal({ open, imageUrl, onClose }) {
     </div>
   );
 }
-
-function getRandomString() {
-  return Math.random().toString(36).substring(2, 12) + Date.now();
-}
-
-// --- Toggle Component ---
 function MediaTypeToggle({ mediaType, setMediaType }) {
   const choices = [
     { key: "image", label: "Image" },
@@ -178,8 +149,6 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
             transition: "all 0.15s",
             outline: mediaType === choice.key ? "3px solid #14e7b9" : "none"
           }}
-          onMouseEnter={e => e.currentTarget.style.transform = "scale(1.13)"}
-          onMouseLeave={e => e.currentTarget.style.transform = mediaType === choice.key ? "scale(1.09)" : "scale(1)"}
         >
           {choice.label}
         </button>
@@ -188,20 +157,25 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
   );
 }
 
-// --------------
-// MAIN COMPONENT
-// --------------
+function getRandomString() {
+  return Math.random().toString(36).substring(2, 12) + Date.now();
+}
+
+// ============== Main Component ================
 export default function FormPage() {
   const navigate = useNavigate();
   const inputRef = useRef();
+
+  // --------------- State -----------------
   const [answers, setAnswers] = useState({});
-  const [step, setStep] = useState(0); // Now tracks chat step
+  const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: CONVO_QUESTIONS[0].question }
+    { from: "gpt", text: `Let's get started! There will be about 8 quick questions. ${CONVO_QUESTIONS[0].question}` }
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Ad preview state (leave unchanged, for previews)
   const [mediaType, setMediaType] = useState("both");
   const [result, setResult] = useState(null);
   const [imageUrl, setImageUrl] = useState("");
@@ -214,59 +188,26 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
 
-  // Restore/save state as in your original code
-  React.useEffect(() => {
-    const state = loadFormState();
-    if (state) {
-      setAnswers(state.answers || {});
-      setResult(state.result || null);
-      setImageUrl(state.imageUrl || "");
-      setVideoUrl(state.videoUrl || "");
-      setVideoScript(state.videoScript || "");
-      setMediaType(state.mediaType || "both");
+  // ----------- Chat Scroll ---------
+  const chatBoxRef = useRef();
+  useEffect(() => {
+    if (chatBoxRef.current) {
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
-  }, []);
+  }, [chatHistory]);
 
-  React.useEffect(() => {
-    if (!videoUrl && !videoScript) return;
-    const prev = loadFormState() || {};
-    saveFormState({
-      ...prev,
-      answers: prev.answers || answers,
-      result: prev.result || result,
-      imageUrl: prev.imageUrl || imageUrl,
-      videoUrl,
-      videoScript,
-      mediaType: prev.mediaType || mediaType,
-    });
-    // eslint-disable-next-line
-  }, [videoUrl, videoScript]);
-
-  // --- Save helpers (same as your original) ---
-  const CAMPAIGN_SAVE_KEY = "smartmark_form_state_v2";
-  const CAMPAIGN_SAVE_TTL = 24 * 60 * 60 * 1000;
-  function saveFormState(data) {
-    localStorage.setItem(CAMPAIGN_SAVE_KEY, JSON.stringify({ ...data, _savedAt: Date.now() }));
+  // ======= Correction/Smart Handler ======
+  function detectCorrection(text) {
+    return /(?:actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)/i.test(text);
   }
-  function loadFormState() {
-    const raw = localStorage.getItem(CAMPAIGN_SAVE_KEY);
-    if (!raw) return null;
-    try {
-      const obj = JSON.parse(raw);
-      if (!obj._savedAt || (Date.now() - obj._savedAt > CAMPAIGN_SAVE_TTL)) {
-        localStorage.removeItem(CAMPAIGN_SAVE_KEY);
-        return null;
-      }
-      return obj;
-    } catch {
-      return null;
+  function findCorrectionKey(text) {
+    for (let q of CONVO_QUESTIONS) {
+      if (text.toLowerCase().includes(q.key)) return q.key;
+      if (text.toLowerCase().includes(q.question.split(" ")[0].toLowerCase())) return q.key;
     }
-  }
-  function clearFormState() {
-    localStorage.removeItem(CAMPAIGN_SAVE_KEY);
+    return null;
   }
 
-  // -- Chat UI logic replaces old stepper/typeform logic here --
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
@@ -274,15 +215,28 @@ export default function FormPage() {
     const value = input.trim();
     if (!value) return;
 
-    // Save answer
-    const newAnswers = { ...answers, [currentQ.key]: value };
-    setAnswers(newAnswers);
+    // Handle corrections (NLP-like)
+    if (detectCorrection(value)) {
+      let keyToUpdate = findCorrectionKey(value) || (step > 0 ? CONVO_QUESTIONS[step-1].key : null);
+      if (keyToUpdate) {
+        setAnswers(prev => ({ ...prev, [keyToUpdate]: value.replace(/^(actually|i meant|change|let me edit|correction|edit answer|can you update|should say|replace)\s*/i, "") }));
+        setChatHistory(ch => [
+          ...ch,
+          { from: "user", text: value },
+          { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
+        ]);
+        setInput("");
+        return;
+      }
+    }
 
-    // Add user message to chat
+    // Save answer
+    let newAnswers = { ...answers, [currentQ.key]: value };
+    setAnswers(newAnswers);
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
 
-    // Check for conditional skip
+    // Find next step (considering conditionals)
     let nextStep = step + 1;
     while (
       CONVO_QUESTIONS[nextStep] &&
@@ -292,208 +246,111 @@ export default function FormPage() {
       nextStep += 1;
     }
 
-    // If next Q exists, ask it
-    if (CONVO_QUESTIONS[nextStep]) {
-      setLoading(true);
-      setTimeout(() => {
-        setChatHistory(ch => [
-          ...ch,
-          {
-            from: "gpt",
-            text: [
-              "Thanks for sharing!",
-              "Noted.",
-              "Great info.",
-              "That helps a lot.",
-              "Perfect.",
-              "Got it.",
-              "Nice.",
-              "Awesome!"
-            ][step % 8]
-          },
-          { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
-        ]);
-        setStep(nextStep);
-        setLoading(false);
-        setTimeout(() => inputRef.current && inputRef.current.focus(), 150);
-      }, 350);
+    // If done, ask for confirmation
+    if (!CONVO_QUESTIONS[nextStep]) {
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: "Would you like me to generate your campaign now? (yes/no)" }
+      ]);
+      setStep(nextStep);
       return;
     }
 
-    // All questions answered, run campaign generate!
-    setLoading(true);
+    // Otherwise, ask next question with progress
     setChatHistory(ch => [
       ...ch,
-      { from: "gpt", text: "Awesome! Give me a few seconds while I create your campaign..." }
+      { from: "gpt", text: `(${nextStep + 1} of ${CONVO_QUESTIONS.length}) ${CONVO_QUESTIONS[nextStep].question}` }
     ]);
-    try {
-      const token = Math.random().toString(36).slice(2);
-      const [data, imgData, videoData] = await Promise.all([
-        fetch(`${API_BASE}/generate-campaign-assets`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answers: newAnswers })
-        }).then(res => res.json()),
-        fetch(`${API_BASE}/generate-image-from-prompt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...newAnswers, regenerateToken: token })
-        }).then(res => res.json()),
-        fetch(`${API_BASE}/generate-video-ad`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...newAnswers, regenerateToken: token }),
-        }).then(res => res.json())
-      ]);
-      setResult({
-        headline: data.headline || "",
-        body: data.body || "",
-        image_overlay_text: data.image_overlay_text || ""
-      });
-      setImageUrl(imgData.imageUrl || "");
-      setVideoUrl(videoData.videoUrl || "");
-      setVideoScript(videoData.script || "");
-      setChatHistory(ch => [
-        ...ch,
-        { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
-      ]);
-    } catch (err) {
-      setError("Failed to generate campaign: " + (err.message || ""));
-      setChatHistory(ch => [...ch, { from: "gpt", text: "There was an error generating your campaign." }]);
-    }
-    setLoading(false);
+    setStep(nextStep);
   }
 
-  // -----------------------
-  // REGENERATE IMAGE/VIDEO (unchanged)
-  // -----------------------
-  const handleRegenerateImage = async () => {
-    setImageLoading(true);
-    setImageUrl("");
-    try {
-      const token = getRandomString();
-      setLastRegenerateToken(token);
-
-      const res = await fetch(`${API_BASE}/generate-campaign-assets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, url: answers.url || "" })
-      });
-      const data = await res.json();
-
-      // Get a new image
-      const imgRes = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers.url || "",
-          industry: answers.industry || "",
-          regenerateToken: token
-        })
-      });
-      const imgData = await imgRes.json();
-      const stockImageUrl = imgData.imageUrl || "";
-
-      // Step 2: Always generate overlay if we have an image
-      if (stockImageUrl) {
-        const overlayRes = await fetch(`${API_BASE}/generate-image-with-overlay`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            imageUrl: stockImageUrl,
-            answers,
-            url: answers.url || ""
-          })
-        });
-
-        const overlayData = await overlayRes.json();
-        setImageUrl(overlayData.imageUrl || stockImageUrl);
-      } else {
-        setImageUrl(stockImageUrl);
+  // ----- Confirmation & Generate -----
+  useEffect(() => {
+    if (step === CONVO_QUESTIONS.length && chatHistory.length > 2) {
+      const lastUser = chatHistory.filter(m => m.from === "user").slice(-1)[0]?.text?.toLowerCase();
+      if (lastUser === "yes" || lastUser === "y" || lastUser?.includes("go ahead")) {
+        setLoading(true);
+        setChatHistory(ch => [...ch, { from: "gpt", text: "Awesome! Creating your campaign now..." }]);
+        // Replace this block with your real async API/generate logic!
+        setTimeout(async () => {
+          // ----------- Your generation logic (ad copy, image, video) -----------
+          const token = getRandomString();
+          const [data, imgData, videoData] = await Promise.all([
+            fetch(`${API_BASE}/generate-campaign-assets`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ answers })
+            }).then(res => res.json()),
+            fetch(`${API_BASE}/generate-image-from-prompt`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...answers, regenerateToken: token })
+            }).then(res => res.json()),
+            fetch(`${API_BASE}/generate-video-ad`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ...answers, regenerateToken: token }),
+            }).then(res => res.json())
+          ]);
+          setResult({
+            headline: data.headline || "",
+            body: data.body || "",
+            image_overlay_text: data.image_overlay_text || ""
+          });
+          setImageUrl(imgData.imageUrl || "");
+          setVideoUrl(videoData.videoUrl || "");
+          setVideoScript(videoData.script || "");
+          setChatHistory(ch => [
+            ...ch,
+            { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
+          ]);
+          setLoading(false);
+        }, 1800);
       }
-
-      // Update state for preview
-      setResult({
-        headline: data.headline || "",
-        body: data.body || "",
-        image_overlay_text: data.image_overlay_text || ""
-      });
-    } catch (err) {
-      setImageUrl("");
+      if (lastUser === "no" || lastUser === "n") {
+        setChatHistory(ch => [
+          ...ch,
+          { from: "gpt", text: "No problem! What would you like to change or add? Type your correction or update below." }
+        ]);
+      }
     }
-    setImageLoading(false);
-  };
+    // eslint-disable-next-line
+  }, [chatHistory, step]);
 
-  const handleRegenerateVideo = async () => {
-    setVideoLoading(true);
-    setVideoUrl("");
-    setVideoScript("");
-    setError("");
-    try {
-      // Generate a NEW random token every time to ensure you get a new set of videos
-      const token = getRandomString();
-      setLastRegenerateToken(token);
-
-      const res = await fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          answers,
-          url: answers.url || "",
-          industry: answers.industry || "",
-          regenerateToken: token // <-- this is the key: always a fresh value
-        }),
-      });
-      const data = await res.json();
-      if (data.videoUrl) setVideoUrl(data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl);
-      setVideoScript(data.script || "");
-    } catch (err) {
-      setError("Failed to regenerate video ad: " + (err.message || ""));
-    }
-    setVideoLoading(false);
-  };
-
-  // Modal open/close handlers
-  const handleImageClick = (url) => {
-    setModalImg(url);
-    setShowModal(true);
-  };
-  const handleModalClose = () => {
-    setShowModal(false);
-    setModalImg("");
-  };
-
-  // ----------- RENDER -----------
+  // ============= Render ===============
   return (
     <div style={{
-      background: DARK_BG,
-      minHeight: "100vh",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      fontFamily: MODERN_FONT,
-      padding: 0,
+      background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
+      display: "flex", flexDirection: "column", alignItems: "center"
     }}>
-      {/* Home Button */}
+      {/* ---------- Home btn ---------- */}
       <button
         style={{
           position: "absolute", top: 24, right: 38, padding: "10px 30px",
           fontWeight: 700, fontSize: "1.18rem", background: "#222c27", color: "#fff",
           border: "none", borderRadius: 20, boxShadow: "0 2px 12px #0003",
-          cursor: "pointer", letterSpacing: "1.1px", zIndex: 1001, opacity: 0.92,
-          transition: "background 0.15s, color 0.15s",
+          cursor: "pointer", letterSpacing: "1.1px", zIndex: 1001, opacity: 0.92
         }}
         onClick={() => navigate("/")}
       >Home</button>
 
-      {/* Main Content Card */}
+      {/* ---- Chat Panel, scrollable, prompt always visible --- */}
       <div style={{
-        width: "100%", maxWidth: 600, margin: "88px 0 0 0", background: "#202327",
-        borderRadius: 22, boxShadow: "0 2px 32px #181b2040", padding: "36px 22px 30px 22px",
-        display: "flex", flexDirection: "column", alignItems: "center"
+        width: "100%", maxWidth: 480, minHeight: 340, marginTop: 54, marginBottom: 26,
+        background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
+        padding: "32px 24px 18px 24px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
-        {/* --- CHAT HISTORY --- */}
-        <div style={{ width: "100%", minHeight: 250, marginBottom: 22 }}>
+        {/* Progress bar */}
+        {step < CONVO_QUESTIONS.length &&
+          <div style={{ color: "#7fffe2", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+            Question {Math.min(step + 1, CONVO_QUESTIONS.length)} of {CONVO_QUESTIONS.length}
+          </div>
+        }
+        {/* Scrollable chat history */}
+        <div ref={chatBoxRef} style={{
+          width: "100%", height: 160, maxHeight: 160, overflowY: "auto",
+          marginBottom: 16, paddingRight: 4, background: "#191b22", borderRadius: 12
+        }}>
           {chatHistory.map((msg, i) => (
             <div key={i}
               style={{
@@ -501,20 +358,19 @@ export default function FormPage() {
                 margin: "8px 0",
                 color: msg.from === "gpt" ? "#22e3bd" : "#fff",
                 fontWeight: 600,
-                fontSize: 18,
-                background: msg.from === "gpt" ? "#191d22" : "#12cbb8",
+                fontSize: 16,
+                background: msg.from === "gpt" ? "#161a1f" : "#14e7b9",
                 borderRadius: msg.from === "gpt" ? "14px 18px 18px 7px" : "16px 12px 7px 17px",
-                padding: "12px 18px",
-                maxWidth: "95%",
+                padding: "10px 18px",
+                maxWidth: "96%",
                 display: "inline-block"
               }}>
               {msg.text}
             </div>
           ))}
         </div>
-
-        {/* Prompt bar (only show before ad previews) */}
-        {!result && !loading && CONVO_QUESTIONS[step] && (
+        {/* Prompt bar */}
+        {!loading && step <= CONVO_QUESTIONS.length &&
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
             <input
               ref={inputRef}
@@ -522,14 +378,18 @@ export default function FormPage() {
               onChange={e => setInput(e.target.value)}
               disabled={loading}
               autoFocus
-              placeholder={CONVO_QUESTIONS[step].question}
+              placeholder={
+                step < CONVO_QUESTIONS.length
+                  ? CONVO_QUESTIONS[step]?.question
+                  : "Type yes to generate, or say what to change..."
+              }
               style={{
                 flex: 1,
-                padding: "16px 20px",
-                borderRadius: 13,
+                padding: "14px 18px",
+                borderRadius: 12,
                 border: "none",
                 outline: "none",
-                fontSize: "1.09rem",
+                fontSize: "1.07rem",
                 fontWeight: 600,
                 background: "#23262a",
                 color: "#fff",
@@ -541,18 +401,17 @@ export default function FormPage() {
                 background: "#14e7b9",
                 color: "#181b20",
                 border: "none",
-                borderRadius: 13,
+                borderRadius: 12,
                 fontWeight: 700,
-                fontSize: "1.1rem",
-                padding: "0 32px",
+                fontSize: "1.08rem",
+                padding: "0 26px",
                 cursor: "pointer"
               }}
               disabled={loading}
             >Send</button>
           </form>
-        )}
-
-        {loading && <div style={{ color: "#15efb8", marginTop: 20, fontWeight: 600 }}>AI thinking...</div>}
+        }
+        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI thinking...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
 
         {/* --- Ad Previews (after Q&A is complete) --- */}
