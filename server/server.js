@@ -61,7 +61,7 @@ const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
 const gptChatRoutes = require('./routes/gpt');
-app.use('/api/gpt-chat', gptChatRoutes);
+app.use('/api', gptChatRoutes);
 
 
 // Health check
