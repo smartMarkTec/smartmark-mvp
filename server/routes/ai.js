@@ -7,6 +7,8 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data'); // ADD THIS
+const { getFbUserToken } = require('../tokenStore');
+
 
 
 function absolutePublicUrl(relativePath) {
@@ -194,8 +196,13 @@ async function getFbInterestIds(keywords, fbToken) {
 
 // POST /api/detect-audience
 router.post('/detect-audience', async (req, res) => {
-  const { url, fbToken } = req.body;
+  // was: const { url, fbToken } = req.body;
+  const { url } = req.body;
+  const fbToken = req.body.fbToken || getFbUserToken();  // ← fallback
+
   if (!url) return res.status(400).json({ error: 'Missing URL' });
+
+  // ...unchanged...
 
   const websiteText = await getWebsiteText(url);
   const safeWebsiteText = (websiteText && websiteText.length > 100)
@@ -1141,13 +1148,17 @@ Never include any scene directions, stage directions, SFX, music notes, or anyth
 
     // Return public video URL and script
   // Return public video URL and (optionally) upload to Ad Account
+// Return public video URL and (optionally) upload to Ad Account
 const publicVideoUrl = `/generated/${videoId}.mp4`;
 const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
 let fbVideoId = null;
 try {
-  // If caller provides ad account + a USER token with ads_management, upload to Ad Account asset library.
-  const { fbAdAccountId, userAccessToken } = req.body || {};
+  // Read ad account from body, but get the token with a fallback to tokenStore
+  const { fbAdAccountId } = req.body || {};
+  const userAccessToken =
+    (req.body && req.body.userAccessToken) || getFbUserToken();
+
   if (fbAdAccountId && userAccessToken) {
     const up = await uploadVideoToAdAccount(
       fbAdAccountId,
@@ -1166,19 +1177,15 @@ try {
 }
 
 return res.json({
-  videoUrl: publicVideoUrl,       // relative URL served by your backend
-  absoluteVideoUrl: absoluteUrl,  // full URL (used for FB upload)
-  fbVideoId,                      // <-- use this to build the ad creative
-  video: {
-    url: publicVideoUrl,
-    script,
-    overlayText,
-    voice: TTS_VOICE
-  },
+  videoUrl: publicVideoUrl,
+  absoluteVideoUrl: absoluteUrl,
+  fbVideoId,
+  video: { url: publicVideoUrl, script, overlayText, voice: TTS_VOICE },
   script,
   overlayText,
   voice: TTS_VOICE
 });
+
 
 
   } catch (err) {

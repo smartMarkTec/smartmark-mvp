@@ -144,6 +144,282 @@ function VideoPreviewBox({ videoUrl }) {
 const FB_CONN_KEY = "smartmark_fb_connected";
 const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000; // 2.5 days in ms
 
+function SchedulerInline({
+  backendUrl,
+  form,
+  selectedAccount,
+  selectedPageId,
+  budget,
+  mediaImageUrl,
+  mediaVideoUrl,
+  headline,
+  body,
+  answers,
+  mediaSelection
+}) {
+  const STORE_KEY = "sm_sched_jobs";
+  const [action, setAction] = React.useState("generate-video"); // generate-video | launch
+
+  // default runAt = now + 10m (rounded to minute)
+  const defaultRun = React.useMemo(() => {
+    const d = new Date(Date.now() + 10 * 60 * 1000);
+    d.setSeconds(0, 0);
+    return d.toISOString().slice(0, 16);
+  }, []);
+  const [runAt, setRunAt] = React.useState(defaultRun);
+
+  const [jobs, setJobs] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
+    catch { return []; }
+  });
+
+  // persist jobs
+  React.useEffect(() => {
+    localStorage.setItem(STORE_KEY, JSON.stringify(jobs));
+  }, [jobs]);
+
+  // helpers
+  const uid = () =>
+    (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : Math.random().toString(36).slice(2, 10);
+
+  const nowIso = () => new Date().toISOString();
+
+  const urlToBase64Maybe = async (url) => {
+    if (!url || url.startsWith("data:")) return url || "";
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const fr = new FileReader();
+      fr.onloadend = () => resolve(fr.result);
+      fr.readAsDataURL(blob);
+    });
+  };
+
+  // Build request for each action using *current* UI state (snapshot taken when scheduling)
+  const buildPayload = async (kind) => {
+    const acctId = String(selectedAccount || "").replace(/^act_/, "");
+    const safeBudget = Math.max(3, Number(budget) || 0);
+
+    // snapshot creatives
+    let adImage = mediaImageUrl || "";
+    let adVideo = mediaVideoUrl || "";
+    if (kind === "launch") {
+      if (adImage && !adImage.startsWith("data:")) adImage = await urlToBase64Maybe(adImage);
+      if (adVideo && !adVideo.startsWith("data:")) adVideo = await urlToBase64Maybe(adVideo);
+    }
+
+    if (kind === "generate-video") {
+      return {
+        endpoint: `${backendUrl}/api/generate-video-ad`,
+        method: "POST",
+        body: {
+          url: form?.url || "",
+          answers: { ...answers, industry: form?.industry || answers?.industry },
+          regenerateToken: uid()
+        }
+      };
+    }
+
+    if (kind === "launch") {
+      return {
+        endpoint: `${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`,
+        method: "POST",
+        body: {
+          form: { ...form },
+          budget: safeBudget,
+          campaignType: form?.campaignType || "Website Traffic",
+          pageId: selectedPageId,
+          aiAudience: form?.aiAudience || answers?.aiAudience || "",
+          adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+          adImage: adImage || "",
+          adVideo: adVideo || "",
+          answers: answers || {},
+          mediaSelection: mediaSelection || "both"
+        }
+      };
+    }
+
+    throw new Error("Unknown action");
+  };
+
+  // execution loop (runs ~every 1.5s and fires due jobs)
+  React.useEffect(() => {
+    let alive = true;
+
+    const tick = async () => {
+      if (!alive) return;
+
+      const dueIdx = jobs.findIndex(
+        (j) => j.status === "pending" &&
+               new Date(j.runAt).getTime() <= Date.now() + 2000 // small grace
+      );
+
+      if (dueIdx !== -1) {
+        const job = jobs[dueIdx];
+
+        // mark running
+        setJobs((prev) => {
+          const clone = [...prev];
+          clone[dueIdx] = { ...clone[dueIdx], status: "running", startedAt: nowIso() };
+          return clone;
+        });
+
+        try {
+          const res = await fetch(job.endpoint, {
+            method: job.method || "POST",
+            headers: { "Content-Type": "application/json" },
+            body: job.body ? JSON.stringify(job.body) : undefined
+          });
+          const json = await res.json().catch(() => ({}));
+
+          setJobs((prev) => {
+            const clone = [...prev];
+            clone[dueIdx] = {
+              ...clone[dueIdx],
+              status: res.ok ? "done" : "failed",
+              finishedAt: nowIso(),
+              result: res.ok ? json : null,
+              error: res.ok ? null : (json?.error || "Request failed")
+            };
+            return clone;
+          });
+        } catch (e) {
+          setJobs((prev) => {
+            const clone = [...prev];
+            clone[dueIdx] = {
+              ...clone[dueIdx],
+              status: "failed",
+              finishedAt: nowIso(),
+              error: e?.message || "Network error"
+            };
+            return clone;
+          });
+        }
+      }
+
+      setTimeout(tick, 1500);
+    };
+
+    // ensure all newly created jobs start as pending
+    if (jobs.some(j => !j.status)) {
+      setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
+    }
+
+    tick();
+    return () => { alive = false; };
+  }, [jobs, backendUrl]);
+
+  // add/clear
+  const addJob = async () => {
+    if (!runAt) return;
+
+    // launch guards
+    if (action === "launch") {
+      if (!selectedAccount) return alert("Select an Ad Account first.");
+      if (!selectedPageId) return alert("Select a Facebook Page first.");
+      if (!budget || Number(budget) < 3) return alert("Budget must be at least $3.");
+    }
+
+    let payload;
+    try {
+      payload = await buildPayload(action);
+    } catch (e) {
+      console.error("buildPayload error:", e);
+      return alert("Could not prepare the request. Check your inputs.");
+    }
+
+    const job = {
+      id: uid(),
+      runAt,                      // 'YYYY-MM-DDTHH:mm'
+      createdAt: nowIso(),
+      status: "pending",
+      action,
+      endpoint: payload.endpoint,
+      method: payload.method,
+      body: payload.body
+    };
+
+    setJobs((prev) => [...prev, job].sort((a, b) => new Date(a.runAt) - new Date(b.runAt)));
+    // bump default +15m
+    const next = new Date(new Date(runAt).getTime() + 15 * 60 * 1000);
+    next.setSeconds(0, 0);
+    setRunAt(next.toISOString().slice(0, 16));
+  };
+
+  const clearDone = () => {
+    setJobs((prev) => prev.filter((j) => j.status !== "done"));
+  };
+
+  const minAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16); // now - 1m
+
+  // UI: compact bar
+  return (
+    <div style={{
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      flexWrap: "wrap",
+      justifyContent: "flex-end",
+      width: "100%"
+    }}>
+      <div style={{ color: "#c7fbe3", fontWeight: 700, fontSize: "0.98rem" }}>Schedule:</div>
+
+      <select
+        value={action}
+        onChange={e => setAction(e.target.value)}
+        style={{
+          background: "#1c2120", color: "#b3f1d6", border: "1px solid #2d5b45",
+          borderRadius: 10, padding: "8px 10px", fontWeight: 700
+        }}>
+        <option value="generate-video">Generate Video</option>
+        <option value="launch">Launch Campaign</option>
+      </select>
+
+      <input
+        type="datetime-local"
+        value={runAt}
+        min={minAttr}
+        onChange={e => setRunAt(e.target.value)}
+        style={{
+          background: "#1c2120", color: "#b3f1d6", border: "1px solid #2d5b45",
+          borderRadius: 10, padding: "8px 10px", fontWeight: 700
+        }}
+      />
+
+      <button
+        onClick={addJob}
+        disabled={
+          !runAt ||
+          (action === "launch" && (!selectedAccount || !selectedPageId || !budget))
+        }
+        style={{
+          background: "#19c37d", color: "#fff", border: "none",
+          borderRadius: 10, padding: "9px 14px", fontWeight: 800,
+          cursor: (!runAt || (action === "launch" && (!selectedAccount || !selectedPageId || !budget))) ? "not-allowed" : "pointer",
+          opacity: (!runAt || (action === "launch" && (!selectedAccount || !selectedPageId || !budget))) ? 0.6 : 1
+        }}>
+        Add
+      </button>
+
+      <button
+        onClick={clearDone}
+        style={{
+          background: "#2b3135", color: "#d9f8ea", border: "1px solid #3b4a44",
+          borderRadius: 10, padding: "9px 12px", fontWeight: 700, cursor: "pointer"
+        }}>
+        Clear Done
+      </button>
+
+      <span style={{ color: "#9fe9c8", fontWeight: 700, marginLeft: 6 }}>
+        {jobs.filter(j => j.status === "pending").length} pending
+      </span>
+    </div>
+  );
+}
+
+
 const CampaignSetup = () => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
@@ -194,34 +470,32 @@ const CampaignSetup = () => {
   const [campaignCount, setCampaignCount] = useState(0);
 
   useEffect(() => {
-  if (!selectedAccount) return;
+    if (!selectedAccount) return;
 
-  const acctId = selectedAccount.replace("act_", "");
-  fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
-    .then(res => res.json())
-    .then(data => {
-      if (Array.isArray(data)) {
-        const activeCount = data.filter(c => c.status === "ACTIVE").length;
-        setCampaignCount(activeCount);
-      }
-    })
-    .catch(err => console.error("Error fetching campaigns:", err));
-}, [selectedAccount]);
+    const acctId = selectedAccount.replace("act_", "");
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const activeCount = data.filter(c => c.status === "ACTIVE").length;
+          setCampaignCount(activeCount);
+        }
+      })
+      .catch(err => console.error("Error fetching campaigns:", err));
+  }, [selectedAccount]);
 
-
-  
   const [mediaSelection, setMediaSelection] = useState(() =>
- 
-  (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
-);
-useEffect(() => {
-  if (location.state?.mediaSelection) {
-    const v = String(location.state.mediaSelection).toLowerCase();
-    setMediaSelection(v);
-    localStorage.setItem("smartmark_media_selection", v);
-  }
-  // eslint-disable-next-line
-}, [location.state?.mediaSelection]);
+    (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+  );
+  useEffect(() => {
+    if (location.state?.mediaSelection) {
+      const v = String(location.state.mediaSelection).toLowerCase();
+      setMediaSelection(v);
+      localStorage.setItem("smartmark_media_selection", v);
+    }
+    // eslint-disable-next-line
+  }, [location.state?.mediaSelection]);
+
 
 
 
@@ -683,29 +957,47 @@ const handleLaunch = async () => {
   </button>
 )}
 
-          {/* CAMPAIGN NAME */}
-          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
-              Campaign Name
-            </label>
-            <input
-              type="text"
-              value={form.campaignName || ""}
-              onChange={e => setForm({ ...form, campaignName: e.target.value })}
-              placeholder="Name your campaign"
-              style={{
-                padding: "1rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1.2px solid #57dfa9",
-                fontSize: "1.14rem",
-                background: "#1c2120",
-                color: "#b3f1d6",
-                marginBottom: "1rem",
-                outline: "none",
-                width: "100%"
-              }}
-            />
-          </div>
+       {/* CAMPAIGN NAME + INLINE SCHEDULER */}
+<div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+  <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+    <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
+      Campaign Name
+    </label>
+    {/* Inline Scheduler sits here */}
+    <SchedulerInline
+      backendUrl={backendUrl}
+      form={form}
+      selectedAccount={selectedAccount}
+      selectedPageId={selectedPageId}
+      budget={budget}
+      mediaImageUrl={mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || ""}
+      mediaVideoUrl={mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || ""}
+      headline={headline}
+      body={body}
+      answers={answers}
+      mediaSelection={mediaSelection}
+    />
+  </div>
+
+  <input
+    type="text"
+    value={form.campaignName || ""}
+    onChange={e => setForm({ ...form, campaignName: e.target.value })}
+    placeholder="Name your campaign"
+    style={{
+      padding: "1rem 1.1rem",
+      borderRadius: "1.1rem",
+      border: "1.2px solid #57dfa9",
+      fontSize: "1.14rem",
+      background: "#1c2120",
+      color: "#b3f1d6",
+      marginBottom: "1rem",
+      outline: "none",
+      width: "100%"
+    }}
+  />
+</div>
+
           {/* CAMPAIGN BUDGET */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>

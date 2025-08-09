@@ -4,6 +4,8 @@ const axios = require('axios');
 const { Buffer } = require('buffer');
 const db = require('../db'); // LOWDB
 const FormData = require('form-data');
+const { setFbUserToken } = require('../tokenStore');
+
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
@@ -46,12 +48,23 @@ router.get('/facebook/callback', async (req, res) => {
       }
     });
     const accessToken = tokenRes.data.access_token;
+    setFbUserToken(accessToken);
     userTokens['singleton'] = accessToken;
+
+    console.log('[auth] FB user token stored in tokenStore:', !!accessToken);
+
+
    res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1&fb_user_token=${encodeURIComponent(accessToken)}`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
     res.status(500).send('Failed to authenticate with Facebook.');
   }
+});
+
+// --- TEMP DEBUG ROUTE (delete later) ---
+router.get('/debug/fbtoken', (req, res) => {
+  const { getFbUserToken } = require('../tokenStore');
+  res.json({ fbUserToken: getFbUserToken() ? 'present' : 'missing' });
 });
 
 // --- AD ACCOUNTS --- //

@@ -1,5 +1,5 @@
 // --- GLOBAL ERROR HANDLERS (keep these at the very top!) ---
-process.on('unhandledRejection', (reason, promise) => {
+process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
 });
 process.on('uncaughtException', (err) => {
@@ -12,6 +12,8 @@ require('dotenv').config({ path: './.env' });
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
+
 const app = express();
 
 const allowedOrigins = [
@@ -46,23 +48,24 @@ if (process.env.RENDER) {
   console.log("Serving /generated from:", generatedPath);
 } else {
   generatedPath = path.join(__dirname, 'public/generated');
+  // Ensure the local folder exists so static serving doesn't fail
+  try { fs.mkdirSync(generatedPath, { recursive: true }); } catch {}
   console.log('Serving /generated from:', generatedPath);
 }
 app.use('/generated', express.static(generatedPath));
 
 // --- ROUTES ---
-const authRoutes = require('./routes/auth');
+const authRoutes = require('./routes/auth');      // -> server/routes/auth.js
 app.use('/auth', authRoutes);
 
-const aiRoutes = require('./routes/ai');
+const aiRoutes = require('./routes/ai');          // -> server/routes/ai.js
 app.use('/api', aiRoutes);
 
-const campaignRoutes = require('./routes/campaigns');
+const campaignRoutes = require('./routes/campaigns'); // -> server/routes/campaigns.js
 app.use('/api', campaignRoutes);
 
-const gptChatRoutes = require('./routes/gpt');
+const gptChatRoutes = require('./routes/gpt');    // -> server/routes/gpt.js
 app.use('/api', gptChatRoutes);
-
 
 // Health check
 app.get('/healthz', (req, res) => {
