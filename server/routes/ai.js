@@ -41,25 +41,49 @@ const TextToSVG = require('text-to-svg');
 const textToSvg = TextToSVG.loadSync(); // Uses default system font (Arial/sans-serif on most OS)
 
 // ----------- UNIVERSAL TRAINING FILE LOADER -----------
-const dataDir = path.join(__dirname, '../data');
-const TRAINING_DOCS = fs.existsSync(dataDir)
-  ? fs.readdirSync(dataDir).map(file => path.join(dataDir, file))
-  : [];
+const DATA_DIR = path.join(__dirname, '../data');
+const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
+const MAX_FILE_MB = 1.5;          // per-file cap
+const MAX_TOTAL_CHARS = 45_000;   // total cap across files
 
-let customContext = '';
-for (const file of TRAINING_DOCS) {
-  try {
-    if (file.endsWith('.docx')) {
-      const buffer = fs.readFileSync(file);
-      customContext += buffer.toString('utf8') + '\n\n';
-    } else {
-      customContext += fs.readFileSync(file, 'utf8') + '\n\n';
+function loadTrainingContext() {
+  if (!fs.existsSync(DATA_DIR)) return '';
+
+  const files = fs.readdirSync(DATA_DIR)
+    .map(f => path.join(DATA_DIR, f))
+    .filter(full => {
+      const ext = path.extname(full).toLowerCase();
+      try {
+        const st = fs.statSync(full);
+        return st.isFile() && ALLOWED_EXT.has(ext) && st.size <= MAX_FILE_MB * 1024 * 1024;
+      } catch { return false; }
+    });
+
+  let context = '';
+  for (const f of files) {
+    try {
+      const ext = path.extname(f).toLowerCase();
+      let text = fs.readFileSync(f, 'utf8');
+      if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text), null, 0); } catch {} }
+      if (!text.trim()) continue;
+
+      const block = `\n\n### SOURCE: ${path.basename(f)}\n${text}\n`;
+      if ((context.length + block.length) <= MAX_TOTAL_CHARS) {
+        context += block;
+        console.log(`[training] loaded: ${path.basename(f)} (${block.length} chars)`);
+      } else {
+        console.warn(`[training] skipped (cap): ${path.basename(f)}`);
+      }
+    } catch (e) {
+      console.warn(`[training] failed: ${path.basename(f)} → ${e.message}`);
     }
-    console.log(`Loaded training file: ${file}`);
-  } catch (e) {
-    console.warn(`Could not load file: ${file}:`, e.message);
   }
+  if (!context) console.warn('[training] no training context loaded (empty/filtered).');
+  return context.trim();
 }
+
+// Load once at boot:
+let customContext = loadTrainingContext();
 
 // ----------- OPENAI -----------
 const { OpenAI } = require('openai');
@@ -107,11 +131,17 @@ router.post('/generate-ad-copy', async (req, res) => {
   if (!description && !businessName && !url) {
     return res.status(400).json({ error: "Please provide at least a description." });
   }
-  let prompt = `Write only the exact words for a spoken video ad script for this business, no scene directions, no director notes, only what the voiceover should say. Script should be around 110–130 words, spoken naturally in 30 seconds. Make it friendly, confident, and include a brief intro, 2-3 unique benefits, and a call to action at the end. Respond with ONLY the script, nothing else.`;
+
+  let prompt =
+    `You are an expert direct‑response ad copywriter.\n\n` +
+    (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
+    `Write only the exact words for a spoken video ad script (45–55 words).` +
+    ` Hook → benefit → strong CTA. Friendly, trustworthy, conversion‑focused.\n`;
+
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite: ${url}`;
-  prompt += `\nUse a powerful call to action. Output only the ad copy.`;
+  prompt += `\nOutput ONLY the script text.`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -127,6 +157,7 @@ router.post('/generate-ad-copy', async (req, res) => {
   }
 });
 
+
 // ========== AI: AUTOMATIC AUDIENCE DETECTION ==========
 const DEFAULT_AUDIENCE = {
   brandName: "",
@@ -138,13 +169,16 @@ const DEFAULT_AUDIENCE = {
   summary: ""
 };
 
+// Keyword extractor for website text
 async function extractKeywords(text) {
   const prompt = `
-Extract 3-6 of the most relevant keywords or topics (comma-separated, lowercase, no duplicates) from the text below. Only output a comma-separated string, no extra text.
+Extract up to 6 compact keywords (one or two words each) from this text that would be useful Facebook interest seeds.
+Return them as a comma-separated list ONLY. No extra words.
 
-Website text:
-"""${text}"""
-`;
+TEXT:
+"""${(text || '').slice(0, 3000)}"""
+`.trim();
+
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -152,16 +186,17 @@ Website text:
       max_tokens: 40,
       temperature: 0.2,
     });
-    return response.choices?.[0]?.message?.content
+    return (response.choices?.[0]?.message?.content || "")
       .replace(/[\n.]/g, "")
       .toLowerCase()
       .split(",")
       .map(k => k.trim())
       .filter(Boolean);
-  } catch (err) {
+  } catch {
     return [];
   }
 }
+
 
 async function getFbInterestIds(keywords, fbToken) {
   const results = [];
@@ -196,13 +231,9 @@ async function getFbInterestIds(keywords, fbToken) {
 
 // POST /api/detect-audience
 router.post('/detect-audience', async (req, res) => {
-  // was: const { url, fbToken } = req.body;
   const { url } = req.body;
-  const fbToken = req.body.fbToken || getFbUserToken();  // ← fallback
-
+  const fbToken = req.body.fbToken || getFbUserToken();
   if (!url) return res.status(400).json({ error: 'Missing URL' });
-
-  // ...unchanged...
 
   const websiteText = await getWebsiteText(url);
   const safeWebsiteText = (websiteText && websiteText.length > 100)
@@ -210,6 +241,7 @@ router.post('/detect-audience', async (req, res) => {
     : '[WEBSITE TEXT UNAVAILABLE]';
 
   const prompt = `
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
 Analyze this website's homepage content and answer ONLY in the following JSON format:
 
 {
@@ -223,7 +255,7 @@ Analyze this website's homepage content and answer ONLY in the following JSON fo
 
 Website homepage text:
 """${safeWebsiteText}"""
-`;
+`.trim();
 
   try {
     const response = await openai.chat.completions.create({
@@ -232,6 +264,7 @@ Website homepage text:
       max_tokens: 220,
       temperature: 0.3,
     });
+
     const aiText = response.choices?.[0]?.message?.content?.trim();
     let audienceJson = null;
     try {
@@ -249,16 +282,14 @@ Website homepage text:
           : "Business, Restaurants",
         summary: audienceJson.summary || ""
       };
-    } catch (err) {
+    } catch {
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
-    let fbInterestIds = [];
     if (fbToken) {
       const keywords = await extractKeywords(websiteText);
       const fbInterests = await getFbInterestIds(keywords, fbToken);
-      fbInterestIds = fbInterests.map(i => i.id);
-      audienceJson.fbInterestIds = fbInterestIds;
+      audienceJson.fbInterestIds = fbInterests.map(i => i.id);
       audienceJson.fbInterestNames = fbInterests.map(i => i.name);
     } else {
       audienceJson.fbInterestIds = [];
@@ -266,10 +297,11 @@ Website homepage text:
     }
 
     return res.json({ audience: audienceJson });
-  } catch (err) {
+  } catch {
     return res.json({ audience: DEFAULT_AUDIENCE });
   }
 });
+
 
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
@@ -283,43 +315,35 @@ router.post('/generate-campaign-assets', async (req, res) => {
       ? websiteText
       : '[WEBSITE TEXT UNAVAILABLE]';
 
-    let surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+    const surveyStr = Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
 
     const prompt = `
-You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words). Required fields: headline, body, image_prompt, video_script, image_overlay_text.
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
+You are an expert Facebook ads copywriter and creative strategist. Based only on the info below, return your answer STRICTLY in minified JSON (no markdown, no explanation, no extra words).
+Required fields: headline, body, image_prompt, video_script, image_overlay_text.
 
 Rules for "image_overlay_text":
-- Write a short, punchy, 7–10 word text for the image overlay.
-- Make it direct, bold, and readable on a photo.
-- Use ALL-CAPS. No punctuation.
+- 7–10 words
+- ALL-CAPS
+- Punchy and readable on a photo
+- No punctuation
 
-${customContext ? "Training context:\n" + customContext : ""}
 Survey answers:
 ${surveyStr}
 Website text:
 """${safeWebsiteText}"""
-`;
+`.trim();
 
-    // Clean parser
     function tryParseJson(str) {
       try {
-        let cleaned = String(str)
-          .replace(/```json|```/gi, '')
-          .replace(/^[\s\r\n]+|[\s\r\n]+$/g, '')
-          .trim();
-
-        const braceIdx = cleaned.indexOf('{');
-        if (braceIdx > 0) cleaned = cleaned.slice(braceIdx);
+        let cleaned = String(str).replace(/```json|```/gi, '').trim();
+        const firstBrace = cleaned.indexOf('{');
+        if (firstBrace > 0) cleaned = cleaned.slice(firstBrace);
         cleaned = cleaned.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-        const braceCount = (cleaned.match(/{/g) || []).length;
-        if (braceCount > 1) {
-          const lastBrace = cleaned.lastIndexOf('}');
-          cleaned = cleaned.substring(0, lastBrace + 1);
-        }
+        const lastBrace = cleaned.lastIndexOf('}');
+        if (lastBrace > -1) cleaned = cleaned.slice(0, lastBrace + 1);
         return JSON.parse(cleaned);
-      } catch {
-        return null;
-      }
+      } catch { return null; }
     }
 
     let raw, result;
@@ -340,7 +364,6 @@ Website text:
     }
 
     if (result && typeof result === "object") {
-      // Always supply all fields
       return res.json({
         headline: result.headline || "",
         body: result.body || "",
@@ -349,7 +372,6 @@ Website text:
         image_overlay_text: result.image_overlay_text || ""
       });
     } else {
-      // AI did not return JSON, send a safe fallback
       console.error("Parse error! AI output was:", raw);
       return res.status(500).json({
         error: "Failed to parse AI response",
@@ -362,6 +384,7 @@ Website text:
     return res.status(500).json({ error: "Unhandled error", detail: err.message });
   }
 });
+
 
 
 
@@ -471,56 +494,46 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .join('\n');
 
     // --- NEW: Add keywords from website to prompt ---
-    const prompt = `
+ // --- NEW prompt using training context + site keywords ---
+const prompt = `
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
 You are the best Facebook ad copywriter. You are Jeremy Haynes.
-Below you have:
-- Business info from a form (see below).
-- Website keywords: [${websiteKeywords.join(", ")}]
 
-TASK:
-1. Write an overlay headline (3-5 words) and CTA (3-6 words) for a stock ad image, based ONLY on this business, industry, and website. 
-2. Headline and CTA must be **highly relevant to THIS business and industry**. Never generic, never vague, never a direct copy of the answers or keywords, but informed by them.
-3. Headline must fit the business/industry (e.g. for dentist: "Brighten Your Smile Today", for gym: "Start Your Fitness Journey"). CTA must be a next step or benefit.
-4. Write a CTA (3-6 words) that MUST end with an exclamation point (!).
+1) Write an overlay headline (3–5 words) and CTA (3–6 words) for a stock ad image, based ONLY on this business + website.
+2) It must be specific and relevant (not generic). CTA must end with "!".
 
-
-Output ONLY valid minified JSON:
+Output ONLY JSON:
 {"headline":"...","cta_box":"..."}
 
 BUSINESS FORM INFO:
 ${formInfo}
 WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
-    `.trim();
+`.trim();
 
-    let headline = "";
-    let ctaText = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 120,
-        temperature: 0.2,
-      });
-      const raw = response.choices?.[0]?.message?.content?.trim();
-      let parsed = {};
-      try {
-        parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-      } catch (e) {
-        parsed = {};
-        console.warn("AI OVERLAY JSON PARSE FAIL:", raw); // DEBUG
-      }
-      headline = parsed.headline && parsed.headline.trim() ? parsed.headline : "GET MORE CLIENTS NOW!";
-      ctaText = parsed.cta_box && parsed.cta_box.trim() ? parsed.cta_box : "BOOK YOUR FREE CALL.";
-    } catch (e) {
-      headline = "AI ERROR - CONTACT SUPPORT";
-      ctaText = "SEE DETAILS";
-    }
+let headline = "";
+let ctaText = "";
+try {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o",
+    messages: [
+      { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
+      { role: "user", content: prompt }
+    ],
+    max_tokens: 120,
+    temperature: 0.2,
+  });
+  const raw = response.choices?.[0]?.message?.content?.trim();
+  let parsed = {};
+  try { parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw); } catch { parsed = {}; }
+  headline = parsed.headline?.trim() || "GET MORE CLIENTS NOW!";
+  ctaText = parsed.cta_box?.trim() || "BOOK YOUR FREE CALL!";
+} catch {
+  headline = "AI ERROR - CONTACT SUPPORT";
+  ctaText = "SEE DETAILS!";
+}
+headline = String(headline).toUpperCase();
+ctaText = String(ctaText).toUpperCase();
 
-    headline = String(headline).toUpperCase();
-    ctaText = String(ctaText).toUpperCase();
 
     // ...Rest of your image overlay code...
 
@@ -986,14 +999,17 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Step 5: Generate GPT script (mention CTA)
-    let prompt = `Write a video ad script for an online e-commerce business selling physical products. Script MUST be 45-55 words, read at normal speed for about 15-18 seconds. Include a strong hook, a specific product benefit, and end with this exact call to action: '${overlayText}'. Sound friendly, trustworthy, and conversion-focused.
-Never include any scene directions, stage directions, SFX, music notes, or anything except the exact words to be spoken aloud. Only output the exact script, nothing else.`;
-    if (productType) prompt += `\nProduct category: ${productType}`;
-    if (answers && Object.keys(answers).length) {
-      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-    }
-    if (url) prompt += `\nWebsite: ${url}`;
-    prompt += "\nRespond ONLY with the script, no intro or explanation. Script must be at least 15 seconds when spoken.";
+let prompt =
+  (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
+  `Write a video ad script for an online e-commerce business selling physical products. ` +
+  `Script MUST be 45–55 words (~15–18s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
+  `No scene directions or SFX — ONLY the spoken words.`;
+if (productType) prompt += `\nProduct category: ${productType}`;
+if (answers && Object.keys(answers).length) {
+  prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+if (url) prompt += `\nWebsite: ${url}`;
+prompt += `\nRespond ONLY with the script text.`;
 
     let script;
     try {
