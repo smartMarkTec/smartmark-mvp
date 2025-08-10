@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "react-icons/fa";
+import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 import { FaExpand } from "react-icons/fa";
 
@@ -697,6 +697,57 @@ const CampaignSetup = () => {
     });
   }
 
+  // Capture the "second frame" (~1s) of a video as a dataURL. Fallback to first image creative if capture fails.
+  async function captureVideoThumbnail(videoUrl, atSec = 1.0) {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const abs = /^https?:\/\//.test(videoUrl) ? videoUrl : `${backendUrl}${videoUrl}`;
+        const v = document.createElement("video");
+        v.crossOrigin = "anonymous";
+        v.preload = "metadata";
+        v.src = abs;
+        v.muted = true;
+
+        const onError = () => reject(new Error("thumb_error"));
+        v.addEventListener("error", onError, { once: true });
+
+        v.addEventListener("loadedmetadata", () => {
+          try {
+            const t = Math.min(Math.max(0.5, atSec), Math.max(0.5, (v.duration || 2) - 0.1));
+            const seek = () => {
+              const canvas = document.createElement("canvas");
+              const w = Math.min(640, v.videoWidth || 640);
+              const h = Math.round((w / (v.videoWidth || 640)) * (v.videoHeight || 360)) || 360;
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext("2d");
+              ctx.drawImage(v, 0, 0, w, h);
+              try {
+                const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+                resolve(dataUrl);
+              } catch {
+                reject(new Error("canvas_tainted"));
+              }
+            };
+            const onSeeked = () => {
+              v.removeEventListener("seeked", onSeeked);
+              seek();
+            };
+            v.addEventListener("seeked", onSeeked);
+            v.currentTime = t;
+          } catch {
+            reject(new Error("seek_error"));
+          }
+        }, { once: true });
+
+        // safety timeout
+        setTimeout(() => reject(new Error("thumb_timeout")), 7000);
+      } catch (e) {
+        reject(new Error("thumb_init"));
+      }
+    });
+  }
+
   // --- Launch handler (uses first variants, sends arrays for engine) ---
   const handleLaunch = async () => {
     setLoading(true);
@@ -714,11 +765,24 @@ const CampaignSetup = () => {
         try { adImage = await urlToBase64(adImage); } catch { /* ignore */ }
       }
 
+      // Try to capture the thumbnail at ~1s for the selected video
+      let videoThumbnailDataUrl = "";
+      try {
+        if (firstVideo) {
+          videoThumbnailDataUrl = await captureVideoThumbnail(firstVideo, 1.0);
+        }
+      } catch {
+        videoThumbnailDataUrl = "";
+      }
+
       // Prefer fbVideoId if present (already in ad account library)
       const fbVideoId = firstFbVideoId || undefined;
 
       // For adVideo, keep URL (server may upload if needed)
       let adVideo = firstVideo;
+
+      // Fallback thumbnail URL if capture failed (use first image creative URL)
+      const videoThumbnailImageUrl = videoThumbnailDataUrl ? "" : (imageUrlsArr[0] || mediaImageUrl || "");
 
       const payload = {
         form: { ...form },
@@ -730,6 +794,11 @@ const CampaignSetup = () => {
         adImage: adImage || "",
         adVideo: adVideo || "",
         fbVideoId,
+        // NEW: thumbnail for video creative to satisfy FB error 1443226
+        // Backend can use `videoThumbnailDataUrl` -> upload AdImage to get image_hash,
+        // or fall back to `videoThumbnailImageUrl` as image_url.
+        videoThumbnailDataUrl,
+        videoThumbnailImageUrl,
         answers: answers || {},
         mediaSelection,
         // arrays for smart engine / auditing
@@ -765,8 +834,8 @@ const CampaignSetup = () => {
       setSelectedCampaignId(json.campaignId || selectedCampaignId);
       setTimeout(() => setLaunched(false), 1500);
     } catch (err) {
+      console.error("FB Campaign Launch Error:", err);
       alert("Failed to launch campaign: " + (err.message || ""));
-      console.error(err);
     }
     setLoading(false);
   };
@@ -947,7 +1016,7 @@ const CampaignSetup = () => {
             </button>
           )}
 
-          {/* Campaign Name + Scheduler (organized; no action dropdown) */}
+          {/* Campaign Name + Scheduler */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
             <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
               <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
@@ -1239,7 +1308,7 @@ const CampaignSetup = () => {
                 </div>
               </div>
 
-              {/* Dropdown list + ATTACHED CREATIVES (collapse with tab) */}
+              {/* Dropdown list + ATTACHED SMALL CREATIVE CAROUSELS (collapse with tab) */}
               {dropdownOpen && (
                 <div style={{
                   width: "100%",
@@ -1269,7 +1338,7 @@ const CampaignSetup = () => {
                     </div>
                   ))}
 
-                  {/* ======= CREATIVE PREVIEW – SMALL & WITHIN COLLAPSIBLE ======= */}
+                  {/* ======= SMALL CREATIVE PREVIEWS – WITHIN COLLAPSIBLE ======= */}
                   {selectedCampaignId && (
                     <div style={{
                       width: "100%",
@@ -1333,7 +1402,7 @@ const CampaignSetup = () => {
                 <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
                 <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
                 <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-                <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
+                <div>Spend: <b>{metrics?.spend ? `$${metrics?.spend}` : "--"}</b></div>
                 <div>Results: <b>{metrics?.results ?? "--"}</b></div>
                 <div>Cost/Result: <b>{metrics?.spend && metrics?.results ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--"}</b></div>
               </div>
