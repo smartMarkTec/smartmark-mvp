@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
+import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 import { FaExpand } from "react-icons/fa";
 
@@ -205,7 +205,7 @@ function VideoPreviewBox({ videoUrl }) {
   );
 }
 
-// --- Carousels (up to 2 items typical) with adjustable height (smaller previews) ---
+// --- Carousels (up to 2 items typical) ---
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
@@ -215,32 +215,32 @@ const navBtn = (dir) => ({
   color:"#fff",
   border:"none",
   borderRadius:10,
-  width:30, height:30,
-  fontSize:18, fontWeight:900,
+  width:34, height:34,
+  fontSize:20, fontWeight:900,
   cursor:"pointer"
 });
 const badge = {
-  position:"absolute", bottom:6, right:8,
+  position:"absolute", bottom:8, right:8,
   background:"rgba(0,0,0,0.55)", color:"#fff",
-  borderRadius:10, padding:"2px 7px", fontSize:11, fontWeight:800
+  borderRadius:10, padding:"3px 8px", fontSize:12, fontWeight:800
 };
 
-function ImageCarousel({ items = [], onFullscreen, height = 120 }) {
+function ImageCarousel({ items = [], onFullscreen }) {
   const [idx, setIdx] = useState(0);
   const normalized = items.map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u)).filter(Boolean);
   useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
   if (!normalized.length) {
-    return <div style={{ height, width: "100%", background: "#e9ecef",
+    return <div style={{ height: 220, width: "100%", background: "#e9ecef",
       color: "#a9abb0", fontWeight: 700, display:"flex", alignItems:"center",
-      justifyContent:"center", fontSize: 16, borderRadius: 10 }}>Images</div>;
+      justifyContent:"center", fontSize: 22 }}>Images</div>;
   }
   const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
   return (
-    <div style={{ position:"relative", background:"#222", borderRadius: 10, overflow: "hidden" }}>
+    <div style={{ position:"relative", background:"#222" }}>
       <img
         src={normalized[idx]}
         alt="Ad"
-        style={{ width:"100%", maxHeight: height, height, objectFit:"cover", display:"block" }}
+        style={{ width:"100%", maxHeight:220, objectFit:"cover", display:"block" }}
         onClick={() => onFullscreen && onFullscreen(normalized[idx])}
       />
       {normalized.length > 1 && (
@@ -254,19 +254,19 @@ function ImageCarousel({ items = [], onFullscreen, height = 120 }) {
   );
 }
 
-function VideoCarousel({ items = [], height = 120 }) {
+function VideoCarousel({ items = [] }) {
   const [idx, setIdx] = useState(0);
   const normalized = items.map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u)).filter(Boolean);
   useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
   if (!normalized.length) {
-    return <div style={{ height, width: "100%", background: "#e9ecef",
+    return <div style={{ height: 220, width: "100%", background: "#e9ecef",
       color: "#a9abb0", fontWeight: 700, display:"flex", alignItems:"center",
-      justifyContent:"center", fontSize: 16, borderRadius: 10 }}>Videos</div>;
+      justifyContent:"center", fontSize: 22 }}>Videos</div>;
   }
   const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
   return (
-    <div style={{ position:"relative", background:"#111", borderRadius: 10, overflow: "hidden" }}>
-      <video src={normalized[idx]} controls style={{ width:"100%", maxHeight: height, height, display:"block", background:"#111" }} />
+    <div style={{ position:"relative", background:"#111" }}>
+      <video src={normalized[idx]} controls style={{ width:"100%", maxHeight:220, display:"block" }} />
       {normalized.length > 1 && (
         <>
           <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">‹</button>
@@ -443,7 +443,7 @@ const CampaignSetup = () => {
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [campaignCount, setCampaignCount] = useState(0);
-  const [dropdownOpen, setDropdownOpen] = useState(true);
+  
 
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
@@ -697,57 +697,6 @@ const CampaignSetup = () => {
     });
   }
 
-  // Capture the "second frame" (~1s) of a video as a dataURL. Fallback to first image creative if capture fails.
-  async function captureVideoThumbnail(videoUrl, atSec = 1.0) {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const abs = /^https?:\/\//.test(videoUrl) ? videoUrl : `${backendUrl}${videoUrl}`;
-        const v = document.createElement("video");
-        v.crossOrigin = "anonymous";
-        v.preload = "metadata";
-        v.src = abs;
-        v.muted = true;
-
-        const onError = () => reject(new Error("thumb_error"));
-        v.addEventListener("error", onError, { once: true });
-
-        v.addEventListener("loadedmetadata", () => {
-          try {
-            const t = Math.min(Math.max(0.5, atSec), Math.max(0.5, (v.duration || 2) - 0.1));
-            const seek = () => {
-              const canvas = document.createElement("canvas");
-              const w = Math.min(640, v.videoWidth || 640);
-              const h = Math.round((w / (v.videoWidth || 640)) * (v.videoHeight || 360)) || 360;
-              canvas.width = w;
-              canvas.height = h;
-              const ctx = canvas.getContext("2d");
-              ctx.drawImage(v, 0, 0, w, h);
-              try {
-                const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-                resolve(dataUrl);
-              } catch {
-                reject(new Error("canvas_tainted"));
-              }
-            };
-            const onSeeked = () => {
-              v.removeEventListener("seeked", onSeeked);
-              seek();
-            };
-            v.addEventListener("seeked", onSeeked);
-            v.currentTime = t;
-          } catch {
-            reject(new Error("seek_error"));
-          }
-        }, { once: true });
-
-        // safety timeout
-        setTimeout(() => reject(new Error("thumb_timeout")), 7000);
-      } catch (e) {
-        reject(new Error("thumb_init"));
-      }
-    });
-  }
-
   // --- Launch handler (uses first variants, sends arrays for engine) ---
   const handleLaunch = async () => {
     setLoading(true);
@@ -765,24 +714,11 @@ const CampaignSetup = () => {
         try { adImage = await urlToBase64(adImage); } catch { /* ignore */ }
       }
 
-      // Try to capture the thumbnail at ~1s for the selected video
-      let videoThumbnailDataUrl = "";
-      try {
-        if (firstVideo) {
-          videoThumbnailDataUrl = await captureVideoThumbnail(firstVideo, 1.0);
-        }
-      } catch {
-        videoThumbnailDataUrl = "";
-      }
-
       // Prefer fbVideoId if present (already in ad account library)
       const fbVideoId = firstFbVideoId || undefined;
 
       // For adVideo, keep URL (server may upload if needed)
       let adVideo = firstVideo;
-
-      // Fallback thumbnail URL if capture failed (use first image creative URL)
-      const videoThumbnailImageUrl = videoThumbnailDataUrl ? "" : (imageUrlsArr[0] || mediaImageUrl || "");
 
       const payload = {
         form: { ...form },
@@ -794,11 +730,6 @@ const CampaignSetup = () => {
         adImage: adImage || "",
         adVideo: adVideo || "",
         fbVideoId,
-        // NEW: thumbnail for video creative to satisfy FB error 1443226
-        // Backend can use `videoThumbnailDataUrl` -> upload AdImage to get image_hash,
-        // or fall back to `videoThumbnailImageUrl` as image_url.
-        videoThumbnailDataUrl,
-        videoThumbnailImageUrl,
         answers: answers || {},
         mediaSelection,
         // arrays for smart engine / auditing
@@ -834,8 +765,8 @@ const CampaignSetup = () => {
       setSelectedCampaignId(json.campaignId || selectedCampaignId);
       setTimeout(() => setLaunched(false), 1500);
     } catch (err) {
-      console.error("FB Campaign Launch Error:", err);
       alert("Failed to launch campaign: " + (err.message || ""));
+      console.error(err);
     }
     setLoading(false);
   };
@@ -1016,7 +947,7 @@ const CampaignSetup = () => {
             </button>
           )}
 
-          {/* Campaign Name + Scheduler */}
+          {/* Campaign Name + Scheduler (organized; no action dropdown) */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
             <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
               <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
@@ -1234,7 +1165,7 @@ const CampaignSetup = () => {
                 >
                   <FaChevronDown
                     style={{
-                      transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      transform: (function(){return dropdownOpen ? "rotate(180deg)" : "rotate(0deg)";})(),
                       marginRight: 7,
                       transition: "transform 0.18s"
                     }}
@@ -1308,8 +1239,8 @@ const CampaignSetup = () => {
                 </div>
               </div>
 
-              {/* Dropdown list + ATTACHED SMALL CREATIVE CAROUSELS (collapse with tab) */}
-              {dropdownOpen && (
+              {/* Dropdown list */}
+              { (function(){return dropdownOpen;})() && (
                 <div style={{
                   width: "100%",
                   background: "#232a28",
@@ -1337,61 +1268,6 @@ const CampaignSetup = () => {
                       {c.name || c.id}
                     </div>
                   ))}
-
-                  {/* ======= SMALL CREATIVE PREVIEWS – WITHIN COLLAPSIBLE ======= */}
-                  {selectedCampaignId && (
-                    <div style={{
-                      width: "100%",
-                      background: PANEL_BG,
-                      borderRadius: "0.9rem",
-                      padding: "0.9rem",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                      marginTop: 8
-                    }}>
-                      <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1rem", marginBottom: 2 }}>
-                        Creatives
-                      </div>
-
-                      {/* Images Card (small) */}
-                      <div style={{
-                        background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                        overflow:"hidden", boxShadow:"0 2px 18px #16242714"
-                      }}>
-                        <div style={{
-                          background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                          display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize:14
-                        }}>
-                          <span>Images</span>
-                        </div>
-                        <div style={{ padding: 8 }}>
-                          <ImageCarousel
-                            items={imageUrlsArr}
-                            height={120}
-                            onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Videos Card (small) */}
-                      <div style={{
-                        background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                        overflow:"hidden", boxShadow:"0 2px 18px #16242714"
-                      }}>
-                        <div style={{
-                          background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                          display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize:14
-                        }}>
-                          <span>Videos</span>
-                          {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-                        </div>
-                        <div style={{ padding: 8 }}>
-                          <VideoCarousel items={videoUrlsArr} height={120} />
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -1402,11 +1278,59 @@ const CampaignSetup = () => {
                 <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
                 <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
                 <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-                <div>Spend: <b>{metrics?.spend ? `$${metrics?.spend}` : "--"}</b></div>
+                <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
                 <div>Results: <b>{metrics?.results ?? "--"}</b></div>
                 <div>Cost/Result: <b>{metrics?.spend && metrics?.results ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--"}</b></div>
               </div>
             )}
+
+            {/* ======= CREATIVE PREVIEW (Carousels) – BELOW CAMPAIGN TAB ======= */}
+            <div style={{
+              width: "100%",
+              background: PANEL_BG,
+              borderRadius: "1.2rem",
+              padding: "1.2rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+              marginTop: 8
+            }}>
+              <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.08rem", marginBottom: 4 }}>
+                Creatives (per campaign)
+              </div>
+
+              {/* Images Card */}
+              <div style={{
+                background:"#fff", borderRadius:13, border:"1.5px solid #eaeaea",
+                overflow:"hidden", boxShadow:"0 2px 24px #16242714"
+              }}>
+                <div style={{
+                  background:"#f5f6fa", padding:"10px 16px", borderBottom:"1px solid #e0e4eb",
+                  display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700
+                }}>
+                  <span>Images</span>
+                </div>
+                <ImageCarousel
+                  items={imageUrlsArr}
+                  onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                />
+              </div>
+
+              {/* Videos Card */}
+              <div style={{
+                background:"#fff", borderRadius:13, border:"1.5px solid #eaeaea",
+                overflow:"hidden", boxShadow:"0 2px 24px #16242714"
+              }}>
+                <div style={{
+                  background:"#f5f6fa", padding:"10px 16px", borderBottom:"1px solid #e0e4eb",
+                  display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700
+                }}>
+                  <span>Videos</span>
+                  {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                </div>
+                <VideoCarousel items={videoUrlsArr} />
+              </div>
+            </div>
 
             {/* Ad Account & Page Selectors */}
             <div style={{
