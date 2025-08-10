@@ -1,6 +1,6 @@
 // src/pages/CampaignSetup.js
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 
@@ -50,9 +50,6 @@ const writeCreativeMap = (actId, map) => {
 };
 
 // --- Small helpers ---
-const getUserKey = (email, cashapp) =>
-  `smartmark_user_${(email || "").trim().toLowerCase()}_${(cashapp || "").trim().toLowerCase()}`;
-
 const calculateFees = (budget) => {
   const parsed = parseFloat(budget);
   if (isNaN(parsed) || parsed <= 0) return { fee: 0, total: 0 };
@@ -60,33 +57,6 @@ const calculateFees = (budget) => {
   const total = parsed + fee;
   return { fee, total };
 };
-
-// --- Tiny inline loader ---
-function Dotty() {
-  return (
-    <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
-      <span className="dotty-dot" style={dotStyle(0)}>.</span>
-      <span className="dotty-dot" style={dotStyle(1)}>.</span>
-      <span className="dotty-dot" style={dotStyle(2)}>.</span>
-      <style>
-        {`
-        @keyframes bounceDot {
-          0% { transform: translateY(0);}
-          30% { transform: translateY(-7px);}
-          60% { transform: translateY(0);}
-        }
-        .dotty-dot {
-          display: inline-block;
-          animation: bounceDot 1.2s infinite;
-        }
-        .dotty-dot:nth-child(2) { animation-delay: 0.15s;}
-        .dotty-dot:nth-child(3) { animation-delay: 0.3s;}
-        `}
-      </style>
-    </span>
-  );
-}
-const dotStyle = (n) => ({ display: "inline-block", margin: "0 3px", fontSize: 36, color: ACCENT, animationDelay: `${n * 0.13}s` });
 
 function DottyMini() {
   return (
@@ -129,78 +99,6 @@ function ImageModal({ open, imageUrl, onClose }) {
           Close
         </button>
       </div>
-    </div>
-  );
-}
-
-// --- Simple video preview buttoned box (not used inside carousels) ---
-function VideoPreviewBox({ videoUrl }) {
-  const [playing, setPlaying] = useState(false);
-  const videoRef = useRef(null);
-  const togglePlay = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (!videoRef.current) return;
-    if (playing) videoRef.current.pause(); else videoRef.current.play();
-    setPlaying(!playing);
-  };
-  const enterFullScreen = (e) => {
-    e.preventDefault(); e.stopPropagation();
-    if (videoRef.current && videoRef.current.requestFullscreen) {
-      videoRef.current.requestFullscreen();
-    }
-  };
-  const onEnded = () => setPlaying(false);
-  const src = videoUrl && !/^https?:\/\//.test(videoUrl) ? backendUrl + videoUrl : videoUrl;
-  return (
-    <div
-      style={{
-        width: 110, height: 110, borderRadius: 14, overflow: "hidden", cursor: "pointer",
-        boxShadow: "0 2px 10px rgba(30,200,133,0.13)", border: "2.2px solid #1ec885",
-        background: "#191f1b", position: "relative", display: "flex", alignItems: "center", justifyContent: "center"
-      }}
-      onClick={togglePlay}
-      title={playing ? "Pause" : "Play"}
-      onDoubleClick={enterFullScreen}
-    >
-      <video
-        ref={videoRef}
-        src={src}
-        width={110}
-        height={110}
-        style={{ objectFit: "cover", width: "100%", height: "100%", borderRadius: 14, background: "#232a24" }}
-        controls={false}
-        onEnded={onEnded}
-        preload="metadata"
-        tabIndex={-1}
-      />
-      {!playing && (
-        <div style={{
-          position: "absolute", left: 0, top: 0, width: "100%", height: "100%",
-          display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none", zIndex: 2
-        }}>
-          <svg width="34" height="34" fill="#fff" style={{ opacity: 0.78 }}><polygon points="8,7 28,17 8,27" /></svg>
-        </div>
-      )}
-      <button
-        onClick={enterFullScreen}
-        style={{
-          position: "absolute", bottom: 7, right: 7, zIndex: 3, background: "rgba(24,84,49,0.81)",
-          border: "none", borderRadius: 5, color: "#fff", padding: 3, cursor: "pointer", opacity: 0.8
-        }}
-        tabIndex={-1}
-        title="Fullscreen"
-      >
-        <svg width="18" height="18" viewBox="0 0 20 20" fill="none">
-          <rect x="3" y="3" width="5" height="2" rx="1" fill="white"/>
-          <rect x="3" y="3" width="2" height="5" rx="1" fill="white"/>
-          <rect x="15" y="3" width="2" height="5" rx="1" fill="white"/>
-          <rect x="12" y="3" width="5" height="2" rx="1" fill="white"/>
-          <rect x="3" y="15" width="5" height="2" rx="1" fill="white"/>
-          <rect x="3" y="12" width="2" height="5" rx="1" fill="white"/>
-          <rect x="15" y="12" width="2" height="5" rx="1" fill="white"/>
-          <rect x="12" y="15" width="5" height="2" rx="1" fill="white"/>
-        </svg>
-      </button>
     </div>
   );
 }
@@ -439,7 +337,7 @@ const CampaignSetup = () => {
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
-const [, setCampaignStatus] = useState("ACTIVE");
+  const [, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [campaignCount, setCampaignCount] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(true);
@@ -471,17 +369,12 @@ const [, setCampaignStatus] = useState("ACTIVE");
     fbVideoId: navFbVideoId,
     headline,
     body,
-    videoScript,
     answers,
     mediaSelection: navMediaSelection
   } = location.state || {};
 
   // --- Effects: session and FB connection ---
   useEffect(() => {
-    let savedEmail = localStorage.getItem("smartmark_last_email") || "";
-    let savedCash = localStorage.getItem("smartmark_last_cashapp") || "";
-    setUserKey(getUserKey(savedEmail, savedCash));
-
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) setForm(JSON.parse(lastFields));
 
@@ -542,37 +435,36 @@ const [, setCampaignStatus] = useState("ACTIVE");
     }
   }, [navMediaSelection]);
 
-// --- Load campaigns & default select ---
-useEffect(() => {
-  if (!fbConnected || !selectedAccount) return;
-  const acctId = String(selectedAccount).replace("act_", "");
+  // --- Load campaigns & default select ---
+  useEffect(() => {
+    if (!fbConnected || !selectedAccount) return;
+    const acctId = String(selectedAccount).replace("act_", "");
 
-  // detect if we came with fresh draft creatives in this navigation
-  const hasNavDraft =
-    (Array.isArray(navImageUrls) && navImageUrls.length) ||
-    (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-    (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
-    navImageUrl || navVideoUrl || navFbVideoId;
+    // detect if we came with fresh draft creatives in this navigation
+    const hasNavDraft =
+      (Array.isArray(navImageUrls) && navImageUrls.length) ||
+      (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+      (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
+      navImageUrl || navVideoUrl || navFbVideoId;
 
-  fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
-    .then(res => res.json())
-    .then(data => {
-      const list = (data && data.data) ? data.data.slice(0, 2) : [];
-      setCampaigns(list);
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
+      .then(res => res.json())
+      .then(data => {
+        const list = (data && data.data) ? data.data.slice(0, 2) : [];
+        setCampaigns(list);
 
-      // if we have fresh draft creatives, do NOT auto-select a campaign
-      if (!selectedCampaignId) {
-        if (hasNavDraft) {
-          setSelectedCampaignId(""); // stay in draft view
-        } else if (list.length > 0) {
-          setSelectedCampaignId(list[0].id);
+        // if we have fresh draft creatives, do NOT auto-select a campaign
+        if (!selectedCampaignId) {
+          if (hasNavDraft) {
+            setSelectedCampaignId(""); // stay in draft view
+          } else if (list.length > 0) {
+            setSelectedCampaignId(list[0].id);
+          }
         }
-      }
-    })
-    .catch(() => {});
-// include nav deps so this runs with awareness of draft on first paint
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
   // --- Load metrics for selected campaign ---
   useEffect(() => {
@@ -610,56 +502,56 @@ useEffect(() => {
     if (navVideoUrl) localStorage.setItem("smartmark_last_video_url", navVideoUrl);
   }, [navImageUrl, navVideoUrl]);
 
-// --- Merge nav arrays into per-account map (draft) and hydrate carousels ---
-useEffect(() => {
-  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-  const map = readCreativeMap(acctKey);
+  // --- Merge nav arrays into per-account map (draft) and hydrate carousels ---
+  useEffect(() => {
+    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+    const map = readCreativeMap(acctKey);
 
-  const fromNavImgs = Array.isArray(navImageUrls) ? navImageUrls : (navImageUrl ? [navImageUrl] : []);
-  const fromNavVids = Array.isArray(navVideoUrls) ? navVideoUrls : (navVideoUrl ? [navVideoUrl] : []);
-  const fromNavIds  = Array.isArray(navFbVideoIds) ? navFbVideoIds : (navFbVideoId ? [String(navFbVideoId)] : []);
+    const fromNavImgs = Array.isArray(navImageUrls) ? navImageUrls : (navImageUrl ? [navImageUrl] : []);
+    const fromNavVids = Array.isArray(navVideoUrls) ? navVideoUrls : (navVideoUrl ? [navVideoUrl] : []);
+    const fromNavIds  = Array.isArray(navFbVideoIds) ? navFbVideoIds : (navFbVideoId ? [String(navFbVideoId)] : []);
 
-  // If we arrived with new creatives, OVERWRITE the draft bucket entirely.
-  if (fromNavImgs.length || fromNavVids.length || fromNavIds.length) {
-    map.draft = {
-      images: fromNavImgs.slice(0, 2),
-      videos: fromNavVids.slice(0, 2),
-      fbVideoIds: fromNavIds.slice(0, 2),
-      time: Date.now()
-    };
-    writeCreativeMap(acctKey, map);
-  }
+    // If we arrived with new creatives, OVERWRITE the draft bucket entirely.
+    if (fromNavImgs.length || fromNavVids.length || fromNavIds.length) {
+      map.draft = {
+        images: fromNavImgs.slice(0, 2),
+        videos: fromNavVids.slice(0, 2),
+        fbVideoIds: fromNavIds.slice(0, 2),
+        time: Date.now()
+      };
+      writeCreativeMap(acctKey, map);
+    }
 
-  // Show draft if we have fresh nav creatives; otherwise show the selected campaign (or draft if none)
-  const preferDraft = Boolean(fromNavImgs.length || fromNavVids.length || fromNavIds.length);
-  const bucket = (selectedCampaignId && !preferDraft) ? map[selectedCampaignId] : map.draft;
+    // Show draft if we have fresh nav creatives; otherwise show the selected campaign (or draft if none)
+    const preferDraft = Boolean(fromNavImgs.length || fromNavVids.length || fromNavIds.length);
+    const bucket = (selectedCampaignId && !preferDraft) ? map[selectedCampaignId] : map.draft;
 
-  setImageUrlsArr(bucket?.images || (fromNavImgs.length ? fromNavImgs.slice(0,2) : (mediaImageUrl ? [mediaImageUrl] : [])));
-  setVideoUrlsArr(bucket?.videos || (fromNavVids.length ? fromNavVids.slice(0,2) : (mediaVideoUrl ? [mediaVideoUrl] : [])));
-  setFbVideoIdsArr(bucket?.fbVideoIds || (fromNavIds.length ? fromNavIds.slice(0,2) : []));
-  // eslint-disable-next-line
-}, [selectedAccount, selectedCampaignId, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+    setImageUrlsArr(bucket?.images || (fromNavImgs.length ? fromNavImgs.slice(0,2) : (mediaImageUrl ? [mediaImageUrl] : [])));
+    setVideoUrlsArr(bucket?.videos || (fromNavVids.length ? fromNavVids.slice(0,2) : (mediaVideoUrl ? [mediaVideoUrl] : [])));
+    setFbVideoIdsArr(bucket?.fbVideoIds || (fromNavIds.length ? fromNavIds.slice(0,2) : []));
+    // eslint-disable-next-line
+  }, [selectedAccount, selectedCampaignId, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
-// --- On campaign change: load that bucket ---
-useEffect(() => {
-  if (!selectedAccount) return;
-  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-  const map = readCreativeMap(acctKey);
+  // --- On campaign change: load that bucket ---
+  useEffect(() => {
+    if (!selectedAccount) return;
+    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+    const map = readCreativeMap(acctKey);
 
-  // if this navigation brought new draft creatives, keep showing draft this time
-  const hasNavDraft =
-    (Array.isArray(navImageUrls) && navImageUrls.length) ||
-    (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-    (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
-    navImageUrl || navVideoUrl || navFbVideoId;
+    // if this navigation brought new draft creatives, keep showing draft this time
+    const hasNavDraft =
+      (Array.isArray(navImageUrls) && navImageUrls.length) ||
+      (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+      (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
+      navImageUrl || navVideoUrl || navFbVideoId;
 
-  const bucket = (selectedCampaignId && !hasNavDraft) ? map[selectedCampaignId] : map.draft;
+    const bucket = (selectedCampaignId && !hasNavDraft) ? map[selectedCampaignId] : map.draft;
 
-  setImageUrlsArr(bucket?.images || []);
-  setVideoUrlsArr(bucket?.videos || []);
-  setFbVideoIdsArr(bucket?.fbVideoIds || []);
-// eslint-disable-next-line react-hooks/exhaustive-deps
-}, [selectedCampaignId, selectedAccount, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+    setImageUrlsArr(bucket?.images || []);
+    setVideoUrlsArr(bucket?.videos || []);
+    setFbVideoIdsArr(bucket?.fbVideoIds || []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCampaignId, selectedAccount, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
   // --- Pause/Unpause/Delete handlers ---
   const [isPaused, setIsPaused] = useState(false);
