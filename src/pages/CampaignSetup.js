@@ -546,19 +546,37 @@ const CampaignSetup = () => {
     }
   }, [navMediaSelection]);
 
-  // --- Load campaigns & default select ---
-  useEffect(() => {
-    if (!fbConnected || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        const list = (data && data.data) ? data.data.slice(0, 2) : [];
-        setCampaigns(list);
-        if (list.length > 0 && !selectedCampaignId) setSelectedCampaignId(list[0].id);
-      })
-      .catch(() => {});
-  }, [fbConnected, selectedAccount, launched]); // refresh after launch
+// --- Load campaigns & default select ---
+useEffect(() => {
+  if (!fbConnected || !selectedAccount) return;
+  const acctId = String(selectedAccount).replace("act_", "");
+
+  // detect if we came with fresh draft creatives in this navigation
+  const hasNavDraft =
+    (Array.isArray(navImageUrls) && navImageUrls.length) ||
+    (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+    (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
+    navImageUrl || navVideoUrl || navFbVideoId;
+
+  fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
+    .then(res => res.json())
+    .then(data => {
+      const list = (data && data.data) ? data.data.slice(0, 2) : [];
+      setCampaigns(list);
+
+      // if we have fresh draft creatives, do NOT auto-select a campaign
+      if (!selectedCampaignId) {
+        if (hasNavDraft) {
+          setSelectedCampaignId(""); // stay in draft view
+        } else if (list.length > 0) {
+          setSelectedCampaignId(list[0].id);
+        }
+      }
+    })
+    .catch(() => {});
+// include nav deps so this runs with awareness of draft on first paint
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
   // --- Load metrics for selected campaign ---
   useEffect(() => {
@@ -596,42 +614,56 @@ const CampaignSetup = () => {
     if (navVideoUrl) localStorage.setItem("smartmark_last_video_url", navVideoUrl);
   }, [navImageUrl, navVideoUrl]);
 
-  // --- Merge nav arrays into per-account map (draft) and hydrate carousels ---
-  useEffect(() => {
-    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(acctKey);
+// --- Merge nav arrays into per-account map (draft) and hydrate carousels ---
+useEffect(() => {
+  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+  const map = readCreativeMap(acctKey);
 
-    const fromNavImgs = Array.isArray(navImageUrls) ? navImageUrls : (navImageUrl ? [navImageUrl] : []);
-    const fromNavVids = Array.isArray(navVideoUrls) ? navVideoUrls : (navVideoUrl ? [navVideoUrl] : []);
-    const fromNavIds  = Array.isArray(navFbVideoIds) ? navFbVideoIds : (navFbVideoId ? [String(navFbVideoId)] : []);
+  const fromNavImgs = Array.isArray(navImageUrls) ? navImageUrls : (navImageUrl ? [navImageUrl] : []);
+  const fromNavVids = Array.isArray(navVideoUrls) ? navVideoUrls : (navVideoUrl ? [navVideoUrl] : []);
+  const fromNavIds  = Array.isArray(navFbVideoIds) ? navFbVideoIds : (navFbVideoId ? [String(navFbVideoId)] : []);
 
-    if (fromNavImgs.length || fromNavVids.length || fromNavIds.length) {
-      map.draft = {
-        images: (map.draft?.images?.length ? map.draft.images : fromNavImgs).slice(0, 2),
-        videos: (map.draft?.videos?.length ? map.draft.videos : fromNavVids).slice(0, 2),
-        fbVideoIds: (map.draft?.fbVideoIds?.length ? map.draft.fbVideoIds : fromNavIds).slice(0, 2),
-        time: Date.now()
-      };
-      writeCreativeMap(acctKey, map);
-    }
+  // If we arrived with new creatives, OVERWRITE the draft bucket entirely.
+  if (fromNavImgs.length || fromNavVids.length || fromNavIds.length) {
+    map.draft = {
+      images: fromNavImgs.slice(0, 2),
+      videos: fromNavVids.slice(0, 2),
+      fbVideoIds: fromNavIds.slice(0, 2),
+      time: Date.now()
+    };
+    writeCreativeMap(acctKey, map);
+  }
 
-    const bucket = selectedCampaignId ? map[selectedCampaignId] : map.draft;
-    setImageUrlsArr(bucket?.images || (fromNavImgs.length ? fromNavImgs.slice(0,2) : (mediaImageUrl ? [mediaImageUrl] : [])));
-    setVideoUrlsArr(bucket?.videos || (fromNavVids.length ? fromNavVids.slice(0,2) : (mediaVideoUrl ? [mediaVideoUrl] : [])));
-    setFbVideoIdsArr(bucket?.fbVideoIds || fromNavIds || []);
-    // eslint-disable-next-line
-  }, [selectedAccount, selectedCampaignId, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+  // Show draft if we have fresh nav creatives; otherwise show the selected campaign (or draft if none)
+  const preferDraft = Boolean(fromNavImgs.length || fromNavVids.length || fromNavIds.length);
+  const bucket = (selectedCampaignId && !preferDraft) ? map[selectedCampaignId] : map.draft;
 
-  // --- On campaign change: load that bucket ---
-  useEffect(() => {
-    if (!selectedAccount) return;
-    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(acctKey);
-    const bucket = selectedCampaignId ? map[selectedCampaignId] : map.draft;
-    setImageUrlsArr(bucket?.images || []);
-    setVideoUrlsArr(bucket?.videos || []);
-    setFbVideoIdsArr(bucket?.fbVideoIds || []);
-  }, [selectedCampaignId, selectedAccount]);
+  setImageUrlsArr(bucket?.images || (fromNavImgs.length ? fromNavImgs.slice(0,2) : (mediaImageUrl ? [mediaImageUrl] : [])));
+  setVideoUrlsArr(bucket?.videos || (fromNavVids.length ? fromNavVids.slice(0,2) : (mediaVideoUrl ? [mediaVideoUrl] : [])));
+  setFbVideoIdsArr(bucket?.fbVideoIds || (fromNavIds.length ? fromNavIds.slice(0,2) : []));
+  // eslint-disable-next-line
+}, [selectedAccount, selectedCampaignId, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+
+// --- On campaign change: load that bucket ---
+useEffect(() => {
+  if (!selectedAccount) return;
+  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+  const map = readCreativeMap(acctKey);
+
+  // if this navigation brought new draft creatives, keep showing draft this time
+  const hasNavDraft =
+    (Array.isArray(navImageUrls) && navImageUrls.length) ||
+    (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+    (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
+    navImageUrl || navVideoUrl || navFbVideoId;
+
+  const bucket = (selectedCampaignId && !hasNavDraft) ? map[selectedCampaignId] : map.draft;
+
+  setImageUrlsArr(bucket?.images || []);
+  setVideoUrlsArr(bucket?.videos || []);
+  setFbVideoIdsArr(bucket?.fbVideoIds || []);
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [selectedCampaignId, selectedAccount, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
   // --- Pause/Unpause/Delete handlers ---
   const [isPaused, setIsPaused] = useState(false);
