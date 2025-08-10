@@ -1,1 +1,46 @@
-{}
+{
+  "schema": 1,
+  "defaults": {
+    "minDailyBudgetUSD": 20,
+    "minFlightHours": 48,
+    "stopRules": {
+      "spendPerAdUSD": 20,
+      "impressionsPerAd": 3000,
+      "clicksPerAd": 30,
+      "timeCapHours": 48
+    },
+    "plateau": {
+      "cpcDegradePct": 0.2,
+      "lookbackHoursRecent": 24,
+      "minImpressionsRecent": 1500,
+      "minSpendRecentUSD": 5
+    },
+    "budgetSplit": {
+      "champion": 0.75,
+      "challengers": 0.25
+    },
+    "variantCounts": {
+      "defaultPerType": 2,
+      "fallbackPerType": 1
+    },
+    "fallbackGuardrails": {
+      "dailyBudgetUSD": 20,
+      "flightHours": 48,
+      "bothAssetsFallback": { "images": 1, "videos": 1 }
+    },
+    "windows": {
+      "recentDays": 3,
+      "priorDays": 3
+    },
+    "limits": {
+      "maxNewAdsPerRunPerAdset": 2,
+      "minHoursBetweenRuns": 24,
+      "minHoursBetweenNewAds": 72
+    },
+    "kpi": {
+      "primary": "cpc",
+      "tiebreaker": "ctr"
+    }
+  },
+  "configs": []
+}

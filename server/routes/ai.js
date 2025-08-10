@@ -133,10 +133,10 @@ router.post('/generate-ad-copy', async (req, res) => {
   }
 
   let prompt =
-    `You are an expert direct‑response ad copywriter.\n\n` +
+    `You are an expert direct-response ad copywriter.\n\n` +
     (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
     `Write only the exact words for a spoken video ad script (45–55 words).` +
-    ` Hook → benefit → strong CTA. Friendly, trustworthy, conversion‑focused.\n`;
+    ` Hook → benefit → strong CTA. Friendly, trustworthy, conversion-focused.\n`;
 
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
@@ -156,6 +156,7 @@ router.post('/generate-ad-copy', async (req, res) => {
     return res.status(500).json({ error: "Failed to generate ad copy" });
   }
 });
+
 
 
 // ========== AI: AUTOMATIC AUDIENCE DETECTION ==========
@@ -493,9 +494,8 @@ router.post('/generate-image-with-overlay', async (req, res) => {
       .filter(Boolean)
       .join('\n');
 
-    // --- NEW: Add keywords from website to prompt ---
- // --- NEW prompt using training context + site keywords ---
-const prompt = `
+    // --- NEW prompt using training context + site keywords ---
+    const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
 You are the best Facebook ad copywriter. You are Jeremy Haynes.
 
@@ -510,38 +510,29 @@ ${formInfo}
 WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
 `.trim();
 
-let headline = "";
-let ctaText = "";
-try {
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages: [
-      { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
-      { role: "user", content: prompt }
-    ],
-    max_tokens: 120,
-    temperature: 0.2,
-  });
-  const raw = response.choices?.[0]?.message?.content?.trim();
-  let parsed = {};
-  try { parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw); } catch { parsed = {}; }
-  headline = parsed.headline?.trim() || "GET MORE CLIENTS NOW!";
-  ctaText = parsed.cta_box?.trim() || "BOOK YOUR FREE CALL!";
-} catch {
-  headline = "AI ERROR - CONTACT SUPPORT";
-  ctaText = "SEE DETAILS!";
-}
-headline = String(headline).toUpperCase();
-ctaText = String(ctaText).toUpperCase();
-
-
-    // ...Rest of your image overlay code...
-
-
-
-    // === ...the rest of your image processing logic follows as before... ===
-
-
+    let headline = "";
+    let ctaText = "";
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o",
+        messages: [
+          { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 120,
+        temperature: 0.2,
+      });
+      const raw = response.choices?.[0]?.message?.content?.trim();
+      let parsed = {};
+      try { parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw); } catch { parsed = {}; }
+      headline = parsed.headline?.trim() || "GET MORE CLIENTS NOW!";
+      ctaText = parsed.cta_box?.trim() || "BOOK YOUR FREE CALL!";
+    } catch {
+      headline = "AI ERROR - CONTACT SUPPORT";
+      ctaText = "SEE DETAILS!";
+    }
+    headline = String(headline).toUpperCase();
+    ctaText = String(ctaText).toUpperCase();
 
     // Download and fit main image
     const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -595,8 +586,7 @@ ctaText = String(ctaText).toUpperCase();
       .blur(blurStrength)
       .toBuffer();
 
-    // Helper for brightness (not used, keeping for ref)
-    // async function getAverageBrightness(imgBuffer) { ... }
+
 
     const headlineTextColor = "#181b20";
     const ctaTextColor = "#181b20";
@@ -662,9 +652,9 @@ ctaText = String(ctaText).toUpperCase();
 
     // --- Compose SVG on Image ---
     const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
-if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-const fileName = `${uuidv4()}.jpg`;
-const filePath = path.join(generatedPath, fileName);
+    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+    const fileName = `${uuidv4()}.jpg`;
+    const filePath = path.join(generatedPath, fileName);
 
     const outBuffer = await sharp({
       create: {
@@ -685,7 +675,11 @@ const filePath = path.join(generatedPath, fileName);
     const publicUrl = `/generated/${fileName}`;
     console.log("Glass overlay image saved at:", filePath, "and served as:", publicUrl);
 
-    return res.json({ imageUrl: publicUrl, overlay: { headline, ctaText } });
+    return res.json({
+      imageUrl: publicUrl,
+      absoluteImageUrl: absolutePublicUrl(publicUrl),
+      overlay: { headline, ctaText }
+    });
   } catch (err) {
     console.error("Image overlay error:", err.message);
     return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
@@ -999,17 +993,17 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Step 5: Generate GPT script (mention CTA)
-let prompt =
-  (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
-  `Write a video ad script for an online e-commerce business selling physical products. ` +
-  `Script MUST be 45–55 words (~15–18s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
-  `No scene directions or SFX — ONLY the spoken words.`;
-if (productType) prompt += `\nProduct category: ${productType}`;
-if (answers && Object.keys(answers).length) {
-  prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
-}
-if (url) prompt += `\nWebsite: ${url}`;
-prompt += `\nRespond ONLY with the script text.`;
+    let prompt =
+      (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
+      `Write a video ad script for an online e-commerce business selling physical products. ` +
+      `Script MUST be 45–55 words (~15–18s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
+      `No scene directions or SFX — ONLY the spoken words.`;
+    if (productType) prompt += `\nProduct category: ${productType}`;
+    if (answers && Object.keys(answers).length) {
+      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+    }
+    if (url) prompt += `\nWebsite: ${url}`;
+    prompt += `\nRespond ONLY with the script text.`;
 
     let script;
     try {
@@ -1028,6 +1022,7 @@ prompt += `\nRespond ONLY with the script text.`;
       console.error("FFMPEG ERROR: GPT script gen failed", e);
       return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
     }
+
 
     // Step 6: Generate TTS voiceover
     let ttsPath;
@@ -1162,48 +1157,43 @@ prompt += `\nRespond ONLY with the script text.`;
     // Clean up temp files
     [tempConcat, tempTrimmed, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
 
-    // Return public video URL and script
-  // Return public video URL and (optionally) upload to Ad Account
-// Return public video URL and (optionally) upload to Ad Account
-const publicVideoUrl = `/generated/${videoId}.mp4`;
-const absoluteUrl = absolutePublicUrl(publicVideoUrl);
+    // Return public video URL and (optionally) upload to Ad Account
+    const publicVideoUrl = `/generated/${videoId}.mp4`;
+    const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
-let fbVideoId = null;
-try {
-  // Read ad account from body, but get the token with a fallback to tokenStore
-  const { fbAdAccountId } = req.body || {};
-  const userAccessToken =
-    (req.body && req.body.userAccessToken) || getFbUserToken();
+    let fbVideoId = null;
+    try {
+      // Read ad account from body, but get the token with a fallback to tokenStore
+      const { fbAdAccountId } = req.body || {};
+      const userAccessToken =
+        (req.body && req.body.userAccessToken) || getFbUserToken();
 
-  if (fbAdAccountId && userAccessToken) {
-    const up = await uploadVideoToAdAccount(
-      fbAdAccountId,
-      userAccessToken,
-      absoluteUrl,
-      'SmartMark Generated Video',
-      'Generated by SmartMark'
-    );
-    fbVideoId = up && up.id ? up.id : null;
-    console.log('Uploaded to Ad Account. video_id:', fbVideoId);
-  } else {
-    console.log('Skipping FB advideos upload (missing fbAdAccountId or userAccessToken).');
-  }
-} catch (e) {
-  console.error('Ad Account video upload failed:', e?.response?.data || e.message);
-}
+      if (fbAdAccountId && userAccessToken) {
+        const up = await uploadVideoToAdAccount(
+          fbAdAccountId,
+          userAccessToken,
+          absoluteUrl,
+          'SmartMark Generated Video',
+          'Generated by SmartMark'
+        );
+        fbVideoId = up && up.id ? up.id : null;
+        console.log('Uploaded to Ad Account. video_id:', fbVideoId);
+      } else {
+        console.log('Skipping FB advideos upload (missing fbAdAccountId or userAccessToken).');
+      }
+    } catch (e) {
+      console.error('Ad Account video upload failed:', e?.response?.data || e.message);
+    }
 
-return res.json({
-  videoUrl: publicVideoUrl,
-  absoluteVideoUrl: absoluteUrl,
-  fbVideoId,
-  video: { url: publicVideoUrl, script, overlayText, voice: TTS_VOICE },
-  script,
-  overlayText,
-  voice: TTS_VOICE
-});
-
-
-
+    return res.json({
+      videoUrl: publicVideoUrl,
+      absoluteVideoUrl: absoluteUrl,
+      fbVideoId,
+      video: { url: publicVideoUrl, script, overlayText, voice: TTS_VOICE },
+      script,
+      overlayText,
+      voice: TTS_VOICE
+    });
   } catch (err) {
     // Always send valid JSON even on crash
     console.error("Video route error:", err);

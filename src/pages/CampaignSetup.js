@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronUp } from "react-icons/fa";
+import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 import { FaExpand } from "react-icons/fa";
 
@@ -49,7 +49,6 @@ function VideoPreviewBox({ videoUrl }) {
     setPlaying(!playing);
   };
 
-  // Allow entering fullscreen via double click
   const enterFullScreen = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -58,7 +57,6 @@ function VideoPreviewBox({ videoUrl }) {
     }
   };
 
-  // When the video ends, reset play icon
   const onEnded = () => setPlaying(false);
 
   return (
@@ -87,12 +85,11 @@ function VideoPreviewBox({ videoUrl }) {
         width={110}
         height={110}
         style={{ objectFit: "cover", width: "100%", height: "100%", borderRadius: 14, background: "#232a24" }}
-        controls={false} // disables controls, we handle play/pause/fullscreen via click/double-click
+        controls={false}
         onEnded={onEnded}
         preload="metadata"
         tabIndex={-1}
       />
-      {/* Overlay Play icon if not playing */}
       {!playing && (
         <div style={{
           position: "absolute",
@@ -105,7 +102,6 @@ function VideoPreviewBox({ videoUrl }) {
           </svg>
         </div>
       )}
-      {/* Optional: add a fullscreen icon/button in the corner if you want */}
       <button
         onClick={enterFullScreen}
         style={{
@@ -155,12 +151,12 @@ function SchedulerInline({
   headline,
   body,
   answers,
-  mediaSelection
+  mediaSelection,
+  fbVideoId // NEW: pass-through for lightweight upload path
 }) {
   const STORE_KEY = "sm_sched_jobs";
   const [action, setAction] = React.useState("generate-video"); // generate-video | launch
 
-  // default runAt = now + 10m (rounded to minute)
   const defaultRun = React.useMemo(() => {
     const d = new Date(Date.now() + 10 * 60 * 1000);
     d.setSeconds(0, 0);
@@ -173,12 +169,10 @@ function SchedulerInline({
     catch { return []; }
   });
 
-  // persist jobs
   React.useEffect(() => {
     localStorage.setItem(STORE_KEY, JSON.stringify(jobs));
   }, [jobs]);
 
-  // helpers
   const uid = () =>
     (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
@@ -197,12 +191,10 @@ function SchedulerInline({
     });
   };
 
-  // Build request for each action using *current* UI state (snapshot taken when scheduling)
   const buildPayload = async (kind) => {
     const acctId = String(selectedAccount || "").replace(/^act_/, "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    // snapshot creatives
     let adImage = mediaImageUrl || "";
     let adVideo = mediaVideoUrl || "";
     if (kind === "launch") {
@@ -217,7 +209,8 @@ function SchedulerInline({
         body: {
           url: form?.url || "",
           answers: { ...answers, industry: form?.industry || answers?.industry },
-          regenerateToken: uid()
+          regenerateToken: uid(),
+          fbAdAccountId: acctId || undefined // allows backend to upload to FB library if token available
         }
       };
     }
@@ -235,6 +228,7 @@ function SchedulerInline({
           adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
           adImage: adImage || "",
           adVideo: adVideo || "",
+          fbVideoId: fbVideoId || null,
           answers: answers || {},
           mediaSelection: mediaSelection || "both"
         }
@@ -244,7 +238,6 @@ function SchedulerInline({
     throw new Error("Unknown action");
   };
 
-  // execution loop (runs ~every 1.5s and fires due jobs)
   React.useEffect(() => {
     let alive = true;
 
@@ -253,13 +246,12 @@ function SchedulerInline({
 
       const dueIdx = jobs.findIndex(
         (j) => j.status === "pending" &&
-               new Date(j.runAt).getTime() <= Date.now() + 2000 // small grace
+               new Date(j.runAt).getTime() <= Date.now() + 2000
       );
 
       if (dueIdx !== -1) {
         const job = jobs[dueIdx];
 
-        // mark running
         setJobs((prev) => {
           const clone = [...prev];
           clone[dueIdx] = { ...clone[dueIdx], status: "running", startedAt: nowIso() };
@@ -302,7 +294,6 @@ function SchedulerInline({
       setTimeout(tick, 1500);
     };
 
-    // ensure all newly created jobs start as pending
     if (jobs.some(j => !j.status)) {
       setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
     }
@@ -311,11 +302,9 @@ function SchedulerInline({
     return () => { alive = false; };
   }, [jobs, backendUrl]);
 
-  // add/clear
   const addJob = async () => {
     if (!runAt) return;
 
-    // launch guards
     if (action === "launch") {
       if (!selectedAccount) return alert("Select an Ad Account first.");
       if (!selectedPageId) return alert("Select a Facebook Page first.");
@@ -332,7 +321,7 @@ function SchedulerInline({
 
     const job = {
       id: uid(),
-      runAt,                      // 'YYYY-MM-DDTHH:mm'
+      runAt,
       createdAt: nowIso(),
       status: "pending",
       action,
@@ -342,7 +331,6 @@ function SchedulerInline({
     };
 
     setJobs((prev) => [...prev, job].sort((a, b) => new Date(a.runAt) - new Date(b.runAt)));
-    // bump default +15m
     const next = new Date(new Date(runAt).getTime() + 15 * 60 * 1000);
     next.setSeconds(0, 0);
     setRunAt(next.toISOString().slice(0, 16));
@@ -352,9 +340,8 @@ function SchedulerInline({
     setJobs((prev) => prev.filter((j) => j.status !== "done"));
   };
 
-  const minAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16); // now - 1m
+  const minAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
 
-  // UI: compact bar
   return (
     <div style={{
       display: "flex",
@@ -419,13 +406,11 @@ function SchedulerInline({
   );
 }
 
-
 const CampaignSetup = () => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // --- Persistent State (Auto Save + Restore) ---
   const [form, setForm] = useState(() => {
     try {
       return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {};
@@ -450,7 +435,6 @@ const CampaignSetup = () => {
     return false;
   });
 
-  // Other UI state (not needed to persist)
   const [userKey, setUserKey] = useState("");
   const [adAccounts, setAdAccounts] = useState([]);
   const [pages, setPages] = useState([]);
@@ -468,18 +452,18 @@ const CampaignSetup = () => {
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
   const [campaignCount, setCampaignCount] = useState(0);
+  const [fbVideoId, setFbVideoId] = useState(() => localStorage.getItem("smartmark_last_fb_video_id") || "");
 
   useEffect(() => {
     if (!selectedAccount) return;
-
     const acctId = selectedAccount.replace("act_", "");
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
       .then(res => res.json())
       .then(data => {
-        if (Array.isArray(data)) {
-          const activeCount = data.filter(c => c.status === "ACTIVE").length;
-          setCampaignCount(activeCount);
-        }
+        // Accept both shapes: array or {data:[...]}
+        const list = Array.isArray(data) ? data : (data?.data || []);
+        const activeCount = list.filter(c => (c.status || c.effective_status) === "ACTIVE").length;
+        setCampaignCount(activeCount);
       })
       .catch(err => console.error("Error fetching campaigns:", err));
   }, [selectedAccount]);
@@ -496,10 +480,7 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, [location.state?.mediaSelection]);
 
-
-
-
-// =============== AUTO-SAVE/RESTORE ================
+  // =============== AUTO-SAVE/RESTORE ================
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
   useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
@@ -512,39 +493,56 @@ const CampaignSetup = () => {
     }
   }, [fbConnected]);
 
-// ============= YOUR COMPONENT CONTINUES AS USUAL FROM HERE =============
+  // Always use navigation state if present, otherwise fallback to localStorage
+  useEffect(() => {
+    let img = location.state?.imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+    let vid = location.state?.videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
+    let vidId = location.state?.fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || "";
 
-// Always use navigation state if present, otherwise fallback to localStorage
+    setMediaImageUrl(img);
+    setMediaVideoUrl(vid);
+    if (vidId) setFbVideoId(vidId);
+
+    if (location.state?.imageUrl) localStorage.setItem("smartmark_last_image_url", location.state.imageUrl);
+    if (location.state?.videoUrl) localStorage.setItem("smartmark_last_video_url", location.state.videoUrl);
+    if (location.state?.fbVideoId) localStorage.setItem("smartmark_last_fb_video_id", String(location.state.fbVideoId));
+  }, [location.state]);
+
+  const [dropdownOpen, setDropdownOpen] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+
+// when reading from navigation state, ALIAS the fields to avoid name collisions
+const {
+  imageUrl: navImageUrl,
+  videoUrl: navVideoUrl,
+  headline,
+  body,
+  videoScript,
+  answers,
+  fbVideoId: navFbVideoId,
+} = location.state || {};
+
+// REPLACE both of your "Always use navigation state..." effects with this ONE:
 useEffect(() => {
-  let img = location.state?.imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
-  let vid = location.state?.videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
+  const img = navImageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+  const vid = navVideoUrl || localStorage.getItem("smartmark_last_video_url") || "";
+  const vidId = navFbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || "";
 
   setMediaImageUrl(img);
   setMediaVideoUrl(vid);
+  if (vidId) setFbVideoId(vidId);
 
-  // Update localStorage if coming from navigation
-  if (location.state?.imageUrl) localStorage.setItem("smartmark_last_image_url", location.state.imageUrl);
-  if (location.state?.videoUrl) localStorage.setItem("smartmark_last_video_url", location.state.videoUrl);
-}, [location.state]);
+  if (navImageUrl) localStorage.setItem("smartmark_last_image_url", navImageUrl);
+  if (navVideoUrl) localStorage.setItem("smartmark_last_video_url", navVideoUrl);
+  if (navFbVideoId) localStorage.setItem("smartmark_last_fb_video_id", String(navFbVideoId));
+}, [navImageUrl, navVideoUrl, navFbVideoId]);
 
+// later when building the launch payload:
+const payload = {
+  // ...
+  fbVideoId: fbVideoId || undefined,
+};
 
-
-
-  // Dropdown open state (always open as per your request)
-  const [dropdownOpen, setDropdownOpen] = useState(true);
-
-  // --- Pause/Play state ---
-  const [isPaused, setIsPaused] = useState(false);
-
-  // --- Get creative/copy data from FormPage (if present) ---
-  const {
-    imageUrl,
-    videoUrl,
-    headline,
-    body,
-    videoScript,
-    answers
-  } = location.state || {};
 
   useEffect(() => {
     let email = localStorage.getItem("smartmark_last_email") || "";
@@ -567,31 +565,27 @@ useEffect(() => {
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
-useEffect(() => {
-  const params = new URLSearchParams(location.search);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
 
-  // Set connected flag
-  if (params.get("facebook_connected") === "1") {
-    setFbConnected(true);
-    if (userKey) {
-      localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
+    if (params.get("facebook_connected") === "1") {
+      setFbConnected(true);
+      if (userKey) {
+        localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
+      }
     }
-  }
 
-  // OPTIONAL: capture a short-lived user token if your backend sends it back
-  const tokenFromCallback = params.get("fb_user_token");
-  if (tokenFromCallback) {
-    setFbUserToken(tokenFromCallback);
-    localStorage.setItem("smartmark_fb_user_token", tokenFromCallback);
-  }
+    const tokenFromCallback = params.get("fb_user_token");
+    if (tokenFromCallback) {
+      setFbUserToken(tokenFromCallback);
+      localStorage.setItem("smartmark_fb_user_token", tokenFromCallback);
+    }
 
-  // Clean URL
-  if (params.get("facebook_connected") === "1" || tokenFromCallback) {
-    window.history.replaceState({}, document.title, "/setup");
-  }
-  // eslint-disable-next-line
-}, [location, userKey]);
-
+    if (params.get("facebook_connected") === "1" || tokenFromCallback) {
+      window.history.replaceState({}, document.title, "/setup");
+    }
+    // eslint-disable-next-line
+  }, [location, userKey]);
 
   useEffect(() => {
     if (fbConnected && userKey) {
@@ -662,7 +656,6 @@ useEffect(() => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // --- Pause/Play & Delete ---
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = selectedAccount.replace("act_", "");
@@ -715,68 +708,65 @@ useEffect(() => {
     parseFloat(budget) >= 3
   );
 
-  // Utility to fetch and convert a URL to base64
-// Utility to fetch and convert a URL to base64
-async function urlToBase64(url) {
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return new Promise((resolve) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result);
-    reader.readAsDataURL(blob);
-  });
-}
-
-// CampaignSetup.js — REPLACE the whole handleLaunch with this
-// === REPLACE the whole handleLaunch function with this ===
-const handleLaunch = async () => {
-  setLoading(true);
-  try {
-    const acctId = selectedAccount.replace("act_", "");
-    const safeBudget = Math.max(3, Number(budget) || 0);
-
-    // Use creatives already shown on this page (coming from FormPage)
-    let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
-    let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
-
-    // Convert to base64 only if not already data: URLs
-    if (adImage && !adImage.startsWith("data:")) {
-      adImage = await urlToBase64(adImage);
-    }
-    if (adVideo && !adVideo.startsWith("data:")) {
-      adVideo = await urlToBase64(adVideo);
-    }
-
-    const payload = {
-      form: { ...form },
-      budget: safeBudget,
-      campaignType: form?.campaignType || "Website Traffic",
-      pageId: selectedPageId,
-      aiAudience: form?.aiAudience || answers?.aiAudience || "",
-      adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-      adImage: adImage || "",
-      adVideo: adVideo || "",
-      answers: answers || {},
-      mediaSelection // "image" | "video" | "both"
-    };
-
-    const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+  async function urlToBase64(url) {
+    const res = await fetch(url);
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
     });
-
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "Server error");
-    setLaunched(true);
-    setLaunchResult(json);
-    setTimeout(() => setLaunched(false), 1500);
-  } catch (err) {
-    alert("Failed to launch campaign: " + (err.message || ""));
-    console.error(err);
   }
-  setLoading(false);
+
+  const handleLaunch = async () => {
+    setLoading(true);
+    try {
+      const acctId = selectedAccount.replace("act_", "");
+      const safeBudget = Math.max(3, Number(budget) || 0);
+
+      let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+      let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
+      const maybeFbVideoId = (location.state && location.state.fbVideoId) || fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || null;
+
+      if (adImage && !adImage.startsWith("data:")) {
+        adImage = await urlToBase64(adImage);
+      }
+      if (adVideo && !adVideo.startsWith("data:")) {
+        adVideo = await urlToBase64(adVideo);
+      }
+
+     const payload = {
+  form: { ...form },
+  budget: safeBudget,
+  campaignType: form?.campaignType || "Website Traffic",
+  pageId: selectedPageId,
+  aiAudience: form?.aiAudience || answers?.aiAudience || "",
+  adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+  adImage: adImage || "",
+  adVideo: adVideo || "",
+  answers: answers || {},
+  mediaSelection,
+  fbVideoId: fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || undefined, // <— add this
 };
+
+
+      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Server error");
+      setLaunched(true);
+      setLaunchResult(json);
+      setTimeout(() => setLaunched(false), 1500);
+    } catch (err) {
+      alert("Failed to launch campaign: " + (err.message || ""));
+      console.error(err);
+    }
+    setLoading(false);
+  };
 
   const openFbPaymentPopup = () => {
     if (!selectedAccount) {
@@ -901,102 +891,102 @@ const handleLaunch = async () => {
           alignItems: "center",
           marginBottom: isMobile ? 30 : 0,
           position: "relative",
-          minHeight: "600px", // ensure left panel height for match
+          minHeight: "600px",
         }}>
          {/* Facebook Connect */}
-<button
-  onClick={() => {
-    window.location.href = `${backendUrl}/auth/facebook`;
-    setFbConnected(true);
-    localStorage.setItem("smartmark_fb_connected", JSON.stringify({ connected: 1, time: Date.now() }));
-  }}
-  style={{
-    padding: "1.15rem 2.8rem",
-    borderRadius: "1.5rem",
-    border: "none",
-    background: fbConnected ? ACCENT_GREEN : "#1877F2",
-    color: "#fff",
-    fontWeight: 800,
-    fontSize: "1.25rem",
-    boxShadow: "0 2px 12px #1877f233",
-    letterSpacing: "1px",
-    cursor: "pointer",
-    fontFamily: MODERN_FONT,
-    width: "100%",
-    maxWidth: 370,
-    margin: "0 auto",
-    display: "block",
-    transition: "background 0.23s"
-  }}
->
-  {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-</button>
-{fbConnected && (
-  <button
-    onClick={openFbPaymentPopup}
-    style={{
-      marginTop: 16,
-      padding: "0.72rem 1.5rem",
-      borderRadius: "1.1rem",
-      background: "#fff",
-      color: "#1877F2",
-      fontWeight: 700,
-      border: "none",
-      cursor: "pointer",
-      fontFamily: MODERN_FONT,
-      fontSize: "1.01rem",
-      boxShadow: "0 2px 8px #1877f233",
-      width: "100%",
-      maxWidth: 370,
-      marginLeft: "auto",
-      marginRight: "auto",
-      display: "block"
-    }}
-  >
-    Add/Manage Payment Method
-  </button>
-)}
+        <button
+          onClick={() => {
+            window.location.href = `${backendUrl}/auth/facebook`;
+            setFbConnected(true);
+            localStorage.setItem("smartmark_fb_connected", JSON.stringify({ connected: 1, time: Date.now() }));
+          }}
+          style={{
+            padding: "1.15rem 2.8rem",
+            borderRadius: "1.5rem",
+            border: "none",
+            background: fbConnected ? ACCENT_GREEN : "#1877F2",
+            color: "#fff",
+            fontWeight: 800,
+            fontSize: "1.25rem",
+            boxShadow: "0 2px 12px #1877f233",
+            letterSpacing: "1px",
+            cursor: "pointer",
+            fontFamily: MODERN_FONT,
+            width: "100%",
+            maxWidth: 370,
+            margin: "0 auto",
+            display: "block",
+            transition: "background 0.23s"
+          }}
+        >
+          {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
+        </button>
+        {fbConnected && (
+          <button
+            onClick={openFbPaymentPopup}
+            style={{
+              marginTop: 16,
+              padding: "0.72rem 1.5rem",
+              borderRadius: "1.1rem",
+              background: "#fff",
+              color: "#1877F2",
+              fontWeight: 700,
+              border: "none",
+              cursor: "pointer",
+              fontFamily: MODERN_FONT,
+              fontSize: "1.01rem",
+              boxShadow: "0 2px 8px #1877f233",
+              width: "100%",
+              maxWidth: 370,
+              marginLeft: "auto",
+              marginRight: "auto",
+              display: "block"
+            }}
+          >
+            Add/Manage Payment Method
+          </button>
+        )}
 
        {/* CAMPAIGN NAME + INLINE SCHEDULER */}
-<div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-  <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-    <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
-      Campaign Name
-    </label>
-    {/* Inline Scheduler sits here */}
-    <SchedulerInline
-      backendUrl={backendUrl}
-      form={form}
-      selectedAccount={selectedAccount}
-      selectedPageId={selectedPageId}
-      budget={budget}
-      mediaImageUrl={mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || ""}
-      mediaVideoUrl={mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || ""}
-      headline={headline}
-      body={body}
-      answers={answers}
-      mediaSelection={mediaSelection}
-    />
-  </div>
+        <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
+              Campaign Name
+            </label>
+            <SchedulerInline
+              backendUrl={backendUrl}
+              form={form}
+              selectedAccount={selectedAccount}
+              selectedPageId={selectedPageId}
+              budget={budget}
+              mediaImageUrl={mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || ""}
+              mediaVideoUrl={mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || ""}
+              headline={headline}
+              body={body}
+              answers={answers}
+              mediaSelection={mediaSelection}
+              fbVideoId={fbVideoId || location.state?.fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || null}
+            />
+          </div>
 
-  <input
-    type="text"
-    value={form.campaignName || ""}
-    onChange={e => setForm({ ...form, campaignName: e.target.value })}
-    placeholder="Name your campaign"
-    style={{
-      padding: "1rem 1.1rem",
-      borderRadius: "1.1rem",
-      border: "1.2px solid #57dfa9",
-      fontSize: "1.14rem",
-      background: "#1c2120",
-      color: "#b3f1d6",
-      marginBottom: "1rem",
-      outline: "none",
-      width: "100%"
-    }}
-  />
-</div>
+          <input
+            type="text"
+            value={form.campaignName || ""}
+            onChange={e => setForm({ ...form, campaignName: e.target.value })}
+            placeholder="Name your campaign"
+            style={{
+              padding: "1rem 1.1rem",
+              borderRadius: "1.1rem",
+              border: "1.2px solid #57dfa9",
+              fontSize: "1.14rem",
+              background: "#1c2120",
+              color: "#b3f1d6",
+              marginBottom: "1rem",
+              outline: "none",
+              width: "100%"
+            }}
+          />
+        </div>
 
           {/* CAMPAIGN BUDGET */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
@@ -1005,7 +995,7 @@ const handleLaunch = async () => {
             </label>
             <input
               type="number"
-              placeholder="Enter budget (minimum $2)"
+              placeholder="Enter budget (minimum $3)"
               min={3}
               step={1}
               value={budget}
@@ -1051,80 +1041,79 @@ const handleLaunch = async () => {
                   width: "100%"
                 }}
               >
-
-<div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6, margin: "8px 0" }}>
-    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3 }}>Your CashApp:</label>
-    <input
-      type="text"
-      placeholder="CashApp username"
-      value={cashapp}
-      onChange={e => {
-        setCashapp(e.target.value);
-        localStorage.setItem("smartmark_login_username", e.target.value);
-      }}
-      style={{
-        padding: "0.74rem 1rem",
-        borderRadius: "0.85rem",
-        border: "1.2px solid #57dfa9",
-        fontSize: "1.09rem",
-        background: "#1c2120",
-        color: "#b3f1d6",
-        marginBottom: 3,
-        width: "100%"
-      }}
-      autoComplete="username"
-    />
-    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3, marginTop: 4 }}>Your Email:</label>
-    <input
-      type="email"
-      placeholder="Email address"
-      value={email}
-      onChange={e => {
-        setEmail(e.target.value);
-        localStorage.setItem("smartmark_login_password", e.target.value);
-      }}
-      style={{
-        padding: "0.74rem 1rem",
-        borderRadius: "0.85rem",
-        border: "1.2px solid #57dfa9",
-        fontSize: "1.09rem",
-        background: "#1c2120",
-        color: "#b3f1d6",
-        marginBottom: 3,
-        width: "100%"
-      }}
-      autoComplete="email"
-    />
-  </div>
-</div>
+                <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6, margin: "8px 0" }}>
+                    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3 }}>Your CashApp:</label>
+                    <input
+                      type="text"
+                      placeholder="CashApp username"
+                      value={cashapp}
+                      onChange={e => {
+                        setCashapp(e.target.value);
+                        localStorage.setItem("smartmark_login_username", e.target.value);
+                      }}
+                      style={{
+                        padding: "0.74rem 1rem",
+                        borderRadius: "0.85rem",
+                        border: "1.2px solid #57dfa9",
+                        fontSize: "1.09rem",
+                        background: "#1c2120",
+                        color: "#b3f1d6",
+                        marginBottom: 3,
+                        width: "100%"
+                      }}
+                      autoComplete="username"
+                    />
+                    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3, marginTop: 4 }}>Your Email:</label>
+                    <input
+                      type="email"
+                      placeholder="Email address"
+                      value={email}
+                      onChange={e => {
+                        setEmail(e.target.value);
+                        localStorage.setItem("smartmark_login_password", e.target.value);
+                      }}
+                      style={{
+                        padding: "0.74rem 1rem",
+                        borderRadius: "0.85rem",
+                        border: "1.2px solid #57dfa9",
+                        fontSize: "1.09rem",
+                        background: "#1c2120",
+                        color: "#b3f1d6",
+                        marginBottom: 3,
+                        width: "100%"
+                      }}
+                      autoComplete="email"
+                    />
+                  </div>
+                </div>
                 Pay (${fee.toFixed(2)}) to <span style={{ color: ACCENT_GREEN }}>$Wknowles20</span>
               </div>
             )}
           </div>
 
-         <button
-  onClick={handleLaunch}
-  disabled={loading || campaignCount >= 2}
-  style={{
-    background: campaignCount >= 2 ? "#ccc" : "#14e7b9",
-    color: "#181b20",
-    border: "none",
-    borderRadius: 13,
-    fontWeight: 700,
-    fontSize: "1.19rem",
-    padding: "18px 72px",
-    marginBottom: 18,
-    marginTop: 2,
-    fontFamily: MODERN_FONT,
-    boxShadow: "0 2px 16px #0cc4be24",
-    cursor: loading || campaignCount >= 2 ? "not-allowed" : "pointer",
-    transition: "background 0.18s",
-    opacity: loading || campaignCount >= 2 ? 0.6 : 1
-  }}
->
-  {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
-</button>
+          <button
+            onClick={handleLaunch}
+            disabled={loading || campaignCount >= 2}
+            style={{
+              background: campaignCount >= 2 ? "#ccc" : "#14e7b9",
+              color: "#181b20",
+              border: "none",
+              borderRadius: 13,
+              fontWeight: 700,
+              fontSize: "1.19rem",
+              padding: "18px 72px",
+              marginBottom: 18,
+              marginTop: 2,
+              fontFamily: MODERN_FONT,
+              boxShadow: "0 2px 16px #0cc4be24",
+              cursor: loading || campaignCount >= 2 ? "not-allowed" : "pointer",
+              transition: "background 0.18s",
+              opacity: loading || campaignCount >= 2 ? 0.6 : 1
+            }}
+          >
+            {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
+          </button>
 
           {launched && launchResult && (
             <div style={{
@@ -1151,7 +1140,6 @@ const handleLaunch = async () => {
           minWidth: isMobile ? "100vw" : 400,
           maxWidth: 430,
         }}>
-          {/* Metrics Pane with Campaign Dropdown */}
           <div
             style={{
               background: "#1b1e22f7",
@@ -1166,10 +1154,9 @@ const handleLaunch = async () => {
               flexDirection: "column",
               gap: "0.8rem",
               alignItems: "flex-start",
-              minHeight: "600px", // match left minHeight
+              minHeight: "600px",
             }}
           >
-            {/* Campaign Dropdown + Buttons */}
             <div style={{ width: "100%", marginBottom: 6 }}>
               <div
                 style={{
@@ -1265,7 +1252,6 @@ const handleLaunch = async () => {
                   )}
                 </div>
               </div>
-              {/* Dropdown for campaign selection */}
               {dropdownOpen && (
                 <div style={{
                   width: "100%",
@@ -1297,7 +1283,6 @@ const handleLaunch = async () => {
                 </div>
               )}
             </div>
-            {/* Metrics for selected campaign */}
             {selectedCampaignId && (
               <>
                 <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
@@ -1312,7 +1297,6 @@ const handleLaunch = async () => {
                 </b></div>
               </>
             )}
-            {/* Ad Account & Page Selectors */}
             <div style={{
               width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
               display: "flex", flexDirection: "column", gap: 14
@@ -1342,163 +1326,157 @@ const handleLaunch = async () => {
                 </select>
               </div>
 
-   {/* MEDIA PREVIEW: Video & Image */}
-{(mediaImageUrl || mediaVideoUrl) && (
-  <div
-    style={{
-      display: "flex",
-      flexDirection: mediaImageUrl && mediaVideoUrl ? "row" : "column",
-      gap: "18px",
-      margin: "22px 0 0 0",
-      alignItems: "center",
-      justifyContent: "center"
-    }}
-  >
-    {/* IMAGE PREVIEW WITH FULLSCREEN BUTTON */}
-    {mediaImageUrl && (
-      <div
-        style={{
-          position: "relative",
-          width: 120,
-          height: 120,
-          borderRadius: 16,
-          overflow: "hidden",
-          background: "#232a24",
-          boxShadow: "0 2px 18px 0 rgba(30,200,133,0.19)",
-          border: "2.2px solid #1ec885",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <img
-          src={mediaImageUrl}
-          alt="Ad Creative"
-          style={{
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            borderRadius: 16,
-            display: "block"
-          }}
-        />
-        {/* Fullscreen Button */}
-        <button
-          style={{
-            position: "absolute",
-            bottom: 7,
-            right: 7,
-            background: "rgba(24,84,49,0.93)",
-            border: "none",
-            borderRadius: 7,
-            padding: 7,
-            cursor: "pointer",
-            color: "#fff",
-            fontSize: 16,
-            zIndex: 2,
-            display: "flex",
-            alignItems: "center",
-            boxShadow: "0 1px 7px #20292777"
-          }}
-          onClick={() => {
-            setModalImg(mediaImageUrl);
-            setShowImageModal(true);
-          }}
-          aria-label="Fullscreen Image"
-        >
-          <FaExpand />
-        </button>
-      </div>
-    )}
-    {/* VIDEO PREVIEW */}
-    {mediaVideoUrl && (
-      <div
-        style={{
-          width: 120,
-          height: 120,
-          borderRadius: 16,
-          overflow: "hidden",
-          background: "#232a24",
-          boxShadow: "0 2px 18px 0 rgba(30,200,133,0.12)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          border: "2.2px solid #1ec885",
-          position: "relative"
-        }}
-      >
-        <VideoPreviewBox videoUrl={mediaVideoUrl} />
-      </div>
-    )}
-    {/* IMAGE FULLSCREEN MODAL */}
-    <ImageModal
-      open={showImageModal}
-      imageUrl={modalImg}
-      onClose={() => setShowImageModal(false)}
-    />
-  </div>
-)}
+              {(mediaImageUrl || mediaVideoUrl) && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: mediaImageUrl && mediaVideoUrl ? "row" : "column",
+                    gap: "18px",
+                    margin: "22px 0 0 0",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  {mediaImageUrl && (
+                    <div
+                      style={{
+                        position: "relative",
+                        width: 120,
+                        height: 120,
+                        borderRadius: 16,
+                        overflow: "hidden",
+                        background: "#232a24",
+                        boxShadow: "0 2px 18px 0 rgba(30,200,133,0.19)",
+                        border: "2.2px solid #1ec885",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <img
+                        src={mediaImageUrl}
+                        alt="Ad Creative"
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                          borderRadius: 16,
+                          display: "block"
+                        }}
+                      />
+                      <button
+                        style={{
+                          position: "absolute",
+                          bottom: 7,
+                          right: 7,
+                          background: "rgba(24,84,49,0.93)",
+                          border: "none",
+                          borderRadius: 7,
+                          padding: 7,
+                          cursor: "pointer",
+                          color: "#fff",
+                          fontSize: 16,
+                          zIndex: 2,
+                          display: "flex",
+                          alignItems: "center",
+                          boxShadow: "0 1px 7px #20292777"
+                        }}
+                        onClick={() => {
+                          setModalImg(mediaImageUrl);
+                          setShowImageModal(true);
+                        }}
+                        aria-label="Fullscreen Image"
+                      >
+                        <FaExpand />
+                      </button>
+                    </div>
+                  )}
+                  {mediaVideoUrl && (
+                    <div
+                      style={{
+                        width: 120,
+                        height: 120,
+                        borderRadius: 16,
+                        overflow: "hidden",
+                        background: "#232a24",
+                        boxShadow: "0 2px 18px 0 rgba(30,200,133,0.12)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: "2.2px solid #1ec885",
+                        position: "relative"
+                      }}
+                    >
+                      <VideoPreviewBox videoUrl={mediaVideoUrl} />
+                    </div>
+                  )}
+                  <ImageModal
+                    open={showImageModal}
+                    imageUrl={modalImg}
+                    onClose={() => setShowImageModal(false)}
+                  />
+                </div>
+              )}
 
-<div>
-  <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
-  <select
-    value={selectedPageId}
-    onChange={e => setSelectedPageId(e.target.value)}
-    style={{
-      padding: "0.7rem",
-      borderRadius: "1.1rem",
-      fontSize: "1.07rem",
-      width: "100%",
-      outline: "none",
-      border: "1.5px solid #2e5c44",
-      background: "#2c2f33",
-      color: "#c7fbe3",
-      marginTop: 5
-    }}>
-    <option value="">Select a page</option>
-    {pages.map(p => (
-      <option key={p.id} value={p.id}>{p.name}</option>
-    ))}
-  </select>
-</div>
-</div>
-</div>
-</aside>
-</div>
-{/* Pause Modal */}
-{showPauseModal && (
-  <div style={{
-    position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
-    background: 'rgba(0,0,0,0.34)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-  }}>
-    <div style={{
-      background: '#24262b', borderRadius: 18, padding: 36, minWidth: 370, boxShadow: "0 10px 44px #000a"
-    }}>
-      <div style={{ fontWeight: 800, fontSize: 22, marginBottom: 28, color: '#fff' }}>
-        Are you sure you want to pause this campaign?
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
+                <select
+                  value={selectedPageId}
+                  onChange={e => setSelectedPageId(e.target.value)}
+                  style={{
+                    padding: "0.7rem",
+                    borderRadius: "1.1rem",
+                    fontSize: "1.07rem",
+                    width: "100%",
+                    outline: "none",
+                    border: "1.5px solid #2e5c44",
+                    background: "#2c2f33",
+                    color: "#c7fbe3",
+                    marginTop: 5
+                  }}>
+                  <option value="">Select a page</option>
+                  {pages.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </aside>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 22 }}>
-        <button
-          onClick={() => setShowPauseModal(false)}
-          style={{ background: '#e74c3c', color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
-        >
-          No
-        </button>
-        <button
-          onClick={async () => {
-            setShowPauseModal(false);
-            await handlePauseUnpause();
-          }}
-          style={{ background: ACCENT_GREEN, color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
-        >
-          Yes, Pause
-        </button>
-      </div>
+      {showPauseModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
+          background: 'rgba(0,0,0,0.34)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+          <div style={{
+            background: '#24262b', borderRadius: 18, padding: 36, minWidth: 370, boxShadow: "0 10px 44px #000a"
+          }}>
+            <div style={{ fontWeight: 800, fontSize: 22, marginBottom: 28, color: '#fff' }}>
+              Are you sure you want to pause this campaign?
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 22 }}>
+              <button
+                onClick={() => setShowPauseModal(false)}
+                style={{ background: '#e74c3c', color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
+              >
+                No
+              </button>
+              <button
+                onClick={async () => {
+                  setShowPauseModal(false);
+                  await handlePauseUnpause();
+                }}
+                style={{ background: ACCENT_GREEN, color: '#fff', border: 'none', padding: '0.7rem 1.7rem', borderRadius: 13, fontWeight: 700, cursor: 'pointer' }}
+              >
+                Yes, Pause
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  </div>
-)}
-</div>
-);
+  );
 };
 
 // Image Modal Component (put above or below CampaignSetup, or in the same file)

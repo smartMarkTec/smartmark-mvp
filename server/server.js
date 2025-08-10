@@ -37,9 +37,9 @@ app.options('*', cors());
 
 app.set('trust proxy', 1);
 
-// Parse JSON and urlencoded payloads
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Parse JSON and urlencoded payloads (raise limits to handle base64 uploads safely)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // -------- Serve generated images & videos for AI overlays --------
 let generatedPath;
@@ -67,6 +67,10 @@ app.use('/api', campaignRoutes);
 const gptChatRoutes = require('./routes/gpt');    // -> server/routes/gpt.js
 app.use('/api', gptChatRoutes);
 
+// Smart engine orchestration routes
+const smartRoutes = require('./routes/smart');    // -> server/routes/smart.js
+app.use('/smart', smartRoutes);
+
 // Health check
 app.get('/healthz', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
@@ -93,6 +97,19 @@ app.use((err, req, res, next) => {
     ...(process.env.NODE_ENV !== 'production' && { stack: err?.stack })
   });
 });
+
+// ---- Start background scheduler (SmartCampaign automation) ----
+try {
+  const scheduler = require('./scheduler/jobs'); // -> server/scheduler/jobs.js
+  if (scheduler && typeof scheduler.start === 'function') {
+    scheduler.start();
+    console.log('✅ Smart scheduler started');
+  } else {
+    console.warn('⚠️  Smart scheduler not started: start() not found');
+  }
+} catch (e) {
+  console.warn('⚠️  Failed to load/start scheduler:', e?.message || e);
+}
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {

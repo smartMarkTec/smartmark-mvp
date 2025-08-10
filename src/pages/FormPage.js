@@ -18,7 +18,6 @@ const CONVO_QUESTIONS = [
   { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
   { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
   { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
-  // Add more up to 20 if desired
 ];
 
 // ========== Helper Functions/Components ==========
@@ -157,6 +156,75 @@ function isGenerateTrigger(input) {
   return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
 }
 
+// Carousel Controls
+function Arrow({ side = "left", onClick, disabled }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        position: "absolute",
+        top: "50%",
+        [side]: 10,
+        transform: "translateY(-50%)",
+        background: "rgba(0,0,0,0.55)",
+        color: "#fff",
+        border: "none",
+        width: 34,
+        height: 34,
+        borderRadius: "50%",
+        cursor: disabled ? "not-allowed" : "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: disabled ? 0.45 : 0.85,
+        zIndex: 3
+      }}
+      aria-label={side === "left" ? "Previous" : "Next"}
+      title={side === "left" ? "Previous" : "Next"}
+    >
+      <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
+        {side === "left" ? (
+          <path d="M12.5 15L7.5 10L12.5 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        ) : (
+          <path d="M7.5 5L12.5 10L7.5 15" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        )}
+      </svg>
+    </button>
+  );
+}
+
+function Dots({ count, active, onClick }) {
+  return (
+    <div style={{
+      position: "absolute",
+      bottom: 8,
+      left: 0,
+      right: 0,
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center",
+      gap: 8,
+      zIndex: 3
+    }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <button
+          key={i}
+          onClick={() => onClick(i)}
+          style={{
+            width: 8, height: 8, borderRadius: "50%",
+            border: "none",
+            background: i === active ? TEAL : "rgba(255,255,255,0.55)",
+            cursor: "pointer", opacity: i === active ? 1 : 0.7
+          }}
+          aria-label={`Go to slide ${i + 1}`}
+          title={`Slide ${i + 1}`}
+        />
+      ))}
+    </div>
+  );
+}
+
 // =========== Main Component ============
 export default function FormPage() {
   const navigate = useNavigate();
@@ -166,10 +234,10 @@ export default function FormPage() {
   // --------------- State -----------------
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
-const [chatHistory, setChatHistory] = useState([
-  { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
-  { from: "gpt", text: "Are you ready to get started? (yes/no)" }
-]);
+  const [chatHistory, setChatHistory] = useState([
+    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
+    { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+  ]);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -178,36 +246,41 @@ const [chatHistory, setChatHistory] = useState([
   // Ad preview state
   const [mediaType, setMediaType] = useState("both");
   const [result, setResult] = useState(null);
+
+  // NEW: carousel data
+  const [imageUrls, setImageUrls] = useState([]); // up to 2
+  const [activeImage, setActiveImage] = useState(0);
+
+  const [videoItems, setVideoItems] = useState([]); // [{url, script, fbVideoId}]
+  const [activeVideo, setActiveVideo] = useState(0);
+
+  // Legacy single values (kept for compatibility with other pages / localStorage)
   const [imageUrl, setImageUrl] = useState("");
-  const [imageLoading, setImageLoading] = useState(false);
   const [videoUrl, setVideoUrl] = useState("");
   const [videoScript, setVideoScript] = useState("");
+
+  const [imageLoading, setImageLoading] = useState(false);
   const [videoLoading, setVideoLoading] = useState(false);
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
   const [lastRegenerateToken, setLastRegenerateToken] = useState("");
   const [awaitingContinue, setAwaitingContinue] = useState(false);
-const [awaitingGenerate, setAwaitingGenerate] = useState(false);
-const [awaitingReady, setAwaitingReady] = useState(true);
+  const [awaitingGenerate, setAwaitingGenerate] = useState(false);
+  const [awaitingReady, setAwaitingReady] = useState(true);
 
-
-function userSaysContinue(val) {
-  return /^(yes|yep|ready|continue|next|ok|sure)$/i.test(val.trim());
-}
-function userSaysGenerate(val) {
-  return /^(yes|yep|ready|let's do it|generate|go ahead|ok|i am ready|im ready|lets do it)$/i.test(val.trim());
-}
-function isOffTopic(val) {
-  // Customize as needed for your ad manager
-  return /(who are you|how does|what do you do|agency|ad manager|work|help|support|feature|question)/i.test(val);
-}
-function getOffTopicAnswer(val) {
-  // Replace with smarter GPT logic or your gpt.js lookup if desired
-  return "I'm your AI Ad Manager. I help create and manage your ad campaigns automatically! Ready for the next question?";
-}
-
-
+  function userSaysContinue(val) {
+    return /^(yes|yep|ready|continue|next|ok|sure)$/i.test(val.trim());
+  }
+  function userSaysGenerate(val) {
+    return /^(yes|yep|ready|let's do it|generate|go ahead|ok|i am ready|im ready|lets do it)$/i.test(val.trim());
+  }
+  function isOffTopic(val) {
+    return /(who are you|how does|what do you do|agency|ad manager|work|help|support|feature|question)/i.test(val);
+  }
+  function getOffTopicAnswer(val) {
+    return "I'm your AI Ad Manager. I help create and manage your ad campaigns automatically! Ready for the next question?";
+  }
 
   // Scroll chat to bottom on update
   useEffect(() => {
@@ -221,196 +294,230 @@ function getOffTopicAnswer(val) {
     setModalImg("");
   }
 
-// ---- AI Q&A: Check for GPT chat before stepping to next Q
-async function handleUserInput(e) {
-  e.preventDefault();
-  if (loading) return;
-  const value = input.trim();
-  if (!value) return;
+  // ---- helpers to call APIs ----
+  async function fetchImageOnce(token) {
+    const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...answers,
+        regenerateToken: token
+      })
+    });
+    const data = await resp.json();
+    return data?.imageUrl || "";
+  }
 
-  // If waiting for "ready"
-  if (awaitingReady) {
-    setChatHistory(ch => [...ch, { from: "user", text: value }]);
-    if (/^(yes|yep|ready|start|go|let'?s go|let'?s start|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
-      setAwaitingReady(false);
+  async function fetchVideoOnce(token) {
+    const resp = await fetch(`${API_BASE}/generate-video-ad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: answers?.url || "",
+        answers,
+        regenerateToken: token
+      })
+    });
+    const data = await resp.json();
+    const vUrl = data?.videoUrl
+      ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
+      : "";
+    return {
+      url: vUrl,
+      script: data?.script || data?.video?.script || "",
+      fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
+    };
+  }
+
+  // ---- AI Q&A: Check for GPT chat before stepping to next Q
+  async function handleUserInput(e) {
+    e.preventDefault();
+    if (loading) return;
+    const value = input.trim();
+    if (!value) return;
+
+    // If waiting for "ready"
+    if (awaitingReady) {
+      setChatHistory(ch => [...ch, { from: "user", text: value }]);
+      if (/^(yes|yep|ready|start|go|let'?s go|let'?s start|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
+        setAwaitingReady(false);
+        setChatHistory(ch => [
+          ...ch,
+          { from: "gpt", text: CONVO_QUESTIONS[0].question }
+        ]);
+        setStep(0);
+        setInput("");
+        return;
+      } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
+        setChatHistory(ch => [
+          ...ch,
+          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }
+        ]);
+        setInput("");
+        return;
+      } else if (isOffTopic(value)) {
+        const resp = await fetch(`${API_BASE}/gpt-chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: value })
+        });
+        const { reply } = await resp.json();
+        setChatHistory(ch => [
+          ...ch,
+          { from: "gpt", text: reply },
+          { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+        ]);
+        setInput("");
+        return;
+      } else {
+        setChatHistory(ch => [
+          ...ch,
+          { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }
+        ]);
+        setInput("");
+        return;
+      }
+    }
+
+    // 1. "Ready to generate?" positive answer triggers campaign
+    if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
+      setLoading(true);
+      setGenerating(true);
       setChatHistory(ch => [
         ...ch,
-        { from: "gpt", text: CONVO_QUESTIONS[0].question }
+        { from: "user", text: value },
+        { from: "gpt", text: "AI generating..." }
       ]);
-      setStep(0);
       setInput("");
+      setTimeout(async () => {
+        // Generate assets JSON
+        const tokenA = getRandomString();
+        const tokenB = getRandomString();
+
+        const [data, img1, img2, vid1, vid2] = await Promise.all([
+          fetch(`${API_BASE}/generate-campaign-assets`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ answers })
+          }).then(res => res.json()),
+          fetchImageOnce(tokenA),
+          fetchImageOnce(tokenB),
+          fetchVideoOnce(tokenA),
+          fetchVideoOnce(tokenB)
+        ]);
+
+        // Update copy result
+        setResult({
+          headline: data.headline || "",
+          body: data.body || "",
+          image_overlay_text: data.image_overlay_text || ""
+        });
+
+        // Images (max two, filter blanks)
+        const imgs = [img1, img2].filter(Boolean).slice(0, 2);
+        setImageUrls(imgs);
+        setActiveImage(0);
+        setImageUrl(imgs[0] || "");
+
+        // Videos (max two, filter blanks)
+        const vids = [vid1, vid2].filter(v => v && v.url).slice(0, 2);
+        setVideoItems(vids);
+        setActiveVideo(0);
+        setVideoUrl(vids[0]?.url || "");
+        setVideoScript(vids[0]?.script || "");
+
+        setGenerating(false);
+        setLoading(false);
+        setChatHistory(ch => [
+          ...ch,
+          { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
+        ]);
+      }, 1600);
       return;
-    } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
+    }
+
+    // 2. If at confirmation step but answer is not "yes"
+    if (step === CONVO_QUESTIONS.length) {
       setChatHistory(ch => [
         ...ch,
-        { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }
+        { from: "user", text: value },
+        { from: "gpt", text: "Let's continue! Just answer the question or let me know if you want to change anything." }
       ]);
       setInput("");
       return;
-    } else if (isOffTopic(value)) {
-      // Off-topic Q (who are you etc)
+    }
+
+    // 3. If off-topic (AI Ad Manager Q&A)
+    if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
       const resp = await fetch(`${API_BASE}/gpt-chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: value })
+        body: JSON.stringify({ message: value, context: { answers } })
       });
       const { reply } = await resp.json();
       setChatHistory(ch => [
         ...ch,
-        { from: "gpt", text: reply },
-        { from: "gpt", text: "Are you ready to get started? (yes/no)" }
-      ]);
-      setInput("");
-      return;
-    } else {
-      setChatHistory(ch => [
-        ...ch,
-        { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }
-      ]);
-      setInput("");
-      return;
-    }
-  }
-
-  // 1. "Ready to generate?" positive answer triggers campaign
-  if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
-    setLoading(true);
-    setGenerating(true);
-    setChatHistory(ch => [
-      ...ch,
-      { from: "user", text: value },
-      { from: "gpt", text: "AI generating..." }
-    ]);
-    setInput("");
-    setTimeout(async () => {
-      const token = getRandomString();
-      const [data, imgData, videoData] = await Promise.all([
-        fetch(`${API_BASE}/generate-campaign-assets`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answers })
-        }).then(res => res.json()),
-        fetch(`${API_BASE}/generate-image-from-prompt`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...answers, regenerateToken: token })
-        }).then(res => res.json()),
-        fetch(`${API_BASE}/generate-video-ad`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...answers, regenerateToken: token })
-        }).then(res => res.json())
-      ]);
-      setResult({
-        headline: data.headline || "",
-        body: data.body || "",
-        image_overlay_text: data.image_overlay_text || ""
-      });
-      setImageUrl(imgData.imageUrl || "");
-setVideoUrl(
-  videoData.videoUrl
-    ? (videoData.videoUrl.startsWith('http')
-      ? videoData.videoUrl
-      : BACKEND_URL + videoData.videoUrl)
-    : ""
-);
-
-
-      setVideoScript(videoData.script || "");
-      setGenerating(false);
-      setLoading(false);
-      setChatHistory(ch => [
-        ...ch,
-        { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
-      ]);
-    }, 1600);
-    return;
-  }
-
-  // 2. If at confirmation step but answer is not "yes"
-  if (step === CONVO_QUESTIONS.length) {
-    setChatHistory(ch => [
-      ...ch,
-      { from: "user", text: value },
-      { from: "gpt", text: "Let's continue! Just answer the question or let me know if you want to change anything." }
-    ]);
-    setInput("");
-    return;
-  }
-
-  // 3. If off-topic (AI Ad Manager Q&A), answer, then wait for user input
-  if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
-    const resp = await fetch(`${API_BASE}/gpt-chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: value, context: { answers } })
-    });
-    const { reply } = await resp.json();
-    setChatHistory(ch => [
-      ...ch,
-      { from: "user", text: value },
-      { from: "gpt", text: reply }
-    ]);
-    setInput("");
-    return;
-  }
-
-  // 4. If user input looks like a correction
-  if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
-    const lastQ = step > 0 ? CONVO_QUESTIONS[step - 1] : null;
-    const keyToUpdate = lastQ ? lastQ.key : null;
-    if (keyToUpdate) {
-      setAnswers(prev => ({
-        ...prev,
-        [keyToUpdate]: value.replace(/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)\s*/i, "")
-      }));
-      setChatHistory(ch => [
-        ...ch,
         { from: "user", text: value },
-        { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
+        { from: "gpt", text: reply }
       ]);
       setInput("");
       return;
     }
-  }
 
-  // 5. Normal Q&A: update answer, move to next Q
-  const currentQ = CONVO_QUESTIONS[step];
-  let newAnswers = { ...answers, [currentQ.key]: value };
-  setAnswers(newAnswers);
-  setChatHistory(ch => [...ch, { from: "user", text: value }]);
-  setInput("");
+    // 4. If user input looks like a correction
+    if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
+      const lastQ = step > 0 ? CONVO_QUESTIONS[step - 1] : null;
+      const keyToUpdate = lastQ ? lastQ.key : null;
+      if (keyToUpdate) {
+        setAnswers(prev => ({
+          ...prev,
+          [keyToUpdate]: value.replace(/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)\s*/i, "")
+        }));
+        setChatHistory(ch => [
+          ...ch,
+          { from: "user", text: value },
+          { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
+        ]);
+        setInput("");
+        return;
+      }
+    }
 
-  // Conditional skip logic
-  let nextStep = step + 1;
-  while (
-    CONVO_QUESTIONS[nextStep] &&
-    CONVO_QUESTIONS[nextStep].conditional &&
-    newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
-  ) {
-    nextStep += 1;
-  }
+    // 5. Normal Q&A: update answer, move to next Q
+    const currentQ = CONVO_QUESTIONS[step];
+    let newAnswers = { ...answers, [currentQ.key]: value };
+    setAnswers(newAnswers);
+    setChatHistory(ch => [...ch, { from: "user", text: value }]);
+    setInput("");
 
-  // If last Q, ask for confirmation
-  if (!CONVO_QUESTIONS[nextStep]) {
+    // Conditional skip logic
+    let nextStep = step + 1;
+    while (
+      CONVO_QUESTIONS[nextStep] &&
+      CONVO_QUESTIONS[nextStep].conditional &&
+      newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
+    ) {
+      nextStep += 1;
+    }
+
+    // If last Q, ask for confirmation
+    if (!CONVO_QUESTIONS[nextStep]) {
+      setChatHistory(ch => [
+        ...ch,
+        { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
+      ]);
+      setStep(nextStep);
+      setAwaitingGenerate && setAwaitingGenerate(true);
+      return;
+    }
+
+    // Otherwise, ask next question
+    setStep(nextStep);
     setChatHistory(ch => [
       ...ch,
-      { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
+      { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
     ]);
-    setStep(nextStep);
-    setAwaitingGenerate && setAwaitingGenerate(true); // if using
-    return;
   }
-
-  // Otherwise, ask next question
-  setStep(nextStep);
-  setChatHistory(ch => [
-    ...ch,
-    { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
-  ]);
-}
-
-
 
   // --- Handlers for modal image, regenerate, etc. ---
   function handleImageClick(url) {
@@ -420,39 +527,33 @@ setVideoUrl(
 
   async function handleRegenerateImage() {
     setImageLoading(true);
-    const token = getRandomString();
-    const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...answers, regenerateToken: token })
-    });
-    const data = await resp.json();
-    setImageUrl(data.imageUrl || "");
-    setImageLoading(false);
+    const tokenA = getRandomString();
+    const tokenB = getRandomString();
+    try {
+      const [a, b] = await Promise.all([fetchImageOnce(tokenA), fetchImageOnce(tokenB)]);
+      const imgs = [a, b].filter(Boolean).slice(0, 2);
+      setImageUrls(imgs);
+      setActiveImage(0);
+      setImageUrl(imgs[0] || "");
+    } finally {
+      setImageLoading(false);
+    }
   }
 
   async function handleRegenerateVideo() {
     setVideoLoading(true);
-    const token = getRandomString();
-    const resp = await fetch(`${API_BASE}/generate-video-ad`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...answers, regenerateToken: token })
-    });
-    const data = await resp.json();
-   setVideoUrl(
-  data.videoUrl
-    ? (data.videoUrl.startsWith('http')
-      ? data.videoUrl
-      : BACKEND_URL + data.videoUrl)
-    : ""
-);
-
-
-
-
-    setVideoScript(data.script || "");
-    setVideoLoading(false);
+    const tokenA = getRandomString();
+    const tokenB = getRandomString();
+    try {
+      const [a, b] = await Promise.all([fetchVideoOnce(tokenA), fetchVideoOnce(tokenB)]);
+      const vids = [a, b].filter(v => v && v.url).slice(0, 2);
+      setVideoItems(vids);
+      setActiveVideo(0);
+      setVideoUrl(vids[0]?.url || "");
+      setVideoScript(vids[0]?.script || "");
+    } finally {
+      setVideoLoading(false);
+    }
   }
 
   // ========== Render ==========
@@ -472,7 +573,7 @@ setVideoUrl(
         onClick={() => navigate("/")}
       >Home</button>
 
-      {/* ---- Chat Panel, slightly larger, scrollable --- */}
+      {/* ---- Chat Panel ---- */}
       <div style={{
         width: "100%", maxWidth: 510, minHeight: 370, marginTop: 54, marginBottom: 26,
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
@@ -560,7 +661,7 @@ setVideoUrl(
       {/* MediaTypeToggle above previews */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* Ad Previews — always shown */}
+      {/* Ad Previews — position unchanged, inside two cards */}
       <div style={{
         display: "flex",
         justifyContent: "center",
@@ -622,25 +723,32 @@ setVideoUrl(
                 {imageLoading || generating ? <Dotty /> : "Regenerate"}
               </button>
             </div>
-            <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+
+            {/* Carousel body */}
+            <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
               {imageLoading || generating ? (
                 <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Dotty />
                 </div>
-              ) : imageUrl ? (
-                <img
-                  src={imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl}
-                  alt="Ad Preview"
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    objectFit: "cover",
-                    borderRadius: 0,
-                    cursor: "pointer"
-                  }}
-                  onClick={() => handleImageClick(imageUrl)}
-                  title="Click to view larger"
-                />
+              ) : imageUrls.length > 0 ? (
+                <>
+                  <img
+                    src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
+                    alt="Ad Preview"
+                    style={{
+                      width: "100%",
+                      maxHeight: 220,
+                      objectFit: "cover",
+                      borderRadius: 0,
+                      cursor: "pointer"
+                    }}
+                    onClick={() => handleImageClick(imageUrls[activeImage])}
+                    title="Click to view larger"
+                  />
+                  <Arrow side="left" onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
+                  <Arrow side="right" onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
+                  <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
+                </>
               ) : (
                 <div style={{
                   height: 220,
@@ -655,6 +763,7 @@ setVideoUrl(
                 }}>Image goes here</div>
               )}
             </div>
+
             <div style={{ padding: "17px 18px 4px 18px" }}>
               <div style={{
                 color: "#191c1e",
@@ -675,10 +784,7 @@ setVideoUrl(
                 {result?.body || "Ad copy goes here..."}
               </div>
             </div>
-            <div style={{
-              padding: "8px 18px",
-              marginTop: 2
-            }}>
+            <div style={{ padding: "8px 18px", marginTop: 2 }}>
               <button style={{
                 background: "#14e7b9",
                 color: "#181b20",
@@ -716,6 +822,7 @@ setVideoUrl(
             </button>
           </div>
         )}
+
         {(mediaType === "video" || mediaType === "both") && (
           <div style={{
             background: "#fff",
@@ -770,22 +877,44 @@ setVideoUrl(
                 {videoLoading || generating ? <Dotty /> : "Regenerate"}
               </button>
             </div>
-            <div style={{ background: "#222", display: "flex", alignItems: "center", justifyContent: "center" }}>
+
+            {/* Carousel body */}
+            <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
               {videoLoading || generating ? (
                 <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <Dotty />
                 </div>
-              ) : videoUrl ? (
-                <video
-                  src={videoUrl}
-                  controls
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    borderRadius: 0,
-                    background: "#111"
-                  }}
-                />
+              ) : videoItems.length > 0 ? (
+                <>
+                  <video
+                    key={videoItems[activeVideo]?.url || "video"}
+                    src={videoItems[activeVideo]?.url}
+                    controls
+                    style={{
+                      width: "100%",
+                      maxHeight: 220,
+                      borderRadius: 0,
+                      background: "#111"
+                    }}
+                  />
+                  <Arrow side="left" onClick={() => {
+                    const next = (activeVideo + videoItems.length - 1) % videoItems.length;
+                    setActiveVideo(next);
+                    setVideoUrl(videoItems[next]?.url || "");
+                    setVideoScript(videoItems[next]?.script || "");
+                  }} disabled={videoItems.length <= 1} />
+                  <Arrow side="right" onClick={() => {
+                    const next = (activeVideo + 1) % videoItems.length;
+                    setActiveVideo(next);
+                    setVideoUrl(videoItems[next]?.url || "");
+                    setVideoScript(videoItems[next]?.script || "");
+                  }} disabled={videoItems.length <= 1} />
+                  <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
+                    setActiveVideo(i);
+                    setVideoUrl(videoItems[i]?.url || "");
+                    setVideoScript(videoItems[i]?.script || "");
+                  }} />
+                </>
               ) : (
                 <div style={{
                   height: 220,
@@ -800,6 +929,7 @@ setVideoUrl(
                 }}>Video goes here</div>
               )}
             </div>
+
             <div style={{ padding: "17px 18px 4px 18px" }}>
               <div style={{
                 color: "#191c1e",
@@ -810,7 +940,7 @@ setVideoUrl(
               }}>
                 {result?.headline || "Welcome New Customers Instantly!"}
               </div>
-              {videoScript && (
+              {videoItems.length > 0 && (videoItems[activeVideo]?.script || videoScript) && (
                 <div style={{
                   color: "#3a4149",
                   fontSize: 15,
@@ -818,14 +948,11 @@ setVideoUrl(
                   marginBottom: 3,
                   minHeight: 18
                 }}>
-                  <b>Script:</b> {videoScript}
+                  <b>Script:</b> {videoItems[activeVideo]?.script || videoScript}
                 </div>
               )}
             </div>
-            <div style={{
-              padding: "8px 18px",
-              marginTop: 2
-            }}>
+            <div style={{ padding: "8px 18px", marginTop: 2 }}>
               <button style={{
                 background: "#14e7b9",
                 color: "#181b20",
@@ -884,31 +1011,38 @@ setVideoUrl(
             transition: "background 0.18s"
           }}
           onClick={() => {
-            let imgUrlToSend = imageUrl;
-            let vidUrlToSend = videoUrl;
+            // Use currently active items
+            let imgUrlToSend = imageUrls[activeImage] || imageUrl || "";
+            let vidUrlToSend = videoItems[activeVideo]?.url || videoUrl || "";
+            const fbVidIdToSend = videoItems[activeVideo]?.fbVideoId || null;
+
             if (imgUrlToSend && !/^https?:\/\//.test(imgUrlToSend)) imgUrlToSend = BACKEND_URL + imgUrlToSend;
             if (vidUrlToSend && !/^https?:\/\//.test(vidUrlToSend)) vidUrlToSend = BACKEND_URL + vidUrlToSend;
+
             if (imgUrlToSend) localStorage.setItem("smartmark_last_image_url", imgUrlToSend);
             if (vidUrlToSend) localStorage.setItem("smartmark_last_video_url", vidUrlToSend);
-        
-            localStorage.setItem("smartmark_media_selection", mediaType);
-            navigate("/setup", {
-  state: {
-    imageUrl: imgUrlToSend,
-    videoUrl: vidUrlToSend,
-    headline: result?.headline,
-    body: result?.body,
-    videoScript,
-    answers,
-    mediaSelection: mediaType // <-- pass user's choice: "image" | "video" | "both"
-  }
-});
+            if (fbVidIdToSend) localStorage.setItem("smartmark_last_fb_video_id", String(fbVidIdToSend));
 
+            localStorage.setItem("smartmark_media_selection", mediaType);
+
+            navigate("/setup", {
+              state: {
+                imageUrl: imgUrlToSend,
+                videoUrl: vidUrlToSend,
+                fbVideoId: fbVidIdToSend || undefined,
+                headline: result?.headline,
+                body: result?.body,
+                videoScript: videoItems[activeVideo]?.script || videoScript,
+                answers,
+                mediaSelection: mediaType
+              }
+            });
           }}
         >
           Continue
         </button>
       </div>
+
       <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
     </div>
   );
