@@ -443,7 +443,7 @@ const CampaignSetup = () => {
   const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [campaignCount, setCampaignCount] = useState(0);
-  
+  const [dropdownOpen, setDropdownOpen] = useState(true);
 
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
