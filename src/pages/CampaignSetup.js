@@ -463,8 +463,18 @@ const CampaignSetup = () => {
         }
       })
       .catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+  }, [
+    fbConnected,
+    selectedAccount,
+    launched,
+    navImageUrls,
+    navVideoUrls,
+    navFbVideoIds,
+    navImageUrl,
+    navVideoUrl,
+    navFbVideoId,
+    selectedCampaignId
+  ]);
 
   // --- Load metrics for selected campaign ---
   useEffect(() => {
@@ -482,7 +492,7 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(setMetrics)
       .catch(() => setMetrics(null));
-  }, [selectedCampaignId, selectedAccount]);
+  }, [selectedCampaignId, selectedAccount, budget]);
 
   // --- Persist basic fields ---
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
@@ -529,8 +539,18 @@ const CampaignSetup = () => {
     setImageUrlsArr(bucket?.images || (fromNavImgs.length ? fromNavImgs.slice(0,2) : (mediaImageUrl ? [mediaImageUrl] : [])));
     setVideoUrlsArr(bucket?.videos || (fromNavVids.length ? fromNavVids.slice(0,2) : (mediaVideoUrl ? [mediaVideoUrl] : [])));
     setFbVideoIdsArr(bucket?.fbVideoIds || (fromNavIds.length ? fromNavIds.slice(0,2) : []));
-    // eslint-disable-next-line
-  }, [selectedAccount, selectedCampaignId, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+  }, [
+    selectedAccount,
+    selectedCampaignId,
+    navImageUrls,
+    navVideoUrls,
+    navFbVideoIds,
+    navImageUrl,
+    navVideoUrl,
+    navFbVideoId,
+    mediaImageUrl,
+    mediaVideoUrl
+  ]);
 
   // --- On campaign change: load that bucket ---
   useEffect(() => {
@@ -550,8 +570,16 @@ const CampaignSetup = () => {
     setImageUrlsArr(bucket?.images || []);
     setVideoUrlsArr(bucket?.videos || []);
     setFbVideoIdsArr(bucket?.fbVideoIds || []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCampaignId, selectedAccount, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
+  }, [
+    selectedCampaignId,
+    selectedAccount,
+    navImageUrls,
+    navVideoUrls,
+    navFbVideoIds,
+    navImageUrl,
+    navVideoUrl,
+    navFbVideoId
+  ]);
 
   // --- Pause/Unpause/Delete handlers ---
   const [isPaused, setIsPaused] = useState(false);
@@ -1088,7 +1116,7 @@ const CampaignSetup = () => {
                 >
                   <FaChevronDown
                     style={{
-                      transform: (function(){return dropdownOpen ? "rotate(180deg)" : "rotate(0deg)";})(),
+                      transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
                       marginRight: 7,
                       transition: "transform 0.18s"
                     }}
@@ -1163,7 +1191,7 @@ const CampaignSetup = () => {
               </div>
 
               {/* Dropdown list */}
-              { (function(){return dropdownOpen;})() && (
+              {dropdownOpen && (
                 <div style={{
                   width: "100%",
                   background: "#232a28",
