@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
+import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaExpand } from "react-icons/fa";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
-import { FaExpand } from "react-icons/fa";
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
 const DARK_GREEN = "#185431";
@@ -135,10 +134,8 @@ function VideoPreviewBox({ videoUrl }) {
   );
 }
 
-// ==================== PERSISTENT STATE SECTION STARTS HERE ====================
-
 const FB_CONN_KEY = "smartmark_fb_connected";
-const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000; // 2.5 days in ms
+const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000;
 
 function SchedulerInline({
   backendUrl,
@@ -152,23 +149,20 @@ function SchedulerInline({
   body,
   answers,
   mediaSelection,
-  fbVideoId // NEW: pass-through for lightweight upload path
+  fbVideoId
 }) {
   const STORE_KEY = "sm_sched_jobs";
-  const [action, setAction] = React.useState("generate-video"); // generate-video | launch
-
+  const [action, setAction] = React.useState("generate-video");
   const defaultRun = React.useMemo(() => {
     const d = new Date(Date.now() + 10 * 60 * 1000);
     d.setSeconds(0, 0);
     return d.toISOString().slice(0, 16);
   }, []);
   const [runAt, setRunAt] = React.useState(defaultRun);
-
   const [jobs, setJobs] = React.useState(() => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
     catch { return []; }
   });
-
   React.useEffect(() => {
     localStorage.setItem(STORE_KEY, JSON.stringify(jobs));
   }, [jobs]);
@@ -177,7 +171,6 @@ function SchedulerInline({
     (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2, 10);
-
   const nowIso = () => new Date().toISOString();
 
   const urlToBase64Maybe = async (url) => {
@@ -194,9 +187,9 @@ function SchedulerInline({
   const buildPayload = async (kind) => {
     const acctId = String(selectedAccount || "").replace(/^act_/, "");
     const safeBudget = Math.max(3, Number(budget) || 0);
-
     let adImage = mediaImageUrl || "";
     let adVideo = mediaVideoUrl || "";
+
     if (kind === "launch") {
       if (adImage && !adImage.startsWith("data:")) adImage = await urlToBase64Maybe(adImage);
       if (adVideo && !adVideo.startsWith("data:")) adVideo = await urlToBase64Maybe(adVideo);
@@ -209,8 +202,7 @@ function SchedulerInline({
         body: {
           url: form?.url || "",
           answers: { ...answers, industry: form?.industry || answers?.industry },
-          regenerateToken: uid(),
-          fbAdAccountId: acctId || undefined // allows backend to upload to FB library if token available
+          regenerateToken: uid()
         }
       };
     }
@@ -228,9 +220,9 @@ function SchedulerInline({
           adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
           adImage: adImage || "",
           adVideo: adVideo || "",
-          fbVideoId: fbVideoId || null,
           answers: answers || {},
-          mediaSelection: mediaSelection || "both"
+          mediaSelection: mediaSelection || "both",
+          fbVideoId: fbVideoId || undefined
         }
       };
     }
@@ -320,7 +312,7 @@ function SchedulerInline({
     }
 
     const job = {
-      id: uid(),
+      id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
       runAt,
       createdAt: nowIso(),
       status: "pending",
@@ -456,13 +448,14 @@ const CampaignSetup = () => {
 
   useEffect(() => {
     if (!selectedAccount) return;
-    const acctId = selectedAccount.replace("act_", "");
+    const acctId = String(selectedAccount).replace("act_", "");
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
       .then(res => res.json())
       .then(data => {
-        // Accept both shapes: array or {data:[...]}
         const list = Array.isArray(data) ? data : (data?.data || []);
-        const activeCount = list.filter(c => (c.status || c.effective_status) === "ACTIVE").length;
+        const activeCount = list.filter(c =>
+          (c.status || c.effective_status || "").toUpperCase() === "ACTIVE"
+        ).length;
         setCampaignCount(activeCount);
       })
       .catch(err => console.error("Error fetching campaigns:", err));
@@ -480,7 +473,6 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, [location.state?.mediaSelection]);
 
-  // =============== AUTO-SAVE/RESTORE ================
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
   useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
@@ -493,61 +485,39 @@ const CampaignSetup = () => {
     }
   }, [fbConnected]);
 
-  // Always use navigation state if present, otherwise fallback to localStorage
+  // Alias navigation state safely
+  const {
+    imageUrl: navImageUrl,
+    videoUrl: navVideoUrl,
+    headline,
+    body,
+    videoScript,
+    answers,
+    fbVideoId: navFbVideoId
+  } = location.state || {};
+
+  // Prefer navigation state, fallback to saved values
   useEffect(() => {
-    let img = location.state?.imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
-    let vid = location.state?.videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
-    let vidId = location.state?.fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || "";
+    const img = navImageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+    const vid = navVideoUrl || localStorage.getItem("smartmark_last_video_url") || "";
+    const vidId = navFbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || "";
 
     setMediaImageUrl(img);
     setMediaVideoUrl(vid);
     if (vidId) setFbVideoId(vidId);
 
-    if (location.state?.imageUrl) localStorage.setItem("smartmark_last_image_url", location.state.imageUrl);
-    if (location.state?.videoUrl) localStorage.setItem("smartmark_last_video_url", location.state.videoUrl);
-    if (location.state?.fbVideoId) localStorage.setItem("smartmark_last_fb_video_id", String(location.state.fbVideoId));
-  }, [location.state]);
+    if (navImageUrl) localStorage.setItem("smartmark_last_image_url", navImageUrl);
+    if (navVideoUrl) localStorage.setItem("smartmark_last_video_url", navVideoUrl);
+    if (navFbVideoId) localStorage.setItem("smartmark_last_fb_video_id", String(navFbVideoId));
+  }, [navImageUrl, navVideoUrl, navFbVideoId]);
 
   const [dropdownOpen, setDropdownOpen] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
 
-// when reading from navigation state, ALIAS the fields to avoid name collisions
-const {
-  imageUrl: navImageUrl,
-  videoUrl: navVideoUrl,
-  headline,
-  body,
-  videoScript,
-  answers,
-  fbVideoId: navFbVideoId,
-} = location.state || {};
-
-// REPLACE both of your "Always use navigation state..." effects with this ONE:
-useEffect(() => {
-  const img = navImageUrl || localStorage.getItem("smartmark_last_image_url") || "";
-  const vid = navVideoUrl || localStorage.getItem("smartmark_last_video_url") || "";
-  const vidId = navFbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || "";
-
-  setMediaImageUrl(img);
-  setMediaVideoUrl(vid);
-  if (vidId) setFbVideoId(vidId);
-
-  if (navImageUrl) localStorage.setItem("smartmark_last_image_url", navImageUrl);
-  if (navVideoUrl) localStorage.setItem("smartmark_last_video_url", navVideoUrl);
-  if (navFbVideoId) localStorage.setItem("smartmark_last_fb_video_id", String(navFbVideoId));
-}, [navImageUrl, navVideoUrl, navFbVideoId]);
-
-// later when building the launch payload:
-const payload = {
-  // ...
-  fbVideoId: fbVideoId || undefined,
-};
-
-
   useEffect(() => {
-    let email = localStorage.getItem("smartmark_last_email") || "";
-    let cashapp = localStorage.getItem("smartmark_last_cashapp") || "";
-    let key = getUserKey(email, cashapp);
+    let emailLS = localStorage.getItem("smartmark_last_email") || "";
+    let cashappLS = localStorage.getItem("smartmark_last_cashapp") || "";
+    let key = getUserKey(emailLS, cashappLS);
     setUserKey(key);
     const conn = localStorage.getItem(`${key}_fb_connected_v2`);
     if (conn) {
@@ -567,31 +537,22 @@ const payload = {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
       if (userKey) {
         localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
       }
     }
-
     const tokenFromCallback = params.get("fb_user_token");
     if (tokenFromCallback) {
       setFbUserToken(tokenFromCallback);
       localStorage.setItem("smartmark_fb_user_token", tokenFromCallback);
     }
-
     if (params.get("facebook_connected") === "1" || tokenFromCallback) {
       window.history.replaceState({}, document.title, "/setup");
     }
     // eslint-disable-next-line
   }, [location, userKey]);
-
-  useEffect(() => {
-    if (fbConnected && userKey) {
-      localStorage.setItem(`${userKey}_fb_connected_v2`, JSON.stringify({ connected: 1, time: Date.now() }));
-    }
-  }, [fbConnected, userKey]);
 
   useEffect(() => {
     if (!fbConnected) return;
@@ -624,7 +585,7 @@ const payload = {
 
   useEffect(() => {
     if (fbConnected && selectedAccount) {
-      const acctId = selectedAccount.replace("act_", "");
+      const acctId = String(selectedAccount).replace("act_", "");
       fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
         .then(res => res.json())
         .then(data => {
@@ -638,7 +599,7 @@ const payload = {
 
   useEffect(() => {
     if (selectedCampaignId && selectedAccount) {
-      const acctId = selectedAccount.replace("act_", "");
+      const acctId = String(selectedAccount).replace("act_", "");
       fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
         .then(res => res.json())
         .then(c => {
@@ -658,7 +619,7 @@ const payload = {
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = selectedAccount.replace("act_", "");
+    const acctId = String(selectedAccount).replace("act_", "");
     setLoading(true);
     try {
       if (isPaused) {
@@ -678,7 +639,7 @@ const payload = {
 
   const handleDelete = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = selectedAccount.replace("act_", "");
+    const acctId = String(selectedAccount).replace("act_", "");
     setLoading(true);
     try {
       await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
@@ -721,12 +682,11 @@ const payload = {
   const handleLaunch = async () => {
     setLoading(true);
     try {
-      const acctId = selectedAccount.replace("act_", "");
+      const acctId = String(selectedAccount).replace("act_", "");
       const safeBudget = Math.max(3, Number(budget) || 0);
 
-      let adImage = mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || "";
-      let adVideo = mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || "";
-      const maybeFbVideoId = (location.state && location.state.fbVideoId) || fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || null;
+      let adImage = mediaImageUrl || localStorage.getItem("smartmark_last_image_url") || "";
+      let adVideo = mediaVideoUrl || localStorage.getItem("smartmark_last_video_url") || "";
 
       if (adImage && !adImage.startsWith("data:")) {
         adImage = await urlToBase64(adImage);
@@ -735,20 +695,19 @@ const payload = {
         adVideo = await urlToBase64(adVideo);
       }
 
-     const payload = {
-  form: { ...form },
-  budget: safeBudget,
-  campaignType: form?.campaignType || "Website Traffic",
-  pageId: selectedPageId,
-  aiAudience: form?.aiAudience || answers?.aiAudience || "",
-  adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-  adImage: adImage || "",
-  adVideo: adVideo || "",
-  answers: answers || {},
-  mediaSelection,
-  fbVideoId: fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || undefined, // <— add this
-};
-
+      const payload = {
+        form: { ...form },
+        budget: safeBudget,
+        campaignType: form?.campaignType || "Website Traffic",
+        pageId: selectedPageId,
+        aiAudience: form?.aiAudience || answers?.aiAudience || "",
+        adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+        adImage: adImage || "",
+        adVideo: adVideo || "",
+        answers: answers || {},
+        mediaSelection, // "image" | "video" | "both"
+        fbVideoId: fbVideoId || undefined
+      };
 
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
@@ -812,7 +771,6 @@ const payload = {
         overflowX: "hidden"
       }}
     >
-      {/* Top Bar */}
       <div
         style={{
           width: "100%",
@@ -861,7 +819,6 @@ const payload = {
         </button>
       </div>
 
-      {/* MAIN CONTENT */}
       <div
         style={{
           width: "100vw",
@@ -876,7 +833,6 @@ const payload = {
           minHeight: "92vh"
         }}
       >
-        {/* LEFT PANE */}
         <main style={{
           background: "#232528e6",
           borderRadius: "2.2rem",
@@ -893,109 +849,106 @@ const payload = {
           position: "relative",
           minHeight: "600px",
         }}>
-         {/* Facebook Connect */}
-        <button
-          onClick={() => {
-            window.location.href = `${backendUrl}/auth/facebook`;
-            setFbConnected(true);
-            localStorage.setItem("smartmark_fb_connected", JSON.stringify({ connected: 1, time: Date.now() }));
-          }}
-          style={{
-            padding: "1.15rem 2.8rem",
-            borderRadius: "1.5rem",
-            border: "none",
-            background: fbConnected ? ACCENT_GREEN : "#1877F2",
-            color: "#fff",
-            fontWeight: 800,
-            fontSize: "1.25rem",
-            boxShadow: "0 2px 12px #1877f233",
-            letterSpacing: "1px",
-            cursor: "pointer",
-            fontFamily: MODERN_FONT,
-            width: "100%",
-            maxWidth: 370,
-            margin: "0 auto",
-            display: "block",
-            transition: "background 0.23s"
-          }}
-        >
-          {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-        </button>
-        {fbConnected && (
           <button
-            onClick={openFbPaymentPopup}
+            onClick={() => {
+              window.location.href = `${backendUrl}/auth/facebook`;
+              setFbConnected(true);
+              localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+            }}
             style={{
-              marginTop: 16,
-              padding: "0.72rem 1.5rem",
-              borderRadius: "1.1rem",
-              background: "#fff",
-              color: "#1877F2",
-              fontWeight: 700,
+              padding: "1.15rem 2.8rem",
+              borderRadius: "1.5rem",
               border: "none",
+              background: fbConnected ? ACCENT_GREEN : "#1877F2",
+              color: "#fff",
+              fontWeight: 800,
+              fontSize: "1.25rem",
+              boxShadow: "0 2px 12px #1877f233",
+              letterSpacing: "1px",
               cursor: "pointer",
               fontFamily: MODERN_FONT,
-              fontSize: "1.01rem",
-              boxShadow: "0 2px 8px #1877f233",
               width: "100%",
               maxWidth: 370,
-              marginLeft: "auto",
-              marginRight: "auto",
-              display: "block"
+              margin: "0 auto",
+              display: "block",
+              transition: "background 0.23s"
             }}
           >
-            Add/Manage Payment Method
+            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
-        )}
+          {fbConnected && (
+            <button
+              onClick={openFbPaymentPopup}
+              style={{
+                marginTop: 16,
+                padding: "0.72rem 1.5rem",
+                borderRadius: "1.1rem",
+                background: "#fff",
+                color: "#1877F2",
+                fontWeight: 700,
+                border: "none",
+                cursor: "pointer",
+                fontFamily: MODERN_FONT,
+                fontSize: "1.01rem",
+                boxShadow: "0 2px 8px #1877f233",
+                width: "100%",
+                maxWidth: 370,
+                marginLeft: "auto",
+                marginRight: "auto",
+                display: "block"
+              }}
+            >
+              Add/Manage Payment Method
+            </button>
+          )}
 
-       {/* CAMPAIGN NAME + INLINE SCHEDULER */}
-        <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-          <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
-              Campaign Name
-            </label>
-            <SchedulerInline
-              backendUrl={backendUrl}
-              form={form}
-              selectedAccount={selectedAccount}
-              selectedPageId={selectedPageId}
-              budget={budget}
-              mediaImageUrl={mediaImageUrl || imageUrl || localStorage.getItem("smartmark_last_image_url") || ""}
-              mediaVideoUrl={mediaVideoUrl || videoUrl || localStorage.getItem("smartmark_last_video_url") || ""}
-              headline={headline}
-              body={body}
-              answers={answers}
-              mediaSelection={mediaSelection}
-              fbVideoId={fbVideoId || location.state?.fbVideoId || localStorage.getItem("smartmark_last_fb_video_id") || null}
+          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+              <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
+                Campaign Name
+              </label>
+              <SchedulerInline
+                backendUrl={backendUrl}
+                form={form}
+                selectedAccount={selectedAccount}
+                selectedPageId={selectedPageId}
+                budget={budget}
+                mediaImageUrl={mediaImageUrl || localStorage.getItem("smartmark_last_image_url") || ""}
+                mediaVideoUrl={mediaVideoUrl || localStorage.getItem("smartmark_last_video_url") || ""}
+                headline={headline}
+                body={body}
+                answers={answers}
+                mediaSelection={mediaSelection}
+                fbVideoId={fbVideoId}
+              />
+            </div>
+
+            <input
+              type="text"
+              value={form.campaignName || ""}
+              onChange={e => setForm({ ...form, campaignName: e.target.value })}
+              placeholder="Name your campaign"
+              style={{
+                padding: "1rem 1.1rem",
+                borderRadius: "1.1rem",
+                border: "1.2px solid #57dfa9",
+                fontSize: "1.14rem",
+                background: "#1c2120",
+                color: "#b3f1d6",
+                marginBottom: "1rem",
+                outline: "none",
+                width: "100%"
+              }}
             />
           </div>
 
-          <input
-            type="text"
-            value={form.campaignName || ""}
-            onChange={e => setForm({ ...form, campaignName: e.target.value })}
-            placeholder="Name your campaign"
-            style={{
-              padding: "1rem 1.1rem",
-              borderRadius: "1.1rem",
-              border: "1.2px solid #57dfa9",
-              fontSize: "1.14rem",
-              background: "#1c2120",
-              color: "#b3f1d6",
-              marginBottom: "1rem",
-              outline: "none",
-              width: "100%"
-            }}
-          />
-        </div>
-
-          {/* CAMPAIGN BUDGET */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
             <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
               Campaign Budget ($)
             </label>
             <input
               type="number"
-              placeholder="Enter budget (minimum $3)"
+              placeholder="Enter budget (minimum $2)"
               min={3}
               step={1}
               value={budget}
@@ -1026,75 +979,58 @@ const payload = {
             <div style={{ color: "#afeca3", fontWeight: 700, marginBottom: 8 }}>
               SmartMark Fee: <span style={{ color: ACCENT_GREEN }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
             </div>
-            {budget && Number(budget) >= 2 && (
-              <div
-                style={{
-                  marginTop: "0.7rem",
-                  color: "#ffe066",
-                  background: "#1c1c1e",
-                  borderRadius: "0.9rem",
-                  padding: "0.8rem 1.1rem",
-                  fontWeight: 700,
-                  textAlign: "center",
-                  fontSize: "1.13rem",
-                  border: "1.2px solid #2b2923",
-                  width: "100%"
-                }}
-              >
-                <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-                  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6, margin: "8px 0" }}>
-                    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3 }}>Your CashApp:</label>
-                    <input
-                      type="text"
-                      placeholder="CashApp username"
-                      value={cashapp}
-                      onChange={e => {
-                        setCashapp(e.target.value);
-                        localStorage.setItem("smartmark_login_username", e.target.value);
-                      }}
-                      style={{
-                        padding: "0.74rem 1rem",
-                        borderRadius: "0.85rem",
-                        border: "1.2px solid #57dfa9",
-                        fontSize: "1.09rem",
-                        background: "#1c2120",
-                        color: "#b3f1d6",
-                        marginBottom: 3,
-                        width: "100%"
-                      }}
-                      autoComplete="username"
-                    />
-                    <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3, marginTop: 4 }}>Your Email:</label>
-                    <input
-                      type="email"
-                      placeholder="Email address"
-                      value={email}
-                      onChange={e => {
-                        setEmail(e.target.value);
-                        localStorage.setItem("smartmark_login_password", e.target.value);
-                      }}
-                      style={{
-                        padding: "0.74rem 1rem",
-                        borderRadius: "0.85rem",
-                        border: "1.2px solid #57dfa9",
-                        fontSize: "1.09rem",
-                        background: "#1c2120",
-                        color: "#b3f1d6",
-                        marginBottom: 3,
-                        width: "100%"
-                      }}
-                      autoComplete="email"
-                    />
-                  </div>
-                </div>
-                Pay (${fee.toFixed(2)}) to <span style={{ color: ACCENT_GREEN }}>$Wknowles20</span>
+
+            <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6, margin: "8px 0" }}>
+                <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3 }}>Your CashApp:</label>
+                <input
+                  type="text"
+                  placeholder="CashApp username"
+                  value={cashapp}
+                  onChange={e => {
+                    setCashapp(e.target.value);
+                    localStorage.setItem("smartmark_login_username", e.target.value);
+                  }}
+                  style={{
+                    padding: "0.74rem 1rem",
+                    borderRadius: "0.85rem",
+                    border: "1.2px solid #57dfa9",
+                    fontSize: "1.09rem",
+                    background: "#1c2120",
+                    color: "#b3f1d6",
+                    marginBottom: 3,
+                    width: "100%"
+                  }}
+                  autoComplete="username"
+                />
+                <label style={{ color: "#fff", fontWeight: 600, fontSize: "1.01rem", marginBottom: 3, marginTop: 4 }}>Your Email:</label>
+                <input
+                  type="email"
+                  placeholder="Email address"
+                  value={email}
+                  onChange={e => {
+                    setEmail(e.target.value);
+                    localStorage.setItem("smartmark_login_password", e.target.value);
+                  }}
+                  style={{
+                    padding: "0.74rem 1rem",
+                    borderRadius: "0.85rem",
+                    border: "1.2px solid #57dfa9",
+                    fontSize: "1.09rem",
+                    background: "#1c2120",
+                    color: "#b3f1d6",
+                    marginBottom: 3,
+                    width: "100%"
+                  }}
+                  autoComplete="email"
+                />
               </div>
-            )}
+            </div>
           </div>
 
           <button
             onClick={handleLaunch}
-            disabled={loading || campaignCount >= 2}
+            disabled={loading || campaignCount >= 2 || !canLaunch}
             style={{
               background: campaignCount >= 2 ? "#ccc" : "#14e7b9",
               color: "#181b20",
@@ -1107,9 +1043,9 @@ const payload = {
               marginTop: 2,
               fontFamily: MODERN_FONT,
               boxShadow: "0 2px 16px #0cc4be24",
-              cursor: loading || campaignCount >= 2 ? "not-allowed" : "pointer",
+              cursor: (loading || campaignCount >= 2 || !canLaunch) ? "not-allowed" : "pointer",
               transition: "background 0.18s",
-              opacity: loading || campaignCount >= 2 ? 0.6 : 1
+              opacity: (loading || campaignCount >= 2 || !canLaunch) ? 0.6 : 1
             }}
           >
             {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
@@ -1128,7 +1064,6 @@ const payload = {
           )}
         </main>
 
-        {/* RIGHT PANE: Metrics & Dropdown */}
         <aside style={{
           flex: 1,
           display: "flex",
@@ -1247,7 +1182,7 @@ const payload = {
                       }}
                       title="New Campaign"
                     >
-                      <FaPlus />
+                      <SmartMarkLogoButton />
                     </button>
                   )}
                 </div>
@@ -1283,6 +1218,7 @@ const payload = {
                 </div>
               )}
             </div>
+
             {selectedCampaignId && (
               <>
                 <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
@@ -1297,6 +1233,7 @@ const payload = {
                 </b></div>
               </>
             )}
+
             <div style={{
               width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
               display: "flex", flexDirection: "column", gap: 14
@@ -1444,6 +1381,7 @@ const payload = {
           </div>
         </aside>
       </div>
+
       {showPauseModal && (
         <div style={{
           position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh',
@@ -1479,7 +1417,6 @@ const payload = {
   );
 };
 
-// Image Modal Component (put above or below CampaignSetup, or in the same file)
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
