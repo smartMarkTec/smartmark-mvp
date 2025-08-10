@@ -644,16 +644,26 @@ useEffect(() => {
   // eslint-disable-next-line
 }, [selectedAccount, selectedCampaignId, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
-  // --- On campaign change: load that bucket ---
-  useEffect(() => {
-    if (!selectedAccount) return;
-    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(acctKey);
-    const bucket = selectedCampaignId ? map[selectedCampaignId] : map.draft;
-    setImageUrlsArr(bucket?.images || []);
-    setVideoUrlsArr(bucket?.videos || []);
-    setFbVideoIdsArr(bucket?.fbVideoIds || []);
-  }, [selectedCampaignId, selectedAccount]);
+// --- On campaign change: load that bucket ---
+useEffect(() => {
+  if (!selectedAccount) return;
+  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+  const map = readCreativeMap(acctKey);
+
+  // if this navigation brought new draft creatives, keep showing draft this time
+  const hasNavDraft =
+    (Array.isArray(navImageUrls) && navImageUrls.length) ||
+    (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+    (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
+    navImageUrl || navVideoUrl || navFbVideoId;
+
+  const bucket = (selectedCampaignId && !hasNavDraft) ? map[selectedCampaignId] : map.draft;
+
+  setImageUrlsArr(bucket?.images || []);
+  setVideoUrlsArr(bucket?.videos || []);
+  setFbVideoIdsArr(bucket?.fbVideoIds || []);
+// eslint-disable-next-line react-hooks/exhaustive-deps
+}, [selectedCampaignId, selectedAccount, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrl, navVideoUrl, navFbVideoId]);
 
   // --- Pause/Unpause/Delete handlers ---
   const [isPaused, setIsPaused] = useState(false);
