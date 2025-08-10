@@ -30,20 +30,47 @@ const FB_SCOPES = [
 
 let userTokens = {};
 
-// Helper: absolute public URL for generated assets
+// ---------- helpers ----------
 function absolutePublicUrl(relativePath) {
   const base =
     process.env.PUBLIC_BASE_URL ||
     process.env.RENDER_EXTERNAL_URL ||
     'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
-  return relativePath.startsWith('http') ? relativePath : `${base}${relativePath}`;
+  if (/^https?:\/\//i.test(relativePath)) return relativePath;
+  return `${base}${relativePath}`;
+}
+
+function getUserToken() {
+  try {
+    const { getFbUserToken } = require('../tokenStore');
+    return getFbUserToken() || userTokens['singleton'] || null;
+  } catch {
+    return userTokens['singleton'] || null;
+  }
+}
+
+function safeUrl(u, fallback = 'https://example.com') {
+  try {
+    const s = String(u || '').trim();
+    if (!s) return fallback;
+    // allow relative to our public base
+    if (s.startsWith('/')) return absolutePublicUrl(s);
+    // validate absolute
+    const _ = new URL(s);
+    return s;
+  } catch {
+    return fallback;
+  }
 }
 
 // --- FACEBOOK OAUTH --- //
 router.get('/facebook', (req, res) => {
   const state = "randomstring123";
-  const fbUrl = `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}&scope=${FB_SCOPES.join(',')}&response_type=code&state=${state}&auth_type=reauthenticate`;
+  const fbUrl =
+    `https://www.facebook.com/v18.0/dialog/oauth?client_id=${FACEBOOK_APP_ID}` +
+    `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
+    `&scope=${FB_SCOPES.join(',')}&response_type=code&state=${state}&auth_type=reauthenticate`;
   res.redirect(fbUrl);
 });
 
@@ -65,7 +92,7 @@ router.get('/facebook/callback', async (req, res) => {
 
     console.log('[auth] FB user token stored in tokenStore:', !!accessToken);
 
-    res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1&fb_user_token=${encodeURIComponent(accessToken)}`);
+    res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
     res.status(500).send('Failed to authenticate with Facebook.');
@@ -74,13 +101,13 @@ router.get('/facebook/callback', async (req, res) => {
 
 // --- TEMP DEBUG ROUTE (delete later) ---
 router.get('/debug/fbtoken', (req, res) => {
-  const { getFbUserToken } = require('../tokenStore');
-  res.json({ fbUserToken: getFbUserToken() ? 'present' : 'missing' });
+  const t = getUserToken();
+  res.json({ fbUserToken: t ? 'present' : 'missing' });
 });
 
 // --- AD ACCOUNTS --- //
 router.get('/facebook/adaccounts', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
     const me = await axios.get(
@@ -89,13 +116,14 @@ router.get('/facebook/adaccounts', async (req, res) => {
     );
     res.json(me.data);
   } catch (err) {
+    console.error('adaccounts error:', err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch ad accounts." });
   }
 });
 
 // --- FB PAGES --- //
 router.get('/facebook/pages', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
     const me = await axios.get(
@@ -104,6 +132,7 @@ router.get('/facebook/pages', async (req, res) => {
     );
     res.json(me.data);
   } catch (err) {
+    console.error('pages error:', err.response?.data || err.message);
     res.status(500).json({ error: err.response?.data?.error?.message || "Failed to fetch Facebook Pages." });
   }
 });
@@ -116,9 +145,7 @@ router.post('/signup', async (req, res) => {
   }
   await db.read();
   if (!db.data.users) db.data.users = [];
-  if (
-    db.data.users.find(u => u.username === username || u.email === email || u.cashtag === cashtag)
-  ) {
+  if (db.data.users.find(u => u.username === username || u.email === email || u.cashtag === cashtag)) {
     return res.status(400).json({ error: 'Username, email, or cashtag already exists' });
   }
   db.data.users.push({ username, email, cashtag, password });
@@ -134,12 +161,7 @@ router.post('/login', async (req, res) => {
   let user = db.data.users.find(u => u.username === username && u.password === password);
 
   if (!user) {
-    user = {
-      username,
-      email: password,
-      cashtag: username,
-      password
-    };
+    user = { username, email: password, cashtag: username, password };
     db.data.users.push(user);
     await db.write();
   }
@@ -147,49 +169,46 @@ router.post('/login', async (req, res) => {
   res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
 });
 
-// ====== LAUNCH CAMPAIGN (Create ad sets per media type; seed 1–2 ads per set based on policy) ======
+// ====== LAUNCH CAMPAIGN ======
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   try {
     const {
       form = {},
-      budget,                 // daily budget entered by user (USD)
-      adCopy,                 // optional seed copy (string)
-      adImage,                // optional base64 data URL
-      adVideo,                // optional base64 data URL
-      fbVideoId,              // optional already-uploaded video id
+      budget,
+      adCopy,
+      adImage,
+      adVideo,
+      fbVideoId,
       campaignType,
       pageId,
       aiAudience: aiAudienceRaw,
       mediaSelection = 'both',
-      // optional AB/flight overrides
       flightStart = null,
       flightEnd = null,
       flightHours = null,
       overrideCountPerType = null,
       answers = {},
-      url = ''
+      url = '',
+      imageVariants = [],
+      videoVariants = [],
+      fbVideoIds = []
     } = req.body;
 
+    if (!pageId) return res.status(400).json({ error: 'Facebook Page is required.' });
+
     const campaignName = form.campaignName || form.businessName || "SmartMark Campaign";
+    const linkUrl = safeUrl(form.url || url || "https://your-smartmark-site.com");
 
     // Parse AI audience
     let aiAudience = null;
     try {
-      if (typeof aiAudienceRaw === "string") {
-        aiAudience = JSON.parse(aiAudienceRaw);
-      } else if (typeof aiAudienceRaw === "object" && aiAudienceRaw !== null) {
-        aiAudience = aiAudienceRaw;
-      }
+      if (typeof aiAudienceRaw === "string") aiAudience = JSON.parse(aiAudienceRaw);
+      else if (typeof aiAudienceRaw === "object" && aiAudienceRaw !== null) aiAudience = aiAudienceRaw;
     } catch { aiAudience = null; }
-
-    // Decide media desire
-    const ms = String(mediaSelection || 'both').toLowerCase();
-    const wantImage = ms === 'image' || ms === 'both';
-    const wantVideo = ms === 'video' || ms === 'both';
 
     // === Build targeting ===
     let targeting = {
@@ -201,17 +220,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     if (aiAudience && aiAudience.location) {
       const loc = aiAudience.location.toLowerCase();
-      if (loc.includes("texas")) {
-        targeting.geo_locations = { regions: [{ key: "3886" }] };
-      } else if (loc.includes("california")) {
-        targeting.geo_locations = { regions: [{ key: "3841" }] };
-      } else if (loc.includes("usa") || loc.includes("united states")) {
-        targeting.geo_locations = { countries: ["US"] };
-      } else if (/^[a-z]{2}$/i.test(aiAudience.location.trim())) {
-        targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
-      } else {
-        targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
-      }
+      if (loc.includes("texas")) targeting.geo_locations = { regions: [{ key: "3886" }] };
+      else if (loc.includes("california")) targeting.geo_locations = { regions: [{ key: "3841" }] };
+      else if (loc.includes("usa") || loc.includes("united states")) targeting.geo_locations = { countries: ["US"] };
+      else if (/^[a-z]{2}$/i.test(aiAudience.location.trim())) targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
+      else targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
     }
 
     if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
@@ -225,13 +238,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       const fbInterestIds = [];
       for (let name of interestNames) {
         try {
-          const fbRes = await axios.get(
-            'https://graph.facebook.com/v18.0/search',
-            {
-              params: { type: 'adinterest', q: name, access_token: userToken }
-            }
-          );
-          if (fbRes.data && fbRes.data.data && fbRes.data.data.length > 0) {
+          const fbRes = await axios.get('https://graph.facebook.com/v18.0/search', {
+            params: { type: 'adinterest', q: name, access_token: userToken }
+          });
+          if (fbRes.data?.data?.length > 0) {
             fbInterestIds.push(fbRes.data.data[0].id);
           }
         } catch (e) {
@@ -268,9 +278,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // Decide variant plan (how many variants per media type)
+    // Decide variant plan
     const variantPlan = policy.decideVariantPlan({
-      assetTypes: ms,
+      assetTypes: String(mediaSelection || 'both'),
       dailyBudget: Number(budget) || 0,
       flightHours: (function () {
         if (flightEnd) return Math.max(0, (new Date(flightEnd) - Date.now()) / 36e5);
@@ -279,12 +289,15 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       })(),
       overrideCountPerType
     });
+
+    const wantImage = /^(image|both)$/.test(String(mediaSelection).toLowerCase());
+    const wantVideo = /^(video|both)$/.test(String(mediaSelection).toLowerCase());
     const needImg = wantImage ? variantPlan.images : 0;
     const needVid = wantVideo ? variantPlan.videos : 0;
 
     // 2) Create Ad Sets (split daily budget across the media types used)
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
-    const perAdsetBudgetCents = Math.max(1, Math.round((Number(budget) || 0) * 100 / Math.max(1, typesUsed)));
+    const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100 / Math.max(1, typesUsed))); // ≥$1.00
 
     const adSetIds = [];
     let imageAdSetId = null, videoAdSetId = null;
@@ -299,14 +312,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           billing_event: "IMPRESSIONS",
           optimization_goal: "LINK_CLICKS",
           bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+          destination_type: "WEBSITE",
           status: "ACTIVE",
           start_time: new Date(Date.now() + 60 * 1000).toISOString(),
           targeting: {
             ...targeting,
             publisher_platforms: ["facebook", "instagram"],
             facebook_positions: ["feed"],
-            audience_network_positions: [],
-            instagram_positions: ["stream"]
+            instagram_positions: ["stream", "reels", "story"]
           },
         },
         { params: { access_token: userToken } }
@@ -325,13 +338,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           billing_event: "IMPRESSIONS",
           optimization_goal: "LINK_CLICKS",
           bid_strategy: "LOWEST_COST_WITHOUT_CAP",
+          destination_type: "WEBSITE",
           status: "ACTIVE",
           start_time: new Date(Date.now() + 60 * 1000).toISOString(),
           targeting: {
             ...targeting,
-            publisher_platforms: ["facebook", "audience_network", "instagram"],
+            publisher_platforms: ["facebook", "instagram"],
             facebook_positions: ["feed", "instream_video"],
-            audience_network_positions: ["rewarded_video"],
             instagram_positions: ["stream", "reels", "story"]
           },
         },
@@ -341,56 +354,66 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       adSetIds.push(videoAdSetId);
     }
 
-    // 3) Prepare creatives (seed from client + auto-generate remainder)
+    // 3) Prepare creatives (seed from client + provided arrays + auto-generate)
     const creatives = [];
 
-    // Seed image (client-provided)
-    if (wantImage && adImage && adImage.startsWith('data:')) {
-      creatives.push({
-        kind: 'image',
-        dataUrl: adImage,
-        adCopy: adCopy || (form.headline ? `${form.headline}\n\n${form.body || ''}` : '')
-      });
+    // Seed image from single payload (dataUrl preferred; else URL)
+    if (wantImage && adImage) {
+      if (adImage.startsWith('data:')) {
+        creatives.push({ kind: 'image', dataUrl: adImage, adCopy: adCopy || `${form.headline || ''}\n\n${form.body || ''}`.trim() });
+      } else {
+        creatives.push({ kind: 'image', imageUrl: adImage, adCopy: adCopy || `${form.headline || ''}\n\n${form.body || ''}`.trim() });
+      }
     }
-    // Seed video (client-provided)
-    if (wantVideo && (fbVideoId || (adVideo && adVideo.startsWith('data:')))) {
+
+    // Seed video from single payload (fbVideoId, dataUrl, or URL)
+    if (wantVideo && (fbVideoId || adVideo)) {
       const v = {};
       if (fbVideoId) v.fbVideoId = fbVideoId;
-      if (adVideo && adVideo.startsWith('data:')) v.dataUrl = adVideo;
-      creatives.push({
-        kind: 'video',
-        video: v,
-        adCopy: adCopy || (form.headline ? `${form.headline}\n\n${form.body || ''}` : '')
-      });
+      if (adVideo) {
+        if (adVideo.startsWith('data:')) v.dataUrl = adVideo;
+        else v.absoluteUrl = adVideo; // absolute or /generated/*
+      }
+      creatives.push({ kind: 'video', video: v, adCopy: adCopy || `${form.headline || ''}\n\n${form.body || ''}`.trim() });
     }
 
-    // Count how many more we need
-    const haveImg = creatives.filter(c => c.kind === 'image').length;
-    const haveVid = creatives.filter(c => c.kind === 'video').length;
-    const needMoreImg = Math.max(0, needImg - haveImg);
-    const needMoreVid = Math.max(0, needVid - haveVid);
-
-    // Generate missing variants via internal generator
-    if (needMoreImg || needMoreVid) {
-      // image pass
-      if (needMoreImg) {
-        const gp = { images: needMoreImg, videos: 0 };
-        const gen = await generator.generateVariants({
-          form, answers, url,
-          mediaSelection: 'image',
-          variantPlan: gp
-        });
-        creatives.push(...gen.filter(c => c.kind === 'image'));
+    // Seed from arrays (imageVariants, videoVariants, fbVideoIds)
+    if (wantImage && Array.isArray(imageVariants)) {
+      for (const u of imageVariants) {
+        if (!u) continue;
+        creatives.push({ kind: 'image', imageUrl: u, adCopy: adCopy || `${form.headline || ''}\n\n${form.body || ''}`.trim() });
       }
-      // video pass
-      if (needMoreVid) {
-        const gp = { images: 0, videos: needMoreVid };
-        const gen = await generator.generateVariants({
-          form, answers, url,
-          mediaSelection: 'video',
-          variantPlan: gp
-        });
-        creatives.push(...gen.filter(c => c.kind === 'video'));
+    }
+    if (wantVideo && Array.isArray(videoVariants)) {
+      for (const u of videoVariants) {
+        if (!u) continue;
+        creatives.push({ kind: 'video', video: { absoluteUrl: u }, adCopy: adCopy || `${form.headline || ''}\n\n${form.body || ''}`.trim() });
+      }
+    }
+    if (wantVideo && Array.isArray(fbVideoIds)) {
+      for (const id of fbVideoIds) {
+        if (!id) continue;
+        creatives.push({ kind: 'video', video: { fbVideoId: String(id) }, adCopy: adCopy || `${form.headline || ''}\n\n${form.body || ''}`.trim() });
+      }
+    }
+
+    // Count + cap by variant plan
+    const imgList = creatives.filter(c => c.kind === 'image').slice(0, needImg);
+    const vidList = creatives.filter(c => c.kind === 'video').slice(0, needVid);
+
+    // If still short, autogenerate the remainder
+    const missingImg = Math.max(0, needImg - imgList.length);
+    const missingVid = Math.max(0, needVid - vidList.length);
+    if (missingImg || missingVid) {
+      if (missingImg) {
+        const gp = { images: missingImg, videos: 0 };
+        const gen = await generator.generateVariants({ form, answers, url: linkUrl, mediaSelection: 'image', variantPlan: gp });
+        imgList.push(...gen.filter(c => c.kind === 'image').slice(0, missingImg));
+      }
+      if (missingVid) {
+        const gp = { images: 0, videos: missingVid };
+        const gen = await generator.generateVariants({ form, answers, url: linkUrl, mediaSelection: 'video', variantPlan: gp });
+        vidList.push(...gen.filter(c => c.kind === 'video').slice(0, missingVid));
       }
     }
 
@@ -409,25 +432,18 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         const fbImageRes = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
           new URLSearchParams({ bytes: base64Data }),
-          {
-            headers: { Authorization: undefined, 'Content-Type': 'application/x-www-form-urlencoded' },
-            params: { access_token: userToken }
-          }
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
         );
         const imgData = fbImageRes.data.images;
         imageHash = Object.values(imgData)[0]?.hash;
       } else if (imageSource.imageUrl) {
-        // Fetch the image and upload
         const abs = absolutePublicUrl(imageSource.imageUrl);
         const imgRes = await axios.get(abs, { responseType: 'arraybuffer' });
         const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
         const fbImageRes = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
           new URLSearchParams({ bytes: dataUrl.split(',')[1] }),
-          {
-            headers: { Authorization: undefined, 'Content-Type': 'application/x-www-form-urlencoded' },
-            params: { access_token: userToken }
-          }
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
         );
         const imgData = fbImageRes.data.images;
         imageHash = Object.values(imgData)[0]?.hash;
@@ -445,9 +461,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             page_id: pageId,
             link_data: {
               message: copy || adCopy || '',
-              link: form.url || "https://your-smartmark-site.com",
+              link: linkUrl,
               image_hash: imageHash,
-              description: form.description || ""
+              description: form.description || "",
+              call_to_action: { type: "LEARN_MORE", value: { link: linkUrl } }
             }
           }
         },
@@ -472,7 +489,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     async function ensureVideoId(videoObj) {
       if (videoObj.fbVideoId) return videoObj.fbVideoId;
 
-      // Prefer absoluteUrl via file_url
       if (videoObj.absoluteUrl) {
         const form = new FormData();
         form.append('file_url', absolutePublicUrl(videoObj.absoluteUrl));
@@ -486,7 +502,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         return up?.data?.id;
       }
 
-      // Fallback: base64 dataUrl upload
       if (videoObj.dataUrl && videoObj.dataUrl.startsWith('data:')) {
         const matches = videoObj.dataUrl.match(/^data:(video\/\w+);base64,(.+)$/);
         if (!matches) throw new Error("Invalid video data.");
@@ -510,7 +525,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     async function uploadVideoAndCreateAd(videoSource, adsetId, copy) {
       const videoId = await ensureVideoId(videoSource);
 
-      // Fetch a thumbnail
+      // Optional thumbnail
       let thumbUrl = null;
       try {
         const thumbRes = await axios.get(
@@ -526,11 +541,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         video_id: videoId,
         message: copy || adCopy || "",
         title: campaignName,
-        call_to_action: { type: "LEARN_MORE", value: { link: form.url || "https://your-smartmark-site.com" } }
+        call_to_action: { type: "LEARN_MORE", value: { link: linkUrl } }
       };
-      if (thumbUrl) {
-        videoData.image_url = thumbUrl;
-      }
+      if (thumbUrl) videoData.image_url = thumbUrl;
 
       const creativeRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
@@ -556,25 +569,24 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return adRes.data.id;
     }
 
-    // Create image ads (up to needImg)
+    // Create image ads
     if (wantImage && imageAdSetId && needImg > 0) {
-      const imgCreatives = creatives.filter(c => c.kind === 'image').slice(0, needImg);
-      for (const ic of imgCreatives) {
+      const list = imgList.slice(0, needImg);
+      for (const ic of list) {
         const adId = await uploadImageAndCreateAd(ic, imageAdSetId, ic.adCopy);
         variantResults.push({ kind: 'image', adId });
       }
     }
 
-    // Create video ads (up to needVid)
+    // Create video ads
     if (wantVideo && videoAdSetId && needVid > 0) {
-      const vidCreatives = creatives.filter(c => c.kind === 'video').slice(0, needVid);
-      for (const vc of vidCreatives) {
+      const list = vidList.slice(0, needVid);
+      for (const vc of list) {
         const adId = await uploadVideoAndCreateAd(vc.video || {}, videoAdSetId, vc.adCopy);
         variantResults.push({ kind: 'video', adId });
       }
     }
 
-    // Done
     res.json({
       success: true,
       campaignId,
@@ -586,20 +598,16 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       campaignStatus: "ACTIVE"
     });
   } catch (err) {
-    let errorMsg = "Failed to launch campaign.";
-    if (err.response && err.response.data && err.response.data.error) {
-      errorMsg = err.response.data.error.message;
-    }
-    console.error("FB Campaign Launch Error:", err.response ? err.response.data : err);
-    res.status(500).json({ error: errorMsg });
+    const fb = err.response?.data?.error;
+    const msg = fb?.message || err.message || "Failed to launch campaign.";
+    console.error("FB Campaign Launch Error:", fb || err);
+    res.status(500).json({ error: msg, fbCode: fb?.code, fbType: fb?.type });
   }
 });
 
-// ====== FACEBOOK API TEST ROUTES (for permissions/feature validation) ======
-
-// Test pages_manage_metadata (update page about)
+// ====== FACEBOOK API TEST ROUTES ======
 router.post('/facebook/test-pages-manage-metadata/:pageId', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { pageId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -614,9 +622,8 @@ router.post('/facebook/test-pages-manage-metadata/:pageId', async (req, res) => 
   }
 });
 
-// Test read_insights
 router.get('/facebook/test-read-insights/:pageId', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { pageId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -630,9 +637,8 @@ router.get('/facebook/test-read-insights/:pageId', async (req, res) => {
   }
 });
 
-// Test pages_read_user_content (read conversations)
 router.get('/facebook/test-pages-read-user-content/:pageId', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { pageId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -646,9 +652,8 @@ router.get('/facebook/test-pages-read-user-content/:pageId', async (req, res) =>
   }
 });
 
-// Test pages_manage_posts (create a post)
 router.post('/facebook/test-pages-manage-posts/:pageId', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { pageId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -663,9 +668,8 @@ router.post('/facebook/test-pages-manage-posts/:pageId', async (req, res) => {
   }
 });
 
-// Test pages_manage_engagement (reply to a comment)
 router.post('/facebook/test-pages-manage-engagement/:commentId', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { commentId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -682,7 +686,7 @@ router.post('/facebook/test-pages-manage-engagement/:commentId', async (req, res
 
 // --- CAMPAIGN MGMT --- //
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
@@ -698,7 +702,7 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
 });
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
@@ -714,7 +718,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
 });
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
@@ -737,7 +741,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
 
 // --- PAUSE / UNPAUSE / CANCEL --- //
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -752,7 +756,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
   }
 });
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -767,7 +771,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   }
 });
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
-  const userToken = userTokens['singleton'];
+  const userToken = getUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {

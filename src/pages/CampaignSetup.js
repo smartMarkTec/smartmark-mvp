@@ -205,28 +205,30 @@ function SchedulerInline({ campaignKey }) {
   const DEFAULT_ACTION = "generate-video";
 
   // Local-only scheduled reminders; no network calls here
-  useEffect(() => {
-    let alive = true;
-    const tick = () => {
-      if (!alive) return;
-      const dueIdx = jobs.findIndex(
-        (j) => j.status === "pending" && new Date(j.runAt).getTime() <= Date.now() + 2000
-      );
-      if (dueIdx !== -1) {
-        setJobs((prev) => {
-          const clone = [...prev];
-          clone[dueIdx] = { ...clone[dueIdx], status: "done", finishedAt: nowIso() };
-          return clone;
-        });
+  useEffect(() => (
+    (() => {
+      let alive = true;
+      const tick = () => {
+        if (!alive) return;
+        const dueIdx = jobs.findIndex(
+          (j) => j.status === "pending" && new Date(j.runAt).getTime() <= Date.now() + 2000
+        );
+        if (dueIdx !== -1) {
+          setJobs((prev) => {
+            const clone = [...prev];
+            clone[dueIdx] = { ...clone[dueIdx], status: "done", finishedAt: nowIso() };
+            return clone;
+          });
+        }
+        setTimeout(tick, 1500);
+      };
+      if (jobs.some(j => !j.status)) {
+        setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
       }
-      setTimeout(tick, 1500);
-    };
-    if (jobs.some(j => !j.status)) {
-      setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
-    }
-    tick();
-    return () => { alive = false; };
-  }, [jobs]);
+      tick();
+      return () => { alive = false; };
+    })()
+  ), [jobs]);
 
   const addJob = () => {
     if (!runAt) return;
@@ -416,7 +418,7 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.data || []);
@@ -480,7 +482,7 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
@@ -488,7 +490,7 @@ const CampaignSetup = () => {
         setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
       })
       .catch(() => {});
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
       .then(res => res.json())
       .then(setMetrics)
       .catch(() => setMetrics(null));
@@ -589,11 +591,17 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       if (isPaused) {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, {
+          method: "POST",
+          credentials: "include"
+        });
         setCampaignStatus("ACTIVE");
         setIsPaused(false);
       } else {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, {
+          method: "POST",
+          credentials: "include"
+        });
         setCampaignStatus("PAUSED");
         setIsPaused(true);
       }
@@ -608,7 +616,10 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).replace("act_", "");
     setLoading(true);
     try {
-      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
+      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, {
+        method: "POST",
+        credentials: "include"
+      });
       setCampaignStatus("ARCHIVED");
       setLaunched(false);
       setLaunchResult(null);
@@ -650,6 +661,26 @@ const CampaignSetup = () => {
 
   // --- Launch handler (uses first variants, sends arrays for engine) ---
   const handleLaunch = async () => {
+    if (!canLaunch) {
+      alert("Please connect Facebook, select Ad Account + Page, and enter a valid budget (≥ $3).");
+      return;
+    }
+
+    // Ensure we have creatives aligned to selection
+    if (mediaSelection === "image" && imageUrlsArr.length === 0 && !mediaImageUrl) {
+      alert("No image creative found. Generate images first.");
+      return;
+    }
+    if (mediaSelection === "video" && videoUrlsArr.length === 0 && !mediaVideoUrl && fbVideoIdsArr.length === 0) {
+      alert("No video creative found. Generate videos first.");
+      return;
+    }
+    if (mediaSelection === "both" &&
+        (imageUrlsArr.length === 0 && !mediaImageUrl || (videoUrlsArr.length === 0 && !mediaVideoUrl && fbVideoIdsArr.length === 0))) {
+      alert("Need at least one image and one video before launching.");
+      return;
+    }
+
     setLoading(true);
     try {
       const acctId = String(selectedAccount).replace("act_", "");
@@ -692,16 +723,24 @@ const CampaignSetup = () => {
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include", // CRITICAL: send session cookie for FB token
         body: JSON.stringify(payload),
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Server error");
+      const maybeJson = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errMsg =
+          maybeJson?.error?.message ||
+          maybeJson?.error ||
+          maybeJson?.fbError ||
+          "Server error";
+        throw new Error(errMsg);
+      }
 
       // Move DRAFT creatives to this new campaign bucket
       const map = readCreativeMap(acctId);
-      if (json.campaignId) {
-        map[json.campaignId] = {
+      if (maybeJson.campaignId) {
+        map[maybeJson.campaignId] = {
           images: imageUrlsArr,
           videos: videoUrlsArr,
           fbVideoIds: fbVideoIdsArr,
@@ -712,8 +751,8 @@ const CampaignSetup = () => {
       }
 
       setLaunched(true);
-      setLaunchResult(json);
-      setSelectedCampaignId(json.campaignId || selectedCampaignId);
+      setLaunchResult(maybeJson);
+      setSelectedCampaignId(maybeJson.campaignId || selectedCampaignId);
       setTimeout(() => setLaunched(false), 1500);
     } catch (err) {
       alert("Failed to launch campaign: " + (err.message || ""));

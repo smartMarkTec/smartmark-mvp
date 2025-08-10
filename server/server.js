@@ -13,6 +13,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 
@@ -20,12 +21,12 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://smartmark-mvp.vercel.app',
   'http://localhost:3000'
-];
+].filter(Boolean);
 
-// CORS setup
+// CORS setup (credentials + dynamic origin reflection)
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin) return callback(null, true); // Allow REST tools, local scripts
+  origin(origin, callback) {
+    if (!origin) return callback(null, true); // allow REST tools/local
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('CORS not allowed from this origin: ' + origin), false);
   },
@@ -33,9 +34,22 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
+
+// Ensure the Access-Control-Allow-Origin echoes for credentials flows
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && allowedOrigins.includes(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+  }
+  res.header('Access-Control-Allow-Credentials', 'true');
+  next();
+});
 app.options('*', cors());
 
 app.set('trust proxy', 1);
+
+// Parse cookies BEFORE routes (required for session/token cookies)
+app.use(cookieParser());
 
 // Parse JSON and urlencoded payloads (raise limits to handle base64 uploads safely)
 app.use(express.json({ limit: '50mb' }));
@@ -48,7 +62,6 @@ if (process.env.RENDER) {
   console.log("Serving /generated from:", generatedPath);
 } else {
   generatedPath = path.join(__dirname, 'public/generated');
-  // Ensure the local folder exists so static serving doesn't fail
   try { fs.mkdirSync(generatedPath, { recursive: true }); } catch {}
   console.log('Serving /generated from:', generatedPath);
 }
