@@ -3,8 +3,6 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
-import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
-import { FaExpand } from "react-icons/fa";
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
 
@@ -19,7 +17,6 @@ const TEXT_DIM = "#b3f1d6";
 const LINE = "#2d5b45";
 const ACCENT = "#14e7b9";
 const ACCENT_ALT = "#1ec885";
-const BRAND = "#12cbb8";
 
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 
@@ -434,7 +431,6 @@ const CampaignSetup = () => {
   });
 
   // --- UI state ---
-  const [userKey, setUserKey] = useState("");
   const [adAccounts, setAdAccounts] = useState([]);
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -443,7 +439,7 @@ const CampaignSetup = () => {
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [campaignStatus, setCampaignStatus] = useState("ACTIVE");
+const [, setCampaignStatus] = useState("ACTIVE");
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [campaignCount, setCampaignCount] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(true);
