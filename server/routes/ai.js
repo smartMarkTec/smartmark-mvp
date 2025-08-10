@@ -897,12 +897,35 @@ function normalizeShortCTA(input) {
 }
 
 
+// ========== AI: GENERATE VIDEO AD (faster, more robust timeouts) ==========
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
     console.log("Step 1: Starting video ad generation...");
 
-    const { url = "", answers = {}, regenerateToken = "" } = req.body;
+    const { url = "", answers = {}, regenerateToken = "", fbAdAccountId, userAccessToken } = req.body;
+
+    // ---- Tunables for speed/reliability on low CPU hosts ----
+    const VIDEO_CFG = {
+      WIDTH: 640,
+      HEIGHT: 360,
+      FPS: 24,
+      CLIP_SEC: 5,          // per-clip length after scaling
+      MIN_FINAL: 12,        // minimum final duration
+      HEADROOM: 2.5         // extra seconds beyond TTS
+    };
+
+    // ---- Timeouts (overridable by env) ----
+    const TO = {
+      PEXELS: +(process.env.VID_PEXELS_TIMEOUT_MS || 30000),
+      DL:     +(process.env.VID_DL_TIMEOUT_MS || 45000),
+      SCALE:  +(process.env.VID_SCALE_TIMEOUT_MS || 45000),
+      CONCAT: +(process.env.VID_CONCAT_TIMEOUT_MS || 30000),
+      TRIM:   +(process.env.VID_TRIM_TIMEOUT_MS || 20000),
+      OVERMUX:+(process.env.VID_OVERLAY_MUX_TIMEOUT_MS || 90000),
+      FPROBE: +(process.env.VID_FFPROBE_TIMEOUT_MS || 8000),
+    };
+
     const productType = answers?.industry || answers?.productType || "";
     const overlayText = normalizeShortCTA(answers?.cta);
 
@@ -917,7 +940,7 @@ router.post('/generate-video-ad', async (req, res) => {
         const websiteText = await withTimeout(getWebsiteText(url), 8000, "Website text fetch timed out");
         const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
         videoKeywords.push(...siteKeywords);
-      } catch (e) {
+      } catch {
         console.log("Warning: website text unavailable or timeout");
       }
     }
@@ -933,16 +956,16 @@ router.post('/generate-video-ad', async (req, res) => {
           headers: { Authorization: PEXELS_API_KEY },
           params: { query: searchTerm, per_page: 70, cb: Date.now() + (regenerateToken || "") }
         }),
-        30000,
+        TO.PEXELS,
         "Pexels API timed out"
       );
       videoClips = resp.data.videos || [];
     } catch (err) {
       console.error("FFMPEG ERROR: Pexels fetch failed", err?.response?.data || err.message || err);
-      return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || err?.toString() });
+      return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || String(err) });
     }
     if (!videoClips || videoClips.length < 3) {
-      console.error('PEXELS returned too few videos. Response:', videoClips);
+      console.error('PEXELS returned too few videos. Response:', videoClips?.length || 0);
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
@@ -950,26 +973,31 @@ router.post('/generate-video-ad', async (req, res) => {
     let candidates = [];
     for (let v of videoClips) {
       let mp4s = (v.video_files || [])
-        .filter(f => f.quality === 'sd' && f.link.endsWith('.mp4'))
+        .filter(f => f.quality === 'sd' && /\.mp4(\?|$)/i.test(f.link))
         .sort((a, b) => (a.width || 9999) - (b.width || 9999));
       if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
     }
     if (candidates.length < 3) {
       return res.status(500).json({ error: "Not enough SD MP4 clips found" });
     }
+
     // Deterministic shuffle for regen
     const shuffled = getDeterministicShuffle(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
     const files = shuffled.slice(0, 3);
 
-    // Step 4: Download, scale, trim (8s each, 720x404)
+    // Step 4: Download, scale, trim (5s each, 640x360 @ 24fps)
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+
     const videoPaths = [];
-    const TARGET_WIDTH = 720, TARGET_HEIGHT = 404, FRAMERATE = 30;
+    const { WIDTH, HEIGHT, FPS, CLIP_SEC } = VIDEO_CFG;
+    const ffmpegPathLocal = 'ffmpeg';
+    const ffprobePathLocal = 'ffprobe';
+
     for (let i = 0; i < files.length; i++) {
       const dest = path.join(tempDir, `${require('uuid').v4()}.mp4`);
       try {
-        await withTimeout(downloadFileWithTimeout(files[i], dest, 30000, 5), 30000, "Download step timed out");
+        await withTimeout(downloadFileWithTimeout(files[i], dest, TO.DL, 6), TO.DL + 2000, "Download step timed out");
       } catch (e) {
         console.error("FFMPEG ERROR: Download step failed", e);
         return res.status(500).json({ error: "Stock video download failed", detail: e.message });
@@ -978,25 +1006,28 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         await withTimeout(
           exec(
-            `${ffmpegPath} -y -i "${dest}" -vf "scale=${TARGET_WIDTH}:${TARGET_HEIGHT}:force_original_aspect_ratio=decrease,pad=${TARGET_WIDTH}:${TARGET_HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FRAMERATE}" -t 6 -r ${FRAMERATE} -c:v libx264 -preset superfast -crf 24 -an "${scaledPath}"`
+            `${ffmpegPathLocal} -y -i "${dest}" ` +
+            `-vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,` +
+            `pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FPS}" ` +
+            `-t ${CLIP_SEC} -r ${FPS} -c:v libx264 -preset superfast -crf 26 -an "${scaledPath}"`
           ),
-          18000,
+          TO.SCALE,
           "ffmpeg scaling timed out"
         );
       } catch (e) {
-        fs.unlinkSync(dest);
+        try { fs.unlinkSync(dest); } catch {}
         console.error("FFMPEG ERROR: Scaling step failed", e.stderr || e.message || e);
         return res.status(500).json({ error: "Video scaling failed", detail: e.message });
       }
-      fs.unlinkSync(dest);
+      try { fs.unlinkSync(dest); } catch {}
       videoPaths.push(scaledPath);
     }
 
-    // Step 5: Generate GPT script (mention CTA)
+    // Step 5: Generate GPT script (shorter target to keep audio short)
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products. ` +
-      `Script MUST be 45–55 words (~15–18s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
+      `Script MUST be 35–45 words (~12–15s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
       `No scene directions or SFX — ONLY the spoken words.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -1011,79 +1042,75 @@ router.post('/generate-video-ad', async (req, res) => {
         openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 110,
-          temperature: 0.65
+          max_tokens: 90,
+          temperature: 0.6
         }),
         15000,
         "OpenAI GPT timed out"
       );
-      script = gptRes.choices?.[0]?.message?.content?.trim() || "Shop the best products online now!";
+      script = gptRes.choices?.[0]?.message?.content?.trim() || "Discover what you love today. Shop now!";
     } catch (e) {
       console.error("FFMPEG ERROR: GPT script gen failed", e);
       return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
     }
 
-
-    // Step 6: Generate TTS voiceover
-    let ttsPath;
+    // Step 6: Generate TTS voiceover (keep short)
+    const ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
     try {
       const ttsRes = await withTimeout(
         openai.audio.speech.create({
           model: 'tts-1',
-          voice: TTS_VOICE,
+          voice: 'alloy',
           input: script
         }),
-        15000,
+        20000,
         "OpenAI TTS timed out"
       );
       const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-      ttsPath = path.join(tempDir, `${require('uuid').v4()}.mp3`);
       fs.writeFileSync(ttsPath, ttsBuffer);
     } catch (e) {
       console.error("FFMPEG ERROR: TTS step failed", e);
       return res.status(500).json({ error: "TTS generation failed", detail: e.message });
     }
 
-    // ----- Step 1: Get TTS duration -----
-    let ttsDuration = 16;
+    // Probe TTS duration
+    let ttsDuration = 13;
     try {
-      let ffprobePath = ffmpegPath && ffmpegPath.endsWith('ffmpeg')
-        ? ffmpegPath.replace(/ffmpeg$/, 'ffprobe')
-        : 'ffprobe';
       const { stdout } = await withTimeout(
-        exec(`${ffprobePath} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`),
-        5000,
+        exec(`${ffprobePathLocal} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`),
+        TO.FPROBE,
         "ffprobe step timed out"
       );
       const seconds = parseFloat(stdout.trim());
       if (!isNaN(seconds) && seconds > 0) ttsDuration = seconds;
-    } catch (e) {
-      ttsDuration = 16;
+    } catch {
+      ttsDuration = 13;
     }
 
-    // --- Step 2: Always set video to ttsDuration + 2, minimum 15s
-    let finalDuration = Math.max(ttsDuration + 3.5, 15);
-    const secondsPerClip = 8;
-    let clipsNeeded = Math.ceil(finalDuration / secondsPerClip);
+    // Final duration target
+    let finalDuration = Math.max(VIDEO_CFG.MIN_FINAL, Math.min(ttsDuration + VIDEO_CFG.HEADROOM, 18));
+    const clipsNeeded = Math.max(1, Math.ceil(finalDuration / CLIP_SEC));
     while (videoPaths.length < clipsNeeded) {
       videoPaths.push(videoPaths[videoPaths.length - 1]);
     }
+
+    // Concat list
     const listPath = path.join(tempDir, `${require('uuid').v4()}.txt`);
     fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
 
-    // ----- Step 3: Concatenate video files -----
+    // Output paths
     const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
     if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
     const videoId = require('uuid').v4();
     const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
     const tempTrimmed = path.join(generatedPath, `${videoId}.trimmed.mp4`);
-    const tempOverlay = path.join(generatedPath, `${videoId}.overlay.mp4`);
     const outPath = path.join(generatedPath, `${videoId}.mp4`);
 
+    // Concat
     try {
       await withTimeout(
-        exec(`${ffmpegPath} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`),
-        20000,
+        exec(`${ffmpegPathLocal} -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`),
+        TO.CONCAT,
         "ffmpeg concat timed out"
       );
     } catch (e) {
@@ -1091,11 +1118,11 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Video concat failed", detail: e.message });
     }
 
-    // --- Step 4: Trim the video to finalDuration (ttsDuration + 2, min 15s) ---
+    // Trim to finalDuration
     try {
       await withTimeout(
-        exec(`${ffmpegPath} -y -i "${tempConcat}" -t ${finalDuration} -c copy "${tempTrimmed}"`),
-        12000,
+        exec(`${ffmpegPathLocal} -y -i "${tempConcat}" -t ${finalDuration} -c copy "${tempTrimmed}"`),
+        TO.TRIM,
         "ffmpeg trim timed out"
       );
     } catch (e) {
@@ -1103,11 +1130,9 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Video trim failed", detail: e.message });
     }
 
-    // --- Step 5: Continue with overlay and mux as before, using tempTrimmed for the rest ---
-    const overlayStart = (finalDuration * 0.75).toFixed(2);
-    const overlayEnd = (ttsDuration + 1.5).toFixed(2); // Overlay until 1.5s after TTS ends
-    const fadeInDur = 0.4;
-    const fadeOutDur = 0.5;
+    // Overlay + Mux IN ONE PASS (faster & fewer temp files)
+    const overlayStart = (finalDuration * 0.70).toFixed(2);
+    const overlayEnd   = Math.min(finalDuration, ttsDuration + 1.0).toFixed(2);
     const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
     const safeOverlayText = String(overlayText)
       .toUpperCase()
@@ -1115,47 +1140,49 @@ router.post('/generate-video-ad', async (req, res) => {
       .replace(/'/g, "")
       .replace(/[^A-Z0-9\s!]/g, "");
 
-    let overlayCmd = fs.existsSync(fontfile)
-      ? `${ffmpegPath} -y -i "${tempTrimmed}" -vf "drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset superfast -pix_fmt yuv420p -an "${tempOverlay}"`
-      : `${ffmpegPath} -y -i "${tempTrimmed}" -vf "drawtext=text='${safeOverlayText}':fontcolor=white:fontsize=44:box=0:shadowcolor=black:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:alpha='if(between(t,${overlayStart},${overlayStart}+${fadeInDur}),(t-${overlayStart})/${fadeInDur}, if(between(t,${overlayEnd}-${fadeOutDur},${overlayEnd}),(${overlayEnd}-t)/${fadeOutDur}, between(t,${overlayStart}+${fadeInDur},${overlayEnd}-${fadeOutDur})))'" -t ${overlayEnd} -c:v libx264 -crf 24 -preset superfast -pix_fmt yuv420p -an "${tempOverlay}"`;
+    // drawtext filter (simple enable window; avoids heavy alpha math)
+    const drawText = (fs.existsSync(fontfile)
+      ? `drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
+      : `drawtext=text='${safeOverlayText}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
+    );
 
-    try {
-      await withTimeout(exec(overlayCmd), 120000, "ffmpeg overlay timed out");
-    } catch (e) {
-      console.error("FFMPEG ERROR: text overlay failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Text overlay failed", detail: e.message });
-    }
-
-    // --- Mux audio with video as before ---
     try {
       await withTimeout(
-        exec(`${ffmpegPath} -y -i "${tempOverlay}" -i "${ttsPath}" -map 0:v:0 -map 1:a:0 -shortest -c:v libx264 -preset superfast -crf 24 -c:a aac -b:a 192k "${outPath}"`),
-        25000,
-        "ffmpeg mux timed out"
+        exec(
+          `${ffmpegPathLocal} -y -i "${tempTrimmed}" -i "${ttsPath}" ` +
+          `-filter:v "${drawText}" ` +
+          `-map 0:v:0 -map 1:a:0 -shortest ` +
+          `-c:v libx264 -preset superfast -crf 26 -r ${FPS} ` +
+          `-c:a aac -b:a 128k -ar 44100 ` +
+          `-movflags +faststart ` +
+          `"${outPath}"`
+        ),
+        TO.OVERMUX,
+        "ffmpeg overlay+mux timed out"
       );
     } catch (e) {
-      console.error("FFMPEG ERROR: mux step failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Final mux (video+audio) failed", detail: e.message });
+      console.error("FFMPEG ERROR: overlay+mux failed", e.stderr || e.message || e);
+      return res.status(500).json({ error: "Overlay/mux failed", detail: e.message });
     }
 
-    // ----------- CRITICAL: Wait for output file -----------
+    // Ensure file exists and is non-trivial
     let videoReady = false;
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       try {
         const stats = fs.statSync(outPath);
-        if (stats.size > 200000) { // >200KB = likely real video, not an empty file
+        if (stats.size > 200000) { // >200KB
           videoReady = true;
           break;
         }
       } catch {}
-      await new Promise(res => setTimeout(res, 200));
+      await new Promise(r => setTimeout(r, 200));
     }
     if (!videoReady) {
       return res.status(500).json({ error: "Video output file not ready after mux" });
     }
 
-    // Clean up temp files
-    [tempConcat, tempTrimmed, tempOverlay, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch (e) {} });
+    // Cleanup temps
+    [tempConcat, tempTrimmed, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch {} });
 
     // Return public video URL and (optionally) upload to Ad Account
     const publicVideoUrl = `/generated/${videoId}.mp4`;
@@ -1163,23 +1190,19 @@ router.post('/generate-video-ad', async (req, res) => {
 
     let fbVideoId = null;
     try {
-      // Read ad account from body, but get the token with a fallback to tokenStore
-      const { fbAdAccountId } = req.body || {};
-      const userAccessToken =
-        (req.body && req.body.userAccessToken) || getFbUserToken();
-
-      if (fbAdAccountId && userAccessToken) {
+      const token = userAccessToken || getFbUserToken();
+      if (fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(
           fbAdAccountId,
-          userAccessToken,
+          token,
           absoluteUrl,
           'SmartMark Generated Video',
           'Generated by SmartMark'
         );
-        fbVideoId = up && up.id ? up.id : null;
+        fbVideoId = up?.id || null;
         console.log('Uploaded to Ad Account. video_id:', fbVideoId);
       } else {
-        console.log('Skipping FB advideos upload (missing fbAdAccountId or userAccessToken).');
+        console.log('Skipping FB advideos upload (missing fbAdAccountId or token).');
       }
     } catch (e) {
       console.error('Ad Account video upload failed:', e?.response?.data || e.message);
@@ -1189,13 +1212,12 @@ router.post('/generate-video-ad', async (req, res) => {
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
       fbVideoId,
-      video: { url: publicVideoUrl, script, overlayText, voice: TTS_VOICE },
+      video: { url: publicVideoUrl, script, overlayText, voice: 'alloy' },
       script,
       overlayText,
-      voice: TTS_VOICE
+      voice: 'alloy'
     });
   } catch (err) {
-    // Always send valid JSON even on crash
     console.error("Video route error:", err);
     if (!res.headersSent) {
       return res.status(500).json({
@@ -1205,5 +1227,6 @@ router.post('/generate-video-ad', async (req, res) => {
     }
   }
 });
+
 
 module.exports = router;
