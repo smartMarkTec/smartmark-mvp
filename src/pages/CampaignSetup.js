@@ -17,7 +17,6 @@ const TEXT_DIM = "#b3f1d6";
 const LINE = "#2d5b45";
 const ACCENT = "#14e7b9";
 const ACCENT_ALT = "#1ec885";
-
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 
 // Smaller creative preview height
@@ -38,7 +37,7 @@ const useIsMobile = () => {
 const FB_CONN_KEY = "smartmark_fb_connected";
 const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000; // 2.5 days
 
-// --- Per-account/campaign creative map (draft + campaign buckets) ---
+// --- Per-account/campaign creative map (ONLY persisted AFTER successful launch) ---
 const CREATIVE_MAP_KEY = (actId) => `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
 const readCreativeMap = (actId) => {
   try { return JSON.parse(localStorage.getItem(CREATIVE_MAP_KEY(actId)) || "{}"); }
@@ -103,7 +102,7 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-// --- Carousels (up to 2 items typical) ---
+// --- Carousels (up to 2 items) ---
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
@@ -176,18 +175,15 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-// --- Cleaner, compact scheduler (no action selector UI) ---
+// --- Compact scheduler (local only) ---
 function SchedulerInline({ campaignKey }) {
   const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
-
-  // default runAt = now + 10m
   const defaultRun = useMemo(() => {
     const d = new Date(Date.now() + 10 * 60 * 1000);
     d.setSeconds(0, 0);
     return d.toISOString().slice(0, 16);
   }, []);
   const [runAt, setRunAt] = useState(defaultRun);
-
   const [jobs, setJobs] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
     catch { return []; }
@@ -200,45 +196,34 @@ function SchedulerInline({ campaignKey }) {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2, 10);
   const nowIso = () => new Date().toISOString();
-
-  // Internally default the action to "generate-video" (hidden from UI)
   const DEFAULT_ACTION = "generate-video";
 
-  // Local-only scheduled reminders; no network calls here
-  useEffect(() => (
-    (() => {
-      let alive = true;
-      const tick = () => {
-        if (!alive) return;
-        const dueIdx = jobs.findIndex(
-          (j) => j.status === "pending" && new Date(j.runAt).getTime() <= Date.now() + 2000
-        );
-        if (dueIdx !== -1) {
-          setJobs((prev) => {
-            const clone = [...prev];
-            clone[dueIdx] = { ...clone[dueIdx], status: "done", finishedAt: nowIso() };
-            return clone;
-          });
-        }
-        setTimeout(tick, 1500);
-      };
-      if (jobs.some(j => !j.status)) {
-        setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      if (!alive) return;
+      const dueIdx = jobs.findIndex(
+        (j) => j.status === "pending" && new Date(j.runAt).getTime() <= Date.now() + 2000
+      );
+      if (dueIdx !== -1) {
+        setJobs((prev) => {
+          const clone = [...prev];
+          clone[dueIdx] = { ...clone[dueIdx], status: "done", finishedAt: nowIso() };
+          return clone;
+        });
       }
-      tick();
-      return () => { alive = false; };
-    })()
-  ), [jobs]);
+      setTimeout(tick, 1500);
+    };
+    if (jobs.some(j => !j.status)) {
+      setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
+    }
+    tick();
+    return () => { alive = false; };
+  }, [jobs]);
 
   const addJob = () => {
     if (!runAt) return;
-    const job = {
-      id: uid(),
-      runAt,
-      createdAt: nowIso(),
-      status: "pending",
-      action: DEFAULT_ACTION
-    };
+    const job = { id: uid(), runAt, createdAt: nowIso(), status: "pending", action: DEFAULT_ACTION };
     setJobs((prev) => [...prev, job].sort((a, b) => new Date(a.runAt) - new Date(b.runAt)));
     const next = new Date(new Date(runAt).getTime() + 15 * 60 * 1000);
     next.setSeconds(0, 0);
@@ -247,51 +232,28 @@ function SchedulerInline({ campaignKey }) {
 
   const clearDone = () => setJobs((prev) => prev.filter((j) => j.status !== "done"));
   const resetAll = () => { setJobs([]); localStorage.removeItem(STORE_KEY); setRunAt(defaultRun); };
-
   const minAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
 
   return (
-    <div style={{
-      display: "flex",
-      alignItems: "center",
-      gap: 8,
-      flexWrap: "wrap",
-      justifyContent: "flex-end",
-      width: "100%"
-    }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", width: "100%" }}>
       <div style={{ color: TEXT_MAIN, fontWeight: 700, fontSize: "0.98rem" }}>Schedule:</div>
       <input
         type="datetime-local"
         value={runAt}
         min={minAttr}
         onChange={e => setRunAt(e.target.value)}
-        style={{
-          background: INPUT_BG, color: TEXT_DIM, border: `1px solid ${LINE}`,
-          borderRadius: 10, padding: "8px 10px", fontWeight: 700
-        }}
+        style={{ background: INPUT_BG, color: TEXT_DIM, border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px", fontWeight: 700 }}
       />
-      <button
-        onClick={addJob}
-        style={{
-          background: ACCENT, color: "#181b20", border: "none",
-          borderRadius: 10, padding: "9px 14px", fontWeight: 800, cursor: "pointer", boxShadow: "0 2px 10px #14e7b955"
-        }}>
+      <button onClick={addJob}
+        style={{ background: ACCENT, color: "#181b20", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 800, cursor: "pointer", boxShadow: "0 2px 10px #14e7b955" }}>
         Add
       </button>
-      <button
-        onClick={clearDone}
-        style={{
-          background: "#2b3135", color: "#d9f8ea", border: "1px solid #3b4a44",
-          borderRadius: 10, padding: "9px 12px", fontWeight: 700, cursor: "pointer"
-        }}>
+      <button onClick={clearDone}
+        style={{ background: "#2b3135", color: "#d9f8ea", border: "1px solid #3b4a44", borderRadius: 10, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
         Clear Done
       </button>
-      <button
-        onClick={resetAll}
-        style={{
-          background: "#3c4045", color: "#ffd", border: "1px solid #4b5550",
-          borderRadius: 10, padding: "9px 12px", fontWeight: 800, cursor: "pointer"
-        }}>
+      <button onClick={resetAll}
+        style={{ background: "#3c4045", color: "#ffd", border: "1px solid #4b5550", borderRadius: 10, padding: "9px 12px", fontWeight: 800, cursor: "pointer" }}>
         Reset
       </button>
       <span style={{ color: "#9fe9c8", fontWeight: 700, marginLeft: 6 }}>
@@ -309,7 +271,7 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // --- Persisted state ---
+  // --- Persisted state (non-creative only) ---
   const [form, setForm] = useState(() => {
     try { return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {}; }
     catch { return {}; }
@@ -348,38 +310,30 @@ const CampaignSetup = () => {
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
 
-  // Single creative fallbacks (rarely shown now)
-  const [mediaImageUrl, setMediaImageUrl] = useState("");
-  const [mediaVideoUrl, setMediaVideoUrl] = useState("");
-
-  // Carousels data (per campaign/account)
-  const [imageUrlsArr, setImageUrlsArr] = useState([]); // array of image urls
-  const [videoUrlsArr, setVideoUrlsArr] = useState([]); // array of video urls
-  const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]); // array of fb video ids for launch shortcut
+  // PREVIEW-ONLY creatives carried from FormPage via navigation state
+  const [imageUrlsArr, setImageUrlsArr] = useState([]);
+  const [videoUrlsArr, setVideoUrlsArr] = useState([]);
+  const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]);
 
   // Image modal
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
 
-  // From navigation (arrays or singles)
+  // From navigation (these are the ONLY creatives we ever use)
   const {
     imageUrls: navImageUrls,
     videoUrls: navVideoUrls,
     fbVideoIds: navFbVideoIds,
-    imageUrl: navImageUrl,
-    videoUrl: navVideoUrl,
-    fbVideoId: navFbVideoId,
     headline,
     body,
     answers,
     mediaSelection: navMediaSelection
   } = location.state || {};
 
-  // --- Effects: session and FB connection ---
+  // --- Effects: load persisted non-creative fields ---
   useEffect(() => {
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) setForm(JSON.parse(lastFields));
-
     const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
@@ -418,7 +372,7 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.data || []);
@@ -437,52 +391,33 @@ const CampaignSetup = () => {
     }
   }, [navMediaSelection]);
 
-  // --- Load campaigns & default select ---
+  // --- Load campaigns list (never auto-persist creatives) ---
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-
-    // detect if we came with fresh draft creatives in this navigation
-    const hasNavDraft =
-      (Array.isArray(navImageUrls) && navImageUrls.length) ||
-      (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-      (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
-      navImageUrl || navVideoUrl || navFbVideoId;
-
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
         const list = (data && data.data) ? data.data.slice(0, 2) : [];
         setCampaigns(list);
-
-        // if we have fresh draft creatives, do NOT auto-select a campaign
+        // do not auto-select if we came with fresh previews
         if (!selectedCampaignId) {
-          if (hasNavDraft) {
-            setSelectedCampaignId(""); // stay in draft view
-          } else if (list.length > 0) {
+          const hasNavDraft = (Array.isArray(navImageUrls) && navImageUrls.length) ||
+                              (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+                              (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
+          if (!hasNavDraft && list.length > 0) {
             setSelectedCampaignId(list[0].id);
           }
         }
       })
       .catch(() => {});
-  }, [
-    fbConnected,
-    selectedAccount,
-    launched,
-    navImageUrls,
-    navVideoUrls,
-    navFbVideoIds,
-    navImageUrl,
-    navVideoUrl,
-    navFbVideoId,
-    selectedCampaignId
-  ]);
+  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, selectedCampaignId]);
 
-  // --- Load metrics for selected campaign ---
+  // --- Load metrics + basic details for selected campaign ---
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
@@ -490,13 +425,13 @@ const CampaignSetup = () => {
         setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
       })
       .catch(() => {});
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
       .then(res => res.json())
       .then(setMetrics)
       .catch(() => setMetrics(null));
   }, [selectedCampaignId, selectedAccount, budget]);
 
-  // --- Persist basic fields ---
+  // --- Persist basic fields (non-creative only) ---
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
   useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
@@ -504,84 +439,36 @@ const CampaignSetup = () => {
   useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
   useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
-  // --- On navigate: seed single creative fallbacks (legacy) ---
+  // --- PREVIEW ONLY: hydrate from navigation state (never persist) ---
   useEffect(() => {
-    const img = navImageUrl || localStorage.getItem("smartmark_last_image_url") || "";
-    const vid = navVideoUrl || localStorage.getItem("smartmark_last_video_url") || "";
-    setMediaImageUrl(img);
-    setMediaVideoUrl(vid);
-    if (navImageUrl) localStorage.setItem("smartmark_last_image_url", navImageUrl);
-    if (navVideoUrl) localStorage.setItem("smartmark_last_video_url", navVideoUrl);
-  }, [navImageUrl, navVideoUrl]);
-
-  // --- Merge nav arrays into per-account map (draft) and hydrate carousels ---
-  useEffect(() => {
-    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(acctKey);
-
-    const fromNavImgs = Array.isArray(navImageUrls) ? navImageUrls : (navImageUrl ? [navImageUrl] : []);
-    const fromNavVids = Array.isArray(navVideoUrls) ? navVideoUrls : (navVideoUrl ? [navVideoUrl] : []);
-    const fromNavIds  = Array.isArray(navFbVideoIds) ? navFbVideoIds : (navFbVideoId ? [String(navFbVideoId)] : []);
-
-    // If we arrived with new creatives, OVERWRITE the draft bucket entirely.
-    if (fromNavImgs.length || fromNavVids.length || fromNavIds.length) {
-      map.draft = {
-        images: fromNavImgs.slice(0, 2),
-        videos: fromNavVids.slice(0, 2),
-        fbVideoIds: fromNavIds.slice(0, 2),
-        time: Date.now()
-      };
-      writeCreativeMap(acctKey, map);
+    const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
+    const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
+    const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
+    if (imgs.length || vids.length || ids.length) {
+      setImageUrlsArr(imgs);
+      setVideoUrlsArr(vids);
+      setFbVideoIdsArr(ids);
+      // do NOT write to any draft storage
     }
+  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
 
-    // Show draft if we have fresh nav creatives; otherwise show the selected campaign (or draft if none)
-    const preferDraft = Boolean(fromNavImgs.length || fromNavVids.length || fromNavIds.length);
-    const bucket = (selectedCampaignId && !preferDraft) ? map[selectedCampaignId] : map.draft;
-
-    setImageUrlsArr(bucket?.images || (fromNavImgs.length ? fromNavImgs.slice(0,2) : (mediaImageUrl ? [mediaImageUrl] : [])));
-    setVideoUrlsArr(bucket?.videos || (fromNavVids.length ? fromNavVids.slice(0,2) : (mediaVideoUrl ? [mediaVideoUrl] : [])));
-    setFbVideoIdsArr(bucket?.fbVideoIds || (fromNavIds.length ? fromNavIds.slice(0,2) : []));
-  }, [
-    selectedAccount,
-    selectedCampaignId,
-    navImageUrls,
-    navVideoUrls,
-    navFbVideoIds,
-    navImageUrl,
-    navVideoUrl,
-    navFbVideoId,
-    mediaImageUrl,
-    mediaVideoUrl
-  ]);
-
-  // --- On campaign change: load that bucket ---
+  // --- When switching to an existing campaign, show its persisted creatives (post-launch only) ---
   useEffect(() => {
-    if (!selectedAccount) return;
+    if (!selectedCampaignId || !selectedAccount) return;
+    // If we arrived with previews this navigation, keep showing them until Launch or manual switch
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(acctKey);
-
-    // if this navigation brought new draft creatives, keep showing draft this time
-    const hasNavDraft =
-      (Array.isArray(navImageUrls) && navImageUrls.length) ||
-      (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-      (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
-      navImageUrl || navVideoUrl || navFbVideoId;
-
-    const bucket = (selectedCampaignId && !hasNavDraft) ? map[selectedCampaignId] : map.draft;
-
-    setImageUrlsArr(bucket?.images || []);
-    setVideoUrlsArr(bucket?.videos || []);
-    setFbVideoIdsArr(bucket?.fbVideoIds || []);
-  }, [
-    selectedCampaignId,
-    selectedAccount,
-    navImageUrls,
-    navVideoUrls,
-    navFbVideoIds,
-    navImageUrl,
-    navVideoUrl,
-    navFbVideoId
-  ]);
+    if (map[selectedCampaignId]) {
+      setImageUrlsArr(map[selectedCampaignId].images || []);
+      setVideoUrlsArr(map[selectedCampaignId].videos || []);
+      setFbVideoIdsArr(map[selectedCampaignId].fbVideoIds || []);
+    } else {
+      // no persisted creatives for this campaign → clear previews
+      setImageUrlsArr([]);
+      setVideoUrlsArr([]);
+      setFbVideoIdsArr([]);
+    }
+  }, [selectedCampaignId, selectedAccount]);
 
   // --- Pause/Unpause/Delete handlers ---
   const [isPaused, setIsPaused] = useState(false);
@@ -591,17 +478,11 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       if (isPaused) {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, {
-          method: "POST",
-          credentials: "include"
-        });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
         setCampaignStatus("ACTIVE");
         setIsPaused(false);
       } else {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, {
-          method: "POST",
-          credentials: "include"
-        });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
         setCampaignStatus("PAUSED");
         setIsPaused(true);
       }
@@ -616,10 +497,7 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).replace("act_", "");
     setLoading(true);
     try {
-      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, {
-        method: "POST",
-        credentials: "include"
-      });
+      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
       setCampaignStatus("ARCHIVED");
       setLaunched(false);
       setLaunchResult(null);
@@ -646,61 +524,12 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // --- Helpers ---
-  async function urlToBase64(url) {
-    if (!url) return "";
-    const abs = /^https?:\/\//.test(url) ? url : `${backendUrl}${url}`;
-    const res = await fetch(abs);
-    const blob = await res.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.readAsDataURL(blob);
-    });
-  }
-
-  // --- Launch handler (uses first variants, sends arrays for engine) ---
+  // --- Launch handler: uses ONLY FormPage creatives (preview arrays), never generates here ---
   const handleLaunch = async () => {
-    if (!canLaunch) {
-      alert("Please connect Facebook, select Ad Account + Page, and enter a valid budget (≥ $3).");
-      return;
-    }
-
-    // Ensure we have creatives aligned to selection
-    if (mediaSelection === "image" && imageUrlsArr.length === 0 && !mediaImageUrl) {
-      alert("No image creative found. Generate images first.");
-      return;
-    }
-    if (mediaSelection === "video" && videoUrlsArr.length === 0 && !mediaVideoUrl && fbVideoIdsArr.length === 0) {
-      alert("No video creative found. Generate videos first.");
-      return;
-    }
-    if (mediaSelection === "both" &&
-        (imageUrlsArr.length === 0 && !mediaImageUrl || (videoUrlsArr.length === 0 && !mediaVideoUrl && fbVideoIdsArr.length === 0))) {
-      alert("Need at least one image and one video before launching.");
-      return;
-    }
-
     setLoading(true);
     try {
       const acctId = String(selectedAccount).replace("act_", "");
       const safeBudget = Math.max(3, Number(budget) || 0);
-
-      const firstImage = imageUrlsArr[0] || mediaImageUrl || "";
-      const firstVideo = videoUrlsArr[0] || mediaVideoUrl || "";
-      const firstFbVideoId = fbVideoIdsArr[0];
-
-      // Convert image to base64 for reliable /adimages upload path
-      let adImage = firstImage;
-      if (adImage && !adImage.startsWith("data:")) {
-        try { adImage = await urlToBase64(adImage); } catch { /* ignore */ }
-      }
-
-      // Prefer fbVideoId if present (already in ad account library)
-      const fbVideoId = firstFbVideoId || undefined;
-
-      // For adVideo, keep URL (server may upload if needed)
-      let adVideo = firstVideo;
 
       const payload = {
         form: { ...form },
@@ -709,50 +538,38 @@ const CampaignSetup = () => {
         pageId: selectedPageId,
         aiAudience: form?.aiAudience || answers?.aiAudience || "",
         adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-        adImage: adImage || "",
-        adVideo: adVideo || "",
-        fbVideoId,
         answers: answers || {},
         mediaSelection,
-        // arrays for smart engine / auditing
-        imageVariants: imageUrlsArr,
-        videoVariants: videoUrlsArr,
-        fbVideoIds: fbVideoIdsArr
+        // The ONLY creatives we ever send (from FormPage)
+        imageVariants: (imageUrlsArr || []).slice(0, 2),
+        videoVariants: (videoUrlsArr || []).slice(0, 2),
+        fbVideoIds: (fbVideoIdsArr || []).slice(0, 2)
       };
 
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // CRITICAL: send session cookie for FB token
         body: JSON.stringify(payload),
       });
 
-      const maybeJson = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const errMsg =
-          maybeJson?.error?.message ||
-          maybeJson?.error ||
-          maybeJson?.fbError ||
-          "Server error";
-        throw new Error(errMsg);
-      }
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Server error");
 
-      // Move DRAFT creatives to this new campaign bucket
+      // Persist creatives ONLY AFTER a successful launch, under the returned campaignId
       const map = readCreativeMap(acctId);
-      if (maybeJson.campaignId) {
-        map[maybeJson.campaignId] = {
-          images: imageUrlsArr,
-          videos: videoUrlsArr,
-          fbVideoIds: fbVideoIdsArr,
+      if (json.campaignId) {
+        map[json.campaignId] = {
+          images: (imageUrlsArr || []).slice(0, 2),
+          videos: (videoUrlsArr || []).slice(0, 2),
+          fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
           time: Date.now()
         };
-        delete map.draft;
         writeCreativeMap(acctId, map);
       }
 
       setLaunched(true);
-      setLaunchResult(maybeJson);
-      setSelectedCampaignId(maybeJson.campaignId || selectedCampaignId);
+      setLaunchResult(json);
+      setSelectedCampaignId(json.campaignId || selectedCampaignId);
       setTimeout(() => setLaunched(false), 1500);
     } catch (err) {
       alert("Failed to launch campaign: " + (err.message || ""));
@@ -937,7 +754,7 @@ const CampaignSetup = () => {
             </button>
           )}
 
-          {/* Campaign Name + Scheduler (organized; no action dropdown) */}
+          {/* Campaign Name + Scheduler */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
             <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
               <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
@@ -991,13 +808,7 @@ const CampaignSetup = () => {
             />
 
             {budget && Number(budget) > 0 && (
-              <div style={{
-                marginTop: "-0.6rem",
-                fontWeight: 700,
-                color: ACCENT_ALT,
-                fontSize: "1.06rem",
-                letterSpacing: "0.04em"
-              }}>
+              <div style={{ marginTop: "-0.6rem", fontWeight: 700, color: ACCENT_ALT, fontSize: "1.06rem", letterSpacing: "0.04em" }}>
                 Pay to <span style={{ color: "#19bd7b" }}>$Wknowles20</span>
               </div>
             )}
@@ -1274,7 +1085,7 @@ const CampaignSetup = () => {
               </div>
             )}
 
-            {/* ======= CREATIVE PREVIEW (Carousels) – BELOW CAMPAIGN TAB, COLLAPSES WITH TAB ======= */}
+            {/* PREVIEW CAROUSELS (aesthetic only) */}
             {dropdownOpen && (
               <div style={{
                 width: "100%",

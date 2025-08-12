@@ -29,6 +29,9 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data; // { id }
 }
 
+
+
+
 // Load Pexels API key from environment
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 
@@ -44,6 +47,8 @@ const MAX_TOTAL_CHARS = 45_000;
 
 function loadTrainingContext() {
   if (!fs.existsSync(DATA_DIR)) return '';
+
+
   const files = fs.readdirSync(DATA_DIR)
     .map(f => path.join(DATA_DIR, f))
     .filter(full => {
@@ -53,6 +58,7 @@ function loadTrainingContext() {
         return st.isFile() && ALLOWED_EXT.has(ext) && st.size <= MAX_FILE_MB * 1024 * 1024;
       } catch { return false; }
     });
+
   let context = '';
   for (const f of files) {
     try {
@@ -60,6 +66,7 @@ function loadTrainingContext() {
       let text = fs.readFileSync(f, 'utf8');
       if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text), null, 0); } catch {} }
       if (!text.trim()) continue;
+
       const block = `\n\n### SOURCE: ${path.basename(f)}\n${text}\n`;
       if ((context.length + block.length) <= MAX_TOTAL_CHARS) {
         context += block;
@@ -74,6 +81,8 @@ function loadTrainingContext() {
   if (!context) console.warn('[training] no training context loaded (empty/filtered).');
   return context.trim();
 }
+
+
 let customContext = loadTrainingContext();
 
 // ----------- OPENAI -----------
@@ -90,9 +99,11 @@ async function getWebsiteText(url) {
   try {
     if (!url || !/^https?:\/\//i.test(url)) throw new Error('Invalid URL');
     const { data, headers } = await axios.get(url, { timeout: 7000 });
+
     if (!headers['content-type'] || !headers['content-type'].includes('text/html')) {
       throw new Error('Not an HTML page');
     }
+
     const body = String(data)
       .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
@@ -116,6 +127,7 @@ router.post('/generate-ad-copy', async (req, res) => {
   if (!description && !businessName && !url) {
     return res.status(400).json({ error: "Please provide at least a description." });
   }
+
   let prompt =
 `You are an expert direct-response ad copywriter.
 
@@ -149,6 +161,8 @@ const DEFAULT_AUDIENCE = {
   fbInterestIds: [],
   summary: ""
 };
+
+
 async function extractKeywords(text) {
   const prompt = `
 Extract up to 6 compact keywords (one or two words each) from this text that would be useful Facebook interest seeds.
@@ -157,6 +171,7 @@ Return them as a comma-separated list ONLY. No extra words.
 TEXT:
 """${(text || '').slice(0, 3000)}"""
 `.trim();
+
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -186,6 +201,8 @@ async function getFbInterestIds(keywords, fbToken) {
   }
   return results;
 }
+
+
 router.post('/detect-audience', async (req, res) => {
   const { url } = req.body;
   const fbToken = req.body.fbToken || getFbUserToken();
@@ -218,6 +235,7 @@ Website homepage text:
       max_tokens: 220,
       temperature: 0.3,
     });
+
     const aiText = response.choices?.[0]?.message?.content?.trim();
     let audienceJson = null;
     try {
@@ -244,6 +262,7 @@ Website homepage text:
       audienceJson.fbInterestIds = [];
       audienceJson.fbInterestNames = [];
     }
+
     return res.json({ audience: audienceJson });
   } catch {
     return res.json({ audience: DEFAULT_AUDIENCE });
@@ -252,6 +271,8 @@ Website homepage text:
 
 // ========= image endpoints (unchanged logic) =========
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
+
+
 const IMAGE_KEYWORD_MAP = [
   { match: ["protein powder","protein","supplement","muscle","fitness","gym"], keyword: "gym workout" },
   { match: ["clothing","fashion","apparel","accessory"], keyword: "fashion model" },
@@ -265,6 +286,7 @@ const IMAGE_KEYWORD_MAP = [
   { match: ["art","painting","craft"], keyword: "painting art" },
   { match: ["coffee","cafe"], keyword: "coffee shop" },
 ];
+
 function getImageKeyword(industry = "", url = "") {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) {
@@ -272,10 +294,12 @@ function getImageKeyword(industry = "", url = "") {
   }
   return industry || "ecommerce";
 }
+
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = "", industry = "", regenerateToken = "" } = req.body;
     const keyword = getImageKeyword(industry, url);
+    
     const perPage = 100;
     let photos = [];
     try {
