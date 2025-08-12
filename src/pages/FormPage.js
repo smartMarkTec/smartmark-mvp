@@ -1,11 +1,10 @@
-// src/pages/FormPage.js
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
 
 // ========== Constants ==========
-const API_BASE = "/api";
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
+const API_BASE = `${BACKEND_URL}/api`; // <-- point to Render backend
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
@@ -22,6 +21,7 @@ const CONVO_QUESTIONS = [
 ];
 
 // ========== Helper Functions/Components ==========
+
 function LoadingSpinner() {
   return (
     <div style={{
@@ -254,7 +254,7 @@ export default function FormPage() {
   const [videoItems, setVideoItems] = useState([]); // [{url, script, fbVideoId}]
   const [activeVideo, setActiveVideo] = useState(0);
 
-  // Legacy single values (kept for compatibility with other pages / localStorage)
+  // Legacy single values (kept for compatibility)
   const [imageUrl, setImageUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoScript, setVideoScript] = useState("");
@@ -268,6 +268,26 @@ export default function FormPage() {
   const [awaitingContinue, setAwaitingContinue] = useState(false);
   const [awaitingGenerate, setAwaitingGenerate] = useState(false);
   const [awaitingReady, setAwaitingReady] = useState(true);
+
+  // --- Restore session-only creatives if returning from Setup (disappear on full tab close) ---
+  useEffect(() => {
+    try {
+      const imgs = JSON.parse(sessionStorage.getItem("sm_form_session_images") || "[]");
+      const vids = JSON.parse(sessionStorage.getItem("sm_form_session_videos") || "[]");
+      const fbids = JSON.parse(sessionStorage.getItem("sm_form_session_fbvids") || "[]");
+      const headline = sessionStorage.getItem("sm_form_session_headline") || "";
+      const body = sessionStorage.getItem("sm_form_session_body") || "";
+      if (imgs.length || vids.length) {
+        setImageUrls(imgs);
+        setActiveImage(0);
+        setImageUrl(imgs[0] || "");
+        setVideoItems(vids.map((u, i) => ({ url: u, script: "", fbVideoId: fbids[i] || null })));
+        setActiveVideo(0);
+        setVideoUrl(vids[0] || "");
+        if (headline || body) setResult({ headline, body });
+      }
+    } catch {}
+  }, []);
 
   function userSaysContinue(val) {
     return /^(yes|yep|ready|continue|next|ok|sure)$/i.test(val.trim());
@@ -288,31 +308,6 @@ export default function FormPage() {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
   }, [chatHistory]);
-
-  // Hydrate previews if returning from CampaignSetup (same tab)
-  useEffect(() => {
-    try {
-      const imgs = JSON.parse(sessionStorage.getItem("sm_form_images") || "[]");
-      const vidItems = JSON.parse(sessionStorage.getItem("sm_form_video_items") || "[]");
-      const hdr = sessionStorage.getItem("sm_form_headline") || "";
-      const bdy = sessionStorage.getItem("sm_form_body") || "";
-      if (!imageUrls.length && Array.isArray(imgs) && imgs.length) {
-        setImageUrls(imgs.slice(0, 2));
-        setActiveImage(0);
-        setImageUrl(imgs[0] || "");
-      }
-      if (!videoItems.length && Array.isArray(vidItems) && vidItems.length) {
-        setVideoItems(vidItems.slice(0, 2));
-        setActiveVideo(0);
-        setVideoUrl(vidItems[0]?.url || "");
-        setVideoScript(vidItems[0]?.script || "");
-      }
-      if (!result && (hdr || bdy)) {
-        setResult({ headline: hdr, body: bdy, image_overlay_text: "" });
-      }
-    } catch {}
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function handleModalClose() {
     setShowModal(false);
@@ -472,7 +467,7 @@ export default function FormPage() {
       return;
     }
 
-    // 3. If off-topic (AI Ad Manager Q&A)
+    // 3. Off-topic Q&A
     if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
       const resp = await fetch(`${API_BASE}/gpt-chat`, {
         method: "POST",
@@ -1036,33 +1031,33 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            // Build arrays (max 2) and normalize URLs
+            // Build arrays (always 0–2) and normalize to absolute URLs
             const imgs = (imageUrls || [])
-              .filter(Boolean)
               .slice(0, 2)
-              .map(u => (/^https?:\/\//.test(u) ? u : BACKEND_URL + u));
+              .map(u => (u && !/^https?:\/\//.test(u) ? `${BACKEND_URL}${u}` : u))
+              .filter(Boolean);
 
-            const vidItemsNorm = (videoItems || [])
-              .filter(v => v && v.url)
+            const vids = (videoItems || [])
               .slice(0, 2)
-              .map(v => ({
-                url: /^https?:\/\//.test(v.url) ? v.url : BACKEND_URL + v.url,
-                script: v.script || "",
-                fbVideoId: v.fbVideoId || null
-              }));
+              .map(v => v?.url && (!/^https?:\/\//.test(v.url) ? `${BACKEND_URL}${v.url}` : v.url))
+              .filter(Boolean);
 
-            const vids = vidItemsNorm.map(v => v.url);
-            const fbIds = vidItemsNorm.filter(v => v.fbVideoId).map(v => v.fbVideoId);
+            const fbIds = (videoItems || [])
+              .slice(0, 2)
+              .map(v => v?.fbVideoId)
+              .filter(Boolean);
 
-            // Persist ONLY for return navigation within the same tab
-            sessionStorage.setItem("sm_form_images", JSON.stringify(imgs));
-            sessionStorage.setItem("sm_form_video_items", JSON.stringify(vidItemsNorm));
-            sessionStorage.setItem("sm_form_videos", JSON.stringify(vids));
-            sessionStorage.setItem("sm_form_fbVideoIds", JSON.stringify(fbIds));
-            sessionStorage.setItem("sm_form_headline", result?.headline || "");
-            sessionStorage.setItem("sm_form_body", result?.body || "");
-            localStorage.setItem("smartmark_media_selection", mediaType);
+            // Session-only persistence for returning to FormPage (clears on full tab close)
+            try {
+              sessionStorage.setItem("sm_form_session_images", JSON.stringify(imgs));
+              sessionStorage.setItem("sm_form_session_videos", JSON.stringify(vids));
+              sessionStorage.setItem("sm_form_session_fbvids", JSON.stringify(fbIds));
+              sessionStorage.setItem("sm_form_session_headline", result?.headline || "");
+              sessionStorage.setItem("sm_form_session_body", result?.body || "");
+              sessionStorage.setItem("smartmark_media_selection", mediaType);
+            } catch {}
 
+            // Navigate with arrays (CampaignSetup reads ONLY these)
             navigate("/setup", {
               state: {
                 imageUrls: imgs,
@@ -1070,7 +1065,7 @@ export default function FormPage() {
                 fbVideoIds: fbIds,
                 headline: result?.headline,
                 body: result?.body,
-                videoScript: videoItems[0]?.script || videoScript,
+                videoScript: (videoItems[0]?.script || videoScript || ""),
                 answers,
                 mediaSelection: mediaType
               }
