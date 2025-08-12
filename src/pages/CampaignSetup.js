@@ -1,5 +1,4 @@
 // src/pages/CampaignSetup.js
-
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
@@ -324,6 +323,8 @@ const CampaignSetup = () => {
     imageUrls: navImageUrls,
     videoUrls: navVideoUrls,
     fbVideoIds: navFbVideoIds,
+    imageUrl: navImageUrlSingle,   // legacy fallback
+    videoUrl: navVideoUrlSingle,   // legacy fallback
     headline,
     body,
     answers,
@@ -372,7 +373,7 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.data || []);
@@ -400,24 +401,24 @@ const CampaignSetup = () => {
       .then(data => {
         const list = (data && data.data) ? data.data.slice(0, 2) : [];
         setCampaigns(list);
-        // do not auto-select if we came with fresh previews
         if (!selectedCampaignId) {
           const hasNavDraft = (Array.isArray(navImageUrls) && navImageUrls.length) ||
                               (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-                              (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
+                              (Array.isArray(navFbVideoIds) && navFbVideoIds.length) ||
+                              !!navImageUrlSingle || !!navVideoUrlSingle;
           if (!hasNavDraft && list.length > 0) {
             setSelectedCampaignId(list[0].id);
           }
         }
       })
       .catch(() => {});
-  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, selectedCampaignId]);
+  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, navImageUrlSingle, navVideoUrlSingle, selectedCampaignId]);
 
   // --- Load metrics + basic details for selected campaign ---
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
@@ -425,7 +426,7 @@ const CampaignSetup = () => {
         setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
       })
       .catch(() => {});
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
       .then(res => res.json())
       .then(setMetrics)
       .catch(() => setMetrics(null));
@@ -441,21 +442,21 @@ const CampaignSetup = () => {
 
   // --- PREVIEW ONLY: hydrate from navigation state (never persist) ---
   useEffect(() => {
-    const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
-    const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
+    const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2)
+                 : navImageUrlSingle ? [navImageUrlSingle] : [];
+    const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2)
+                 : navVideoUrlSingle ? [navVideoUrlSingle] : [];
     const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
     if (imgs.length || vids.length || ids.length) {
       setImageUrlsArr(imgs);
       setVideoUrlsArr(vids);
       setFbVideoIdsArr(ids);
-      // do NOT write to any draft storage
     }
-  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
+  }, [navImageUrls, navVideoUrls, navFbVideoIds, navImageUrlSingle, navVideoUrlSingle]);
 
   // --- When switching to an existing campaign, show its persisted creatives (post-launch only) ---
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
-    // If we arrived with previews this navigation, keep showing them until Launch or manual switch
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(acctKey);
     if (map[selectedCampaignId]) {
@@ -463,7 +464,6 @@ const CampaignSetup = () => {
       setVideoUrlsArr(map[selectedCampaignId].videos || []);
       setFbVideoIdsArr(map[selectedCampaignId].fbVideoIds || []);
     } else {
-      // no persisted creatives for this campaign → clear previews
       setImageUrlsArr([]);
       setVideoUrlsArr([]);
       setFbVideoIdsArr([]);
@@ -478,11 +478,11 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       if (isPaused) {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, { method: "POST", credentials: "include" });
         setCampaignStatus("ACTIVE");
         setIsPaused(false);
       } else {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, { method: "POST", credentials: "include" });
         setCampaignStatus("PAUSED");
         setIsPaused(true);
       }
@@ -497,7 +497,7 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).replace("act_", "");
     setLoading(true);
     try {
-      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
+      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST", credentials: "include" });
       setCampaignStatus("ARCHIVED");
       setLaunched(false);
       setLaunchResult(null);
@@ -524,7 +524,7 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // --- Launch handler: uses ONLY FormPage creatives (preview arrays), never generates here ---
+  // --- Launch: ONLY use FormPage creatives; clear FormPage session items after success ---
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -540,7 +540,6 @@ const CampaignSetup = () => {
         adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
         answers: answers || {},
         mediaSelection,
-        // The ONLY creatives we ever send (from FormPage)
         imageVariants: (imageUrlsArr || []).slice(0, 2),
         videoVariants: (videoUrlsArr || []).slice(0, 2),
         fbVideoIds: (fbVideoIdsArr || []).slice(0, 2)
@@ -550,12 +549,13 @@ const CampaignSetup = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
+        credentials: "include",
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      // Persist creatives ONLY AFTER a successful launch, under the returned campaignId
+      // Persist creatives ONLY AFTER successful launch
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
@@ -566,6 +566,14 @@ const CampaignSetup = () => {
         };
         writeCreativeMap(acctId, map);
       }
+
+      // Clear FormPage session previews (so returning to /form shows nothing after launch)
+      sessionStorage.removeItem("sm_form_images");
+      sessionStorage.removeItem("sm_form_video_items");
+      sessionStorage.removeItem("sm_form_videos");
+      sessionStorage.removeItem("sm_form_fbVideoIds");
+      sessionStorage.removeItem("sm_form_headline");
+      sessionStorage.removeItem("sm_form_body");
 
       setLaunched(true);
       setLaunchResult(json);

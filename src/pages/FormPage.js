@@ -1,4 +1,4 @@
-// FormPage.js
+// src/pages/FormPage.js
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
@@ -21,11 +21,7 @@ const CONVO_QUESTIONS = [
   { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
 ];
 
-// Session key for per-tab persistence (clears on tab close; cleared on Launch from CampaignSetup)
-const SESSION_KEY = "smartmark_form_creatives_v1";
-
 // ========== Helper Functions/Components ==========
-
 function LoadingSpinner() {
   return (
     <div style={{
@@ -293,42 +289,30 @@ export default function FormPage() {
     }
   }, [chatHistory]);
 
-  // ---------- Restore creatives from this TAB (if user came back from CampaignSetup) ----------
+  // Hydrate previews if returning from CampaignSetup (same tab)
   useEffect(() => {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    if (!raw) return;
     try {
-      const saved = JSON.parse(raw);
-      if (saved.imageUrls?.length || saved.videoItems?.length) {
-        setImageUrls(saved.imageUrls || []);
-        setVideoItems(saved.videoItems || []);
-        setResult(saved.result || null);
-        setMediaType(saved.mediaType || "both");
-        setActiveImage(saved.activeImage ?? 0);
-        setActiveVideo(saved.activeVideo ?? 0);
-
-        // keep legacy single fields in sync
-        setImageUrl((saved.imageUrls && saved.imageUrls[0]) || "");
-        setVideoUrl((saved.videoItems && saved.videoItems[0]?.url) || "");
-        setVideoScript((saved.videoItems && saved.videoItems[0]?.script) || "");
+      const imgs = JSON.parse(sessionStorage.getItem("sm_form_images") || "[]");
+      const vidItems = JSON.parse(sessionStorage.getItem("sm_form_video_items") || "[]");
+      const hdr = sessionStorage.getItem("sm_form_headline") || "";
+      const bdy = sessionStorage.getItem("sm_form_body") || "";
+      if (!imageUrls.length && Array.isArray(imgs) && imgs.length) {
+        setImageUrls(imgs.slice(0, 2));
+        setActiveImage(0);
+        setImageUrl(imgs[0] || "");
+      }
+      if (!videoItems.length && Array.isArray(vidItems) && vidItems.length) {
+        setVideoItems(vidItems.slice(0, 2));
+        setActiveVideo(0);
+        setVideoUrl(vidItems[0]?.url || "");
+        setVideoScript(vidItems[0]?.script || "");
+      }
+      if (!result && (hdr || bdy)) {
+        setResult({ headline: hdr, body: bdy, image_overlay_text: "" });
       }
     } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // ---------- Auto-save creatives to this TAB only (clears on tab close; cleared on Launch) ----------
-  useEffect(() => {
-    const hasCreatives = (imageUrls && imageUrls.length) || (videoItems && videoItems.length);
-    if (!hasCreatives) return;
-    const snapshot = {
-      imageUrls,
-      videoItems,
-      result,
-      mediaType,
-      activeImage,
-      activeVideo
-    };
-    try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(snapshot)); } catch {}
-  }, [imageUrls, videoItems, result, mediaType, activeImage, activeVideo]);
 
   function handleModalClose() {
     setShowModal(false);
@@ -1052,26 +1036,41 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            // Use currently active items
-            let imgUrlToSend = imageUrls[activeImage] || imageUrl || "";
-            let vidUrlToSend = videoItems[activeVideo]?.url || videoUrl || "";
-            const fbVidIdToSend = videoItems[activeVideo]?.fbVideoId || null;
+            // Build arrays (max 2) and normalize URLs
+            const imgs = (imageUrls || [])
+              .filter(Boolean)
+              .slice(0, 2)
+              .map(u => (/^https?:\/\//.test(u) ? u : BACKEND_URL + u));
 
-            if (imgUrlToSend && !/^https?:\/\//.test(imgUrlToSend)) imgUrlToSend = BACKEND_URL + imgUrlToSend;
-            if (vidUrlToSend && !/^https?:\/\//.test(vidUrlToSend)) vidUrlToSend = BACKEND_URL + vidUrlToSend;
+            const vidItemsNorm = (videoItems || [])
+              .filter(v => v && v.url)
+              .slice(0, 2)
+              .map(v => ({
+                url: /^https?:\/\//.test(v.url) ? v.url : BACKEND_URL + v.url,
+                script: v.script || "",
+                fbVideoId: v.fbVideoId || null
+              }));
 
-            // IMPORTANT: do NOT persist creatives to localStorage here.
-            // Creatives persist only within this tab (sessionStorage) and
-            // will be cleared on Launch from CampaignSetup.
+            const vids = vidItemsNorm.map(v => v.url);
+            const fbIds = vidItemsNorm.filter(v => v.fbVideoId).map(v => v.fbVideoId);
+
+            // Persist ONLY for return navigation within the same tab
+            sessionStorage.setItem("sm_form_images", JSON.stringify(imgs));
+            sessionStorage.setItem("sm_form_video_items", JSON.stringify(vidItemsNorm));
+            sessionStorage.setItem("sm_form_videos", JSON.stringify(vids));
+            sessionStorage.setItem("sm_form_fbVideoIds", JSON.stringify(fbIds));
+            sessionStorage.setItem("sm_form_headline", result?.headline || "");
+            sessionStorage.setItem("sm_form_body", result?.body || "");
+            localStorage.setItem("smartmark_media_selection", mediaType);
 
             navigate("/setup", {
               state: {
-                imageUrl: imgUrlToSend,
-                videoUrl: vidUrlToSend,
-                fbVideoId: fbVidIdToSend || undefined,
+                imageUrls: imgs,
+                videoUrls: vids,
+                fbVideoIds: fbIds,
                 headline: result?.headline,
                 body: result?.body,
-                videoScript: videoItems[activeVideo]?.script || videoScript,
+                videoScript: videoItems[0]?.script || videoScript,
                 answers,
                 mediaSelection: mediaType
               }
