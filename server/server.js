@@ -1,3 +1,4 @@
+// server/server.js
 // --- GLOBAL ERROR HANDLERS (keep these at the very top!) ---
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
@@ -6,27 +7,26 @@ process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
 
-// server/server.js
 require('dotenv').config({ path: './.env' });
 
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const cookieParser = require('cookie-parser');
 
 const app = express();
 
+// --- Allowed origins (fill FRONTEND_URL in .env for Render/Vercel) ---
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://smartmark-mvp.vercel.app',
   'http://localhost:3000'
 ].filter(Boolean);
 
-// CORS setup (credentials + dynamic origin reflection)
+// --- CORS (credentials + dynamic origin reflection) ---
 app.use(cors({
   origin(origin, callback) {
-    if (!origin) return callback(null, true); // allow REST tools/local
+    if (!origin) return callback(null, true); // allow REST tools/local scripts
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error('CORS not allowed from this origin: ' + origin), false);
   },
@@ -35,7 +35,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-// Ensure the Access-Control-Allow-Origin echoes for credentials flows
+// Echo ACAO per-request so credentials work
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
@@ -48,18 +48,15 @@ app.options('*', cors());
 
 app.set('trust proxy', 1);
 
-// Parse cookies BEFORE routes (required for session/token cookies)
-app.use(cookieParser());
-
-// Parse JSON and urlencoded payloads (raise limits to handle base64 uploads safely)
+// --- Body parsing (no cookies) ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// -------- Serve generated images & videos for AI overlays --------
+// --- Serve generated images & videos for AI overlays ---
 let generatedPath;
 if (process.env.RENDER) {
   generatedPath = '/tmp/generated';
-  console.log("Serving /generated from:", generatedPath);
+  console.log('Serving /generated from:', generatedPath);
 } else {
   generatedPath = path.join(__dirname, 'public/generated');
   try { fs.mkdirSync(generatedPath, { recursive: true }); } catch {}
@@ -84,22 +81,22 @@ app.use('/api', gptChatRoutes);
 const smartRoutes = require('./routes/smart');    // -> server/routes/smart.js
 app.use('/smart', smartRoutes);
 
-// Health check
+// --- Health check ---
 app.get('/healthz', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
 });
 
-// Root
+// --- Root ---
 app.get('/', (req, res) => {
   res.json({ status: 'SmartMark backend running', time: new Date().toISOString() });
 });
 
-// 404 handler
+// --- 404 handler ---
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// Improved global error handler (must be last)
+// --- Global error handler (must be last) ---
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err?.stack || err);
   if (res.headersSent) return next(err);
