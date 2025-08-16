@@ -1,13 +1,11 @@
-// src/pages/CampaignSetup.js
-
+/* eslint-disable */
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
-const PREVIEW_KEY = "sm_preview_bundle_v1"; // <-- NEW
 
-// Visual theme (aligned to FormPage)
+// Visual theme
 const DARK_BG = "#181b20";
 const PANEL_BG = "#202327";
 const CARD_BG = "#1b1e22f7";
@@ -20,10 +18,9 @@ const ACCENT = "#14e7b9";
 const ACCENT_ALT = "#1ec885";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 
-// Smaller creative preview height
 const CREATIVE_HEIGHT = 150;
 
-// --- Responsive helper ---
+// Responsive helper
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
   React.useEffect(() => {
@@ -34,11 +31,11 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-// --- Local/session keys ---
+// FB connection flag
 const FB_CONN_KEY = "smartmark_fb_connected";
-const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000; // 2.5 days
+const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000;
 
-// --- Per-account/campaign creative map (ONLY persisted AFTER successful launch) ---
+// Persisted creatives (only AFTER launch)
 const CREATIVE_MAP_KEY = (actId) => `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
 const readCreativeMap = (actId) => {
   try { return JSON.parse(localStorage.getItem(CREATIVE_MAP_KEY(actId)) || "{}"); }
@@ -49,7 +46,6 @@ const writeCreativeMap = (actId, map) => {
   catch {}
 };
 
-// --- Small helpers ---
 const calculateFees = (budget) => {
   const parsed = parseFloat(budget);
   if (isNaN(parsed) || parsed <= 0) return { fee: 0, total: 0 };
@@ -69,7 +65,6 @@ function DottyMini() {
   );
 }
 
-// --- Image fullscreen modal ---
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   const src = imageUrl && !/^https?:\/\//.test(imageUrl) ? backendUrl + imageUrl : imageUrl;
@@ -103,7 +98,6 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-// --- Carousels (up to 2 items) ---
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
@@ -176,7 +170,6 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-// --- Compact scheduler (local only) ---
 function SchedulerInline({ campaignKey }) {
   const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
   const defaultRun = useMemo(() => {
@@ -272,7 +265,7 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // --- Persisted state (non-creative only) ---
+  // Persisted non-creative fields
   const [form, setForm] = useState(() => {
     try { return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {}; }
     catch { return {}; }
@@ -293,7 +286,7 @@ const CampaignSetup = () => {
     return false;
   });
 
-  // --- UI state ---
+  // UI state
   const [adAccounts, setAdAccounts] = useState([]);
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -316,11 +309,10 @@ const CampaignSetup = () => {
   const [videoUrlsArr, setVideoUrlsArr] = useState([]);
   const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]);
 
-  // Image modal
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
 
-  // From navigation (these are the ONLY creatives we ever use)
+  // From navigation state
   const {
     imageUrls: navImageUrls,
     videoUrls: navVideoUrls,
@@ -331,7 +323,7 @@ const CampaignSetup = () => {
     mediaSelection: navMediaSelection
   } = location.state || {};
 
-  // --- Load persisted non-creative fields ---
+  // Load basic persisted fields
   useEffect(() => {
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) setForm(JSON.parse(lastFields));
@@ -339,7 +331,7 @@ const CampaignSetup = () => {
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
-  // --- After OAuth redirect, set flag and remove query param (keep sessionStorage intact) ---
+  // Handle Facebook oauth return
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
@@ -353,49 +345,7 @@ const CampaignSetup = () => {
     if (fbConnected) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
   }, [fbConnected]);
 
-  // --- Hydrate previews: prefer nav state; otherwise fall back to sessionStorage (survives the OAuth bounce) ---
-  useEffect(() => {
-    const hasNav =
-      (Array.isArray(navImageUrls) && navImageUrls.length) ||
-      (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-      (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
-
-    if (hasNav) {
-      setImageUrlsArr((navImageUrls || []).slice(0, 2));
-      setVideoUrlsArr((navVideoUrls || []).slice(0, 2));
-      setFbVideoIdsArr((navFbVideoIds || []).slice(0, 2));
-      if (navMediaSelection) setMediaSelection(String(navMediaSelection).toLowerCase());
-
-      // refresh preview bundle so a subsequent connect click still shows them
-      try {
-        sessionStorage.setItem(PREVIEW_KEY, JSON.stringify({
-          imageUrls: (navImageUrls || []).slice(0, 2),
-          videoUrls: (navVideoUrls || []).slice(0, 2),
-          fbVideoIds: (navFbVideoIds || []).slice(0, 2),
-          headline: headline || "",
-          body: body || "",
-          answers: answers || {},
-          mediaSelection: navMediaSelection || mediaSelection
-        }));
-      } catch {}
-      return;
-    }
-
-    // no nav state → try sessionStorage
-    try {
-      const raw = sessionStorage.getItem(PREVIEW_KEY);
-      if (raw) {
-        const b = JSON.parse(raw);
-        setImageUrlsArr((b.imageUrls || []).slice(0, 2));
-        setVideoUrlsArr((b.videoUrls || []).slice(0, 2));
-        setFbVideoIdsArr((b.fbVideoIds || []).slice(0, 2));
-        if (b.mediaSelection) setMediaSelection(String(b.mediaSelection).toLowerCase());
-      }
-    } catch {}
-    
-  }, []);
-
-  // --- Fetch account/page lists ---
+  // Fetch ad accounts
   useEffect(() => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
@@ -404,6 +354,7 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [fbConnected]);
 
+  // Fetch pages
   useEffect(() => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
@@ -412,7 +363,7 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [fbConnected]);
 
-  // --- Count campaigns for "2 max" rule ---
+  // Count campaigns
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -426,7 +377,7 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [selectedAccount]);
 
-  // --- Sync mediaSelection if passed from nav ---
+  // Sync mediaSelection if passed from nav
   useEffect(() => {
     if (navMediaSelection) {
       const v = String(navMediaSelection).toLowerCase();
@@ -435,7 +386,7 @@ const CampaignSetup = () => {
     }
   }, [navMediaSelection]);
 
-  // --- Load campaigns list (avoid auto-select when we came with previews) ---
+  // Load campaigns list
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -445,14 +396,18 @@ const CampaignSetup = () => {
         const list = (data && data.data) ? data.data.slice(0, 2) : [];
         setCampaigns(list);
         if (!selectedCampaignId) {
-          const hasNavDraft = imageUrlsArr.length || videoUrlsArr.length || fbVideoIdsArr.length;
-          if (!hasNavDraft && list.length > 0) setSelectedCampaignId(list[0].id);
+          const hasNavDraft = (Array.isArray(navImageUrls) && navImageUrls.length) ||
+                              (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+                              (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
+          if (!hasNavDraft && list.length > 0) {
+            setSelectedCampaignId(list[0].id);
+          }
         }
       })
       .catch(() => {});
-  }, [fbConnected, selectedAccount, selectedCampaignId, imageUrlsArr, videoUrlsArr, fbVideoIdsArr]);
+  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, selectedCampaignId]);
 
-  // --- Load metrics + basic details for selected campaign ---
+  // Metrics for selected campaign
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -470,7 +425,7 @@ const CampaignSetup = () => {
       .catch(() => setMetrics(null));
   }, [selectedCampaignId, selectedAccount, budget]);
 
-  // --- Persist basic fields (non-creative only) ---
+  // Persist basic fields
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
   useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
@@ -478,7 +433,35 @@ const CampaignSetup = () => {
   useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
   useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
-  // --- When selecting an existing campaign, show its persisted creatives (post-launch only) ---
+  // PREVIEW ONLY: hydrate from navigation OR from sessionStorage draft after FB connect redirect
+  useEffect(() => {
+    const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
+    const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
+    const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
+    if (imgs.length || vids.length || ids.length) {
+      setImageUrlsArr(imgs);
+      setVideoUrlsArr(vids);
+      setFbVideoIdsArr(ids);
+      return;
+    }
+
+    // If no nav state (common after oauth redirect), restore the draft
+    try {
+      const draftRaw = sessionStorage.getItem("draft_form_creatives");
+      if (!draftRaw) return;
+      const draft = JSON.parse(draftRaw);
+      setImageUrlsArr(Array.isArray(draft.images) ? draft.images.slice(0, 2) : []);
+      setVideoUrlsArr(Array.isArray(draft.videos) ? draft.videos.slice(0, 2) : []);
+      setFbVideoIdsArr(Array.isArray(draft.fbVideoIds) ? draft.fbVideoIds.slice(0, 2) : []);
+      if (draft.mediaSelection) {
+        const v = String(draft.mediaSelection).toLowerCase();
+        setMediaSelection(v);
+        localStorage.setItem("smartmark_media_selection", v);
+      }
+    } catch {}
+  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
+
+  // When switching to an existing campaign, show its persisted creatives (post-launch only)
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
@@ -494,7 +477,7 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // --- Pause/Unpause/Delete handlers ---
+  // Pause/Unpause/Delete
   const [isPaused, setIsPaused] = useState(false);
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
@@ -515,7 +498,6 @@ const CampaignSetup = () => {
     }
     setLoading(false);
   };
-
   const handleDelete = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -533,7 +515,6 @@ const CampaignSetup = () => {
     }
     setLoading(false);
   };
-
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
     navigate('/form');
@@ -548,7 +529,7 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // --- Launch: uses ONLY previews from FormPage; clears session bundle on success ---
+  // Launch: ONLY use the creatives from FormPage (previews), never generate here
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -578,7 +559,7 @@ const CampaignSetup = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      // Persist creatives AFTER success
+      // Persist creatives ONLY AFTER a successful launch
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
@@ -590,8 +571,8 @@ const CampaignSetup = () => {
         writeCreativeMap(acctId, map);
       }
 
-      // Clear ephemeral previews so FormPage shows blank next time
-      try { sessionStorage.removeItem(PREVIEW_KEY); } catch {}
+      // Clear the draft now that it's launched
+      sessionStorage.removeItem("draft_form_creatives");
 
       setLaunched(true);
       setLaunchResult(json);
@@ -633,7 +614,7 @@ const CampaignSetup = () => {
 
   const { fee, total } = calculateFees(budget);
 
-  // --- Render ---
+  // ---------- Render ----------
   return (
     <div
       style={{
@@ -843,7 +824,7 @@ const CampaignSetup = () => {
               SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
             </div>
 
-            {/* CashApp + Email only after a number is typed */}
+            {/* CashApp + Email */}
             {budget && Number(budget) >= 1 && (
               <div style={{
                 marginTop: "0.7rem",

@@ -1,15 +1,19 @@
+/* eslint-disable */
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
 
-// ========== Constants ==========
-const API_BASE = "/api";
-const BACKEND_URL = "https://smartmark-mvp.onrender.com";
-const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
+// ===== Constants =====
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const TEAL = "#14e7b9";
+const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const DARK_BG = "#181b20";
-const PREVIEW_KEY = "sm_preview_bundle_v1"; // <-- NEW: ephemeral previews (sessionStorage)
+const TEAL = "#14e7b9";
+
+// If you run a local backend with a CRA proxy, set USE_LOCAL_BACKEND=true
+const USE_LOCAL_BACKEND = false;
+const PROD_BACKEND = "https://smartmark-mvp.onrender.com";
+const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;               // For assets returned like /generated/xxx
+const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;     // <-- absolute API for Vercel
 
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
@@ -22,23 +26,7 @@ const CONVO_QUESTIONS = [
   { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
 ];
 
-// ========== Helper Functions/Components ==========
-
-const abs = (u) => (!u ? "" : /^https?:\/\//i.test(u) ? u : `${BACKEND_URL}${u}`);
-
-function LoadingSpinner() {
-  return (
-    <div style={{
-      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150
-    }}>
-      <div style={{ color: "#b0b8bc", fontWeight: 500, fontSize: "0.99rem", marginBottom: 10 }}>
-        This could take up to 2 minutes <span role="img" aria-label="robot">🤖</span>
-      </div>
-      <Dotty />
-    </div>
-  );
-}
-
+// ---------- Small UI helpers ----------
 function Dotty() {
   return (
     <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
@@ -62,18 +50,21 @@ function Dotty() {
       </style>
     </span>
   );
-}
 
+}
 function dotStyle(n) {
-  return {
-    display: "inline-block",
-    margin: "0 3px",
-    fontSize: 36,
-    color: "#29efb9",
-    animationDelay: `${n * 0.13}s`
-  };
+  return { display: "inline-block", margin: "0 3px", fontSize: 36, color: "#29efb9", animationDelay: `${n * 0.13}s` };
 }
-
+function LoadingSpinner() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150 }}>
+      <div style={{ color: "#b0b8bc", fontWeight: 500, fontSize: "0.99rem", marginBottom: 10 }}>
+        This could take up to 2 minutes <span role="img" aria-label="robot">🤖</span>
+      </div>
+      <Dotty />
+    </div>
+  );
+}
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
@@ -119,13 +110,7 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     { key: "video", label: "Video" },
   ];
   return (
-    <div style={{
-      display: "flex",
-      gap: 16,
-      justifyContent: "center",
-      alignItems: "center",
-      margin: "18px 0 14px 0"
-    }}>
+    <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "18px 0 14px 0" }}>
       {choices.map((choice) => (
         <button
           key={choice.key}
@@ -152,15 +137,13 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
   );
 }
 
-function getRandomString() {
-  return Math.random().toString(36).substring(2, 12) + Date.now();
-}
 
-function isGenerateTrigger(input) {
-  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
-}
 
-// Carousel Controls
+
+
+
+
+
 function Arrow({ side = "left", onClick, disabled }) {
   return (
     <button
@@ -229,13 +212,25 @@ function Dots({ count, active, onClick }) {
   );
 }
 
+// ---------- helpers ----------
+function getRandomString() {
+  return Math.random().toString(36).substring(2, 12) + Date.now();
+}
+function isGenerateTrigger(input) {
+  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
+}
+async function safeJson(res) {
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  try { return await res.json(); } catch { throw new Error("Bad JSON"); }
+}
+
 // =========== Main Component ============
 export default function FormPage() {
   const navigate = useNavigate();
-  const inputRef = useRef();
+
   const chatBoxRef = useRef();
 
-  // --------------- State -----------------
+
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
@@ -248,18 +243,17 @@ export default function FormPage() {
   const [generating, setGenerating] = useState(false);
 
   // Ad preview state
-  const [mediaType, setMediaType] = useState("both");
+  const [mediaType, setMediaType] = useState("both"); // <- correct variable
   const [result, setResult] = useState(null);
 
-  // NEW: carousel data
+
   const [imageUrls, setImageUrls] = useState([]); // up to 2
   const [activeImage, setActiveImage] = useState(0);
 
   const [videoItems, setVideoItems] = useState([]); // [{url, script, fbVideoId}]
   const [activeVideo, setActiveVideo] = useState(0);
 
-  // Legacy single values (kept for compatibility with other pages / localStorage)
-  const [imageUrl, setImageUrl] = useState("");
+  const [imageUrl, setImageUrl] = useState(""); // legacy single value
   const [videoUrl, setVideoUrl] = useState("");
   const [videoScript, setVideoScript] = useState("");
 
@@ -270,247 +264,145 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
 
-  // Scroll chat to bottom on update
+  // Scroll chat to bottom
   useEffect(() => {
-    if (chatBoxRef.current) {
-      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-    }
+    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory]);
 
-  // NEW: If we came back from CampaignSetup (same tab), restore previews from sessionStorage
-  useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(PREVIEW_KEY);
-      if (!raw) return;
-      const b = JSON.parse(raw);
-
-      if (Array.isArray(b.imageUrls) && b.imageUrls.length) {
-        setImageUrls(b.imageUrls);
-        setActiveImage(0);
-        setImageUrl(b.imageUrls[0] || "");
-      }
-      if (Array.isArray(b.videoUrls) && b.videoUrls.length) {
-        const items = b.videoUrls.map((u, i) => ({
-          url: u,
-          script: Array.isArray(b.videoScripts) ? (b.videoScripts[i] || "") : "",
-          fbVideoId: Array.isArray(b.fbVideoIds) ? (b.fbVideoIds[i] || null) : null
-        }));
-        setVideoItems(items);
-        setActiveVideo(0);
-        setVideoUrl(items[0]?.url || "");
-        setVideoScript(items[0]?.script || "");
-      }
-      if (b.headline || b.body) {
-        setResult({ headline: b.headline || "", body: b.body || "" });
-      }
-      if (b.mediaSelection) {
-        setMediaType(String(b.mediaSelection).toLowerCase());
-      }
-    } catch {}
-  }, []);
-
+  function handleImageClick(url) {
+    setShowModal(true);
+    setModalImg(url);
+  }
   function handleModalClose() {
     setShowModal(false);
     setModalImg("");
   }
 
-  // ---- helpers to call APIs ----
+  // ---- API calls (defensive) ----
   async function fetchImageOnce(token) {
-    const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...answers,
-        regenerateToken: token
-      })
-    });
-    const data = await resp.json();
-    return data?.imageUrl || "";
+    try {
+      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      return data?.imageUrl || "";
+    } catch (e) {
+      console.warn("image fetch failed:", e.message);
+      return "";
+    }
   }
-
   async function fetchVideoOnce(token) {
-    const resp = await fetch(`${API_BASE}/generate-video-ad`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: answers?.url || "",
-        answers,
-        regenerateToken: token
-      })
-    });
-    const data = await resp.json();
-    const vUrl = data?.videoUrl
-      ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
-      : "";
-    return {
-      url: vUrl,
-      script: data?.script || data?.video?.script || "",
-      fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
-    };
+    try {
+      const resp = await fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      const vUrl = data?.videoUrl
+        ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
+        : "";
+      return {
+        url: vUrl,
+        script: data?.script || data?.video?.script || "",
+        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
+      };
+    } catch (e) {
+      console.warn("video fetch failed:", e.message);
+      return { url: "", script: "", fbVideoId: null };
+    }
   }
 
-  // ---- AI Q&A: Check for GPT chat before stepping to next Q
+  // ---- Chat flow handler ----
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
-    const value = input.trim();
+    const value = (input || "").trim();
     if (!value) return;
 
-    // If waiting for "ready"
+    // Ready gate
     if (awaitingReady) {
       setChatHistory(ch => [...ch, { from: "user", text: value }]);
-      if (/^(yes|yep|ready|start|go|let'?s go|let'?s start|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
+      if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
         setAwaitingReady(false);
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: CONVO_QUESTIONS[0].question }
-        ]);
+        setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[0].question }]);
         setStep(0);
         setInput("");
         return;
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }
-        ]);
-        setInput("");
-        return;
-      } else if (/(who are you|how does|what do you do|agency|ad manager|work|help|support|feature|question)/i.test(value)) {
-        const resp = await fetch(`${API_BASE}/gpt-chat`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: value })
-        });
-        const { reply } = await resp.json();
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: reply },
-          { from: "gpt", text: "Are you ready to get started? (yes/no)" }
-        ]);
+        setChatHistory(ch => [...ch, { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }]);
         setInput("");
         return;
       } else {
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }
-        ]);
+        setChatHistory(ch => [...ch, { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }]);
         setInput("");
         return;
       }
     }
 
-    // 1. "Ready to generate?" positive answer triggers campaign
+    // Generate trigger
     if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
       setLoading(true);
       setGenerating(true);
-      setChatHistory(ch => [
-        ...ch,
-        { from: "user", text: value },
-        { from: "gpt", text: "AI generating..." }
-      ]);
+      setChatHistory(ch => [...ch, { from: "user", text: value }, { from: "gpt", text: "AI generating..." }]);
       setInput("");
+
       setTimeout(async () => {
-        // Generate assets JSON
         const tokenA = getRandomString();
         const tokenB = getRandomString();
 
-        const [data, img1, img2, vid1, vid2] = await Promise.all([
-          fetch(`${API_BASE}/generate-campaign-assets`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ answers })
-          }).then(res => res.json()),
-          fetchImageOnce(tokenA),
-          fetchImageOnce(tokenB),
-          fetchVideoOnce(tokenA),
-          fetchVideoOnce(tokenB)
-        ]);
+        try {
+          const [data, img1, img2, vid1, vid2] = await Promise.all([
+            fetch(`${API_BASE}/generate-campaign-assets`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ answers })
+            }).then(safeJson).catch(() => ({})),
+            fetchImageOnce(tokenA),
+            fetchImageOnce(tokenB),
+            fetchVideoOnce(tokenA),
+            fetchVideoOnce(tokenB)
+          ]);
 
-        // Update copy result
-        setResult({
-          headline: data.headline || "",
-          body: data.body || "",
-          image_overlay_text: data.image_overlay_text || ""
-        });
+          setResult({
+            headline: data?.headline || "",
+            body: data?.body || "",
+            image_overlay_text: data?.image_overlay_text || ""
+          });
 
-        // Images (max two, filter blanks)
-        const imgs = [img1, img2].filter(Boolean).slice(0, 2);
-        setImageUrls(imgs);
-        setActiveImage(0);
-        setImageUrl(imgs[0] || "");
+          const imgs = [img1, img2].filter(Boolean).slice(0, 2);
+          setImageUrls(imgs);
+          setActiveImage(0);
+          setImageUrl(imgs[0] || "");
 
-        // Videos (max two, filter blanks)
-        const vids = [vid1, vid2].filter(v => v && v.url).slice(0, 2);
-        setVideoItems(vids);
-        setActiveVideo(0);
-        setVideoUrl(vids[0]?.url || "");
-        setVideoScript(vids[0]?.script || "");
+          const vids = [vid1, vid2].filter(v => v && v.url).slice(0, 2);
+          setVideoItems(vids);
+          setActiveVideo(0);
+          setVideoUrl(vids[0]?.url || "");
+          setVideoScript(vids[0]?.script || "");
 
-        setGenerating(false);
-        setLoading(false);
-        setChatHistory(ch => [
-          ...ch,
-          { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }
-        ]);
-      }, 1600);
+          setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
+        } catch (err) {
+          console.error("generation failed:", err);
+          setError("Generation failed. Please try again.");
+        } finally {
+          setGenerating(false);
+          setLoading(false);
+        }
+      }, 500);
       return;
     }
 
-    // 2. If at confirmation step but answer is not "yes"
-    if (step === CONVO_QUESTIONS.length) {
-      setChatHistory(ch => [
-        ...ch,
-        { from: "user", text: value },
-        { from: "gpt", text: "Let's continue! Just answer the question or let me know if you want to change anything." }
-      ]);
-      setInput("");
-      return;
-    }
-
-    // 3. Off-topic Q&A
-    if (/(\bwho are you\b|\bwhat is this\b|\bhow does it work\b|\bdo you use ai\b|\bpricing\b|\bhow do you work\b|\bcan you help\b|\bprivacy\b|\bwhat platforms\b|\bcan you run my ads\b|\bcontact\b)/i.test(value)) {
-      const resp = await fetch(`${API_BASE}/gpt-chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: value, context: { answers } })
-      });
-      const { reply } = await resp.json();
-      setChatHistory(ch => [
-        ...ch,
-        { from: "user", text: value },
-        { from: "gpt", text: reply }
-      ]);
-      setInput("");
-      return;
-    }
-
-    // 4. Corrections
-    if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
-      const lastQ = step > 0 ? CONVO_QUESTIONS[step - 1] : null;
-      const keyToUpdate = lastQ ? lastQ.key : null;
-      if (keyToUpdate) {
-        setAnswers(prev => ({
-          ...prev,
-          [keyToUpdate]: value.replace(/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)\s*/i, "")
-        }));
-        setChatHistory(ch => [
-          ...ch,
-          { from: "user", text: value },
-          { from: "gpt", text: `✅ Updated your answer for "${keyToUpdate.replace(/([A-Z])/g, ' $1')}". Want to change anything else or continue?` }
-        ]);
-        setInput("");
-        return;
-      }
-    }
-
-    // 5. Normal Q&A
+    // Normal Q&A
     const currentQ = CONVO_QUESTIONS[step];
-    let newAnswers = { ...answers, [currentQ.key]: value };
+    const newAnswers = { ...answers, [currentQ.key]: value };
     setAnswers(newAnswers);
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
 
-    // Conditional skip logic
+    // Conditional skip
     let nextStep = step + 1;
     while (
       CONVO_QUESTIONS[nextStep] &&
@@ -520,77 +412,45 @@ export default function FormPage() {
       nextStep += 1;
     }
 
-    // If last Q, ask for confirmation
+
     if (!CONVO_QUESTIONS[nextStep]) {
-      setChatHistory(ch => [
-        ...ch,
-        { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
-      ]);
+      setChatHistory(ch => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
       setStep(nextStep);
       return;
     }
 
-    // Otherwise, ask next question
+
     setStep(nextStep);
-    setChatHistory(ch => [
-      ...ch,
-      { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }
-    ]);
+    setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
   }
 
-  // --- Handlers for modal image, regenerate, etc. ---
-  function handleImageClick(url) {
-    setShowModal(true);
-    setModalImg(url);
-  }
-
+  // Regenerate actions
   async function handleRegenerateImage() {
     setImageLoading(true);
-    const tokenA = getRandomString();
-    const tokenB = getRandomString();
-    try {
-      const [a, b] = await Promise.all([fetchImageOnce(tokenA), fetchImageOnce(tokenB)]);
-      const imgs = [a, b].filter(Boolean).slice(0, 2);
-      setImageUrls(imgs);
-      setActiveImage(0);
-      setImageUrl(imgs[0] || "");
-    } finally {
-      setImageLoading(false);
-    }
+    const [a, b] = await Promise.all([fetchImageOnce(getRandomString()), fetchImageOnce(getRandomString())]);
+    const imgs = [a, b].filter(Boolean).slice(0, 2);
+    setImageUrls(imgs);
+    setActiveImage(0);
+    setImageUrl(imgs[0] || "");
+    setImageLoading(false);
   }
-
   async function handleRegenerateVideo() {
     setVideoLoading(true);
-    const tokenA = getRandomString();
-    const tokenB = getRandomString();
-    try {
-      const [a, b] = await Promise.all([fetchVideoOnce(tokenA), fetchVideoOnce(tokenB)]);
-      const vids = [a, b].filter(v => v && v.url).slice(0, 2);
-      setVideoItems(vids);
-      setActiveVideo(0);
-      setVideoUrl(vids[0]?.url || "");
-      setVideoScript(vids[0]?.script || "");
-    } finally {
-      setVideoLoading(false);
-    }
+    const [a, b] = await Promise.all([fetchVideoOnce(getRandomString()), fetchVideoOnce(getRandomString())]);
+    const vids = [a, b].filter(v => v && v.url).slice(0, 2);
+    setVideoItems(vids);
+    setActiveVideo(0);
+    setVideoUrl(vids[0]?.url || "");
+    setVideoScript(vids[0]?.script || "");
+    setVideoLoading(false);
   }
 
-  // ========== Render ==========
+  // ---------- Render ----------
   return (
     <div style={{
       background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
       display: "flex", flexDirection: "column", alignItems: "center"
     }}>
-      {/* Home btn */}
-      <button
-        style={{
-          position: "absolute", top: 24, right: 38, padding: "10px 30px",
-          fontWeight: 700, fontSize: "1.18rem", background: "#222c27", color: "#fff",
-          border: "none", borderRadius: 20, boxShadow: "0 2px 12px #0003",
-          cursor: "pointer", letterSpacing: "1.1px", zIndex: 1001, opacity: 0.92
-        }}
-        onClick={() => navigate("/")}
-      >Home</button>
 
       {/* ---- Chat Panel ---- */}
       <div style={{
@@ -598,10 +458,7 @@ export default function FormPage() {
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
         padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
-        {/* Chat Header */}
-        <div style={{
-          color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2
-        }}>
+        <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2 }}>
           AI Ad Manager
         </div>
         {/* Scrollable chat history */}
@@ -631,7 +488,7 @@ export default function FormPage() {
         {!loading && step <= CONVO_QUESTIONS.length &&
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
             <input
-              ref={inputRef}
+            
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={loading}
@@ -680,7 +537,7 @@ export default function FormPage() {
       {/* MediaTypeToggle above previews */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* Ad Previews — position unchanged, inside two cards */}
+      {/* Ad Previews — two cards (Image + Video) */}
       <div style={{
         display: "flex",
         justifyContent: "center",
@@ -688,111 +545,277 @@ export default function FormPage() {
         flexWrap: "wrap",
         width: "100%"
       }}>
-        {(mediaType === "image" || mediaType === "both") && (
+        {/* IMAGE CARD */}
+        <div style={{
+          background: "#fff",
+          borderRadius: 13,
+          boxShadow: "0 2px 24px #16242714",
+          minWidth: 340,
+          maxWidth: 390,
+          flex: mediaType === "video" ? 0 : 1,
+          marginBottom: 20,
+          padding: "0px 0px 14px 0px",
+          border: "1.5px solid #eaeaea",
+          fontFamily: AD_FONT,
+          display: mediaType === "video" ? "none" : "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative"
+        }}>
           <div style={{
-            background: "#fff",
-            borderRadius: 13,
-            boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
-            flex: 1,
-            marginBottom: 20,
-            padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea",
-            fontFamily: AD_FONT,
+            background: "#f5f6fa",
+            padding: "11px 20px",
+            borderBottom: "1px solid #e0e4eb",
+            fontWeight: 700,
+            color: "#495a68",
+            fontSize: 16,
+            letterSpacing: 0.08,
             display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative"
+            justifyContent: "space-between",
+            alignItems: "center"
           }}>
-            <div style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center"
-            }}>
-              <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
-              <button
-                style={{
-                  background: "#1ad6b7",
-                  color: "#222",
-                  border: "none",
-                  borderRadius: 12,
-                  fontWeight: 700,
-                  fontSize: "1.01rem",
-                  padding: "6px 20px",
-                  cursor: imageLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8,
-                  boxShadow: "0 2px 7px #19e5b733",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7
-                }}
-                onClick={handleRegenerateImage}
-                disabled={imageLoading}
-                title="Regenerate Image Ad"
-              >
-                <FaSyncAlt style={{ fontSize: 16 }} />
-                {imageLoading || generating ? <Dotty /> : "Regenerate"}
-              </button>
-            </div>
+            <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+            <button
+              style={{
+                background: "#1ad6b7",
+                color: "#222",
+                border: "none",
+                borderRadius: 12,
+                fontWeight: 700,
+                fontSize: "1.01rem",
+                padding: "6px 20px",
+                cursor: imageLoading ? "not-allowed" : "pointer",
+                marginLeft: 8,
+                boxShadow: "0 2px 7px #19e5b733",
+                display: "flex",
+                alignItems: "center",
+                gap: 7
+              }}
+              onClick={handleRegenerateImage}
+              disabled={imageLoading}
+              title="Regenerate Image Ad"
+            >
+              <FaSyncAlt style={{ fontSize: 16 }} />
+              {imageLoading || generating ? <Dotty /> : "Regenerate"}
+            </button>
+          </div>
 
-            {/* Carousel body */}
-            <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
-              {imageLoading || generating ? (
-                <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Dotty />
-                </div>
-              ) : imageUrls.length > 0 ? (
-                <>
-                  <img
-                    src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
-                    alt="Ad Preview"
-                    style={{
-                      width: "100%",
-                      maxHeight: 220,
-                      objectFit: "cover",
-                      borderRadius: 0,
-                      cursor: "pointer"
-                    }}
-                    onClick={() => handleImageClick(imageUrls[activeImage])}
-                    title="Click to view larger"
-                  />
-                  <Arrow side="left" onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
-                  <Arrow side="right" onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
-                  <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
-                </>
-              ) : (
-                <div style={{
-                  height: 220,
-                  width: "100%",
-                  background: "#e9ecef",
-                  color: "#a9abb0",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22
-                }}>Image goes here</div>
-              )}
-            </div>
-
-            <div style={{ padding: "17px 18px 4px 18px" }}>
-              <div style={{
-                color: "#191c1e",
-                fontWeight: 800,
-                fontSize: 17,
-                marginBottom: 5,
-                fontFamily: AD_FONT
-              }}>
-                {result?.headline || "Don't Miss Our Limited-Time Offer"}
+          {/* Carousel body */}
+          <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
+            {imageLoading || generating ? (
+              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Dotty />
               </div>
+            ) : imageUrls.length > 0 ? (
+              <>
+                <img
+                  src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
+                  alt="Ad Preview"
+                  style={{
+                    width: "100%",
+                    maxHeight: 220,
+                    objectFit: "cover",
+                    borderRadius: 0,
+                    cursor: "pointer"
+                  }}
+                  onClick={() => handleImageClick(imageUrls[activeImage])}
+                  title="Click to view larger"
+                />
+                <Arrow side="left" onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
+                <Arrow side="right" onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
+                <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
+              </>
+            ) : (
+              <div style={{
+                height: 220,
+                width: "100%",
+                background: "#e9ecef",
+                color: "#a9abb0",
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 22
+              }}>Image goes here</div>
+            )}
+          </div>
+
+          <div style={{ padding: "17px 18px 4px 18px" }}>
+            <div style={{
+              color: "#191c1e",
+              fontWeight: 800,
+              fontSize: 17,
+              marginBottom: 5,
+              fontFamily: AD_FONT
+            }}>
+              {result?.headline || "Don't Miss Our Limited-Time Offer"}
+            </div>
+            <div style={{
+              color: "#3a4149",
+              fontSize: 15,
+              fontWeight: 600,
+              marginBottom: 3,
+              minHeight: 18
+            }}>
+              {result?.body || "Ad copy goes here..."}
+            </div>
+          </div>
+          <div style={{ padding: "8px 18px", marginTop: 2 }}>
+            <button style={{
+              background: "#14e7b9",
+              color: "#181b20",
+              fontWeight: 700,
+              border: "none",
+              borderRadius: 9,
+              padding: "8px 20px",
+              fontSize: 15,
+              cursor: "pointer"
+            }}>Learn More</button>
+          </div>
+          <button
+            style={{
+              position: "absolute",
+              bottom: 10,
+              right: 18,
+              background: "#f3f6f7",
+              color: "#12cbb8",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: "1.05rem",
+              padding: "5px 14px",
+              cursor: "pointer",
+              boxShadow: "0 1px 3px #2bcbb828",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              zIndex: 2
+            }}
+            onClick={() => {}}
+          >
+            <FaEdit style={{ fontSize: 15 }} />
+            Edit
+          </button>
+        </div>
+
+        {/* VIDEO CARD */}
+        <div style={{
+          background: "#fff",
+          borderRadius: 13,
+          boxShadow: "0 2px 24px #16242714",
+          minWidth: 340,
+          maxWidth: 390,
+          flex: mediaType === "image" ? 0 : 1,
+          marginBottom: 20,
+          padding: "0px 0px 14px 0px",
+          border: "1.5px solid #eaeaea",
+          fontFamily: AD_FONT,
+          display: mediaType === "image" ? "none" : "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          position: "relative"
+        }}>
+          <div style={{
+            background: "#f5f6fa",
+            padding: "11px 20px",
+            borderBottom: "1px solid #e0e4eb",
+            fontWeight: 700,
+            color: "#495a68",
+            fontSize: 16,
+            letterSpacing: 0.08,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
+            <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+            <button
+              style={{
+                background: "#1ad6b7",
+                color: "#222",
+                border: "none",
+                borderRadius: 12,
+                fontWeight: 700,
+                fontSize: "1.01rem",
+                padding: "6px 20px",
+                cursor: videoLoading ? "not-allowed" : "pointer",
+                marginLeft: 8,
+                boxShadow: "0 2px 7px #19e5b733",
+                display: "flex",
+                alignItems: "center",
+                gap: 7
+              }}
+              onClick={handleRegenerateVideo}
+              disabled={videoLoading}
+              title="Regenerate Video Ad"
+            >
+              <FaSyncAlt style={{ fontSize: 16 }} />
+              {videoLoading || generating ? <Dotty /> : "Regenerate"}
+            </button>
+          </div>
+
+          {/* Carousel body */}
+          <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
+            {videoLoading || generating ? (
+              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Dotty />
+              </div>
+            ) : videoItems.length > 0 ? (
+              <>
+                <video
+                  key={videoItems[activeVideo]?.url || "video"}
+                  src={videoItems[activeVideo]?.url}
+                  controls
+                  style={{
+                    width: "100%",
+                    maxHeight: 220,
+                    borderRadius: 0,
+                    background: "#111"
+                  }}
+                />
+                <Arrow side="left" onClick={() => {
+                  const next = (activeVideo + videoItems.length - 1) % videoItems.length;
+                  setActiveVideo(next);
+                  setVideoUrl(videoItems[next]?.url || "");
+                  setVideoScript(videoItems[next]?.script || "");
+                }} disabled={videoItems.length <= 1} />
+                <Arrow side="right" onClick={() => {
+                  const next = (activeVideo + 1) % videoItems.length;
+                  setActiveVideo(next);
+                  setVideoUrl(videoItems[next]?.url || "");
+                  setVideoScript(videoItems[next]?.script || "");
+                }} disabled={videoItems.length <= 1} />
+                <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
+                  setActiveVideo(i);
+                  setVideoUrl(videoItems[i]?.url || "");
+                  setVideoScript(videoItems[i]?.script || "");
+                }} />
+              </>
+            ) : (
+              <div style={{
+                height: 220,
+                width: "100%",
+                background: "#e9ecef",
+                color: "#a9abb0",
+                fontWeight: 700,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 22
+              }}>Video goes here</div>
+            )}
+          </div>
+
+          <div style={{ padding: "17px 18px 4px 18px" }}>
+            <div style={{
+              color: "#191c1e",
+              fontWeight: 800,
+              fontSize: 17,
+              marginBottom: 5,
+              fontFamily: AD_FONT
+            }}>
+              {result?.headline || "Welcome New Customers Instantly!"}
+            </div>
+            {videoItems.length > 0 && (videoItems[activeVideo]?.script || videoScript) && (
               <div style={{
                 color: "#3a4149",
                 fontSize: 15,
@@ -800,215 +823,47 @@ export default function FormPage() {
                 marginBottom: 3,
                 minHeight: 18
               }}>
-                {result?.body || "Ad copy goes here..."}
+                <b>Script:</b> {videoItems[activeVideo]?.script || videoScript}
               </div>
-            </div>
-            <div style={{ padding: "8px 18px", marginTop: 2 }}>
-              <button style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer"
-              }}>Learn More</button>
-            </div>
-            <button
-              style={{
-                position: "absolute",
-                bottom: 10,
-                right: 18,
-                background: "#f3f6f7",
-                color: "#12cbb8",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: "1.05rem",
-                padding: "5px 14px",
-                cursor: "pointer",
-                boxShadow: "0 1px 3px #2bcbb828",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                zIndex: 2
-              }}
-              onClick={() => {}}
-            >
-              <FaEdit style={{ fontSize: 15 }} />
-              Edit
-            </button>
+            )}
           </div>
-        )}
-
-        {(mediaType === "video" || mediaType === "both") && (
-          <div style={{
-            background: "#fff",
-            borderRadius: 13,
-            boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
-            flex: 1,
-            marginBottom: 20,
-            padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea",
-            fontFamily: AD_FONT,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative"
-          }}>
-            <div style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
+          <div style={{ padding: "8px 18px", marginTop: 2 }}>
+            <button style={{
+              background: "#14e7b9",
+              color: "#181b20",
               fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center"
-            }}>
-              <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
-              <button
-                style={{
-                  background: "#1ad6b7",
-                  color: "#222",
-                  border: "none",
-                  borderRadius: 12,
-                  fontWeight: 700,
-                  fontSize: "1.01rem",
-                  padding: "6px 20px",
-                  cursor: videoLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8,
-                  boxShadow: "0 2px 7px #19e5b733",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7
-                }}
-                onClick={handleRegenerateVideo}
-                disabled={videoLoading}
-                title="Regenerate Video Ad"
-              >
-                <FaSyncAlt style={{ fontSize: 16 }} />
-                {videoLoading || generating ? <Dotty /> : "Regenerate"}
-              </button>
-            </div>
-
-            {/* Carousel body */}
-            <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
-              {videoLoading || generating ? (
-                <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Dotty />
-                </div>
-              ) : videoItems.length > 0 ? (
-                <>
-                  <video
-                    key={videoItems[activeVideo]?.url || "video"}
-                    src={videoItems[activeVideo]?.url}
-                    controls
-                    style={{
-                      width: "100%",
-                      maxHeight: 220,
-                      borderRadius: 0,
-                      background: "#111"
-                    }}
-                  />
-                  <Arrow side="left" onClick={() => {
-                    const next = (activeVideo + videoItems.length - 1) % videoItems.length;
-                    setActiveVideo(next);
-                    setVideoUrl(videoItems[next]?.url || "");
-                    setVideoScript(videoItems[next]?.script || "");
-                  }} disabled={videoItems.length <= 1} />
-                  <Arrow side="right" onClick={() => {
-                    const next = (activeVideo + 1) % videoItems.length;
-                    setActiveVideo(next);
-                    setVideoUrl(videoItems[next]?.url || "");
-                    setVideoScript(videoItems[next]?.script || "");
-                  }} disabled={videoItems.length <= 1} />
-                  <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
-                    setActiveVideo(i);
-                    setVideoUrl(videoItems[i]?.url || "");
-                    setVideoScript(videoItems[i]?.script || "");
-                  }} />
-                </>
-              ) : (
-                <div style={{
-                  height: 220,
-                  width: "100%",
-                  background: "#e9ecef",
-                  color: "#a9abb0",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22
-                }}>Video goes here</div>
-              )}
-            </div>
-
-            <div style={{ padding: "17px 18px 4px 18px" }}>
-              <div style={{
-                color: "#191c1e",
-                fontWeight: 800,
-                fontSize: 17,
-                marginBottom: 5,
-                fontFamily: AD_FONT
-              }}>
-                {result?.headline || "Welcome New Customers Instantly!"}
-              </div>
-              {videoItems.length > 0 && (videoItems[activeVideo]?.script || videoScript) && (
-                <div style={{
-                  color: "#3a4149",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  marginBottom: 3,
-                  minHeight: 18
-                }}>
-                  <b>Script:</b> {videoItems[activeVideo]?.script || videoScript}
-                </div>
-              )}
-            </div>
-            <div style={{ padding: "8px 18px", marginTop: 2 }}>
-              <button style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer"
-              }}>Learn More</button>
-            </div>
-            <button
-              style={{
-                position: "absolute",
-                bottom: 10,
-                right: 18,
-                background: "#f3f6f7",
-                color: "#12cbb8",
-                border: "none",
-                borderRadius: 8,
-                fontWeight: 700,
-                fontSize: "1.05rem",
-                padding: "5px 14px",
-                cursor: "pointer",
-                boxShadow: "0 1px 3px #2bcbb828",
-                display: "flex",
-                alignItems: "center",
-                gap: 5,
-                zIndex: 2
-              }}
-              onClick={() => {}}
-            >
-              <FaEdit style={{ fontSize: 15 }} />
-              Edit
-            </button>
+              border: "none",
+              borderRadius: 9,
+              padding: "8px 20px",
+              fontSize: 15,
+              cursor: "pointer"
+            }}>Learn More</button>
           </div>
-        )}
+          <button
+            style={{
+              position: "absolute",
+              bottom: 10,
+              right: 18,
+              background: "#f3f6f7",
+              color: "#12cbb8",
+              border: "none",
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: "1.05rem",
+              padding: "5px 14px",
+              cursor: "pointer",
+              boxShadow: "0 1px 3px #2bcbb828",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+              zIndex: 2
+            }}
+            onClick={() => {}}
+          >
+            <FaEdit style={{ fontSize: 15 }} />
+            Edit
+          </button>
+        </div>
       </div>
 
       {/* Continue Button */}
@@ -1030,32 +885,40 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            // Build arrays (max two) from current previews
-            const imgs = (imageUrls.length ? imageUrls : [imageUrl].filter(Boolean))
-              .slice(0, 2).map(abs);
-            const vids = (videoItems.length ? videoItems.map(v => v.url) : [videoUrl].filter(Boolean))
-              .slice(0, 2).map(abs);
-            const fbIds = (videoItems.length ? videoItems.map(v => v.fbVideoId).filter(Boolean) : []).slice(0, 2);
-            const scripts = (videoItems.length ? videoItems.map(v => v.script || "") : [videoScript].filter(Boolean)).slice(0, 2);
+            const imgA = imageUrls.map(u => (/^https?:\/\//.test(u) ? u : BACKEND_URL + u)).slice(0, 2);
+            const vidA = videoItems.map(v => (/^https?:\/\//.test(v.url) ? v.url : BACKEND_URL + v.url)).slice(0, 2);
+            const fbIds = videoItems.map(v => v.fbVideoId).filter(Boolean).slice(0, 2);
 
-            // Save ephemeral preview bundle so it survives OAuth redirect
-            const bundle = {
-              imageUrls: imgs,
-              videoUrls: vids,
+            // Save a draft so creatives survive the Facebook connect redirect
+            sessionStorage.setItem("draft_form_creatives", JSON.stringify({
+              images: imgA,
+              videos: vidA,
               fbVideoIds: fbIds,
-              videoScripts: scripts,
               headline: result?.headline || "",
               body: result?.body || "",
+              videoScript: videoItems[0]?.script || videoScript || "",
               answers,
-              mediaSelection
-            };
-            try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(bundle)); } catch {}
+              mediaSelection: mediaType
+            }));
 
-            // Keep just the user's preference in localStorage (NOT creatives)
-            localStorage.setItem("smartmark_media_selection", mediaSelection);
+            // Legacy keys (optional)
+            if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+            if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
+            if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+            localStorage.setItem("smartmark_media_selection", mediaType);
 
-            // Navigate with same bundle (works when no redirect happens)
-            navigate("/setup", { state: bundle });
+            navigate("/setup", {
+              state: {
+                imageUrls: imgA,
+                videoUrls: vidA,
+                fbVideoIds: fbIds,
+                headline: result?.headline,
+                body: result?.body,
+                videoScript: videoItems[0]?.script || videoScript,
+                answers,
+                mediaSelection: mediaType
+              }
+            });
           }}
         >
           Continue
