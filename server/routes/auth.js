@@ -248,18 +248,37 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     }
 
     // Decide variant plan (1 or 2 per type based on budget/flight)
-    const variantPlan = policy.decideVariantPlan({
-      assetTypes: ms,
-      dailyBudget: Number(budget) || 0,
-      flightHours: (function () {
-        if (flightEnd) return Math.max(0, (new Date(flightEnd) - Date.now()) / 36e5);
-        if (flightHours) return Number(flightHours) || 0;
-        return 0;
-      })(),
-      overrideCountPerType
-    });
-    const needImg = wantImage ? variantPlan.images : 0;
-    const needVid = wantVideo ? variantPlan.videos : 0;
+
+// Keep policy only for logging/telemetry (we don't cap by it anymore)
+const variantPlan = policy.decideVariantPlan({
+  assetTypes: ms,
+  dailyBudget: Number(budget) || 0,
+  flightHours: (function () {
+    if (flightEnd) return Math.max(0, (new Date(flightEnd) - Date.now()) / 36e5);
+    if (flightHours) return Number(flightHours) || 0;
+    return 0;
+  })(),
+  overrideCountPerType
+});
+
+// Count what you actually provided
+const providedImages = Array.isArray(imageVariants) ? imageVariants.filter(Boolean).length : 0;
+const providedVideos = Math.max(
+  Array.isArray(videoVariants) ? videoVariants.filter(Boolean).length : 0,
+  Array.isArray(fbVideoIds) ? fbVideoIds.filter(Boolean).length : 0
+);
+
+// We will launch up to 2 per type, capped by what's provided
+const needImg = wantImage ? Math.min(2, providedImages) : 0;
+const needVid = wantVideo ? Math.min(2, providedVideos) : 0;
+
+// Debug visibility
+console.log('A/B plan -> provided:', { providedImages, providedVideos },
+            'final need:', { needImg, needVid },
+            'policy (informational):', variantPlan);
+
+// No hard 400 validation here; we just cap by what you passed.
+
 
     // Validate creatives from FormPage (no server generation here)
     if (wantImage && imageVariants.length < needImg) {
