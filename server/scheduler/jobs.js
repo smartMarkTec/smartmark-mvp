@@ -1,21 +1,24 @@
 // server/scheduler/jobs.js
-// Interval-based scheduler: enforces stop rules frequently and spawns challengers on plateau.
-// Uses combined SmartCampaignEngine and LowDB.
+// Interval-based scheduler with STOP-RULE winner commit + plateau-confirmed challengers.
+// Uses SmartCampaignEngine (policy, analyzer, generator, deployer) and LowDB.
 
+const axios = require('axios');                    // <-- add
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { policy, analyzer, generator, deployer } = require('../smartCampaignEngine');
 
 async function ensureSmartTables() {
   await db.read();
-  db.data = db.data || {};
-  db.data.smart_configs = db.data.smart_configs || [];
-  db.data.smart_runs = db.data.smart_runs || [];
-  db.data.creative_history = db.data.creative_history || [];
+  db.data ||= {};
+  db.data.smart_configs ||= [];
+  db.data.smart_runs ||= [];
+  db.data.creative_history ||= [];
   await db.write();
 }
 
-function nowIso() { return new Date().toISOString(); }
+const FB_API_VER = 'v23.0';                        // <-- add
+const nowIso = () => new Date().toISOString();
+const hoursBetween = (a, b) => Math.abs(new Date(a).getTime() - new Date(b).getTime()) / 36e5;
 
 function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   if (endAt) {
@@ -34,174 +37,267 @@ function decideVariantPlanFrom(cfg = {}) {
     endAt: cfg.flightEnd,
     fallbackHours: cfg.flightHours || 0
   });
-  return policy.decideVariantPlan({ assetTypes, dailyBudget, flightHours, overrideCountPerType: cfg.overrideCountPerType || null });
+  return policy.decideVariantPlan({
+    assetTypes,
+    dailyBudget,
+    flightHours,
+    overrideCountPerType: cfg.overrideCountPerType || null
+  });
 }
 
-/**
- * Decide A/B winner using CPC as primary, CTR as tie-breaker.
- * @param {Object} adIds array of ad ids
- * @param {Object} adInsights map adId -> { recent:{cpc,ctr} }
- * @returns { winnerId, losers[] }
- */
-function chooseWinnerByCpcCtr(adIds, adInsights) {
-  const rows = adIds.map(id => {
-    const w = adInsights[id] || {};
-    const r = w.recent || {};
-    const cpc = (typeof r.cpc === 'number' && isFinite(r.cpc)) ? r.cpc : null;
-    const ctr = (typeof r.ctr === 'number' && isFinite(r.ctr)) ? r.ctr : null;
-    return { id, cpc, ctr };
-  });
+// --- Tunables for automation behavior ---
+const COOLDOWN_NEW_ADS_HOURS = policy?.LIMITS?.MIN_HOURS_BETWEEN_NEW_ADS || 72;
+const MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU = 24;
+const PLATEAU_CONFIRM_HOURS = 36;           // plateau must persist this long
+const MIN_HOURS_LEFT_TO_SPAWN = 24;         // must have this many hours left in flight
 
-  // Sort by CPC asc (nulls to end); tie -> CTR desc
-  rows.sort((a, b) => {
-    const an = (a.cpc === null), bn = (b.cpc === null);
-    if (an && bn) {
-      // both null CPC → compare CTR
-      const actr = a.ctr ?? -Infinity, bctr = b.ctr ?? -Infinity;
-      return bctr - actr;
+function ensureCfgState(cfg) {
+  cfg.state ||= { adsets: {} };
+  // cfg.state.adsets: { [adsetId]: { championAdId, winnerCommittedAt, plateauSince, lastSpawnAt } }
+  return cfg.state;
+}
+
+function hasRecentSpawn(cfg) {
+  if (!cfg.lastRunAt) return false;
+  return hoursBetween(nowIso(), cfg.lastRunAt) < COOLDOWN_NEW_ADS_HOURS;
+}
+
+function timeLeftOk(cfg) {
+  const hoursLeft = resolveFlightHours({
+    startAt: cfg.flightStart,
+    endAt: cfg.flightEnd,
+    fallbackHours: cfg.flightHours || 0
+  });
+  return hoursLeft >= MIN_HOURS_LEFT_TO_SPAWN;
+}
+
+function adCpc(w) {
+  const r = w?.recent || {};
+  const clicks = Number(r.clicks || 0);
+  const spend = Number(r.spend || 0);
+  return clicks > 0 ? spend / clicks : Infinity;
+}
+function adCtr(w) {
+  return Number(w?.recent?.ctr || 0);
+}
+
+// Pause helper (direct Graph call)
+async function pauseAdsDirect({ adIds, userToken }) {
+  for (const id of adIds) {
+    try {
+      await axios.post(
+        `https://graph.facebook.com/${FB_API_VER}/${id}`,
+        { status: 'PAUSED' },
+        { params: { access_token: userToken } }
+      );
+    } catch (e) {
+      console.warn('Pause failed for', id, e?.response?.data?.error?.message || e.message);
     }
-    if (an) return 1;
-    if (bn) return -1;
-    if (a.cpc !== b.cpc) return a.cpc - b.cpc;
-    // tie CPC → CTR desc
-    const actr = a.ctr ?? -Infinity, bctr = b.ctr ?? -Infinity;
-    return bctr - actr;
-  });
-
-  const winnerId = rows[0]?.id || null;
-  const losers = rows.slice(1).map(r => r.id);
-  return { winnerId, losers };
+  }
 }
 
-/**
- * Enforce stop rules: when any ad in an ad set hits a stop rule, pause the non-winners.
- */
-async function enforceStopRulesForConfig(cfg) {
-  const userToken = getFbUserToken();
-  if (!userToken) return;
+async function commitWinnerIfReady({ cfg, analysis, userToken }) {
+  // We commit winners per ad set when each active test ad has *some* stop flag triggered,
+  // OR the time cap flag is true for each ad (so tests can't drag forever).
+  const results = { committed: false, champions: {} };
 
-  const { accountId, campaignId } = cfg;
-  const analysis = await analyzer.analyzeCampaign({
-    accountId,
-    campaignId,
-    userToken,
-    kpi: cfg.kpi || 'cpc'
-  });
-
-  const pausedByAdset = {};
-  let anyCommitted = false;
-
-  for (const adsetId of (analysis.adsetIds || [])) {
+  for (const adsetId of analysis.adsetIds) {
     const ids = analysis.adMapByAdset[adsetId] || [];
-    if (ids.length < 2) continue; // need at least two to pick a winner
+    if (ids.length < 2) continue; // need at least 2 to "A/B"
 
-    // did ANY ad meet a stop rule?
-    const stopHit = ids.some(id => analysis.stopFlagsByAd?.[id]?.any);
-    if (!stopHit) continue;
+    const state = ensureCfgState(cfg);
+    const lane = state.adsets[adsetId] || {};
+    if (lane.winnerCommittedAt) continue; // already committed a winner here
 
-    const { winnerId, losers } = chooseWinnerByCpcCtr(ids, analysis.adInsights);
-    if (!winnerId || losers.length === 0) continue;
+    // Gather stop flags for all ads in this ad set
+    const perAdFlags = ids.map((id) => ({
+      id,
+      flags: analysis.stopFlagsByAd[id]?.flags || {},
+      any: !!analysis.stopFlagsByAd[id]?.any
+    }));
 
-    await deployer.pauseAds({ adIds: losers, userToken });
-    pausedByAdset[adsetId] = losers;
-    anyCommitted = true;
-  }
+    // Are *all* ads "ready" to judge? (any stop flag or time flag)
+    const allReady =
+      perAdFlags.length > 0 &&
+      perAdFlags.every(a => a.any || a.flags.time === true);
 
-  if (anyCommitted) {
+    if (!allReady) continue;
+
+    // Pick winner by lowest CPC (tie → higher CTR)
+    let best = null;
+    for (const id of ids) {
+      const w = analysis.adInsights[id];
+      const cpc = adCpc(w);
+      const ctr = adCtr(w);
+      if (!best) best = { id, cpc, ctr };
+      else if (cpc < best.cpc - 1e-9) best = { id, cpc, ctr };
+      else if (Math.abs(cpc - best.cpc) <= 1e-9 && ctr > best.ctr) best = { id, cpc, ctr };
+    }
+    const championId = best?.id;
+    if (!championId) continue;
+
+    // Losers = everyone else → pause them
+    const losers = ids.filter(id => id !== championId);
+    if (losers.length) {
+      await pauseAdsDirect({ adIds: losers, userToken });
+    }
+
+    // Persist champion into config state
+    state.adsets[adsetId] = {
+      ...(state.adsets[adsetId] || {}),
+      championAdId: championId,
+      winnerCommittedAt: nowIso(),
+      plateauSince: null
+    };
+    cfg.state = state;
+    results.committed = true;
+    results.champions[adsetId] = championId;
+
+    // Log a "stop_rules" run
     await db.read();
     db.data.smart_runs.push({
       id: `run_${Date.now()}`,
-      campaignId,
-      accountId,
-      startedAt: nowIso(),
-      mode: 'stop_rules',
-      message: 'Committed winner by stop rules (paused losers)',
-      pausedAdsByAdset: pausedByAdset
+      mode: 'stop_rules_commit',
+      campaignId: cfg.campaignId,
+      accountId: cfg.accountId,
+      adsetId,
+      committedAt: nowIso(),
+      championAdId: championId,
+      losers,
+      thresholds: policy.STOP_RULES
     });
-
-    const cfgRef = db.data.smart_configs.find(c => c.campaignId === campaignId);
-    if (cfgRef) {
-      cfgRef.lastStopRunAt = nowIso();
-      cfgRef.updatedAt = nowIso();
-    }
     await db.write();
   }
+
+  if (results.committed) {
+    await db.read();
+    const ref = (db.data.smart_configs || []).find(c => c.campaignId === cfg.campaignId);
+    if (ref) {
+      ref.state = cfg.state;
+      ref.updatedAt = nowIso();
+      await db.write();
+    }
+  }
+
+  return results;
 }
 
-/**
- * Plateau flow (unchanged): spawn challengers if champion plateau is detected
- */
-async function runPlateauFlowForConfig(cfg) {
+async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
+  // Only after a winner is committed AND enough time passed AND plateau is confirmed.
+  let spawned = false;
+
+  const state = ensureCfgState(cfg);
+
+  for (const adsetId of analysis.adsetIds) {
+    const lane = state.adsets[adsetId] || {};
+    if (!lane.winnerCommittedAt || !lane.championAdId) continue;
+
+    // Require champion to be "mature" for at least 24h before considering plateau
+    if (hoursBetween(nowIso(), lane.winnerCommittedAt) < MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU) continue;
+
+    // Plateau signal from analyzer
+    const plateauNow = !!analysis.championPlateauByAdset[adsetId];
+    if (!plateauNow) {
+      // clear any partial plateau window
+      if (lane.plateauSince) {
+        state.adsets[adsetId].plateauSince = null;
+      }
+      continue;
+    }
+
+    // Start plateau window if not present
+    if (!lane.plateauSince) {
+      state.adsets[adsetId] = { ...lane, plateauSince: nowIso() };
+      continue;
+    }
+
+    // Confirm plateau duration
+    const plateauHours = hoursBetween(nowIso(), lane.plateauSince);
+    if (plateauHours < PLATEAU_CONFIRM_HOURS) continue;
+
+    // Guards: time left & global cooldown
+    if (!timeLeftOk(cfg)) continue;
+    if (hasRecentSpawn(cfg)) continue;
+
+    // Decide how many variants
+    const variantPlan = decideVariantPlanFrom(cfg);
+
+    // Generate challengers (match original assetTypes)
+    const creatives = await generator.generateVariants({
+      form: {},
+      answers: {},
+      url: cfg.link || '',
+      mediaSelection: cfg.assetTypes || 'both',
+      variantPlan
+    });
+
+    // Deploy challengers. IMPORTANT: don't pause champion on plateau spawn.
+    const deployed = await deployer.deploy({
+      accountId: cfg.accountId,
+      pageId: cfg.pageId,
+      campaignLink: cfg.link || 'https://your-smartmark-site.com',
+      adsetIds: [adsetId],
+      winnersByAdset: {},   // keep current champion
+      losersByAdset: {},    // do not pause anyone at spawn
+      creatives,
+      userToken
+    });
+
+    // Log & update state
+    await db.read();
+    db.data.smart_runs.push({
+      id: `run_${Date.now()}`,
+      mode: 'plateau_challengers',
+      campaignId: cfg.campaignId,
+      accountId: cfg.accountId,
+      startedAt: nowIso(),
+      adsetId,
+      plateauSince: lane.plateauSince,
+      variantPlan,
+      createdAdsByAdset: deployed.createdAdsByAdset,
+      pausedAdsByAdset: deployed.pausedAdsByAdset
+    });
+    const ref = (db.data.smart_configs || []).find(c => c.campaignId === cfg.campaignId);
+    if (ref) {
+      ref.state = {
+        ...state,
+        adsets: {
+          ...state.adsets,
+          [adsetId]: {
+            ...(state.adsets[adsetId] || {}),
+            plateauSince: null,        // reset plateau window after spawn
+            lastSpawnAt: nowIso()
+          }
+        }
+      };
+      ref.lastRunAt = nowIso();
+      ref.updatedAt = nowIso();
+      await db.write();
+    }
+
+    spawned = true;
+  }
+
+  return { spawned };
+}
+
+async function runSmartForConfig(cfg) {
   const userToken = getFbUserToken();
   if (!userToken) return;
 
-  const { accountId, campaignId } = cfg;
-
+  // Analyze current performance
   const analysis = await analyzer.analyzeCampaign({
-    accountId,
-    campaignId,
+    accountId: cfg.accountId,
+    campaignId: cfg.campaignId,
     userToken,
     kpi: cfg.kpi || 'cpc'
   });
 
-  const somePlateau = Object.values(analysis.championPlateauByAdset || {}).some(Boolean);
-  if (!somePlateau) return;
+  // 1) Stop rules -> commit winner (pause losers, keep champion active)
+  await commitWinnerIfReady({ cfg, analysis, userToken });
 
-  // throttle new ads by 72h
-  if (cfg.lastRunAt) {
-    const hours = (Date.now() - new Date(cfg.lastRunAt).getTime()) / 36e5;
-    if (hours < policy.LIMITS.MIN_HOURS_BETWEEN_NEW_ADS) return;
-  }
-
-  const variantPlan = decideVariantPlanFrom(cfg);
-  const creatives = await generator.generateVariants({
-    form: {},
-    answers: {},
-    url: cfg.link || '',
-    mediaSelection: cfg.assetTypes || 'both',
-    variantPlan
-  });
-
-  const deployed = await deployer.deploy({
-    accountId,
-    pageId: cfg.pageId,
-    campaignLink: cfg.link || 'https://your-smartmark-site.com',
-    adsetIds: analysis.adsetIds,
-    winnersByAdset: analysis.winnersByAdset,
-    losersByAdset: analysis.losersByAdset,
-    creatives,
-    userToken
-  });
-
-  await db.read();
-  db.data.smart_runs.push({
-    id: `run_${Date.now()}`,
-    campaignId,
-    accountId,
-    startedAt: nowIso(),
-    mode: 'plateau',
-    plateauDetected: true,
-    createdAdsByAdset: deployed.createdAdsByAdset,
-    pausedAdsByAdset: deployed.pausedAdsByAdset
-  });
-
-  Object.entries(deployed.variantMapByAdset || {}).forEach(([adsetId, vmap]) => {
-    Object.entries(vmap || {}).forEach(([variantId, adId]) => {
-      db.data.creative_history.push({
-        id: `ch_${adId}`,
-        campaignId,
-        adsetId,
-        adId,
-        variantId,
-        createdAt: nowIso(),
-        kind: (variantId || '').startsWith('img_') ? 'image' : 'video'
-      });
-    });
-  });
-
-  const cfgRef = db.data.smart_configs.find(c => c.campaignId === campaignId);
-  if (cfgRef) cfgRef.lastRunAt = nowIso();
-  await db.write();
+  // 2) Plateau confirmed -> spawn challengers
+  await spawnChallengersIfPlateau({ cfg, analysis, userToken });
 }
 
 async function sweep() {
@@ -211,24 +307,22 @@ async function sweep() {
     const configs = db.data.smart_configs || [];
     for (const cfg of configs) {
       try {
-        // 1) Commit winners quickly when stop rules hit
-        await enforceStopRulesForConfig(cfg);
-        // 2) Less frequent: plateau challenger flow
-        await runPlateauFlowForConfig(cfg);
+        // Ensure state object exists
+        ensureCfgState(cfg);
+        await runSmartForConfig(cfg);
       } catch (e) {
-        console.error('[SmartScheduler] run error:', e.message);
+        console.error('[SmartScheduler] run error:', e?.message || e);
       }
     }
   } catch (e) {
-    console.error('[SmartScheduler] sweep error:', e.message);
+    console.error('[SmartScheduler] sweep error:', e?.message || e);
   }
 }
 
 function start() {
-  // Kick off soon after boot
-  setTimeout(sweep, 2 * 60 * 1000);
-  // Check stop rules & plateau frequently
-  setInterval(sweep, 15 * 60 * 1000); // every 15 minutes
+  // First pass shortly after boot, then every 15 minutes (metrics-only polling).
+  setTimeout(sweep, 2 * 60 * 1000);           // 2 min after boot
+  setInterval(sweep, 15 * 60 * 1000);         // every 15 min, no creative churn without plateau confirmation
 }
 
 module.exports = { start };
