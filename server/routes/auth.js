@@ -157,10 +157,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       pageId,
       aiAudience: aiAudienceRaw,
       mediaSelection = 'both',
-      // ONLY these creatives are accepted (from FormPage)
+      // creatives FROM FormPage only
       imageVariants = [],
       videoVariants = [],
       fbVideoIds = [],
+      // NEW: explicit thumbnail (optional)
+      videoThumbnailUrl = null,
+
       // optional flight overrides (still used for policy)
       flightStart = null,
       flightEnd = null,
@@ -225,9 +228,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             { params: { type: 'adinterest', q: name, access_token: userToken } }
           );
           if (fbRes.data?.data?.length > 0) fbInterestIds.push(fbRes.data.data[0].id);
-        } catch (e) {
-          console.warn("FB interest search failed for:", name, e.message);
-        }
+        } catch (e) { console.warn("FB interest search failed for:", name, e.message); }
       }
       if (fbInterestIds.length > 0) {
         targeting.flexible_spec = [{ interests: fbInterestIds.map(id => ({ id })) }];
@@ -260,11 +261,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const needImg = wantImage ? variantPlan.images : 0;
     const needVid = wantVideo ? variantPlan.videos : 0;
 
-    // Validate we have enough creatives from FormPage (no server generation here)
+    // Validate creatives from FormPage (no server generation here)
     if (wantImage && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
-    // Videos can be provided as fb ids or raw URLs (we accept either)
     const providedVideoCount = Math.max(videoVariants.length, fbVideoIds.length);
     if (wantVideo && providedVideoCount < needVid) {
       return res.status(400).json({ error: `Need ${needVid} video(s) but received ${providedVideoCount}.` });
@@ -283,7 +283,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 2) Create Ad Sets (split daily budget across the media types used)
+    // 2) Create Ad Sets (split daily budget across media types)
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
     const perAdsetBudgetCents = Math.max(1, Math.round((Number(budget) || 0) * 100 / Math.max(1, typesUsed)));
 
@@ -346,8 +346,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     async function uploadImageAndCreateAd(imageUrl, adsetId, copy) {
       if (!imageUrl) throw new Error('No image URL provided');
 
-      let imageHash = null;
-      // Fetch and upload as base64 bytes (reliable across hosts)
       const abs = absolutePublicUrl(imageUrl);
       const imgRes = await axios.get(abs, { responseType: 'arraybuffer' });
       const base64 = Buffer.from(imgRes.data).toString('base64');
@@ -361,8 +359,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         }
       );
       const imgData = fbImageRes.data.images;
-      imageHash = Object.values(imgData)[0]?.hash;
-
+      const imageHash = Object.values(imgData)[0]?.hash;
       if (!imageHash) throw new Error("Failed to upload image to Facebook.");
 
       const creativeRes = await axios.post(
@@ -416,20 +413,33 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return up?.data?.id;
     }
 
+    // VIDEO: always include a thumbnail to satisfy FB requirement (image_url)
     async function createVideoAdByIndex(idx, adsetId, copy) {
       const videoId = await ensureVideoIdByIndex(idx);
 
-      // Try to fetch a thumbnail (optional)
+      // Choose thumbnail priority:
+      // 1) explicit videoThumbnailUrl from client
+      // 2) first (or matching index) image variant from FormPage
+      // 3) preferred thumbnail from Graph for the uploaded video
       let thumbUrl = null;
-      try {
-        const thumbRes = await axios.get(
-          `https://graph.facebook.com/v18.0/${videoId}/thumbnails`,
-          { params: { access_token: userToken, fields: 'uri,is_preferred' } }
-        );
-        const thumbs = thumbRes.data?.data || [];
-        const preferred = thumbs.find(t => t.is_preferred) || thumbs[0];
-        thumbUrl = preferred?.uri || null;
-      } catch {}
+      const candidateFromBody = (typeof videoThumbnailUrl === 'string' && videoThumbnailUrl) ? videoThumbnailUrl : null;
+      const candidateFromImages = imageVariants[idx] || imageVariants[0] || null;
+
+      if (candidateFromBody) {
+        thumbUrl = absolutePublicUrl(candidateFromBody);
+      } else if (candidateFromImages) {
+        thumbUrl = absolutePublicUrl(candidateFromImages);
+      } else {
+        try {
+          const thumbRes = await axios.get(
+            `https://graph.facebook.com/v18.0/${videoId}/thumbnails`,
+            { params: { access_token: userToken, fields: 'uri,is_preferred' } }
+          );
+          const thumbs = thumbRes.data?.data || [];
+          const preferred = thumbs.find(t => t.is_preferred) || thumbs[0];
+          thumbUrl = preferred?.uri || null;
+        } catch {}
+      }
 
       const videoData = {
         video_id: videoId,
@@ -437,7 +447,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         title: campaignName,
         call_to_action: { type: "LEARN_MORE", value: { link: form.url || "https://your-smartmark-site.com" } }
       };
-      if (thumbUrl) videoData.image_url = thumbUrl;
+      if (thumbUrl) {
+        // This field is what fixes subcode 1443226 ("Your ad needs a video thumbnail")
+        videoData.image_url = thumbUrl;
+      }
 
       const creativeRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
@@ -462,9 +475,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return adRes.data.id;
     }
 
-    // 3) Create ads strictly from provided FormPage variants (clip to policy counts)
+    // 3) Create ads strictly from provided variants
     const adIds = [];
-    const creativeIds = []; // kept for parity with previous response
+    const creativeIds = [];
     const variantResults = [];
 
     if (wantImage && imageAdSetId && needImg > 0) {
@@ -489,7 +502,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       success: true,
       campaignId,
       adSetIds,
-      creativeIds, // empty list here (we’re not returning them; could be extended)
+      creativeIds,
       adIds,
       variants: variantResults,
       variantPlan,
@@ -504,6 +517,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     res.status(500).json({ error: errorMsg });
   }
 });
+
 
 // ====== FACEBOOK API TEST ROUTES (optional) ======
 router.post('/facebook/test-pages-manage-metadata/:pageId', async (req, res) => {
