@@ -1,5 +1,5 @@
 // server/scheduler/jobs.js
-// Interval-based scheduler: scans smart configs daily (and initial delay) to spawn challengers on plateau.
+// Interval-based scheduler: enforces stop rules frequently and spawns challengers on plateau.
 // Uses combined SmartCampaignEngine and LowDB.
 
 const db = require('../db');
@@ -17,11 +17,6 @@ async function ensureSmartTables() {
 
 function nowIso() { return new Date().toISOString(); }
 
-function hoursSince(iso) {
-  if (!iso) return Infinity;
-  return (Date.now() - new Date(iso).getTime()) / 36e5;
-}
-
 function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   if (endAt) {
     const start = startAt || nowIso();
@@ -31,115 +26,161 @@ function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   return Math.max(0, Number(fallbackHours || 0));
 }
 
-/**
- * Decide variant plan (1 vs 2 per type) for scheduled runs.
- * - honors cfg.forceTwoPerType (always 2-per-selected-type)
- * - honors cfg.overrideCountPerType when provided
- * - otherwise uses guardrails in policy.decideVariantPlan
- */
 function decideVariantPlanFrom(cfg = {}) {
-  const assetTypes = String(cfg.assetTypes || 'both').toLowerCase();
-  const wantsImage = assetTypes === 'image' || assetTypes === 'both';
-  const wantsVideo = assetTypes === 'video' || assetTypes === 'both';
-
-  if (cfg.forceTwoPerType) {
-    return { images: wantsImage ? 2 : 0, videos: wantsVideo ? 2 : 0 };
-  }
-
+  const assetTypes = cfg.assetTypes || 'both';
   const dailyBudget = Number(cfg.dailyBudget || 0);
   const flightHours = resolveFlightHours({
     startAt: cfg.flightStart,
     endAt: cfg.flightEnd,
     fallbackHours: cfg.flightHours || 0
   });
-
-  return policy.decideVariantPlan({
-    assetTypes,
-    dailyBudget,
-    flightHours,
-    overrideCountPerType: cfg.overrideCountPerType || null
-  });
+  return policy.decideVariantPlan({ assetTypes, dailyBudget, flightHours, overrideCountPerType: cfg.overrideCountPerType || null });
 }
 
-async function runSmartForConfig(cfg) {
+/**
+ * Decide A/B winner using CPC as primary, CTR as tie-breaker.
+ * @param {Object} adIds array of ad ids
+ * @param {Object} adInsights map adId -> { recent:{cpc,ctr} }
+ * @returns { winnerId, losers[] }
+ */
+function chooseWinnerByCpcCtr(adIds, adInsights) {
+  const rows = adIds.map(id => {
+    const w = adInsights[id] || {};
+    const r = w.recent || {};
+    const cpc = (typeof r.cpc === 'number' && isFinite(r.cpc)) ? r.cpc : null;
+    const ctr = (typeof r.ctr === 'number' && isFinite(r.ctr)) ? r.ctr : null;
+    return { id, cpc, ctr };
+  });
+
+  // Sort by CPC asc (nulls to end); tie -> CTR desc
+  rows.sort((a, b) => {
+    const an = (a.cpc === null), bn = (b.cpc === null);
+    if (an && bn) {
+      // both null CPC → compare CTR
+      const actr = a.ctr ?? -Infinity, bctr = b.ctr ?? -Infinity;
+      return bctr - actr;
+    }
+    if (an) return 1;
+    if (bn) return -1;
+    if (a.cpc !== b.cpc) return a.cpc - b.cpc;
+    // tie CPC → CTR desc
+    const actr = a.ctr ?? -Infinity, bctr = b.ctr ?? -Infinity;
+    return bctr - actr;
+  });
+
+  const winnerId = rows[0]?.id || null;
+  const losers = rows.slice(1).map(r => r.id);
+  return { winnerId, losers };
+}
+
+/**
+ * Enforce stop rules: when any ad in an ad set hits a stop rule, pause the non-winners.
+ */
+async function enforceStopRulesForConfig(cfg) {
   const userToken = getFbUserToken();
-  if (!userToken) return; // not logged in with FB
+  if (!userToken) return;
 
-  const { accountId, campaignId } = cfg || {};
-  if (!accountId || !campaignId || !cfg.pageId) return;
+  const { accountId, campaignId } = cfg;
+  const analysis = await analyzer.analyzeCampaign({
+    accountId,
+    campaignId,
+    userToken,
+    kpi: cfg.kpi || 'cpc'
+  });
 
-  // Rate limit: avoid hammering. Respect both scheduler cadence and "new ads" spacing.
-  if (hoursSince(cfg.lastRunAt) < Math.min(
-    policy.LIMITS.MIN_HOURS_BETWEEN_RUNS || 24,
-    policy.LIMITS.MIN_HOURS_BETWEEN_NEW_ADS || 72
-  )) {
-    return;
+  const pausedByAdset = {};
+  let anyCommitted = false;
+
+  for (const adsetId of (analysis.adsetIds || [])) {
+    const ids = analysis.adMapByAdset[adsetId] || [];
+    if (ids.length < 2) continue; // need at least two to pick a winner
+
+    // did ANY ad meet a stop rule?
+    const stopHit = ids.some(id => analysis.stopFlagsByAd?.[id]?.any);
+    if (!stopHit) continue;
+
+    const { winnerId, losers } = chooseWinnerByCpcCtr(ids, analysis.adInsights);
+    if (!winnerId || losers.length === 0) continue;
+
+    await deployer.pauseAds({ adIds: losers, userToken });
+    pausedByAdset[adsetId] = losers;
+    anyCommitted = true;
   }
 
-  // 1) Analyze current performance
-  let analysis;
-  try {
-    analysis = await analyzer.analyzeCampaign({
-      accountId,
+  if (anyCommitted) {
+    await db.read();
+    db.data.smart_runs.push({
+      id: `run_${Date.now()}`,
       campaignId,
-      userToken,
-      kpi: cfg.kpi || 'cpc'
+      accountId,
+      startedAt: nowIso(),
+      mode: 'stop_rules',
+      message: 'Committed winner by stop rules (paused losers)',
+      pausedAdsByAdset: pausedByAdset
     });
-  } catch (e) {
-    console.error('[SmartScheduler] analyze error:', e?.response?.data?.error?.message || e.message);
-    return;
-  }
 
-  // 2) Plateau signal (champion-level); if none, skip
+    const cfgRef = db.data.smart_configs.find(c => c.campaignId === campaignId);
+    if (cfgRef) {
+      cfgRef.lastStopRunAt = nowIso();
+      cfgRef.updatedAt = nowIso();
+    }
+    await db.write();
+  }
+}
+
+/**
+ * Plateau flow (unchanged): spawn challengers if champion plateau is detected
+ */
+async function runPlateauFlowForConfig(cfg) {
+  const userToken = getFbUserToken();
+  if (!userToken) return;
+
+  const { accountId, campaignId } = cfg;
+
+  const analysis = await analyzer.analyzeCampaign({
+    accountId,
+    campaignId,
+    userToken,
+    kpi: cfg.kpi || 'cpc'
+  });
+
   const somePlateau = Object.values(analysis.championPlateauByAdset || {}).some(Boolean);
   if (!somePlateau) return;
 
-  // 3) Decide how many challengers (guardrails or forced)
+  // throttle new ads by 72h
+  if (cfg.lastRunAt) {
+    const hours = (Date.now() - new Date(cfg.lastRunAt).getTime()) / 36e5;
+    if (hours < policy.LIMITS.MIN_HOURS_BETWEEN_NEW_ADS) return;
+  }
+
   const variantPlan = decideVariantPlanFrom(cfg);
+  const creatives = await generator.generateVariants({
+    form: {},
+    answers: {},
+    url: cfg.link || '',
+    mediaSelection: cfg.assetTypes || 'both',
+    variantPlan
+  });
 
-  // 4) Generate challengers
-  let creatives = [];
-  try {
-    creatives = await generator.generateVariants({
-      form: {},
-      answers: {},
-      url: cfg.link || '',
-      mediaSelection: cfg.assetTypes || 'both',
-      variantPlan
-    });
-  } catch (e) {
-    console.error('[SmartScheduler] generateVariants error:', e.message);
-    return;
-  }
-  if (!creatives.length) return;
+  const deployed = await deployer.deploy({
+    accountId,
+    pageId: cfg.pageId,
+    campaignLink: cfg.link || 'https://your-smartmark-site.com',
+    adsetIds: analysis.adsetIds,
+    winnersByAdset: analysis.winnersByAdset,
+    losersByAdset: analysis.losersByAdset,
+    creatives,
+    userToken
+  });
 
-  // 5) Deploy challengers (into same ad sets) + pause current losers
-  let deployed;
-  try {
-    deployed = await deployer.deploy({
-      accountId,
-      pageId: cfg.pageId,
-      campaignLink: cfg.link || 'https://your-smartmark-site.com',
-      adsetIds: analysis.adsetIds,
-      winnersByAdset: analysis.winnersByAdset,
-      losersByAdset: analysis.losersByAdset, // deployer will pause these
-      creatives,
-      userToken
-    });
-  } catch (e) {
-    console.error('[SmartScheduler] deploy error:', e?.response?.data?.error?.message || e.message);
-    return;
-  }
-
-  // 6) Persist run + creative mappings
   await db.read();
   db.data.smart_runs.push({
     id: `run_${Date.now()}`,
     campaignId,
     accountId,
     startedAt: nowIso(),
+    mode: 'plateau',
     plateauDetected: true,
-    variantPlan,
     createdAdsByAdset: deployed.createdAdsByAdset,
     pausedAdsByAdset: deployed.pausedAdsByAdset
   });
@@ -158,8 +199,7 @@ async function runSmartForConfig(cfg) {
     });
   });
 
-  // Update lastRunAt
-  const cfgRef = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
+  const cfgRef = db.data.smart_configs.find(c => c.campaignId === campaignId);
   if (cfgRef) cfgRef.lastRunAt = nowIso();
   await db.write();
 }
@@ -171,7 +211,10 @@ async function sweep() {
     const configs = db.data.smart_configs || [];
     for (const cfg of configs) {
       try {
-        await runSmartForConfig(cfg);
+        // 1) Commit winners quickly when stop rules hit
+        await enforceStopRulesForConfig(cfg);
+        // 2) Less frequent: plateau challenger flow
+        await runPlateauFlowForConfig(cfg);
       } catch (e) {
         console.error('[SmartScheduler] run error:', e.message);
       }
@@ -182,9 +225,10 @@ async function sweep() {
 }
 
 function start() {
-  // First run after ~2 minutes (give time for campaigns to start), then every 24h
+  // Kick off soon after boot
   setTimeout(sweep, 2 * 60 * 1000);
-  setInterval(sweep, 24 * 60 * 60 * 1000);
+  // Check stop rules & plateau frequently
+  setInterval(sweep, 15 * 60 * 1000); // every 15 minutes
 }
 
 module.exports = { start };

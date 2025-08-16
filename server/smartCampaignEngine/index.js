@@ -40,7 +40,7 @@ async function fbPostV(apiVersion, endpoint, body, params) {
 const FB_API_VER = 'v23.0';
 
 // =========================
-/** POLICY (Step 1) */
+// POLICY (Step 1)
 // =========================
 const policy = {
   // Recent/prior windows for analyzer
@@ -130,7 +130,7 @@ const policy = {
 };
 
 // =========================
-/** ANALYZER (Step 4) */
+// ANALYZER (Step 4)
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -188,7 +188,6 @@ function rankAds(listByAdId, kpi = 'cpc') {
     return { adId, value: v, windows: w };
   });
 
-  // For CPC, lower is better; for CTR higher is better
   if (kpi === 'cpc') {
     rows.sort((a, b) => {
       if (a.value === null && b.value === null) return 0;
@@ -228,16 +227,7 @@ function stopFlagsForAd(windows, createdTime, stop) {
 }
 
 const analyzer = {
-  /**
-   * Analyze a campaign (compatible return + extras).
-   * @param {Object} opts
-   * @param {string} opts.accountId
-   * @param {string} opts.campaignId
-   * @param {string} opts.userToken
-   * @param {string} [opts.kpi='cpc']  // primary CPC, tiebreaker CTR
-   */
   async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc' }) {
-    // 1) Fetch ad sets within campaign
     const adsets = await fbGetV(FB_API_VER, `act_${accountId}/adsets`, {
       access_token: userToken,
       fields: 'id,name,campaign_id,status,daily_budget,budget_remaining',
@@ -249,9 +239,8 @@ const analyzer = {
     const adsetInsights = {};
     const adInsights = {};
     const adMapByAdset = {};
-    const adMeta = {}; // created_time per ad
+    const adMeta = {};
 
-    // 2) Per adset: insights + ads + per-ad insights
     for (const adsetId of adsetIds) {
       adsetInsights[adsetId] = await getWindowInsights(adsetId, userToken, 'adset', policy.WINDOWS);
 
@@ -271,7 +260,6 @@ const analyzer = {
       }
     }
 
-    // 3) Plateau (legacy, adset-level) and CPC/CTR-based rankings
     const plateauByAdset = {};
     const winnersByAdset = {};
     const losersByAdset = {};
@@ -282,14 +270,12 @@ const analyzer = {
     for (const adsetId of adsetIds) {
       const ids = adMapByAdset[adsetId] || [];
 
-      // legacy plateau
       plateauByAdset[adsetId] = policy.isPlateau({
         recent: adsetInsights[adsetId].recent,
         prior: adsetInsights[adsetId].prior,
         thresholds: policy.THRESHOLDS
       });
 
-      // rank by CPC (primary); choose loser by worst CPC
       const subset = {};
       ids.forEach(id => (subset[id] = adInsights[id]));
       const ranking = rankAds(subset, 'cpc');
@@ -304,12 +290,10 @@ const analyzer = {
         championByAdset[adsetId] = null;
       }
 
-      // stop flags per ad
       for (const adId of ids) {
         stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, policy.STOP_RULES);
       }
 
-      // Champion plateau (CPC degradation vs baseline)
       const champId = championByAdset[adsetId];
       if (champId) {
         const w = adInsights[champId] || {};
@@ -336,7 +320,7 @@ const analyzer = {
       adMapByAdset,
       adsetInsights,
       adInsights,
-      plateauByAdset,                 // legacy
+      plateauByAdset,
       winnersByAdset,
       losersByAdset,
       stopFlagsByAd,
@@ -347,18 +331,9 @@ const analyzer = {
 };
 
 // =========================
-/** GENERATOR (Step 2) */
+/* GENERATOR (Step 2) — unchanged */
 // =========================
 const generator = {
-  /**
-   * Generate N variants per asset type using your existing AI endpoints.
-   * @param {Object} opts
-   * @param {Object} opts.form
-   * @param {Object} opts.answers
-   * @param {string} opts.url
-   * @param {string} opts.mediaSelection  "image" | "video" | "both"
-   * @param {Object} opts.variantPlan     { images: 0|1|2, videos: 0|1|2 }
-   */
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
     const api = baseUrl() + '/api';
     const wantsImage = variantPlan.images > 0;
@@ -407,9 +382,7 @@ const generator = {
             imageUrl,
             adCopy: copy
           });
-        } catch (e) {
-          // skip this variant
-        }
+        } catch (e) {}
       }
     }
 
@@ -435,16 +408,13 @@ const generator = {
             },
             adCopy: copy
           });
-        } catch (e) {
-          // skip this variant
-        }
+        } catch (e) {}
       }
     }
 
     return out;
   },
 
-  // Back-compat: old function used by existing code
   async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both' }) {
     return this.generateVariants({
       form,
@@ -474,7 +444,6 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
 async function ensureVideoId({ accountId, userToken, creativeVideo }) {
   if (creativeVideo.fbVideoId) return creativeVideo.fbVideoId;
 
-  // If we have an absolute file URL, upload by file_url
   if (creativeVideo.absoluteUrl) {
     const form = new FormData();
     form.append('file_url', creativeVideo.absoluteUrl);
@@ -514,53 +483,20 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
   return ad.id;
 }
 
-/**
- * Create a video ad and ALWAYS provide a thumbnail to satisfy FB (image_url or image_hash).
- * Priority:
- *   1) thumbnailUrl (explicit, may be relative → absolutized)
- *   2) FB preferred thumbnail from /{video_id}/thumbnails
- *   3) fallbackImageUrlCandidate (e.g., first image creative)
- * If none found → throw with a clear error so caller can react.
- */
-async function createVideoAd({
-  pageId, accountId, adsetId, adCopy, videoId, userToken, link,
-  thumbnailUrl, fallbackImageUrlCandidate
-}) {
-  // Resolve thumbnail
-  let finalThumbUrl = null;
-
-  // (1) explicit
-  if (thumbnailUrl) {
-    finalThumbUrl = absolutePublicUrl(thumbnailUrl);
-  }
-
-  // (2) FB preferred thumbnail
-  if (!finalThumbUrl) {
-    try {
-      const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
-      const arr = thumbs?.data || [];
-      const preferred = arr.find(t => t.is_preferred) || arr[0];
-      if (preferred?.uri) finalThumbUrl = preferred.uri;
-    } catch {}
-  }
-
-  // (3) fallback from image creative
-  if (!finalThumbUrl && fallbackImageUrlCandidate) {
-    finalThumbUrl = absolutePublicUrl(fallbackImageUrlCandidate);
-  }
-
-  if (!finalThumbUrl) {
-    // Hard fail to prevent OAuthException subcode 1443226
-    throw new Error('Video thumbnail missing (image_url). Provide thumbnailUrl or at least one image creative.');
-  }
+async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imageHash, userToken, link }) {
+  let image_url = null;
+  try {
+    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
+    image_url = (thumbs.data || [])[0]?.uri || null;
+  } catch {}
 
   const video_data = {
     video_id: videoId,
     message: adCopy || '',
     title: 'SmartMark Video',
-    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } },
-    image_url: finalThumbUrl
+    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } }
   };
+  if (image_url) video_data.image_url = image_url;
 
   const creative = await fbPostV(FB_API_VER, `act_${accountId}/adcreatives`, {
     name: `SmartMark Video ${new Date().toISOString()}`,
@@ -582,18 +518,15 @@ async function pauseAds({ adIds, userToken }) {
     try {
       await fbPostV(FB_API_VER, id, { status: 'PAUSED' }, { access_token: userToken });
     } catch (e) {
-      // log and keep going
       console.warn('Pause failed for', id, e?.response?.data?.error?.message || e.message);
     }
   }
 }
 
-// Budget helpers (Step 5)
+// Budget helpers
 async function setAdsetDailyBudget({ adsetId, dailyBudgetCents, userToken }) {
-  // NB: Requires correct access & ad set billing settings
   await fbPostV(FB_API_VER, adsetId, { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) }, { access_token: userToken });
 }
-
 async function splitBudgetBetweenChampionAndChallengers({
   championAdsetId,
   challengerAdsetId,
@@ -609,27 +542,17 @@ async function splitBudgetBetweenChampionAndChallengers({
 }
 
 const deployer = {
-  /**
-   * Deploy variants as separate ads in each ad set (capped by policy limit).
-   * Returns { createdAdsByAdset, pausedAdsByAdset, variantMapByAdset }
-   */
   async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken }) {
     const createdAdsByAdset = {};
     const pausedAdsByAdset = {};
     const variantMapByAdset = {};
-
-    // Prepare cached image uploads to avoid re-uploading same image URL
     const uploadedImageHashByDataUrl = new Map();
-
-    // Grab a general thumbnail fallback from the first image creative (if any)
-    const firstImageUrl = (creatives.find(c => c.kind === 'image' && c.imageUrl)?.imageUrl) || null;
 
     for (const adsetId of adsetIds) {
       createdAdsByAdset[adsetId] = [];
       pausedAdsByAdset[adsetId] = [];
       variantMapByAdset[adsetId] = {};
 
-      // Cap the number of new ads per run per adset
       const maxNew = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
       let created = 0;
 
@@ -638,7 +561,6 @@ const deployer = {
 
         try {
           if (c.kind === 'image' && c.imageUrl) {
-            // Fetch the image file and upload as data: URL to adimages
             const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer' });
             const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
 
@@ -664,18 +586,14 @@ const deployer = {
           } else if (c.kind === 'video' && c.video) {
             const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
 
-            // Thumbnail priority: explicit on creative → any image creative as fallback
-            const thumbCandidate =
-              c.video.thumbnailUrl || c.thumbnailUrl || firstImageUrl || null;
-
+            
             const adId = await createVideoAd({
               pageId, accountId, adsetId,
               adCopy: c.adCopy,
               videoId,
+              imageHash: null,
               userToken,
-              link: campaignLink,
-              thumbnailUrl: thumbCandidate,
-              fallbackImageUrlCandidate: firstImageUrl
+              link: campaignLink
             });
 
             createdAdsByAdset[adsetId].push(adId);
@@ -687,7 +605,7 @@ const deployer = {
         }
       }
 
-      // Pause only the worst 1 per adset (as provided)
+
       const losers = losersByAdset[adsetId] || [];
       if (losers.length) {
         await pauseAds({ adIds: losers, userToken });
@@ -698,7 +616,8 @@ const deployer = {
     return { createdAdsByAdset, pausedAdsByAdset, variantMapByAdset };
   },
 
-  // Budget helpers exposed
+  // expose helpers
+  pauseAds,
   setAdsetDailyBudget,
   splitBudgetBetweenChampionAndChallengers
 };
