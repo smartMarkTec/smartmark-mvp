@@ -9,7 +9,7 @@ const db = require('../db'); // LOWDB
 const FormData = require('form-data');
 const { setFbUserToken } = require('../tokenStore');
 
-// Use ONLY policy from SmartEngine (no smartStore in this route)
+// Only the policy (we don't need the whole SmartEngine here)
 const { policy } = require('../smartCampaignEngine');
 
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
@@ -32,8 +32,11 @@ const FB_SCOPES = [
   'ads_read'
 ];
 
-// In-memory "session" store for user token use
+// Simple in-memory holder for the user token
 let userTokens = {};
+
+// Normalize “act_123” → “123”
+const normalizeAccountId = (id) => String(id || '').replace(/^act_/, '');
 
 // Helper: absolute public URL for generated assets
 function absolutePublicUrl(relativePath) {
@@ -49,7 +52,7 @@ function absolutePublicUrl(relativePath) {
    FACEBOOK OAUTH
    ========================= */
 router.get('/facebook', (req, res) => {
-  const state = 'smartmark_state_1'; // could randomize
+  const state = 'smartmark_state_1';
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
     `?client_id=${FACEBOOK_APP_ID}` +
@@ -153,13 +156,11 @@ router.post('/login', async (req, res) => {
 });
 
 /* =========================
-   LAUNCH CAMPAIGN
-   - No generation here; uses FormPage creatives only
-   - Enforces variant plan (override capable)
+   LAUNCH CAMPAIGN (uses FormPage creatives only)
    ========================= */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = userTokens['singleton'];
-  const { accountId } = req.params;
+  const acctId = normalizeAccountId(req.params.accountId);
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   try {
@@ -196,7 +197,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const wantImage = ms === 'image' || ms === 'both';
     const wantVideo = ms === 'video' || ms === 'both';
 
-    // Targeting (same logic you had)
+    // Targeting baseline
     let targeting = {
       geo_locations: { countries: ['US'] },
       age_min: 18,
@@ -232,7 +233,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     // Enforce max 2 active campaigns
     const existing = await axios.get(
-      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+      `https://graph.facebook.com/v18.0/act_${acctId}/campaigns`,
       { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
     );
     const activeCount = (existing.data?.data || []).filter(
@@ -242,7 +243,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
     }
 
-    // Variant plan (2 by default; fallback based on guardrails; supports override)
+    // Decide variant plan
     const dailyBudget = Number(budget) || 0;
     const hours = (() => {
       if (flightEnd) return Math.max(0, (new Date(flightEnd) - Date.now()) / 36e5);
@@ -258,7 +259,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const needImg = wantImage ? plan.images : 0;
     const needVid = wantVideo ? plan.videos : 0;
 
-    // Validate the provided creatives match the plan
     if (wantImage && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
@@ -269,7 +269,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     // 1) Campaign
     const campaignRes = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+      `https://graph.facebook.com/v18.0/act_${acctId}/campaigns`,
       {
         name: campaignName,
         objective: 'OUTCOME_TRAFFIC',
@@ -280,14 +280,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 2) Ad Sets (split budget evenly across used types)
+    // 2) Adsets
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
     const perAdsetBudgetCents = Math.max(100, Math.round(dailyBudget * 100 / Math.max(1, typesUsed)));
 
     let imageAdSetId = null, videoAdSetId = null;
     if (wantImage) {
       const { data } = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+        `https://graph.facebook.com/v18.0/act_${acctId}/adsets`,
         {
           name: `${campaignName} (Image) - ${new Date().toISOString()}`,
           campaign_id: campaignId,
@@ -311,7 +311,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     }
     if (wantVideo) {
       const { data } = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+        `https://graph.facebook.com/v18.0/act_${acctId}/adsets`,
         {
           name: `${campaignName} (Video) - ${new Date().toISOString()}`,
           campaign_id: campaignId,
@@ -337,16 +337,26 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     // Helpers inside route
     async function uploadImage(imageUrl) {
       const abs = absolutePublicUrl(imageUrl);
-      const imgRes = await axios.get(abs, { responseType: 'arraybuffer' });
+      let imgRes;
+      try {
+        imgRes = await axios.get(abs, { responseType: 'arraybuffer', timeout: 15000 });
+      } catch (e) {
+        const msg = `Image fetch failed for ${abs}`;
+        console.error('[uploadImage] ' + msg, e?.message || e);
+        const err = new Error(msg);
+        err.status = 400;
+        throw err;
+      }
       const base64 = Buffer.from(imgRes.data).toString('base64');
       const fbImageRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
+        `https://graph.facebook.com/v18.0/act_${acctId}/adimages`,
         new URLSearchParams({ bytes: base64 }),
         { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
       );
       const imgData = fbImageRes.data.images;
       return Object.values(imgData)[0]?.hash;
     }
+
     async function ensureVideoIdByIndex(idx) {
       const existingId = fbVideoIds[idx];
       if (existingId) return existingId;
@@ -356,7 +366,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       formd.append('name', 'SmartMark Generated Video');
       formd.append('description', 'Generated by SmartMark');
       const up = await axios.post(
-        `https://graph.facebook.com/v23.0/act_${accountId}/advideos`,
+        `https://graph.facebook.com/v23.0/act_${acctId}/advideos`,
         formd,
         { headers: formd.getHeaders(), params: { access_token: userToken } }
       );
@@ -370,7 +380,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       for (let i = 0; i < needImg; i++) {
         const hash = await uploadImage(imageVariants[i]);
         const cr = await axios.post(
-          `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+          `https://graph.facebook.com/v18.0/act_${acctId}/adcreatives`,
           {
             name: `${campaignName} (Image v${i + 1})`,
             object_story_spec: {
@@ -386,7 +396,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           { params: { access_token: userToken } }
         );
         const ad = await axios.post(
-          `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+          `https://graph.facebook.com/v18.0/act_${acctId}/ads`,
           { name: `${campaignName} (Image v${i + 1})`, adset_id: imageAdSetId, creative: { creative_id: cr.data.id }, status: 'ACTIVE' },
           { params: { access_token: userToken } }
         );
@@ -398,7 +408,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       for (let i = 0; i < needVid; i++) {
         const video_id = await ensureVideoIdByIndex(i);
 
-        // thumbnail priority: explicit → imageVariants[i] → imageVariants[0] → FB preferred thumbnail
+        // Pick a thumbnail if available
         let thumbUrl = null;
         const candBody = (typeof videoThumbnailUrl === 'string' && videoThumbnailUrl) ? videoThumbnailUrl : null;
         const candImg  = imageVariants[i] || imageVariants[0] || null;
@@ -425,12 +435,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         if (thumbUrl) video_data.image_url = thumbUrl;
 
         const cr = await axios.post(
-          `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+          `https://graph.facebook.com/v18.0/act_${acctId}/adcreatives`,
           { name: `${campaignName} (Video v${i + 1})`, object_story_spec: { page_id: pageId, video_data } },
           { params: { access_token: userToken } }
         );
         const ad = await axios.post(
-          `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+          `https://graph.facebook.com/v18.0/act_${acctId}/ads`,
           { name: `${campaignName} (Video v${i + 1})`, adset_id: videoAdSetId, creative: { creative_id: cr.data.id }, status: 'ACTIVE' },
           { params: { access_token: userToken } }
         );
@@ -447,6 +457,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       campaignStatus: 'ACTIVE'
     });
   } catch (err) {
+    // Improve error clarity on image fetch failures
+    if (err.status === 400 && /Image fetch failed/.test(err.message || '')) {
+      return res.status(400).json({ error: err.message });
+    }
     let errorMsg = 'Failed to launch campaign.';
     if (err.response?.data?.error) errorMsg = err.response.data.error.message;
     console.error('FB Campaign Launch Error:', err.response ? err.response.data : err);
@@ -490,11 +504,11 @@ router.get('/facebook/test-read-insights/:pageId', async (req, res) => {
 
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = userTokens['singleton'];
-  const { accountId } = req.params;
+  const acctId = normalizeAccountId(req.params.accountId);
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
     const response = await axios.get(
-      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+      `https://graph.facebook.com/v18.0/act_${acctId}/campaigns`,
       { params: { access_token: userToken, fields: 'id,name,status,start_time' } }
     );
     res.json(response.data);
