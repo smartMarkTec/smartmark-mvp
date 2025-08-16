@@ -477,90 +477,117 @@ const CampaignSetup = () => {
     }
   }, [selectedCampaignId, selectedAccount]);
 
-  // Pause/Unpause/Delete
-  const [isPaused, setIsPaused] = useState(false);
-  const handlePauseUnpause = async () => {
-    if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace("act_", "");
-    setLoading(true);
-    try {
-      if (isPaused) {
-       await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, { method: "POST", credentials: "include" });
-        setCampaignStatus("ACTIVE");
-        setIsPaused(false);
-      } else {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, { method: "POST", credentials: "include" });
-        setCampaignStatus("PAUSED");
-        setIsPaused(true);
-      }
-    } catch {
-      alert("Could not update campaign status.");
-    }
-    setLoading(false);
-  };
-  const handleDelete = async () => {
-    if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace("act_", "");
-    setLoading(true);
-    try {
-      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
-      setCampaignStatus("ARCHIVED");
-      setLaunched(false);
-      setLaunchResult(null);
-      setMetrics(null);
-      setSelectedCampaignId("");
-      alert("Campaign deleted.");
-    } catch {
-      alert("Could not delete campaign.");
-    }
-    setLoading(false);
-  };
-  const handleNewCampaign = () => {
-    if (campaigns.length >= 2) return;
-    navigate('/form');
-  };
+ // Pause/Unpause/Delete
+const [isPaused, setIsPaused] = useState(false);
 
-  const canLaunch = !!(
-    fbConnected &&
-    selectedAccount &&
-    selectedPageId &&
-    budget &&
-    !isNaN(parseFloat(budget)) &&
-    parseFloat(budget) >= 3
-  );
+const handlePauseUnpause = async () => {
+  if (!selectedCampaignId || !selectedAccount) return;
+  const acctId = String(selectedAccount).replace(/^act_/, ""); // anchor the replace
+  setLoading(true);
+  try {
+    if (isPaused) {
+      const r = await fetch(
+        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
+        { method: "POST", credentials: "include" }
+      );
+      if (!r.ok) throw new Error("Unpause failed");
+      setCampaignStatus("ACTIVE");
+      setIsPaused(false);
+    } else {
+      const r = await fetch(
+        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
+        { method: "POST", credentials: "include" }
+      );
+      if (!r.ok) throw new Error("Pause failed");
+      setCampaignStatus("PAUSED");
+      setIsPaused(true);
+    }
+  } catch {
+    alert("Could not update campaign status.");
+  }
+  setLoading(false);
+};
+
+const handleDelete = async () => {
+  if (!selectedCampaignId || !selectedAccount) return;
+  const acctId = String(selectedAccount).replace(/^act_/, ""); // anchor the replace
+  setLoading(true);
+  try {
+    const r = await fetch(
+      `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
+      { method: "POST", credentials: "include" } // include credentials
+    );
+    if (!r.ok) throw new Error("Archive failed");
+    setCampaignStatus("ARCHIVED");
+    setLaunched(false);
+    setLaunchResult(null);
+    setMetrics(null);
+    setSelectedCampaignId("");
+    alert("Campaign deleted.");
+  } catch {
+    alert("Could not delete campaign.");
+  }
+  setLoading(false);
+};
+
+const handleNewCampaign = () => {
+  if (campaigns.length >= 2) return;
+  navigate('/form');
+};
+
+const canLaunch = !!(
+  fbConnected &&
+  selectedAccount &&
+  selectedPageId &&
+  budget &&
+  !isNaN(parseFloat(budget)) &&
+  parseFloat(budget) >= 3
+);
+
 
   // Launch: ONLY use the creatives from FormPage (previews), never generate here
-  const handleLaunch = async () => {
-    setLoading(true);
-    try {
-      const acctId = String(selectedAccount).replace("act_", "");
-      const safeBudget = Math.max(3, Number(budget) || 0);
+// Launch: ONLY use the creatives from FormPage (previews), never generate here
+const handleLaunch = async () => {
+  setLoading(true);
+  try {
+    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const safeBudget = Math.max(3, Number(budget) || 0);
 
-      const payload = {
-        form: { ...form },
-        budget: safeBudget,
-        campaignType: form?.campaignType || "Website Traffic",
-        pageId: selectedPageId,
-        aiAudience: form?.aiAudience || answers?.aiAudience || "",
-        adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-        answers: answers || {},
-        mediaSelection,
-        imageVariants: (imageUrlsArr || []).slice(0, 2),
-        videoVariants: (videoUrlsArr || []).slice(0, 2),
-        fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
-        videoThumbnailUrl: (imageUrlsArr && imageUrlsArr[0]) ? imageUrlsArr[0] : null
-  
-      };
+    const images = (imageUrlsArr || []).slice(0, 2);
+    const videos = (videoUrlsArr || []).slice(0, 2);
+    const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
 
-      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",            // <-- send FB session cookie
-        body: JSON.stringify(payload),
-      });
+    const payload = {
+      form: { ...form },
+      budget: safeBudget,
+      campaignType: form?.campaignType || "Website Traffic",
+      pageId: selectedPageId,
+      aiAudience: form?.aiAudience || answers?.aiAudience || "",
+      adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+      answers: answers || {},
+      mediaSelection,                         // "image" | "video" | "both"
+      imageVariants: images,
+      videoVariants: videos,
+      fbVideoIds: fbIds,
+      // send a thumbnail to satisfy FB if needed
+      videoThumbnailUrl: images[0] || null,
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Server error");
+      // 👇 force 2 images + 2 videos when provided, ignoring budget/flight guardrails
+      overrideCountPerType: {
+        images: Math.min(2, images.length),
+        videos: Math.min(2, Math.max(videos.length, fbIds.length))
+      }
+    };
+
+    const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || "Server error");
 
       // Persist creatives ONLY AFTER a successful launch
       const map = readCreativeMap(acctId);
