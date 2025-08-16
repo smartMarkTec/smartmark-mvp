@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
+const PREVIEW_KEY = "sm_preview_bundle_v1"; // <-- NEW
 
 // Visual theme (aligned to FormPage)
 const DARK_BG = "#181b20";
@@ -153,7 +154,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
 
 function VideoCarousel({ items = [], height = 220 }) {
   const [idx, setIdx] = useState(0);
-  const normalized = items.map(u => (u && !/^https?:\/\/.*/.test(u) ? `${backendUrl}${u}` : u)).filter(Boolean);
+  const normalized = items.map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u)).filter(Boolean);
   useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
   if (!normalized.length) {
     return <div style={{ height, width: "100%", background: "#e9ecef",
@@ -330,7 +331,7 @@ const CampaignSetup = () => {
     mediaSelection: navMediaSelection
   } = location.state || {};
 
-  // --- Effects: load persisted non-creative fields ---
+  // --- Load persisted non-creative fields ---
   useEffect(() => {
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) setForm(JSON.parse(lastFields));
@@ -338,6 +339,7 @@ const CampaignSetup = () => {
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
   }, []);
 
+  // --- After OAuth redirect, set flag and remove query param (keep sessionStorage intact) ---
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
@@ -350,6 +352,48 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (fbConnected) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
   }, [fbConnected]);
+
+  // --- Hydrate previews: prefer nav state; otherwise fall back to sessionStorage (survives the OAuth bounce) ---
+  useEffect(() => {
+    const hasNav =
+      (Array.isArray(navImageUrls) && navImageUrls.length) ||
+      (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+      (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
+
+    if (hasNav) {
+      setImageUrlsArr((navImageUrls || []).slice(0, 2));
+      setVideoUrlsArr((navVideoUrls || []).slice(0, 2));
+      setFbVideoIdsArr((navFbVideoIds || []).slice(0, 2));
+      if (navMediaSelection) setMediaSelection(String(navMediaSelection).toLowerCase());
+
+      // refresh preview bundle so a subsequent connect click still shows them
+      try {
+        sessionStorage.setItem(PREVIEW_KEY, JSON.stringify({
+          imageUrls: (navImageUrls || []).slice(0, 2),
+          videoUrls: (navVideoUrls || []).slice(0, 2),
+          fbVideoIds: (navFbVideoIds || []).slice(0, 2),
+          headline: headline || "",
+          body: body || "",
+          answers: answers || {},
+          mediaSelection: navMediaSelection || mediaSelection
+        }));
+      } catch {}
+      return;
+    }
+
+    // no nav state → try sessionStorage
+    try {
+      const raw = sessionStorage.getItem(PREVIEW_KEY);
+      if (raw) {
+        const b = JSON.parse(raw);
+        setImageUrlsArr((b.imageUrls || []).slice(0, 2));
+        setVideoUrlsArr((b.videoUrls || []).slice(0, 2));
+        setFbVideoIdsArr((b.fbVideoIds || []).slice(0, 2));
+        if (b.mediaSelection) setMediaSelection(String(b.mediaSelection).toLowerCase());
+      }
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // --- Fetch account/page lists ---
   useEffect(() => {
@@ -372,7 +416,7 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`)
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.data || []);
@@ -391,7 +435,7 @@ const CampaignSetup = () => {
     }
   }, [navMediaSelection]);
 
-  // --- Load campaigns list (never auto-persist creatives) ---
+  // --- Load campaigns list (avoid auto-select when we came with previews) ---
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -401,22 +445,18 @@ const CampaignSetup = () => {
         const list = (data && data.data) ? data.data.slice(0, 2) : [];
         setCampaigns(list);
         if (!selectedCampaignId) {
-          const hasNavDraft = (Array.isArray(navImageUrls) && navImageUrls.length) ||
-                              (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
-                              (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
-          if (!hasNavDraft && list.length > 0) {
-            setSelectedCampaignId(list[0].id);
-          }
+          const hasNavDraft = imageUrlsArr.length || videoUrlsArr.length || fbVideoIdsArr.length;
+          if (!hasNavDraft && list.length > 0) setSelectedCampaignId(list[0].id);
         }
       })
       .catch(() => {});
-  }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, selectedCampaignId]);
+  }, [fbConnected, selectedAccount, selectedCampaignId, imageUrlsArr, videoUrlsArr, fbVideoIdsArr]);
 
   // --- Load metrics + basic details for selected campaign ---
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`)
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
@@ -424,7 +464,7 @@ const CampaignSetup = () => {
         setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
       })
       .catch(() => {});
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`)
       .then(res => res.json())
       .then(setMetrics)
       .catch(() => setMetrics(null));
@@ -438,19 +478,7 @@ const CampaignSetup = () => {
   useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
   useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
-  // --- PREVIEW ONLY: hydrate from navigation state (never persist here) ---
-  useEffect(() => {
-    const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
-    const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
-    const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
-    if (imgs.length || vids.length || ids.length) {
-      setImageUrlsArr(imgs);
-      setVideoUrlsArr(vids);
-      setFbVideoIdsArr(ids);
-    }
-  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
-
-  // --- When switching to an existing campaign, show its persisted creatives (post-launch only) ---
+  // --- When selecting an existing campaign, show its persisted creatives (post-launch only) ---
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
@@ -474,17 +502,11 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       if (isPaused) {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, {
-          method: "POST",
-          credentials: 'include'
-        });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, { method: "POST" });
         setCampaignStatus("ACTIVE");
         setIsPaused(false);
       } else {
-        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, {
-          method: "POST",
-          credentials: 'include'
-        });
+        await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, { method: "POST" });
         setCampaignStatus("PAUSED");
         setIsPaused(true);
       }
@@ -499,10 +521,7 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).replace("act_", "");
     setLoading(true);
     try {
-      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, {
-        method: "POST",
-        credentials: 'include'
-      });
+      await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, { method: "POST" });
       setCampaignStatus("ARCHIVED");
       setLaunched(false);
       setLaunchResult(null);
@@ -529,7 +548,7 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // --- Launch handler: ONLY use FormPage creatives (arrays), persist after success ---
+  // --- Launch: uses ONLY previews from FormPage; clears session bundle on success ---
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -553,14 +572,13 @@ const CampaignSetup = () => {
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: 'include',
         body: JSON.stringify(payload),
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      // Persist creatives ONLY AFTER a successful launch
+      // Persist creatives AFTER success
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
@@ -571,6 +589,9 @@ const CampaignSetup = () => {
         };
         writeCreativeMap(acctId, map);
       }
+
+      // Clear ephemeral previews so FormPage shows blank next time
+      try { sessionStorage.removeItem(PREVIEW_KEY); } catch {}
 
       setLaunched(true);
       setLaunchResult(json);

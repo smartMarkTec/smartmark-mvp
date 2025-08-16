@@ -3,12 +3,14 @@ import { useNavigate } from "react-router-dom";
 import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
 
 // ========== Constants ==========
+const API_BASE = "/api";
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
-const API_BASE = `${BACKEND_URL}/api`; // <-- point to Render backend
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const TEAL = "#14e7b9";
 const DARK_BG = "#181b20";
+const PREVIEW_KEY = "sm_preview_bundle_v1"; // <-- NEW: ephemeral previews (sessionStorage)
+
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
@@ -21,6 +23,8 @@ const CONVO_QUESTIONS = [
 ];
 
 // ========== Helper Functions/Components ==========
+
+const abs = (u) => (!u ? "" : /^https?:\/\//i.test(u) ? u : `${BACKEND_URL}${u}`);
 
 function LoadingSpinner() {
   return (
@@ -254,7 +258,7 @@ export default function FormPage() {
   const [videoItems, setVideoItems] = useState([]); // [{url, script, fbVideoId}]
   const [activeVideo, setActiveVideo] = useState(0);
 
-  // Legacy single values (kept for compatibility)
+  // Legacy single values (kept for compatibility with other pages / localStorage)
   const [imageUrl, setImageUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoScript, setVideoScript] = useState("");
@@ -264,43 +268,7 @@ export default function FormPage() {
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
-  const [lastRegenerateToken, setLastRegenerateToken] = useState("");
-  const [awaitingContinue, setAwaitingContinue] = useState(false);
-  const [awaitingGenerate, setAwaitingGenerate] = useState(false);
   const [awaitingReady, setAwaitingReady] = useState(true);
-
-  // --- Restore session-only creatives if returning from Setup (disappear on full tab close) ---
-  useEffect(() => {
-    try {
-      const imgs = JSON.parse(sessionStorage.getItem("sm_form_session_images") || "[]");
-      const vids = JSON.parse(sessionStorage.getItem("sm_form_session_videos") || "[]");
-      const fbids = JSON.parse(sessionStorage.getItem("sm_form_session_fbvids") || "[]");
-      const headline = sessionStorage.getItem("sm_form_session_headline") || "";
-      const body = sessionStorage.getItem("sm_form_session_body") || "";
-      if (imgs.length || vids.length) {
-        setImageUrls(imgs);
-        setActiveImage(0);
-        setImageUrl(imgs[0] || "");
-        setVideoItems(vids.map((u, i) => ({ url: u, script: "", fbVideoId: fbids[i] || null })));
-        setActiveVideo(0);
-        setVideoUrl(vids[0] || "");
-        if (headline || body) setResult({ headline, body });
-      }
-    } catch {}
-  }, []);
-
-  function userSaysContinue(val) {
-    return /^(yes|yep|ready|continue|next|ok|sure)$/i.test(val.trim());
-  }
-  function userSaysGenerate(val) {
-    return /^(yes|yep|ready|let's do it|generate|go ahead|ok|i am ready|im ready|lets do it)$/i.test(val.trim());
-  }
-  function isOffTopic(val) {
-    return /(who are you|how does|what do you do|agency|ad manager|work|help|support|feature|question)/i.test(val);
-  }
-  function getOffTopicAnswer(val) {
-    return "I'm your AI Ad Manager. I help create and manage your ad campaigns automatically! Ready for the next question?";
-  }
 
   // Scroll chat to bottom on update
   useEffect(() => {
@@ -308,6 +276,38 @@ export default function FormPage() {
       chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     }
   }, [chatHistory]);
+
+  // NEW: If we came back from CampaignSetup (same tab), restore previews from sessionStorage
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(PREVIEW_KEY);
+      if (!raw) return;
+      const b = JSON.parse(raw);
+
+      if (Array.isArray(b.imageUrls) && b.imageUrls.length) {
+        setImageUrls(b.imageUrls);
+        setActiveImage(0);
+        setImageUrl(b.imageUrls[0] || "");
+      }
+      if (Array.isArray(b.videoUrls) && b.videoUrls.length) {
+        const items = b.videoUrls.map((u, i) => ({
+          url: u,
+          script: Array.isArray(b.videoScripts) ? (b.videoScripts[i] || "") : "",
+          fbVideoId: Array.isArray(b.fbVideoIds) ? (b.fbVideoIds[i] || null) : null
+        }));
+        setVideoItems(items);
+        setActiveVideo(0);
+        setVideoUrl(items[0]?.url || "");
+        setVideoScript(items[0]?.script || "");
+      }
+      if (b.headline || b.body) {
+        setResult({ headline: b.headline || "", body: b.body || "" });
+      }
+      if (b.mediaSelection) {
+        setMediaType(String(b.mediaSelection).toLowerCase());
+      }
+    } catch {}
+  }, []);
 
   function handleModalClose() {
     setShowModal(false);
@@ -375,7 +375,7 @@ export default function FormPage() {
         ]);
         setInput("");
         return;
-      } else if (isOffTopic(value)) {
+      } else if (/(who are you|how does|what do you do|agency|ad manager|work|help|support|feature|question)/i.test(value)) {
         const resp = await fetch(`${API_BASE}/gpt-chat`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -484,7 +484,7 @@ export default function FormPage() {
       return;
     }
 
-    // 4. If user input looks like a correction
+    // 4. Corrections
     if (/^(actually|i meant|change|correction|edit answer|should say|replace|let me edit)/i.test(value)) {
       const lastQ = step > 0 ? CONVO_QUESTIONS[step - 1] : null;
       const keyToUpdate = lastQ ? lastQ.key : null;
@@ -503,7 +503,7 @@ export default function FormPage() {
       }
     }
 
-    // 5. Normal Q&A: update answer, move to next Q
+    // 5. Normal Q&A
     const currentQ = CONVO_QUESTIONS[step];
     let newAnswers = { ...answers, [currentQ.key]: value };
     setAnswers(newAnswers);
@@ -527,7 +527,6 @@ export default function FormPage() {
         { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }
       ]);
       setStep(nextStep);
-      setAwaitingGenerate && setAwaitingGenerate(true);
       return;
     }
 
@@ -1031,45 +1030,32 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            // Build arrays (always 0–2) and normalize to absolute URLs
-            const imgs = (imageUrls || [])
-              .slice(0, 2)
-              .map(u => (u && !/^https?:\/\//.test(u) ? `${BACKEND_URL}${u}` : u))
-              .filter(Boolean);
+            // Build arrays (max two) from current previews
+            const imgs = (imageUrls.length ? imageUrls : [imageUrl].filter(Boolean))
+              .slice(0, 2).map(abs);
+            const vids = (videoItems.length ? videoItems.map(v => v.url) : [videoUrl].filter(Boolean))
+              .slice(0, 2).map(abs);
+            const fbIds = (videoItems.length ? videoItems.map(v => v.fbVideoId).filter(Boolean) : []).slice(0, 2);
+            const scripts = (videoItems.length ? videoItems.map(v => v.script || "") : [videoScript].filter(Boolean)).slice(0, 2);
 
-            const vids = (videoItems || [])
-              .slice(0, 2)
-              .map(v => v?.url && (!/^https?:\/\//.test(v.url) ? `${BACKEND_URL}${v.url}` : v.url))
-              .filter(Boolean);
+            // Save ephemeral preview bundle so it survives OAuth redirect
+            const bundle = {
+              imageUrls: imgs,
+              videoUrls: vids,
+              fbVideoIds: fbIds,
+              videoScripts: scripts,
+              headline: result?.headline || "",
+              body: result?.body || "",
+              answers,
+              mediaSelection
+            };
+            try { sessionStorage.setItem(PREVIEW_KEY, JSON.stringify(bundle)); } catch {}
 
-            const fbIds = (videoItems || [])
-              .slice(0, 2)
-              .map(v => v?.fbVideoId)
-              .filter(Boolean);
+            // Keep just the user's preference in localStorage (NOT creatives)
+            localStorage.setItem("smartmark_media_selection", mediaSelection);
 
-            // Session-only persistence for returning to FormPage (clears on full tab close)
-            try {
-              sessionStorage.setItem("sm_form_session_images", JSON.stringify(imgs));
-              sessionStorage.setItem("sm_form_session_videos", JSON.stringify(vids));
-              sessionStorage.setItem("sm_form_session_fbvids", JSON.stringify(fbIds));
-              sessionStorage.setItem("sm_form_session_headline", result?.headline || "");
-              sessionStorage.setItem("sm_form_session_body", result?.body || "");
-              sessionStorage.setItem("smartmark_media_selection", mediaType);
-            } catch {}
-
-            // Navigate with arrays (CampaignSetup reads ONLY these)
-            navigate("/setup", {
-              state: {
-                imageUrls: imgs,
-                videoUrls: vids,
-                fbVideoIds: fbIds,
-                headline: result?.headline,
-                body: result?.body,
-                videoScript: (videoItems[0]?.script || videoScript || ""),
-                answers,
-                mediaSelection: mediaType
-              }
-            });
+            // Navigate with same bundle (works when no redirect happens)
+            navigate("/setup", { state: bundle });
           }}
         >
           Continue
