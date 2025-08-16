@@ -24,27 +24,33 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 // --- CORS (credentials + dynamic origin reflection) ---
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin) return callback(null, true); // allow REST tools/local scripts
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('CORS not allowed from this origin: ' + origin), false);
+const corsOptions = {
+  origin(origin, cb) {
+    if (!origin) return cb(null, true); // allow curl/postman/local scripts
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    return cb(new Error(`CORS not allowed from ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 204,
+};
 
-// Echo ACAO per-request so credentials work
+// Apply to all routes + make preflight use the SAME options
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// Echo ACAO per-request so credentials work (and add Vary for caches/CDNs)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
-  res.header('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   next();
 });
-app.options('*', cors());
+
 
 app.set('trust proxy', 1);
 
