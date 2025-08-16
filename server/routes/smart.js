@@ -31,16 +31,52 @@ function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   return Math.max(0, Number(fallbackHours || 0));
 }
 
+/**
+ * Decide variant plan (1 vs 2 per type).
+ * - honors overrideCountPerType when provided
+ * - supports forceTwoPerType to always send 2-per-selected-type regardless of budget/flight
+ * - otherwise falls back to policy.decideVariantPlan guardrails
+ */
 function decideVariantPlanFrom(cfg = {}, overrides = {}) {
-  const assetTypes = overrides.assetTypes || cfg.assetTypes || 'both';
-  const dailyBudget = Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0);
-  const flightHours = resolveFlightHours({
-    startAt: overrides.flightStart || cfg.flightStart,
-    endAt: overrides.flightEnd || cfg.flightEnd,
-    fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
-  });
+  const assetTypes = String(overrides.assetTypes || cfg.assetTypes || 'both').toLowerCase();
+  const wantsImage = assetTypes === 'image' || assetTypes === 'both';
+  const wantsVideo = assetTypes === 'video' || assetTypes === 'both';
+
+  // If caller/config requests hard 2-per-type, do it.
+  const forceTwoPerType = !!(overrides.forceTwoPerType ?? cfg.forceTwoPerType);
+  if (forceTwoPerType) {
+    return {
+      images: wantsImage ? 2 : 0,
+      videos: wantsVideo ? 2 : 0
+    };
+  }
+
+  // If explicit override counts are provided, pass straight through to policy.
   const overrideCountPerType = overrides.overrideCountPerType || cfg.overrideCountPerType || null;
-  return policy.decideVariantPlan({ assetTypes, dailyBudget, flightHours, overrideCountPerType });
+  if (overrideCountPerType && typeof overrideCountPerType === 'object') {
+    return policy.decideVariantPlan({
+      assetTypes,
+      dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
+      flightHours: resolveFlightHours({
+        startAt: overrides.flightStart || cfg.flightStart,
+        endAt: overrides.flightEnd || cfg.flightEnd,
+        fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
+      }),
+      overrideCountPerType
+    });
+  }
+
+  // Default guardrails path.
+  return policy.decideVariantPlan({
+    assetTypes,
+    dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
+    flightHours: resolveFlightHours({
+      startAt: overrides.flightStart || cfg.flightStart,
+      endAt: overrides.flightEnd || cfg.flightEnd,
+      fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
+    }),
+    overrideCountPerType: null
+  });
 }
 
 // Enable Smart management for a campaign (stores guardrails and selections)
@@ -59,6 +95,7 @@ router.post('/enable', async (req, res) => {
       flightEnd = null,
       flightHours = 0,
       overrideCountPerType = null,
+      forceTwoPerType = false,           // NEW: hard force 2-per-type if true
       thresholds = {},
       stopRules = {}
     } = req.body;
@@ -67,6 +104,10 @@ router.post('/enable', async (req, res) => {
       return res.status(400).json({ error: 'accountId, campaignId, pageId are required' });
     }
 
+    const mergedThresholds = { ...(policy.THRESHOLDS || {}), ...(thresholds || {}) };
+    const mergedStopRules  = { ...(policy.STOP_RULES || {}), ...(stopRules || {}) };
+
+    await db.read();
     const existing = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (existing) {
       existing.pageId = pageId;
@@ -79,8 +120,9 @@ router.post('/enable', async (req, res) => {
       existing.flightEnd = flightEnd;
       existing.flightHours = Number(flightHours) || 0;
       existing.overrideCountPerType = overrideCountPerType;
-      existing.thresholds = { ...(existing.thresholds || {}), ...thresholds };
-      existing.stopRules = { ...(existing.stopRules || {}), ...stopRules };
+      existing.forceTwoPerType = !!forceTwoPerType;   // NEW
+      existing.thresholds = mergedThresholds;
+      existing.stopRules = mergedStopRules;
       existing.updatedAt = nowIso();
     } else {
       db.data.smart_configs.push({
@@ -96,8 +138,9 @@ router.post('/enable', async (req, res) => {
         flightEnd,
         flightHours: Number(flightHours) || 0,
         overrideCountPerType,
-        thresholds,
-        stopRules,
+        forceTwoPerType: !!forceTwoPerType,           // NEW
+        thresholds: mergedThresholds,
+        stopRules: mergedStopRules,
         createdAt: nowIso(),
         updatedAt: nowIso(),
         lastRunAt: null
@@ -114,7 +157,10 @@ router.post('/enable', async (req, res) => {
  * Manually trigger a single Smart run for a campaign.
  * Modes:
  *  - initial/force=true → start first A/B (ignores plateau)
- *  - default          → only act when plateau detected
+ *  - default            → only act when plateau detected
+ * Controls:
+ *  - forceTwoPerType    → hard 2-per-selected-type for this run (overrides budget/flight guardrails)
+ *  - overrideCountPerType → explicit {images, videos} counts if you want custom numbers
  */
 router.post('/run-once', async (req, res) => {
   try {
@@ -129,14 +175,15 @@ router.post('/run-once', async (req, res) => {
       answers = {},
       url = '',
       mediaSelection = 'both',
-      // optional overrides for this run
+      // optional run overrides
       force = false,
       initial = false,
       dailyBudget = null,
       flightStart = null,
       flightEnd = null,
       flightHours = null,
-      overrideCountPerType = null
+      overrideCountPerType = null,
+      forceTwoPerType = null      // NEW: hard 2-per-type just for this run
     } = req.body;
 
     if (!accountId || !campaignId) {
@@ -162,6 +209,7 @@ router.post('/run-once', async (req, res) => {
         flightEnd,
         flightHours: Number(flightHours) || 0,
         overrideCountPerType,
+        forceTwoPerType: !!forceTwoPerType,   // NEW
         thresholds: {},
         stopRules: {},
         createdAt: nowIso(),
@@ -187,7 +235,8 @@ router.post('/run-once', async (req, res) => {
       flightStart,
       flightEnd,
       flightHours,
-      overrideCountPerType
+      overrideCountPerType,
+      forceTwoPerType   // NEW: honors per-run override
     });
 
     // Determine whether to act
@@ -202,7 +251,7 @@ router.post('/run-once', async (req, res) => {
       form,
       answers,
       url,
-      mediaSelection: mediaSelection || cfg.assetTypes || 'both',
+      mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase(),
       variantPlan
     });
 
@@ -256,7 +305,28 @@ router.post('/run-once', async (req, res) => {
     }
     await db.write();
 
-    res.json({ success: true, run, analysis, variantPlan });
+    // Some handy counts for UI/debug
+    const wantImages = variantPlan.images || 0;
+    const wantVideos = variantPlan.videos || 0;
+    const createdCounts = Object.fromEntries(
+      Object.entries(deployed.variantMapByAdset || {}).map(([adsetId, vmap]) => {
+        const counts = { images: 0, videos: 0 };
+        Object.keys(vmap || {}).forEach(vid => {
+          if (vid.startsWith('img_')) counts.images++;
+          else if (vid.startsWith('vid_')) counts.videos++;
+        });
+        return [adsetId, counts];
+      })
+    );
+
+    res.json({
+      success: true,
+      run,
+      analysis,
+      variantPlan,
+      expectedPerType: { images: wantImages, videos: wantVideos },
+      createdCountsPerAdset: createdCounts
+    });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -40,7 +40,7 @@ async function fbPostV(apiVersion, endpoint, body, params) {
 const FB_API_VER = 'v23.0';
 
 // =========================
-// POLICY (Step 1)
+/** POLICY (Step 1) */
 // =========================
 const policy = {
   // Recent/prior windows for analyzer
@@ -130,7 +130,7 @@ const policy = {
 };
 
 // =========================
-// ANALYZER (Step 4)
+/** ANALYZER (Step 4) */
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -347,7 +347,7 @@ const analyzer = {
 };
 
 // =========================
-// GENERATOR (Step 2)
+/** GENERATOR (Step 2) */
 // =========================
 const generator = {
   /**
@@ -514,21 +514,53 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
   return ad.id;
 }
 
-async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imageHash, userToken, link }) {
-  // Optional thumbnail (not required)
-  let image_url = null;
-  try {
-    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
-    image_url = (thumbs.data || [])[0]?.uri || null;
-  } catch {}
+/**
+ * Create a video ad and ALWAYS provide a thumbnail to satisfy FB (image_url or image_hash).
+ * Priority:
+ *   1) thumbnailUrl (explicit, may be relative → absolutized)
+ *   2) FB preferred thumbnail from /{video_id}/thumbnails
+ *   3) fallbackImageUrlCandidate (e.g., first image creative)
+ * If none found → throw with a clear error so caller can react.
+ */
+async function createVideoAd({
+  pageId, accountId, adsetId, adCopy, videoId, userToken, link,
+  thumbnailUrl, fallbackImageUrlCandidate
+}) {
+  // Resolve thumbnail
+  let finalThumbUrl = null;
+
+  // (1) explicit
+  if (thumbnailUrl) {
+    finalThumbUrl = absolutePublicUrl(thumbnailUrl);
+  }
+
+  // (2) FB preferred thumbnail
+  if (!finalThumbUrl) {
+    try {
+      const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
+      const arr = thumbs?.data || [];
+      const preferred = arr.find(t => t.is_preferred) || arr[0];
+      if (preferred?.uri) finalThumbUrl = preferred.uri;
+    } catch {}
+  }
+
+  // (3) fallback from image creative
+  if (!finalThumbUrl && fallbackImageUrlCandidate) {
+    finalThumbUrl = absolutePublicUrl(fallbackImageUrlCandidate);
+  }
+
+  if (!finalThumbUrl) {
+    // Hard fail to prevent OAuthException subcode 1443226
+    throw new Error('Video thumbnail missing (image_url). Provide thumbnailUrl or at least one image creative.');
+  }
 
   const video_data = {
     video_id: videoId,
     message: adCopy || '',
     title: 'SmartMark Video',
-    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } }
+    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } },
+    image_url: finalThumbUrl
   };
-  if (image_url) video_data.image_url = image_url;
 
   const creative = await fbPostV(FB_API_VER, `act_${accountId}/adcreatives`, {
     name: `SmartMark Video ${new Date().toISOString()}`,
@@ -589,6 +621,9 @@ const deployer = {
     // Prepare cached image uploads to avoid re-uploading same image URL
     const uploadedImageHashByDataUrl = new Map();
 
+    // Grab a general thumbnail fallback from the first image creative (if any)
+    const firstImageUrl = (creatives.find(c => c.kind === 'image' && c.imageUrl)?.imageUrl) || null;
+
     for (const adsetId of adsetIds) {
       createdAdsByAdset[adsetId] = [];
       pausedAdsByAdset[adsetId] = [];
@@ -629,13 +664,18 @@ const deployer = {
           } else if (c.kind === 'video' && c.video) {
             const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
 
+            // Thumbnail priority: explicit on creative → any image creative as fallback
+            const thumbCandidate =
+              c.video.thumbnailUrl || c.thumbnailUrl || firstImageUrl || null;
+
             const adId = await createVideoAd({
               pageId, accountId, adsetId,
               adCopy: c.adCopy,
               videoId,
-              imageHash: null,
               userToken,
-              link: campaignLink
+              link: campaignLink,
+              thumbnailUrl: thumbCandidate,
+              fallbackImageUrlCandidate: firstImageUrl
             });
 
             createdAdsByAdset[adsetId].push(adId);

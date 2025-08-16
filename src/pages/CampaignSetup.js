@@ -547,7 +547,9 @@ const CampaignSetup = () => {
         mediaSelection,
         imageVariants: (imageUrlsArr || []).slice(0, 2),
         videoVariants: (videoUrlsArr || []).slice(0, 2),
-        fbVideoIds: (fbVideoIdsArr || []).slice(0, 2)
+        fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
+        videoThumbnailUrl: (imageUrlsArr && imageUrlsArr[0]) ? imageUrlsArr[0] : null
+  
       };
 
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
