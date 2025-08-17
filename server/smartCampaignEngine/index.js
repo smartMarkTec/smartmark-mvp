@@ -7,7 +7,7 @@ const path = require('path');
 
 // ===== runtime test toggles (no spend / dry run) =====
 const NO_SPEND = process.env.NO_SPEND === '1';
-const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1'; // add ?validate_only=1 to your launch route or set env
+const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1';
 const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
 
 // =========================
@@ -36,18 +36,15 @@ async function fbGetV(apiVersion, endpoint, params) {
 }
 async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
-  // auto-append validate_only when requested
   const mergedParams = { ...params };
-  if (VALIDATE_ONLY) {
-    mergedParams.execution_options = 'validate_only';
-  }
+  if (VALIDATE_ONLY) mergedParams.execution_options = 'validate_only';
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
 const FB_API_VER = 'v23.0';
 
 // =========================
-/* POLICY (Step 1) */
+/* POLICY */
 // =========================
 const policy = {
   WINDOWS: { RECENT_DAYS: 3, PRIOR_DAYS: 3 },
@@ -71,18 +68,9 @@ const policy = {
   LIMITS: {
     MAX_NEW_ADS_PER_RUN_PER_ADSET: 2,
     MIN_HOURS_BETWEEN_RUNS: 24,
-    MIN_HOURS_BETWEEN_NEW_ADS: 72,
-    // ⬇️ added to make scheduler tunable for testing
-    MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU: 24,
-    PLATEAU_CONFIRM_HOURS: 36,
-    MIN_HOURS_LEFT_TO_SPAWN: 24
+    MIN_HOURS_BETWEEN_NEW_ADS: 72
   },
   THRESHOLDS: { MIN_IMPRESSIONS: 1500, CTR_DROP_PCT: 0.20, FREQ_MAX: 2.0, MIN_SPEND: 5 },
-
-  // Debug switches to enable fast/forced plateau during tests (set via admin route)
-  DEBUG: {
-    FORCE_PLATEAU: false
-  },
 
   isPlateau({ recent, prior, thresholds }) {
     const t = thresholds || this.THRESHOLDS;
@@ -122,7 +110,32 @@ const policy = {
 };
 
 // =========================
-/* ANALYZER (Step 4) */
+// TEST MOCKS: in-memory insight overrides
+// =========================
+const _mocks = { adset: {}, ad: {} };
+function _norm(m = {}) {
+  const imp = Number(m.impressions || 0);
+  const clk = Number(m.clicks || 0);
+  const sp = Number(m.spend || 0);
+  const ctr = (typeof m.ctr === 'number') ? m.ctr : (imp ? (clk / imp) * 100 : 0);
+  const cpm = (typeof m.cpm === 'number') ? m.cpm : (imp ? (sp / imp) * 1000 : 0);
+  const freq = Number(m.frequency || 1);
+  const cpc = clk > 0 ? sp / clk : null;
+  return { impressions: imp, clicks: clk, spend: sp, ctr, cpm, frequency: freq, cpc };
+}
+const testing = {
+  setMockInsights({ adset = {}, ad = {} } = {}) {
+    _mocks.adset = { ..._mocks.adset, ...adset };
+    _mocks.ad = { ..._mocks.ad, ...ad };
+  },
+  clearMockInsights() {
+    _mocks.adset = {};
+    _mocks.ad = {};
+  }
+};
+
+// =========================
+/* ANALYZER */
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -152,6 +165,16 @@ function parseMetrics(node) {
 }
 
 async function getWindowInsights(id, token, level, windows) {
+  // ---- MOCK SHORT-CIRCUIT ----
+  if (level === 'adset' && _mocks.adset[id]) {
+    const { recent = {}, prior = {} } = _mocks.adset[id];
+    return { recent: _norm(recent), prior: _norm(prior), _ranges: null };
+  }
+  if (level === 'ad' && _mocks.ad[id]) {
+    const { recent = {}, prior = {} } = _mocks.ad[id];
+    return { recent: _norm(recent), prior: _norm(prior), _ranges: null };
+  }
+
   const FIELDS = 'impressions,clicks,spend,ctr,cpm,frequency';
   const { RECENT_DAYS, PRIOR_DAYS } = windows || policy.WINDOWS;
 
@@ -174,9 +197,9 @@ function rankAds(listByAdId, kpi = 'cpc') {
   });
 
   if (kpi === 'cpc') {
-    rows.sort((a, b) => ((a.value == null) - (b.value == null)) || (a.value - b.value));
+    rows.sort((a, b) => (a.value == null) - (b.value == null) || a.value - b.value);
   } else {
-    rows.sort((a, b) => ((a.value == null) - (b.value == null)) || (b.value - a.value));
+    rows.sort((a, b) => (a.value == null) - (b.value == null) || b.value - a.value);
   }
   return rows;
 }
@@ -200,7 +223,6 @@ function stopFlagsForAd(windows, createdTime, stop) {
 
 const analyzer = {
   async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc', stopRules = null }) {
-    // fetch adsets directly from the campaign
     const adsetsResp = await fbGetV(FB_API_VER, `${campaignId}/adsets`, {
       access_token: userToken,
       fields: 'id,name,status,daily_budget,budget_remaining,created_time',
@@ -209,7 +231,6 @@ const analyzer = {
 
     let adsetIds = (adsetsResp.data || []).map(a => a.id);
 
-    // Fallback: derive from ads
     if (adsetIds.length === 0) {
       const adsFallback = await fbGetV(FB_API_VER, `${campaignId}/ads`, {
         access_token: userToken,
@@ -317,7 +338,7 @@ const analyzer = {
 };
 
 // =========================
-/* GENERATOR (Step 2) */
+/* GENERATOR */
 // =========================
 const generator = {
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
@@ -397,7 +418,7 @@ const generator = {
 };
 
 // =========================
-/* DEPLOYER (Step 3) + Budget helpers (Step 5) */
+/* DEPLOYER (+ dryRun for tests) */
 // =========================
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
@@ -512,7 +533,7 @@ async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, chall
 }
 
 const deployer = {
-  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken }) {
+  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken, dryRun = false }) {
     const createdAdsByAdset = {};
     const pausedAdsByAdset = {};
     const variantMapByAdset = {};
@@ -530,6 +551,14 @@ const deployer = {
         if (created >= maxNew) break;
 
         try {
+          if (dryRun) {
+            const adId = `DRY_AD_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+            createdAdsByAdset[adsetId].push(adId);
+            variantMapByAdset[adsetId][c.variantId || `var_${created + 1}`] = adId;
+            created += 1;
+            continue;
+          }
+
           if (c.kind === 'image' && c.imageUrl) {
             const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer' });
             const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
@@ -558,10 +587,12 @@ const deployer = {
         }
       }
 
-      const losers = losersByAdset[adsetId] || [];
-      if (losers.length) {
-        await pauseAds({ adIds: losers, userToken });
-        pausedAdsByAdset[adsetId].push(...losers);
+      if (!dryRun) {
+        const losers = losersByAdset[adsetId] || [];
+        if (losers.length) {
+          await pauseAds({ adIds: losers, userToken });
+          pausedAdsByAdset[adsetId].push(...losers);
+        }
       }
     }
 
@@ -573,4 +604,4 @@ const deployer = {
   splitBudgetBetweenChampionAndChallengers
 };
 
-module.exports = { policy, analyzer, generator, deployer };
+module.exports = { policy, analyzer, generator, deployer, testing };

@@ -1,17 +1,13 @@
 // server/routes/smart.js
 'use strict';
 
-// SmartCampaign API: enable, run-once (initial A/B or plateau challengers), status.
-// Uses LowDB and the combined SmartCampaignEngine (policy, analyzer, generator, deployer).
-
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
-const { policy, analyzer, generator, deployer } = require('../smartCampaignEngine');
+const { policy, analyzer, generator, deployer, testing } = require('../smartCampaignEngine');
 
-// ---- DB helpers / migrations ----
 async function ensureSmartTables() {
   await db.read();
   db.data = db.data || {};
@@ -34,9 +30,6 @@ function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   return Math.max(0, Number(fallbackHours || 0));
 }
 
-/**
- * Decide variant plan (1 vs 2 per type).
- */
 function decideVariantPlanFrom(cfg = {}, overrides = {}) {
   const assetTypes = String(overrides.assetTypes || cfg.assetTypes || 'both').toLowerCase();
   const wantsImage = assetTypes === 'image' || assetTypes === 'both';
@@ -73,7 +66,6 @@ function decideVariantPlanFrom(cfg = {}, overrides = {}) {
   });
 }
 
-// Normalize UI stop rules -> analyzer keys
 function normalizeStopRules(cfg = {}) {
   const s = cfg.stopRules || {};
   const base = policy.STOP_RULES;
@@ -85,25 +77,27 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
-// Enable Smart management for a campaign (stores guardrails and selections)
+// ===== TEST MOCK ENDPOINTS =====
+router.post('/mock-insights', async (req, res) => {
+  const { adset = {}, ad = {} } = req.body || {};
+  testing.setMockInsights({ adset, ad });
+  res.json({ ok: true, counts: { adset: Object.keys(adset).length, ad: Object.keys(ad).length } });
+});
+router.post('/mock-insights/clear', async (req, res) => {
+  testing.clearMockInsights();
+  res.json({ ok: true });
+});
+
+// Enable Smart config
 router.post('/enable', async (req, res) => {
   try {
     await ensureSmartTables();
     const {
-      accountId,
-      campaignId,
-      pageId,
-      link,
-      kpi = 'cpc',
-      assetTypes = 'both',
-      dailyBudget = 0,
-      flightStart = null,
-      flightEnd = null,
-      flightHours = 0,
-      overrideCountPerType = null,
-      forceTwoPerType = false,
-      thresholds = {},
-      stopRules = {}
+      accountId, campaignId, pageId, link,
+      kpi = 'cpc', assetTypes = 'both', dailyBudget = 0,
+      flightStart = null, flightEnd = null, flightHours = 0,
+      overrideCountPerType = null, forceTwoPerType = false,
+      thresholds = {}, stopRules = {}
     } = req.body;
 
     if (!accountId || !campaignId || !pageId) {
@@ -133,23 +127,14 @@ router.post('/enable', async (req, res) => {
     } else {
       db.data.smart_configs.push({
         id: `sc_${campaignId}`,
-        accountId,
-        campaignId,
-        pageId,
+        accountId, campaignId, pageId,
         link: link || '',
-        kpi,
-        assetTypes,
+        kpi, assetTypes,
         dailyBudget: Number(dailyBudget) || 0,
-        flightStart,
-        flightEnd,
-        flightHours: Number(flightHours) || 0,
-        overrideCountPerType,
-        forceTwoPerType: !!forceTwoPerType,
-        thresholds: mergedThresholds,
-        stopRules: mergedStopRules,
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
-        lastRunAt: null,
+        flightStart, flightEnd, flightHours: Number(flightHours) || 0,
+        overrideCountPerType, forceTwoPerType: !!forceTwoPerType,
+        thresholds: mergedThresholds, stopRules: mergedStopRules,
+        createdAt: nowIso(), updatedAt: nowIso(), lastRunAt: null,
         state: { adsets: {} }
       });
     }
@@ -160,11 +145,7 @@ router.post('/enable', async (req, res) => {
   }
 });
 
-/**
- * Manually trigger a single Smart run for a campaign.
- * - force/initial => spawn challengers even if plateau isn't detected by metrics yet
- * - uses fallback to fetch adsets if analyzer returned none
- */
+// Run once (initial or plateau)
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -172,28 +153,18 @@ router.post('/run-once', async (req, res) => {
     if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
     const {
-      accountId,
-      campaignId,
-      form = {},
-      answers = {},
-      url = '',
+      accountId, campaignId, form = {}, answers = {}, url = '',
       mediaSelection = 'both',
-      // optional run overrides
-      force = false,
-      initial = false,
-      dailyBudget = null,
-      flightStart = null,
-      flightEnd = null,
-      flightHours = null,
-      overrideCountPerType = null,
-      forceTwoPerType = null
+      force = false, initial = false,
+      dailyBudget = null, flightStart = null, flightEnd = null, flightHours = null,
+      overrideCountPerType = null, forceTwoPerType = null,
+      dryRun = true
     } = req.body;
 
     if (!accountId || !campaignId) {
       return res.status(400).json({ error: 'accountId and campaignId are required' });
     }
 
-    // Ensure config exists or create a minimal one on the fly
     await db.read();
     let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (!cfg) {
@@ -201,66 +172,41 @@ router.post('/run-once', async (req, res) => {
       if (!pageId) return res.status(400).json({ error: 'Config not found. Provide pageId or call /smart/enable first.' });
       cfg = {
         id: `sc_${campaignId}`,
-        accountId,
-        campaignId,
-        pageId,
+        accountId, campaignId, pageId,
         link: form?.url || url || '',
         kpi: 'cpc',
         assetTypes: (mediaSelection || 'both').toLowerCase(),
         dailyBudget: Number(dailyBudget) || 0,
-        flightStart,
-        flightEnd,
-        flightHours: Number(flightHours) || 0,
-        overrideCountPerType,
-        forceTwoPerType: !!forceTwoPerType,
-        thresholds: {},
-        stopRules: {},
-        createdAt: nowIso(),
-        updatedAt: nowIso(),
-        lastRunAt: null,
+        flightStart, flightEnd, flightHours: Number(flightHours) || 0,
+        overrideCountPerType, forceTwoPerType: !!forceTwoPerType,
+        thresholds: {}, stopRules: {}, createdAt: nowIso(), updatedAt: nowIso(), lastRunAt: null,
         state: { adsets: {} }
       };
       db.data.smart_configs.push(cfg);
       await db.write();
     }
 
-    // Analyzer pass (honor stop rules from config)
     const analysis = await analyzer.analyzeCampaign({
-      accountId,
-      campaignId,
-      userToken,
-      kpi: cfg.kpi || 'cpc',
-      stopRules: normalizeStopRules(cfg)
+      accountId, campaignId, userToken, kpi: cfg.kpi || 'cpc', stopRules: normalizeStopRules(cfg)
     });
 
-    // Decide variant plan (1 vs 2 per type)
     const variantPlan = decideVariantPlanFrom(cfg, {
-      assetTypes: mediaSelection,
-      dailyBudget,
-      flightStart,
-      flightEnd,
-      flightHours,
-      overrideCountPerType,
-      forceTwoPerType
+      assetTypes: mediaSelection, dailyBudget, flightStart, flightEnd, flightHours, overrideCountPerType, forceTwoPerType
     });
 
-    // Determine whether to act
     const plateauDetected = Object.values(analysis.plateauByAdset || {}).some(Boolean);
     const shouldForceInitial = !!force || !!initial;
+
     if (!plateauDetected && !shouldForceInitial) {
       return res.json({ success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan });
     }
 
     // Generate variants
     const creatives = await generator.generateVariants({
-      form,
-      answers,
-      url,
-      mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase(),
-      variantPlan
+      form, answers, url, mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase(), variantPlan
     });
 
-    // --- Fallback: if analyzer didn't find adsets, fetch from FB ---
+    // Target ad sets
     let targetAdsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
     if (!targetAdsetIds.length) {
       try {
@@ -269,35 +215,32 @@ router.post('/run-once', async (req, res) => {
           { params: { access_token: userToken, fields: 'id,name,status,effective_status', limit: 50 } }
         );
         targetAdsetIds = (adsetsResp.data?.data || []).map(a => a.id);
-      } catch (e) {
-        console.warn('[smart.run-once] Fallback adset fetch failed:', e?.response?.data || e.message);
-      }
+      } catch {}
     }
     if (!targetAdsetIds.length) {
-      return res.status(409).json({
-        error: 'No ad sets found for this campaign (analyzer returned none, and fallback list is empty). Launch needs at least one ad set.'
-      });
+      return res.status(409).json({ error: 'No ad sets found for this campaign.' });
     }
 
-    // Deploy
+    // IMPORTANT: on plateau, do not pause champion
+    const losersByAdset = shouldForceInitial ? {} : (plateauDetected ? {} : analysis.losersByAdset);
+    const winnersByAdset = shouldForceInitial ? {} : analysis.winnersByAdset;
+
     const deployed = await deployer.deploy({
       accountId,
       pageId: cfg.pageId,
       campaignLink: cfg.link || form?.url || url || 'https://your-smartmark-site.com',
       adsetIds: targetAdsetIds,
-      winnersByAdset: shouldForceInitial ? {} : analysis.winnersByAdset,
-      losersByAdset: shouldForceInitial ? {} : analysis.losersByAdset,
+      winnersByAdset,
+      losersByAdset,
       creatives,
-      userToken
+      userToken,
+      dryRun: !!dryRun
     });
 
-    // Log run
     await db.read();
     const run = {
       id: `run_${Date.now()}`,
-      campaignId,
-      accountId,
-      startedAt: nowIso(),
+      campaignId, accountId, startedAt: nowIso(),
       mode: shouldForceInitial ? 'initial' : 'plateau',
       plateauDetected: plateauDetected || shouldForceInitial,
       variantPlan,
@@ -306,30 +249,19 @@ router.post('/run-once', async (req, res) => {
     };
     db.data.smart_runs.push(run);
 
-    // Archive variant↔adId mapping
     Object.entries(deployed.variantMapByAdset || {}).forEach(([adsetId, vmap]) => {
       Object.entries(vmap || {}).forEach(([variantId, adId]) => {
         db.data.creative_history.push({
-          id: `ch_${adId}`,
-          campaignId,
-          adsetId,
-          adId,
-          variantId,
-          createdAt: nowIso(),
+          id: `ch_${adId}`, campaignId, adsetId, adId, variantId, createdAt: nowIso(),
           kind: (variantId || '').startsWith('img_') ? 'image' : 'video'
         });
       });
     });
 
-    // Update config last run
     const cfgRef = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
-    if (cfgRef) {
-      cfgRef.lastRunAt = nowIso();
-      cfgRef.updatedAt = nowIso();
-    }
+    if (cfgRef) { cfgRef.lastRunAt = nowIso(); cfgRef.updatedAt = nowIso(); }
     await db.write();
 
-    // Handy counts for UI/debug
     const wantImages = variantPlan.images || 0;
     const wantVideos = variantPlan.videos || 0;
     const createdCounts = Object.fromEntries(
@@ -345,9 +277,7 @@ router.post('/run-once', async (req, res) => {
 
     res.json({
       success: true,
-      run,
-      analysis,
-      variantPlan,
+      run, analysis, variantPlan,
       expectedPerType: { images: wantImages, videos: wantVideos },
       createdCountsPerAdset: createdCounts
     });
@@ -356,7 +286,7 @@ router.post('/run-once', async (req, res) => {
   }
 });
 
-// Persist-only: update stored config stop rules (so /smart/status reflects what you set)
+// Persist stop rules
 router.post('/config/:campaignId/stop-rules', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -365,7 +295,6 @@ router.post('/config/:campaignId/stop-rules', async (req, res) => {
     await db.read();
     const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (!cfg) return res.status(404).json({ error: 'Config not found. Call /smart/enable first.' });
-
     const next = {
       spendPerAdUSD: Number(inb.spendPerAdUSD ?? cfg.stopRules?.spendPerAdUSD ?? 0),
       impressionsPerAd: Number(inb.impressionsPerAd ?? cfg.stopRules?.impressionsPerAd ?? 0),
@@ -381,7 +310,7 @@ router.post('/config/:campaignId/stop-rules', async (req, res) => {
   }
 });
 
-// Status for a campaign
+// Status
 router.get('/status/:campaignId', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -395,7 +324,6 @@ router.get('/status/:campaignId', async (req, res) => {
   }
 });
 
-// Manually trigger the scheduler sweep once (for testing)
 router.post('/sweep-now', async (req, res) => {
   try {
     const jobs = require('../scheduler/jobs');
@@ -409,8 +337,6 @@ router.post('/sweep-now', async (req, res) => {
   }
 });
 
-// Force-commit a winner now (rank ads by CPC and pause the worst per ad set)
-// ⬇️ UPDATED to persist champion in config.state so plateau can run next.
 router.post('/commit-now', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -423,79 +349,37 @@ router.post('/commit-now', async (req, res) => {
     }
 
     const analysis = await analyzer.analyzeCampaign({
-      accountId,
-      campaignId,
-      userToken,
-      kpi: 'cpc'
+      accountId, campaignId, userToken, kpi: 'cpc'
     });
 
-    // Build winners/losers per adset even if insights are empty
-    const winnersByAdset = {};
-    const losersToPause = [];
-
+    let losers = [];
     for (const adsetId of (analysis.adsetIds || [])) {
-      const ids = analysis.adMapByAdset?.[adsetId] || [];
-      if (ids.length < 2) continue;
-
-      // Try ranked winner from analyzer; fallback to first id
-      const subset = {};
-      ids.forEach(id => (subset[id] = analysis.adInsights[id] || {}));
-
-      // Simple CPC-first rank
-      const rows = Object.keys(subset).map(id => {
-        const r = subset[id]?.recent || {};
-        const clicks = Number(r.clicks || 0);
-        const spend = Number(r.spend || 0);
-        const cpc = clicks > 0 ? spend / clicks : Infinity;
-        const ctr = Number(r.ctr || 0);
-        return { id, cpc, ctr };
-      }).sort((a, b) => (a.cpc - b.cpc) || (b.ctr - a.ctr));
-
-      const championId = rows?.[0]?.id || ids[0];
-      winnersByAdset[adsetId] = championId;
-      ids.filter(id => id !== championId).forEach(id => losersToPause.push(id));
-    }
-
-    // Pause losers
-    if (losersToPause.length) {
-      await deployer.pauseAds({ adIds: losersToPause, userToken });
-    }
-
-    // Persist champions into config.state
-    await db.read();
-    const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
-    if (cfg) {
-      cfg.state = cfg.state || { adsets: {} };
-      for (const adsetId of (analysis.adsetIds || [])) {
-        const champ = winnersByAdset[adsetId];
-        if (!champ) continue;
-        cfg.state.adsets[adsetId] = {
-          ...(cfg.state.adsets[adsetId] || {}),
-          championAdId: champ,
-          winnerCommittedAt: nowIso(),
-          plateauSince: null
-        };
+      const loserList = analysis.losersByAdset?.[adsetId] || [];
+      if (loserList.length) losers.push(...loserList);
+      else {
+        const ids = analysis.adMapByAdset?.[adsetId] || [];
+        if (ids.length > 1) losers.push(ids[ids.length - 1]);
       }
-      cfg.updatedAt = nowIso();
-      await db.write();
     }
 
-    // Log run
+    losers = Array.from(new Set(losers)).filter(Boolean);
+    if (!losers.length) {
+      return res.json({ success: true, message: 'No losers found to pause (need at least 2 ads per ad set).' });
+    }
+
+    await deployer.pauseAds({ adIds: losers, userToken });
+
     await db.read();
     db.data.smart_runs.push({
       id: `run_${Date.now()}`,
-      campaignId,
-      accountId,
-      startedAt: nowIso(),
-      mode: 'stop_rules_commit',
-      plateauDetected: true,
+      campaignId, accountId, startedAt: nowIso(),
+      mode: 'stop_rules_commit', plateauDetected: true,
       variantPlan: { images: 0, videos: 0 },
-      createdAdsByAdset: {},
-      pausedAdsByAdset: { '*': losersToPause }
+      createdAdsByAdset: {}, pausedAdsByAdset: { '*': losers }
     });
     await db.write();
 
-    res.json({ success: true, paused: losersToPause, champions: winnersByAdset });
+    res.json({ success: true, paused: losers });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
