@@ -1,14 +1,27 @@
+// server/db.js
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
 const { Low } = require('lowdb');
 const { JSONFile } = require('lowdb/node');
 
-// Store database file in the backend folder (so it’s always found)
-const db = new Low(new JSONFile(__dirname + '/db.json'), { users: [], campaigns: [] });
+const DB_FILE =
+  process.env.DB_FILE ||
+  path.join(__dirname, 'data', 'db.json'); // local default: server/data/db.json
 
-// Always ensure .data is initialized
-(async () => {
-  await db.read();
-  db.data ||= { users: [], campaigns: [] };
-  await db.write();
-})();
+// ensure folder exists
+fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
+
+// lowdb adapter + instance (no top-level await; callers do db.read()/db.write())
+const adapter = new JSONFile(DB_FILE);
+const db = new Low(adapter, {
+  users: [],
+  campaigns: [],
+  smart_configs: [],
+  smart_runs: [],
+  creative_history: [],
+  tokens: {} // <= where we keep the FB token
+});
 
 module.exports = db;
