@@ -1,7 +1,4 @@
 // server/smartCampaignEngine/index.js
-// Combined Policy + Analyzer + Generator + Deployer with A/B guardrails, stop rules, CPC/CTR metrics,
-// and budget helpers (steps 1–5). Keep exports stable + add new helpers.
-
 'use strict';
 
 const axios = require('axios');
@@ -40,52 +37,33 @@ async function fbPostV(apiVersion, endpoint, body, params) {
 const FB_API_VER = 'v23.0';
 
 // =========================
-/** POLICY (Step 1) */
+// POLICY (Step 1)
 // =========================
 const policy = {
-  // Recent/prior windows for analyzer
-  WINDOWS: {
-    RECENT_DAYS: 3,
-    PRIOR_DAYS: 3
-  },
-
-  // A/B defaults and guardrails
+  WINDOWS: { RECENT_DAYS: 3, PRIOR_DAYS: 3 },
   VARIANTS: {
-    DEFAULT_COUNT_PER_TYPE: 2,      // images:2, videos:2 (if selected)
-    FALLBACK_COUNT_PER_TYPE: 1,     // fallback when budget/flight too small
-    MIN_DAILY_BUDGET_FOR_AB: 20,    // USD
-    MIN_FLIGHT_HOURS_FOR_AB: 48     // hours
+    DEFAULT_COUNT_PER_TYPE: 2,
+    FALLBACK_COUNT_PER_TYPE: 1,
+    MIN_DAILY_BUDGET_FOR_AB: 20,
+    MIN_FLIGHT_HOURS_FOR_AB: 48
   },
-
-  // Stop rules (any one met → we can choose a winner)
   STOP_RULES: {
-    MIN_SPEND_PER_AD: 20,           // USD
+    MIN_SPEND_PER_AD: 20,
     MIN_IMPRESSIONS_PER_AD: 3000,
     MIN_CLICKS_PER_AD: 30,
-    MAX_TEST_HOURS: 48              // hours since ad.created_time
+    MAX_TEST_HOURS: 48
   },
-
-  // Plateau rules (Champion degradation)
   PLATEAU: {
-    CPC_DEGRADATION_PCT: 0.20,      // +20% CPC vs baseline (prior window)
+    CPC_DEGRADATION_PCT: 0.20,
     MIN_IMPRESSIONS_RECENT: 1500,
     MIN_SPEND_RECENT: 5
   },
-
-  // Safety limits
   LIMITS: {
     MAX_NEW_ADS_PER_RUN_PER_ADSET: 2,
     MIN_HOURS_BETWEEN_RUNS: 24,
     MIN_HOURS_BETWEEN_NEW_ADS: 72
   },
-
-  // Legacy adset-level plateau heuristic (kept for compatibility)
-  THRESHOLDS: {
-    MIN_IMPRESSIONS: 1500,
-    CTR_DROP_PCT: 0.20,
-    FREQ_MAX: 2.0,
-    MIN_SPEND: 5
-  },
+  THRESHOLDS: { MIN_IMPRESSIONS: 1500, CTR_DROP_PCT: 0.20, FREQ_MAX: 2.0, MIN_SPEND: 5 },
 
   isPlateau({ recent, prior, thresholds }) {
     const t = thresholds || this.THRESHOLDS;
@@ -103,13 +81,11 @@ const policy = {
     return false;
   },
 
-  // Decide # of variants per asset type
   decideVariantPlan({ assetTypes = 'both', dailyBudget = 0, flightHours = 0, overrideCountPerType = null }) {
     const at = String(assetTypes || 'both').toLowerCase();
     const wantsImage = at === 'image' || at === 'both';
     const wantsVideo = at === 'video' || at === 'both';
 
-    // override support
     if (overrideCountPerType && typeof overrideCountPerType === 'object') {
       return {
         images: wantsImage ? Math.max(1, Number(overrideCountPerType.images || 0)) : 0,
@@ -122,15 +98,12 @@ const policy = {
       Number(flightHours) >= this.VARIANTS.MIN_FLIGHT_HOURS_FOR_AB;
 
     const count = canAB ? this.VARIANTS.DEFAULT_COUNT_PER_TYPE : this.VARIANTS.FALLBACK_COUNT_PER_TYPE;
-    return {
-      images: wantsImage ? count : 0,
-      videos: wantsVideo ? count : 0
-    };
+    return { images: wantsImage ? count : 0, videos: wantsVideo ? count : 0 };
   }
 };
 
 // =========================
-/** ANALYZER (Step 4) */
+// ANALYZER (Step 4)  — FIXED to get adsets via /{campaignId}/adsets
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -171,37 +144,20 @@ async function getWindowInsights(id, token, level, windows) {
     fbGetV(FB_API_VER, `${id}/insights`, { access_token: token, fields: FIELDS, time_range: JSON.stringify(priorRange), level })
   ]);
 
-  return {
-    recent: parseMetrics(recent),
-    prior: parseMetrics(prior),
-    _ranges: { recentRange, priorRange }
-  };
+  return { recent: parseMetrics(recent), prior: parseMetrics(prior), _ranges: { recentRange, priorRange } };
 }
 
 function rankAds(listByAdId, kpi = 'cpc') {
   const safe = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
   const rows = Object.entries(listByAdId).map(([adId, w]) => {
-    const v =
-      kpi === 'cpc'
-        ? safe(w.recent?.cpc)
-        : (kpi === 'ctr' ? safe(w.recent?.ctr) : safe(w.recent?.ctr));
+    const v = kpi === 'cpc' ? safe(w.recent?.cpc) : (kpi === 'ctr' ? safe(w.recent?.ctr) : safe(w.recent?.ctr));
     return { adId, value: v, windows: w };
   });
 
   if (kpi === 'cpc') {
-    rows.sort((a, b) => {
-      if (a.value === null && b.value === null) return 0;
-      if (a.value === null) return 1;
-      if (b.value === null) return -1;
-      return a.value - b.value;
-    });
+    rows.sort((a, b) => (a.value == null) - (b.value == null) || a.value - b.value);
   } else {
-    rows.sort((a, b) => {
-      if (a.value === null && b.value === null) return 0;
-      if (a.value === null) return 1;
-      if (b.value === null) return -1;
-      return b.value - a.value;
-    });
+    rows.sort((a, b) => (a.value == null) - (b.value == null) || b.value - a.value);
   }
   return rows;
 }
@@ -220,35 +176,31 @@ function stopFlagsForAd(windows, createdTime, stop) {
     clicks: (r.clicks || 0) >= stop.MIN_CLICKS_PER_AD,
     time: hoursSince(createdTime) >= stop.MAX_TEST_HOURS
   };
-  return {
-    flags,
-    any: !!(flags.spend || flags.impressions || flags.clicks || flags.time)
-  };
+  return { flags, any: !!(flags.spend || flags.impressions || flags.clicks || flags.time) };
 }
 
 const analyzer = {
-  /**
-   * Analyze a campaign with optional stopRules override (from /smart/enable).
-   * @param {Object} opts
-   * @param {string} opts.accountId
-   * @param {string} opts.campaignId
-   * @param {string} opts.userToken
-   * @param {string} [opts.kpi='cpc']
-   * @param {Object|null} [opts.stopRules=null] // {MIN_SPEND_PER_AD, MIN_IMPRESSIONS_PER_AD, MIN_CLICKS_PER_AD, MAX_TEST_HOURS}
-   */
-  async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc', stopRules = null }) {
-    const adsets = await fbGetV(FB_API_VER, `act_${accountId}/adsets`, {
+  async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc' }) {
+    // FIX: fetch adsets directly from the campaign (no flaky account-level filtering)
+    const adsetsResp = await fbGetV(FB_API_VER, `${campaignId}/adsets`, {
       access_token: userToken,
-      fields: 'id,name,campaign_id,status,daily_budget,budget_remaining',
-      limit: 200,
-      filtering: JSON.stringify([{ field: 'campaign_id', operator: 'IN', value: [campaignId] }])
+      fields: 'id,name,status,daily_budget,budget_remaining',
+      limit: 200
     });
 
-    const effectiveStop = stopRules && typeof stopRules === 'object'
-      ? stopRules
-      : policy.STOP_RULES;
+    let adsetIds = (adsetsResp.data || []).map(a => a.id);
 
-    const adsetIds = (adsets.data || []).map(a => a.id);
+    // Fallback: if no adsets came back, try campaign->ads and derive adsets
+    if (adsetIds.length === 0) {
+      const adsFallback = await fbGetV(FB_API_VER, `${campaignId}/ads`, {
+        access_token: userToken,
+        fields: 'id,adset_id',
+        limit: 200
+      });
+      const set = new Set((adsFallback.data || []).map(a => a.adset_id).filter(Boolean));
+      adsetIds = Array.from(set);
+    }
+
     const adsetInsights = {};
     const adInsights = {};
     const adMapByAdset = {};
@@ -259,9 +211,10 @@ const analyzer = {
 
       const ads = await fbGetV(FB_API_VER, `${adsetId}/ads`, {
         access_token: userToken,
-        fields: 'id,name,status,created_time,creative{id,object_story_spec}',
+        fields: 'id,name,status,effective_status,created_time,adset_id,creative{id,object_story_spec}',
         limit: 200
       });
+
       const ids = (ads.data || []).map(a => a.id);
       adMapByAdset[adsetId] = ids;
       for (const a of (ads.data || [])) {
@@ -284,8 +237,8 @@ const analyzer = {
       const ids = adMapByAdset[adsetId] || [];
 
       plateauByAdset[adsetId] = policy.isPlateau({
-        recent: adsetInsights[adsetId].recent,
-        prior: adsetInsights[adsetId].prior,
+        recent: adsetInsights[adsetId]?.recent || {},
+        prior: adsetInsights[adsetId]?.prior || {},
         thresholds: policy.THRESHOLDS
       });
 
@@ -304,7 +257,7 @@ const analyzer = {
       }
 
       for (const adId of ids) {
-        stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, effectiveStop);
+        stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, policy.STOP_RULES);
       }
 
       const champId = championByAdset[adsetId];
@@ -344,7 +297,7 @@ const analyzer = {
 };
 
 // =========================
-/** GENERATOR (Step 2) — unchanged */
+// GENERATOR (Step 2)
 // =========================
 const generator = {
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
@@ -352,7 +305,6 @@ const generator = {
     const wantsImage = variantPlan.images > 0;
     const wantsVideo = variantPlan.videos > 0;
 
-    // 1) Copy (generate once, reuse)
     let copy = '';
     try {
       const copyResp = await axios.post(`${api}/generate-campaign-assets`, {
@@ -360,13 +312,10 @@ const generator = {
         url: url || form?.url || ''
       }, { timeout: 60000 });
       copy = `${copyResp.data?.headline || ''}\n\n${copyResp.data?.body || ''}`.trim();
-    } catch {
-      copy = '';
-    }
+    } catch { copy = ''; }
 
     const out = [];
 
-    // 2) Images
     if (wantsImage) {
       for (let i = 0; i < variantPlan.images; i++) {
         try {
@@ -389,17 +338,11 @@ const generator = {
           let imageUrl = overlayResp.data?.imageUrl || pickedUrl;
           imageUrl = absolutePublicUrl(imageUrl);
 
-          out.push({
-            kind: 'image',
-            variantId: `img_${i + 1}`,
-            imageUrl,
-            adCopy: copy
-          });
-        } catch (e) {}
+          out.push({ kind: 'image', variantId: `img_${i + 1}`, imageUrl, adCopy: copy });
+        } catch {}
       }
     }
 
-    // 3) Videos
     if (wantsVideo) {
       for (let i = 0; i < variantPlan.videos; i++) {
         try {
@@ -421,7 +364,7 @@ const generator = {
             },
             adCopy: copy
           });
-        } catch (e) {}
+        } catch {}
       }
     }
 
@@ -429,18 +372,12 @@ const generator = {
   },
 
   async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both' }) {
-    return this.generateVariants({
-      form,
-      answers,
-      url,
-      mediaSelection,
-      variantPlan: { images: 1, videos: 1 }
-    });
+    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 1 } });
   }
 };
 
 // =========================
-/** DEPLOYER (Step 3) + Budget helpers (Step 5) */
+// DEPLOYER (Step 3) + Budget helpers (Step 5)
 // =========================
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
@@ -456,13 +393,11 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
 
 async function ensureVideoId({ accountId, userToken, creativeVideo }) {
   if (creativeVideo.fbVideoId) return creativeVideo.fbVideoId;
-
   if (creativeVideo.absoluteUrl) {
     const form = new FormData();
     form.append('file_url', creativeVideo.absoluteUrl);
     form.append('name', 'SmartMark Generated Video');
     form.append('description', 'Generated by SmartMark');
-
     const res = await axios.post(
       `https://graph.facebook.com/${FB_API_VER}/act_${accountId}/advideos`,
       form,
@@ -478,11 +413,7 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
     name: `SmartMark Image ${new Date().toISOString()}`,
     object_story_spec: {
       page_id: pageId,
-      link_data: {
-        message: adCopy || '',
-        link: link || 'https://your-smartmark-site.com',
-        image_hash: imageHash
-      }
+      link_data: { message: adCopy || '', link: link || 'https://your-smartmark-site.com', image_hash: imageHash }
     }
   }, { access_token: userToken });
 
@@ -528,25 +459,15 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imag
 
 async function pauseAds({ adIds, userToken }) {
   for (const id of adIds) {
-    try {
-      await fbPostV(FB_API_VER, id, { status: 'PAUSED' }, { access_token: userToken });
-    } catch (e) {
-      console.warn('Pause failed for', id, e?.response?.data?.error?.message || e.message);
-    }
+    try { await fbPostV(FB_API_VER, id, { status: 'PAUSED' }, { access_token: userToken }); }
+    catch (e) { console.warn('Pause failed for', id, e?.response?.data?.error?.message || e.message); }
   }
 }
 
-// Budget helpers
 async function setAdsetDailyBudget({ adsetId, dailyBudgetCents, userToken }) {
   await fbPostV(FB_API_VER, adsetId, { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) }, { access_token: userToken });
 }
-async function splitBudgetBetweenChampionAndChallengers({
-  championAdsetId,
-  challengerAdsetId,
-  totalBudgetCents,
-  championPct = 0.75,
-  userToken
-}) {
+async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, challengerAdsetId, totalBudgetCents, championPct = 0.75, userToken }) {
   const total = Math.max(200, Number(totalBudgetCents || 0));
   const champ = Math.round(total * Math.min(0.95, Math.max(0.05, championPct)));
   const chall = Math.max(100, total - champ);
@@ -585,29 +506,13 @@ const deployer = {
               uploadedImageHashByDataUrl.set(dataUrl, hash);
             }
 
-            const adId = await createImageAd({
-              pageId, accountId, adsetId,
-              adCopy: c.adCopy,
-              imageHash: hash,
-              userToken,
-              link: campaignLink
-            });
-
+            const adId = await createImageAd({ pageId, accountId, adsetId, adCopy: c.adCopy, imageHash: hash, userToken, link: campaignLink });
             createdAdsByAdset[adsetId].push(adId);
             variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
             created += 1;
           } else if (c.kind === 'video' && c.video) {
             const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
-
-            const adId = await createVideoAd({
-              pageId, accountId, adsetId,
-              adCopy: c.adCopy,
-              videoId,
-              imageHash: null,
-              userToken,
-              link: campaignLink
-            });
-
+            const adId = await createVideoAd({ pageId, accountId, adsetId, adCopy: c.adCopy, videoId, imageHash: null, userToken, link: campaignLink });
             createdAdsByAdset[adsetId].push(adId);
             variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
             created += 1;
@@ -627,15 +532,9 @@ const deployer = {
     return { createdAdsByAdset, pausedAdsByAdset, variantMapByAdset };
   },
 
-  // expose helpers
   pauseAds,
   setAdsetDailyBudget,
   splitBudgetBetweenChampionAndChallengers
 };
 
-module.exports = {
-  policy,
-  analyzer,
-  generator,
-  deployer
-};
+module.exports = { policy, analyzer, generator, deployer };
