@@ -5,6 +5,11 @@ const axios = require('axios');
 const FormData = require('form-data');
 const path = require('path');
 
+// ===== runtime test toggles (no spend / dry run) =====
+const NO_SPEND = process.env.NO_SPEND === '1';
+const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1'; // add ?validate_only=1 to your launch route or set env
+const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
+
 // =========================
 // Shared helpers
 // =========================
@@ -29,15 +34,21 @@ async function fbGetV(apiVersion, endpoint, params) {
   const res = await axios.get(url, { params });
   return res.data;
 }
-async function fbPostV(apiVersion, endpoint, body, params) {
+async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
-  const res = await axios.post(url, body, { params });
+  // auto-append validate_only when requested
+  const mergedParams = { ...params };
+  if (VALIDATE_ONLY) {
+    // FB accepts either a string or array; string keeps payloads small.
+    mergedParams.execution_options = 'validate_only';
+  }
+  const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
 const FB_API_VER = 'v23.0';
 
 // =========================
-// POLICY (Step 1)
+/* POLICY (Step 1) */
 // =========================
 const policy = {
   WINDOWS: { RECENT_DAYS: 3, PRIOR_DAYS: 3 },
@@ -103,7 +114,8 @@ const policy = {
 };
 
 // =========================
-// ANALYZER (Step 4)  — FIXED to get adsets via /{campaignId}/adsets
+/* ANALYZER (Step 4) — gets adsets via /{campaignId}/adsets
+   + now accepts stopRules override from /smart/config */
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -180,17 +192,17 @@ function stopFlagsForAd(windows, createdTime, stop) {
 }
 
 const analyzer = {
-  async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc' }) {
-    // FIX: fetch adsets directly from the campaign (no flaky account-level filtering)
+  async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc', stopRules = null }) {
+    // fetch adsets directly from the campaign
     const adsetsResp = await fbGetV(FB_API_VER, `${campaignId}/adsets`, {
       access_token: userToken,
-      fields: 'id,name,status,daily_budget,budget_remaining',
+      fields: 'id,name,status,daily_budget,budget_remaining,created_time',
       limit: 200
     });
 
     let adsetIds = (adsetsResp.data || []).map(a => a.id);
 
-    // Fallback: if no adsets came back, try campaign->ads and derive adsets
+    // Fallback: derive from ads
     if (adsetIds.length === 0) {
       const adsFallback = await fbGetV(FB_API_VER, `${campaignId}/ads`, {
         access_token: userToken,
@@ -205,6 +217,7 @@ const analyzer = {
     const adInsights = {};
     const adMapByAdset = {};
     const adMeta = {};
+    const stop = stopRules || policy.STOP_RULES;
 
     for (const adsetId of adsetIds) {
       adsetInsights[adsetId] = await getWindowInsights(adsetId, userToken, 'adset', policy.WINDOWS);
@@ -257,7 +270,7 @@ const analyzer = {
       }
 
       for (const adId of ids) {
-        stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, policy.STOP_RULES);
+        stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, stop);
       }
 
       const champId = championByAdset[adsetId];
@@ -297,7 +310,7 @@ const analyzer = {
 };
 
 // =========================
-// GENERATOR (Step 2)
+/* GENERATOR (Step 2) */
 // =========================
 const generator = {
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
@@ -377,7 +390,8 @@ const generator = {
 };
 
 // =========================
-// DEPLOYER (Step 3) + Budget helpers (Step 5)
+/* DEPLOYER (Step 3) + Budget helpers (Step 5)
+   — now honors NO_SPEND + VALIDATE_ONLY */
 // =========================
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
@@ -386,7 +400,8 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const resp = await fbPostV(FB_API_VER, `act_${accountId}/adimages`, new URLSearchParams({ bytes: base64 }), {
     access_token: userToken
   });
-  const hash = Object.values(resp.images || {})[0]?.hash;
+  let hash = Object.values(resp.images || {})[0]?.hash || null;
+  if (!hash && VALIDATE_ONLY) hash = 'VALIDATION_ONLY_HASH';
   if (!hash) throw new Error('Image upload failed');
   return hash;
 }
@@ -401,9 +416,11 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
     const res = await axios.post(
       `https://graph.facebook.com/${FB_API_VER}/act_${accountId}/advideos`,
       form,
-      { headers: form.getHeaders(), params: { access_token: userToken } }
+      { headers: form.getHeaders(), params: VALIDATE_ONLY ? { access_token: userToken, execution_options: 'validate_only' } : { access_token: userToken } }
     );
-    return res.data?.id;
+    const vid = res.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
+    if (!vid) throw new Error('Video upload failed');
+    return vid;
   }
   throw new Error('No video available to upload');
 }
@@ -417,14 +434,19 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
     }
   }, { access_token: userToken });
 
+  const creativeId = creative.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_CREATIVE_${Date.now()}` : null);
+  if (!creativeId) throw new Error('Creative create failed');
+
   const ad = await fbPostV(FB_API_VER, `act_${accountId}/ads`, {
     name: `SmartMark Image Ad ${new Date().toISOString()}`,
     adset_id: adsetId,
-    creative: { creative_id: creative.id },
-    status: 'ACTIVE'
+    creative: { creative_id: creativeId },
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
   }, { access_token: userToken });
 
-  return ad.id;
+  const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
+  if (!adId) throw new Error('Ad create failed');
+  return adId;
 }
 
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imageHash, userToken, link }) {
@@ -447,20 +469,28 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imag
     object_story_spec: { page_id: pageId, video_data }
   }, { access_token: userToken });
 
+  const creativeId = creative.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_CREATIVE_${Date.now()}` : null);
+  if (!creativeId) throw new Error('Creative create failed');
+
   const ad = await fbPostV(FB_API_VER, `act_${accountId}/ads`, {
     name: `SmartMark Video Ad ${new Date().toISOString()}`,
     adset_id: adsetId,
-    creative: { creative_id: creative.id },
-    status: 'ACTIVE'
+    creative: { creative_id: creativeId },
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
   }, { access_token: userToken });
 
-  return ad.id;
+  const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
+  if (!adId) throw new Error('Ad create failed');
+  return adId;
 }
 
 async function pauseAds({ adIds, userToken }) {
   for (const id of adIds) {
-    try { await fbPostV(FB_API_VER, id, { status: 'PAUSED' }, { access_token: userToken }); }
-    catch (e) { console.warn('Pause failed for', id, e?.response?.data?.error?.message || e.message); }
+    try {
+      await fbPostV(FB_API_VER, id, { status: 'PAUSED' }, { access_token: userToken });
+    } catch (e) {
+      console.warn('Pause failed for', id, e?.response?.data?.error?.message || e.message);
+    }
   }
 }
 

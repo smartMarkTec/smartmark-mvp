@@ -167,10 +167,24 @@ router.post('/login', async (req, res) => {
 /* =========================
    LAUNCH CAMPAIGN (uses provided creatives)
    ========================= */
+// --- REPLACE THIS WHOLE ROUTE in server/routes/auth.js ---
+
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+  // no-spend flags
+  const NO_SPEND = process.env.NO_SPEND === '1' || req.query.no_spend === '1' || !!req.body.noSpend;
+  const VALIDATE_ONLY = req.query.validate_only === '1' || !!req.body.validateOnly;
+  const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
+
+  // helper to build params (adds validate_only when requested)
+  const mkParams = () => {
+    const p = { access_token: userToken };
+    if (VALIDATE_ONLY) p.execution_options = ['validate_only'];
+    return p;
+  };
 
   try {
     const {
@@ -228,16 +242,18 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map(id => ({ id })) }];
     }
 
-    // limit: max 2 active campaigns
-    const existing = await axios.get(
-      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-      { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
-    );
-    const activeCount = (existing.data?.data || []).filter(
-      c => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
-    ).length;
-    if (activeCount >= 2) {
-      return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
+    // limit: max 2 active campaigns (skip when validate-only)
+    if (!VALIDATE_ONLY) {
+      const existing = await axios.get(
+        `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+        { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
+      );
+      const activeCount = (existing.data?.data || []).filter(
+        c => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
+      ).length;
+      if (activeCount >= 2) {
+        return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
+      }
     }
 
     // decide variants
@@ -265,20 +281,20 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return res.status(400).json({ error: `Need ${needVid} video(s) but received ${providedVideoCount}.` });
     }
 
-    // 1) Campaign
+    // 1) Campaign (PAUSED in no-spend; ACTIVE otherwise)
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
         name: campaignName,
         objective: 'OUTCOME_TRAFFIC',
-        status: 'ACTIVE',
+        status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
         special_ad_categories: []
       },
-      { params: { access_token: userToken } }
+      { params: mkParams() }
     );
-    const campaignId = campaignRes.data.id;
+    const campaignId = campaignRes.data?.id || 'VALIDATION_ONLY';
 
-    // 2) Ad Sets (split budget evenly across used types)
+    // 2) Ad Sets
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
     const perAdsetBudgetCents = Math.max(100, Math.round(dailyBudget * 100 / Math.max(1, typesUsed)));
 
@@ -293,8 +309,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           billing_event: 'IMPRESSIONS',
           optimization_goal: 'LINK_CLICKS',
           bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-          status: 'ACTIVE',
-          start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+          status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+          start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
           targeting: {
             ...targeting,
             publisher_platforms: ['facebook','instagram'],
@@ -304,9 +320,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             messenger_positions: []
           }
         },
-        { params: { access_token: userToken } }
+        { params: mkParams() }
       );
-      imageAdSetId = data.id;
+      imageAdSetId = data?.id || null;
     }
     if (wantVideo) {
       const { data } = await axios.post(
@@ -318,8 +334,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           billing_event: 'IMPRESSIONS',
           optimization_goal: 'LINK_CLICKS',
           bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-          status: 'ACTIVE',
-          start_time: new Date(Date.now() + 60 * 1000).toISOString(),
+          status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+          start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
           targeting: {
             ...targeting,
             publisher_platforms: ['facebook','instagram'],
@@ -329,9 +345,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             messenger_positions: []
           }
         },
-        { params: { access_token: userToken } }
+        { params: mkParams() }
       );
-      videoAdSetId = data.id;
+      videoAdSetId = data?.id || null;
     }
 
     // helpers
@@ -342,7 +358,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       const fbImageRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
         new URLSearchParams({ bytes: base64 }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: { access_token: userToken } }
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: mkParams() }
       );
       const imgData = fbImageRes.data.images;
       return Object.values(imgData)[0]?.hash;
@@ -359,12 +375,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       const up = await axios.post(
         `https://graph.facebook.com/v23.0/act_${accountId}/advideos`,
         formd,
-        { headers: formd.getHeaders(), params: { access_token: userToken } }
+        { headers: formd.getHeaders(), params: mkParams() }
       );
       return up?.data?.id;
     }
 
-    // 3) Ads (exactly needImg / needVid)
+    // 3) Ads (PAUSED in no-spend)
     const adIds = [];
 
     if (wantImage && imageAdSetId) {
@@ -384,14 +400,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
               }
             }
           },
-          { params: { access_token: userToken } }
+          { params: mkParams() }
         );
         const ad = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-          { name: `${campaignName} (Image v${i + 1})`, adset_id: imageAdSetId, creative: { creative_id: cr.data.id }, status: 'ACTIVE' },
-          { params: { access_token: userToken } }
+          { name: `${campaignName} (Image v${i + 1})`, adset_id: imageAdSetId, creative: { creative_id: cr.data.id }, status: NO_SPEND ? 'PAUSED' : 'ACTIVE' },
+          { params: mkParams() }
         );
-        adIds.push(ad.data.id);
+        adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i+1}`);
       }
     }
 
@@ -428,14 +444,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         const cr = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
           { name: `${campaignName} (Video v${i + 1})`, object_story_spec: { page_id: pageId, video_data } },
-          { params: { access_token: userToken } }
+          { params: mkParams() }
         );
         const ad = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-          { name: `${campaignName} (Video v${i + 1})`, adset_id: videoAdSetId, creative: { creative_id: cr.data.id }, status: 'ACTIVE' },
-          { params: { access_token: userToken } }
+          { name: `${campaignName} (Video v${i + 1})`, adset_id: videoAdSetId, creative: { creative_id: cr.data.id }, status: NO_SPEND ? 'PAUSED' : 'ACTIVE' },
+          { params: mkParams() }
         );
-        adIds.push(ad.data.id);
+        adIds.push(ad.data?.id || `VALIDATION_ONLY_VID_${i+1}`);
       }
     }
 
@@ -445,7 +461,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       adSetIds: [imageAdSetId, videoAdSetId].filter(Boolean),
       adIds,
       variantPlan: plan,
-      campaignStatus: 'ACTIVE'
+      campaignStatus: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+      validateOnly: VALIDATE_ONLY
     });
   } catch (err) {
     let errorMsg = 'Failed to launch campaign.';
@@ -454,6 +471,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     res.status(500).json({ error: errorMsg, detail: err.response?.data || err.message });
   }
 });
+
 
 /* =========================
    TEST/UTILITY ROUTES
