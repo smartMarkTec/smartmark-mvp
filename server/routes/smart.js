@@ -1,9 +1,12 @@
 // server/routes/smart.js
+'use strict';
+
 // SmartCampaign API: enable, run-once (initial A/B or plateau challengers), status.
 // Uses LowDB and the combined SmartCampaignEngine (policy, analyzer, generator, deployer).
 
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { policy, analyzer, generator, deployer } = require('../smartCampaignEngine');
@@ -33,25 +36,17 @@ function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
 
 /**
  * Decide variant plan (1 vs 2 per type).
- * - honors overrideCountPerType when provided
- * - supports forceTwoPerType to always send 2-per-selected-type regardless of budget/flight
- * - otherwise falls back to policy.decideVariantPlan guardrails
  */
 function decideVariantPlanFrom(cfg = {}, overrides = {}) {
   const assetTypes = String(overrides.assetTypes || cfg.assetTypes || 'both').toLowerCase();
   const wantsImage = assetTypes === 'image' || assetTypes === 'both';
   const wantsVideo = assetTypes === 'video' || assetTypes === 'both';
 
-  // If caller/config requests hard 2-per-type, do it.
   const forceTwoPerType = !!(overrides.forceTwoPerType ?? cfg.forceTwoPerType);
   if (forceTwoPerType) {
-    return {
-      images: wantsImage ? 2 : 0,
-      videos: wantsVideo ? 2 : 0
-    };
+    return { images: wantsImage ? 2 : 0, videos: wantsVideo ? 2 : 0 };
   }
 
-  // If explicit override counts are provided, pass straight through to policy.
   const overrideCountPerType = overrides.overrideCountPerType || cfg.overrideCountPerType || null;
   if (overrideCountPerType && typeof overrideCountPerType === 'object') {
     return policy.decideVariantPlan({
@@ -66,7 +61,6 @@ function decideVariantPlanFrom(cfg = {}, overrides = {}) {
     });
   }
 
-  // Default guardrails path.
   return policy.decideVariantPlan({
     assetTypes,
     dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
@@ -167,12 +161,6 @@ router.post('/enable', async (req, res) => {
 
 /**
  * Manually trigger a single Smart run for a campaign.
- * Modes:
- *  - initial/force=true → start first A/B (ignores plateau)
- *  - default            → only act when plateau detected
- * Controls:
- *  - forceTwoPerType    → hard 2-per-selected-type for this run (overrides budget/flight guardrails)
- *  - overrideCountPerType → explicit {images, videos} counts if you want custom numbers
  */
 router.post('/run-once', async (req, res) => {
   try {
@@ -345,6 +333,32 @@ router.post('/run-once', async (req, res) => {
   }
 });
 
+// Persist-only: update stored config stop rules (so /smart/status reflects what you set)
+router.post('/config/:campaignId/stop-rules', async (req, res) => {
+  try {
+    await ensureSmartTables();
+    const { campaignId } = req.params;
+    const inb = req.body || {};
+    await db.read();
+    const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
+    if (!cfg) return res.status(404).json({ error: 'Config not found. Call /smart/enable first.' });
+
+    // Accept UI keys or analyzer keys
+    const next = {
+      spendPerAdUSD: Number(inb.spendPerAdUSD ?? cfg.stopRules?.spendPerAdUSD ?? 0),
+      impressionsPerAd: Number(inb.impressionsPerAd ?? cfg.stopRules?.impressionsPerAd ?? 0),
+      clicksPerAd: Number(inb.clicksPerAd ?? cfg.stopRules?.clicksPerAd ?? 0),
+      timeCapHours: Number(inb.timeCapHours ?? cfg.stopRules?.timeCapHours ?? 0),
+    };
+    cfg.stopRules = next;
+    cfg.updatedAt = nowIso();
+    await db.write();
+    res.json({ ok: true, stored: cfg.stopRules });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Status for a campaign
 router.get('/status/:campaignId', async (req, res) => {
   try {
@@ -373,5 +387,63 @@ router.post('/sweep-now', async (req, res) => {
   }
 });
 
+// Force-commit a winner now (rank ads by CPC and pause the worst per ad set)
+router.post('/commit-now', async (req, res) => {
+  try {
+    await ensureSmartTables();
+    const userToken = getFbUserToken();
+    if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
+    const { accountId, campaignId } = req.body || {};
+    if (!accountId || !campaignId) {
+      return res.status(400).json({ error: 'accountId and campaignId are required' });
+    }
+
+    const analysis = await analyzer.analyzeCampaign({
+      accountId,
+      campaignId,
+      userToken,
+      kpi: 'cpc'
+    });
+
+    // If analyzer produced losers, use those. Otherwise, take the last ranked per adset.
+    let losers = [];
+    for (const adsetId of (analysis.adsetIds || [])) {
+      const loserList = analysis.losersByAdset?.[adsetId] || [];
+      if (loserList.length) {
+        losers.push(...loserList);
+      } else {
+        const ids = analysis.adMapByAdset?.[adsetId] || [];
+        if (ids.length > 1) losers.push(ids[ids.length - 1]);
+      }
+    }
+
+    losers = Array.from(new Set(losers)).filter(Boolean);
+    if (!losers.length) {
+      return res.json({ success: true, message: 'No losers found to pause (need at least 2 ads per ad set).' });
+    }
+
+    await deployer.pauseAds({ adIds: losers, userToken });
+
+    // Log a tiny run entry
+    await db.read();
+    db.data.smart_runs.push({
+      id: `run_${Date.now()}`,
+      campaignId,
+      accountId,
+      startedAt: nowIso(),
+      mode: 'stop_rules_commit',
+      plateauDetected: true,
+      variantPlan: { images: 0, videos: 0 },
+      createdAdsByAdset: {},
+      pausedAdsByAdset: { '*': losers }
+    });
+    await db.write();
+
+    res.json({ success: true, paused: losers });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 module.exports = router;
