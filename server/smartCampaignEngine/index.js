@@ -39,7 +39,6 @@ async function fbPostV(apiVersion, endpoint, body, params = {}) {
   // auto-append validate_only when requested
   const mergedParams = { ...params };
   if (VALIDATE_ONLY) {
-    // FB accepts either a string or array; string keeps payloads small.
     mergedParams.execution_options = 'validate_only';
   }
   const res = await axios.post(url, body, { params: mergedParams });
@@ -72,9 +71,18 @@ const policy = {
   LIMITS: {
     MAX_NEW_ADS_PER_RUN_PER_ADSET: 2,
     MIN_HOURS_BETWEEN_RUNS: 24,
-    MIN_HOURS_BETWEEN_NEW_ADS: 72
+    MIN_HOURS_BETWEEN_NEW_ADS: 72,
+    // ⬇️ added to make scheduler tunable for testing
+    MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU: 24,
+    PLATEAU_CONFIRM_HOURS: 36,
+    MIN_HOURS_LEFT_TO_SPAWN: 24
   },
   THRESHOLDS: { MIN_IMPRESSIONS: 1500, CTR_DROP_PCT: 0.20, FREQ_MAX: 2.0, MIN_SPEND: 5 },
+
+  // Debug switches to enable fast/forced plateau during tests (set via admin route)
+  DEBUG: {
+    FORCE_PLATEAU: false
+  },
 
   isPlateau({ recent, prior, thresholds }) {
     const t = thresholds || this.THRESHOLDS;
@@ -114,8 +122,7 @@ const policy = {
 };
 
 // =========================
-/* ANALYZER (Step 4) — gets adsets via /{campaignId}/adsets
-   + now accepts stopRules override from /smart/config */
+/* ANALYZER (Step 4) */
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -167,9 +174,9 @@ function rankAds(listByAdId, kpi = 'cpc') {
   });
 
   if (kpi === 'cpc') {
-    rows.sort((a, b) => (a.value == null) - (b.value == null) || a.value - b.value);
+    rows.sort((a, b) => ((a.value == null) - (b.value == null)) || (a.value - b.value));
   } else {
-    rows.sort((a, b) => (a.value == null) - (b.value == null) || b.value - a.value);
+    rows.sort((a, b) => ((a.value == null) - (b.value == null)) || (b.value - a.value));
   }
   return rows;
 }
@@ -390,8 +397,7 @@ const generator = {
 };
 
 // =========================
-/* DEPLOYER (Step 3) + Budget helpers (Step 5)
-   — now honors NO_SPEND + VALIDATE_ONLY */
+/* DEPLOYER (Step 3) + Budget helpers (Step 5) */
 // =========================
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');

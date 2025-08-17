@@ -149,7 +149,8 @@ router.post('/enable', async (req, res) => {
         stopRules: mergedStopRules,
         createdAt: nowIso(),
         updatedAt: nowIso(),
-        lastRunAt: null
+        lastRunAt: null,
+        state: { adsets: {} }
       });
     }
     await db.write();
@@ -216,7 +217,8 @@ router.post('/run-once', async (req, res) => {
         stopRules: {},
         createdAt: nowIso(),
         updatedAt: nowIso(),
-        lastRunAt: null
+        lastRunAt: null,
+        state: { adsets: {} }
       };
       db.data.smart_configs.push(cfg);
       await db.write();
@@ -364,7 +366,6 @@ router.post('/config/:campaignId/stop-rules', async (req, res) => {
     const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (!cfg) return res.status(404).json({ error: 'Config not found. Call /smart/enable first.' });
 
-    // Accept UI keys or analyzer keys
     const next = {
       spendPerAdUSD: Number(inb.spendPerAdUSD ?? cfg.stopRules?.spendPerAdUSD ?? 0),
       impressionsPerAd: Number(inb.impressionsPerAd ?? cfg.stopRules?.impressionsPerAd ?? 0),
@@ -409,6 +410,7 @@ router.post('/sweep-now', async (req, res) => {
 });
 
 // Force-commit a winner now (rank ads by CPC and pause the worst per ad set)
+// ⬇️ UPDATED to persist champion in config.state so plateau can run next.
 router.post('/commit-now', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -427,26 +429,58 @@ router.post('/commit-now', async (req, res) => {
       kpi: 'cpc'
     });
 
-    // If analyzer produced losers, use those. Otherwise, take the last ranked per adset.
-    let losers = [];
+    // Build winners/losers per adset even if insights are empty
+    const winnersByAdset = {};
+    const losersToPause = [];
+
     for (const adsetId of (analysis.adsetIds || [])) {
-      const loserList = analysis.losersByAdset?.[adsetId] || [];
-      if (loserList.length) {
-        losers.push(...loserList);
-      } else {
-        const ids = analysis.adMapByAdset?.[adsetId] || [];
-        if (ids.length > 1) losers.push(ids[ids.length - 1]);
+      const ids = analysis.adMapByAdset?.[adsetId] || [];
+      if (ids.length < 2) continue;
+
+      // Try ranked winner from analyzer; fallback to first id
+      const subset = {};
+      ids.forEach(id => (subset[id] = analysis.adInsights[id] || {}));
+
+      // Simple CPC-first rank
+      const rows = Object.keys(subset).map(id => {
+        const r = subset[id]?.recent || {};
+        const clicks = Number(r.clicks || 0);
+        const spend = Number(r.spend || 0);
+        const cpc = clicks > 0 ? spend / clicks : Infinity;
+        const ctr = Number(r.ctr || 0);
+        return { id, cpc, ctr };
+      }).sort((a, b) => (a.cpc - b.cpc) || (b.ctr - a.ctr));
+
+      const championId = rows?.[0]?.id || ids[0];
+      winnersByAdset[adsetId] = championId;
+      ids.filter(id => id !== championId).forEach(id => losersToPause.push(id));
+    }
+
+    // Pause losers
+    if (losersToPause.length) {
+      await deployer.pauseAds({ adIds: losersToPause, userToken });
+    }
+
+    // Persist champions into config.state
+    await db.read();
+    const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
+    if (cfg) {
+      cfg.state = cfg.state || { adsets: {} };
+      for (const adsetId of (analysis.adsetIds || [])) {
+        const champ = winnersByAdset[adsetId];
+        if (!champ) continue;
+        cfg.state.adsets[adsetId] = {
+          ...(cfg.state.adsets[adsetId] || {}),
+          championAdId: champ,
+          winnerCommittedAt: nowIso(),
+          plateauSince: null
+        };
       }
+      cfg.updatedAt = nowIso();
+      await db.write();
     }
 
-    losers = Array.from(new Set(losers)).filter(Boolean);
-    if (!losers.length) {
-      return res.json({ success: true, message: 'No losers found to pause (need at least 2 ads per ad set).' });
-    }
-
-    await deployer.pauseAds({ adIds: losers, userToken });
-
-    // Log a tiny run entry
+    // Log run
     await db.read();
     db.data.smart_runs.push({
       id: `run_${Date.now()}`,
@@ -457,11 +491,11 @@ router.post('/commit-now', async (req, res) => {
       plateauDetected: true,
       variantPlan: { images: 0, videos: 0 },
       createdAdsByAdset: {},
-      pausedAdsByAdset: { '*': losers }
+      pausedAdsByAdset: { '*': losersToPause }
     });
     await db.write();
 
-    res.json({ success: true, paused: losers });
+    res.json({ success: true, paused: losersToPause, champions: winnersByAdset });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

@@ -167,8 +167,6 @@ router.post('/login', async (req, res) => {
 /* =========================
    LAUNCH CAMPAIGN (uses provided creatives)
    ========================= */
-// --- REPLACE THIS WHOLE ROUTE in server/routes/auth.js ---
-
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
@@ -649,7 +647,6 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
 /* === ADMIN: override policy STOP_RULES at runtime (for testing) === */
 router.post('/admin/set-policy-stop-rules', async (req, res) => {
   try {
-    const { policy } = require('../smartCampaignEngine');
     const inb = req.body || {};
     const next = {
       MIN_SPEND_PER_AD: Number(inb.MIN_SPEND_PER_AD ?? policy.STOP_RULES.MIN_SPEND_PER_AD),
@@ -659,6 +656,53 @@ router.post('/admin/set-policy-stop-rules', async (req, res) => {
     };
     policy.STOP_RULES = next;
     res.json({ ok: true, STOP_RULES: policy.STOP_RULES });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* === ADMIN: NEW — override plateau thresholds for fast testing === */
+router.post('/admin/set-policy-plateau', async (req, res) => {
+  try {
+    const inb = req.body || {};
+    policy.PLATEAU = {
+      CPC_DEGRADATION_PCT: Number(inb.CPC_DEGRADATION_PCT ?? policy.PLATEAU.CPC_DEGRADATION_PCT),
+      MIN_IMPRESSIONS_RECENT: Number(inb.MIN_IMPRESSIONS_RECENT ?? policy.PLATEAU.MIN_IMPRESSIONS_RECENT),
+      MIN_SPEND_RECENT: Number(inb.MIN_SPEND_RECENT ?? policy.PLATEAU.MIN_SPEND_RECENT)
+    };
+    res.json({ ok: true, PLATEAU: policy.PLATEAU });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* === ADMIN: NEW — override scheduler limits (hours) for fast plateau === */
+router.post('/admin/set-policy-limits', async (req, res) => {
+  try {
+    const inb = req.body || {};
+    policy.LIMITS = {
+      MAX_NEW_ADS_PER_RUN_PER_ADSET: Number(inb.MAX_NEW_ADS_PER_RUN_PER_ADSET ?? policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET),
+      MIN_HOURS_BETWEEN_RUNS: Number(inb.MIN_HOURS_BETWEEN_RUNS ?? policy.LIMITS.MIN_HOURS_BETWEEN_RUNS),
+      MIN_HOURS_BETWEEN_NEW_ADS: Number(inb.MIN_HOURS_BETWEEN_NEW_ADS ?? policy.LIMITS.MIN_HOURS_BETWEEN_NEW_ADS),
+      MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU: Number(inb.MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU ?? policy.LIMITS.MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU),
+      PLATEAU_CONFIRM_HOURS: Number(inb.PLATEAU_CONFIRM_HOURS ?? policy.LIMITS.PLATEAU_CONFIRM_HOURS),
+      MIN_HOURS_LEFT_TO_SPAWN: Number(inb.MIN_HOURS_LEFT_TO_SPAWN ?? policy.LIMITS.MIN_HOURS_LEFT_TO_SPAWN)
+    };
+    res.json({ ok: true, LIMITS: policy.LIMITS });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/* === ADMIN: NEW — debug switch to force plateau true === */
+router.post('/admin/set-policy-debug', async (req, res) => {
+  try {
+    const inb = req.body || {};
+    policy.DEBUG = {
+      ...policy.DEBUG,
+      FORCE_PLATEAU: !!inb.FORCE_PLATEAU
+    };
+    res.json({ ok: true, DEBUG: policy.DEBUG });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
