@@ -100,11 +100,13 @@ app.use('/api', campaignRoutes);
 const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
 
+// Mount MOCK routes FIRST so they don't get swallowed by /smart router
+const smartMockRoutes = require('./routes/smartMock');
+app.use(smartMockRoutes);
+
 const smartRoutes = require('./routes/smart');
 app.use('/smart', smartRoutes);
 
-// after your other app.use(...) lines
-app.use(require('./server/routes/smartMock'));
 
 
 // --- Health check ---
