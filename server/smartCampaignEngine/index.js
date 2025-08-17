@@ -532,8 +532,40 @@ async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, chall
   await setAdsetDailyBudget({ adsetId: challengerAdsetId, dailyBudgetCents: chall, userToken });
 }
 
+// ... existing requires and helpers above remain unchanged ...
+
+async function getAdsetDetails({ adsetId, userToken }) {
+  // Pull enough fields to reproduce a similar ad set
+  const FIELDS = [
+    'name','campaign_id','daily_budget','billing_event','optimization_goal','bid_strategy',
+    'targeting','promoted_object','attribution_spec','start_time','end_time','is_autobid'
+  ].join(',');
+  return fbGetV(FB_API_VER, adsetId, { access_token: userToken, fields: FIELDS });
+}
+
+async function ensureChallengerAdsetClone({ accountId, campaignId, sourceAdsetId, userToken, nameSuffix = 'Challengers', dailyBudgetCents = 300 }) {
+  const src = await getAdsetDetails({ adsetId: sourceAdsetId, userToken });
+  const body = {
+    name: `${src.name || 'Ad Set'} - ${nameSuffix}`,
+    campaign_id: campaignId,
+    daily_budget: Math.max(100, Number(dailyBudgetCents || src.daily_budget || 300)),
+    billing_event: src.billing_event || 'IMPRESSIONS',
+    optimization_goal: src.optimization_goal || 'LINK_CLICKS',
+    bid_strategy: src.bid_strategy || 'LOWEST_COST_WITHOUT_CAP',
+    targeting: src.targeting || undefined,
+    promoted_object: src.promoted_object || undefined,
+    attribution_spec: src.attribution_spec || undefined,
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
+  };
+
+  const created = await fbPostV(FB_API_VER, `act_${accountId}/adsets`, body, { access_token: userToken });
+  const id = created.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_ADSET_${Date.now()}` : null);
+  if (!id) throw new Error('Challenger ad set creation failed');
+  return id;
+}
+
 const deployer = {
-  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken, dryRun = false }) {
+  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken }) {
     const createdAdsByAdset = {};
     const pausedAdsByAdset = {};
     const variantMapByAdset = {};
@@ -551,14 +583,6 @@ const deployer = {
         if (created >= maxNew) break;
 
         try {
-          if (dryRun) {
-            const adId = `DRY_AD_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
-            createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `var_${created + 1}`] = adId;
-            created += 1;
-            continue;
-          }
-
           if (c.kind === 'image' && c.imageUrl) {
             const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer' });
             const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
@@ -587,12 +611,10 @@ const deployer = {
         }
       }
 
-      if (!dryRun) {
-        const losers = losersByAdset[adsetId] || [];
-        if (losers.length) {
-          await pauseAds({ adIds: losers, userToken });
-          pausedAdsByAdset[adsetId].push(...losers);
-        }
+      const losers = losersByAdset[adsetId] || [];
+      if (losers.length) {
+        await pauseAds({ adIds: losers, userToken });
+        pausedAdsByAdset[adsetId].push(...losers);
       }
     }
 
@@ -601,7 +623,8 @@ const deployer = {
 
   pauseAds,
   setAdsetDailyBudget,
-  splitBudgetBetweenChampionAndChallengers
+  splitBudgetBetweenChampionAndChallengers,
+  ensureChallengerAdsetClone // <-- NEW export
 };
 
 module.exports = { policy, analyzer, generator, deployer, testing };

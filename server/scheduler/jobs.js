@@ -54,15 +54,19 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
-// --- Tunables for automation behavior (now policy-driven) ---
-const COOLDOWN_NEW_ADS_HOURS = Number(policy?.LIMITS?.MIN_HOURS_BETWEEN_NEW_ADS || 72);
-const MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU = Number(policy?.LIMITS?.MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU || 24);
-const PLATEAU_CONFIRM_HOURS = Number(policy?.LIMITS?.PLATEAU_CONFIRM_HOURS || 36);
-const MIN_HOURS_LEFT_TO_SPAWN = Number(policy?.LIMITS?.MIN_HOURS_LEFT_TO_SPAWN || 24);
+// --- Tunables for automation behavior ---
+const COOLDOWN_NEW_ADS_HOURS = policy?.LIMITS?.MIN_HOURS_BETWEEN_NEW_ADS || 72;
+const MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU = 24;
+const PLATEAU_CONFIRM_HOURS = 36;           // plateau must persist this long
+const MIN_HOURS_LEFT_TO_SPAWN = 24;         // must have this many hours left in flight
+
+// NEW: budget split + overlap
+const CHALLENGER_BUDGET_PCT = 0.30;         // 30% challengers / 70% champion
+const OVERLAP_HOURS = 18;                   // keep old and new champ both live this long before pausing old
 
 function ensureCfgState(cfg) {
   cfg.state ||= { adsets: {} };
-  // cfg.state.adsets: { [adsetId]: { championAdId, winnerCommittedAt, plateauSince, lastSpawnAt } }
+  // cfg.state.adsets: { [adsetId]: { championAdId, winnerCommittedAt, plateauSince, lastSpawnAt, challengerAdsetId?, pendingSwap? } }
   return cfg.state;
 }
 
@@ -91,28 +95,34 @@ function adCtr(w) {
 }
 
 async function commitWinnerIfReady({ cfg, analysis, userToken }) {
-  // Commit winners per ad set when all test ads are "ready"
-  const results = { committed: false, champions: {} };
+  // Winner commit now supports an OVERLAP window when the "best" changes.
+  // - If no champion yet: pick winner, pause others.
+  // - If best != champion: begin pendingSwap (keep both live). After OVERLAP_HOURS, pause old champion and commit new.
+  const results = { committed: false, champions: {}, pending: false, completedSwaps: [] };
 
   for (const adsetId of analysis.adsetIds) {
     const ids = analysis.adMapByAdset[adsetId] || [];
-    if (ids.length < 2) continue;
+    if (ids.length < 2) continue; // need at least 2 to "A/B"
 
     const state = ensureCfgState(cfg);
     const lane = state.adsets[adsetId] || {};
-    if (lane.winnerCommittedAt) continue; // already committed a winner here
+    const stopRules = normalizeStopRules(cfg);
 
+    // Gather stop flags for all ads in this ad set
     const perAdFlags = ids.map((id) => ({
       id,
       flags: analysis.stopFlagsByAd[id]?.flags || {},
       any: !!analysis.stopFlagsByAd[id]?.any
     }));
+
+    // Are *all* ads "ready" to judge? (any stop flag or time flag)
     const allReady =
       perAdFlags.length > 0 &&
       perAdFlags.every(a => a.any || a.flags.time === true);
+
     if (!allReady) continue;
 
-    // Pick winner by lowest CPC (tie → higher CTR)
+    // Rank by CPC (tie -> CTR)
     let best = null;
     for (const id of ids) {
       const w = analysis.adInsights[id];
@@ -125,43 +135,120 @@ async function commitWinnerIfReady({ cfg, analysis, userToken }) {
         else if (Math.abs(cpc - best.cpc) <= 1e-9 && ctr > best.ctr) best = { id, cpc, ctr };
       }
     }
-    const championId = best?.id;
-    if (!championId) continue;
+    const newBestId = best?.id;
+    if (!newBestId) continue;
 
-    // Losers = everyone else
-    const losers = ids.filter(id => id !== championId);
-    if (losers.length) {
-      try { await deployer.pauseAds({ adIds: losers, userToken }); } catch {}
+    const prevChampion = lane.championAdId || null;
+
+    // If no champion yet → first commit (pause everyone else)
+    if (!prevChampion) {
+      const losers = ids.filter(id => id !== newBestId);
+      if (losers.length) {
+        try { await deployer.pauseAds({ adIds: losers, userToken }); } catch {}
+      }
+      state.adsets[adsetId] = {
+        championAdId: newBestId,
+        winnerCommittedAt: nowIso(),
+        plateauSince: null,
+        lastSpawnAt: lane.lastSpawnAt || null,
+        challengerAdsetId: lane.challengerAdsetId || null,
+        pendingSwap: null
+      };
+
+      // Log commit
+      await db.read();
+      db.data.smart_runs.push({
+        id: `run_${Date.now()}`,
+        mode: 'stop_rules_commit',
+        campaignId: cfg.campaignId,
+        accountId: cfg.accountId,
+        adsetId,
+        committedAt: nowIso(),
+        championAdId: newBestId,
+        losers,
+        thresholds: policy.STOP_RULES
+      });
+      await db.write();
+
+      results.committed = true;
+      results.champions[adsetId] = newBestId;
+      continue;
     }
 
-    // Persist champion into config state
-    state.adsets[adsetId] = {
-      ...(state.adsets[adsetId] || {}),
-      championAdId: championId,
-      winnerCommittedAt: nowIso(),
-      plateauSince: null
-    };
-    cfg.state = state;
-    results.committed = true;
-    results.champions[adsetId] = championId;
+    // A champion exists. Is the best the same?
+    if (prevChampion === newBestId) {
+      // If there is a pending swap but the same ID is still best, clear it.
+      if (lane.pendingSwap) {
+        state.adsets[adsetId] = { ...lane, pendingSwap: null };
+      }
+      continue;
+    }
 
-    // Log "stop_rules_commit"
-    await db.read();
-    db.data.smart_runs.push({
-      id: `run_${Date.now()}`,
-      mode: 'stop_rules_commit',
-      campaignId: cfg.campaignId,
-      accountId: cfg.accountId,
-      adsetId,
-      committedAt: nowIso(),
-      championAdId: championId,
-      losers,
-      thresholds: policy.STOP_RULES
-    });
-    await db.write();
+    // Best changed → handle overlap window
+    // Start or progress a pendingSwap window
+    if (!lane.pendingSwap || lane.pendingSwap.newChampionId !== newBestId) {
+      // Start overlap: keep prevChampion live; pause other losers (except prevChampion & newBest)
+      const losers = ids.filter(id => id !== prevChampion && id !== newBestId);
+      if (losers.length) {
+        try { await deployer.pauseAds({ adIds: losers, userToken }); } catch {}
+      }
+      state.adsets[adsetId] = {
+        ...lane,
+        pendingSwap: { newChampionId: newBestId, startedAt: nowIso() }
+      };
+
+      // Log start
+      await db.read();
+      db.data.smart_runs.push({
+        id: `run_${Date.now()}`,
+        mode: 'overlap_start',
+        campaignId: cfg.campaignId,
+        accountId: cfg.accountId,
+        adsetId,
+        startedAt: nowIso(),
+        prevChampion,
+        newChampionId: newBestId,
+        overlapHours: OVERLAP_HOURS
+      });
+      await db.write();
+
+      results.pending = true;
+      continue;
+    }
+
+    // Pending exists for this newBestId — check if window elapsed
+    const since = hoursBetween(nowIso(), lane.pendingSwap.startedAt);
+    if (since >= OVERLAP_HOURS) {
+      // Complete swap: pause old champion, keep new champ; clear pending
+      try { await deployer.pauseAds({ adIds: [prevChampion], userToken }); } catch {}
+      state.adsets[adsetId] = {
+        ...lane,
+        championAdId: newBestId,
+        winnerCommittedAt: nowIso(),
+        pendingSwap: null
+      };
+
+      await db.read();
+      db.data.smart_runs.push({
+        id: `run_${Date.now()}`,
+        mode: 'overlap_complete',
+        campaignId: cfg.campaignId,
+        accountId: cfg.accountId,
+        adsetId,
+        completedAt: nowIso(),
+        newChampionId: newBestId,
+        paused: [prevChampion]
+      });
+      await db.write();
+
+      results.committed = true;
+      results.completedSwaps.push({ adsetId, newChampionId: newBestId, oldChampionId: prevChampion });
+    } else {
+      results.pending = true;
+    }
   }
 
-  if (results.committed) {
+  if (results.committed || results.pending) {
     await db.read();
     const ref = (db.data.smart_configs || []).find(c => c.campaignId === cfg.campaignId);
     if (ref) {
@@ -175,22 +262,27 @@ async function commitWinnerIfReady({ cfg, analysis, userToken }) {
 }
 
 async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
-  // Only after a winner is committed AND enough time passed AND plateau is confirmed (or forced for debug).
+  // Only after a winner is committed AND enough time passed AND plateau is confirmed.
   let spawned = false;
 
   const state = ensureCfgState(cfg);
+  const totalBudgetCents = Math.max(200, Math.round(Number(cfg.dailyBudget || 0) * 100));
+  const champPct = 1 - CHALLENGER_BUDGET_PCT;
 
   for (const adsetId of analysis.adsetIds) {
     const lane = state.adsets[adsetId] || {};
     if (!lane.winnerCommittedAt || !lane.championAdId) continue;
 
-    // Require champion to exist for at least N hours before considering plateau
+    // Require champion to be "mature" for at least 24h before considering plateau
     if (hoursBetween(nowIso(), lane.winnerCommittedAt) < MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU) continue;
 
-    // Plateau signal (can be forced for testing)
-    const plateauNow = policy?.DEBUG?.FORCE_PLATEAU ? true : !!analysis.championPlateauByAdset[adsetId];
+    // Plateau signal from analyzer
+    const plateauNow = !!analysis.championPlateauByAdset[adsetId];
     if (!plateauNow) {
-      if (lane.plateauSince) state.adsets[adsetId].plateauSince = null;
+      // clear any partial plateau window
+      if (lane.plateauSince) {
+        state.adsets[adsetId].plateauSince = null;
+      }
       continue;
     }
 
@@ -211,6 +303,27 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
     // Decide how many variants
     const variantPlan = decideVariantPlanFrom(cfg);
 
+    // ===== NEW: create a challenger ad set and deploy challengers there =====
+    let challengerAdsetId = lane.challengerAdsetId || null;
+    try {
+      if (!challengerAdsetId) {
+        const challengerBudgetCents = Math.max(100, Math.round(totalBudgetCents * CHALLENGER_BUDGET_PCT));
+        challengerAdsetId = await deployer.ensureChallengerAdsetClone({
+          accountId: cfg.accountId,
+          campaignId: cfg.campaignId,
+          sourceAdsetId: adsetId,
+          userToken,
+          nameSuffix: 'Challengers',
+          dailyBudgetCents: challengerBudgetCents
+        });
+      }
+    } catch (e) {
+      console.warn('[SmartScheduler] challenger adset creation failed; fallback to same adset:', e?.message || e);
+      challengerAdsetId = adsetId; // fallback
+    }
+
+    const deployAdsetIds = [challengerAdsetId || adsetId];
+
     // Generate challengers (match original assetTypes)
     const creatives = await generator.generateVariants({
       form: {},
@@ -220,17 +333,32 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
       variantPlan
     });
 
-    // Deploy challengers (do not pause champion)
+    // Deploy challengers. IMPORTANT: don't pause champion on plateau spawn.
     const deployed = await deployer.deploy({
       accountId: cfg.accountId,
       pageId: cfg.pageId,
       campaignLink: cfg.link || 'https://your-smartmark-site.com',
-      adsetIds: [adsetId],
+      adsetIds: deployAdsetIds,
       winnersByAdset: {},
       losersByAdset: {},
       creatives,
       userToken
     });
+
+    // Budget split: 70% champion / 30% challengers IF we have two different ad sets
+    if (challengerAdsetId && challengerAdsetId !== adsetId) {
+      try {
+        await deployer.splitBudgetBetweenChampionAndChallengers({
+          championAdsetId: adsetId,
+          challengerAdsetId,
+          totalBudgetCents: totalBudgetCents,
+          championPct: champPct,
+          userToken
+        });
+      } catch (e) {
+        console.warn('[SmartScheduler] budget split failed:', e?.message || e);
+      }
+    }
 
     // Log & update state
     await db.read();
@@ -241,6 +369,7 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
       accountId: cfg.accountId,
       startedAt: nowIso(),
       adsetId,
+      challengerAdsetId: challengerAdsetId || null,
       plateauSince: lane.plateauSince,
       variantPlan,
       createdAdsByAdset: deployed.createdAdsByAdset,
@@ -254,8 +383,9 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
           ...state.adsets,
           [adsetId]: {
             ...(state.adsets[adsetId] || {}),
-            plateauSince: null,
-            lastSpawnAt: nowIso()
+            plateauSince: null,        // reset plateau window after spawn
+            lastSpawnAt: nowIso(),
+            challengerAdsetId: challengerAdsetId || null
           }
         }
       };
@@ -283,10 +413,10 @@ async function runSmartForConfig(cfg) {
     stopRules: normalizeStopRules(cfg)
   });
 
-  // 1) Stop rules -> commit winner (pause losers, keep champion active)
+  // 1) Stop rules -> commit winner (pause losers, keep champion active) + overlap handling
   await commitWinnerIfReady({ cfg, analysis, userToken });
 
-  // 2) Plateau confirmed -> spawn challengers
+  // 2) Plateau confirmed -> spawn challengers (in cloned adset) + 70/30 split
   await spawnChallengersIfPlateau({ cfg, analysis, userToken });
 }
 
@@ -297,6 +427,7 @@ async function sweep() {
     const configs = db.data.smart_configs || [];
     for (const cfg of configs) {
       try {
+        // Ensure state object exists
         ensureCfgState(cfg);
         await runSmartForConfig(cfg);
       } catch (e) {
@@ -310,8 +441,8 @@ async function sweep() {
 
 function start() {
   // First pass shortly after boot, then every 15 minutes (metrics-only polling).
-  setTimeout(sweep, 2 * 60 * 1000);
-  setInterval(sweep, 15 * 60 * 1000);
+  setTimeout(sweep, 2 * 60 * 1000);           // 2 min after boot
+  setInterval(sweep, 15 * 60 * 1000);         // every 15 min
 }
 
 module.exports = { start, sweep };
