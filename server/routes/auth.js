@@ -223,7 +223,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         base64 = await fetchImageAsBase64(imageUrl);
       } catch (e) {
         // fallback to a very reliable placeholder (prevents picsum 503s)
-        base64 = await fetchImageAsBase64('https://via.placeholder.com/1200.jpg?text=SmartMark');
+base64 = await fetchImageAsBase64('/__fallback/1200.jpg');
       }
       const fbImageRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
@@ -374,53 +374,59 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     let imageAdSetId = null, videoAdSetId = null;
     if (wantImage) {
-      const { data } = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-        {
-          name: `${campaignName} (Image) - ${new Date().toISOString()}`,
-          campaign_id: campaignId,
-          daily_budget: perAdsetBudgetCents,
-          billing_event: 'IMPRESSIONS',
-          optimization_goal: 'LINK_CLICKS',
-          bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-          status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-          start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
-          targeting: {
-            ...targeting,
-            publisher_platforms: ['facebook','instagram'],
-            facebook_positions: ['feed','marketplace'],
-            instagram_positions: ['stream','story','reels'],
-            audience_network_positions: [],
-            messenger_positions: []
-          }
-        },
-        { params: mkParams() }
-      );
+  // IMAGE ad set
+const { data } = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+  {
+    name: `${campaignName} (Image) - ${new Date().toISOString()}`,
+    campaign_id: campaignId,
+    daily_budget: perAdsetBudgetCents,
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: 'LINK_CLICKS',
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+    start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
+    promoted_object: { page_id: pageId },              // ← ADD THIS
+    targeting: {
+      ...targeting,
+      publisher_platforms: ['facebook','instagram'],
+      facebook_positions: ['feed','marketplace'],
+      instagram_positions: ['stream','story','reels'],
+      audience_network_positions: [],
+      messenger_positions: []
+    }
+  },
+  { params: mkParams() }
+);
+
       imageAdSetId = data?.id || null;
     }
     if (wantVideo) {
-      const { data } = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-        {
-          name: `${campaignName} (Video) - ${new Date().toISOString()}`,
-          campaign_id: campaignId,
-          daily_budget: perAdsetBudgetCents,
-          billing_event: 'IMPRESSIONS',
-          optimization_goal: 'LINK_CLICKS',
-          bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-          status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-          start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
-          targeting: {
-            ...targeting,
-            publisher_platforms: ['facebook','instagram'],
-            facebook_positions: ['feed','video_feeds','marketplace'],
-            instagram_positions: ['stream','reels','story'],
-            audience_network_positions: [],
-            messenger_positions: []
-          }
-        },
-        { params: mkParams() }
-      );
+   // VIDEO ad set
+const { data } = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+  {
+    name: `${campaignName} (Video) - ${new Date().toISOString()}`,
+    campaign_id: campaignId,
+    daily_budget: perAdsetBudgetCents,
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: 'LINK_CLICKS',
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+    start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
+    promoted_object: { page_id: pageId },              // ← ADD THIS
+    targeting: {
+      ...targeting,
+      publisher_platforms: ['facebook','instagram'],
+      facebook_positions: ['feed','video_feeds','marketplace'],
+      instagram_positions: ['stream','reels','story'],
+      audience_network_positions: [],
+      messenger_positions: []
+    }
+  },
+  { params: mkParams() }
+);
+
       videoAdSetId = data?.id || null;
     }
 
