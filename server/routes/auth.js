@@ -619,4 +619,61 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
   }
 });
 
+// === DEBUG/HELPERS: list ads for a campaign ===
+router.get('/facebook/campaign/:campaignId/ads', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { campaignId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const response = await axios.get(
+      `https://graph.facebook.com/v18.0/${campaignId}/ads`,
+      { params: { access_token: userToken, fields: 'id,name,status,effective_status,adset_id,created_time', limit: 200 } }
+    );
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaign ads.' });
+  }
+});
+
+// === DEBUG/HELPERS: ad-level insights (date_preset=maximum) ===
+router.get('/facebook/ad/:adId/insights', async (req, res) => {
+  const userToken = userTokens['singleton'];
+  const { adId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    const response = await axios.get(
+      `https://graph.facebook.com/v18.0/${adId}/insights`,
+      {
+        params: {
+          access_token: userToken,
+          date_preset: 'maximum',
+          fields: 'impressions,clicks,spend,ctr,cpm,frequency,unique_clicks,actions'
+        }
+      }
+    );
+    res.json(response.data);
+  } catch (err) {
+    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch ad insights.' });
+  }
+});
+
+// === ADMIN: override policy STOP_RULES at runtime (for testing) ===
+router.post('/admin/set-policy-stop-rules', async (req, res) => {
+  try {
+    const { policy } = require('../smartCampaignEngine');
+    const inb = req.body || {};
+    const next = {
+      MIN_SPEND_PER_AD: Number(inb.MIN_SPEND_PER_AD ?? policy.STOP_RULES.MIN_SPEND_PER_AD),
+      MIN_IMPRESSIONS_PER_AD: Number(inb.MIN_IMPRESSIONS_PER_AD ?? policy.STOP_RULES.MIN_IMPRESSIONS_PER_AD),
+      MIN_CLICKS_PER_AD: Number(inb.MIN_CLICKS_PER_AD ?? policy.STOP_RULES.MIN_CLICKS_PER_AD),
+      MAX_TEST_HOURS: Number(inb.MAX_TEST_HOURS ?? policy.STOP_RULES.MAX_TEST_HOURS)
+    };
+    policy.STOP_RULES = next;
+    res.json({ ok: true, STOP_RULES: policy.STOP_RULES });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 module.exports = router;

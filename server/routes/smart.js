@@ -359,4 +359,19 @@ router.get('/status/:campaignId', async (req, res) => {
   }
 });
 
+// Manually trigger the scheduler sweep once (for testing)
+router.post('/sweep-now', async (req, res) => {
+  try {
+    const jobs = require('../scheduler/jobs');
+    if (!jobs || typeof jobs.sweep !== 'function') {
+      return res.status(500).json({ error: 'jobs.sweep not available' });
+    }
+    await jobs.sweep();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+
 module.exports = router;

@@ -327,4 +327,5 @@ function start() {
   setInterval(sweep, 15 * 60 * 1000);         // every 15 min
 }
 
-module.exports = { start };
+module.exports = { start, sweep };
+
