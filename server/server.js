@@ -103,6 +103,10 @@ app.use('/api', gptChatRoutes);
 const smartRoutes = require('./routes/smart');
 app.use('/smart', smartRoutes);
 
+// after your other app.use(...) lines
+app.use(require('./server/routes/smartMock'));
+
+
 // --- Health check ---
 app.get('/healthz', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
