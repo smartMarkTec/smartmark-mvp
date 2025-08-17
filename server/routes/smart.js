@@ -161,6 +161,8 @@ router.post('/enable', async (req, res) => {
 
 /**
  * Manually trigger a single Smart run for a campaign.
+ * - force/initial => spawn challengers even if plateau isn't detected by metrics yet
+ * - uses fallback to fetch adsets if analyzer returned none
  */
 router.post('/run-once', async (req, res) => {
   try {
@@ -256,12 +258,31 @@ router.post('/run-once', async (req, res) => {
       variantPlan
     });
 
+    // --- Fallback: if analyzer didn't find adsets, fetch from FB ---
+    let targetAdsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
+    if (!targetAdsetIds.length) {
+      try {
+        const adsetsResp = await axios.get(
+          `https://graph.facebook.com/v18.0/${campaignId}/adsets`,
+          { params: { access_token: userToken, fields: 'id,name,status,effective_status', limit: 50 } }
+        );
+        targetAdsetIds = (adsetsResp.data?.data || []).map(a => a.id);
+      } catch (e) {
+        console.warn('[smart.run-once] Fallback adset fetch failed:', e?.response?.data || e.message);
+      }
+    }
+    if (!targetAdsetIds.length) {
+      return res.status(409).json({
+        error: 'No ad sets found for this campaign (analyzer returned none, and fallback list is empty). Launch needs at least one ad set.'
+      });
+    }
+
     // Deploy
     const deployed = await deployer.deploy({
       accountId,
       pageId: cfg.pageId,
       campaignLink: cfg.link || form?.url || url || 'https://your-smartmark-site.com',
-      adsetIds: analysis.adsetIds,
+      adsetIds: targetAdsetIds,
       winnersByAdset: shouldForceInitial ? {} : analysis.winnersByAdset,
       losersByAdset: shouldForceInitial ? {} : analysis.losersByAdset,
       creatives,
