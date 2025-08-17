@@ -40,7 +40,7 @@ async function fbPostV(apiVersion, endpoint, body, params) {
 const FB_API_VER = 'v23.0';
 
 // =========================
-// POLICY (Step 1)
+/** POLICY (Step 1) */
 // =========================
 const policy = {
   // Recent/prior windows for analyzer
@@ -130,7 +130,7 @@ const policy = {
 };
 
 // =========================
-// ANALYZER (Step 4)
+/** ANALYZER (Step 4) */
 // =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
@@ -227,13 +227,26 @@ function stopFlagsForAd(windows, createdTime, stop) {
 }
 
 const analyzer = {
-  async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc' }) {
+  /**
+   * Analyze a campaign with optional stopRules override (from /smart/enable).
+   * @param {Object} opts
+   * @param {string} opts.accountId
+   * @param {string} opts.campaignId
+   * @param {string} opts.userToken
+   * @param {string} [opts.kpi='cpc']
+   * @param {Object|null} [opts.stopRules=null] // {MIN_SPEND_PER_AD, MIN_IMPRESSIONS_PER_AD, MIN_CLICKS_PER_AD, MAX_TEST_HOURS}
+   */
+  async analyzeCampaign({ accountId, campaignId, userToken, kpi = 'cpc', stopRules = null }) {
     const adsets = await fbGetV(FB_API_VER, `act_${accountId}/adsets`, {
       access_token: userToken,
       fields: 'id,name,campaign_id,status,daily_budget,budget_remaining',
       limit: 200,
       filtering: JSON.stringify([{ field: 'campaign_id', operator: 'IN', value: [campaignId] }])
     });
+
+    const effectiveStop = stopRules && typeof stopRules === 'object'
+      ? stopRules
+      : policy.STOP_RULES;
 
     const adsetIds = (adsets.data || []).map(a => a.id);
     const adsetInsights = {};
@@ -291,7 +304,7 @@ const analyzer = {
       }
 
       for (const adId of ids) {
-        stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, policy.STOP_RULES);
+        stopFlagsByAd[adId] = stopFlagsForAd(adInsights[adId], adMeta[adId]?.created_time, effectiveStop);
       }
 
       const champId = championByAdset[adsetId];
@@ -331,7 +344,7 @@ const analyzer = {
 };
 
 // =========================
-/* GENERATOR (Step 2) — unchanged */
+/** GENERATOR (Step 2) — unchanged */
 // =========================
 const generator = {
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
@@ -427,7 +440,7 @@ const generator = {
 };
 
 // =========================
-// DEPLOYER (Step 3) + Budget helpers (Step 5)
+/** DEPLOYER (Step 3) + Budget helpers (Step 5) */
 // =========================
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
@@ -586,7 +599,6 @@ const deployer = {
           } else if (c.kind === 'video' && c.video) {
             const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
 
-            
             const adId = await createVideoAd({
               pageId, accountId, adsetId,
               adCopy: c.adCopy,
@@ -604,7 +616,6 @@ const deployer = {
           console.warn('Create ad failed:', e?.response?.data?.error?.message || e.message);
         }
       }
-
 
       const losers = losersByAdset[adsetId] || [];
       if (losers.length) {

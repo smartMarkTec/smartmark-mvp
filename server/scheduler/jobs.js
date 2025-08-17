@@ -1,6 +1,6 @@
 // server/scheduler/jobs.js
 // Interval-based scheduler with STOP-RULE winner commit + plateau-confirmed challengers.
-// Honors per-campaign stopRules from smart_configs.
+// Uses SmartCampaignEngine (policy, analyzer, generator, deployer) and LowDB.
 
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
@@ -43,11 +43,22 @@ function decideVariantPlanFrom(cfg = {}) {
   });
 }
 
+function normalizeStopRules(cfg = {}) {
+  const base = policy.STOP_RULES;
+  const s = cfg.stopRules || {};
+  return {
+    MIN_SPEND_PER_AD: Number(s.spendPerAdUSD ?? base.MIN_SPEND_PER_AD),
+    MIN_IMPRESSIONS_PER_AD: Number(s.impressionsPerAd ?? base.MIN_IMPRESSIONS_PER_AD),
+    MIN_CLICKS_PER_AD: Number(s.clicksPerAd ?? base.MIN_CLICKS_PER_AD),
+    MAX_TEST_HOURS: Number(s.timeCapHours ?? base.MAX_TEST_HOURS),
+  };
+}
+
 // --- Tunables for automation behavior ---
 const COOLDOWN_NEW_ADS_HOURS = policy?.LIMITS?.MIN_HOURS_BETWEEN_NEW_ADS || 72;
 const MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU = 24;
-const PLATEAU_CONFIRM_HOURS = 36;   // plateau must persist this long
-const MIN_HOURS_LEFT_TO_SPAWN = 24; // must have this many hours left in flight
+const PLATEAU_CONFIRM_HOURS = 36;           // plateau must persist this long
+const MIN_HOURS_LEFT_TO_SPAWN = 24;         // must have this many hours left in flight
 
 function ensureCfgState(cfg) {
   cfg.state ||= { adsets: {} };
@@ -69,78 +80,69 @@ function timeLeftOk(cfg) {
   return hoursLeft >= MIN_HOURS_LEFT_TO_SPAWN;
 }
 
-// ---- STOP RULE evaluation (uses per-campaign overrides if present)
-function evaluateStopFlags({ windows, createdIso, stop }) {
-  const r = windows?.recent || {};
-  const s = stop || policy.STOP_RULES;
-  const spendOk = (r.spend || 0) >= (s.spendPerAdUSD ?? s.MIN_SPEND_PER_AD ?? 0);
-  const impOk   = (r.impressions || 0) >= (s.impressionsPerAd ?? s.MIN_IMPRESSIONS_PER_AD ?? 0);
-  const clkOk   = (r.clicks || 0) >= (s.clicksPerAd ?? s.MIN_CLICKS_PER_AD ?? 0);
-
-  let timeOk = false;
-  const capHours = (s.timeCapHours ?? s.MAX_TEST_HOURS);
-  if (capHours != null && isFinite(capHours) && createdIso) {
-    timeOk = hoursBetween(nowIso(), createdIso) >= Number(capHours);
-  }
-
-  return { flags: { spend: spendOk, impressions: impOk, clicks: clkOk, time: timeOk },
-           any: !!(spendOk || impOk || clkOk || timeOk) };
-}
-
 function adCpc(w) {
   const r = w?.recent || {};
   const clicks = Number(r.clicks || 0);
   const spend = Number(r.spend || 0);
   return clicks > 0 ? spend / clicks : Infinity;
 }
-function adCtr(w) { return Number(w?.recent?.ctr || 0); }
+function adCtr(w) {
+  return Number(w?.recent?.ctr || 0);
+}
 
 async function commitWinnerIfReady({ cfg, analysis, userToken }) {
+  // We commit winners per ad set when each active test ad has *some* stop flag triggered,
+  // OR the time cap flag is true for each ad (so tests can't drag forever).
   const results = { committed: false, champions: {} };
-  const stop = cfg.stopRules && Object.keys(cfg.stopRules).length ? cfg.stopRules : policy.STOP_RULES;
-
-  const state = ensureCfgState(cfg);
 
   for (const adsetId of analysis.adsetIds) {
     const ids = analysis.adMapByAdset[adsetId] || [];
-    if (ids.length < 2) continue;
+    if (ids.length < 2) continue; // need at least 2 to "A/B"
 
+    const state = ensureCfgState(cfg);
     const lane = state.adsets[adsetId] || {};
-    if (lane.winnerCommittedAt) continue; // already committed in this ad set
+    if (lane.winnerCommittedAt) continue; // already committed a winner here
 
-    // recompute flags using *cfg.stopRules* against current ad windows
-    const perAdFlags = ids.map((id) => {
-      const w = analysis.adInsights[id];
-      // analyzer didn’t return created_time; we treat time flag as false unless we have it
-      const createdIso = null;
-      return { id, ...evaluateStopFlags({ windows: w, createdIso, stop }) };
-    });
+    // Gather stop flags for all ads in this ad set
+    const perAdFlags = ids.map((id) => ({
+      id,
+      flags: analysis.stopFlagsByAd[id]?.flags || {},
+      any: !!analysis.stopFlagsByAd[id]?.any
+    }));
 
-    // Every ad must be "ready" (any flag true OR time flag true)
+    // Are *all* ads "ready" to judge? (any stop flag or time flag)
     const allReady =
       perAdFlags.length > 0 &&
       perAdFlags.every(a => a.any || a.flags.time === true);
 
     if (!allReady) continue;
 
-    // Choose winner by lowest CPC (tie → higher CTR)
+    // Pick winner by lowest CPC (tie → higher CTR)
     let best = null;
     for (const id of ids) {
       const w = analysis.adInsights[id];
       const cpc = adCpc(w);
       const ctr = adCtr(w);
-      if (!best || cpc < best.cpc - 1e-9 || (Math.abs(cpc - best.cpc) <= 1e-9 && ctr > best.ctr)) {
+      if (!best) {
         best = { id, cpc, ctr };
+      } else {
+        if (cpc < best.cpc - 1e-9) best = { id, cpc, ctr };
+        else if (Math.abs(cpc - best.cpc) <= 1e-9 && ctr > best.ctr) best = { id, cpc, ctr };
       }
     }
     const championId = best?.id;
     if (!championId) continue;
 
+    // Losers = everyone else
     const losers = ids.filter(id => id !== championId);
     if (losers.length) {
-      try { await deployer.pauseAds({ adIds: losers, userToken }); } catch {}
+      // Optional: adjust budgets later if you split at adset-level.
+      await (async () => {
+        try { await deployer.pauseAds({ adIds: losers, userToken }); } catch {}
+      })();
     }
 
+    // Persist champion into config state
     state.adsets[adsetId] = {
       ...(state.adsets[adsetId] || {}),
       championAdId: championId,
@@ -148,10 +150,10 @@ async function commitWinnerIfReady({ cfg, analysis, userToken }) {
       plateauSince: null
     };
     cfg.state = state;
-
     results.committed = true;
     results.champions[adsetId] = championId;
 
+    // Log a "stop_rules_commit" run
     await db.read();
     db.data.smart_runs.push({
       id: `run_${Date.now()}`,
@@ -162,7 +164,7 @@ async function commitWinnerIfReady({ cfg, analysis, userToken }) {
       committedAt: nowIso(),
       championAdId: championId,
       losers,
-      thresholds: stop
+      thresholds: policy.STOP_RULES
     });
     await db.write();
   }
@@ -176,38 +178,51 @@ async function commitWinnerIfReady({ cfg, analysis, userToken }) {
       await db.write();
     }
   }
+
   return results;
 }
 
 async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
+  // Only after a winner is committed AND enough time passed AND plateau is confirmed.
   let spawned = false;
+
   const state = ensureCfgState(cfg);
 
   for (const adsetId of analysis.adsetIds) {
     const lane = state.adsets[adsetId] || {};
     if (!lane.winnerCommittedAt || !lane.championAdId) continue;
 
+    // Require champion to be "mature" for at least 24h before considering plateau
     if (hoursBetween(nowIso(), lane.winnerCommittedAt) < MIN_HOURS_AFTER_WINNER_TO_CHECK_PLATEAU) continue;
 
+    // Plateau signal from analyzer
     const plateauNow = !!analysis.championPlateauByAdset[adsetId];
     if (!plateauNow) {
-      if (lane.plateauSince) state.adsets[adsetId].plateauSince = null;
+      // clear any partial plateau window
+      if (lane.plateauSince) {
+        state.adsets[adsetId].plateauSince = null;
+      }
       continue;
     }
 
+    // Start plateau window if not present
     if (!lane.plateauSince) {
       state.adsets[adsetId] = { ...lane, plateauSince: nowIso() };
       continue;
     }
 
+    // Confirm plateau duration
     const plateauHours = hoursBetween(nowIso(), lane.plateauSince);
     if (plateauHours < PLATEAU_CONFIRM_HOURS) continue;
 
+    // Guards: time left & global cooldown
     if (!timeLeftOk(cfg)) continue;
     if (hasRecentSpawn(cfg)) continue;
 
+    // Decide how many variants
     const variantPlan = decideVariantPlanFrom(cfg);
 
+    // Generate challengers (match original assetTypes)
     const creatives = await generator.generateVariants({
       form: {},
       answers: {},
@@ -216,6 +231,8 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
       variantPlan
     });
 
+    // Deploy challengers. IMPORTANT: don't pause champion on plateau spawn.
+    // We pass empty losersByAdset so deployer won't pause anything here.
     const deployed = await deployer.deploy({
       accountId: cfg.accountId,
       pageId: cfg.pageId,
@@ -227,6 +244,7 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
       userToken
     });
 
+    // Log & update state
     await db.read();
     db.data.smart_runs.push({
       id: `run_${Date.now()}`,
@@ -240,7 +258,6 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
       createdAdsByAdset: deployed.createdAdsByAdset,
       pausedAdsByAdset: deployed.pausedAdsByAdset
     });
-
     const ref = (db.data.smart_configs || []).find(c => c.campaignId === cfg.campaignId);
     if (ref) {
       ref.state = {
@@ -249,7 +266,7 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
           ...state.adsets,
           [adsetId]: {
             ...(state.adsets[adsetId] || {}),
-            plateauSince: null,
+            plateauSince: null,        // reset plateau window after spawn
             lastSpawnAt: nowIso()
           }
         }
@@ -269,14 +286,19 @@ async function runSmartForConfig(cfg) {
   const userToken = getFbUserToken();
   if (!userToken) return;
 
+  // Analyze current performance (honor per-campaign stop rules)
   const analysis = await analyzer.analyzeCampaign({
     accountId: cfg.accountId,
     campaignId: cfg.campaignId,
     userToken,
-    kpi: cfg.kpi || 'cpc'
+    kpi: cfg.kpi || 'cpc',
+    stopRules: normalizeStopRules(cfg)
   });
 
+  // 1) Stop rules -> commit winner (pause losers, keep champion active)
   await commitWinnerIfReady({ cfg, analysis, userToken });
+
+  // 2) Plateau confirmed -> spawn challengers
   await spawnChallengersIfPlateau({ cfg, analysis, userToken });
 }
 
@@ -287,6 +309,7 @@ async function sweep() {
     const configs = db.data.smart_configs || [];
     for (const cfg of configs) {
       try {
+        // Ensure state object exists
         ensureCfgState(cfg);
         await runSmartForConfig(cfg);
       } catch (e) {
@@ -299,9 +322,9 @@ async function sweep() {
 }
 
 function start() {
-  // First pass shortly after boot, then every 15 minutes (metrics polling only).
-  setTimeout(sweep, 2 * 60 * 1000);
-  setInterval(sweep, 15 * 60 * 1000);
+  // First pass shortly after boot, then every 15 minutes (metrics-only polling).
+  setTimeout(sweep, 2 * 60 * 1000);           // 2 min after boot
+  setInterval(sweep, 15 * 60 * 1000);         // every 15 min
 }
 
 module.exports = { start };

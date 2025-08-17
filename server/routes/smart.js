@@ -1,12 +1,14 @@
 // server/routes/smart.js
+// SmartCampaign API: enable, run-once (initial A/B or plateau challengers), status.
+// Uses LowDB and the combined SmartCampaignEngine (policy, analyzer, generator, deployer).
+
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { policy, analyzer, generator, deployer } = require('../smartCampaignEngine');
 
-const normalizeAccountId = (id) => String(id || '').replace(/^act_/, '');
-
+// ---- DB helpers / migrations ----
 async function ensureSmartTables() {
   await db.read();
   db.data = db.data || {};
@@ -29,26 +31,67 @@ function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   return Math.max(0, Number(fallbackHours || 0));
 }
 
+/**
+ * Decide variant plan (1 vs 2 per type).
+ * - honors overrideCountPerType when provided
+ * - supports forceTwoPerType to always send 2-per-selected-type regardless of budget/flight
+ * - otherwise falls back to policy.decideVariantPlan guardrails
+ */
 function decideVariantPlanFrom(cfg = {}, overrides = {}) {
   const assetTypes = String(overrides.assetTypes || cfg.assetTypes || 'both').toLowerCase();
   const wantsImage = assetTypes === 'image' || assetTypes === 'both';
   const wantsVideo = assetTypes === 'video' || assetTypes === 'both';
-  const forceTwoPerType = !!(overrides.forceTwoPerType ?? cfg.forceTwoPerType);
 
+  // If caller/config requests hard 2-per-type, do it.
+  const forceTwoPerType = !!(overrides.forceTwoPerType ?? cfg.forceTwoPerType);
   if (forceTwoPerType) {
-    return { images: wantsImage ? 2 : 0, videos: wantsVideo ? 2 : 0 };
+    return {
+      images: wantsImage ? 2 : 0,
+      videos: wantsVideo ? 2 : 0
+    };
   }
+
+  // If explicit override counts are provided, pass straight through to policy.
   const overrideCountPerType = overrides.overrideCountPerType || cfg.overrideCountPerType || null;
-  const dailyBudget = Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0);
-  const flightHours = resolveFlightHours({
-    startAt: overrides.flightStart || cfg.flightStart,
-    endAt: overrides.flightEnd || cfg.flightEnd,
-    fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
+  if (overrideCountPerType && typeof overrideCountPerType === 'object') {
+    return policy.decideVariantPlan({
+      assetTypes,
+      dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
+      flightHours: resolveFlightHours({
+        startAt: overrides.flightStart || cfg.flightStart,
+        endAt: overrides.flightEnd || cfg.flightEnd,
+        fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
+      }),
+      overrideCountPerType
+    });
+  }
+
+  // Default guardrails path.
+  return policy.decideVariantPlan({
+    assetTypes,
+    dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
+    flightHours: resolveFlightHours({
+      startAt: overrides.flightStart || cfg.flightStart,
+      endAt: overrides.flightEnd || cfg.flightEnd,
+      fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
+    }),
+    overrideCountPerType: null
   });
-  return policy.decideVariantPlan({ assetTypes, dailyBudget, flightHours, overrideCountPerType });
 }
 
-// Enable Smart
+// Normalize UI stop rules -> analyzer keys
+function normalizeStopRules(cfg = {}) {
+  const s = cfg.stopRules || {};
+  const base = policy.STOP_RULES;
+  return {
+    MIN_SPEND_PER_AD: Number(s.spendPerAdUSD ?? base.MIN_SPEND_PER_AD),
+    MIN_IMPRESSIONS_PER_AD: Number(s.impressionsPerAd ?? base.MIN_IMPRESSIONS_PER_AD),
+    MIN_CLICKS_PER_AD: Number(s.clicksPerAd ?? base.MIN_CLICKS_PER_AD),
+    MAX_TEST_HOURS: Number(s.timeCapHours ?? base.MAX_TEST_HOURS),
+  };
+}
+
+// Enable Smart management for a campaign (stores guardrails and selections)
 router.post('/enable', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -73,7 +116,6 @@ router.post('/enable', async (req, res) => {
       return res.status(400).json({ error: 'accountId, campaignId, pageId are required' });
     }
 
-    const acctIdClean = normalizeAccountId(accountId);
     const mergedThresholds = { ...(policy.THRESHOLDS || {}), ...(thresholds || {}) };
     const mergedStopRules  = { ...(policy.STOP_RULES || {}), ...(stopRules || {}) };
 
@@ -81,7 +123,7 @@ router.post('/enable', async (req, res) => {
     const existing = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (existing) {
       existing.pageId = pageId;
-      existing.accountId = acctIdClean;
+      existing.accountId = accountId;
       existing.link = link || existing.link || '';
       existing.kpi = kpi;
       existing.assetTypes = assetTypes;
@@ -97,7 +139,7 @@ router.post('/enable', async (req, res) => {
     } else {
       db.data.smart_configs.push({
         id: `sc_${campaignId}`,
-        accountId: acctIdClean,
+        accountId,
         campaignId,
         pageId,
         link: link || '',
@@ -123,7 +165,15 @@ router.post('/enable', async (req, res) => {
   }
 });
 
-// Run once
+/**
+ * Manually trigger a single Smart run for a campaign.
+ * Modes:
+ *  - initial/force=true → start first A/B (ignores plateau)
+ *  - default            → only act when plateau detected
+ * Controls:
+ *  - forceTwoPerType    → hard 2-per-selected-type for this run (overrides budget/flight guardrails)
+ *  - overrideCountPerType → explicit {images, videos} counts if you want custom numbers
+ */
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -137,6 +187,7 @@ router.post('/run-once', async (req, res) => {
       answers = {},
       url = '',
       mediaSelection = 'both',
+      // optional run overrides
       force = false,
       initial = false,
       dailyBudget = null,
@@ -151,6 +202,7 @@ router.post('/run-once', async (req, res) => {
       return res.status(400).json({ error: 'accountId and campaignId are required' });
     }
 
+    // Ensure config exists or create a minimal one on the fly
     await db.read();
     let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (!cfg) {
@@ -158,7 +210,7 @@ router.post('/run-once', async (req, res) => {
       if (!pageId) return res.status(400).json({ error: 'Config not found. Provide pageId or call /smart/enable first.' });
       cfg = {
         id: `sc_${campaignId}`,
-        accountId: normalizeAccountId(accountId),
+        accountId,
         campaignId,
         pageId,
         link: form?.url || url || '',
@@ -180,13 +232,16 @@ router.post('/run-once', async (req, res) => {
       await db.write();
     }
 
+    // Analyzer pass (honor stop rules from config)
     const analysis = await analyzer.analyzeCampaign({
-      accountId: normalizeAccountId(accountId),
+      accountId,
       campaignId,
       userToken,
-      kpi: cfg.kpi || 'cpc'
+      kpi: cfg.kpi || 'cpc',
+      stopRules: normalizeStopRules(cfg)
     });
 
+    // Decide variant plan (1 vs 2 per type)
     const variantPlan = decideVariantPlanFrom(cfg, {
       assetTypes: mediaSelection,
       dailyBudget,
@@ -197,12 +252,14 @@ router.post('/run-once', async (req, res) => {
       forceTwoPerType
     });
 
+    // Determine whether to act
     const plateauDetected = Object.values(analysis.plateauByAdset || {}).some(Boolean);
     const shouldForceInitial = !!force || !!initial;
     if (!plateauDetected && !shouldForceInitial) {
       return res.json({ success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan });
     }
 
+    // Generate variants
     const creatives = await generator.generateVariants({
       form,
       answers,
@@ -211,8 +268,9 @@ router.post('/run-once', async (req, res) => {
       variantPlan
     });
 
+    // Deploy
     const deployed = await deployer.deploy({
-      accountId: normalizeAccountId(accountId),
+      accountId,
       pageId: cfg.pageId,
       campaignLink: cfg.link || form?.url || url || 'https://your-smartmark-site.com',
       adsetIds: analysis.adsetIds,
@@ -222,11 +280,12 @@ router.post('/run-once', async (req, res) => {
       userToken
     });
 
+    // Log run
     await db.read();
     const run = {
       id: `run_${Date.now()}`,
       campaignId,
-      accountId: normalizeAccountId(accountId),
+      accountId,
       startedAt: nowIso(),
       mode: shouldForceInitial ? 'initial' : 'plateau',
       plateauDetected: plateauDetected || shouldForceInitial,
@@ -236,6 +295,7 @@ router.post('/run-once', async (req, res) => {
     };
     db.data.smart_runs.push(run);
 
+    // Archive variant↔adId mapping
     Object.entries(deployed.variantMapByAdset || {}).forEach(([adsetId, vmap]) => {
       Object.entries(vmap || {}).forEach(([variantId, adId]) => {
         db.data.creative_history.push({
@@ -250,6 +310,7 @@ router.post('/run-once', async (req, res) => {
       });
     });
 
+    // Update config last run
     const cfgRef = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (cfgRef) {
       cfgRef.lastRunAt = nowIso();
@@ -257,6 +318,7 @@ router.post('/run-once', async (req, res) => {
     }
     await db.write();
 
+    // Handy counts for UI/debug
     const wantImages = variantPlan.images || 0;
     const wantVideos = variantPlan.videos || 0;
     const createdCounts = Object.fromEntries(
