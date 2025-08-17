@@ -5,7 +5,7 @@ const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
-const db = require('../db'); // LowDB instance (persistent)
+const db = require('../db'); // LowDB instance
 const FormData = require('form-data');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
 const { policy } = require('../smartCampaignEngine'); // for decideVariantPlan
@@ -145,7 +145,7 @@ router.post('/login', async (req, res) => {
 
 
 /* =========================
-   LAUNCH CAMPAIGN (provided creatives; no generation here)
+   LAUNCH CAMPAIGN (uses provided creatives; no generation here)
    ========================= */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = getFbUserToken();
@@ -157,7 +157,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       form = {},
       budget,
       adCopy,
+      campaignType,
       pageId,
+      aiAudience: aiAudienceRaw,
       mediaSelection = 'both',
       imageVariants = [],
       videoVariants = [],
@@ -171,19 +173,64 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       url = ''
     } = req.body;
 
-    const campaignName = form.campaignName || form.businessName || 'Smart AB Test - Images';
+    const campaignName = form.campaignName || form.businessName || 'SmartMark Campaign';
 
-    // Basic targeting (can be replaced by your AI audience)
-    const targetingBase = {
+    // Parse AI audience (if stringified)
+    let aiAudience = null;
+    try {
+      if (typeof aiAudienceRaw === 'string') aiAudience = JSON.parse(aiAudienceRaw);
+      else if (aiAudienceRaw && typeof aiAudienceRaw === 'object') aiAudience = aiAudienceRaw;
+    } catch { aiAudience = null; }
+
+    const ms = String(mediaSelection || 'both').toLowerCase();
+    const wantImage = ms === 'image' || ms === 'both';
+    const wantVideo = ms === 'video' || ms === 'both';
+
+    // Targeting
+    let targeting = {
       geo_locations: { countries: ['US'] },
       age_min: 18,
       age_max: 65,
       targeting_automation: { advantage_audience: 0 }
     };
+    if (aiAudience && aiAudience.location) {
+      const loc = aiAudience.location.toLowerCase();
+      if (loc.includes('texas')) targeting.geo_locations = { regions: [{ key: '3886' }] };
+      else if (loc.includes('california')) targeting.geo_locations = { regions: [{ key: '3841' }] };
+      else if (loc.includes('usa') || loc.includes('united states')) targeting.geo_locations = { countries: ['US'] };
+      else if (/^[a-z]{2}$/i.test(aiAudience.location.trim())) targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
+      else targeting.geo_locations = { countries: [aiAudience.location.trim().toUpperCase()] };
+    }
+    if (aiAudience && aiAudience.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
+      const [min, max] = aiAudience.ageRange.split('-').map(Number);
+      targeting.age_min = min; targeting.age_max = max;
+    }
+    if (aiAudience && aiAudience.interests) {
+      const interestNames = aiAudience.interests.split(',').map(s => s.trim()).filter(Boolean);
+      const fbInterestIds = [];
+      for (let name of interestNames) {
+        try {
+          const fbRes = await axios.get(
+            'https://graph.facebook.com/v18.0/search',
+            { params: { type: 'adinterest', q: name, access_token: userToken } }
+          );
+          if (fbRes.data?.data?.length > 0) fbInterestIds.push(fbRes.data.data[0].id);
+        } catch {}
+      }
+      if (fbInterestIds.length > 0) targeting.flexible_spec = [{ interests: fbInterestIds.map(id => ({ id })) }];
+    }
 
-    const ms = String(mediaSelection || 'both').toLowerCase();
-    const wantImage = ms === 'image' || ms === 'both';
-    const wantVideo = ms === 'video' || ms === 'both';
+    // Enforce max 2 active campaigns
+    const existing = await axios.get(
+      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+      { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
+    );
+    const activeCount = (existing.data?.data || []).filter(
+      c => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
+    ).length;
+    if (activeCount >= 2) {
+      return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
+    }
 
     // Variant plan (override capable)
     const dailyBudget = Number(budget) || 0;
@@ -201,6 +248,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const needImg = wantImage ? plan.images : 0;
     const needVid = wantVideo ? plan.videos : 0;
 
+    // Validate the provided creatives match the plan
     if (wantImage && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
@@ -222,30 +270,25 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data.id;
 
-    // 2) Ad Set(s) — broadened placements for cheaper delivery
+    // 2) Ad Sets (split budget evenly across used types)
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
-    const perAdsetBudgetCents = Math.max(100, Math.round((dailyBudget || 3) * 100 / Math.max(1, typesUsed)));
-
-    const baseAdset = {
-      campaign_id: campaignId,
-      daily_budget: perAdsetBudgetCents,
-      billing_event: 'IMPRESSIONS',
-      optimization_goal: 'LINK_CLICKS',
-      bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-      status: 'ACTIVE',
-      start_time: new Date(Date.now() + 60 * 1000).toISOString()
-    };
+    const perAdsetBudgetCents = Math.max(100, Math.round(dailyBudget * 100 / Math.max(1, typesUsed)));
 
     let imageAdSetId = null, videoAdSetId = null;
-
     if (wantImage) {
       const { data } = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
         {
           name: `${campaignName} (Image) - ${new Date().toISOString()}`,
-          ...baseAdset,
+          campaign_id: campaignId,
+          daily_budget: perAdsetBudgetCents,
+          billing_event: 'IMPRESSIONS',
+          optimization_goal: 'LINK_CLICKS',
+          bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+          status: 'ACTIVE',
+          start_time: new Date(Date.now() + 60 * 1000).toISOString(),
           targeting: {
-            ...targetingBase,
+            ...targeting,
             publisher_platforms: ['facebook', 'instagram'],
             facebook_positions: ['feed', 'marketplace'],
             instagram_positions: ['stream', 'story', 'reels'],
@@ -257,15 +300,20 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       );
       imageAdSetId = data.id;
     }
-
     if (wantVideo) {
       const { data } = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
         {
           name: `${campaignName} (Video) - ${new Date().toISOString()}`,
-          ...baseAdset,
+          campaign_id: campaignId,
+          daily_budget: perAdsetBudgetCents,
+          billing_event: 'IMPRESSIONS',
+          optimization_goal: 'LINK_CLICKS',
+          bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+          status: 'ACTIVE',
+          start_time: new Date(Date.now() + 60 * 1000).toISOString(),
           targeting: {
-            ...targetingBase,
+            ...targeting,
             publisher_platforms: ['facebook', 'instagram'],
             facebook_positions: ['feed', 'video_feeds', 'marketplace'],
             instagram_positions: ['stream', 'reels', 'story'],
@@ -278,7 +326,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       videoAdSetId = data.id;
     }
 
-    // Helpers
+    // Helpers inside route
     async function uploadImage(imageUrl) {
       const abs = absolutePublicUrl(imageUrl);
       const imgRes = await axios.get(abs, { responseType: 'arraybuffer' });
@@ -291,12 +339,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       const imgData = fbImageRes.data.images;
       return Object.values(imgData)[0]?.hash;
     }
-
     async function ensureVideoIdByIndex(idx) {
       const existingId = fbVideoIds[idx];
       if (existingId) return existingId;
       const vUrl = videoVariants[idx];
-      const formd = new FormData();
+      const formd = new (require('form-data'))();
       formd.append('file_url', absolutePublicUrl(vUrl));
       formd.append('name', 'SmartMark Generated Video');
       formd.append('description', 'Generated by SmartMark');
@@ -308,7 +355,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return up?.data?.id;
     }
 
-    // 3) Ads
+    // 3) Create Ads (exactly needImg / needVid)
     const adIds = [];
 
     if (wantImage && imageAdSetId) {
@@ -322,7 +369,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
               page_id: pageId,
               link_data: {
                 message: adCopy || '',
-                link: form.url || url || 'https://your-smartmark-site.com',
+                link: form.url || 'https://your-smartmark-site.com',
                 image_hash: hash,
                 description: form.description || ''
               }
@@ -332,12 +379,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         );
         const ad = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-          {
-            name: `${campaignName} (Image v${i + 1})`,
-            adset_id: imageAdSetId,
-            creative: { creative_id: cr.data.id },
-            status: 'ACTIVE'
-          },
+          { name: `${campaignName} (Image v${i + 1})`, adset_id: imageAdSetId, creative: { creative_id: cr.data.id }, status: 'ACTIVE' },
           { params: { access_token: userToken } }
         );
         adIds.push(ad.data.id);
@@ -363,14 +405,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             const thumbs = data?.data || [];
             const preferred = thumbs.find(t => t.is_preferred) || thumbs[0];
             thumbUrl = preferred?.uri || null;
-          } catch { /* ignore thumbnail failure */ }
+          } catch {}
         }
 
         const video_data = {
           video_id,
           message: adCopy || '',
           title: campaignName,
-          call_to_action: { type: 'LEARN_MORE', value: { link: form.url || url || 'https://your-smartmark-site.com' } }
+          call_to_action: { type: 'LEARN_MORE', value: { link: form.url || 'https://your-smartmark-site.com' } }
         };
         if (thumbUrl) video_data.image_url = thumbUrl;
 
@@ -381,12 +423,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         );
         const ad = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-          {
-            name: `${campaignName} (Video v${i + 1})`,
-            adset_id: videoAdSetId,
-            creative: { creative_id: cr.data.id },
-            status: 'ACTIVE'
-          },
+          { name: `${campaignName} (Video v${i + 1})`, adset_id: videoAdSetId, creative: { creative_id: cr.data.id }, status: 'ACTIVE' },
           { params: { access_token: userToken } }
         );
         adIds.push(ad.data.id);
@@ -405,7 +442,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     let errorMsg = 'Failed to launch campaign.';
     if (err.response?.data?.error) errorMsg = err.response.data.error.message;
     console.error('FB Campaign Launch Error:', err.response ? err.response.data : err);
-    res.status(500).json({ error: errorMsg });
+    res.status(500).json({ error: errorMsg, detail: err.response?.data || err.message });
   }
 });
 
@@ -484,7 +521,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
       {
         params: {
           access_token: userToken,
-          fields: 'impressions,clicks,spend,cpm,cpp,ctr,reach,unique_clicks',
+          fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
           date_preset: 'maximum'
         }
       }
@@ -585,6 +622,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
 /* === ADMIN: override policy STOP_RULES at runtime (for testing) === */
 router.post('/admin/set-policy-stop-rules', async (req, res) => {
   try {
+    const { policy } = require('../smartCampaignEngine');
     const inb = req.body || {};
     const next = {
       MIN_SPEND_PER_AD: Number(inb.MIN_SPEND_PER_AD ?? policy.STOP_RULES.MIN_SPEND_PER_AD),
