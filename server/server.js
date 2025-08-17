@@ -13,6 +13,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const sharp = require('sharp'); // <<< add
 
 const app = express();
 
@@ -26,7 +27,7 @@ const allowedOrigins = [
 // --- CORS (credentials + dynamic origin reflection) ---
 const corsOptions = {
   origin(origin, cb) {
-    if (!origin) return cb(null, true); // allow curl/postman/local scripts
+    if (!origin) return cb(null, true);
     if (allowedOrigins.includes(origin)) return cb(null, true);
     return cb(new Error(`CORS not allowed from ${origin}`));
   },
@@ -36,11 +37,9 @@ const corsOptions = {
   optionsSuccessStatus: 204,
 };
 
-// Apply to all routes + make preflight use the SAME options
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));
 
-// Echo ACAO per-request so credentials work (and add Vary for caches/CDNs)
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin && allowedOrigins.includes(origin)) {
@@ -51,10 +50,7 @@ app.use((req, res, next) => {
   next();
 });
 
-
 app.set('trust proxy', 1);
-
-// --- Body parsing (no cookies) ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -70,21 +66,41 @@ if (process.env.RENDER) {
 }
 app.use('/generated', express.static(generatedPath));
 
+/** ===== Local fallback image (no external DNS) ===== */
+app.get('/__fallback/1200.jpg', async (req, res) => {
+  try {
+    const buf = await sharp({
+      create: {
+        width: 1200,
+        height: 1200,
+        channels: 3,
+        background: { r: 30, g: 200, b: 133 }
+      }
+    })
+      .jpeg({ quality: 82 })
+      .toBuffer();
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.end(buf);
+  } catch (e) {
+    res.status(500).send('fallback image error');
+  }
+});
+
 // --- ROUTES ---
-const authRoutes = require('./routes/auth');      // -> server/routes/auth.js
+const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
-const aiRoutes = require('./routes/ai');          // -> server/routes/ai.js
+const aiRoutes = require('./routes/ai');
 app.use('/api', aiRoutes);
 
-const campaignRoutes = require('./routes/campaigns'); // -> server/routes/campaigns.js
+const campaignRoutes = require('./routes/campaigns');
 app.use('/api', campaignRoutes);
 
-const gptChatRoutes = require('./routes/gpt');    // -> server/routes/gpt.js
+const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
 
-// Smart engine orchestration routes
-const smartRoutes = require('./routes/smart');    // -> server/routes/smart.js
+const smartRoutes = require('./routes/smart');
 app.use('/smart', smartRoutes);
 
 // --- Health check ---
@@ -114,9 +130,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ---- Start background scheduler (SmartCampaign automation) ----
+// ---- Start background scheduler ----
 try {
-  const scheduler = require('./scheduler/jobs'); // -> server/scheduler/jobs.js
+  const scheduler = require('./scheduler/jobs');
   if (scheduler && typeof scheduler.start === 'function') {
     scheduler.start();
     console.log('✅ Smart scheduler started');
