@@ -1,3 +1,4 @@
+// server/routes/smart.js
 'use strict';
 
 const express = require('express');
@@ -7,6 +8,9 @@ const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { policy, analyzer, generator, deployer, testing } = require('../smartCampaignEngine');
 
+// ----------------------
+// helpers
+// ----------------------
 async function ensureSmartTables() {
   await db.read();
   db.data = db.data || {};
@@ -17,7 +21,8 @@ async function ensureSmartTables() {
   db.data.creative_history = db.data.creative_history || [];
   await db.write();
 }
-const nowIso = () => new Date().toISOString();
+
+function nowIso() { return new Date().toISOString(); }
 
 function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   if (endAt) {
@@ -34,19 +39,34 @@ function decideVariantPlanFrom(cfg = {}, overrides = {}) {
   const wantsVideo = assetTypes === 'video' || assetTypes === 'both';
 
   const forceTwoPerType = !!(overrides.forceTwoPerType ?? cfg.forceTwoPerType);
-  if (forceTwoPerType) return { images: wantsImage ? 2 : 0, videos: wantsVideo ? 2 : 0 };
+  if (forceTwoPerType) {
+    return { images: wantsImage ? 2 : 0, videos: wantsVideo ? 2 : 0 };
+  }
 
   const overrideCountPerType = overrides.overrideCountPerType || cfg.overrideCountPerType || null;
-  const baseArgs = {
+  if (overrideCountPerType && typeof overrideCountPerType === 'object') {
+    return policy.decideVariantPlan({
+      assetTypes,
+      dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
+      flightHours: resolveFlightHours({
+        startAt: overrides.flightStart || cfg.flightStart,
+        endAt: overrides.flightEnd || cfg.flightEnd,
+        fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
+      }),
+      overrideCountPerType
+    });
+  }
+
+  return policy.decideVariantPlan({
     assetTypes,
     dailyBudget: Number(overrides.dailyBudget ?? cfg.dailyBudget ?? 0),
     flightHours: resolveFlightHours({
       startAt: overrides.flightStart || cfg.flightStart,
       endAt: overrides.flightEnd || cfg.flightEnd,
       fallbackHours: overrides.flightHours ?? cfg.flightHours ?? 0
-    })
-  };
-  return policy.decideVariantPlan({ ...baseArgs, overrideCountPerType });
+    }),
+    overrideCountPerType: null
+  });
 }
 
 function normalizeStopRules(cfg = {}) {
@@ -60,23 +80,31 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
-/* =========================
-   TEST MOCK ENDPOINTS
-   ========================= */
-// These mount under /smart/...
-router.post('/mock/insights', (req, res) => {
-  const { adset = {}, ad = {} } = req.body || {};
-  testing.setMockInsights({ adset, ad });
-  res.json({ ok: true, counts: { adset: Object.keys(adset).length, ad: Object.keys(ad).length } });
-});
-router.post('/mock/clear', (_req, res) => {
-  testing.clearMockInsights();
-  res.json({ ok: true });
+// ----------------------
+// TEST MOCK ENDPOINTS (local helpers; you also have /smart/mock/* in smartMock.js)
+// ----------------------
+router.post('/mock-insights', async (req, res) => {
+  try {
+    const { adset = {}, ad = {} } = req.body || {};
+    testing.setMockInsights({ adset, ad });
+    res.json({ ok: true, counts: { adset: Object.keys(adset).length, ad: Object.keys(ad).length } });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to set mocks' });
+  }
 });
 
-/* =========================
-   ENABLE SMART
-   ========================= */
+router.post('/mock-insights/clear', async (_req, res) => {
+  try {
+    testing.clearMockInsights();
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to clear mocks' });
+  }
+});
+
+// ----------------------
+// Enable Smart config
+// ----------------------
 router.post('/enable', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -98,16 +126,20 @@ router.post('/enable', async (req, res) => {
     await db.read();
     const existing = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (existing) {
-      Object.assign(existing, {
-        pageId, accountId,
-        link: link || existing.link || '',
-        kpi, assetTypes,
-        dailyBudget: Number(dailyBudget) || 0,
-        flightStart, flightEnd, flightHours: Number(flightHours) || 0,
-        overrideCountPerType, forceTwoPerType: !!forceTwoPerType,
-        thresholds: mergedThresholds, stopRules: mergedStopRules,
-        updatedAt: nowIso()
-      });
+      existing.pageId = pageId;
+      existing.accountId = accountId;
+      existing.link = link || existing.link || '';
+      existing.kpi = kpi;
+      existing.assetTypes = assetTypes;
+      existing.dailyBudget = Number(dailyBudget) || 0;
+      existing.flightStart = flightStart;
+      existing.flightEnd = flightEnd;
+      existing.flightHours = Number(flightHours) || 0;
+      existing.overrideCountPerType = overrideCountPerType;
+      existing.forceTwoPerType = !!forceTwoPerType;
+      existing.thresholds = mergedThresholds;
+      existing.stopRules = mergedStopRules;
+      existing.updatedAt = nowIso();
     } else {
       db.data.smart_configs.push({
         id: `sc_${campaignId}`,
@@ -129,9 +161,9 @@ router.post('/enable', async (req, res) => {
   }
 });
 
-/* =========================
-   RUN-ONCE (initial or plateau)
-   ========================= */
+// ----------------------
+// Run once (initial or plateau)
+// ----------------------
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -139,13 +171,12 @@ router.post('/run-once', async (req, res) => {
     if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
     const {
-      accountId, campaignId, pageId: pageIdInBody = null,
-      form = {}, answers = {}, url = '',
+      accountId, campaignId, form = {}, answers = {}, url = '',
       mediaSelection = 'both',
       force = false, initial = false,
       dailyBudget = null, flightStart = null, flightEnd = null, flightHours = null,
       overrideCountPerType = null, forceTwoPerType = null,
-      championPct: championPctIn = 0.70,
+      championPct: bodyChampionPct = null,
       dryRun = true
     } = req.body;
 
@@ -156,7 +187,7 @@ router.post('/run-once', async (req, res) => {
     await db.read();
     let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (!cfg) {
-      const pageId = pageIdInBody || null;
+      const pageId = req.body.pageId || null;
       if (!pageId) return res.status(400).json({ error: 'Config not found. Provide pageId or call /smart/enable first.' });
       cfg = {
         id: `sc_${campaignId}`,
@@ -184,64 +215,90 @@ router.post('/run-once', async (req, res) => {
 
     const plateauDetected = Object.values(analysis.plateauByAdset || {}).some(Boolean);
     const shouldForceInitial = !!force || !!initial;
+
     if (!plateauDetected && !shouldForceInitial) {
       return res.json({ success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan });
     }
 
-    // Generate challenger variants
+    // Generate challenger creatives
     const creatives = await generator.generateVariants({
-      form, answers, url,
-      mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase(),
-      variantPlan
+      form, answers, url, mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase(), variantPlan
     });
 
-    // Determine champion ad set (fallback to fetching if empty)
-    let adsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
-    if (!adsetIds.length) {
+    // Determine target adsets (default: existing adsets in campaign)
+    let targetAdsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
+    if (!targetAdsetIds.length) {
       try {
         const adsetsResp = await axios.get(
           `https://graph.facebook.com/v18.0/${campaignId}/adsets`,
-          { params: { access_token: userToken, fields: 'id', limit: 50 } }
+          { params: { access_token: userToken, fields: 'id,name,status,effective_status', limit: 50 } }
         );
-        adsetIds = (adsetsResp.data?.data || []).map(a => a.id);
+        targetAdsetIds = (adsetsResp.data?.data || []).map(a => a.id);
       } catch {}
     }
-    if (!adsetIds.length) return res.status(409).json({ error: 'No ad sets found for this campaign.' });
+    if (!targetAdsetIds.length) return res.status(409).json({ error: 'No ad sets found for this campaign.' });
 
-    const championAdsetId = adsetIds[0];
-    let adsetIdsForNewCreatives = adsetIds;
-    const championPct = Number(championPctIn || 0.70);
+    // Choose the adset that actually has a champion if possible
+    let championAdsetId = targetAdsetIds[0];
+    for (const asid of targetAdsetIds) {
+      if (analysis.championByAdset?.[asid]) { championAdsetId = asid; break; }
+    }
+
+    // Plateau branch → clone adset for challengers and split budget (champion vs challengers)
+    let adsetIdsForNewCreatives = targetAdsetIds;
+    let budgetSplit = null;
+    const championPct = Number(bodyChampionPct ?? 0.70);
     const totalBudgetCents = Math.round((Number(dailyBudget ?? cfg.dailyBudget ?? 10)) * 100);
 
-    // If plateau, create a dedicated challenger ad set and split budgets 70/30
-    let budgetSplit = null;
-    if (analysis.plateauByAdset[championAdsetId]) {
-      const challengerAdsetId = await deployer.ensureChallengerAdsetClone({
-        accountId,
-        campaignId,
-        sourceAdsetId: championAdsetId,
-        userToken,
-        nameSuffix: 'Challengers',
-        dailyBudgetCents: Math.max(200, Math.round(totalBudgetCents * (1 - championPct)))
-      });
+    if (analysis.plateauByAdset?.[championAdsetId] && !shouldForceInitial) {
+      // 1) clone challenger ad set
+      let challengerAdsetId;
+      try {
+        challengerAdsetId = await deployer.ensureChallengerAdsetClone({
+          accountId,
+          campaignId,
+          sourceAdsetId: championAdsetId,
+          userToken,                                       // FIX: use real token
+          nameSuffix: 'Challengers',
+          dailyBudgetCents: Math.max(200, Math.round(totalBudgetCents * (1 - championPct)))
+        });
+      } catch (e) {
+        return res.status(400).json({
+          error: 'adset_clone_failed',
+          detail: e.response?.data?.error || e.response?.data || e.message
+        });
+      }
 
-      await deployer.splitBudgetBetweenChampionAndChallengers({
-        championAdsetId,
-        challengerAdsetId,
-        totalBudgetCents,
-        championPct,
-        userToken
-      });
+      // 2) split budget 70/30 across champion/challenger ad sets
+      try {
+        await deployer.splitBudgetBetweenChampionAndChallengers({
+          championAdsetId,
+          challengerAdsetId,
+          totalBudgetCents,
+          championPct,
+          userToken                                       // FIX: use real token
+        });
+      } catch (e) {
+        return res.status(400).json({
+          error: 'budget_split_failed',
+          detail: e.response?.data?.error || e.response?.data || e.message
+        });
+      }
 
+      // 3) create challengers only in the challenger ad set
       adsetIdsForNewCreatives = [challengerAdsetId];
       budgetSplit = { championAdsetId, challengerAdsetId, totalBudgetCents, championPct };
     }
 
-    // On plateau: don't pause champion. On forced-initial: also don't pause.
-    const losersByAdset = shouldForceInitial ? {} : (plateauDetected ? {} : analysis.losersByAdset);
-    const winnersByAdset = shouldForceInitial ? {} : analysis.winnersByAdset;
+    // Decide who to pause:
+    // - initial (forced): pause nobody
+    // - plateau: do NOT pause champion; let losers only be paused when not in plateau flow
+    const losersByAdset =
+      shouldForceInitial ? {} :
+      (analysis.plateauByAdset?.[championAdsetId] ? {} : (analysis.losersByAdset || {}));
+    const winnersByAdset = shouldForceInitial ? {} : (analysis.winnersByAdset || {});
 
-    // Single deploy call — create challengers in the right ad set(s)
+    // Single deploy call
     const deployed = await deployer.deploy({
       accountId,
       pageId: cfg.pageId,
@@ -281,6 +338,7 @@ router.post('/run-once', async (req, res) => {
     if (cfgRef) { cfgRef.lastRunAt = nowIso(); cfgRef.updatedAt = nowIso(); }
     await db.write();
 
+    // Summary of what we expected vs created
     const wantImages = variantPlan.images || 0;
     const wantVideos = variantPlan.videos || 0;
     const createdCounts = Object.fromEntries(
@@ -305,23 +363,24 @@ router.post('/run-once', async (req, res) => {
   }
 });
 
-/* =========================
-   STOP-RULES PERSIST
-   ========================= */
+// ----------------------
+// Persist stop rules
+// ----------------------
 router.post('/config/:campaignId/stop-rules', async (req, res) => {
   try {
     await ensureSmartTables();
     const { campaignId } = req.params;
+    const inb = req.body || {};
     await db.read();
     const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     if (!cfg) return res.status(404).json({ error: 'Config not found. Call /smart/enable first.' });
-    const inb = req.body || {};
-    cfg.stopRules = {
+    const next = {
       spendPerAdUSD: Number(inb.spendPerAdUSD ?? cfg.stopRules?.spendPerAdUSD ?? 0),
       impressionsPerAd: Number(inb.impressionsPerAd ?? cfg.stopRules?.impressionsPerAd ?? 0),
       clicksPerAd: Number(inb.clicksPerAd ?? cfg.stopRules?.clicksPerAd ?? 0),
       timeCapHours: Number(inb.timeCapHours ?? cfg.stopRules?.timeCapHours ?? 0),
     };
+    cfg.stopRules = next;
     cfg.updatedAt = nowIso();
     await db.write();
     res.json({ ok: true, stored: cfg.stopRules });
@@ -330,9 +389,9 @@ router.post('/config/:campaignId/stop-rules', async (req, res) => {
   }
 });
 
-/* =========================
-   STATUS
-   ========================= */
+// ----------------------
+// Status
+// ----------------------
 router.get('/status/:campaignId', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -346,9 +405,9 @@ router.get('/status/:campaignId', async (req, res) => {
   }
 });
 
-/* =========================
-   MANUAL SWEEP / COMMIT
-   ========================= */
+// ----------------------
+// Scheduler controls (optional)
+// ----------------------
 router.post('/sweep-now', async (_req, res) => {
   try {
     const jobs = require('../scheduler/jobs');
