@@ -535,26 +535,35 @@ async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, chall
 // ... existing requires and helpers above remain unchanged ...
 
 async function getAdsetDetails({ adsetId, userToken }) {
-  // Pull enough fields to reproduce a similar ad set
+  // Pull enough fields to reproduce a similar ad set (no is_autobid)
   const FIELDS = [
     'name','campaign_id','daily_budget','billing_event','optimization_goal','bid_strategy',
-    'targeting','promoted_object','attribution_spec','start_time','end_time','is_autobid'
+    'targeting','promoted_object','attribution_spec','start_time','end_time'
   ].join(',');
   return fbGetV(FB_API_VER, adsetId, { access_token: userToken, fields: FIELDS });
 }
 
-async function ensureChallengerAdsetClone({ accountId, campaignId, sourceAdsetId, userToken, nameSuffix = 'Challengers', dailyBudgetCents = 300 }) {
+// --- replace ensureChallengerAdsetClone() with this ---
+async function ensureChallengerAdsetClone({
+  accountId, campaignId, sourceAdsetId, userToken,
+  nameSuffix = 'Challengers', dailyBudgetCents = 300
+}) {
   const src = await getAdsetDetails({ adsetId: sourceAdsetId, userToken });
+
+  // Build a clean body. DO NOT include deprecated/read-only fields like is_autobid.
   const body = {
     name: `${src.name || 'Ad Set'} - ${nameSuffix}`,
     campaign_id: campaignId,
     daily_budget: Math.max(100, Number(dailyBudgetCents || src.daily_budget || 300)),
     billing_event: src.billing_event || 'IMPRESSIONS',
     optimization_goal: src.optimization_goal || 'LINK_CLICKS',
-    bid_strategy: src.bid_strategy || 'LOWEST_COST_WITHOUT_CAP',
-    targeting: src.targeting || undefined,
-    promoted_object: src.promoted_object || undefined,
-    attribution_spec: src.attribution_spec || undefined,
+    // Include bid_strategy only if present/valid
+    ...(src.bid_strategy ? { bid_strategy: src.bid_strategy } : {}),
+    ...(src.targeting ? { targeting: src.targeting } : {}),
+    ...(src.promoted_object ? { promoted_object: src.promoted_object } : {}),
+    ...(src.attribution_spec ? { attribution_spec: src.attribution_spec } : {}),
+    ...(src.start_time ? { start_time: src.start_time } : {}),
+    ...(src.end_time ? { end_time: src.end_time } : {}),
     status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
   };
 
