@@ -190,19 +190,49 @@ async function getWindowInsights(id, token, level, windows) {
 }
 
 function rankAds(listByAdId, kpi = 'cpc') {
-  const safe = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
-  const rows = Object.entries(listByAdId).map(([adId, w]) => {
-    const v = kpi === 'cpc' ? safe(w.recent?.cpc) : (kpi === 'ctr' ? safe(w.recent?.ctr) : safe(w.recent?.ctr));
-    return { adId, value: v, windows: w };
-  });
+  const toNum = (v) => (typeof v === 'number' && isFinite(v) ? v : null);
+  const rows = Object.entries(listByAdId).map(([adId, w]) => ({
+    adId,
+    cpc: toNum(w?.recent?.cpc),
+    ctr: toNum(w?.recent?.ctr),
+    windows: w
+  }));
 
-  if (kpi === 'cpc') {
-    rows.sort((a, b) => (a.value == null) - (b.value == null) || a.value - b.value);
-  } else {
-    rows.sort((a, b) => (a.value == null) - (b.value == null) || b.value - a.value);
-  }
-  return rows;
+  const EPS = 1e-9;
+
+  const byCpcThenCtr = (a, b) => {
+    // Primary: lower CPC wins; treat null as +∞
+    const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
+    const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
+    if (Math.abs(ac - bc) > EPS) return ac - bc;
+
+    // Tie / both null: higher CTR wins; treat null as -∞
+    const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
+    const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
+    if (Math.abs(actr - bctr) > EPS) return bctr - actr;
+
+    // Final stable tiebreak to keep deterministic order
+    return String(a.adId).localeCompare(String(b.adId));
+  };
+
+  const byCtrThenCpc = (a, b) => {
+    // Primary: higher CTR wins
+    const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
+    const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
+    if (Math.abs(actr - bctr) > EPS) return bctr - actr;
+
+    // Tie: lower CPC wins
+    const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
+    const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
+    if (Math.abs(ac - bc) > EPS) return ac - bc;
+
+    return String(a.adId).localeCompare(String(b.adId));
+  };
+
+  rows.sort(kpi === 'ctr' ? byCtrThenCpc : byCpcThenCtr);
+  return rows.map(r => ({ adId: r.adId, value: kpi === 'ctr' ? r.ctr : r.cpc, windows: r.windows }));
 }
+
 
 function hoursSince(iso) {
   if (!iso) return Infinity;

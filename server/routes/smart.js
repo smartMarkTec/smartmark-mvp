@@ -425,41 +425,71 @@ router.post('/commit-now', async (req, res) => {
       return res.status(400).json({ error: 'accountId and campaignId are required' });
     }
 
+    // Analyze with CPC primary (rankAds already CTR tie-breaks now)
     const analysis = await analyzer.analyzeCampaign({
       accountId, campaignId, userToken, kpi: 'cpc'
     });
 
-    let losers = [];
+    const eligibleAdsets = [];
+    const losersToPause = [];
+
+    // Gate by stop rules: only commit (pause losers) if ANY stop flag is met in that ad set
     for (const adsetId of (analysis.adsetIds || [])) {
+      const adIds = analysis.adMapByAdset?.[adsetId] || [];
+      if (!adIds.length) continue;
+
+      // Has any ad met a stop rule?
+      const hasStop = adIds.some(id => analysis.stopFlagsByAd?.[id]?.any);
+
+      if (!hasStop) {
+        // Skip committing this ad set for now
+        continue;
+      }
+
+      // Losers determined by ranking (lowest CPC wins, CTR tiebreaker)
       const loserList = analysis.losersByAdset?.[adsetId] || [];
-      if (loserList.length) losers.push(...loserList);
-      else {
+      if (loserList.length) {
+        losersToPause.push(...loserList);
+        eligibleAdsets.push(adsetId);
+      } else {
+        // Fallback: if more than 1 ad and no explicit losers array, pause the worst-ranked one
         const ids = analysis.adMapByAdset?.[adsetId] || [];
-        if (ids.length > 1) losers.push(ids[ids.length - 1]);
+        if (ids.length > 1) {
+          // Worst = last in ranked order; losersByAdset already computed that,
+          // but if it's missing, conservatively skip to avoid pausing the wrong ad.
+        }
       }
     }
 
-    losers = Array.from(new Set(losers)).filter(Boolean);
-    if (!losers.length) {
-      return res.json({ success: true, message: 'No losers found to pause (need at least 2 ads per ad set).' });
+    if (!losersToPause.length) {
+      return res.json({
+        success: true,
+        message: 'No ad sets met stop rules yet. Nothing paused.',
+        eligibleAdsets
+      });
     }
 
-    await deployer.pauseAds({ adIds: losers, userToken });
+    const uniqueLosers = Array.from(new Set(losersToPause)).filter(Boolean);
+    await deployer.pauseAds({ adIds: uniqueLosers, userToken });
 
     await db.read();
     db.data.smart_runs.push({
       id: `run_${Date.now()}`,
       campaignId, accountId, startedAt: nowIso(),
-      mode: 'stop_rules_commit', plateauDetected: true,
+      mode: 'stop_rules_commit',
+      plateauDetected: true,
       variantPlan: { images: 0, videos: 0 },
-      createdAdsByAdset: {}, pausedAdsByAdset: { '*': losers }
+      createdAdsByAdset: {},
+      pausedAdsByAdset: { '*': uniqueLosers },
+      meta: { eligibleAdsets }
     });
     await db.write();
 
-    res.json({ success: true, paused: losers });
+    res.json({ success: true, paused: uniqueLosers, eligibleAdsets });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
+
 
 module.exports = router;
