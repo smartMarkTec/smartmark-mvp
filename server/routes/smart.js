@@ -353,9 +353,13 @@ router.post('/run-once', async (req, res) => {
       createdCountsPerAdset: createdCounts
     });
   } catch (e) {
-    res.status(500).json({ error: e.message });
+    // <<< improved error bubbling >>>
+    const status = e?.response?.status || 500;
+    const detail = e?.response?.data?.error || e?.response?.data || e?.message;
+    return res.status(status).json({ error: 'fb_error', detail });
   }
 });
+
 
 /* ------------------------- PERSIST STOP RULES ------------------------- */
 router.post('/config/:campaignId/stop-rules', async (req, res) => {
