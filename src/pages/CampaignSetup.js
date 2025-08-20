@@ -1,4 +1,3 @@
-// src/pages/CampaignSetup.js
 /* eslint-disable */
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -171,6 +170,64 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
+/* -------- Compact metrics scroller (per-campaign cached) -------- */
+function MetricScroller({ metrics }) {
+  const items = [
+    { k: "impressions", label: "Impr", fmt: (v)=>v ?? "--" },
+    { k: "reach", label: "Reach", fmt: (v)=>v ?? "--" },
+    { k: "clicks", label: "Clicks", fmt: (v)=>v ?? "--" },
+    { k: "ctr", label: "CTR", fmt: (v)=> (v!=null? `${Number(v).toFixed(2)}%` : "--") },
+    { k: "spend", label: "Spend", fmt: (v)=> (v!=null? `$${Number(v).toFixed(2)}` : "--") },
+    { k: "cpm", label: "CPM", fmt: (v)=> (v!=null? `$${Number(v).toFixed(2)}` : "--") },
+    { k: "cpp", label: "CPP", fmt: (v)=> (v!=null? `$${Number(v).toFixed(2)}` : "--") },
+    { k: "results", label: "Results", fmt: (v)=>v ?? "--" },
+    { k: "unique_clicks", label: "U-Clicks", fmt: (v)=>v ?? "--" },
+  ];
+  const [idx, setIdx] = useState(0);
+  const visible = 3; // tiles at a time
+  const total = items.length;
+  const data = (k)=> (metrics && Object.prototype.hasOwnProperty.call(metrics, k) ? metrics[k] : null);
+
+  const tile = (it, i) => (
+    <div key={i} style={{
+      minWidth: 120, background: "#232a2c", border: `1px solid ${LINE}`, borderRadius: 12,
+      padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start",
+      boxShadow: "0 2px 10px #17352a22"
+    }}>
+      <div style={{ color: "#bffae2", fontWeight: 800, fontSize: "0.8rem" }}>{it.label}</div>
+      <div style={{ color: "#fff", fontWeight: 900, fontSize: "1.05rem", letterSpacing: "0.3px" }}>
+        {it.fmt(data(it.k))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ position:"relative", width:"100%", display:"flex", alignItems:"center" }}>
+      <button
+        onClick={() => setIdx((p)=> (p - 1 + total) % total)}
+        style={{ position:"absolute", left: -6, top:"50%", transform:"translateY(-50%)",
+          background:"#2a3332", color:"#fff", border:"1px solid #314940", borderRadius:10, width:28, height:28, cursor:"pointer" }}
+        aria-label="Prev metrics"
+      >‹</button>
+      <div style={{
+        display:"grid",
+        gridTemplateColumns:`repeat(${visible}, minmax(0,1fr))`,
+        gap:10,
+        margin:"0 28px",
+        width:"100%"
+      }}>
+        {Array.from({length: visible}).map((_, i) => tile(items[(idx + i) % total], i))}
+      </div>
+      <button
+        onClick={() => setIdx((p)=> (p + 1) % total)}
+        style={{ position:"absolute", right: -6, top:"50%", transform:"translateY(-50%)",
+          background:"#2a3332", color:"#fff", border:"1px solid #314940", borderRadius:10, width:28, height:28, cursor:"pointer" }}
+        aria-label="Next metrics"
+      >›</button>
+    </div>
+  );
+}
+
 function SchedulerInline({ campaignKey }) {
   const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
   const defaultRun = useMemo(() => {
@@ -292,7 +349,6 @@ const CampaignSetup = () => {
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
-  const [metrics, setMetrics] = useState(null);
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -312,6 +368,9 @@ const CampaignSetup = () => {
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
+
+  // Cache metrics per-campaign
+  const [metricsByCampaign, setMetricsByCampaign] = useState({});
 
   // From navigation state
   const {
@@ -408,7 +467,7 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, selectedCampaignId]);
 
-  // Metrics for selected campaign
+  // Metrics for selected campaign (cache per id)
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -416,15 +475,18 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
-        setBudget(c.budget || budget);
+        setBudget(budget => budget || c.budget || "");
         setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
       })
       .catch(() => {});
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
       .then(res => res.json())
-      .then(setMetrics)
-      .catch(() => setMetrics(null));
-  }, [selectedCampaignId, selectedAccount, budget]);
+      .then(m => {
+        const row = Array.isArray(m?.data) ? m.data[0] || {} : m || {};
+        setMetricsByCampaign(prev => ({ ...prev, [selectedCampaignId]: row }));
+      })
+      .catch(() => {});
+  }, [selectedCampaignId, selectedAccount]);
 
   // Persist basic fields
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
@@ -483,7 +545,7 @@ const [isPaused, setIsPaused] = useState(false);
 
 const handlePauseUnpause = async () => {
   if (!selectedCampaignId || !selectedAccount) return;
-  const acctId = String(selectedAccount).replace(/^act_/, ""); // anchor the replace
+  const acctId = String(selectedAccount).replace(/^act_/, "");
   setLoading(true);
   try {
     if (isPaused) {
@@ -511,18 +573,17 @@ const handlePauseUnpause = async () => {
 
 const handleDelete = async () => {
   if (!selectedCampaignId || !selectedAccount) return;
-  const acctId = String(selectedAccount).replace(/^act_/, ""); // anchor the replace
+  const acctId = String(selectedAccount).replace(/^act_/, "");
   setLoading(true);
   try {
     const r = await fetch(
       `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
-      { method: "POST", credentials: "include" } // include credentials
+      { method: "POST", credentials: "include" }
     );
     if (!r.ok) throw new Error("Archive failed");
     setCampaignStatus("ARCHIVED");
     setLaunched(false);
     setLaunchResult(null);
-    setMetrics(null);
     setSelectedCampaignId("");
     alert("Campaign deleted.");
   } catch {
@@ -532,7 +593,10 @@ const handleDelete = async () => {
 };
 
 const handleNewCampaign = () => {
-  if (campaigns.length >= 2) return;
+  if (campaigns.length >= 2) {
+    alert("You can only have 2 active campaigns.");
+    return;
+  }
   navigate('/form');
 };
 
@@ -545,19 +609,17 @@ const canLaunch = !!(
   parseFloat(budget) >= 3
 );
 
-// Launch: ONLY use the creatives from FormPage (previews), filtered by mediaSelection
+
+  // Launch: ONLY use the creatives from FormPage (previews), never generate here
 const handleLaunch = async () => {
   setLoading(true);
   try {
     const acctId = String(selectedAccount).replace(/^act_/, "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    let images = (imageUrlsArr || []).slice(0, 2);
-    let videos = (videoUrlsArr || []).slice(0, 2);
-    let fbIds  = (fbVideoIdsArr || []).slice(0, 2);
-
-    if (mediaSelection === "image") { videos = []; fbIds = []; }
-    if (mediaSelection === "video") { images = []; }
+    const images = (imageUrlsArr || []).slice(0, 2);
+    const videos = (videoUrlsArr || []).slice(0, 2);
+    const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
 
     const payload = {
       form: { ...form },
@@ -571,13 +633,13 @@ const handleLaunch = async () => {
       imageVariants: images,
       videoVariants: videos,
       fbVideoIds: fbIds,
-      // send a thumbnail to satisfy FB if needed (may be null if 'video' and you didn't pick images)
-      videoThumbnailUrl: images[0] || null,
+      // send a thumbnail to satisfy FB if needed
+      videoThumbnailUrl: images[0] || "/__fallback/1200.jpg",
 
-      // honor selection in override counts
+      // force 2 images + 2 videos when provided, ignoring budget/flight guardrails
       overrideCountPerType: {
-        images: mediaSelection !== "video" ? Math.min(2, images.length) : 0,
-        videos: mediaSelection !== "image" ? Math.min(2, Math.max(videos.length, fbIds.length)) : 0
+        images: Math.min(2, images.length),
+        videos: Math.min(2, Math.max(videos.length, fbIds.length))
       }
     };
 
@@ -595,15 +657,15 @@ const handleLaunch = async () => {
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
-          images: images,
-          videos: videos,
-          fbVideoIds: fbIds,
+          images: (imageUrlsArr || []).slice(0, 2),
+          videos: (videoUrlsArr || []).slice(0, 2),
+          fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
           time: Date.now()
         };
         writeCreativeMap(acctId, map);
       }
 
-      // Clear the draft now that it's launched
+      // Clear the draft now that it's launched (keeps FormPage clean)
       sessionStorage.removeItem("draft_form_creatives");
 
       setLaunched(true);
@@ -1112,15 +1174,13 @@ const handleLaunch = async () => {
               )}
             </div>
 
-            {/* Metrics */}
+            {/* Metrics (per selected campaign, compact scroller) */}
             {selectedCampaignId && (
-              <div style={{ width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
-                <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
-                <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-                <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
-                <div>Results: <b>{metrics?.results ?? "--"}</b></div>
-                <div>Cost/Result: <b>{metrics?.spend && metrics?.results ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--"}</b></div>
+              <div style={{ width: "100%", background: PANEL_BG, borderRadius: "1.0rem", padding: "0.8rem 0.9rem" }}>
+                <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 8 }}>
+                  Performance
+                </div>
+                <MetricScroller metrics={metricsByCampaign[selectedCampaignId]} />
               </div>
             )}
 
@@ -1140,42 +1200,38 @@ const handleLaunch = async () => {
                   Creatives
                 </div>
 
-                {/* Images Card (shown unless selection is 'video') */}
-                {mediaSelection !== "video" && (
+                {/* Images Card */}
+                <div style={{
+                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                }}>
                   <div style={{
-                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
                   }}>
-                    <div style={{
-                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                    }}>
-                      <span>Images</span>
-                    </div>
-                    <ImageCarousel
-                      items={imageUrlsArr}
-                      height={CREATIVE_HEIGHT}
-                      onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                    />
+                    <span>Images</span>
                   </div>
-                )}
+                  <ImageCarousel
+                    items={imageUrlsArr}
+                    height={CREATIVE_HEIGHT}
+                    onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                  />
+                </div>
 
-                {/* Videos Card (shown unless selection is 'image') */}
-                {mediaSelection !== "image" && (
+                {/* Videos Card */}
+                <div style={{
+                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                }}>
                   <div style={{
-                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
                   }}>
-                    <div style={{
-                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                    }}>
-                      <span>Videos</span>
-                      {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-                    </div>
-                    <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                    <span>Videos</span>
+                    {videoUrlsArr.length === 0 ? <DottyMini/> : null}
                   </div>
-                )}
+                  <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                </div>
               </div>
             )}
 
