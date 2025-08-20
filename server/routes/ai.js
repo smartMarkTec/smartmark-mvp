@@ -97,7 +97,7 @@ router.get('/test', (req, res) => {
 // Robust website scraping
 async function getWebsiteText(url) {
   try {
-    if (!url || !/^https?:\/\//i.test(url)) throw new Error('Invalid URL');
+    if (!url || !/^https?:\/\/\//i.test(url)) throw new Error('Invalid URL');
     const { data, headers } = await axios.get(url, { timeout: 7000 });
 
     if (!headers['content-type'] || !headers['content-type'].includes('text/html')) {
@@ -551,7 +551,7 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
 function getDeterministicShuffle(arr, seed) {
   let array = [...arr];
   let random = seedrandom(seed);
-  for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [array[i], array[j]] = [array[j], array[i]]; }
+  for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [array[i], array[j]] = [array[j]]; }
   return array;
 }
 function normalizeShortCTA(input) {

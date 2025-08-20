@@ -1,3 +1,4 @@
+// src/pages/FormPage.js
 /* eslint-disable */
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -137,13 +138,6 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
   );
 }
 
-
-
-
-
-
-
-
 function Arrow({ side = "left", onClick, disabled }) {
   return (
     <button
@@ -230,7 +224,6 @@ export default function FormPage() {
 
   const chatBoxRef = useRef();
 
-
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
@@ -245,7 +238,6 @@ export default function FormPage() {
   // Ad preview state
   const [mediaType, setMediaType] = useState("both"); // <- correct variable
   const [result, setResult] = useState(null);
-
 
   const [imageUrls, setImageUrls] = useState([]); // up to 2
   const [activeImage, setActiveImage] = useState(0);
@@ -412,13 +404,11 @@ export default function FormPage() {
       nextStep += 1;
     }
 
-
     if (!CONVO_QUESTIONS[nextStep]) {
       setChatHistory(ch => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
       setStep(nextStep);
       return;
     }
-
 
     setStep(nextStep);
     setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
@@ -488,7 +478,6 @@ export default function FormPage() {
         {!loading && step <= CONVO_QUESTIONS.length &&
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
             <input
-            
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={loading}
@@ -885,9 +874,14 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            const imgA = imageUrls.map(u => (/^https?:\/\//.test(u) ? u : BACKEND_URL + u)).slice(0, 2);
-            const vidA = videoItems.map(v => (/^https?:\/\//.test(v.url) ? v.url : BACKEND_URL + v.url)).slice(0, 2);
-            const fbIds = videoItems.map(v => v.fbVideoId).filter(Boolean).slice(0, 2);
+            // Raw arrays
+            let imgA = imageUrls.map(u => (/^https?:\/\//.test(u) ? u : BACKEND_URL + u)).slice(0, 2);
+            let vidA = videoItems.map(v => (/^https?:\/\//.test(v.url) ? v.url : BACKEND_URL + v.url)).slice(0, 2);
+            let fbIds = videoItems.map(v => v.fbVideoId).filter(Boolean).slice(0, 2);
+
+            // Filter by selection
+            if (mediaType === "image") { vidA = []; fbIds = []; }
+            if (mediaType === "video") { imgA = []; }
 
             // Save a draft so creatives survive the Facebook connect redirect
             sessionStorage.setItem("draft_form_creatives", JSON.stringify({

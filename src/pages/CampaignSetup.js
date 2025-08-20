@@ -1,3 +1,4 @@
+// src/pages/CampaignSetup.js
 /* eslint-disable */
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -544,18 +545,19 @@ const canLaunch = !!(
   parseFloat(budget) >= 3
 );
 
-
-  // Launch: ONLY use the creatives from FormPage (previews), never generate here
-// Launch: ONLY use the creatives from FormPage (previews), never generate here
+// Launch: ONLY use the creatives from FormPage (previews), filtered by mediaSelection
 const handleLaunch = async () => {
   setLoading(true);
   try {
     const acctId = String(selectedAccount).replace(/^act_/, "");
     const safeBudget = Math.max(3, Number(budget) || 0);
 
-    const images = (imageUrlsArr || []).slice(0, 2);
-    const videos = (videoUrlsArr || []).slice(0, 2);
-    const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
+    let images = (imageUrlsArr || []).slice(0, 2);
+    let videos = (videoUrlsArr || []).slice(0, 2);
+    let fbIds  = (fbVideoIdsArr || []).slice(0, 2);
+
+    if (mediaSelection === "image") { videos = []; fbIds = []; }
+    if (mediaSelection === "video") { images = []; }
 
     const payload = {
       form: { ...form },
@@ -569,13 +571,13 @@ const handleLaunch = async () => {
       imageVariants: images,
       videoVariants: videos,
       fbVideoIds: fbIds,
-      // send a thumbnail to satisfy FB if needed
+      // send a thumbnail to satisfy FB if needed (may be null if 'video' and you didn't pick images)
       videoThumbnailUrl: images[0] || null,
 
-      // 👇 force 2 images + 2 videos when provided, ignoring budget/flight guardrails
+      // honor selection in override counts
       overrideCountPerType: {
-        images: Math.min(2, images.length),
-        videos: Math.min(2, Math.max(videos.length, fbIds.length))
+        images: mediaSelection !== "video" ? Math.min(2, images.length) : 0,
+        videos: mediaSelection !== "image" ? Math.min(2, Math.max(videos.length, fbIds.length)) : 0
       }
     };
 
@@ -593,9 +595,9 @@ const handleLaunch = async () => {
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
-          images: (imageUrlsArr || []).slice(0, 2),
-          videos: (videoUrlsArr || []).slice(0, 2),
-          fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
+          images: images,
+          videos: videos,
+          fbVideoIds: fbIds,
           time: Date.now()
         };
         writeCreativeMap(acctId, map);
@@ -1138,38 +1140,42 @@ const handleLaunch = async () => {
                   Creatives
                 </div>
 
-                {/* Images Card */}
-                <div style={{
-                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
-                }}>
+                {/* Images Card (shown unless selection is 'video') */}
+                {mediaSelection !== "video" && (
                   <div style={{
-                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
                   }}>
-                    <span>Images</span>
+                    <div style={{
+                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    }}>
+                      <span>Images</span>
+                    </div>
+                    <ImageCarousel
+                      items={imageUrlsArr}
+                      height={CREATIVE_HEIGHT}
+                      onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                    />
                   </div>
-                  <ImageCarousel
-                    items={imageUrlsArr}
-                    height={CREATIVE_HEIGHT}
-                    onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                  />
-                </div>
+                )}
 
-                {/* Videos Card */}
-                <div style={{
-                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
-                }}>
+                {/* Videos Card (shown unless selection is 'image') */}
+                {mediaSelection !== "image" && (
                   <div style={{
-                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
                   }}>
-                    <span>Videos</span>
-                    {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                    <div style={{
+                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    }}>
+                      <span>Videos</span>
+                      {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                    </div>
+                    <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
                   </div>
-                  <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
-                </div>
+                )}
               </div>
             )}
 
