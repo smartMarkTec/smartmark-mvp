@@ -360,6 +360,11 @@ const CampaignSetup = () => {
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
+  // what to show on the Creatives panel based on selection made on FormPage
+const showImagesCard = mediaSelection !== "video"; // show images unless user picked ONLY video
+const showVideosCard = mediaSelection !== "image"; // show videos unless user picked ONLY image
+
+
 
   // PREVIEW-ONLY creatives carried from FormPage via navigation state
   const [imageUrlsArr, setImageUrlsArr] = useState([]);
@@ -1183,57 +1188,61 @@ const handleLaunch = async () => {
                 <MetricScroller metrics={metricsByCampaign[selectedCampaignId]} />
               </div>
             )}
+{/* PREVIEW CAROUSELS (aesthetic only) */}
+{dropdownOpen && (
+  <div style={{
+    width: "100%",
+    background: PANEL_BG,
+    borderRadius: "1.0rem",
+    padding: "0.9rem",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    marginTop: 6
+  }}>
+    <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
+      Creatives
+    </div>
 
-            {/* PREVIEW CAROUSELS (aesthetic only) */}
-            {dropdownOpen && (
-              <div style={{
-                width: "100%",
-                background: PANEL_BG,
-                borderRadius: "1.0rem",
-                padding: "0.9rem",
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-                marginTop: 6
-              }}>
-                <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
-                  Creatives
-                </div>
+    {/* Images Card (shown unless user selected ONLY video) */}
+    {showImagesCard && (
+      <div style={{
+        background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+        overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+      }}>
+        <div style={{
+          background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+          display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+        }}>
+          <span>Images</span>
+        </div>
+        <ImageCarousel
+          items={imageUrlsArr}
+          height={CREATIVE_HEIGHT}
+          onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+        />
+      </div>
+    )}
 
-                {/* Images Card */}
-                <div style={{
-                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
-                }}>
-                  <div style={{
-                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                  }}>
-                    <span>Images</span>
-                  </div>
-                  <ImageCarousel
-                    items={imageUrlsArr}
-                    height={CREATIVE_HEIGHT}
-                    onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                  />
-                </div>
+    {/* Videos Card (shown unless user selected ONLY image) */}
+    {showVideosCard && (
+      <div style={{
+        background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+        overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+      }}>
+        <div style={{
+          background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+          display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+        }}>
+          <span>Videos</span>
+          {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+        </div>
+        <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+      </div>
+    )}
+  </div>
+)}
 
-                {/* Videos Card */}
-                <div style={{
-                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
-                }}>
-                  <div style={{
-                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                  }}>
-                    <span>Videos</span>
-                    {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-                  </div>
-                  <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
-                </div>
-              </div>
-            )}
 
             {/* Ad Account & Page Selectors */}
             <div style={{
