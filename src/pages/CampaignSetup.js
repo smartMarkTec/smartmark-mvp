@@ -466,21 +466,36 @@ const CampaignSetup = () => {
     } catch {}
   }, [navImageUrls, navVideoUrls, navFbVideoIds]);
 
-  // When switching to an existing campaign, show its persisted creatives (post-launch only)
-  useEffect(() => {
-    if (!selectedCampaignId || !selectedAccount) return;
-    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(acctKey);
-    if (map[selectedCampaignId]) {
-      setImageUrlsArr(map[selectedCampaignId].images || []);
-      setVideoUrlsArr(map[selectedCampaignId].videos || []);
-      setFbVideoIdsArr(map[selectedCampaignId].fbVideoIds || []);
-    } else {
-      setImageUrlsArr([]);
-      setVideoUrlsArr([]);
-      setFbVideoIdsArr([]);
-    }
-  }, [selectedCampaignId, selectedAccount]);
+// When switching to an existing campaign, show its persisted creatives (post-launch only)
+useEffect(() => {
+  if (!selectedCampaignId || !selectedAccount) return;
+  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+  const map = readCreativeMap(acctKey);
+  const saved = map[selectedCampaignId];
+  if (saved) {
+    setImageUrlsArr(saved.images || []);
+    setVideoUrlsArr(saved.videos || []);
+    setFbVideoIdsArr(saved.fbVideoIds || []);
+
+    // reflect the saved selection (fallback: infer from what exists)
+    const inferred =
+      saved.mediaSelection
+        ? String(saved.mediaSelection).toLowerCase()
+        : ( (saved.images?.length && saved.videos?.length) ? 'both'
+          : saved.videos?.length ? 'video'
+          : saved.images?.length ? 'image'
+          : (localStorage.getItem("smartmark_media_selection") || 'both') );
+    setMediaSelection(inferred);
+    localStorage.setItem("smartmark_media_selection", inferred);
+  } else {
+    // No saved creatives for this campaign (e.g., created outside UI)
+    setImageUrlsArr([]);
+    setVideoUrlsArr([]);
+    setFbVideoIdsArr([]);
+    // keep current mediaSelection as-is
+  }
+}, [selectedCampaignId, selectedAccount]);
+
 
   // Pause/Unpause/Delete
   const [isPaused, setIsPaused] = useState(false);
@@ -592,17 +607,19 @@ const CampaignSetup = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      // Persist creatives ONLY AFTER a successful launch
-      const map = readCreativeMap(acctId);
-      if (json.campaignId) {
-        map[json.campaignId] = {
-          images: (imageUrlsArr || []).slice(0, 2),
-          videos: (videoUrlsArr || []).slice(0, 2),
-          fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
-          time: Date.now()
-        };
-        writeCreativeMap(acctId, map);
-      }
+   // Persist creatives ONLY AFTER a successful launch
+const map = readCreativeMap(acctId);
+if (json.campaignId) {
+  map[json.campaignId] = {
+    images: (imageUrlsArr || []).slice(0, 2),
+    videos: (videoUrlsArr || []).slice(0, 2),
+    fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
+    mediaSelection: (mediaSelection || 'both').toLowerCase(), // <-- persist selection
+    time: Date.now()
+  };
+  writeCreativeMap(acctId, map);
+}
+
 
       // Clear the draft now that it's launched (FormPage cleaned)
       sessionStorage.removeItem("draft_form_creatives");
