@@ -236,12 +236,7 @@ export default function FormPage() {
   const [generating, setGenerating] = useState(false);
 
   // Ad preview state
-  // NEW: initialize from persisted choice so it carries to setup and survives refresh/OAuth
-  const [mediaType, setMediaType] = useState(() => localStorage.getItem("smartmark_media_selection") || "both");
-  useEffect(() => {
-    localStorage.setItem("smartmark_media_selection", mediaType);
-  }, [mediaType]);
-
+  const [mediaType, setMediaType] = useState("both"); // <- selection that flows to Setup
   const [result, setResult] = useState(null);
 
   const [imageUrls, setImageUrls] = useState([]); // up to 2

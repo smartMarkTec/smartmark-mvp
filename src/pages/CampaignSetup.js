@@ -236,40 +236,6 @@ function MetricsSlider({ metrics }) {
   );
 }
 
-/* ---------- NEW: MediaType toggle on Setup (keeps selection consistent) ---------- */
-function MediaTypeToggle({ mediaType, onChange }) {
-  const choices = [
-    { key: "image", label: "Image" },
-    { key: "both", label: "Both" },
-    { key: "video", label: "Video" },
-  ];
-  return (
-    <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", margin: "6px 0 2px 0" }}>
-      {choices.map((c) => (
-        <button
-          key={c.key}
-          onClick={() => onChange(c.key)}
-          style={{
-            fontWeight: 800,
-            fontSize: "0.98rem",
-            padding: "8px 16px",
-            borderRadius: 12,
-            border: "1px solid #2e5c44",
-            background: mediaType === c.key ? ACCENT_ALT : "#23292c",
-            color: mediaType === c.key ? "#fff" : "#bcfff6",
-            cursor: "pointer",
-            boxShadow: mediaType === c.key ? "0 2px 14px #1ad6b773" : "none",
-            transition: "all 0.15s",
-            outline: "none"
-          }}
-        >
-          {c.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // =========================================================
 // ===================== MAIN COMPONENT ====================
 // =========================================================
@@ -313,7 +279,7 @@ const CampaignSetup = () => {
   const [campaignCount, setCampaignCount] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(true);
 
-  // Media selection (synced from FormPage -> Setup)
+  // Media selection (synced from FormPage -> Setup; no UI toggle here)
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
@@ -417,7 +383,7 @@ const CampaignSetup = () => {
     }
   }, [navMediaSelection]);
 
-  // Persist selection as user toggles here
+  // Persist selection
   useEffect(() => {
     localStorage.setItem("smartmark_media_selection", mediaSelection);
   }, [mediaSelection]);
@@ -755,6 +721,10 @@ const CampaignSetup = () => {
   const endMinAttr = startDate ? new Date(new Date(startDate).getTime() + 60*60*1000).toISOString().slice(0,16) : startMinAttr;
   const endMaxAttr = startDate ? new Date(new Date(startDate).getTime() + 14*24*60*60*1000).toISOString().slice(0,16) : undefined;
 
+  // show/hide creatives based on selection (layout intact)
+  const showImages = mediaSelection === "image" || mediaSelection === "both";
+  const showVideos = mediaSelection === "video" || mediaSelection === "both";
+
   return (
     <div
       style={{
@@ -923,12 +893,6 @@ const CampaignSetup = () => {
                 width: "100%"
               }}
             />
-          </div>
-
-          {/* Media Type Selection (Image / Both / Video) */}
-          <div style={{ width:"100%", maxWidth:370, margin:"-6px auto 6px auto" }}>
-            <div style={{ color:"#fff", fontWeight:700, fontSize:"1.05rem", marginBottom: 6 }}>Ad Format</div>
-            <MediaTypeToggle mediaType={mediaSelection} onChange={(v) => setMediaSelection(v)} />
           </div>
 
           {/* Campaign Duration (max 14 days) */}
@@ -1283,7 +1247,8 @@ const CampaignSetup = () => {
                 {/* Images Card */}
                 <div style={{
                   background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                  overflow:"hidden", boxShadow:"0 2px 16px #16242714",
+                  display: showImages ? "block" : "none"
                 }}>
                   <div style={{
                     background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
@@ -1301,7 +1266,8 @@ const CampaignSetup = () => {
                 {/* Videos Card */}
                 <div style={{
                   background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                  overflow:"hidden", boxShadow:"0 2px 16px #16242714",
+                  display: showVideos ? "block" : "none"
                 }}>
                   <div style={{
                     background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
