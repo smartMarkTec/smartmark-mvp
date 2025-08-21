@@ -170,16 +170,28 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- NEW: Compact metrics slider ---------- */
+/* ---------- NEW: Compact metrics slider (tidy visual) ---------- */
 function MetricsSlider({ metrics }) {
   const stripRef = useRef(null);
+
+  const fmt = (n, opts) => {
+    if (n === undefined || n === null || n === "--") return "--";
+    const v = Number(n);
+    if (isNaN(v)) return n;
+    if (opts === "usd") return `$${v.toFixed(2)}`;
+    if (opts === "pct") return `${(v * 100).toFixed(2)}%`;
+    return String(v);
+  };
+
   const cards = useMemo(() => ([
     { key: "impressions", label: "Impressions", value: metrics?.impressions ?? "--" },
+    { key: "reach", label: "Reach", value: metrics?.reach ?? "--" },
     { key: "clicks", label: "Clicks", value: metrics?.clicks ?? "--" },
-    { key: "ctr", label: "CTR", value: metrics?.ctr ?? "--" },
-    { key: "spend", label: "Spend", value: metrics?.spend ? `$${metrics.spend}` : "--" },
-    { key: "results", label: "Results", value: metrics?.results ?? "--" },
-    { key: "cpr", label: "Cost/Result", value: (metrics?.spend && metrics?.results) ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--" },
+    { key: "ctr", label: "CTR", value: fmt(metrics?.ctr, "pct") },
+    { key: "spend", label: "Spend", value: fmt(metrics?.spend, "usd") },
+    { key: "cpm", label: "CPM", value: fmt(metrics?.cpm, "usd") },
+    { key: "cpp", label: "CPP", value: fmt(metrics?.cpp, "usd") },
+    { key: "unique_clicks", label: "Unique Clicks", value: metrics?.unique_clicks ?? "--" },
   ]), [metrics]);
 
   const scroll = (dir) => {
@@ -189,7 +201,7 @@ function MetricsSlider({ metrics }) {
   };
 
   const cardStyle = {
-    minWidth: 160,
+    minWidth: 170,
     background: "#242a2e",
     border: "1px solid #2f5243",
     color: "#eafff6",
@@ -217,7 +229,8 @@ function MetricsSlider({ metrics }) {
           overflowX:"auto",
           padding: "6px 28px",
           scrollSnapType: "x proximity",
-          scrollbarWidth: "none"
+          scrollbarWidth: "none",
+          msOverflowStyle: "none"
         }}
       >
         {cards.map(c => (
@@ -1091,38 +1104,55 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Campaign dropdown + controls */}
+            {/* Campaign dropdown + controls (CLEAN) */}
             <div style={{ width: "100%", marginBottom: 6 }}>
               <div
                 style={{
-                  display: "flex", width: "100%",
+                  display: "flex",
+                  width: "100%",
                   justifyContent: "space-between",
                   alignItems: "center",
                   marginBottom: 12
-                }}>
+                }}
+              >
+                {/* Toggleable 'Campaign' tab — no 'select' wording */}
                 <div
+                  onClick={() => setDropdownOpen((o) => !o)}
                   style={{
-                    fontSize: "1.23rem",
-                    fontWeight: 800,
-                    color: "#fff",
                     display: "flex",
                     alignItems: "center",
+                    gap: 10,
                     cursor: "pointer",
-                    gap: 9,
+                    userSelect: "none",
+                    padding: "8px 12px",
+                    borderRadius: 10,
+                    background: "#20262a",
+                    border: "1px solid #2b3d37",
+                    boxShadow: "0 1px 10px #0c1a1420"
                   }}
-                  onClick={() => setDropdownOpen((o) => !o)}
+                  aria-label="Campaign dropdown"
+                  role="button"
                 >
                   <FaChevronDown
                     style={{
                       transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
-                      marginRight: 7,
-                      transition: "transform 0.18s"
+                      transition: "transform 0.18s",
+                      color: "#a7e8d1"
                     }}
                   />
-                  {selectedCampaignId
-                    ? (campaigns.find(c => c.id === selectedCampaignId)?.name || "Campaign")
-                    : "Campaigns"}
+                  <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.15 }}>
+                    <div style={{ fontSize: "0.86rem", fontWeight: 800, color: "#bfeede", letterSpacing: 0.3 }}>
+                      Campaign
+                    </div>
+                    <div style={{ fontSize: "1.02rem", fontWeight: 800, color: "#fff" }}>
+                      {selectedCampaignId
+                        ? (campaigns.find(c => c.id === selectedCampaignId)?.name || "—")
+                        : (campaigns[0]?.name || "—")}
+                    </div>
+                  </div>
                 </div>
+
+                {/* Controls */}
                 <div style={{ display: "flex", gap: "0.7rem" }}>
                   <button
                     onClick={handlePauseUnpause}
@@ -1138,7 +1168,8 @@ const CampaignSetup = () => {
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "center"
+                      justifyContent: "center",
+                      opacity: (loading || !selectedCampaignId) ? 0.7 : 1
                     }}
                     title={isPaused ? "Play" : "Pause"}
                   >
@@ -1158,7 +1189,8 @@ const CampaignSetup = () => {
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "center"
+                      justifyContent: "center",
+                      opacity: (loading || !selectedCampaignId) ? 0.7 : 1
                     }}
                     title="Delete"
                   >
@@ -1188,35 +1220,64 @@ const CampaignSetup = () => {
                 </div>
               </div>
 
-              {/* Dropdown list */}
+              {/* Dropdown list (max 2). Clean cards, no extra labels */}
               {dropdownOpen && (
-                <div style={{
-                  width: "100%",
-                  background: "#232a28",
-                  borderRadius: "0.8rem",
-                  marginBottom: 6,
-                  marginTop: 1,
-                  padding: "0.7rem 0.4rem",
-                  boxShadow: "0 2px 12px #193a2a13"
-                }}>
-                  {campaigns.map(c => (
-                    <div
-                      key={c.id}
-                      style={{
-                        color: c.id === selectedCampaignId ? ACCENT_ALT : "#fff",
-                        fontWeight: c.id === selectedCampaignId ? 800 : 600,
-                        fontSize: "1.09rem",
-                        cursor: "pointer",
-                        padding: "0.35rem 0.8rem",
-                        borderRadius: 8,
-                        marginBottom: 2,
-                        background: c.id === selectedCampaignId ? "#1c3938" : "transparent"
-                      }}
-                      onClick={() => setSelectedCampaignId(c.id)}
-                    >
-                      {c.name || c.id}
-                    </div>
-                  ))}
+                <div
+                  style={{
+                    width: "100%",
+                    background: "#232a28",
+                    borderRadius: "0.9rem",
+                    marginBottom: 6,
+                    marginTop: 2,
+                    padding: "6px",
+                    boxShadow: "0 2px 12px #193a2a13",
+                    border: "1px solid #2a3f35"
+                  }}
+                >
+                  {(campaigns || []).slice(0, 2).map(c => {
+                    const active = c.id === selectedCampaignId;
+                    return (
+                      <div
+                        key={c.id}
+                        onClick={() => setSelectedCampaignId(c.id)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 10,
+                          padding: "10px 12px",
+                          margin: "4px",
+                          borderRadius: 10,
+                          cursor: "pointer",
+                          background: active ? "#1c3938" : "transparent",
+                          color: active ? ACCENT_ALT : "#e8fff6",
+                          border: active ? "1px solid #2e6b58" : "1px solid transparent",
+                          transition: "background 0.15s, border 0.15s"
+                        }}
+                      >
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <div style={{ fontWeight: 800, fontSize: "1.02rem", lineHeight: 1.15 }}>
+                            {c.name || c.id}
+                          </div>
+                          <div style={{ fontSize: "0.82rem", color: active ? "#a6f0d6" : "#93cdb9" }}>
+                            {c.id}
+                          </div>
+                        </div>
+                        {active && (
+                          <div style={{
+                            fontSize: 11,
+                            fontWeight: 900,
+                            color: "#a6f0d6",
+                            background: "#17322c",
+                            padding: "4px 8px",
+                            borderRadius: 999
+                          }}>
+                            ACTIVE
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
