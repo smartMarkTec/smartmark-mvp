@@ -14,6 +14,18 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
+// ADD NEAR THE TOP, after the env consts:
+router.get('/facebook/ping', (req, res) => {
+  res.json({
+    ok: true,
+    env: {
+      FACEBOOK_APP_ID: !!FACEBOOK_APP_ID,
+      FACEBOOK_APP_SECRET: !!FACEBOOK_APP_SECRET,
+      FACEBOOK_REDIRECT_URI
+    }
+  });
+});
+
 // Helper: absolute public URL for generated assets
 function absolutePublicUrl(relativePath) {
   const base =
@@ -41,15 +53,23 @@ const FB_SCOPES = [
 /* =========================
    FACEBOOK OAUTH
    ========================= */
-router.get('/facebook', (req, res) => {
-  const state = 'smartmark_state_1';
-  const fbUrl =
-    `https://www.facebook.com/v18.0/dialog/oauth` +
-    `?client_id=${FACEBOOK_APP_ID}` +
-    `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
-    `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
-    `&response_type=code&state=${state}`;
-  res.redirect(fbUrl);
+router.get('/facebook', (req, res, next) => {
+  try {
+    if (!FACEBOOK_APP_ID || !FACEBOOK_REDIRECT_URI) {
+      return res.status(500).json({
+        error: 'Missing FACEBOOK_APP_ID or FACEBOOK_REDIRECT_URI on the server'
+      });
+    }
+    const url = new URL('https://www.facebook.com/v18.0/dialog/oauth');
+    url.searchParams.set('client_id', FACEBOOK_APP_ID);
+    url.searchParams.set('redirect_uri', FACEBOOK_REDIRECT_URI);
+    url.searchParams.set('scope', FB_SCOPES.join(','));
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('state', 'smartmark_state_1');
+    res.redirect(url.toString());
+  } catch (err) {
+    next(err);
+  }
 });
 
 router.get('/facebook/callback', async (req, res) => {
