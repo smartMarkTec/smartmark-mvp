@@ -310,7 +310,7 @@ const CampaignSetup = () => {
 
   // PREVIEW-ONLY creatives carried from FormPage via navigation state
   const [imageUrlsArr, setImageUrlsArr] = useState([]);
-  the
+  
   const [videoUrlsArr, setVideoUrlsArr] = useState([]);
   const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]);
 
