@@ -1,19 +1,28 @@
-/* eslint-disable */
 'use strict';
 
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
-const db = require('../db'); // LowDB instance (persisted to disk)
+const db = require('../db');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
-const { policy } = require('../smartCampaignEngine'); // decideVariantPlan, STOP_RULES, etc.
+const { policy } = require('../smartCampaignEngine');
 
 // ---- env ----
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+// Helper: absolute public URL for generated assets
+function absolutePublicUrl(relativePath) {
+  const base =
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://smartmark-mvp.onrender.com';
+  if (!relativePath) return '';
+  return /^https?:\/\//i.test(relativePath) ? relativePath : `${base}${relativePath}`;
+}
 
 const FB_SCOPES = [
   'pages_manage_engagement',
@@ -29,49 +38,24 @@ const FB_SCOPES = [
   'ads_read'
 ];
 
-// Helper: absolute public URL for generated assets
-function absolutePublicUrl(relativePath) {
-  const base =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    'https://smartmark-mvp.onrender.com';
-  if (!relativePath) return '';
-  return /^https?:\/\//i.test(relativePath) ? relativePath : `${base}${relativePath}`;
-}
-
 /* =========================
    FACEBOOK OAUTH
    ========================= */
 router.get('/facebook', (req, res) => {
-  try {
-    if (!FACEBOOK_APP_ID || !FACEBOOK_APP_SECRET || !FACEBOOK_REDIRECT_URI) {
-      return res.status(500).json({
-        error: 'Facebook OAuth not configured',
-        missing: {
-          FACEBOOK_APP_ID: !!FACEBOOK_APP_ID,
-          FACEBOOK_APP_SECRET: !!FACEBOOK_APP_SECRET,
-          FACEBOOK_REDIRECT_URI: !!FACEBOOK_REDIRECT_URI
-        }
-      });
-    }
-    const state = 'smartmark_state_1';
-    const fbUrl =
-      `https://www.facebook.com/v18.0/dialog/oauth` +
-      `?client_id=${FACEBOOK_APP_ID}` +
-      `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
-      `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
-      `&response_type=code&state=${state}`;
-    return res.redirect(fbUrl);
-  } catch (e) {
-    return res.status(500).json({ error: 'Failed to start Facebook OAuth', detail: e.message });
-  }
+  const state = 'smartmark_state_1';
+  const fbUrl =
+    `https://www.facebook.com/v18.0/dialog/oauth` +
+    `?client_id=${FACEBOOK_APP_ID}` +
+    `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
+    `&response_type=code&state=${state}`;
+  res.redirect(fbUrl);
 });
 
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('No code returned from Facebook.');
   try {
-    // short-lived
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: {
         client_id: FACEBOOK_APP_ID,
@@ -82,7 +66,6 @@ router.get('/facebook/callback', async (req, res) => {
     });
     const accessToken = tokenRes.data.access_token;
 
-    // exchange to long-lived if possible
     try {
       const x = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
         params: {
@@ -111,7 +94,7 @@ router.get('/facebook/callback', async (req, res) => {
   }
 });
 
-// Debug route: confirm token presence
+// Debug route
 router.get('/debug/fbtoken', (req, res) => {
   res.json({ fbUserToken: getFbUserToken() ? 'present' : 'missing' });
 });
@@ -179,38 +162,32 @@ router.post('/login', async (req, res) => {
 });
 
 /* =========================
-   LAUNCH CAMPAIGN (uses provided creatives)
+   LAUNCH CAMPAIGN
    ========================= */
-
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // no-spend flags
   const NO_SPEND = process.env.NO_SPEND === '1' || req.query.no_spend === '1' || !!req.body.noSpend;
   const VALIDATE_ONLY = req.query.validate_only === '1' || !!req.body.validateOnly;
-  const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
+  const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  // helper to build params (adds validate_only when requested)
   const mkParams = () => {
     const p = { access_token: userToken };
     if (VALIDATE_ONLY) p.execution_options = ['validate_only'];
     return p;
   };
 
-  // tiny sleep
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // robust image fetch (with fallback) + upload
   async function fetchImageAsBase64(url) {
     if (!url) throw new Error('No image URL');
-    // allow data URLs directly
     const m = /^data:image\/\w+;base64,(.+)$/i.exec(url);
     if (m) return m[1];
 
     const abs = absolutePublicUrl(url);
-    const tries = [0, 400, 900]; // backoff
+    const tries = [0, 400, 900];
     let lastErr;
     for (const d of tries) {
       try {
@@ -223,9 +200,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
         if (!ct.includes('image')) throw new Error(`Non-image content-type: ${ct || 'unknown'}`);
         return Buffer.from(imgRes.data).toString('base64');
-      } catch (e) {
-        lastErr = e;
-      }
+      } catch (e) { lastErr = e; }
     }
     throw lastErr || new Error('Image download failed');
   }
@@ -236,7 +211,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       try {
         base64 = await fetchImageAsBase64(imageUrl);
       } catch (e) {
-        // guaranteed fallback (prevents picsum/remote 503s)
         base64 = await fetchImageAsBase64('/__fallback/1200.jpg');
       }
       const fbImageRes = await axios.post(
@@ -247,7 +221,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       const imgData = fbImageRes.data?.images || {};
       const hash = Object.values(imgData)[0]?.hash || null;
       if (hash) return hash;
-      // in validate-only, accept stub
       if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
       throw new Error('Image upload failed');
     } catch (e) {
@@ -294,7 +267,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     const campaignName = form.campaignName || form.businessName || 'SmartMark Campaign';
 
-    // parse AI audience
     let aiAudience = null;
     try {
       if (typeof aiAudienceRaw === 'string') aiAudience = JSON.parse(aiAudienceRaw);
@@ -305,7 +277,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const wantImage = ms === 'image' || ms === 'both';
     const wantVideo = ms === 'video' || ms === 'both';
 
-    // Targeting baseline
+    // Targeting baseline + Advantage+ when user didn't provide interests
     let targeting = {
       geo_locations: { countries: ['US'] },
       age_min: 18,
@@ -328,9 +300,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     }
     if (aiAudience?.fbInterestIds?.length) {
       targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map(id => ({ id })) }];
+      targeting.targeting_automation.advantage_audience = 0;
+    } else {
+      targeting.targeting_automation.advantage_audience = 1; // let FB optimize
     }
 
-    // limit: max 2 active campaigns (skip when validate-only)
+    // limit: max 2 active (skip in validate-only)
     if (!VALIDATE_ONLY) {
       const existing = await axios.get(
         `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
@@ -344,10 +319,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       }
     }
 
-    // decide variants
+    // Decide variants
     const dailyBudget = Number(budget) || 0;
     const hours = (() => {
-      if (flightEnd) return Math.max(0, (new Date(flightEnd) - Date.now()) / 36e5);
+      if (flightEnd && flightStart) return Math.max(0, (new Date(flightEnd) - new Date(flightStart)) / 36e5);
       if (flightHours) return Number(flightHours) || 0;
       return 0;
     })();
@@ -360,7 +335,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const needImg = wantImage ? plan.images : 0;
     const needVid = wantVideo ? plan.videos : 0;
 
-    // validate creative counts
     if (wantImage && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
@@ -369,7 +343,18 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return res.status(400).json({ error: `Need ${needVid} video(s) but received ${providedVideoCount}.` });
     }
 
-    // 1) Campaign (PAUSED in no-spend; ACTIVE otherwise)
+    // Timeframe normalization + 14-day cap
+    const now = new Date();
+    let startISO = flightStart ? new Date(flightStart).toISOString()
+      : (NO_SPEND ? new Date(now.getTime() + 7*24*60*60*1000).toISOString() : new Date(now.getTime() + 60*1000).toISOString());
+    let endISO = flightEnd ? new Date(flightEnd).toISOString() : null;
+    if (endISO) {
+      const maxEnd = new Date(new Date(startISO).getTime() + 14*24*60*60*1000);
+      if (new Date(endISO) > maxEnd) endISO = maxEnd.toISOString();
+      if (new Date(endISO) <= new Date(startISO)) endISO = new Date(new Date(startISO).getTime() + 24*60*60*1000).toISOString();
+    }
+
+    // 1) Campaign
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -382,13 +367,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     );
     const campaignId = campaignRes.data?.id || 'VALIDATION_ONLY';
 
-    // 2) Ad Sets
+    // Per-adset budget split
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
-    const perAdsetBudgetCents = Math.max(100, Math.round(dailyBudget * 100 / Math.max(1, typesUsed)));
+    const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100 / Math.max(1, typesUsed)));
 
+    // 2) Ad Sets
     let imageAdSetId = null, videoAdSetId = null;
     if (wantImage) {
-      // IMAGE ad set
       const { data } = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
         {
@@ -399,7 +384,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           optimization_goal: 'LINK_CLICKS',
           bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
           status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-          start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
+          start_time: startISO,
+          ...(endISO ? { end_time: endISO } : {}),
           promoted_object: { page_id: pageId },
           targeting: {
             ...targeting,
@@ -415,7 +401,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       imageAdSetId = data?.id || null;
     }
     if (wantVideo) {
-      // VIDEO ad set
       const { data } = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
         {
@@ -426,7 +411,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           optimization_goal: 'LINK_CLICKS',
           bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
           status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-          start_time: NO_SPEND ? SAFE_START : new Date(Date.now() + 60 * 1000).toISOString(),
+          start_time: startISO,
+          ...(endISO ? { end_time: endISO } : {}),
           promoted_object: { page_id: pageId },
           targeting: {
             ...targeting,
@@ -442,10 +428,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       videoAdSetId = data?.id || null;
     }
 
-    // 3) Ads (PAUSED in no-spend)
+    // 3) Ads
     const adIds = [];
 
-    // images
     if (wantImage && imageAdSetId) {
       for (let i = 0; i < needImg; i++) {
         const hash = await uploadImage(imageVariants[i]);
@@ -474,15 +459,11 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       }
     }
 
-    // videos (with GUARANTEED THUMBNAIL)
     if (wantVideo && videoAdSetId) {
       for (let i = 0; i < needVid; i++) {
         const video_id = await ensureVideoIdByIndex(i, videoVariants, fbVideoIds);
 
-        // try to resolve a thumbnail: explicit → imageVariants[i]/[0] → FB preferred → guaranteed fallback
         let thumbUrl = null;
-        let thumbHash = null;
-
         const candBody = (typeof videoThumbnailUrl === 'string' && videoThumbnailUrl) ? videoThumbnailUrl : null;
         const candImg  = imageVariants[i] || imageVariants[0] || null;
         if (candBody) thumbUrl = absolutePublicUrl(candBody);
@@ -498,15 +479,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             thumbUrl = preferred?.uri || null;
           } catch {}
         }
-        // GUARANTEED fallback: if still nothing, upload our reliable image and use image_hash
-        if (!thumbUrl) {
-          try {
-            thumbHash = await uploadImage('/__fallback/1200.jpg');
-          } catch {
-            // final safety: use absolute URL anyway
-            thumbUrl = absolutePublicUrl('/__fallback/1200.jpg');
-          }
-        }
 
         const video_data = {
           video_id,
@@ -515,7 +487,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           call_to_action: { type: 'LEARN_MORE', value: { link: form.url || 'https://your-smartmark-site.com' } }
         };
         if (thumbUrl) video_data.image_url = thumbUrl;
-        else if (thumbHash) video_data.image_hash = thumbHash;
 
         const cr = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
@@ -543,53 +514,16 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   } catch (err) {
     let errorMsg = 'Failed to launch campaign.';
     if (err.response?.data?.error) errorMsg = err.response.data.error.message;
-
-    // Convert HTML/Buffer errors to readable text
     let detail = err.response?.data || err.message;
-    if (Buffer.isBuffer(detail)) {
-      try { detail = detail.toString('utf8'); } catch {}
-    }
-
+    if (Buffer.isBuffer(detail)) { try { detail = detail.toString('utf8'); } catch {} }
     console.error('FB Campaign Launch Error:', detail);
     res.status(500).json({ error: errorMsg, detail });
   }
 });
 
-
 /* =========================
    TEST/UTILITY ROUTES
    ========================= */
-router.post('/facebook/test-pages-manage-metadata/:pageId', async (req, res) => {
-  const userToken = getFbUserToken();
-  const { pageId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const result = await axios.post(
-      `https://graph.facebook.com/v18.0/${pageId}`,
-      { about: 'SmartMark API permission test' },
-      { params: { access_token: userToken } }
-    );
-    res.json(result.data);
-  } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'pages_manage_metadata test failed' });
-  }
-});
-
-router.get('/facebook/test-read-insights/:pageId', async (req, res) => {
-  const userToken = getFbUserToken();
-  const { pageId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const result = await axios.get(
-      `https://graph.facebook.com/v18.0/${pageId}/insights`,
-      { params: { metric: 'page_impressions', access_token: userToken } }
-    );
-    res.json(result.data);
-  } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'read_insights test failed' });
-  }
-});
-
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
@@ -642,22 +576,6 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 
-/* === DEBUG: list ads for a campaign === */
-router.get('/facebook/campaign/:campaignId/ads', async (req, res) => {
-  const userToken = getFbUserToken();
-  const { campaignId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const response = await axios.get(
-      `https://graph.facebook.com/v18.0/${campaignId}/ads`,
-      { params: { access_token: userToken, fields: 'id,name,status,effective_status,adset_id,created_time', limit: 200 } }
-    );
-    res.json(response.data);
-  } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaign ads.' });
-  }
-});
-
 /* Pause / Unpause / Cancel */
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = getFbUserToken();
@@ -704,24 +622,6 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
     res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
-  }
-});
-
-/* === ADMIN: override policy STOP_RULES at runtime (for testing) === */
-router.post('/admin/set-policy-stop-rules', async (req, res) => {
-  try {
-    const { policy } = require('../smartCampaignEngine');
-    const inb = req.body || {};
-    const next = {
-      MIN_SPEND_PER_AD: Number(inb.MIN_SPEND_PER_AD ?? policy.STOP_RULES.MIN_SPEND_PER_AD),
-      MIN_IMPRESSIONS_PER_AD: Number(inb.MIN_IMPRESSIONS_PER_AD ?? policy.STOP_RULES.MIN_IMPRESSIONS_PER_AD),
-      MIN_CLICKS_PER_AD: Number(inb.MIN_CLICKS_PER_AD ?? policy.STOP_RULES.MIN_CLICKS_PER_AD),
-      MAX_TEST_HOURS: Number(inb.MAX_TEST_HOURS ?? policy.STOP_RULES.MAX_TEST_HOURS)
-    };
-    policy.STOP_RULES = next;
-    res.json({ ok: true, STOP_RULES: policy.STOP_RULES });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
   }
 });
 

@@ -1,7 +1,7 @@
 /* eslint-disable */
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
+import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaChevronLeft, FaChevronRight } from "react-icons/fa";
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
 
@@ -170,6 +170,73 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
+/* ---------- NEW: Compact metrics slider ---------- */
+function MetricsSlider({ metrics }) {
+  const stripRef = useRef(null);
+  const cards = useMemo(() => ([
+    { key: "impressions", label: "Impressions", value: metrics?.impressions ?? "--" },
+    { key: "clicks", label: "Clicks", value: metrics?.clicks ?? "--" },
+    { key: "ctr", label: "CTR", value: metrics?.ctr ?? "--" },
+    { key: "spend", label: "Spend", value: metrics?.spend ? `$${metrics.spend}` : "--" },
+    { key: "results", label: "Results", value: metrics?.results ?? "--" },
+    { key: "cpr", label: "Cost/Result", value: (metrics?.spend && metrics?.results) ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--" },
+  ]), [metrics]);
+
+  const scroll = (dir) => {
+    if (!stripRef.current) return;
+    const delta = dir * (stripRef.current.clientWidth * 0.85);
+    stripRef.current.scrollBy({ left: delta, behavior: "smooth" });
+  };
+
+  const cardStyle = {
+    minWidth: 160,
+    background: "#242a2e",
+    border: "1px solid #2f5243",
+    color: "#eafff6",
+    borderRadius: 14,
+    padding: "10px 12px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    gap: 6,
+    boxShadow: "0 2px 10px #14352a33"
+  };
+
+  return (
+    <div style={{ position:"relative", width:"100%" }}>
+      <button
+        onClick={() => scroll(-1)}
+        style={{ position:"absolute", left:-8, top:"50%", transform:"translateY(-50%)", background:"#22312b", border:"none", color:"#aef4da", width:32, height:32, borderRadius:10, cursor:"pointer", zIndex:2 }}
+        aria-label="Prev metrics"
+      ><FaChevronLeft/></button>
+      <div
+        ref={stripRef}
+        style={{
+          display:"flex",
+          gap:12,
+          overflowX:"auto",
+          padding: "6px 28px",
+          scrollSnapType: "x proximity",
+          scrollbarWidth: "none"
+        }}
+      >
+        {cards.map(c => (
+          <div key={c.key} style={{ ...cardStyle, scrollSnapAlign:"start" }}>
+            <div style={{ fontSize:12, color:"#a6d9c5", fontWeight:800, letterSpacing:0.2 }}>{c.label}</div>
+            <div style={{ fontSize:20, fontWeight:900 }}>{c.value}</div>
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={() => scroll(1)}
+        style={{ position:"absolute", right:-8, top:"50%", transform:"translateY(-50%)", background:"#22312b", border:"none", color:"#aef4da", width:32, height:32, borderRadius:10, cursor:"pointer", zIndex:2 }}
+        aria-label="Next metrics"
+      ><FaChevronRight/></button>
+    </div>
+  );
+}
+
+/* ---------- Simple local scheduler (unchanged) ---------- */
 function SchedulerInline({ campaignKey }) {
   const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
   const defaultRun = useMemo(() => {
@@ -188,7 +255,7 @@ function SchedulerInline({ campaignKey }) {
   const uid = () =>
     (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
-      : Math.random().toString(36).slice(0, 10);
+      : Math.random().toString(36).slice(2, 10);
   const nowIso = () => new Date().toISOString();
   const DEFAULT_ACTION = "generate-video";
 
@@ -304,13 +371,12 @@ const CampaignSetup = () => {
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
 
-  // 👇 NEW: flags to show/hide cards based on selection (reflects immediately)
-  const showImagesCard = mediaSelection !== "video";
-  const showVideosCard = mediaSelection !== "image";
+  // Timeframe (max two weeks)
+  const [startDate, setStartDate] = useState(form.startDate || "");
+  const [endDate, setEndDate] = useState(form.endDate || "");
 
   // PREVIEW-ONLY creatives carried from FormPage via navigation state
   const [imageUrlsArr, setImageUrlsArr] = useState([]);
-  
   const [videoUrlsArr, setVideoUrlsArr] = useState([]);
   const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]);
 
@@ -376,7 +442,7 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.data || []);
-        const activeCount = list.filter(c => (c.status || c.effective_status) === "ACTIVE").length;
+        const activeCount = list.filter(c => (c.status || c.effective_status) === "ACTIVE" || (c.status || c.effective_status) === "PAUSED").length;
         setCampaignCount(activeCount);
       })
       .catch(() => {});
@@ -420,18 +486,23 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
-        setBudget(c.budget || budget);
-        setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
+        setBudget(prev => prev || "");
+        setForm(f => ({
+          ...f,
+          campaignName: c.campaignName || f.campaignName || "",
+          startDate: f.startDate || "",
+          endDate: f.endDate || ""
+        }));
       })
       .catch(() => {});
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
       .then(res => res.json())
       .then(setMetrics)
       .catch(() => setMetrics(null));
-  }, [selectedCampaignId, selectedAccount, budget]);
+  }, [selectedCampaignId, selectedAccount]);
 
   // Persist basic fields
-  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
+  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
   useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
   useEffect(() => { localStorage.setItem("smartmark_login_password", email); }, [email]);
@@ -450,7 +521,6 @@ const CampaignSetup = () => {
       return;
     }
 
-    // If no nav state (common after oauth redirect), restore the draft
     try {
       const draftRaw = sessionStorage.getItem("draft_form_creatives");
       if (!draftRaw) return;
@@ -466,36 +536,32 @@ const CampaignSetup = () => {
     } catch {}
   }, [navImageUrls, navVideoUrls, navFbVideoIds]);
 
-// When switching to an existing campaign, show its persisted creatives (post-launch only)
-useEffect(() => {
-  if (!selectedCampaignId || !selectedAccount) return;
-  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-  const map = readCreativeMap(acctKey);
-  const saved = map[selectedCampaignId];
-  if (saved) {
-    setImageUrlsArr(saved.images || []);
-    setVideoUrlsArr(saved.videos || []);
-    setFbVideoIdsArr(saved.fbVideoIds || []);
+  // When switching to an existing campaign, show its persisted creatives (post-launch only)
+  useEffect(() => {
+    if (!selectedCampaignId || !selectedAccount) return;
+    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+    const map = readCreativeMap(acctKey);
+    const saved = map[selectedCampaignId];
+    if (saved) {
+      setImageUrlsArr(saved.images || []);
+      setVideoUrlsArr(saved.videos || []);
+      setFbVideoIdsArr(saved.fbVideoIds || []);
 
-    // reflect the saved selection (fallback: infer from what exists)
-    const inferred =
-      saved.mediaSelection
-        ? String(saved.mediaSelection).toLowerCase()
-        : ( (saved.images?.length && saved.videos?.length) ? 'both'
-          : saved.videos?.length ? 'video'
-          : saved.images?.length ? 'image'
-          : (localStorage.getItem("smartmark_media_selection") || 'both') );
-    setMediaSelection(inferred);
-    localStorage.setItem("smartmark_media_selection", inferred);
-  } else {
-    // No saved creatives for this campaign (e.g., created outside UI)
-    setImageUrlsArr([]);
-    setVideoUrlsArr([]);
-    setFbVideoIdsArr([]);
-    // keep current mediaSelection as-is
-  }
-}, [selectedCampaignId, selectedAccount]);
-
+      const inferred =
+        saved.mediaSelection
+          ? String(saved.mediaSelection).toLowerCase()
+          : ( (saved.images?.length && saved.videos?.length) ? 'both'
+            : saved.videos?.length ? 'video'
+            : saved.images?.length ? 'image'
+            : (localStorage.getItem("smartmark_media_selection") || 'both') );
+      setMediaSelection(inferred);
+      localStorage.setItem("smartmark_media_selection", inferred);
+    } else {
+      setImageUrlsArr([]);
+      setVideoUrlsArr([]);
+      setFbVideoIdsArr([]);
+    }
+  }, [selectedCampaignId, selectedAccount]);
 
   // Pause/Unpause/Delete
   const [isPaused, setIsPaused] = useState(false);
@@ -552,7 +618,7 @@ useEffect(() => {
 
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
-    navigate('/form'); // send back to FormPage to build a brand-new campaign with its own creatives
+    navigate('/form');
   };
 
   const canLaunch = !!(
@@ -564,7 +630,22 @@ useEffect(() => {
     parseFloat(budget) >= 3
   );
 
-  // Launch: ONLY use the creatives from FormPage (previews), never generate here
+  // helper: cap timeframe to 14 days
+  function capTwoWeeksISO(startISO, endISO) {
+    try {
+      if (!startISO && !endISO) return { startISO: null, endISO: null };
+      const now = new Date();
+      const start = startISO ? new Date(startISO) : now;
+      let end = endISO ? new Date(endISO) : null;
+      const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
+      if (!end) end = maxEnd;
+      if (end > maxEnd) end = maxEnd;
+      if (end <= start) end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      return { startISO: start.toISOString(), endISO: end.toISOString() };
+    } catch { return { startISO: null, endISO: null }; }
+  }
+
+  // Launch
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -574,6 +655,12 @@ useEffect(() => {
       const images = (imageUrlsArr || []).slice(0, 2);
       const videos = (videoUrlsArr || []).slice(0, 2);
       const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
+
+      // timeframe (cap to two weeks)
+      const { startISO, endISO } = capTwoWeeksISO(
+        startDate ? new Date(startDate).toISOString() : null,
+        endDate ? new Date(endDate).toISOString() : null
+      );
 
       const payload = {
         form: { ...form },
@@ -587,10 +674,9 @@ useEffect(() => {
         imageVariants: images,
         videoVariants: videos,
         fbVideoIds: fbIds,
-        // send a thumbnail to satisfy FB if needed
         videoThumbnailUrl: images[0] || null,
-
-        // force 2 images + 2 videos when provided
+        flightStart: startISO,
+        flightEnd: endISO,
         overrideCountPerType: {
           images: Math.min(2, images.length),
           videos: Math.min(2, Math.max(videos.length, fbIds.length))
@@ -607,21 +693,20 @@ useEffect(() => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-   // Persist creatives ONLY AFTER a successful launch
-const map = readCreativeMap(acctId);
-if (json.campaignId) {
-  map[json.campaignId] = {
-    images: (imageUrlsArr || []).slice(0, 2),
-    videos: (videoUrlsArr || []).slice(0, 2),
-    fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
-    mediaSelection: (mediaSelection || 'both').toLowerCase(), // <-- persist selection
-    time: Date.now()
-  };
-  writeCreativeMap(acctId, map);
-}
+      // Persist creatives ONLY AFTER a successful launch
+      const map = readCreativeMap(acctId);
+      if (json.campaignId) {
+        map[json.campaignId] = {
+          images: (imageUrlsArr || []).slice(0, 2),
+          videos: (videoUrlsArr || []).slice(0, 2),
+          fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
+          mediaSelection: (mediaSelection || 'both').toLowerCase(),
+          time: Date.now()
+        };
+        writeCreativeMap(acctId, map);
+      }
 
-
-      // Clear the draft now that it's launched (FormPage cleaned)
+      // Clear the draft now that it's launched (remove from FormPage)
       sessionStorage.removeItem("draft_form_creatives");
 
       setLaunched(true);
@@ -837,6 +922,28 @@ if (json.campaignId) {
                 width: "100%"
               }}
             />
+          </div>
+
+          {/* Timeframe (optional, max 14 days) */}
+          <div style={{ width:"100%", maxWidth:370, margin:"0 auto", display:"flex", flexDirection:"column", gap:8 }}>
+            <div style={{ color:"#fff", fontWeight:700, fontSize:"1.05rem" }}>Campaign Timeframe (optional)</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <input
+                type="datetime-local"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                placeholder="Start"
+                style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+              />
+              <input
+                type="datetime-local"
+                value={endDate}
+                onChange={e => setEndDate(e.target.value)}
+                placeholder="End"
+                style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+              />
+            </div>
+            <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>We’ll cap duration to 14 days automatically.</div>
           </div>
 
           {/* Budget */}
@@ -1130,19 +1237,14 @@ if (json.campaignId) {
               )}
             </div>
 
-            {/* Metrics */}
+            {/* Compact, scrollable metrics tied to selected campaign */}
             {selectedCampaignId && (
-              <div style={{ width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
-                <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
-                <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
-                <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
-                <div>Results: <b>{metrics?.results ?? "--"}</b></div>
-                <div>Cost/Result: <b>{metrics?.spend && metrics?.results ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--"}</b></div>
+              <div style={{ width: "100%" }}>
+                <MetricsSlider metrics={metrics} />
               </div>
             )}
 
-            {/* PREVIEW CAROUSELS (aesthetic only) — respects mediaSelection */}
+            {/* PREVIEW CAROUSELS (aesthetic only) */}
             {dropdownOpen && (
               <div style={{
                 width: "100%",
@@ -1158,42 +1260,38 @@ if (json.campaignId) {
                   Creatives
                 </div>
 
-                {/* Images (hidden if user picked video-only) */}
-                {showImagesCard && (
+                {/* Images Card */}
+                <div style={{
+                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                }}>
                   <div style={{
-                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
                   }}>
-                    <div style={{
-                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                    }}>
-                      <span>Images</span>
-                    </div>
-                    <ImageCarousel
-                      items={imageUrlsArr}
-                      height={CREATIVE_HEIGHT}
-                      onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                    />
+                    <span>Images</span>
                   </div>
-                )}
+                  <ImageCarousel
+                    items={imageUrlsArr}
+                    height={CREATIVE_HEIGHT}
+                    onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                  />
+                </div>
 
-                {/* Videos (hidden if user picked image-only) */}
-                {showVideosCard && (
+                {/* Videos Card */}
+                <div style={{
+                  background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                  overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                }}>
                   <div style={{
-                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                    background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                    display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
                   }}>
-                    <div style={{
-                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                    }}>
-                      <span>Videos</span>
-                      {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-                    </div>
-                    <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                    <span>Videos</span>
+                    {videoUrlsArr.length === 0 ? <DottyMini/> : null}
                   </div>
-                )}
+                  <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                </div>
               </div>
             )}
 
