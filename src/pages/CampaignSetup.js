@@ -20,6 +20,26 @@ const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 
 const CREATIVE_HEIGHT = 150;
 
+// --- date helpers for datetime-local ---
+const pad2 = (n) => String(n).padStart(2, "0");
+const toLocalInputValue = (d) => {
+  const dt = new Date(d);
+  return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}T${pad2(dt.getHours())}:${pad2(dt.getMinutes())}`;
+};
+const addDays = (d, days) => {
+  const nd = new Date(d);
+  nd.setDate(nd.getDate() + days);
+  return nd;
+};
+
+// Recommend sensible duration by budget (simple rule-of-thumb)
+const budgetToRecommendedDays = (b) => {
+  const num = Number(b) || 0;
+  if (num >= 100) return 14; // bigger budgets: 14-day run
+  if (num >= 30)  return 7;  // standard benchmark
+  return 3;                  // low-budget quick learning
+};
+
 // Responsive helper
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
@@ -236,94 +256,6 @@ function MetricsSlider({ metrics }) {
   );
 }
 
-/* ---------- Simple local scheduler (unchanged) ---------- */
-function SchedulerInline({ campaignKey }) {
-  const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
-  const defaultRun = useMemo(() => {
-    const d = new Date(Date.now() + 10 * 60 * 1000);
-    d.setSeconds(0, 0);
-    return d.toISOString().slice(0, 16);
-  }, []);
-  const [runAt, setRunAt] = useState(defaultRun);
-  const [jobs, setJobs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
-    catch { return []; }
-  });
-
-  useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(jobs)); }, [jobs, STORE_KEY]);
-
-  const uid = () =>
-    (typeof crypto !== "undefined" && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10);
-  const nowIso = () => new Date().toISOString();
-  const DEFAULT_ACTION = "generate-video";
-
-  useEffect(() => {
-    let alive = true;
-    const tick = () => {
-      if (!alive) return;
-      const dueIdx = jobs.findIndex(
-        (j) => j.status === "pending" && new Date(j.runAt).getTime() <= Date.now() + 2000
-      );
-      if (dueIdx !== -1) {
-        setJobs((prev) => {
-          const clone = [...prev];
-          clone[dueIdx] = { ...clone[dueIdx], status: "done", finishedAt: nowIso() };
-          return clone;
-        });
-      }
-      setTimeout(tick, 1500);
-    };
-    if (jobs.some(j => !j.status)) {
-      setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
-    }
-    tick();
-    return () => { alive = false; };
-  }, [jobs]);
-
-  const addJob = () => {
-    if (!runAt) return;
-    const job = { id: uid(), runAt, createdAt: nowIso(), status: "pending", action: DEFAULT_ACTION };
-    setJobs((prev) => [...prev, job].sort((a, b) => new Date(a.runAt) - new Date(b.runAt)));
-    const next = new Date(new Date(runAt).getTime() + 15 * 60 * 1000);
-    next.setSeconds(0, 0);
-    setRunAt(next.toISOString().slice(0, 16));
-  };
-
-  const clearDone = () => setJobs((prev) => prev.filter((j) => j.status !== "done"));
-  const resetAll = () => { setJobs([]); localStorage.removeItem(STORE_KEY); setRunAt(defaultRun); };
-  const minAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", width: "100%" }}>
-      <div style={{ color: TEXT_MAIN, fontWeight: 700, fontSize: "0.98rem" }}>Schedule:</div>
-      <input
-        type="datetime-local"
-        value={runAt}
-        min={minAttr}
-        onChange={e => setRunAt(e.target.value)}
-        style={{ background: INPUT_BG, color: TEXT_DIM, border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px", fontWeight: 700 }}
-      />
-      <button onClick={addJob}
-        style={{ background: ACCENT, color: "#181b20", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 800, cursor: "pointer", boxShadow: "0 2px 10px #14e7b955" }}>
-        Add
-      </button>
-      <button onClick={clearDone}
-        style={{ background: "#2b3135", color: "#d9f8ea", border: "1px solid #3b4a44", borderRadius: 10, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-        Clear Done
-      </button>
-      <button onClick={resetAll}
-        style={{ background: "#3c4045", color: "#ffd", border: "1px solid #4b5550", borderRadius: 10, padding: "9px 12px", fontWeight: 800, cursor: "pointer" }}>
-        Reset
-      </button>
-      <span style={{ color: "#9fe9c8", fontWeight: 700, marginLeft: 6 }}>
-        {jobs.filter(j => j.status === "pending").length} pending
-      </span>
-    </div>
-  );
-}
-
 // =========================================================
 // ===================== MAIN COMPONENT ====================
 // =========================================================
@@ -371,7 +303,7 @@ const CampaignSetup = () => {
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
 
-  // Timeframe (max two weeks)
+  // Campaign Duration (max two weeks)
   const [startDate, setStartDate] = useState(form.startDate || "");
   const [endDate, setEndDate] = useState(form.endDate || "");
 
@@ -645,6 +577,20 @@ const CampaignSetup = () => {
     } catch { return { startISO: null, endISO: null }; }
   }
 
+  // Defaults for Campaign Duration (applied once if both empty)
+  useEffect(() => {
+    if (!startDate && !endDate) {
+      const start = new Date();
+      start.setMinutes(0,0,0);
+      start.setHours(start.getHours() + 1); // start next full hour
+      const recDays = budgetToRecommendedDays(budget || form?.budget);
+      const end = addDays(start, Math.min(14, Math.max(1, recDays || 7)));
+      setStartDate(toLocalInputValue(start));
+      setEndDate(toLocalInputValue(end));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Launch
   const handleLaunch = async () => {
     setLoading(true);
@@ -896,15 +842,11 @@ const CampaignSetup = () => {
             </button>
           )}
 
-          {/* Campaign Name + Scheduler */}
+          {/* Campaign Name */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-              <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
-                Campaign Name
-              </label>
-              <SchedulerInline campaignKey={selectedCampaignId || "draft"} />
-            </div>
-
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", alignSelf: "flex-start", marginBottom: 7 }}>
+              Campaign Name
+            </label>
             <input
               type="text"
               value={form.campaignName || ""}
@@ -924,26 +866,114 @@ const CampaignSetup = () => {
             />
           </div>
 
-          {/* Timeframe (optional, max 14 days) */}
-          <div style={{ width:"100%", maxWidth:370, margin:"0 auto", display:"flex", flexDirection:"column", gap:8 }}>
-            <div style={{ color:"#fff", fontWeight:700, fontSize:"1.05rem" }}>Campaign Timeframe (optional)</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-              <input
-                type="datetime-local"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-                placeholder="Start"
-                style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
-              />
-              <input
-                type="datetime-local"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-                placeholder="End"
-                style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
-              />
+          {/* Campaign Duration (max 14 days) */}
+          <div style={{ width:"100%", maxWidth:370, margin:"0 auto", display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
+              <div style={{ color:"#fff", fontWeight:700, fontSize:"1.05rem" }}>Campaign Duration</div>
+              <div style={{ color:"#a6d9c5", fontWeight:800, fontSize:"0.92rem" }}>
+                {(() => {
+                  if (!startDate || !endDate) return "—";
+                  const s = new Date(startDate);
+                  const e = new Date(endDate);
+                  const ms = e - s;
+                  if (isNaN(ms) || ms <= 0) return "—";
+                  const days = Math.ceil(ms / (24*60*60*1000));
+                  return `${days} day${days > 1 ? "s" : ""}`;
+                })()}
+              </div>
             </div>
-            <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>We’ll cap duration to 14 days automatically.</div>
+
+            {/* Quick picks */}
+            <div style={{ display:"flex", gap:8 }}>
+              {[
+                { label:"3d Test", days:3 },
+                { label:"7d Standard", days:7 },
+                { label:"14d Max", days:14 },
+              ].map(({label, days}) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => {
+                    const baseStart = startDate ? new Date(startDate) : (() => {
+                      const d = new Date();
+                      d.setMinutes(0,0,0);
+                      d.setHours(d.getHours() + 1); // start next hour
+                      return d;
+                    })();
+                    const targetEnd = addDays(baseStart, Math.min(14, days));
+                    setStartDate(toLocalInputValue(baseStart));
+                    setEndDate(toLocalInputValue(targetEnd));
+                  }}
+                  style={{
+                    background:"#22312b", color:"#aef4da", border:"1px solid #2f5243",
+                    borderRadius:12, padding:"7px 10px", fontWeight:800, fontSize:"0.92rem", cursor:"pointer",
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Inputs */}
+            {(() => {
+              const now = new Date();
+              const startObj = startDate ? new Date(startDate) : null;
+              const endMin = startObj ? toLocalInputValue(startObj) : toLocalInputValue(now);
+              const endMax = startObj ? toLocalInputValue(addDays(startObj, 14)) : undefined;
+              const startMin = toLocalInputValue(now);
+
+              return (
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                  <input
+                    type="datetime-local"
+                    value={startDate}
+                    min={startMin}
+                    onChange={e => {
+                      const v = e.target.value;
+                      setStartDate(v);
+                      // clamp end when start shifts
+                      if (endDate) {
+                        const s = new Date(v);
+                        const eDate = new Date(endDate);
+                        const maxEnd = addDays(s, 14);
+                        let nextEnd = eDate;
+                        if (eDate <= s) nextEnd = addDays(s, 1);
+                        if (eDate > maxEnd) nextEnd = maxEnd;
+                        setEndDate(toLocalInputValue(nextEnd));
+                      } else {
+                        // set a recommended end if none picked
+                        const recDays = budgetToRecommendedDays(budget);
+                        setEndDate(toLocalInputValue(addDays(new Date(v), Math.min(14, Math.max(1, recDays)))));
+                      }
+                    }}
+                    placeholder="Start"
+                    style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+                  />
+                  <input
+                    type="datetime-local"
+                    value={endDate}
+                    min={endMin}
+                    {...(endMax ? { max: endMax } : {})}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      if (!startDate) { setEndDate(raw); return; }
+                      const s = new Date(startDate);
+                      let eDate = new Date(raw);
+                      const maxEnd = addDays(s, 14);
+                      if (eDate <= s) eDate = addDays(s, 1);
+                      if (eDate > maxEnd) eDate = maxEnd;
+                      setEndDate(toLocalInputValue(eDate));
+                    }}
+                    placeholder="End"
+                    style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+                  />
+                </div>
+              );
+            })()}
+
+            <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>
+              Max 14 days. Defaults are based on ad best-practices.
+            </div>
           </div>
 
           {/* Budget */}

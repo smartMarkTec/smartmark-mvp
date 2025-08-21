@@ -13,7 +13,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const sharp = require('sharp'); // <<< add
+const sharp = require('sharp'); // needed for fallback image
 
 const app = express();
 
@@ -107,8 +107,6 @@ app.use(smartMockRoutes);
 const smartRoutes = require('./routes/smart');
 app.use('/smart', smartRoutes);
 
-
-
 // --- Health check ---
 app.get('/healthz', (req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
@@ -136,18 +134,9 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ---- Start background scheduler ----
-try {
-  const scheduler = require('./scheduler/jobs');
-  if (scheduler && typeof scheduler.start === 'function') {
-    scheduler.start();
-    console.log('✅ Smart scheduler started');
-  } else {
-    console.warn('⚠️  Smart scheduler not started: start() not found');
-  }
-} catch (e) {
-  console.warn('⚠️  Failed to load/start scheduler:', e?.message || e);
-}
+// ---- Background scheduler intentionally disabled ----
+// Timeframes are now controlled per-campaign from the UI (Campaign Duration).
+// (If you ever need it again, re-enable ./scheduler/jobs start here.)
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
