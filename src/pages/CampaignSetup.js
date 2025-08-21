@@ -170,64 +170,6 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* -------- Compact metrics scroller (per-campaign cached) -------- */
-function MetricScroller({ metrics }) {
-  const items = [
-    { k: "impressions", label: "Impr", fmt: (v)=>v ?? "--" },
-    { k: "reach", label: "Reach", fmt: (v)=>v ?? "--" },
-    { k: "clicks", label: "Clicks", fmt: (v)=>v ?? "--" },
-    { k: "ctr", label: "CTR", fmt: (v)=> (v!=null? `${Number(v).toFixed(2)}%` : "--") },
-    { k: "spend", label: "Spend", fmt: (v)=> (v!=null? `$${Number(v).toFixed(2)}` : "--") },
-    { k: "cpm", label: "CPM", fmt: (v)=> (v!=null? `$${Number(v).toFixed(2)}` : "--") },
-    { k: "cpp", label: "CPP", fmt: (v)=> (v!=null? `$${Number(v).toFixed(2)}` : "--") },
-    { k: "results", label: "Results", fmt: (v)=>v ?? "--" },
-    { k: "unique_clicks", label: "U-Clicks", fmt: (v)=>v ?? "--" },
-  ];
-  const [idx, setIdx] = useState(0);
-  const visible = 3; // tiles at a time
-  const total = items.length;
-  const data = (k)=> (metrics && Object.prototype.hasOwnProperty.call(metrics, k) ? metrics[k] : null);
-
-  const tile = (it, i) => (
-    <div key={i} style={{
-      minWidth: 120, background: "#232a2c", border: `1px solid ${LINE}`, borderRadius: 12,
-      padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start",
-      boxShadow: "0 2px 10px #17352a22"
-    }}>
-      <div style={{ color: "#bffae2", fontWeight: 800, fontSize: "0.8rem" }}>{it.label}</div>
-      <div style={{ color: "#fff", fontWeight: 900, fontSize: "1.05rem", letterSpacing: "0.3px" }}>
-        {it.fmt(data(it.k))}
-      </div>
-    </div>
-  );
-
-  return (
-    <div style={{ position:"relative", width:"100%", display:"flex", alignItems:"center" }}>
-      <button
-        onClick={() => setIdx((p)=> (p - 1 + total) % total)}
-        style={{ position:"absolute", left: -6, top:"50%", transform:"translateY(-50%)",
-          background:"#2a3332", color:"#fff", border:"1px solid #314940", borderRadius:10, width:28, height:28, cursor:"pointer" }}
-        aria-label="Prev metrics"
-      >‹</button>
-      <div style={{
-        display:"grid",
-        gridTemplateColumns:`repeat(${visible}, minmax(0,1fr))`,
-        gap:10,
-        margin:"0 28px",
-        width:"100%"
-      }}>
-        {Array.from({length: visible}).map((_, i) => tile(items[(idx + i) % total], i))}
-      </div>
-      <button
-        onClick={() => setIdx((p)=> (p + 1) % total)}
-        style={{ position:"absolute", right: -6, top:"50%", transform:"translateY(-50%)",
-          background:"#2a3332", color:"#fff", border:"1px solid #314940", borderRadius:10, width:28, height:28, cursor:"pointer" }}
-        aria-label="Next metrics"
-      >›</button>
-    </div>
-  );
-}
-
 function SchedulerInline({ campaignKey }) {
   const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
   const defaultRun = useMemo(() => {
@@ -246,7 +188,7 @@ function SchedulerInline({ campaignKey }) {
   const uid = () =>
     (typeof crypto !== "undefined" && crypto.randomUUID)
       ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10);
+      : Math.random().toString(36).slice(0, 10);
   const nowIso = () => new Date().toISOString();
   const DEFAULT_ACTION = "generate-video";
 
@@ -349,6 +291,7 @@ const CampaignSetup = () => {
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [metrics, setMetrics] = useState(null);
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -360,22 +303,19 @@ const CampaignSetup = () => {
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
-  // what to show on the Creatives panel based on selection made on FormPage
-const showImagesCard = mediaSelection !== "video"; // show images unless user picked ONLY video
-const showVideosCard = mediaSelection !== "image"; // show videos unless user picked ONLY image
 
-
+  // 👇 NEW: flags to show/hide cards based on selection (reflects immediately)
+  const showImagesCard = mediaSelection !== "video";
+  const showVideosCard = mediaSelection !== "image";
 
   // PREVIEW-ONLY creatives carried from FormPage via navigation state
   const [imageUrlsArr, setImageUrlsArr] = useState([]);
+  the
   const [videoUrlsArr, setVideoUrlsArr] = useState([]);
   const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]);
 
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
-
-  // Cache metrics per-campaign
-  const [metricsByCampaign, setMetricsByCampaign] = useState({});
 
   // From navigation state
   const {
@@ -472,7 +412,7 @@ const showVideosCard = mediaSelection !== "image"; // show videos unless user pi
       .catch(() => {});
   }, [fbConnected, selectedAccount, launched, navImageUrls, navVideoUrls, navFbVideoIds, selectedCampaignId]);
 
-  // Metrics for selected campaign (cache per id)
+  // Metrics for selected campaign
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -480,18 +420,15 @@ const showVideosCard = mediaSelection !== "image"; // show videos unless user pi
       .then(res => res.json())
       .then(c => {
         setCampaignStatus(c.status || c.effective_status || "ACTIVE");
-        setBudget(budget => budget || c.budget || "");
+        setBudget(c.budget || budget);
         setForm(f => ({ ...f, campaignName: c.campaignName || f.campaignName || "", startDate: c.startDate || f.startDate || "" }));
       })
       .catch(() => {});
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
       .then(res => res.json())
-      .then(m => {
-        const row = Array.isArray(m?.data) ? m.data[0] || {} : m || {};
-        setMetricsByCampaign(prev => ({ ...prev, [selectedCampaignId]: row }));
-      })
-      .catch(() => {});
-  }, [selectedCampaignId, selectedAccount]);
+      .then(setMetrics)
+      .catch(() => setMetrics(null));
+  }, [selectedCampaignId, selectedAccount, budget]);
 
   // Persist basic fields
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify(form)); }, [form]);
@@ -545,118 +482,115 @@ const showVideosCard = mediaSelection !== "image"; // show videos unless user pi
     }
   }, [selectedCampaignId, selectedAccount]);
 
- // Pause/Unpause/Delete
-const [isPaused, setIsPaused] = useState(false);
+  // Pause/Unpause/Delete
+  const [isPaused, setIsPaused] = useState(false);
 
-const handlePauseUnpause = async () => {
-  if (!selectedCampaignId || !selectedAccount) return;
-  const acctId = String(selectedAccount).replace(/^act_/, "");
-  setLoading(true);
-  try {
-    if (isPaused) {
-      const r = await fetch(
-        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
-        { method: "POST", credentials: "include" }
-      );
-      if (!r.ok) throw new Error("Unpause failed");
-      setCampaignStatus("ACTIVE");
-      setIsPaused(false);
-    } else {
-      const r = await fetch(
-        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
-        { method: "POST", credentials: "include" }
-      );
-      if (!r.ok) throw new Error("Pause failed");
-      setCampaignStatus("PAUSED");
-      setIsPaused(true);
+  const handlePauseUnpause = async () => {
+    if (!selectedCampaignId || !selectedAccount) return;
+    const acctId = String(selectedAccount).replace(/^act_/, "");
+    setLoading(true);
+    try {
+      if (isPaused) {
+        const r = await fetch(
+          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
+          { method: "POST", credentials: "include" }
+        );
+        if (!r.ok) throw new Error("Unpause failed");
+        setCampaignStatus("ACTIVE");
+        setIsPaused(false);
+      } else {
+        const r = await fetch(
+          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
+          { method: "POST", credentials: "include" }
+        );
+        if (!r.ok) throw new Error("Pause failed");
+        setCampaignStatus("PAUSED");
+        setIsPaused(true);
+      }
+    } catch {
+      alert("Could not update campaign status.");
     }
-  } catch {
-    alert("Could not update campaign status.");
-  }
-  setLoading(false);
-};
+    setLoading(false);
+  };
 
-const handleDelete = async () => {
-  if (!selectedCampaignId || !selectedAccount) return;
-  const acctId = String(selectedAccount).replace(/^act_/, "");
-  setLoading(true);
-  try {
-    const r = await fetch(
-      `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
-      { method: "POST", credentials: "include" }
-    );
-    if (!r.ok) throw new Error("Archive failed");
-    setCampaignStatus("ARCHIVED");
-    setLaunched(false);
-    setLaunchResult(null);
-    setSelectedCampaignId("");
-    alert("Campaign deleted.");
-  } catch {
-    alert("Could not delete campaign.");
-  }
-  setLoading(false);
-};
+  const handleDelete = async () => {
+    if (!selectedCampaignId || !selectedAccount) return;
+    const acctId = String(selectedAccount).replace(/^act_/, "");
+    setLoading(true);
+    try {
+      const r = await fetch(
+        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
+        { method: "POST", credentials: "include" }
+      );
+      if (!r.ok) throw new Error("Archive failed");
+      setCampaignStatus("ARCHIVED");
+      setLaunched(false);
+      setLaunchResult(null);
+      setMetrics(null);
+      setSelectedCampaignId("");
+      alert("Campaign deleted.");
+    } catch {
+      alert("Could not delete campaign.");
+    }
+    setLoading(false);
+  };
 
-const handleNewCampaign = () => {
-  if (campaigns.length >= 2) {
-    alert("You can only have 2 active campaigns.");
-    return;
-  }
-  navigate('/form');
-};
+  const handleNewCampaign = () => {
+    if (campaigns.length >= 2) return;
+    navigate('/form'); // send back to FormPage to build a brand-new campaign with its own creatives
+  };
 
-const canLaunch = !!(
-  fbConnected &&
-  selectedAccount &&
-  selectedPageId &&
-  budget &&
-  !isNaN(parseFloat(budget)) &&
-  parseFloat(budget) >= 3
-);
-
+  const canLaunch = !!(
+    fbConnected &&
+    selectedAccount &&
+    selectedPageId &&
+    budget &&
+    !isNaN(parseFloat(budget)) &&
+    parseFloat(budget) >= 3
+  );
 
   // Launch: ONLY use the creatives from FormPage (previews), never generate here
-const handleLaunch = async () => {
-  setLoading(true);
-  try {
-    const acctId = String(selectedAccount).replace(/^act_/, "");
-    const safeBudget = Math.max(3, Number(budget) || 0);
+  const handleLaunch = async () => {
+    setLoading(true);
+    try {
+      const acctId = String(selectedAccount).replace(/^act_/, "");
+      const safeBudget = Math.max(3, Number(budget) || 0);
 
-    const images = (imageUrlsArr || []).slice(0, 2);
-    const videos = (videoUrlsArr || []).slice(0, 2);
-    const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
+      const images = (imageUrlsArr || []).slice(0, 2);
+      const videos = (videoUrlsArr || []).slice(0, 2);
+      const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
 
-    const payload = {
-      form: { ...form },
-      budget: safeBudget,
-      campaignType: form?.campaignType || "Website Traffic",
-      pageId: selectedPageId,
-      aiAudience: form?.aiAudience || answers?.aiAudience || "",
-      adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-      answers: answers || {},
-      mediaSelection,                         // "image" | "video" | "both"
-      imageVariants: images,
-      videoVariants: videos,
-      fbVideoIds: fbIds,
-      // send a thumbnail to satisfy FB if needed
-      videoThumbnailUrl: images[0] || "/__fallback/1200.jpg",
+      const payload = {
+        form: { ...form },
+        budget: safeBudget,
+        campaignType: form?.campaignType || "Website Traffic",
+        pageId: selectedPageId,
+        aiAudience: form?.aiAudience || answers?.aiAudience || "",
+        adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+        answers: answers || {},
+        mediaSelection,                         // "image" | "video" | "both"
+        imageVariants: images,
+        videoVariants: videos,
+        fbVideoIds: fbIds,
+        // send a thumbnail to satisfy FB if needed
+        videoThumbnailUrl: images[0] || null,
 
-      // force 2 images + 2 videos when provided, ignoring budget/flight guardrails
-      overrideCountPerType: {
-        images: Math.min(2, images.length),
-        videos: Math.min(2, Math.max(videos.length, fbIds.length))
-      }
-    };
+        // force 2 images + 2 videos when provided
+        overrideCountPerType: {
+          images: Math.min(2, images.length),
+          videos: Math.min(2, Math.max(videos.length, fbIds.length))
+        }
+      };
 
-    const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify(payload),
-    });
+      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(payload),
+      });
 
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error || "Server error");
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Server error");
 
       // Persist creatives ONLY AFTER a successful launch
       const map = readCreativeMap(acctId);
@@ -670,7 +604,7 @@ const handleLaunch = async () => {
         writeCreativeMap(acctId, map);
       }
 
-      // Clear the draft now that it's launched (keeps FormPage clean)
+      // Clear the draft now that it's launched (FormPage cleaned)
       sessionStorage.removeItem("draft_form_creatives");
 
       setLaunched(true);
@@ -1179,70 +1113,72 @@ const handleLaunch = async () => {
               )}
             </div>
 
-            {/* Metrics (per selected campaign, compact scroller) */}
+            {/* Metrics */}
             {selectedCampaignId && (
-              <div style={{ width: "100%", background: PANEL_BG, borderRadius: "1.0rem", padding: "0.8rem 0.9rem" }}>
-                <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 8 }}>
-                  Performance
-                </div>
-                <MetricScroller metrics={metricsByCampaign[selectedCampaignId]} />
+              <div style={{ width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>Impressions: <b>{metrics?.impressions ?? "--"}</b></div>
+                <div>Clicks: <b>{metrics?.clicks ?? "--"}</b></div>
+                <div>CTR: <b>{metrics?.ctr ?? "--"}</b></div>
+                <div>Spend: <b>{metrics?.spend ? `$${metrics.spend}` : "--"}</b></div>
+                <div>Results: <b>{metrics?.results ?? "--"}</b></div>
+                <div>Cost/Result: <b>{metrics?.spend && metrics?.results ? `$${(metrics.spend / metrics.results).toFixed(2)}` : "--"}</b></div>
               </div>
             )}
-{/* PREVIEW CAROUSELS (aesthetic only) */}
-{dropdownOpen && (
-  <div style={{
-    width: "100%",
-    background: PANEL_BG,
-    borderRadius: "1.0rem",
-    padding: "0.9rem",
-    display: "flex",
-    flexDirection: "column",
-    gap: 12,
-    marginTop: 6
-  }}>
-    <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
-      Creatives
-    </div>
 
-    {/* Images Card (shown unless user selected ONLY video) */}
-    {showImagesCard && (
-      <div style={{
-        background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-        overflow:"hidden", boxShadow:"0 2px 16px #16242714"
-      }}>
-        <div style={{
-          background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-          display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-        }}>
-          <span>Images</span>
-        </div>
-        <ImageCarousel
-          items={imageUrlsArr}
-          height={CREATIVE_HEIGHT}
-          onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-        />
-      </div>
-    )}
+            {/* PREVIEW CAROUSELS (aesthetic only) — respects mediaSelection */}
+            {dropdownOpen && (
+              <div style={{
+                width: "100%",
+                background: PANEL_BG,
+                borderRadius: "1.0rem",
+                padding: "0.9rem",
+                display: "flex",
+                flexDirection: "column",
+                gap: 12,
+                marginTop: 6
+              }}>
+                <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
+                  Creatives
+                </div>
 
-    {/* Videos Card (shown unless user selected ONLY image) */}
-    {showVideosCard && (
-      <div style={{
-        background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-        overflow:"hidden", boxShadow:"0 2px 16px #16242714"
-      }}>
-        <div style={{
-          background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-          display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-        }}>
-          <span>Videos</span>
-          {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-        </div>
-        <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
-      </div>
-    )}
-  </div>
-)}
+                {/* Images (hidden if user picked video-only) */}
+                {showImagesCard && (
+                  <div style={{
+                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                  }}>
+                    <div style={{
+                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    }}>
+                      <span>Images</span>
+                    </div>
+                    <ImageCarousel
+                      items={imageUrlsArr}
+                      height={CREATIVE_HEIGHT}
+                      onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                    />
+                  </div>
+                )}
 
+                {/* Videos (hidden if user picked image-only) */}
+                {showVideosCard && (
+                  <div style={{
+                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                    overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                  }}>
+                    <div style={{
+                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    }}>
+                      <span>Videos</span>
+                      {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                    </div>
+                    <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Ad Account & Page Selectors */}
             <div style={{

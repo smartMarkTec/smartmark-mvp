@@ -29,9 +29,6 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data; // { id }
 }
 
-
-
-
 // Load Pexels API key from environment
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 
@@ -47,7 +44,6 @@ const MAX_TOTAL_CHARS = 45_000;
 
 function loadTrainingContext() {
   if (!fs.existsSync(DATA_DIR)) return '';
-
 
   const files = fs.readdirSync(DATA_DIR)
     .map(f => path.join(DATA_DIR, f))
@@ -82,7 +78,6 @@ function loadTrainingContext() {
   return context.trim();
 }
 
-
 let customContext = loadTrainingContext();
 
 // ----------- OPENAI -----------
@@ -94,11 +89,17 @@ router.get('/test', (req, res) => {
   res.json({ msg: "AI route is working!" });
 });
 
-// Robust website scraping
+// Robust website scraping (FIXED: trim/validate URL, tolerate redirects, better errors)
 async function getWebsiteText(url) {
   try {
-    if (!url || !/^https?:\/\/\//i.test(url)) throw new Error('Invalid URL');
-    const { data, headers } = await axios.get(url, { timeout: 7000 });
+    const cleanUrl = String(url || "").trim();
+    if (!cleanUrl || !/^https?:\/\//i.test(cleanUrl)) throw new Error("Invalid URL");
+
+    const { data, headers } = await axios.get(cleanUrl, {
+      timeout: 7000,
+      maxRedirects: 3,
+      validateStatus: (s) => s < 400
+    });
 
     if (!headers['content-type'] || !headers['content-type'].includes('text/html')) {
       throw new Error('Not an HTML page');
@@ -110,8 +111,9 @@ async function getWebsiteText(url) {
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
     const lower = body.toLowerCase();
-    if (lower.includes("cloudflare") || lower.includes("access denied") || lower.includes("error occurred") || lower.length < 200) {
+    if (lower.includes("cloudflare") || lower.includes("access denied") || lower.length < 200) {
       throw new Error("Failed to get usable website text (blocked or not enough content)");
     }
     return body.slice(0, 3500);
@@ -162,7 +164,6 @@ const DEFAULT_AUDIENCE = {
   summary: ""
 };
 
-
 async function extractKeywords(text) {
   const prompt = `
 Extract up to 6 compact keywords (one or two words each) from this text that would be useful Facebook interest seeds.
@@ -201,7 +202,6 @@ async function getFbInterestIds(keywords, fbToken) {
   }
   return results;
 }
-
 
 router.post('/detect-audience', async (req, res) => {
   const { url } = req.body;
@@ -269,9 +269,8 @@ Website homepage text:
   }
 });
 
-// ========= image endpoints (unchanged logic) =========
+// ========= image endpoints =========
 const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
-
 
 const IMAGE_KEYWORD_MAP = [
   { match: ["protein powder","protein","supplement","muscle","fitness","gym"], keyword: "gym workout" },
@@ -517,8 +516,13 @@ function mapIndustry(inputRaw = "") {
 function withTimeout(promise, ms, errorMsg = "Timeout") {
   return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))]);
 }
+// FIXED: upfront guard for invalid clip URLs
 async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB = 5) {
   return new Promise((resolve, reject) => {
+    if (!url || !/^https?:\/\//i.test(String(url))) {
+      return reject(new Error("Invalid clip URL"));
+    }
+
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
     const timeout = setTimeout(() => {
@@ -551,7 +555,7 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
 function getDeterministicShuffle(arr, seed) {
   let array = [...arr];
   let random = seedrandom(seed);
-  for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [array[i], array[j]] = [array[j]]; }
+  for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [array[i], array[j]] = [array[j], array[i]]; }
   return array;
 }
 function normalizeShortCTA(input) {
@@ -606,10 +610,10 @@ router.post('/generate-video-ad', async (req, res) => {
     const overlayText = normalizeShortCTA(answers?.cta);
     const { category, pexels } = mapIndustry(productType);
 
-    // Build search term
+    // Build and sanitize search term (FIXED)
     let videoKeywords = [pexels];
     if (productType && !pexels.includes(productType.toLowerCase())) videoKeywords.push(productType);
-    if (url && /^https?:\/\//i.test(url)) {
+    if (url && /^https?:\/\//i.test(String(url).trim())) {
       try {
         const websiteText = await withTimeout(getWebsiteText(url), 8000, "Website text fetch timed out");
         const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
@@ -617,10 +621,11 @@ router.post('/generate-video-ad', async (req, res) => {
       } catch { console.log("Warning: website text unavailable or timeout"); }
     }
     videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
-    const searchTerm = videoKeywords.slice(0, 2).join(" ");
+    const sanitize = (s) => String(s || "").toLowerCase().replace(/['"]/g, "").replace(/[^a-z0-9\s]/gi, " ").replace(/\s+/g, " ").trim();
+    const searchTerm = sanitize(videoKeywords.slice(0, 2).join(" ")) || sanitize(pexels) || "shopping";
     console.log("Step 3: Pexels search term:", searchTerm);
 
-    // Fetch Pexels videos
+    // Fetch Pexels videos (FIXED: require real .link)
     let videoClips = [];
     try {
       const resp = await withTimeout(
@@ -637,39 +642,37 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(404).json({ error: "Not enough stock videos found" });
     }
 
-    // Pick 3 smallest SD mp4s
+    // Build candidate links safely (require valid MP4 link)
     let candidates = [];
     for (let v of videoClips) {
-      let mp4s = (v.video_files || [])
-        .filter(f => f.quality === 'sd' && /\.mp4(\?|$)/i.test(f.link))
-        .sort((a, b) => (a.width || 9999) - (b.width || 9999));
-      if (mp4s[0] && !candidates.includes(mp4s[0].link)) candidates.push(mp4s[0].link);
+      const files = (v.video_files || [])
+        .filter(f => f && typeof f.link === 'string' && /\.mp4(\?|$)/i.test(f.link))
+        .sort((a, b) => (a.width || 9999) - (b.width || 9999)); // prefer smaller
+      const best = files.find(f => f.quality === 'sd' && f.link) || files[0];
+      if (best?.link) candidates.push(best.link);
     }
-    if (candidates.length < 3) return res.status(500).json({ error: "Not enough SD MP4 clips found" });
+    candidates = Array.from(new Set(candidates)).filter(Boolean);
+    if (candidates.length < 3) return res.status(404).json({ error: "Not enough SD MP4 clips with valid links" });
 
     const shuffled = getDeterministicShuffle(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
-    const files = shuffled.slice(0, 3);
 
     // Work dir
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
+    // Download + scale (FIXED: robust loop; skip bad candidates)
     const videoPaths = [];
     const { WIDTH, HEIGHT, FPS, CLIP_SEC } = VIDEO_CFG;
     const ffmpegPathLocal = 'ffmpeg';
     const ffprobePathLocal = 'ffprobe';
 
-    // Download + scale
-    for (let i = 0; i < files.length; i++) {
+    let ptr = 0;
+    while (videoPaths.length < 3 && ptr < shuffled.length) {
+      const srcLink = shuffled[ptr++];
       const dest = path.join(tempDir, `${uuidv4()}.mp4`);
       try {
-        await withTimeout(downloadFileWithTimeout(files[i], dest, TO.DL, 6), TO.DL + 2000, "Download step timed out");
-      } catch (e) {
-        console.error("FFMPEG ERROR: Download step failed", e);
-        return res.status(500).json({ error: "Stock video download failed", detail: e.message });
-      }
-      const scaledPath = dest.replace('.mp4', '_scaled.mp4');
-      try {
+        await withTimeout(downloadFileWithTimeout(srcLink, dest, TO.DL, 6), TO.DL + 2000, "Download step timed out");
+        const scaledPath = dest.replace('.mp4', '_scaled.mp4');
         await withTimeout(
           exec(
             `${ffmpegPathLocal} -y -i "${dest}" ` +
@@ -680,13 +683,15 @@ router.post('/generate-video-ad', async (req, res) => {
           TO.SCALE,
           "ffmpeg scaling timed out"
         );
+        try { fs.unlinkSync(dest); } catch {}
+        videoPaths.push(scaledPath);
       } catch (e) {
         try { fs.unlinkSync(dest); } catch {}
-        console.error("FFMPEG ERROR: Scaling step failed", e.stderr || e.message || e);
-        return res.status(500).json({ error: "Video scaling failed", detail: e.message });
+        console.warn("Skipping bad candidate:", (srcLink || "<empty>"), "-", e.message || e);
       }
-      try { fs.unlinkSync(dest); } catch {}
-      videoPaths.push(scaledPath);
+    }
+    if (!videoPaths.length) {
+      return res.status(500).json({ error: "Stock video download failed", detail: "No usable clips after filtering." });
     }
 
     // GPT script
