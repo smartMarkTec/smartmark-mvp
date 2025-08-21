@@ -1,3 +1,4 @@
+// server/routes/auth.js
 'use strict';
 
 const express = require('express');
@@ -8,13 +9,55 @@ const db = require('../db');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
 const { policy } = require('../smartCampaignEngine');
 
+/* ------------------------------------------------------------------ */
+/*                    Small in-process defaults cache                  */
+/*  Filled right after OAuth, and used as a fallback during launch     */
+/* ------------------------------------------------------------------ */
+const DEFAULTS = {
+  adAccountId: null, // numeric (without "act_")
+  pageId: null,      // numeric page id
+  adAccounts: [],    // lightweight list for convenience
+  pages: [],         // lightweight list for convenience
+};
+async function refreshDefaults(userToken) {
+  try {
+    const [acctRes, pagesRes] = await Promise.all([
+      axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+        params: { access_token: userToken, fields: 'id,name,account_status' },
+      }),
+      axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+        params: { access_token: userToken, fields: 'id,name,access_token' },
+      }),
+    ]);
+
+    const accts = Array.isArray(acctRes.data?.data) ? acctRes.data.data : [];
+    const pages = Array.isArray(pagesRes.data?.data) ? pagesRes.data.data : [];
+
+    DEFAULTS.adAccounts = accts.map(a => ({ id: String(a.id).replace(/^act_/, ''), name: a.name, account_status: a.account_status }));
+    DEFAULTS.pages = pages.map(p => ({ id: p.id, name: p.name }));
+
+    // Keep existing selection if still valid; else pick first available
+    const firstAcct = DEFAULTS.adAccounts[0]?.id || null;
+    const firstPage = DEFAULTS.pages[0]?.id || null;
+
+    if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find(a => a.id === DEFAULTS.adAccountId)) {
+      DEFAULTS.adAccountId = firstAcct;
+    }
+    if (!DEFAULTS.pageId || !DEFAULTS.pages.find(p => p.id === DEFAULTS.pageId)) {
+      DEFAULTS.pageId = firstPage;
+    }
+  } catch (e) {
+    // leave defaults as-is on failure
+  }
+}
+
 // ---- env ----
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// ADD NEAR THE TOP, after the env consts:
+// Quick sanity route
 router.get('/facebook/ping', (req, res) => {
   res.json({
     ok: true,
@@ -22,6 +65,12 @@ router.get('/facebook/ping', (req, res) => {
       FACEBOOK_APP_ID: !!FACEBOOK_APP_ID,
       FACEBOOK_APP_SECRET: !!FACEBOOK_APP_SECRET,
       FACEBOOK_REDIRECT_URI
+    },
+    defaults: {
+      adAccountId: DEFAULTS.adAccountId,
+      pageId: DEFAULTS.pageId,
+      adAccounts: DEFAULTS.adAccounts,
+      pages: DEFAULTS.pages,
     }
   });
 });
@@ -53,23 +102,15 @@ const FB_SCOPES = [
 /* =========================
    FACEBOOK OAUTH
    ========================= */
-router.get('/facebook', (req, res, next) => {
-  try {
-    if (!FACEBOOK_APP_ID || !FACEBOOK_REDIRECT_URI) {
-      return res.status(500).json({
-        error: 'Missing FACEBOOK_APP_ID or FACEBOOK_REDIRECT_URI on the server'
-      });
-    }
-    const url = new URL('https://www.facebook.com/v18.0/dialog/oauth');
-    url.searchParams.set('client_id', FACEBOOK_APP_ID);
-    url.searchParams.set('redirect_uri', FACEBOOK_REDIRECT_URI);
-    url.searchParams.set('scope', FB_SCOPES.join(','));
-    url.searchParams.set('response_type', 'code');
-    url.searchParams.set('state', 'smartmark_state_1');
-    res.redirect(url.toString());
-  } catch (err) {
-    next(err);
-  }
+router.get('/facebook', (req, res) => {
+  const state = 'smartmark_state_1';
+  const fbUrl =
+    `https://www.facebook.com/v18.0/dialog/oauth` +
+    `?client_id=${FACEBOOK_APP_ID}` +
+    `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
+    `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
+    `&response_type=code&state=${state}`;
+  res.redirect(fbUrl);
 });
 
 router.get('/facebook/callback', async (req, res) => {
@@ -97,16 +138,20 @@ router.get('/facebook/callback', async (req, res) => {
       });
       if (x.data?.access_token) {
         await setFbUserToken(x.data.access_token);
-        console.log('[auth] stored LONG-LIVED FB user token');
+        await refreshDefaults(x.data.access_token);
+        console.log('[auth] stored LONG-LIVED FB user token + refreshed defaults');
       } else {
         await setFbUserToken(accessToken);
-        console.log('[auth] stored SHORT-LIVED FB user token (no exchange data)');
+        await refreshDefaults(accessToken);
+        console.log('[auth] stored SHORT-LIVED FB user token + refreshed defaults');
       }
     } catch (e) {
       await setFbUserToken(accessToken);
-      console.warn('[auth] long-lived exchange failed, stored short-lived token');
+      await refreshDefaults(accessToken);
+      console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
+    // Redirect as before (frontend already expects this)
     res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
@@ -117,6 +162,30 @@ router.get('/facebook/callback', async (req, res) => {
 // Debug route
 router.get('/debug/fbtoken', (req, res) => {
   res.json({ fbUserToken: getFbUserToken() ? 'present' : 'missing' });
+});
+
+/* =========================
+   NEW: Defaults helper
+   ========================= */
+router.get('/facebook/defaults', async (req, res) => {
+  const userToken = getFbUserToken();
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  // keep fresh-ish
+  await refreshDefaults(userToken);
+  res.json({
+    ok: true,
+    adAccountId: DEFAULTS.adAccountId,
+    pageId: DEFAULTS.pageId,
+    adAccounts: DEFAULTS.adAccounts,
+    pages: DEFAULTS.pages,
+  });
+});
+
+router.post('/facebook/defaults/select', (req, res) => {
+  const { adAccountId, pageId } = req.body || {};
+  if (adAccountId) DEFAULTS.adAccountId = String(adAccountId).replace(/^act_/, '');
+  if (pageId) DEFAULTS.pageId = String(pageId);
+  return res.json({ ok: true, adAccountId: DEFAULTS.adAccountId, pageId: DEFAULTS.pageId });
 });
 
 /* =========================
@@ -266,14 +335,31 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return up?.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
   }
 
+  // Will fetch first page id if none is provided and DEFAULTS has none
+  async function resolvePageId(explicitPageId) {
+    if (explicitPageId) return String(explicitPageId);
+    if (DEFAULTS.pageId) return String(DEFAULTS.pageId);
+    try {
+      const pagesRes = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+        params: { access_token: userToken, fields: 'id,name' }
+      });
+      const first = pagesRes.data?.data?.[0]?.id || null;
+      if (first) {
+        DEFAULTS.pageId = String(first);
+        return String(first);
+      }
+    } catch {}
+    return null;
+  }
+
   try {
     const {
       form = {},
       budget,
       adCopy,
-      pageId,
+      pageId, // may be omitted now
       aiAudience: aiAudienceRaw,
-      mediaSelection = 'both',               // <-- CRITICAL: respect client selection
+      mediaSelection = 'both',
       imageVariants = [],
       videoVariants = [],
       fbVideoIds = [],
@@ -283,6 +369,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       flightHours = null,
       overrideCountPerType = null
     } = req.body;
+
+    // Resolve page id automatically when not supplied
+    const pageIdFinal = await resolvePageId(pageId);
+    if (!pageIdFinal) {
+      return res.status(400).json({ error: 'No Facebook Page available on this account. Connect a Page and try again.' });
+    }
 
     const campaignName = form.campaignName || form.businessName || 'SmartMark Campaign';
 
@@ -405,7 +497,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
           start_time: startISO,
           ...(endISO ? { end_time: endISO } : {}),
-          promoted_object: { page_id: pageId },
+          promoted_object: { page_id: pageIdFinal },
           targeting: {
             ...targeting,
             publisher_platforms: ['facebook','instagram'],
@@ -432,7 +524,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
           start_time: startISO,
           ...(endISO ? { end_time: endISO } : {}),
-          promoted_object: { page_id: pageId },
+          promoted_object: { page_id: pageIdFinal },
           targeting: {
             ...targeting,
             publisher_platforms: ['facebook','instagram'],
@@ -458,7 +550,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           {
             name: `${campaignName} (Image v${i + 1})`,
             object_story_spec: {
-              page_id: pageId,
+              page_id: pageIdFinal,
               link_data: {
                 message: form.adCopy || adCopy || '',
                 link: form.url || 'https://your-smartmark-site.com',
@@ -509,7 +601,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
         const cr = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-          { name: `${campaignName} (Video v${i + 1})`, object_story_spec: { page_id: pageId, video_data } },
+          { name: `${campaignName} (Video v${i + 1})`, object_story_spec: { page_id: pageIdFinal, video_data } },
           { params: mkParams() }
         );
         const ad = await axios.post(
@@ -528,7 +620,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       adIds,
       variantPlan: plan,
       campaignStatus: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-      validateOnly: VALIDATE_ONLY
+      validateOnly: VALIDATE_ONLY,
+      resolvedPageId: pageIdFinal
     });
   } catch (err) {
     let errorMsg = 'Failed to launch campaign.';
