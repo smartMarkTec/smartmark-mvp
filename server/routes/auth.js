@@ -171,7 +171,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
   const NO_SPEND = process.env.NO_SPEND === '1' || req.query.no_spend === '1' || !!req.body.noSpend;
   const VALIDATE_ONLY = req.query.validate_only === '1' || !!req.body.validateOnly;
-  const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const mkParams = () => {
     const p = { access_token: userToken };
@@ -254,7 +253,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       adCopy,
       pageId,
       aiAudience: aiAudienceRaw,
-      mediaSelection = 'both',
+      mediaSelection = 'both',               // <-- CRITICAL: respect client selection
       imageVariants = [],
       videoVariants = [],
       fbVideoIds = [],
@@ -343,7 +342,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return res.status(400).json({ error: `Need ${needVid} video(s) but received ${providedVideoCount}.` });
     }
 
-    // Timeframe normalization + 14-day cap
+    // Timeframe normalization + 14-day cap (what the UI enforces)
     const now = new Date();
     let startISO = flightStart ? new Date(flightStart).toISOString()
       : (NO_SPEND ? new Date(now.getTime() + 7*24*60*60*1000).toISOString() : new Date(now.getTime() + 60*1000).toISOString());

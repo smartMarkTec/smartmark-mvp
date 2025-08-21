@@ -236,90 +236,36 @@ function MetricsSlider({ metrics }) {
   );
 }
 
-/* ---------- Simple local scheduler (unchanged) ---------- */
-function SchedulerInline({ campaignKey }) {
-  const STORE_KEY = useMemo(() => `sm_sched_jobs_${campaignKey || "draft"}`, [campaignKey]);
-  const defaultRun = useMemo(() => {
-    const d = new Date(Date.now() + 10 * 60 * 1000);
-    d.setSeconds(0, 0);
-    return d.toISOString().slice(0, 16);
-  }, []);
-  const [runAt, setRunAt] = useState(defaultRun);
-  const [jobs, setJobs] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); }
-    catch { return []; }
-  });
-
-  useEffect(() => { localStorage.setItem(STORE_KEY, JSON.stringify(jobs)); }, [jobs, STORE_KEY]);
-
-  const uid = () =>
-    (typeof crypto !== "undefined" && crypto.randomUUID)
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10);
-  const nowIso = () => new Date().toISOString();
-  const DEFAULT_ACTION = "generate-video";
-
-  useEffect(() => {
-    let alive = true;
-    const tick = () => {
-      if (!alive) return;
-      const dueIdx = jobs.findIndex(
-        (j) => j.status === "pending" && new Date(j.runAt).getTime() <= Date.now() + 2000
-      );
-      if (dueIdx !== -1) {
-        setJobs((prev) => {
-          const clone = [...prev];
-          clone[dueIdx] = { ...clone[dueIdx], status: "done", finishedAt: nowIso() };
-          return clone;
-        });
-      }
-      setTimeout(tick, 1500);
-    };
-    if (jobs.some(j => !j.status)) {
-      setJobs((prev) => prev.map(j => j.status ? j : { ...j, status: "pending" }));
-    }
-    tick();
-    return () => { alive = false; };
-  }, [jobs]);
-
-  const addJob = () => {
-    if (!runAt) return;
-    const job = { id: uid(), runAt, createdAt: nowIso(), status: "pending", action: DEFAULT_ACTION };
-    setJobs((prev) => [...prev, job].sort((a, b) => new Date(a.runAt) - new Date(b.runAt)));
-    const next = new Date(new Date(runAt).getTime() + 15 * 60 * 1000);
-    next.setSeconds(0, 0);
-    setRunAt(next.toISOString().slice(0, 16));
-  };
-
-  const clearDone = () => setJobs((prev) => prev.filter((j) => j.status !== "done"));
-  const resetAll = () => { setJobs([]); localStorage.removeItem(STORE_KEY); setRunAt(defaultRun); };
-  const minAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
-
+/* ---------- NEW: MediaType toggle on Setup (keeps selection consistent) ---------- */
+function MediaTypeToggle({ mediaType, onChange }) {
+  const choices = [
+    { key: "image", label: "Image" },
+    { key: "both", label: "Both" },
+    { key: "video", label: "Video" },
+  ];
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", width: "100%" }}>
-      <div style={{ color: TEXT_MAIN, fontWeight: 700, fontSize: "0.98rem" }}>Schedule:</div>
-      <input
-        type="datetime-local"
-        value={runAt}
-        min={minAttr}
-        onChange={e => setRunAt(e.target.value)}
-        style={{ background: INPUT_BG, color: TEXT_DIM, border: `1px solid ${LINE}`, borderRadius: 10, padding: "8px 10px", fontWeight: 700 }}
-      />
-      <button onClick={addJob}
-        style={{ background: ACCENT, color: "#181b20", border: "none", borderRadius: 10, padding: "9px 14px", fontWeight: 800, cursor: "pointer", boxShadow: "0 2px 10px #14e7b955" }}>
-        Add
-      </button>
-      <button onClick={clearDone}
-        style={{ background: "#2b3135", color: "#d9f8ea", border: "1px solid #3b4a44", borderRadius: 10, padding: "9px 12px", fontWeight: 700, cursor: "pointer" }}>
-        Clear Done
-      </button>
-      <button onClick={resetAll}
-        style={{ background: "#3c4045", color: "#ffd", border: "1px solid #4b5550", borderRadius: 10, padding: "9px 12px", fontWeight: 800, cursor: "pointer" }}>
-        Reset
-      </button>
-      <span style={{ color: "#9fe9c8", fontWeight: 700, marginLeft: 6 }}>
-        {jobs.filter(j => j.status === "pending").length} pending
-      </span>
+    <div style={{ display: "flex", gap: 12, justifyContent: "center", alignItems: "center", margin: "6px 0 2px 0" }}>
+      {choices.map((c) => (
+        <button
+          key={c.key}
+          onClick={() => onChange(c.key)}
+          style={{
+            fontWeight: 800,
+            fontSize: "0.98rem",
+            padding: "8px 16px",
+            borderRadius: 12,
+            border: "1px solid #2e5c44",
+            background: mediaType === c.key ? ACCENT_ALT : "#23292c",
+            color: mediaType === c.key ? "#fff" : "#bcfff6",
+            cursor: "pointer",
+            boxShadow: mediaType === c.key ? "0 2px 14px #1ad6b773" : "none",
+            transition: "all 0.15s",
+            outline: "none"
+          }}
+        >
+          {c.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -367,13 +313,28 @@ const CampaignSetup = () => {
   const [campaignCount, setCampaignCount] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(true);
 
+  // Media selection (synced from FormPage -> Setup)
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
 
-  // Timeframe (max two weeks)
-  const [startDate, setStartDate] = useState(form.startDate || "");
-  const [endDate, setEndDate] = useState(form.endDate || "");
+  // --- Campaign Duration (max 14 days) ---
+  // default start = next 10 minutes
+  const defaultStart = useMemo(() => {
+    const d = new Date(Date.now() + 10 * 60 * 1000);
+    d.setSeconds(0, 0);
+    return d;
+  }, []);
+  const [startDate, setStartDate] = useState(() => {
+    const existing = form.startDate || "";
+    return existing || new Date(defaultStart).toISOString().slice(0, 16);
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const s = startDate ? new Date(startDate) : defaultStart;
+    const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
+    e.setSeconds(0,0);
+    return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
+  });
 
   // PREVIEW-ONLY creatives carried from FormPage via navigation state
   const [imageUrlsArr, setImageUrlsArr] = useState([]);
@@ -394,13 +355,44 @@ const CampaignSetup = () => {
     mediaSelection: navMediaSelection
   } = location.state || {};
 
+  // --- helpers for duration clamp ---
+  const clampEndForStart = (startStr, endStr) => {
+    try {
+      const start = new Date(startStr);
+      let end = endStr ? new Date(endStr) : null;
+      const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
+      if (!end || end <= start) end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+      if (end > maxEnd) end = maxEnd;
+      end.setSeconds(0,0);
+      return end.toISOString().slice(0, 16);
+    } catch {
+      return endStr;
+    }
+  };
+  const clampEndOnChange = (val) => {
+    // when user edits End, keep it within [Start+1h, Start+14d]
+    const s = new Date(startDate);
+    let e = new Date(val);
+    const minEnd = new Date(Math.max(s.getTime() + 60*60*1000, s.getTime() + 60*1000));
+    const maxEnd = new Date(s.getTime() + 14*24*60*60*1000);
+    if (e < minEnd) e = minEnd;
+    if (e > maxEnd) e = maxEnd;
+    e.setSeconds(0,0);
+    return e.toISOString().slice(0,16);
+  };
+
   // Load basic persisted fields
   useEffect(() => {
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
-    if (lastFields) setForm(JSON.parse(lastFields));
+    if (lastFields) {
+      const f = JSON.parse(lastFields);
+      setForm(f);
+      if (f.startDate) setStartDate(f.startDate);
+      if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
+    }
     const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
-  }, []);
+  }, []); // eslint-disable-line
 
   // Handle Facebook oauth return
   useEffect(() => {
@@ -415,6 +407,20 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (fbConnected) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
   }, [fbConnected]);
+
+  // Sync selection if passed from nav
+  useEffect(() => {
+    if (navMediaSelection) {
+      const v = String(navMediaSelection).toLowerCase();
+      setMediaSelection(v);
+      localStorage.setItem("smartmark_media_selection", v);
+    }
+  }, [navMediaSelection]);
+
+  // Persist selection as user toggles here
+  useEffect(() => {
+    localStorage.setItem("smartmark_media_selection", mediaSelection);
+  }, [mediaSelection]);
 
   // Fetch ad accounts
   useEffect(() => {
@@ -448,15 +454,6 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [selectedAccount]);
 
-  // Sync mediaSelection if passed from nav
-  useEffect(() => {
-    if (navMediaSelection) {
-      const v = String(navMediaSelection).toLowerCase();
-      setMediaSelection(v);
-      localStorage.setItem("smartmark_media_selection", v);
-    }
-  }, [navMediaSelection]);
-
   // Load campaigns list
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
@@ -481,7 +478,7 @@ const CampaignSetup = () => {
   // Metrics for selected campaign
   useEffect(() => {
     if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace("act_", "");
+    const acctId = String(selectedAccount).replace(/^act_/, "");
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
       .then(res => res.json())
       .then(c => {
@@ -546,7 +543,6 @@ const CampaignSetup = () => {
       setImageUrlsArr(saved.images || []);
       setVideoUrlsArr(saved.videos || []);
       setFbVideoIdsArr(saved.fbVideoIds || []);
-
       const inferred =
         saved.mediaSelection
           ? String(saved.mediaSelection).toLowerCase()
@@ -634,8 +630,7 @@ const CampaignSetup = () => {
   function capTwoWeeksISO(startISO, endISO) {
     try {
       if (!startISO && !endISO) return { startISO: null, endISO: null };
-      const now = new Date();
-      const start = startISO ? new Date(startISO) : now;
+      const start = startISO ? new Date(startISO) : new Date();
       let end = endISO ? new Date(endISO) : null;
       const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
       if (!end) end = maxEnd;
@@ -652,15 +647,20 @@ const CampaignSetup = () => {
       const acctId = String(selectedAccount).replace(/^act_/, "");
       const safeBudget = Math.max(3, Number(budget) || 0);
 
-      const images = (imageUrlsArr || []).slice(0, 2);
-      const videos = (videoUrlsArr || []).slice(0, 2);
-      const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
-
-      // timeframe (cap to two weeks)
+      // clamp durations
       const { startISO, endISO } = capTwoWeeksISO(
         startDate ? new Date(startDate).toISOString() : null,
         endDate ? new Date(endDate).toISOString() : null
       );
+
+      // Filter creatives by selection to avoid confusion
+      const images = (imageUrlsArr || []).slice(0, 2);
+      const videos = (videoUrlsArr || []).slice(0, 2);
+      const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
+
+      const filteredImages = mediaSelection === "video" ? [] : images;
+      const filteredVideos = mediaSelection === "image" ? [] : videos;
+      const filteredFbIds  = mediaSelection === "image" ? [] : fbIds;
 
       const payload = {
         form: { ...form },
@@ -670,16 +670,16 @@ const CampaignSetup = () => {
         aiAudience: form?.aiAudience || answers?.aiAudience || "",
         adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
         answers: answers || {},
-        mediaSelection,                         // "image" | "video" | "both"
-        imageVariants: images,
-        videoVariants: videos,
-        fbVideoIds: fbIds,
-        videoThumbnailUrl: images[0] || null,
+        mediaSelection: (mediaSelection || 'both').toLowerCase(),  // <-- CRITICAL
+        imageVariants: filteredImages,
+        videoVariants: filteredVideos,
+        fbVideoIds: filteredFbIds,
+        videoThumbnailUrl: filteredImages[0] || null,
         flightStart: startISO,
         flightEnd: endISO,
         overrideCountPerType: {
-          images: Math.min(2, images.length),
-          videos: Math.min(2, Math.max(videos.length, fbIds.length))
+          images: Math.min(2, filteredImages.length),
+          videos: Math.min(2, Math.max(filteredVideos.length, filteredFbIds.length))
         }
       };
 
@@ -697,9 +697,9 @@ const CampaignSetup = () => {
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
-          images: (imageUrlsArr || []).slice(0, 2),
-          videos: (videoUrlsArr || []).slice(0, 2),
-          fbVideoIds: (fbVideoIdsArr || []).slice(0, 2),
+          images: filteredImages,
+          videos: filteredVideos,
+          fbVideoIds: filteredFbIds,
           mediaSelection: (mediaSelection || 'both').toLowerCase(),
           time: Date.now()
         };
@@ -750,6 +750,11 @@ const CampaignSetup = () => {
   const { fee, total } = calculateFees(budget);
 
   // ---------- Render ----------
+  // min/max attrs for duration inputs
+  const startMinAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
+  const endMinAttr = startDate ? new Date(new Date(startDate).getTime() + 60*60*1000).toISOString().slice(0,16) : startMinAttr;
+  const endMaxAttr = startDate ? new Date(new Date(startDate).getTime() + 14*24*60*60*1000).toISOString().slice(0,16) : undefined;
+
   return (
     <div
       style={{
@@ -896,15 +901,11 @@ const CampaignSetup = () => {
             </button>
           )}
 
-          {/* Campaign Name + Scheduler */}
+          {/* Campaign Name */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
-              <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7 }}>
-                Campaign Name
-              </label>
-              <SchedulerInline campaignKey={selectedCampaignId || "draft"} />
-            </div>
-
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
+              Campaign Name
+            </label>
             <input
               type="text"
               value={form.campaignName || ""}
@@ -924,26 +925,45 @@ const CampaignSetup = () => {
             />
           </div>
 
-          {/* Timeframe (optional, max 14 days) */}
-          <div style={{ width:"100%", maxWidth:370, margin:"0 auto", display:"flex", flexDirection:"column", gap:8 }}>
-            <div style={{ color:"#fff", fontWeight:700, fontSize:"1.05rem" }}>Campaign Timeframe (optional)</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-              <input
-                type="datetime-local"
-                value={startDate}
-                onChange={e => setStartDate(e.target.value)}
-                placeholder="Start"
-                style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
-              />
-              <input
-                type="datetime-local"
-                value={endDate}
-                onChange={e => setEndDate(e.target.value)}
-                placeholder="End"
-                style={{ padding:"0.8rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
-              />
+          {/* Media Type Selection (Image / Both / Video) */}
+          <div style={{ width:"100%", maxWidth:370, margin:"-6px auto 6px auto" }}>
+            <div style={{ color:"#fff", fontWeight:700, fontSize:"1.05rem", marginBottom: 6 }}>Ad Format</div>
+            <MediaTypeToggle mediaType={mediaSelection} onChange={(v) => setMediaSelection(v)} />
+          </div>
+
+          {/* Campaign Duration (max 14 days) */}
+          <div style={{ width:"100%", maxWidth:370, margin:"6px auto 0 auto", display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ color:"#fff", fontWeight:800, fontSize:"1.10rem" }}>Campaign Duration</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Start</label>
+                <input
+                  type="datetime-local"
+                  value={startDate}
+                  min={startMinAttr}
+                  onChange={e => {
+                    const newStart = e.target.value;
+                    setStartDate(newStart);
+                    setEndDate(clampEndForStart(newStart, endDate));
+                  }}
+                  style={{ padding:"0.85rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+                />
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>End</label>
+                <input
+                  type="datetime-local"
+                  value={endDate}
+                  min={endMinAttr}
+                  max={endMaxAttr}
+                  onChange={e => setEndDate(clampEndOnChange(e.target.value))}
+                  style={{ padding:"0.85rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+                />
+              </div>
             </div>
-            <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>We’ll cap duration to 14 days automatically.</div>
+            <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>
+              Max duration is 14 days. End will auto-adjust if needed.
+            </div>
           </div>
 
           {/* Budget */}
