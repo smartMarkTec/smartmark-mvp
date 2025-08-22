@@ -170,7 +170,7 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- NEW: Compact metrics slider ---------- */
+/* ---------- Compact metrics slider ---------- */
 function MetricsSlider({ metrics }) {
   const stripRef = useRef(null);
   const cards = useMemo(() => ([
@@ -276,12 +276,7 @@ const CampaignSetup = () => {
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [, setCampaignStatus] = useState("ACTIVE");
-  const [showPauseModal, setShowPauseModal] = useState(false);
-  const [campaignCount, setCampaignCount] = useState(0);
   const [dropdownOpen, setDropdownOpen] = useState(true);
-
-  // NEW: local draft tab
-  const [draftCampaign, setDraftCampaign] = useState(null);
 
   // Media selection (synced from FormPage -> Setup; no UI toggle here)
   const [mediaSelection, setMediaSelection] = useState(() =>
@@ -289,7 +284,6 @@ const CampaignSetup = () => {
   );
 
   // --- Campaign Duration (max 14 days) ---
-  // default start = next 10 minutes
   const defaultStart = useMemo(() => {
     const d = new Date(Date.now() + 10 * 60 * 1000);
     d.setSeconds(0, 0);
@@ -340,7 +334,6 @@ const CampaignSetup = () => {
     }
   };
   const clampEndOnChange = (val) => {
-    // when user edits End, keep it within [Start+1h, Start+14d]
     const s = new Date(startDate);
     let e = new Date(val);
     const minEnd = new Date(Math.max(s.getTime() + 60*60*1000, s.getTime() + 60*1000));
@@ -411,6 +404,7 @@ const CampaignSetup = () => {
   }, [fbConnected]);
 
   // Count campaigns
+  const [campaignCount, setCampaignCount] = useState(0);
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -433,14 +427,14 @@ const CampaignSetup = () => {
       .then(data => {
         const list = (data && data.data) ? data.data.slice(0, 2) : [];
         setCampaigns(list);
-        // Default selection logic below handled by draft effect
+        // do not auto-select; let user click a row. if nothing selected and a draft exists, we'll pick draft
       })
       .catch(() => {});
   }, [fbConnected, selectedAccount, launched]);
 
-  // Metrics for selected campaign (only real campaigns)
+  // Metrics for selected campaign (only for real campaign, not draft)
   useEffect(() => {
-    if (!selectedCampaignId || selectedCampaignId === 'DRAFT' || !selectedAccount) return;
+    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
       .then(res => res.json())
@@ -449,7 +443,7 @@ const CampaignSetup = () => {
         setBudget(prev => prev || "");
         setForm(f => ({
           ...f,
-          campaignName: f.campaignName || "",
+          campaignName: c.campaignName || f.campaignName || "",
           startDate: f.startDate || "",
           endDate: f.endDate || ""
         }));
@@ -469,70 +463,36 @@ const CampaignSetup = () => {
   useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
   useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
-  // PREVIEW ONLY: hydrate draft from navigation OR sessionStorage draft after FB connect redirect
+  // PREVIEW ONLY: hydrate from navigation OR from sessionStorage draft after FB connect redirect
   useEffect(() => {
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
     const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
-
-    let fromDraft = { images: imgs, videos: vids, fbVideoIds: ids };
-    if (!(imgs.length || vids.length || ids.length)) {
-      try {
-        const draftRaw = sessionStorage.getItem("draft_form_creatives");
-        if (draftRaw) {
-          const draft = JSON.parse(draftRaw);
-          fromDraft = {
-            images: Array.isArray(draft.images) ? draft.images.slice(0, 2) : [],
-            videos: Array.isArray(draft.videos) ? draft.videos.slice(0, 2) : [],
-            fbVideoIds: Array.isArray(draft.fbVideoIds) ? draft.fbVideoIds.slice(0, 2) : []
-          };
-          if (draft.mediaSelection) {
-            const v = String(draft.mediaSelection).toLowerCase();
-            setMediaSelection(v);
-            localStorage.setItem("smartmark_media_selection", v);
-          }
-        }
-      } catch {}
-    }
-
-    const hasDraft = (fromDraft.images.length || fromDraft.videos.length || fromDraft.fbVideoIds.length);
-    if (hasDraft) {
-      setDraftCampaign({
-        id: 'DRAFT',
-        name: form.campaignName?.trim() || 'Untitled',
-        status: 'DRAFT',
-        images: fromDraft.images,
-        videos: fromDraft.videos,
-        fbVideoIds: fromDraft.fbVideoIds
-      });
-      // Hydrate preview arrays for immediate display if draft is selected
-      setImageUrlsArr(fromDraft.images);
-      setVideoUrlsArr(fromDraft.videos);
-      setFbVideoIdsArr(fromDraft.fbVideoIds);
-      // Default to draft tab if nothing else chosen
-      setSelectedCampaignId(prev => prev || 'DRAFT');
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
-
-  // Update draft tab title live as the user types a campaign name
-  useEffect(() => {
-    if (draftCampaign) {
-      setDraftCampaign(dc => ({ ...dc, name: (form.campaignName?.trim() || 'Untitled') }));
-    }
-  }, [form.campaignName]); // eslint-disable-line
-
-  // When switching to an existing campaign, show its persisted creatives (post-launch only)
-  useEffect(() => {
-    if (!selectedCampaignId || !selectedAccount) return;
-
-    if (selectedCampaignId === 'DRAFT' && draftCampaign) {
-      setImageUrlsArr(draftCampaign.images || []);
-      setVideoUrlsArr(draftCampaign.videos || []);
-      setFbVideoIdsArr(draftCampaign.fbVideoIds || []);
+    if (imgs.length || vids.length || ids.length) {
+      setImageUrlsArr(imgs);
+      setVideoUrlsArr(vids);
+      setFbVideoIdsArr(ids);
       return;
     }
 
+    try {
+      const draftRaw = sessionStorage.getItem("draft_form_creatives");
+      if (!draftRaw) return;
+      const draft = JSON.parse(draftRaw);
+      setImageUrlsArr(Array.isArray(draft.images) ? draft.images.slice(0, 2) : []);
+      setVideoUrlsArr(Array.isArray(draft.videos) ? draft.videos.slice(0, 2) : []);
+      setFbVideoIdsArr(Array.isArray(draft.fbVideoIds) ? draft.fbVideoIds.slice(0, 2) : []);
+      if (draft.mediaSelection) {
+        const v = String(draft.mediaSelection).toLowerCase();
+        setMediaSelection(v);
+        localStorage.setItem("smartmark_media_selection", v);
+      }
+    } catch {}
+  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
+
+  // Show saved creatives for existing selected campaign
+  useEffect(() => {
+    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(acctKey);
     const saved = map[selectedCampaignId];
@@ -554,13 +514,19 @@ const CampaignSetup = () => {
       setVideoUrlsArr([]);
       setFbVideoIdsArr([]);
     }
-  }, [selectedCampaignId, selectedAccount, draftCampaign]);
+  }, [selectedCampaignId, selectedAccount]);
+
+  // Derived draft presence + draft name
+  const hasDraft = useMemo(() => {
+    return (imageUrlsArr?.length || videoUrlsArr?.length || fbVideoIdsArr?.length) && !launchResult;
+  }, [imageUrlsArr, videoUrlsArr, fbVideoIdsArr, launchResult]);
+  const draftName = (form?.campaignName && form.campaignName.trim().length) ? form.campaignName.trim() : "Untitled";
 
   // Pause/Unpause/Delete
   const [isPaused, setIsPaused] = useState(false);
 
   const handlePauseUnpause = async () => {
-    if (!selectedCampaignId || selectedCampaignId === 'DRAFT' || !selectedAccount) return;
+    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
     setLoading(true);
     try {
@@ -588,7 +554,7 @@ const CampaignSetup = () => {
   };
 
   const handleDelete = async () => {
-    if (!selectedCampaignId || selectedCampaignId === 'DRAFT' || !selectedAccount) return;
+    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
     setLoading(true);
     try {
@@ -610,8 +576,7 @@ const CampaignSetup = () => {
   };
 
   const handleNewCampaign = () => {
-    const totalTabs = (campaigns?.length || 0) + (draftCampaign ? 1 : 0);
-    if (totalTabs >= 2) return;
+    if (campaigns.length >= 2) return;
     navigate('/form');
   };
 
@@ -651,7 +616,6 @@ const CampaignSetup = () => {
         endDate ? new Date(endDate).toISOString() : null
       );
 
-      // Filter creatives by selection to avoid confusion
       const images = (imageUrlsArr || []).slice(0, 2);
       const videos = (videoUrlsArr || []).slice(0, 2);
       const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
@@ -668,7 +632,7 @@ const CampaignSetup = () => {
         aiAudience: form?.aiAudience || answers?.aiAudience || "",
         adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
         answers: answers || {},
-        mediaSelection: (mediaSelection || 'both').toLowerCase(),  // <-- CRITICAL
+        mediaSelection: (mediaSelection || 'both').toLowerCase(),
         imageVariants: filteredImages,
         videoVariants: filteredVideos,
         fbVideoIds: filteredFbIds,
@@ -706,7 +670,6 @@ const CampaignSetup = () => {
 
       // Clear the draft now that it's launched
       sessionStorage.removeItem("draft_form_creatives");
-      setDraftCampaign(null);
 
       setLaunched(true);
       setLaunchResult(json);
@@ -749,34 +712,13 @@ const CampaignSetup = () => {
   const { fee, total } = calculateFees(budget);
 
   // ---------- Render ----------
-  // min/max attrs for duration inputs
+  const isDraftSelected = selectedCampaignId === "__DRAFT__";
   const startMinAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
   const endMinAttr = startDate ? new Date(new Date(startDate).getTime() + 60*60*1000).toISOString().slice(0,16) : startMinAttr;
   const endMaxAttr = startDate ? new Date(new Date(startDate).getTime() + 14*24*60*60*1000).toISOString().slice(0,16) : undefined;
 
-  // show/hide creatives based on selection (layout intact)
   const showImages = mediaSelection === "image" || mediaSelection === "both";
   const showVideos = mediaSelection === "video" || mediaSelection === "both";
-
-  // Combined campaigns list (draft first if present)
-  const campaignItems = useMemo(() => {
-    const list = (campaigns || []).map(c => ({
-      id: c.id,
-      name: c.name || 'Untitled',
-      status: (c.status || c.effective_status || '').toUpperCase() || 'ACTIVE',
-      isDraft: false
-    }));
-    if (draftCampaign) list.unshift({
-      id: 'DRAFT',
-      name: draftCampaign.name || 'Untitled',
-      status: 'DRAFT',
-      isDraft: true
-    });
-    return list.slice(0, 2);
-  }, [campaigns, draftCampaign]);
-
-  const totalTabs = (campaigns?.length || 0) + (draftCampaign ? 1 : 0);
-  const controlsDisabled = loading || !selectedCampaignId || selectedCampaignId === 'DRAFT';
 
   return (
     <div
@@ -1126,7 +1068,7 @@ const CampaignSetup = () => {
           maxWidth: 540,
         }}>
 
-          {/* Metrics + Campaign Dropdown */}
+          {/* Campaigns card (dropdown + list + metrics/creatives INSIDE) */}
           <div
             style={{
               background: CARD_BG,
@@ -1144,7 +1086,7 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Campaign dropdown + controls */}
+            {/* Header row */}
             <div style={{ width: "100%", marginBottom: 6 }}>
               <div
                 style={{
@@ -1164,7 +1106,6 @@ const CampaignSetup = () => {
                     gap: 9,
                   }}
                   onClick={() => setDropdownOpen((o) => !o)}
-                  title="Campaign"
                 >
                   <FaChevronDown
                     style={{
@@ -1178,17 +1119,16 @@ const CampaignSetup = () => {
                 <div style={{ display: "flex", gap: "0.7rem" }}>
                   <button
                     onClick={handlePauseUnpause}
-                    disabled={controlsDisabled}
+                    disabled={loading || !selectedCampaignId || isDraftSelected}
                     style={{
-                      background: isPaused ? "#22dd7f" : "#ffd966",
+                      background: isDraftSelected ? "#777" : (isPaused ? "#22dd7f" : "#ffd966"),
                       color: "#181b20",
                       border: "none",
                       borderRadius: 9,
                       fontWeight: 900,
                       fontSize: 22,
                       width: 36, height: 36,
-                      cursor: controlsDisabled ? "not-allowed" : "pointer",
-                      opacity: controlsDisabled ? 0.5 : 1,
+                      cursor: isDraftSelected ? "not-allowed" : "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center"
@@ -1199,17 +1139,16 @@ const CampaignSetup = () => {
                   </button>
                   <button
                     onClick={handleDelete}
-                    disabled={controlsDisabled}
+                    disabled={loading || !selectedCampaignId || isDraftSelected}
                     style={{
-                      background: "#f44336",
+                      background: isDraftSelected ? "#777" : "#f44336",
                       color: "#fff",
                       border: "none",
                       borderRadius: 9,
                       fontWeight: 900,
                       fontSize: 19,
                       width: 36, height: 36,
-                      cursor: controlsDisabled ? "not-allowed" : "pointer",
-                      opacity: controlsDisabled ? 0.5 : 1,
+                      cursor: isDraftSelected ? "not-allowed" : "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center"
@@ -1218,7 +1157,7 @@ const CampaignSetup = () => {
                   >
                     <FaTrash />
                   </button>
-                  {totalTabs < 2 && (
+                  {campaigns.length < 2 && (
                     <button
                       onClick={handleNewCampaign}
                       style={{
@@ -1242,136 +1181,191 @@ const CampaignSetup = () => {
                 </div>
               </div>
 
-              {/* Dropdown list → each item acts like a tab with its own contents */}
+              {/* Dropdown list */}
               {dropdownOpen && (
                 <div style={{
                   width: "100%",
                   background: "#232a28",
                   borderRadius: "0.8rem",
-                  marginBottom: 6,
+                  marginBottom: 10,
                   marginTop: 1,
-                  padding: "0.4rem",
-                  boxShadow: "0 2px 12px #193a2a13",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8
+                  padding: "0.7rem 0.4rem",
+                  boxShadow: "0 2px 12px #193a2a13"
                 }}>
-                  {campaignItems.map(item => {
-                    const selected = item.id === selectedCampaignId;
-                    const statusColor = item.isDraft ? "#8a8a8a" : "#2fd08a";
-                    return (
-                      <div key={item.id} style={{
-                        background: selected ? "#1c3938" : "transparent",
-                        borderRadius: 10,
-                        padding: "8px 10px"
+                  {/* Draft row if present */}
+                  {hasDraft && (
+                    <div
+                      key="__draft__"
+                      style={{
+                        color: isDraftSelected ? ACCENT_ALT : "#fff",
+                        fontWeight: isDraftSelected ? 800 : 600,
+                        fontSize: "1.09rem",
+                        cursor: "pointer",
+                        padding: "0.35rem 0.8rem",
+                        borderRadius: 8,
+                        marginBottom: 2,
+                        background: isDraftSelected ? "#1c3938" : "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}
+                      onClick={() => setSelectedCampaignId("__DRAFT__")}
+                    >
+                      <span>{draftName}</span>
+                      <span style={{ fontSize: 12, fontWeight: 900, color: "#9ddfc8", background:"#1f3a33", padding:"2px 8px", borderRadius: 8 }}>
+                        DRAFT
+                      </span>
+                    </div>
+                  )}
+
+                  {campaigns.map(c => (
+                    <div
+                      key={c.id}
+                      style={{
+                        color: c.id === selectedCampaignId ? ACCENT_ALT : "#fff",
+                        fontWeight: c.id === selectedCampaignId ? 800 : 600,
+                        fontSize: "1.09rem",
+                        cursor: "pointer",
+                        padding: "0.35rem 0.8rem",
+                        borderRadius: 8,
+                        marginBottom: 2,
+                        background: c.id === selectedCampaignId ? "#1c3938" : "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 10
+                      }}
+                      onClick={() => setSelectedCampaignId(c.id)}
+                    >
+                      <span>{c.name || "Campaign"}</span>
+                      <span style={{
+                        fontSize: 11, fontWeight: 900,
+                        color: "#c9ffe9", background:"#17352d",
+                        padding:"3px 8px", borderRadius: 999
                       }}>
-                        {/* Item header (no ID shown) */}
-                        <div
-                          onClick={() => setSelectedCampaignId(item.id)}
-                          style={{
-                            display:"flex",
-                            alignItems:"center",
-                            justifyContent:"space-between",
-                            cursor:"pointer",
-                            padding: "6px 8px",
-                            borderRadius: 8,
-                            color: selected ? ACCENT_ALT : "#fff",
-                            fontWeight: selected ? 800 : 600
-                          }}
-                        >
-                          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                            <div style={{
-                              background:"#13312d",
-                              border:"1px solid #2c6a55",
-                              color:"#c9ffe9",
-                              padding:"8px 12px",
-                              borderRadius: 10,
-                              fontSize:"0.98rem",
-                              fontWeight:800
-                            }}>
-                              {item.name || "Untitled"}
-                            </div>
-                          </div>
-                          <div style={{
-                            background: "#1e2826",
-                            border: "1px solid #2c6a55",
-                            color: statusColor,
-                            fontWeight: 900,
-                            fontSize: 12,
-                            padding: "4px 10px",
-                            borderRadius: 10
-                          }}>
-                            {item.status}
-                          </div>
-                        </div>
-
-                        {/* Expanded content for the selected item */}
-                        {selected && (
-                          <div style={{ padding: "10px 6px 8px 6px" }}>
-                            {/* Metrics only inside selected tab */}
-                            {!item.isDraft && (
-                              <div style={{ margin: "6px 0 12px 0" }}>
-                                <MetricsSlider metrics={metrics} />
-                              </div>
-                            )}
-
-                            {/* Creatives block inside the tab */}
-                            <div style={{
-                              width: "100%",
-                              background: PANEL_BG,
-                              borderRadius: "1.0rem",
-                              padding: "0.9rem",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 12,
-                              marginTop: 6
-                            }}>
-                              <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
-                                Creatives
-                              </div>
-
-                              {/* Images Card */}
-                              <div style={{
-                                background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                                overflow:"hidden", boxShadow:"0 2px 16px #16242714",
-                                display: showImages ? "block" : "none"
-                              }}>
-                                <div style={{
-                                  background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                                  display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                                }}>
-                                  <span>Images</span>
-                                </div>
-                                <ImageCarousel
-                                  items={imageUrlsArr}
-                                  height={CREATIVE_HEIGHT}
-                                  onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                                />
-                              </div>
-
-                              {/* Videos Card */}
-                              <div style={{
-                                background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                                overflow:"hidden", boxShadow:"0 2px 16px #16242714",
-                                display: showVideos ? "block" : "none"
-                              }}>
-                                <div style={{
-                                  background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                                  display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                                }}>
-                                  <span>Videos</span>
-                                  {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-                                </div>
-                                <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                        {(c.status || c.effective_status || "ACTIVE").toUpperCase()}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
+            </div>
+
+            {/* ---- INSIDE the campaign card only when dropdown open + a row selected ---- */}
+            {dropdownOpen && (selectedCampaignId || isDraftSelected) && (
+              <>
+                {/* Metrics (hide for draft; only real campaigns) */}
+                {selectedCampaignId && selectedCampaignId !== "__DRAFT__" && (
+                  <div style={{ width: "100%", marginTop: 4 }}>
+                    <MetricsSlider metrics={metrics} />
+                  </div>
+                )}
+
+                {/* PREVIEW CAROUSELS */}
+                <div style={{
+                  width: "100%",
+                  background: PANEL_BG,
+                  borderRadius: "1.0rem",
+                  padding: "0.9rem",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  marginTop: 10
+                }}>
+                  <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
+                    Creatives
+                  </div>
+
+                  {/* Images Card */}
+                  <div style={{
+                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                    overflow:"hidden", boxShadow:"0 2px 16px #16242714",
+                    display: (showImages ? "block" : "none")
+                  }}>
+                    <div style={{
+                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    }}>
+                      <span>Images</span>
+                    </div>
+                    <ImageCarousel
+                      items={imageUrlsArr}
+                      height={CREATIVE_HEIGHT}
+                      onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                    />
+                  </div>
+
+                  {/* Videos Card */}
+                  <div style={{
+                    background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                    overflow:"hidden", boxShadow:"0 2px 16px #16242714",
+                    display: (showVideos ? "block" : "none")
+                  }}>
+                    <div style={{
+                      background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                      display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                    }}>
+                      <span>Videos</span>
+                      {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                    </div>
+                    <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Ad Account & Page Selectors (OUTSIDE the campaign card) */}
+          <div style={{
+            width: "100%", marginTop: 0, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
+            display: "flex", flexDirection: "column", gap: 14
+          }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Ad Account</div>
+              <select
+                value={selectedAccount}
+                onChange={e => setSelectedAccount(e.target.value)}
+                style={{
+                  padding: "0.7rem",
+                  borderRadius: "1.1rem",
+                  fontSize: "1.07rem",
+                  width: "100%",
+                  outline: "none",
+                  border: "1.5px solid #2e5c44",
+                  background: "#2c2f33",
+                  color: "#c7fbe3",
+                  marginTop: 5
+                }}>
+                <option value="">Choose an ad account</option>
+                {adAccounts.map(ac => (
+                  <option key={ac.id} value={ac.id.replace("act_", "")}>
+                    {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
+              <select
+                value={selectedPageId}
+                onChange={e => setSelectedPageId(e.target.value)}
+                style={{
+                  padding: "0.7rem",
+                  borderRadius: "1.1rem",
+                  fontSize: "1.07rem",
+                  width: "100%",
+                  outline: "none",
+                  border: "1.5px solid #2e5c44",
+                  background: "#2c2f33",
+                  color: "#c7fbe3",
+                  marginTop: 5
+                }}>
+                <option value="">Choose a page</option>
+                {pages.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
             </div>
           </div>
         </aside>
