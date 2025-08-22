@@ -48,7 +48,7 @@ const writeCreativeMap = (actId, map) => {
 const calculateFees = (budget) => {
   const parsed = parseFloat(budget);
   if (isNaN(parsed) || parsed <= 0) return { fee: 0, total: 0 };
-  const fee = 25;
+  const fee = 25; // flat for now
   const total = parsed + fee;
   return { fee, total };
 };
@@ -123,12 +123,11 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       />
       {normalized.length > 1 && (
         <>
-          {/* simple swipe/click without visible arrows */}
+          {/* click/drag area keeps it slideable without visible arrows */}
           <div
             onClick={() => go(1)}
             style={{ position:"absolute", inset:0, cursor:"pointer" }}
             aria-label="Next"
-            title=""
           />
           <div style={badge}>{idx + 1}/{normalized.length}</div>
         </>
@@ -152,12 +151,10 @@ function VideoCarousel({ items = [], height = 220 }) {
       <video src={normalized[idx]} controls style={{ width:"100%", maxHeight:height, height, display:"block", objectFit:"cover" }} />
       {normalized.length > 1 && (
         <>
-          {/* simple swipe/click without visible arrows */}
           <div
             onClick={() => go(1)}
             style={{ position:"absolute", inset:0, cursor:"pointer" }}
             aria-label="Next"
-            title=""
           />
           <div style={badge}>{idx + 1}/{normalized.length}</div>
         </>
@@ -166,19 +163,16 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- Compact metrics strip (no arrows, no zeroes) ---------- */
+/* ---------- Compact metrics strip (no arrows/zeros) ---------- */
 function MetricsSlider({ metrics }) {
-  const stripRef = useRef(null);
   const nf = useMemo(() => new Intl.NumberFormat(), []);
   const pf = (v) => (v == null ? "—" : `${(+v).toFixed(2)}%`);
-  const cf = (v) => (v == null ? "—" : `$${(+v).toFixed(2)}`);
   const show = (v) => (v == null || v === 0 ? "—" : nf.format(v));
 
   const cards = useMemo(() => ([
     { key: "impressions", label: "Impressions", value: show(metrics?.impressions) },
     { key: "clicks", label: "Clicks", value: show(metrics?.clicks) },
     { key: "ctr", label: "CTR", value: pf(metrics?.ctr) },
-    { key: "cpc", label: "CPC", value: cf(metrics?.cpc) },
   ]), [metrics]); // eslint-disable-line
 
   const cardStyle = {
@@ -198,7 +192,6 @@ function MetricsSlider({ metrics }) {
   return (
     <div style={{ position:"relative", width:"100%" }}>
       <div
-        ref={stripRef}
         style={{
           display:"flex",
           gap:12,
@@ -252,15 +245,16 @@ const CampaignSetup = () => {
   const [adAccounts, setAdAccounts] = useState([]);
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [selectedCampaignId, setSelectedCampaignId] = useState(""); // for actions
+  const [openCampaignId, setOpenCampaignId] = useState(""); // which panel is expanded
   const [metrics, setMetrics] = useState(null);
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [, setCampaignStatus] = useState("ACTIVE");
-  const [dropdownOpen, setDropdownOpen] = useState(true);
+  const [hasDraft, setHasDraft] = useState(false);
 
-  // Media selection (synced from FormPage -> Setup; no UI toggle here)
+  // Media selection (synced)
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
@@ -385,7 +379,7 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [fbConnected]);
 
-  // Count campaigns + list
+  // Pull campaigns
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -394,59 +388,22 @@ const CampaignSetup = () => {
       .then(data => {
         const list = (data && data.data) ? data.data.slice(0, 2) : [];
         setCampaigns(list);
-        // default select: existing → first; none → draft
-        if (!selectedCampaignId) {
-          setSelectedCampaignId(list.length ? list[0].id : "__DRAFT__");
-        }
       })
       .catch(() => {});
   }, [selectedAccount]); // eslint-disable-line
 
-  // Metrics for selected campaign (real campaigns only)
+  // Draft detection (when user came from FormPage or has draft creatives)
   useEffect(() => {
-    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) {
-      setMetrics(null);
-      return;
-    }
-    const acctId = String(selectedAccount).replace(/^act_/, "");
-    // details (for status)
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/details`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(c => {
-        setCampaignStatus(c.status || c.effective_status || "ACTIVE");
-      })
-      .catch(() => {});
-    // insights
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/metrics`, { credentials: 'include' })
-      .then(res => res.json())
-      .then((raw) => {
-        const row = Array.isArray(raw?.data) ? raw.data[0] : raw;
-        const impressions = row && row.impressions ? Number(row.impressions) : null;
-        const clicks = row && row.clicks ? Number(row.clicks) : null;
-        const spend = row && row.spend ? parseFloat(row.spend) : null;
-        let ctr = null;
-        if (row && row.ctr != null) {
-          const v = String(row.ctr).replace("%","").trim();
-          const n = parseFloat(v);
-          ctr = isNaN(n) ? null : n;
-        } else if (impressions && clicks != null) {
-          ctr = impressions > 0 ? (clicks / impressions) * 100 : null;
-        }
-        const cpc = (spend != null && clicks) ? (clicks > 0 ? spend / clicks : null) : null;
-        setMetrics({ impressions, clicks, ctr, cpc });
-      })
-      .catch(() => setMetrics(null));
-  }, [selectedCampaignId, selectedAccount]);
+    const hasNavDraft = (Array.isArray(navImageUrls) && navImageUrls.length) ||
+                        (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
+                        (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
+    let ssDraft = false;
+    try { ssDraft = !!sessionStorage.getItem("draft_form_creatives"); } catch {}
+    const anyLocal = (imageUrlsArr.length + videoUrlsArr.length + fbVideoIdsArr.length) > 0;
+    setHasDraft(!!(hasNavDraft || ssDraft || anyLocal || campaigns.length === 0));
+  }, [navImageUrls, navVideoUrls, navFbVideoIds, imageUrlsArr, videoUrlsArr, fbVideoIdsArr, campaigns.length]);
 
-  // Persist basic fields
-  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
-  useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
-  useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
-  useEffect(() => { localStorage.setItem("smartmark_login_password", email); }, [email]);
-  useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
-  useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
-
-  // PREVIEW ONLY: hydrate from navigation OR from sessionStorage draft after FB connect redirect
+  // PREVIEW ONLY: hydrate draft arrays
   useEffect(() => {
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
@@ -472,16 +429,12 @@ const CampaignSetup = () => {
     } catch {}
   }, [navImageUrls, navVideoUrls, navFbVideoIds]);
 
-  // When switching to an existing campaign, show its persisted creatives (post-launch only)
+  // When opening a real campaign, load its creatives (persisted post-launch)
   useEffect(() => {
-    if (!selectedCampaignId || !selectedAccount) return;
-    if (selectedCampaignId === "__DRAFT__") {
-      // keep whatever is in draft arrays
-      return;
-    }
+    if (!openCampaignId || openCampaignId === "__DRAFT__" || !selectedAccount) return;
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(acctKey);
-    const saved = map[selectedCampaignId];
+    const saved = map[openCampaignId];
     if (saved) {
       setImageUrlsArr(saved.images || []);
       setVideoUrlsArr(saved.videos || []);
@@ -500,19 +453,58 @@ const CampaignSetup = () => {
       setVideoUrlsArr([]);
       setFbVideoIdsArr([]);
     }
-  }, [selectedCampaignId, selectedAccount]);
+  }, [openCampaignId, selectedAccount]);
 
-  // Pause/Unpause/Delete
+  // Metrics for selected (expanded) campaign
+  useEffect(() => {
+    if (!openCampaignId || openCampaignId === "__DRAFT__" || !selectedAccount) {
+      setMetrics(null);
+      return;
+    }
+    const acctId = String(selectedAccount).replace(/^act_/, "");
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${openCampaignId}/details`, { credentials: 'include' })
+      .then(res => res.json())
+      .then(c => setCampaignStatus(c.status || c.effective_status || "ACTIVE"))
+      .catch(() => {});
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${openCampaignId}/metrics`, { credentials: 'include' })
+      .then(res => res.json())
+      .then((raw) => {
+        const row = Array.isArray(raw?.data) ? raw.data[0] : raw;
+        const impressions = row && row.impressions ? Number(row.impressions) : null;
+        const clicks = row && row.clicks ? Number(row.clicks) : null;
+        let ctr = null;
+        if (row && row.ctr != null) {
+          const v = String(row.ctr).replace("%","").trim();
+          const n = parseFloat(v);
+          ctr = isNaN(n) ? null : n;
+        } else if (impressions && clicks != null) {
+          ctr = impressions > 0 ? (clicks / impressions) * 100 : null;
+        }
+        setMetrics({ impressions, clicks, ctr });
+      })
+      .catch(() => setMetrics(null));
+  }, [openCampaignId, selectedAccount]);
+
+  // Persist basics
+  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
+  useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
+  useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
+  useEffect(() => { localStorage.setItem("smartmark_login_password", email); }, [email]);
+  useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
+  useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
+
+  // Actions state
   const [isPaused, setIsPaused] = useState(false);
 
   const handlePauseUnpause = async () => {
-    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
+    const actingId = selectedCampaignId || openCampaignId;
+    if (!actingId || actingId === "__DRAFT__" || !selectedAccount) return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
     setLoading(true);
     try {
       if (isPaused) {
         const r = await fetch(
-          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
+          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${actingId}/unpause`,
           { method: "POST", credentials: "include" }
         );
         if (!r.ok) throw new Error("Unpause failed");
@@ -520,7 +512,7 @@ const CampaignSetup = () => {
         setIsPaused(false);
       } else {
         const r = await fetch(
-          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
+          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${actingId}/pause`,
           { method: "POST", credentials: "include" }
         );
         if (!r.ok) throw new Error("Pause failed");
@@ -534,21 +526,26 @@ const CampaignSetup = () => {
   };
 
   const handleDelete = async () => {
-    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__" || !selectedAccount) return;
+    const actingId = selectedCampaignId || openCampaignId;
+    if (!actingId || actingId === "__DRAFT__" || !selectedAccount) return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
     setLoading(true);
     try {
       const r = await fetch(
-        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
+        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${actingId}/cancel`,
         { method: "POST", credentials: "include" }
       );
       if (!r.ok) throw new Error("Archive failed");
       setCampaignStatus("ARCHIVED");
-      setLaunched(false);
-      setLaunchResult(null);
       setMetrics(null);
-      setSelectedCampaignId("__DRAFT__");
+      setSelectedCampaignId("");
+      setOpenCampaignId("");
       alert("Campaign deleted.");
+      // refresh list
+      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' });
+      const data = await res.json();
+      const list = (data && data.data) ? data.data.slice(0, 2) : [];
+      setCampaigns(list);
     } catch {
       alert("Could not delete campaign.");
     }
@@ -568,7 +565,6 @@ const CampaignSetup = () => {
     parseFloat(budget) >= 3
   );
 
-  // helper: cap timeframe to 14 days
   function capTwoWeeksISO(startISO, endISO) {
     try {
       if (!startISO && !endISO) return { startISO: null, endISO: null };
@@ -582,20 +578,17 @@ const CampaignSetup = () => {
     } catch { return { startISO: null, endISO: null }; }
   }
 
-  // Launch
   const handleLaunch = async () => {
     setLoading(true);
     try {
       const acctId = String(selectedAccount).replace(/^act_/, "");
       const safeBudget = Math.max(3, Number(budget) || 0);
 
-      // clamp durations
       const { startISO, endISO } = capTwoWeeksISO(
         startDate ? new Date(startDate).toISOString() : null,
         endDate ? new Date(endDate).toISOString() : null
       );
 
-      // Filter creatives by selection to avoid confusion
       const images = (imageUrlsArr || []).slice(0, 2);
       const videos = (videoUrlsArr || []).slice(0, 2);
       const fbIds  = (fbVideoIdsArr || []).slice(0, 2);
@@ -648,12 +641,21 @@ const CampaignSetup = () => {
         writeCreativeMap(acctId, map);
       }
 
-      // Clear the draft now that it's launched
       sessionStorage.removeItem("draft_form_creatives");
 
       setLaunched(true);
       setLaunchResult(json);
-      setSelectedCampaignId(json.campaignId || "__DRAFT__");
+
+      // refresh list and select/open the new campaign
+      const resList = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' });
+      const dataList = await resList.json();
+      const list = (dataList && dataList.data) ? dataList.data.slice(0, 2) : [];
+      setCampaigns(list);
+
+      const newId = json.campaignId || "";
+      setSelectedCampaignId(newId);
+      setOpenCampaignId(newId);
+
       setTimeout(() => setLaunched(false), 1200);
     } catch (err) {
       alert("Failed to launch campaign: " + (err.message || ""));
@@ -691,21 +693,26 @@ const CampaignSetup = () => {
 
   const { fee, total } = calculateFees(budget);
 
-  // show/hide creatives based on selection (layout intact)
   const showImages = mediaSelection === "image" || mediaSelection === "both";
   const showVideos = mediaSelection === "video" || mediaSelection === "both";
 
-  // Visible list: real campaigns or a single draft placeholder
+  // Visible list: active campaigns (+ optional draft at top)
   const visibleCampaigns = useMemo(() => {
-    if (Array.isArray(campaigns) && campaigns.length > 0) return campaigns;
-    return [{ id: "__DRAFT__", name: (form.campaignName?.trim() || "Untitled"), status: "DRAFT" }];
-  }, [campaigns, form.campaignName]);
-
-  useEffect(() => {
-    if (!selectedCampaignId && visibleCampaigns.length) {
-      setSelectedCampaignId(visibleCampaigns[0].id);
+    const list = Array.isArray(campaigns) ? campaigns.slice(0, 2) : [];
+    if (hasDraft) {
+      const draftName = (form.campaignName?.trim() || "Untitled");
+      return [{ id: "__DRAFT__", name: draftName, status: "DRAFT" }, ...list];
     }
-  }, [visibleCampaigns, selectedCampaignId]);
+    return list;
+  }, [campaigns, hasDraft, form.campaignName]);
+
+  // ensure a sensible default open/selection
+  useEffect(() => {
+    if (!openCampaignId && visibleCampaigns.length) {
+      setOpenCampaignId(""); // start closed
+      setSelectedCampaignId(visibleCampaigns.find(c => c.id !== "__DRAFT__")?.id || "");
+    }
+  }, [visibleCampaigns, openCampaignId]);
 
   return (
     <div
@@ -1042,7 +1049,7 @@ const CampaignSetup = () => {
           )}
         </main>
 
-        {/* RIGHT PANE (layout preserved) */}
+        {/* RIGHT PANE */}
         <aside style={{
           flex: 1,
           display: "flex",
@@ -1055,7 +1062,7 @@ const CampaignSetup = () => {
           maxWidth: 540,
         }}>
 
-          {/* Campaign dropdown + controls + content */}
+          {/* Active Campaigns (title has NO caret) */}
           <div
             style={{
               background: CARD_BG,
@@ -1073,193 +1080,205 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Header row */}
-            <div style={{ width: "100%", marginBottom: 6 }}>
-              <div
-                style={{
-                  display: "flex", width: "100%",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 12
-                }}>
-                <div
+            {/* Header row (no dropdown here) */}
+            <div style={{
+              width: "100%", marginBottom: 6,
+              display: "flex", alignItems: "center", justifyContent: "space-between"
+            }}>
+              <div style={{ fontSize: "1.23rem", fontWeight: 800, color: "#fff" }}>
+                Active Campaigns
+              </div>
+              <div style={{ display: "flex", gap: "0.7rem" }}>
+                <button
+                  onClick={handlePauseUnpause}
+                  disabled={loading || !selectedCampaignId || selectedCampaignId === "__DRAFT__"}
                   style={{
-                    fontSize: "1.23rem",
-                    fontWeight: 800,
-                    color: "#fff",
+                    background: isPaused ? "#22dd7f" : "#ffd966",
+                    color: "#181b20",
+                    border: "none",
+                    borderRadius: 9,
+                    fontWeight: 900,
+                    fontSize: 22,
+                    width: 36, height: 36,
+                    cursor: (!selectedCampaignId || selectedCampaignId === "__DRAFT__") ? "not-allowed" : "pointer",
                     display: "flex",
                     alignItems: "center",
-                    cursor: "pointer",
-                    gap: 9,
+                    justifyContent: "center"
                   }}
-                  onClick={() => setDropdownOpen((o) => !o)}
+                  title={(!selectedCampaignId || selectedCampaignId === "__DRAFT__") ? "Pause (launch first)" : (isPaused ? "Play" : "Pause")}
                 >
-                  <FaChevronDown
-                    style={{
-                      transform: dropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
-                      marginRight: 7,
-                      transition: "transform 0.18s"
-                    }}
-                  />
-                  Campaign
-                </div>
-                <div style={{ display: "flex", gap: "0.7rem" }}>
+                  {isPaused ? <FaPlay /> : "⏸"}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={loading || !selectedCampaignId || selectedCampaignId === "__DRAFT__"}
+                  style={{
+                    background: "#f44336",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 9,
+                    fontWeight: 900,
+                    fontSize: 19,
+                    width: 36, height: 36,
+                    cursor: (!selectedCampaignId || selectedCampaignId === "__DRAFT__") ? "not-allowed" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                  title="Delete"
+                >
+                  <FaTrash />
+                </button>
+                {visibleCampaigns.length < 2 && (
                   <button
-                    onClick={handlePauseUnpause}
-                    disabled={loading || selectedCampaignId === "__DRAFT__"}
+                    onClick={handleNewCampaign}
                     style={{
-                      background: isPaused ? "#22dd7f" : "#ffd966",
-                      color: "#181b20",
+                      background: ACCENT_ALT,
+                      color: "#fff",
                       border: "none",
                       borderRadius: 9,
                       fontWeight: 900,
                       fontSize: 22,
                       width: 36, height: 36,
-                      cursor: selectedCampaignId === "__DRAFT__" ? "not-allowed" : "pointer",
+                      cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center"
                     }}
-                    title={selectedCampaignId === "__DRAFT__" ? "Pause (launch first)" : (isPaused ? "Play" : "Pause")}
+                    title="New Campaign"
                   >
-                    {isPaused ? <FaPlay /> : "⏸"}
+                    <FaPlus />
                   </button>
-                  <button
-                    onClick={handleDelete}
-                    disabled={loading || selectedCampaignId === "__DRAFT__"}
-                    style={{
-                      background: "#f44336",
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 9,
-                      fontWeight: 900,
-                      fontSize: 19,
-                      width: 36, height: 36,
-                      cursor: selectedCampaignId === "__DRAFT__" ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center"
-                    }}
-                    title="Delete"
-                  >
-                    <FaTrash />
-                  </button>
-                  {visibleCampaigns.length < 2 && (
-                    <button
-                      onClick={handleNewCampaign}
+                )}
+              </div>
+            </div>
+
+            {/* Campaign list: each row has its own caret + collapsible content */}
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+              {visibleCampaigns.map(c => {
+                const isOpen = openCampaignId === c.id;
+                return (
+                  <div key={c.id} style={{
+                    width: "100%",
+                    background: "#232a28",
+                    borderRadius: "0.9rem",
+                    padding: "0.55rem 0.65rem 0.55rem 0.65rem",
+                    boxShadow: "0 2px 12px #193a2a13"
+                  }}>
+                    {/* Row header */}
+                    <div
+                      onClick={() => {
+                        const next = isOpen ? "" : c.id;
+                        setOpenCampaignId(next);
+                        if (c.id !== "__DRAFT__") setSelectedCampaignId(c.id);
+                      }}
                       style={{
-                        background: ACCENT_ALT,
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 9,
-                        fontWeight: 900,
-                        fontSize: 22,
-                        width: 36, height: 36,
-                        cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
-                        justifyContent: "center"
-                      }}
-                      title="New Campaign"
-                    >
-                      <FaPlus />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* Dropdown list */}
-              {dropdownOpen && (
-                <div style={{
-                  width: "100%",
-                  background: "#232a28",
-                  borderRadius: "0.8rem",
-                  marginBottom: 6,
-                  marginTop: 1,
-                  padding: "0.7rem 0.4rem",
-                  boxShadow: "0 2px 12px #193a2a13"
-                }}>
-                  {visibleCampaigns.map(c => (
-                    <div
-                      key={c.id}
-                      style={{
-                        color: c.id === selectedCampaignId ? ACCENT_ALT : "#fff",
-                        fontWeight: c.id === selectedCampaignId ? 800 : 600,
-                        fontSize: "1.09rem",
+                        justifyContent: "space-between",
+                        gap: 10,
                         cursor: "pointer",
-                        padding: "0.35rem 0.8rem",
-                        borderRadius: 8,
-                        marginBottom: 2,
-                        background: c.id === selectedCampaignId ? "#1c3938" : "transparent"
+                        padding: "0.35rem 0.2rem"
                       }}
-                      onClick={() => setSelectedCampaignId(c.id)}
                     >
-                      {(c.name || "Untitled")}{c.id === "__DRAFT__" ? " (Draft)" : ""}
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <FaChevronDown
+                          style={{
+                            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                            transition: "transform 0.18s",
+                            color: "#cfeee2"
+                          }}
+                        />
+                        <div style={{
+                          color: c.id === selectedCampaignId ? ACCENT_ALT : "#fff",
+                          fontWeight: c.id === selectedCampaignId ? 800 : 700,
+                          fontSize: "1.02rem"
+                        }}>
+                          {(c.name || "Untitled")}{c.id === "__DRAFT__" ? " (Draft)" : ""}
+                        </div>
+                      </div>
+                      {c.status && (
+                        <div style={{
+                          background: c.id === "__DRAFT__" ? "#444e4a" : "#1f7a57",
+                          color: "#fff",
+                          fontSize: 12,
+                          fontWeight: 800,
+                          padding: "4px 10px",
+                          borderRadius: 999
+                        }}>
+                          {c.id === "__DRAFT__" ? "IN PROGRESS" : (c.status || "ACTIVE")}
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              )}
+
+                    {/* Collapsible content */}
+                    {isOpen && (
+                      <div style={{ padding: "0.6rem 0.2rem 0.2rem 2.0rem" }}>
+                        {/* Metrics only for real campaigns */}
+                        {c.id !== "__DRAFT__" && (
+                          <div style={{ width: "100%", margin: "0.15rem 0 0.75rem 0" }}>
+                            <MetricsSlider metrics={metrics} />
+                          </div>
+                        )}
+
+                        {/* Creatives */}
+                        <div style={{
+                          width: "100%",
+                          background: PANEL_BG,
+                          borderRadius: "1.0rem",
+                          padding: "0.9rem",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 12,
+                          marginTop: 6
+                        }}>
+                          <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
+                            Creatives
+                          </div>
+
+                          {/* Images Card */}
+                          <div style={{
+                            background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                            overflow:"hidden", boxShadow:"0 2px 16px #16242714",
+                            display: (showImages ? "block" : "none")
+                          }}>
+                            <div style={{
+                              background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                              display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                            }}>
+                              <span>Images</span>
+                            </div>
+                            <ImageCarousel
+                              items={imageUrlsArr}
+                              height={CREATIVE_HEIGHT}
+                              onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                            />
+                          </div>
+
+                          {/* Videos Card */}
+                          <div style={{
+                            background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
+                            overflow:"hidden", boxShadow:"0 2px 16px #16242714",
+                            display: (showVideos ? "block" : "none")
+                          }}>
+                            <div style={{
+                              background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
+                              display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                            }}>
+                              <span>Videos</span>
+                              {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                            </div>
+                            <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
-            {/* Metrics (ONLY for real selected campaign) */}
-            {selectedCampaignId && selectedCampaignId !== "__DRAFT__" && (
-              <div style={{ width: "100%" }}>
-                <MetricsSlider metrics={metrics} />
-              </div>
-            )}
-
-            {/* PREVIEW CARDS */}
-            <div style={{
-              width: "100%",
-              background: PANEL_BG,
-              borderRadius: "1.0rem",
-              padding: "0.9rem",
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-              marginTop: 6
-            }}>
-              <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
-                Creatives
-              </div>
-
-              {/* Images Card */}
-              <div style={{
-                background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                overflow:"hidden", boxShadow:"0 2px 16px #16242714",
-                display: showImages ? "block" : "none"
-              }}>
-                <div style={{
-                  background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                  display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                }}>
-                  <span>Images</span>
-                </div>
-                <ImageCarousel
-                  items={imageUrlsArr}
-                  height={CREATIVE_HEIGHT}
-                  onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
-                />
-              </div>
-
-              {/* Videos Card */}
-              <div style={{
-                background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                overflow:"hidden", boxShadow:"0 2px 16px #16242714",
-                display: showVideos ? "block" : "none"
-              }}>
-                <div style={{
-                  background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                  display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
-                }}>
-                  <span>Videos</span>
-                  {videoUrlsArr.length === 0 ? <DottyMini/> : null}
-                </div>
-                <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
-              </div>
-            </div>
-
-            {/* Ad Account & Page Selectors */}
+            {/* Ad Account & Page Selectors (outside of any campaign content) */}
             <div style={{
               width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
               display: "flex", flexDirection: "column", gap: 14
