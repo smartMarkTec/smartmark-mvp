@@ -48,7 +48,7 @@ const writeCreativeMap = (actId, map) => {
 const calculateFees = (budget) => {
   const parsed = parseFloat(budget);
   if (isNaN(parsed) || parsed <= 0) return { fee: 0, total: 0 };
-  const fee = 25; // flat for now
+  const fee = 25;
   const total = parsed + fee;
   return { fee, total };
 };
@@ -123,7 +123,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       />
       {normalized.length > 1 && (
         <>
-          {/* click/drag area keeps it slideable without visible arrows */}
           <div
             onClick={() => go(1)}
             style={{ position:"absolute", inset:0, cursor:"pointer" }}
@@ -245,8 +244,8 @@ const CampaignSetup = () => {
   const [adAccounts, setAdAccounts] = useState([]);
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
-  const [selectedCampaignId, setSelectedCampaignId] = useState(""); // for actions
-  const [openCampaignId, setOpenCampaignId] = useState(""); // which panel is expanded
+  const [selectedCampaignId, setSelectedCampaignId] = useState(""); // action target
+  const [openCampaignId, setOpenCampaignId] = useState(""); // expanded row
   const [metrics, setMetrics] = useState(null);
   const [launched, setLaunched] = useState(false);
   const [launchResult, setLaunchResult] = useState(null);
@@ -254,7 +253,7 @@ const CampaignSetup = () => {
   const [, setCampaignStatus] = useState("ACTIVE");
   const [hasDraft, setHasDraft] = useState(false);
 
-  // Media selection (synced)
+  // Media selection (synced for draft only)
   const [mediaSelection, setMediaSelection] = useState(() =>
     (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   );
@@ -276,7 +275,7 @@ const CampaignSetup = () => {
     return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
   });
 
-  // PREVIEW-ONLY creatives carried from FormPage via navigation state
+  // Creatives displayed in the panel (either draft or loaded for a launched campaign)
   const [imageUrlsArr, setImageUrlsArr] = useState([]);
   const [videoUrlsArr, setVideoUrlsArr] = useState([]);
   const [fbVideoIdsArr, setFbVideoIdsArr] = useState([]);
@@ -347,19 +346,21 @@ const CampaignSetup = () => {
     if (fbConnected) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
   }, [fbConnected]);
 
-  // Sync selection if passed from nav
+  // Only let nav-provided mediaSelection influence the DRAFT
   useEffect(() => {
-    if (navMediaSelection) {
+    if (navMediaSelection && (openCampaignId === "__DRAFT__" || !openCampaignId)) {
       const v = String(navMediaSelection).toLowerCase();
       setMediaSelection(v);
       localStorage.setItem("smartmark_media_selection", v);
     }
-  }, [navMediaSelection]);
+  }, [navMediaSelection, openCampaignId]);
 
-  // Persist selection
+  // Persist selection (for draft convenience)
   useEffect(() => {
-    localStorage.setItem("smartmark_media_selection", mediaSelection);
-  }, [mediaSelection]);
+    if (openCampaignId === "__DRAFT__" || !openCampaignId) {
+      localStorage.setItem("smartmark_media_selection", mediaSelection);
+    }
+  }, [mediaSelection, openCampaignId]);
 
   // Fetch ad accounts
   useEffect(() => {
@@ -392,28 +393,31 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [selectedAccount]); // eslint-disable-line
 
-  // Draft detection (when user came from FormPage or has draft creatives)
+  // Draft presence detection (do NOT look at preview arrays to avoid confusion)
   useEffect(() => {
     const hasNavDraft = (Array.isArray(navImageUrls) && navImageUrls.length) ||
                         (Array.isArray(navVideoUrls) && navVideoUrls.length) ||
                         (Array.isArray(navFbVideoIds) && navFbVideoIds.length);
     let ssDraft = false;
     try { ssDraft = !!sessionStorage.getItem("draft_form_creatives"); } catch {}
-    const anyLocal = (imageUrlsArr.length + videoUrlsArr.length + fbVideoIdsArr.length) > 0;
-    setHasDraft(!!(hasNavDraft || ssDraft || anyLocal || campaigns.length === 0));
-  }, [navImageUrls, navVideoUrls, navFbVideoIds, imageUrlsArr, videoUrlsArr, fbVideoIdsArr, campaigns.length]);
+    setHasDraft(!!(hasNavDraft || ssDraft || campaigns.length === 0));
+  }, [navImageUrls, navVideoUrls, navFbVideoIds, campaigns.length]);
 
-  // PREVIEW ONLY: hydrate draft arrays
+  // PREVIEW ONLY: hydrate draft arrays — but ONLY when the DRAFT panel is open (or nothing open yet)
   useEffect(() => {
+    if (openCampaignId && openCampaignId !== "__DRAFT__") return;
+
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
     const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
+
     if (imgs.length || vids.length || ids.length) {
       setImageUrlsArr(imgs);
       setVideoUrlsArr(vids);
       setFbVideoIdsArr(ids);
       return;
     }
+
     try {
       const draftRaw = sessionStorage.getItem("draft_form_creatives");
       if (!draftRaw) return;
@@ -427,18 +431,20 @@ const CampaignSetup = () => {
         localStorage.setItem("smartmark_media_selection", v);
       }
     } catch {}
-  }, [navImageUrls, navVideoUrls, navFbVideoIds]);
+  }, [navImageUrls, navVideoUrls, navFbVideoIds, openCampaignId]);
 
-  // When opening a real campaign, load its creatives (persisted post-launch)
+  // When opening a real campaign, show its LOCKED creatives from the saved map only
   useEffect(() => {
     if (!openCampaignId || openCampaignId === "__DRAFT__" || !selectedAccount) return;
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(acctKey);
     const saved = map[openCampaignId];
+
     if (saved) {
       setImageUrlsArr(saved.images || []);
       setVideoUrlsArr(saved.videos || []);
       setFbVideoIdsArr(saved.fbVideoIds || []);
+
       const inferred =
         saved.mediaSelection
           ? String(saved.mediaSelection).toLowerCase()
@@ -447,15 +453,15 @@ const CampaignSetup = () => {
             : saved.images?.length ? 'image'
             : (localStorage.getItem("smartmark_media_selection") || 'both') );
       setMediaSelection(inferred);
-      localStorage.setItem("smartmark_media_selection", inferred);
     } else {
+      // No saved creatives; show empty rather than draft contents
       setImageUrlsArr([]);
       setVideoUrlsArr([]);
       setFbVideoIdsArr([]);
     }
   }, [openCampaignId, selectedAccount]);
 
-  // Metrics for selected (expanded) campaign
+  // Metrics for selected (expanded) campaign — real campaigns only
   useEffect(() => {
     if (!openCampaignId || openCampaignId === "__DRAFT__" || !selectedAccount) {
       setMetrics(null);
@@ -493,7 +499,6 @@ const CampaignSetup = () => {
   useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
   useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
-  // Actions state
   const [isPaused, setIsPaused] = useState(false);
 
   const handlePauseUnpause = async () => {
@@ -628,7 +633,7 @@ const CampaignSetup = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      // Persist creatives ONLY AFTER a successful launch
+      // Persist creatives ONLY AFTER launch — and LOCK them
       const map = readCreativeMap(acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
@@ -636,17 +641,20 @@ const CampaignSetup = () => {
           videos: filteredVideos,
           fbVideoIds: filteredFbIds,
           mediaSelection: (mediaSelection || 'both').toLowerCase(),
+          locked: true,
           time: Date.now()
         };
         writeCreativeMap(acctId, map);
       }
 
+      // Clear draft state after successful launch
       sessionStorage.removeItem("draft_form_creatives");
+      setHasDraft(false);
 
       setLaunched(true);
       setLaunchResult(json);
 
-      // refresh list and select/open the new campaign
+      // refresh list and open the new campaign
       const resList = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' });
       const dataList = await resList.json();
       const list = (dataList && dataList.data) ? dataList.data.slice(0, 2) : [];
@@ -706,10 +714,10 @@ const CampaignSetup = () => {
     return list;
   }, [campaigns, hasDraft, form.campaignName]);
 
-  // ensure a sensible default open/selection
+  // sensible initial state
   useEffect(() => {
     if (!openCampaignId && visibleCampaigns.length) {
-      setOpenCampaignId(""); // start closed
+      setOpenCampaignId(""); // start all collapsed
       setSelectedCampaignId(visibleCampaigns.find(c => c.id !== "__DRAFT__")?.id || "");
     }
   }, [visibleCampaigns, openCampaignId]);
@@ -1062,7 +1070,7 @@ const CampaignSetup = () => {
           maxWidth: 540,
         }}>
 
-          {/* Active Campaigns (title has NO caret) */}
+          {/* Active Campaigns */}
           <div
             style={{
               background: CARD_BG,
@@ -1080,7 +1088,7 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Header row (no dropdown here) */}
+            {/* Header row */}
             <div style={{
               width: "100%", marginBottom: 6,
               display: "flex", alignItems: "center", justifyContent: "space-between"
@@ -1240,7 +1248,7 @@ const CampaignSetup = () => {
                           <div style={{
                             background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
                             overflow:"hidden", boxShadow:"0 2px 16px #16242714",
-                            display: (showImages ? "block" : "none")
+                            display: ( (mediaSelection === "image" || mediaSelection === "both") ? "block" : "none")
                           }}>
                             <div style={{
                               background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
@@ -1259,14 +1267,14 @@ const CampaignSetup = () => {
                           <div style={{
                             background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
                             overflow:"hidden", boxShadow:"0 2px 16px #16242714",
-                            display: (showVideos ? "block" : "none")
+                            display: ( (mediaSelection === "video" || mediaSelection === "both") ? "block" : "none")
                           }}>
                             <div style={{
                               background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
                               display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
                             }}>
                               <span>Videos</span>
-                              {videoUrlsArr.length === 0 ? <DottyMini/> : null}
+                              {videoUrlsArr.length === 0 && (openCampaignId === "__DRAFT__") ? <DottyMini/> : null}
                             </div>
                             <VideoCarousel items={videoUrlsArr} height={CREATIVE_HEIGHT} />
                           </div>
@@ -1278,7 +1286,7 @@ const CampaignSetup = () => {
               })}
             </div>
 
-            {/* Ad Account & Page Selectors (outside of any campaign content) */}
+            {/* Ad Account & Page Selectors */}
             <div style={{
               width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
               display: "flex", flexDirection: "column", gap: 14
