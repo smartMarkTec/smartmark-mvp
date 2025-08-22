@@ -97,6 +97,61 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
+/* ---- helpers for ImageCarousel (restored) ---- */
+const navBtn = (dir) => ({
+  position:"absolute",
+  top:"50%",
+  transform:"translateY(-50%)",
+  [dir < 0 ? "left" : "right"]: 6,
+  background:"rgba(0,0,0,0.45)",
+  color:"#fff",
+  border:"none",
+  borderRadius:8,
+  width:26, height:26,
+  fontSize:16, fontWeight:900,
+  cursor:"pointer"
+});
+const badge = {
+  position:"absolute", bottom:6, right:6,
+  background:"rgba(0,0,0,0.55)", color:"#fff",
+  borderRadius:8, padding:"2px 6px", fontSize:11, fontWeight:800
+};
+
+/* ---- ImageCarousel (restored) ---- */
+function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
+  const [idx, setIdx] = useState(0);
+  const normalized = items
+    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u))
+    .filter(Boolean);
+
+  useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
+
+  if (!normalized.length) {
+    return <div style={{ height, width: "100%", background: "#e9ecef",
+      color: "#a9abb0", fontWeight: 700, display:"flex", alignItems:"center",
+      justifyContent:"center", fontSize: 18 }}>Images</div>;
+  }
+  const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
+
+  return (
+    <div style={{ position:"relative", background:"#222" }}>
+      <img
+        src={normalized[idx]}
+        alt="Ad"
+        style={{ width:"100%", maxHeight:height, height, objectFit:"cover", display:"block" }}
+        onClick={() => onFullscreen && onFullscreen(normalized[idx])}
+      />
+      {normalized.length > 1 && (
+        <>
+          <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">‹</button>
+          <button onClick={() => go(1)} style={navBtn(1)} aria-label="Next">›</button>
+          <div style={badge}>{idx + 1}/{normalized.length}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ---------- Minimal, clean metrics row (no arrows, still scrollable) ---------- */
 function MetricsRow({ metrics }) {
   const cards = useMemo(() => {
@@ -736,30 +791,6 @@ const CampaignSetup = () => {
           >
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
-          {fbConnected && (
-            <button
-              onClick={openFbPaymentPopup}
-              style={{
-                marginTop: 16,
-                padding: "0.72rem 1.5rem",
-                borderRadius: "1.1rem",
-                background: "#fff",
-                color: "#1877F2",
-                fontWeight: 700,
-                border: "none",
-                cursor: "pointer",
-                fontSize: "1.01rem",
-                boxShadow: "0 2px 8px #1877f233",
-                width: "100%",
-                maxWidth: 370,
-                marginLeft: "auto",
-                marginRight: "auto",
-                display: "block"
-              }}
-            >
-              Add/Manage Payment Method
-            </button>
-          )}
 
           {/* Campaign Name */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
