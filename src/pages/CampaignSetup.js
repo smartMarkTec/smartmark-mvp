@@ -1,5 +1,5 @@
 /* eslint-disable */
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 
@@ -22,6 +22,7 @@ const CREATIVE_HEIGHT = 150;
 // ---- Draft persistence (24h TTL) ----
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
 // Responsive helper
 const useIsMobile = () => {
@@ -101,7 +102,7 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-/* ---- helpers for ImageCarousel ---- */
+/* ---- helpers for ImageCarousel (restored) ---- */
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
@@ -113,21 +114,19 @@ const navBtn = (dir) => ({
   borderRadius:8,
   width:26, height:26,
   fontSize:16, fontWeight:900,
-  cursor:"pointer",
-  zIndex: 2
+  cursor:"pointer"
 });
 const badge = {
   position:"absolute", bottom:6, right:6,
   background:"rgba(0,0,0,0.55)", color:"#fff",
-  borderRadius:8, padding:"2px 6px", fontSize:11, fontWeight:800,
-  zIndex: 2
+  borderRadius:8, padding:"2px 6px", fontSize:11, fontWeight:800
 };
 
-/* ---- ImageCarousel ---- */
+/* ---- ImageCarousel (restored) ---- */
 function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
-  const normalized = (items || [])
-    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
+  const normalized = items
+    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u))
     .filter(Boolean);
 
   useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
@@ -161,8 +160,9 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
 /* ---- VideoCarousel (NEW) ---- */
 function VideoCarousel({ items = [], height = 220 }) {
   const [idx, setIdx] = useState(0);
+
   const normalized = (items || [])
-    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
+    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u))
     .filter(Boolean);
 
   useEffect(() => {
@@ -187,14 +187,10 @@ function VideoCarousel({ items = [], height = 220 }) {
     <div style={{ position: "relative", background: "#222" }}>
       <video
         key={normalized[idx]}
+        src={normalized[idx]}
         controls
-        preload="metadata"
-        playsInline
-        crossOrigin="anonymous"
-        style={{ width: "100%", maxHeight: height, height, display: "block", objectFit: "cover", background:"#111" }}
-      >
-        <source src={normalized[idx]} type="video/mp4" />
-      </video>
+        style={{ width: "100%", maxHeight: height, height, display: "block", objectFit: "cover" }}
+      />
       {normalized.length > 1 && (
         <>
           <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">‹</button>
@@ -206,7 +202,8 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- Minimal, clean metrics row ---------- */
+
+/* ---------- Minimal, clean metrics row (no arrows, still scrollable) ---------- */
 function MetricsRow({ metrics }) {
   const cards = useMemo(() => {
     const m = metrics || {};
@@ -288,76 +285,74 @@ const CampaignSetup = () => {
     return false;
   });
 
-// UI state
-const [adAccounts, setAdAccounts] = useState([]);
+  // UI state
+  const [adAccounts, setAdAccounts] = useState([]);
 
-const defaultStart = useMemo(() => {
-  const d = new Date(Date.now() + 10 * 60 * 1000);
-  d.setSeconds(0, 0);
-  return d;
-}, []);
+  const defaultStart = useMemo(() => {
+    const d = new Date(Date.now() + 10 * 60 * 1000);
+    d.setSeconds(0, 0);
+    return d;
+  }, []);
 
-const [pages, setPages] = useState([]);
-const [campaigns, setCampaigns] = useState([]);
-const [selectedCampaignId, setSelectedCampaignId] = useState("");
-const [metricsMap, setMetricsMap] = useState({});
-const [launched, setLaunched] = useState(false);
-const [launchResult, setLaunchResult] = useState(null);
-const [loading, setLoading] = useState(false);
-const [, setCampaignStatus] = useState("ACTIVE");
-const [campaignCount, setCampaignCount] = useState(0);
-const [isPaused, setIsPaused] = useState(false);
+  const [pages, setPages] = useState([]);
+  const [campaigns, setCampaigns] = useState([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+  const [metricsMap, setMetricsMap] = useState({});
+  const [launched, setLaunched] = useState(false);
+  const [launchResult, setLaunchResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [, setCampaignStatus] = useState("ACTIVE");
+  const [campaignCount, setCampaignCount] = useState(0);
+  const [isPaused, setIsPaused] = useState(false);
 
-// Right-pane: which row is expanded
-const [expandedId, setExpandedId] = useState(null);
+  // Right-pane: which row is expanded
+  const [expandedId, setExpandedId] = useState(null);
 
-// DRAFT creatives (used ONLY for not-yet-launched new campaign)
-const [draftCreatives, setDraftCreatives] = useState({
-  images: [],
-  videos: [],
-  fbVideoIds: [],
-  mediaSelection: (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
-});
+  // DRAFT creatives (used ONLY for not-yet-launched new campaign)
+  const [draftCreatives, setDraftCreatives] = useState({
+    images: [],
+    videos: [],
+    fbVideoIds: [],
+    mediaSelection: (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+  });
 
-// From navigation state (for new draft creation)
-const {
-  imageUrls: navImageUrls,
-  videoUrls: navVideoUrls,
-  fbVideoIds: navFbVideoIds,
-  headline,
-  body,
-  answers,
-  mediaSelection: navMediaSelection
-} = location.state || {};
+  // From navigation state (for new draft creation)
+  const {
+    imageUrls: navImageUrls,
+    videoUrls: navVideoUrls,
+    fbVideoIds: navFbVideoIds,
+    headline,
+    body,
+    answers,
+    mediaSelection: navMediaSelection
+  } = location.state || {};
 
-// --- Campaign Duration (max 14 days) ---
-// ❗️Remove the duplicate declaration that was here.
-const [startDate, setStartDate] = useState(() => {
-  const existing = form.startDate || "";
-  return existing || new Date(defaultStart).toISOString().slice(0, 16);
-});
-const [endDate, setEndDate] = useState(() => {
-  const s = startDate ? new Date(startDate) : defaultStart;
-  const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
-  e.setSeconds(0, 0);
-  return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
-});
+  // --- Campaign Duration (max 14 days) ---
+  const [startDate, setStartDate] = useState(() => {
+    const existing = form.startDate || "";
+    return existing || new Date(defaultStart).toISOString().slice(0, 16);
+  });
+  const [endDate, setEndDate] = useState(() => {
+    const s = startDate ? new Date(startDate) : defaultStart;
+    const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
+    e.setSeconds(0,0);
+    return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
+  });
 
-// derived date parts for compact pickers (MM | DD | YY)
-const sd = new Date(startDate || defaultStart);
-const ed = new Date(endDate || new Date(sd.getTime() + 3 * 24 * 60 * 60 * 1000));
-const [sMonth, setSMonth] = useState(sd.getMonth() + 1);
-const [sDay, setSDay] = useState(sd.getDate());
-const [sYear, setSYear] = useState(sd.getFullYear() % 100);
-const [eMonth, setEMonth] = useState(ed.getMonth() + 1);
-const [eDay, setEDay] = useState(ed.getDate());
-const [eYear, setEYear] = useState(ed.getFullYear() % 100);
+  // derived date parts for compact pickers (MM | DD | YY)
+  const sd = new Date(startDate || defaultStart);
+  const ed = new Date(endDate || (new Date(sd.getTime() + 3*24*60*60*1000)));
+  const [sMonth, setSMonth] = useState(sd.getMonth()+1);
+  const [sDay, setSDay] = useState(sd.getDate());
+  const [sYear, setSYear] = useState(sd.getFullYear()%100);
+  const [eMonth, setEMonth] = useState(ed.getMonth()+1);
+  const [eDay, setEDay] = useState(ed.getDate());
+  const [eYear, setEYear] = useState(ed.getFullYear()%100);
 
-const [showImageModal, setShowImageModal] = useState(false);
-const [modalImg, setModalImg] = useState("");
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [modalImg, setModalImg] = useState("");
 
-// helpers...
-
+  // helpers
   const clampEndForStart = (startStr, endStr) => {
     try {
       const start = new Date(startStr);
@@ -381,29 +376,6 @@ const [modalImg, setModalImg] = useState("");
     e.setSeconds(0,0);
     return e.toISOString().slice(0,16);
   };
-
-  // Sync compact pickers -> ISO strings
-  useEffect(() => {
-    const clampDay = (m, y2) => {
-      const y = 2000 + y2;
-      return new Date(y, m, 0).getDate();
-    };
-    // build start at 09:00 local
-    const sdMaxDay = clampDay(sMonth, sYear);
-    const sD = Math.min(sDay, sdMaxDay);
-    const sISO = new Date(2000 + sYear, sMonth - 1, sD, 9, 0, 0).toISOString().slice(0,16);
-    setStartDate(sISO);
-
-    // end at 18:00 local (visually distinct)
-    const edMaxDay = clampDay(eMonth, eYear);
-    const eD = Math.min(eDay, edMaxDay);
-    let eISO = new Date(2000 + eYear, eMonth - 1, eD, 18, 0, 0).toISOString().slice(0,16);
-
-    // enforce clamp (>= start +1h, <= start +14d)
-    eISO = clampEndForStart(sISO, eISO);
-    setEndDate(eISO);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
   // Load persisted fields + saved draft (24h TTL)
   useEffect(() => {
@@ -448,17 +420,6 @@ const [modalImg, setModalImg] = useState("");
     // eslint-disable-next-line
   }, []);
 
-  // keep 24h draft fresh whenever creatives change
-  useEffect(() => {
-    const hasDraft =
-      (draftCreatives.images && draftCreatives.images.length) ||
-      (draftCreatives.videos && draftCreatives.videos.length) ||
-      (draftCreatives.fbVideoIds && draftCreatives.fbVideoIds.length);
-    if (!hasDraft) return;
-    const payload = { ...draftCreatives, savedAt: Date.now() };
-    try { localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload)); } catch {}
-  }, [draftCreatives]);
-
   // Handle Facebook oauth return
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -479,16 +440,12 @@ const [modalImg, setModalImg] = useState("");
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
     const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
     if (imgs.length || vids.length || ids.length || navMediaSelection) {
-      setDraftCreatives(dc => {
-        const next = {
-          images: imgs.length ? imgs : dc.images,
-          videos: vids.length ? vids : dc.videos,
-          fbVideoIds: ids.length ? ids : dc.fbVideoIds,
-          mediaSelection: (navMediaSelection || dc.mediaSelection || "both").toLowerCase()
-        };
-        try { localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify({ ...next, savedAt: Date.now() })); } catch {}
-        return next;
-      });
+      setDraftCreatives(dc => ({
+        images: imgs.length ? imgs : dc.images,
+        videos: vids.length ? vids : dc.videos,
+        fbVideoIds: ids.length ? ids : dc.fbVideoIds,
+        mediaSelection: (navMediaSelection || dc.mediaSelection || "both").toLowerCase()
+      }));
       localStorage.setItem("smartmark_media_selection", (navMediaSelection || "both").toLowerCase());
     }
   }, [navImageUrls, navVideoUrls, navFbVideoIds, navMediaSelection]);
@@ -712,6 +669,7 @@ const [modalImg, setModalImg] = useState("");
       // Clear the draft after successful launch
       sessionStorage.removeItem("draft_form_creatives");
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
+      localStorage.removeItem(FORM_DRAFT_KEY);
       setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
 
       setLaunched(true);
@@ -779,15 +737,9 @@ const [modalImg, setModalImg] = useState("");
   };
 
   // ---------- Render ----------
-  // compact date wheels helpers
-  const yearNow = new Date().getFullYear() % 100;
-  const years = [yearNow, yearNow + 1];
-  const months = Array.from({ length: 12 }, (_, i) => i + 1);
-  const daysFor = (m, y2) => {
-    const y = 2000 + y2;
-    const max = new Date(y, m, 0).getDate();
-    return Array.from({ length: max }, (_, i) => i + 1);
-  };
+  const startMinAttr = new Date(Date.now() - 60_000).toISOString().slice(0, 16);
+  const endMinAttr = startDate ? new Date(new Date(startDate).getTime() + 60*60*1000).toISOString().slice(0,16) : startMinAttr;
+  const endMaxAttr = startDate ? new Date(new Date(startDate).getTime() + 14*24*60*60*1000).toISOString().slice(0,16) : undefined;
 
   // Compose right-pane rows: existing campaigns (max 2) + draft if present
   const hasDraft =
@@ -922,82 +874,93 @@ const [modalImg, setModalImg] = useState("");
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
 
-          {/* Campaign Name */}
-          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
-            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
+          {/* Payment Method (moved here; pill aesthetic) */}
+          <button
+            onClick={openFbPaymentPopup}
+            style={{
+              width: "100%",
+              maxWidth: 370,
+              margin: "0 auto",
+              display: "block",
+              background: "#202824e0",
+              color: "#fff",
+              border: "none",
+              borderRadius: "1.3rem",
+              padding: "0.9rem 1.6rem",
+              fontWeight: 800,
+              fontSize: "1.05rem",
+              letterSpacing: "0.6px",
+              cursor: "pointer",
+              boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)"
+            }}
+            title="Add Payment Method in Facebook Ads"
+          >
+            Add Payment Method
+          </button>
+
+          {/* Campaign Name — minimalist pill style, typable */}
+          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ color: "#fff", fontWeight: 800, fontSize: "1.10rem" }}>
               Campaign Name
-            </label>
-            <input
-              type="text"
-              value={form.campaignName || ""}
-              onChange={e => setForm({ ...form, campaignName: e.target.value })}
-              placeholder="Name your campaign"
-              style={{
-                padding: "1rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1.2px solid #57dfa9",
-                fontSize: "1.14rem",
-                background: INPUT_BG,
-                color: TEXT_DIM,
-                marginBottom: "1rem",
-                outline: "none",
-                width: "100%"
-              }}
-            />
+            </div>
+            <div style={{
+              width: "100%",
+              background: "#1f2523",
+              borderRadius: "0.9rem",
+              padding: "0.2rem",
+              display: "flex",
+              alignItems: "center"
+            }}>
+              <input
+                type="text"
+                value={form.campaignName || ""}
+                onChange={e => setForm({ ...form, campaignName: e.target.value })}
+                placeholder="Type a name..."
+                style={{
+                  flex: 1,
+                  padding: "0.9rem 1.0rem",
+                  border: "none",
+                  outline: "none",
+                  background: "transparent",
+                  color: "#c9ffe9",
+                  fontWeight: 800,
+                  fontSize: "1.06rem",
+                  letterSpacing: 0.2
+                }}
+              />
+            </div>
           </div>
 
-          {/* Campaign Duration (max 14 days) */}
+          {/* Campaign Duration (max 14 days) — keep as-is */}
           <div style={{ width:"100%", maxWidth:370, margin:"6px auto 0 auto", display:"flex", flexDirection:"column", gap:10 }}>
             <div style={{ color:"#fff", fontWeight:800, fontSize:"1.10rem" }}>Campaign Duration</div>
-
-            {/* Compact wheels */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
-              {/* Start */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Start</label>
-                <div style={{
-                  display:"flex", gap:10, alignItems:"center",
-                  padding:"8px 10px", borderRadius:12, background:"#1b1f22"
-                }}>
-                  {/* MM */}
-                  <Picker
-                    value={sMonth}
-                    options={months}
-                    onChange={setSMonth}
-                  />
-                  <Sep />
-                  {/* DD */}
-                  <Picker
-                    value={sDay}
-                    options={daysFor(sMonth, sYear)}
-                    onChange={setSDay}
-                  />
-                  <Sep />
-                  {/* YY */}
-                  <Picker
-                    value={sYear}
-                    options={years}
-                    onChange={setSYear}
-                  />
-                </div>
+                <input
+                  type="datetime-local"
+                  value={startDate}
+                  min={new Date(Date.now() - 60_000).toISOString().slice(0, 16)}
+                  onChange={e => {
+                    const newStart = e.target.value;
+                    setStartDate(newStart);
+                    setEndDate(clampEndForStart(newStart, endDate));
+                  }}
+                  style={{ padding:"0.85rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+                />
               </div>
-
-              {/* End */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>End</label>
-                <div style={{
-                  display:"flex", gap:10, alignItems:"center",
-                  padding:"8px 10px", borderRadius:12, background:"#1b1f22"
-                }}>
-                  <Picker value={eMonth} options={months} onChange={setEMonth} />
-                  <Sep />
-                  <Picker value={eDay} options={daysFor(eMonth, eYear)} onChange={setEDay} />
-                  <Sep />
-                  <Picker value={eYear} options={years} onChange={setEYear} />
-                </div>
+                <input
+                  type="datetime-local"
+                  value={endDate}
+                  min={new Date(new Date(startDate).getTime() + 60*60*1000).toISOString().slice(0,16)}
+                  max={new Date(new Date(startDate).getTime() + 14*24*60*60*1000).toISOString().slice(0,16)}
+                  onChange={e => setEndDate(clampEndOnChange(e.target.value))}
+                  style={{ padding:"0.85rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
+                />
               </div>
             </div>
-
             <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>
               Max duration is 14 days. End will auto-adjust if needed.
             </div>
@@ -1022,7 +985,7 @@ const [modalImg, setModalImg] = useState("");
                 fontSize: "1.14rem",
                 background: INPUT_BG,
                 color: TEXT_DIM,
-                marginBottom: "0.6rem",
+                marginBottom: "1rem",
                 outline: "none",
                 width: "100%"
               }}
@@ -1031,49 +994,57 @@ const [modalImg, setModalImg] = useState("");
               SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${calculateFees(budget).fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${calculateFees(budget).total.toFixed(2)}</span>
             </div>
 
-            {/* Pay + credentials (simple, only when budget valid) */}
-            {parseFloat(budget) >= 3 && (
-              <div style={{ width: "100%", display:"flex", flexDirection:"column", gap:10, marginTop: 6 }}>
+            {/* Pay + login fields appear after a valid budget */}
+            {Number(budget) >= 3 && (
+              <div style={{ width: "100%", maxWidth: 370, marginTop: 8 }}>
                 <button
-                  onClick={() => window.open("https://cash.app", "_blank")}
+                  onClick={() => alert(`Collect $${calculateFees(budget).fee.toFixed(2)} fee (demo)`)}
                   style={{
-                    background: "#14e7b9",
-                    color: "#181b20",
+                    width: "100%",
+                    background: ACCENT_ALT,
+                    color: "#0f1514",
                     border: "none",
-                    borderRadius: 10,
-                    fontWeight: 800,
-                    padding: "10px 16px",
+                    borderRadius: "1.1rem",
+                    padding: "0.9rem 1.2rem",
+                    fontWeight: 900,
+                    letterSpacing: 0.4,
                     cursor: "pointer",
-                    boxShadow: "0 2px 12px #0cc4be44"
+                    boxShadow: "0 2px 12px #1ec88533",
+                    marginBottom: 12
                   }}
                 >
-                  Pay ${calculateFees(budget).fee.toFixed(0)}
+                  Pay ${calculateFees(budget).fee.toFixed(2)}
                 </button>
 
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Cashtag (your username)</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <input
                     type="text"
+                    placeholder="Your $Cashtag (username)"
                     value={cashapp}
-                    onChange={e => setCashapp(e.target.value)}
-                    placeholder="$yourcashtag"
+                    onChange={(e) => setCashapp(e.target.value)}
                     style={{
-                      padding:"0.85rem 1rem", borderRadius:10, border:"1.2px solid #57dfa9",
-                      background: INPUT_BG, color: TEXT_DIM, outline:"none"
+                      padding: "0.9rem 1.0rem",
+                      borderRadius: "0.9rem",
+                      border: "1.2px solid #2e5c44",
+                      background: INPUT_BG,
+                      color: TEXT_DIM,
+                      outline: "none",
+                      width: "100%"
                     }}
                   />
-                </div>
-
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                  <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Email (used as password)</label>
                   <input
                     type="email"
+                    placeholder="Email (used as password for now)"
                     value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="you@example.com"
+                    onChange={(e) => setEmail(e.target.value)}
                     style={{
-                      padding:"0.85rem 1rem", borderRadius:10, border:"1.2px solid #57dfa9",
-                      background: INPUT_BG, color: TEXT_DIM, outline:"none"
+                      padding: "0.9rem 1.0rem",
+                      borderRadius: "0.9rem",
+                      border: "1.2px solid #2e5c44",
+                      background: INPUT_BG,
+                      color: TEXT_DIM,
+                      outline: "none",
+                      width: "100%"
                     }}
                   />
                 </div>
@@ -1094,7 +1065,7 @@ const [modalImg, setModalImg] = useState("");
               fontSize: "1.19rem",
               padding: "18px 72px",
               marginBottom: 18,
-              marginTop: 12,
+              marginTop: 2,
               boxShadow: "0 2px 16px #0cc4be24",
               cursor: (loading || campaignCount >= 2 || !canLaunch) ? "not-allowed" : "pointer",
               transition: "background 0.18s",
@@ -1152,23 +1123,6 @@ const [modalImg, setModalImg] = useState("");
                 Active Campaigns
               </div>
               <div style={{ display: "flex", gap: "0.7rem" }}>
-                <button
-                  onClick={openFbPaymentPopup}
-                  style={{
-                    background: "#2f7a5d",
-                    color: "#fff",
-                    border: "none",
-                    borderRadius: 9,
-                    fontWeight: 900,
-                    fontSize: 12,
-                    padding: "0 10px",
-                    height: 36,
-                    cursor: "pointer"
-                  }}
-                  title="Add FB Payment"
-                >
-                  Billing
-                </button>
                 <button
                   onClick={handlePauseUnpause}
                   disabled={loading || !selectedCampaignId}
@@ -1434,39 +1388,5 @@ const [modalImg, setModalImg] = useState("");
     </div>
   );
 };
-
-/* ---------- tiny UI helpers for compact wheels ---------- */
-function Picker({ value, options, onChange }) {
-  return (
-    <select
-      value={value}
-      onChange={e => onChange(Number(e.target.value))}
-      style={{
-        appearance: "none",
-        WebkitAppearance: "none",
-        MozAppearance: "none",
-        background: "transparent",
-        border: "none",
-        color: "#c7fbe3",
-        fontWeight: 900,
-        fontSize: "1.05rem",
-        padding: "4px 8px",
-        outline: "none",
-        maxHeight: 120,
-        overflowY: "auto",
-        scrollbarWidth: "none"
-      }}
-    >
-      {options.map(v => (
-        <option key={v} value={v} style={{ background:"#1b1f22", color:"#c7fbe3" }}>
-          {String(v).padStart(2,"0")}
-        </option>
-      ))}
-    </select>
-  );
-}
-function Sep() {
-  return <div style={{ width:2, height:22, background:"#2a3236", borderRadius:2 }} />;
-}
 
 export default CampaignSetup;
