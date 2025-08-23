@@ -157,6 +157,52 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   );
 }
 
+/* ---- VideoCarousel (NEW) ---- */
+function VideoCarousel({ items = [], height = 220 }) {
+  const [idx, setIdx] = useState(0);
+
+  const normalized = (items || [])
+    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : u))
+    .filter(Boolean);
+
+  useEffect(() => {
+    if (idx >= normalized.length) setIdx(0);
+  }, [normalized, idx]);
+
+  if (!normalized.length) {
+    return (
+      <div style={{
+        height, width: "100%", background: "#e9ecef",
+        color: "#a9abb0", fontWeight: 700, display: "flex",
+        alignItems: "center", justifyContent: "center", fontSize: 18
+      }}>
+        Videos
+      </div>
+    );
+  }
+
+  const go = (d) => setIdx(p => (p + d + normalized.length) % normalized.length);
+
+  return (
+    <div style={{ position: "relative", background: "#222" }}>
+      <video
+        key={normalized[idx]}
+        src={normalized[idx]}
+        controls
+        style={{ width: "100%", maxHeight: height, height, display: "block", objectFit: "cover" }}
+      />
+      {normalized.length > 1 && (
+        <>
+          <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">‹</button>
+          <button onClick={() => go(1)} style={navBtn(1)} aria-label="Next">›</button>
+          <div style={badge}>{idx + 1}/{normalized.length}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+
 /* ---------- Minimal, clean metrics row (no arrows, still scrollable) ---------- */
 function MetricsRow({ metrics }) {
   const cards = useMemo(() => {
@@ -275,24 +321,26 @@ const CampaignSetup = () => {
   } = location.state || {};
 
   // --- Campaign Duration (max 14 days) ---
-  const defaultStart = useMemo(() => {
-    const d = new Date(Date.now() + 10 * 60 * 1000);
-    d.setSeconds(0, 0);
-    return d;
-  }, []);
-  const [startDate, setStartDate] = useState(() => {
-    const existing = form.startDate || "";
-    return existing || new Date(defaultStart).toISOString().slice(0, 16);
-  });
-  const [endDate, setEndDate] = useState(() => {
-    const s = startDate ? new Date(startDate) : defaultStart;
-    const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
-    e.setSeconds(0,0);
-    return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
-  });
+const defaultStart = useMemo(() => {
+  const d = new Date(Date.now() + 10 * 60 * 1000);
+  d.setSeconds(0, 0);
+  return d;
+}, []);
 
-  const [showImageModal, setShowImageModal] = useState(false);
-  const [modalImg, setModalImg] = useState("");
+const [startDate, setStartDate] = useState(() => {
+  const existing = form.startDate || "";
+  return existing || new Date(defaultStart).toISOString().slice(0, 16);
+});
+
+const [endDate, setEndDate] = useState(() => {
+  const s = startDate ? new Date(startDate) : defaultStart;
+  const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
+  e.setSeconds(0, 0);
+  return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
+});
+
+const [showImageModal, setShowImageModal] = useState(false);
+const [modalImg, setModalImg] = useState("");
 
   // helpers
   const clampEndForStart = (startStr, endStr) => {
@@ -1148,7 +1196,7 @@ const CampaignSetup = () => {
                             </div>
                           )}
 
-                          {/* Videos Card */}
+                          {/* Videos Card — uses VideoCarousel */}
                           {showVideos && (
                             <div style={{
                               background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
@@ -1161,13 +1209,7 @@ const CampaignSetup = () => {
                                 <span>Videos</span>
                                 {(!creatives.videos || creatives.videos.length === 0) ? <DottyMini/> : null}
                               </div>
-                              <div style={{ position:"relative" }}>
-                                <video
-                                  src={(creatives.videos && creatives.videos[0]) ? (/^https?:\/\//.test(creatives.videos[0]) ? creatives.videos[0] : `${backendUrl}${creatives.videos[0]}`) : undefined}
-                                  controls
-                                  style={{ width:"100%", maxHeight:CREATIVE_HEIGHT, height:CREATIVE_HEIGHT, display:"block", objectFit:"cover" }}
-                                />
-                              </div>
+                              <VideoCarousel items={creatives.videos} height={CREATIVE_HEIGHT} />
                             </div>
                           )}
 
