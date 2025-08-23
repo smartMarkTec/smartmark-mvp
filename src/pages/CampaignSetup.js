@@ -463,6 +463,21 @@ const CampaignSetup = () => {
     } catch {}
   }, [draftCreatives]);
 
+  const handleClearDraft = () => {
+  // clear session draft (older key) + current 24h draft + form-page draft + media selection hint
+  try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+  try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
+  try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
+  try { localStorage.removeItem("smartmark_media_selection"); } catch {}
+
+  // reset local draft state so the row disappears
+  setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
+
+  // collapse if it was open
+  if (expandedId === "__DRAFT__") setExpandedId(null);
+};
+
+
   // Handle Facebook oauth return
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -1256,51 +1271,78 @@ const CampaignSetup = () => {
                     padding:"0.7rem",
                     boxShadow: "0 2px 12px #193a2a13"
                   }}>
-                    {/* Row header */}
-                    <div
-                      onClick={() => {
-                        setExpandedId(isOpen ? null : id);
-                        if (!isDraft) setSelectedCampaignId(id);
-                      }}
-                      style={{
-                        display:"flex",
-                        alignItems:"center",
-                        justifyContent:"space-between",
-                        cursor:"pointer",
-                        padding:"0.5rem 0.6rem",
-                        borderRadius:8,
-                        background:"#1f2523"
-                      }}
-                    >
-                      <div style={{ display:"flex", alignItems:"center", gap:10, color:"#fff", fontWeight:800 }}>
-                        <FaChevronDown
-                          style={{
-                            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-                            transition: "transform 0.18s"
-                          }}
-                        />
-                        <span>{name}</span>
-                        {isDraft && (
-                          <span style={{
-                            marginLeft:8,
-                            padding:"2px 8px",
-                            borderRadius:999,
-                            background:"#2d5b45",
-                            color:"#aef4da",
-                            fontSize:11,
-                            fontWeight:900,
-                            letterSpacing:0.5
-                          }}>
-                            IN&nbsp;PROGRESS
-                          </span>
-                        )}
-                      </div>
-                      {!isDraft && (
-                        <div style={{ color:"#89f0cc", fontSize:12, fontWeight:800 }}>
-                          {(c.status || c.effective_status || "ACTIVE")}
-                        </div>
-                      )}
-                    </div>
+                   {/* Row header */}
+<div
+  onClick={() => {
+    setExpandedId(isOpen ? null : id);
+    if (!isDraft) setSelectedCampaignId(id);
+  }}
+  style={{
+    display:"flex",
+    alignItems:"center",
+    justifyContent:"space-between",
+    cursor:"pointer",
+    padding:"0.5rem 0.6rem",
+    borderRadius:8,
+    background:"#1f2523"
+  }}
+>
+  <div style={{ display:"flex", alignItems:"center", gap:10, color:"#fff", fontWeight:800 }}>
+    <FaChevronDown
+      style={{
+        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+        transition: "transform 0.18s"
+      }}
+    />
+    <span>{name}</span>
+    {isDraft && (
+      <span style={{
+        marginLeft:8,
+        padding:"2px 8px",
+        borderRadius:999,
+        background:"#2d5b45",
+        color:"#aef4da",
+        fontSize:11,
+        fontWeight:900,
+        letterSpacing:0.5
+      }}>
+        IN&nbsp;PROGRESS
+      </span>
+    )}
+  </div>
+
+  {/* RIGHT SIDE: status for launched OR “×” discard for draft */}
+  {isDraft ? (
+    <button
+      onClick={(e) => {
+        e.stopPropagation(); // don’t toggle row when clicking ×
+        handleClearDraft();
+      }}
+      title="Discard draft"
+      aria-label="Discard draft"
+      style={{
+        background:"#5b2d2d",
+        color:"#ffecec",
+        border:"none",
+        borderRadius:8,
+        fontWeight:900,
+        width:28,
+        height:28,
+        lineHeight:"28px",
+        textAlign:"center",
+        cursor:"pointer",
+        boxShadow:"0 1px 6px rgba(0,0,0,0.25)"
+      }}
+    >
+      ×
+    </button>
+  ) : (
+    <div style={{ color:"#89f0cc", fontSize:12, fontWeight:800 }}>
+      {(c.status || c.effective_status || "ACTIVE")}
+    </div>
+  )}
+</div>
+
 
                     {/* Row contents */}
                     {isOpen && (
