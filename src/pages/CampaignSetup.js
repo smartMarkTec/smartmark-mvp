@@ -437,6 +437,34 @@ const CampaignSetup = () => {
       .catch(() => setMetricsMap(m => ({ ...m, [expandedId]: { impressions:"--", clicks:"--", ctr:"--" } })));
   }, [expandedId, selectedAccount]);
 
+  // NEW: Fetch creatives & mediaSelection from backend when a campaign is expanded
+  useEffect(() => {
+    if (!expandedId || expandedId === "__DRAFT__" || !selectedAccount) return;
+    const acctId = String(selectedAccount).replace(/^act_/, "");
+    (async () => {
+      try {
+        const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${expandedId}/creatives`, {
+          credentials: 'include'
+        });
+        if (!res.ok) return; // fallback to local cache
+        const data = await res.json();
+        const map = readCreativeMap(acctId);
+        map[expandedId] = {
+          ...(map[expandedId] || {}),
+          images: Array.isArray(data.images) ? data.images : [],
+          videos: Array.isArray(data.videos) ? data.videos : [],
+          fbVideoIds: Array.isArray(data.fbVideoIds) ? data.fbVideoIds : [],
+          mediaSelection: (data.mediaSelection || 'both').toLowerCase(),
+          time: Date.now(),
+          name: data.name || (map[expandedId]?.name || 'Campaign')
+        };
+        writeCreativeMap(acctId, map);
+        // trigger re-render without touching layout
+        setMetricsMap(m => ({ ...m }));
+      } catch {}
+    })();
+  }, [expandedId, selectedAccount]);
+
   // Persist basics
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);

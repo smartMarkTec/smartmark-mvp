@@ -16,6 +16,8 @@ async function ensureSmartTables() {
   db.data.smart_configs = db.data.smart_configs || [];
   db.data.smart_runs = db.data.smart_runs || [];
   db.data.creative_history = db.data.creative_history || [];
+  // NEW: persist per-campaign creatives + selection
+  db.data.campaign_creatives = db.data.campaign_creatives || [];
   await db.write();
 }
 

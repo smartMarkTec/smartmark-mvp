@@ -251,6 +251,43 @@ router.post('/login', async (req, res) => {
 });
 
 /* =========================
+   HELPERS: persist creatives
+   ========================= */
+async function ensureCampaignCreativesTable() {
+  await db.read();
+  db.data = db.data || {};
+  db.data.campaign_creatives = db.data.campaign_creatives || [];
+  await db.write();
+}
+async function upsertCampaignCreatives({
+  campaignId, accountId, pageId, name, status,
+  mediaSelection, images = [], videos = [], fbVideoIds = []
+}) {
+  await ensureCampaignCreativesTable();
+  await db.read();
+  const list = db.data.campaign_creatives || [];
+  const idx = list.findIndex(c => c.campaignId === campaignId);
+  const now = new Date().toISOString();
+  const record = {
+    campaignId,
+    accountId: String(accountId || ''),
+    pageId: String(pageId || ''),
+    name: name || 'SmartMark Campaign',
+    status: status || 'ACTIVE',
+    mediaSelection: (mediaSelection || 'both').toLowerCase(),
+    images: Array.isArray(images) ? images : [],
+    videos: Array.isArray(videos) ? videos : [],
+    fbVideoIds: Array.isArray(fbVideoIds) ? fbVideoIds : [],
+    updatedAt: now,
+    ...(idx === -1 ? { createdAt: now } : {})
+  };
+  if (idx === -1) list.push(record);
+  else list[idx] = { ...list[idx], ...record };
+  db.data.campaign_creatives = list;
+  await db.write();
+}
+
+/* =========================
    LAUNCH CAMPAIGN
    ========================= */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
@@ -541,10 +578,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     // 3) Ads
     const adIds = [];
+    const usedImages = [];
+    const usedVideos = [];
+    const usedFbIds  = [];
 
     if (wantImage && imageAdSetId) {
       for (let i = 0; i < needImg; i++) {
-        const hash = await uploadImage(imageVariants[i]);
+        const srcUrl = imageVariants[i];
+        const hash = await uploadImage(srcUrl);
         const cr = await axios.post(
           `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
           {
@@ -567,12 +608,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           { params: mkParams() }
         );
         adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i+1}`);
+        if (srcUrl) usedImages.push(absolutePublicUrl(srcUrl));
       }
     }
 
     if (wantVideo && videoAdSetId) {
       for (let i = 0; i < needVid; i++) {
         const video_id = await ensureVideoIdByIndex(i, videoVariants, fbVideoIds);
+        const vUrl = videoVariants[i] ? absolutePublicUrl(videoVariants[i]) : null;
 
         let thumbUrl = null;
         const candBody = (typeof videoThumbnailUrl === 'string' && videoThumbnailUrl) ? videoThumbnailUrl : null;
@@ -610,8 +653,25 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           { params: mkParams() }
         );
         adIds.push(ad.data?.id || `VALIDATION_ONLY_VID_${i+1}`);
+        if (vUrl) usedVideos.push(vUrl);
+        if (video_id) usedFbIds.push(video_id);
       }
     }
+
+    const campaignStatus = NO_SPEND ? 'PAUSED' : 'ACTIVE';
+
+    // Persist creatives + selection for this campaign
+    await upsertCampaignCreatives({
+      campaignId,
+      accountId,
+      pageId: pageIdFinal,
+      name: campaignName,
+      status: campaignStatus,
+      mediaSelection: ms,
+      images: usedImages,
+      videos: usedVideos,
+      fbVideoIds: usedFbIds.length ? usedFbIds : fbVideoIds
+    });
 
     res.json({
       success: true,
@@ -619,7 +679,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       adSetIds: [imageAdSetId, videoAdSetId].filter(Boolean),
       adIds,
       variantPlan: plan,
-      campaignStatus: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+      campaignStatus,
       validateOnly: VALIDATE_ONLY,
       resolvedPageId: pageIdFinal
     });
@@ -685,6 +745,34 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
     res.json(response.data);
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaign metrics.' });
+  }
+});
+
+/* NEW: Fetch stored creatives + selection for a campaign */
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', async (req, res) => {
+  const userToken = getFbUserToken();
+  const { campaignId } = req.params;
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  try {
+    await ensureCampaignCreativesTable();
+    await db.read();
+    const rec = (db.data.campaign_creatives || []).find(r => r.campaignId === campaignId) || null;
+    if (!rec) return res.status(404).json({ error: 'No creatives stored for this campaign.' });
+    res.json({
+      campaignId: rec.campaignId,
+      accountId: rec.accountId,
+      pageId: rec.pageId,
+      name: rec.name,
+      status: rec.status,
+      mediaSelection: rec.mediaSelection,
+      images: rec.images || [],
+      videos: rec.videos || [],
+      fbVideoIds: rec.fbVideoIds || [],
+      updatedAt: rec.updatedAt,
+      createdAt: rec.createdAt
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message || 'Failed to load creatives.' });
   }
 });
 
