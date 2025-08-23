@@ -102,7 +102,7 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-/* ---- helpers for ImageCarousel ---- */
+/* ---- helpers for Image/Video carousels ---- */
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
@@ -124,7 +124,6 @@ const badge = {
   zIndex: 2
 };
 
-/* ---- ImageCarousel ---- */
 function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
   const normalized = (items || [])
@@ -159,16 +158,13 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   );
 }
 
-/* ---- VideoCarousel (with <source> + preload) ---- */
 function VideoCarousel({ items = [], height = 220 }) {
   const [idx, setIdx] = useState(0);
   const normalized = (items || [])
     .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
     .filter(Boolean);
 
-  useEffect(() => {
-    if (idx >= normalized.length) setIdx(0);
-  }, [normalized, idx]);
+  useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
 
   if (!normalized.length) {
     return (
@@ -207,7 +203,7 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- Minimal, clean metrics row ---------- */
+/* ---------- Minimal metrics row ---------- */
 function MetricsRow({ metrics }) {
   const cards = useMemo(() => {
     const m = metrics || {};
@@ -377,18 +373,15 @@ const CampaignSetup = () => {
       const y = 2000 + y2;
       return new Date(y, m, 0).getDate();
     };
-    // build start at 09:00 local
     const sdMaxDay = clampDay(sMonth, sYear);
     const sD = Math.min(sDay, sdMaxDay);
     const sISO = new Date(2000 + sYear, sMonth - 1, sD, 9, 0, 0).toISOString().slice(0,16);
     setStartDate(sISO);
 
-    // end at 18:00 local (visually distinct)
     const edMaxDay = clampDay(eMonth, eYear);
     const eD = Math.min(eDay, edMaxDay);
     let eISO = new Date(2000 + eYear, eMonth - 1, eD, 18, 0, 0).toISOString().slice(0,16);
 
-    // enforce clamp (>= start +1h, <= start +14d)
     eISO = clampEndForStart(sISO, eISO);
     setEndDate(eISO);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -403,8 +396,6 @@ const CampaignSetup = () => {
       if (f.startDate) setStartDate(f.startDate);
       if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
     }
-    const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
-    if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
 
     const applyDraft = (draftObj) => {
       setDraftCreatives({
@@ -419,14 +410,11 @@ const CampaignSetup = () => {
     };
 
     try {
-      // Priority: session (OAuth bounce)
       const sess = sessionStorage.getItem("draft_form_creatives");
       if (sess) {
         applyDraft(JSON.parse(sess));
         return;
       }
-
-      // Fallback: 24h local draft
       const raw = localStorage.getItem(CREATIVE_DRAFT_KEY);
       if (!raw) return;
       const draft = JSON.parse(raw);
@@ -436,6 +424,21 @@ const CampaignSetup = () => {
     } catch {}
     // eslint-disable-next-line
   }, []);
+
+  // keep draft fresh while editing (so video carousel reloads even after long gaps)
+  useEffect(() => {
+    const hasDraft =
+      (draftCreatives.images && draftCreatives.images.length) ||
+      (draftCreatives.videos && draftCreatives.videos.length) ||
+      (draftCreatives.fbVideoIds && draftCreatives.fbVideoIds.length);
+    if (!hasDraft) return;
+    try {
+      localStorage.setItem(
+        CREATIVE_DRAFT_KEY,
+        JSON.stringify({ ...draftCreatives, savedAt: Date.now() })
+      );
+    } catch {}
+  }, [draftCreatives]);
 
   // Handle Facebook oauth return
   useEffect(() => {
@@ -730,7 +733,7 @@ const CampaignSetup = () => {
 
   const { fee, total } = calculateFees(budget);
 
-  // Saved creatives for a launched campaign (infer mediaSelection if missing)
+  // Saved creatives for a launched campaign
   const getSavedCreatives = (campaignId) => {
     if (!selectedAccount) return { images:[], videos:[], fbVideoIds:[], mediaSelection:"both" };
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
@@ -764,7 +767,7 @@ const CampaignSetup = () => {
     return Array.from({ length: max }, (_, i) => i + 1);
   };
 
-  // Compose right-pane rows: existing campaigns (max 2) + draft if present
+  // Compose right-pane rows
   const hasDraft =
     (draftCreatives.images && draftCreatives.images.length) ||
     (draftCreatives.videos && draftCreatives.videos.length) ||
@@ -897,64 +900,51 @@ const CampaignSetup = () => {
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
 
-          {/* Payment Method */}
+          {/* Add Payment Method (moved here; same aesthetic as old Billing) */}
           <button
             onClick={openFbPaymentPopup}
             style={{
               width: "100%",
               maxWidth: 370,
-              margin: "0 auto",
-              display: "block",
-              background: "#202824e0",
-              color: "#fff",
+              padding: "0.9rem 1.2rem",
+              borderRadius: "1.5rem",
               border: "none",
-              borderRadius: "1.3rem",
-              padding: "0.9rem 1.6rem",
-              fontWeight: 800,
-              fontSize: "1.05rem",
-              letterSpacing: "0.6px",
+              background: "#2f7a5d",
+              color: "#fff",
+              fontWeight: 900,
+              fontSize: "1.02rem",
               cursor: "pointer",
-              boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)"
+              boxShadow: "0 2px 10px #0b3f2e55"
             }}
-            title="Add Payment Method in Facebook Ads"
           >
             Add Payment Method
           </button>
 
-          {/* Campaign Name — minimalist pill style, typable */}
+          {/* Campaign Name — same pill container vibe as duration */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ color: "#fff", fontWeight: 800, fontSize: "1.10rem" }}>
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>
               Campaign Name
-            </div>
-            <div style={{
-              width: "100%",
-              background: "#1f2523",
-              borderRadius: "0.9rem",
-              padding: "0.2rem",
-              display: "flex",
-              alignItems: "center"
-            }}>
+            </label>
+            <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px" }}>
               <input
                 type="text"
                 value={form.campaignName || ""}
                 onChange={e => setForm({ ...form, campaignName: e.target.value })}
                 placeholder="Type a name..."
                 style={{
-                  flex: 1,
-                  padding: "0.9rem 1.0rem",
-                  border: "none",
-                  outline: "none",
-                  background: "transparent",
-                  color: "#c9ffe9",
-                  fontWeight: 800,
-                  fontSize: "1.06rem",
-                  letterSpacing: 0.2
+                  background:"transparent",
+                  border:"none",
+                  outline:"none",
+                  width:"100%",
+                  color: TEXT_DIM,
+                  fontSize:"1.06rem",
+                  fontWeight:700
                 }}
               />
             </div>
           </div>
 
-          {/* Campaign Duration — COMPACT WHEELS (exact look) */}
+          {/* Campaign Duration (compact wheels; unchanged look) */}
           <div style={{ width:"100%", maxWidth:370, margin:"6px auto 0 auto", display:"flex", flexDirection:"column", gap:10 }}>
             <div style={{ color:"#fff", fontWeight:800, fontSize:"1.10rem" }}>Campaign Duration</div>
 
@@ -967,26 +957,11 @@ const CampaignSetup = () => {
                   display:"flex", gap:10, alignItems:"center",
                   padding:"8px 10px", borderRadius:12, background:"#1b1f22"
                 }}>
-                  {/* MM */}
-                  <Picker
-                    value={sMonth}
-                    options={months}
-                    onChange={setSMonth}
-                  />
+                  <Picker value={sMonth} options={months} onChange={setSMonth} />
                   <Sep />
-                  {/* DD */}
-                  <Picker
-                    value={sDay}
-                    options={daysFor(sMonth, sYear)}
-                    onChange={setSDay}
-                  />
+                  <Picker value={sDay} options={daysFor(sMonth, sYear)} onChange={setSDay} />
                   <Sep />
-                  {/* YY */}
-                  <Picker
-                    value={sYear}
-                    options={years}
-                    onChange={setSYear}
-                  />
+                  <Picker value={sYear} options={years} onChange={setSYear} />
                 </div>
               </div>
 
@@ -1011,45 +986,45 @@ const CampaignSetup = () => {
             </div>
           </div>
 
-          {/* Budget */}
-          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", alignItems: "center" }}>
-            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem", marginBottom: 7, alignSelf: "flex-start" }}>
+          {/* Budget (same container style as duration) */}
+          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
+            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>
               Campaign Budget ($)
             </label>
-            <input
-              type="number"
-              placeholder="Enter budget (minimum $3)"
-              min={3}
-              step={1}
-              value={budget}
-              onChange={e => setBudget(e.target.value)}
-              style={{
-                padding: "1rem 1.1rem",
-                borderRadius: "1.1rem",
-                border: "1.2px solid #57dfa9",
-                fontSize: "1.14rem",
-                background: INPUT_BG,
-                color: TEXT_DIM,
-                marginBottom: "0.6rem",
-                outline: "none",
-                width: "100%"
-              }}
-            />
-            <div style={{ color: "#afeca3", fontWeight: 700, marginBottom: 8 }}>
-              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${calculateFees(budget).fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${calculateFees(budget).total.toFixed(2)}</span>
+            <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px" }}>
+              <input
+                type="number"
+                placeholder="Enter budget (minimum $3)"
+                min={3}
+                step={1}
+                value={budget}
+                onChange={e => setBudget(e.target.value)}
+                style={{
+                  background:"transparent",
+                  border:"none",
+                  outline:"none",
+                  width:"100%",
+                  color: TEXT_DIM,
+                  fontSize:"1.06rem",
+                  fontWeight:700
+                }}
+              />
+            </div>
+            <div style={{ color: "#afeca3", fontWeight: 700 }}>
+              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
             </div>
 
-            {/* Pay + credentials (simple, only when budget valid) */}
+            {/* Pay + credentials (appear when budget valid) */}
             {parseFloat(budget) >= 3 && (
-              <div style={{ width: "100%", display:"flex", flexDirection:"column", gap:10, marginTop: 6 }}>
+              <div style={{ width: "100%", display:"flex", flexDirection:"column", gap:10 }}>
                 <button
                   onClick={() => window.open("https://cash.app", "_blank")}
                   style={{
                     background: "#14e7b9",
                     color: "#181b20",
                     border: "none",
-                    borderRadius: 10,
-                    fontWeight: 800,
+                    borderRadius: 12,
+                    fontWeight: 900,
                     padding: "10px 16px",
                     cursor: "pointer",
                     boxShadow: "0 2px 12px #0cc4be44"
@@ -1058,32 +1033,46 @@ const CampaignSetup = () => {
                   Pay ${calculateFees(budget).fee.toFixed(0)}
                 </button>
 
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <div>
                   <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Cashtag (your username)</label>
-                  <input
-                    type="text"
-                    value={cashapp}
-                    onChange={e => setCashapp(e.target.value)}
-                    placeholder="$yourcashtag"
-                    style={{
-                      padding:"0.85rem 1rem", borderRadius:10, border:"1.2px solid #57dfa9",
-                      background: INPUT_BG, color: TEXT_DIM, outline:"none"
-                    }}
-                  />
+                  <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px", marginTop:6 }}>
+                    <input
+                      type="text"
+                      value={cashapp}
+                      onChange={e => setCashapp(e.target.value)}
+                      placeholder="$yourcashtag"
+                      style={{
+                        background:"transparent",
+                        border:"none",
+                        outline:"none",
+                        width:"100%",
+                        color: TEXT_DIM,
+                        fontSize:"1.02rem",
+                        fontWeight:700
+                      }}
+                    />
+                  </div>
                 </div>
 
-                <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                <div>
                   <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Email (used as password)</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={e => setEmail(e.target.value)}
-                    placeholder="you@example.com"
-                    style={{
-                      padding:"0.85rem 1rem", borderRadius:10, border:"1.2px solid #57dfa9",
-                      background: INPUT_BG, color: TEXT_DIM, outline:"none"
-                    }}
-                  />
+                  <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px", marginTop:6 }}>
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={e => setEmail(e.target.value)}
+                      placeholder="you@example.com"
+                      style={{
+                        background:"transparent",
+                        border:"none",
+                        outline:"none",
+                        width:"100%",
+                        color: TEXT_DIM,
+                        fontSize:"1.02rem",
+                        fontWeight:700
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
             )}
@@ -1102,7 +1091,7 @@ const CampaignSetup = () => {
               fontSize: "1.19rem",
               padding: "18px 72px",
               marginBottom: 18,
-              marginTop: 12,
+              marginTop: 8,
               boxShadow: "0 2px 16px #0cc4be24",
               cursor: (loading || campaignCount >= 2 || !canLaunch) ? "not-allowed" : "pointer",
               transition: "background 0.18s",
@@ -1116,8 +1105,8 @@ const CampaignSetup = () => {
             <div style={{
               color: "#1eea78",
               fontWeight: 800,
-              marginTop: "1.2rem",
-              fontSize: "1.15rem",
+              marginTop: "0.8rem",
+              fontSize: "1.05rem",
               textShadow: "0 2px 8px #0a893622"
             }}>
               Campaign launched! ID: {launchResult.campaignId || "--"}
@@ -1154,7 +1143,7 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Top row: Title + controls */}
+            {/* Top row: Title + controls (Billing removed here as requested) */}
             <div style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div style={{ fontSize:"1.23rem", fontWeight: 900, color: "#fff" }}>
                 Active Campaigns
@@ -1363,7 +1352,7 @@ const CampaignSetup = () => {
               })}
             </div>
 
-            {/* Ad Account & Page Selectors (outside campaign rows) */}
+            {/* Ad Account & Page Selectors */}
             <div style={{
               width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
               display: "flex", flexDirection: "column", gap: 14
