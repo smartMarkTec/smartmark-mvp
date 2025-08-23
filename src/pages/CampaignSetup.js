@@ -19,6 +19,11 @@ const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 
 const CREATIVE_HEIGHT = 150;
 
+// ---- Draft persistence (24h TTL) ----
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
+const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+const FORM_DRAFT_KEY = "sm_form_draft_v2";
+
 // Responsive helper
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
@@ -314,7 +319,7 @@ const CampaignSetup = () => {
     return e.toISOString().slice(0,16);
   };
 
-  // Load persisted fields + saved draft
+  // Load persisted fields + saved draft (24h TTL)
   useEffect(() => {
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) {
@@ -326,19 +331,36 @@ const CampaignSetup = () => {
     const lastAudience = localStorage.getItem("smartmark_last_ai_audience");
     if (lastAudience) setForm(f => ({ ...f, aiAudience: JSON.parse(lastAudience) }));
 
-    try {
-      const draftRaw = sessionStorage.getItem("draft_form_creatives");
-      if (draftRaw) {
-        const draft = JSON.parse(draftRaw);
-        setDraftCreatives({
-          images: Array.isArray(draft.images) ? draft.images.slice(0, 2) : [],
-          videos: Array.isArray(draft.videos) ? draft.videos.slice(0, 2) : [],
-          fbVideoIds: Array.isArray(draft.fbVideoIds) ? draft.fbVideoIds.slice(0, 2) : [],
-          mediaSelection: (draft.mediaSelection || navMediaSelection || "both").toLowerCase()
-        });
+    const applyDraft = (draftObj) => {
+      setDraftCreatives({
+        images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
+        videos: Array.isArray(draftObj.videos) ? draftObj.videos.slice(0, 2) : [],
+        fbVideoIds: Array.isArray(draftObj.fbVideoIds) ? draftObj.fbVideoIds.slice(0, 2) : [],
+        mediaSelection: (draftObj.mediaSelection || navMediaSelection || "both").toLowerCase()
+      });
+      if (draftObj.mediaSelection) {
+        localStorage.setItem("smartmark_media_selection", String(draftObj.mediaSelection).toLowerCase());
       }
+    };
+
+    try {
+      // Priority: session (OAuth bounce)
+      const sess = sessionStorage.getItem("draft_form_creatives");
+      if (sess) {
+        applyDraft(JSON.parse(sess));
+        return;
+      }
+
+      // Fallback: 24h local draft
+      const raw = localStorage.getItem(CREATIVE_DRAFT_KEY);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      const ageOk = !draft.savedAt || (Date.now() - draft.savedAt <= DRAFT_TTL_MS);
+      if (ageOk) applyDraft(draft);
+      else localStorage.removeItem(CREATIVE_DRAFT_KEY);
     } catch {}
-  }, []); // eslint-disable-line
+    // eslint-disable-next-line
+  }, []);
 
   // Handle Facebook oauth return
   useEffect(() => {
@@ -435,34 +457,6 @@ const CampaignSetup = () => {
         setMetricsMap(m => ({ ...m, [expandedId]: normalized }));
       })
       .catch(() => setMetricsMap(m => ({ ...m, [expandedId]: { impressions:"--", clicks:"--", ctr:"--" } })));
-  }, [expandedId, selectedAccount]);
-
-  // NEW: Fetch creatives & mediaSelection from backend when a campaign is expanded
-  useEffect(() => {
-    if (!expandedId || expandedId === "__DRAFT__" || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace(/^act_/, "");
-    (async () => {
-      try {
-        const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${expandedId}/creatives`, {
-          credentials: 'include'
-        });
-        if (!res.ok) return; // fallback to local cache
-        const data = await res.json();
-        const map = readCreativeMap(acctId);
-        map[expandedId] = {
-          ...(map[expandedId] || {}),
-          images: Array.isArray(data.images) ? data.images : [],
-          videos: Array.isArray(data.videos) ? data.videos : [],
-          fbVideoIds: Array.isArray(data.fbVideoIds) ? data.fbVideoIds : [],
-          mediaSelection: (data.mediaSelection || 'both').toLowerCase(),
-          time: Date.now(),
-          name: data.name || (map[expandedId]?.name || 'Campaign')
-        };
-        writeCreativeMap(acctId, map);
-        // trigger re-render without touching layout
-        setMetricsMap(m => ({ ...m }));
-      } catch {}
-    })();
   }, [expandedId, selectedAccount]);
 
   // Persist basics
@@ -616,6 +610,8 @@ const CampaignSetup = () => {
 
       // Clear the draft after successful launch
       sessionStorage.removeItem("draft_form_creatives");
+      localStorage.removeItem(CREATIVE_DRAFT_KEY);
+      localStorage.removeItem(FORM_DRAFT_KEY);
       setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
 
       setLaunched(true);
@@ -853,7 +849,7 @@ const CampaignSetup = () => {
                 <input
                   type="datetime-local"
                   value={startDate}
-                  min={startMinAttr}
+                  min={new Date(Date.now() - 60_000).toISOString().slice(0, 16)}
                   onChange={e => {
                     const newStart = e.target.value;
                     setStartDate(newStart);
@@ -867,8 +863,8 @@ const CampaignSetup = () => {
                 <input
                   type="datetime-local"
                   value={endDate}
-                  min={endMinAttr}
-                  max={endMaxAttr}
+                  min={new Date(new Date(startDate).getTime() + 60*60*1000).toISOString().slice(0,16)}
+                  max={new Date(new Date(startDate).getTime() + 14*24*60*60*1000).toISOString().slice(0,16)}
                   onChange={e => setEndDate(clampEndOnChange(e.target.value))}
                   style={{ padding:"0.85rem", borderRadius:"0.9rem", border:"1.2px solid #57dfa9", background:INPUT_BG, color:TEXT_DIM }}
                 />

@@ -16,6 +16,11 @@ const PROD_BACKEND = "https://smartmark-mvp.onrender.com";
 const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;               // For assets returned like /generated/xxx
 const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;     // <-- absolute API for Vercel
 
+// ---- Draft persistence (24h TTL) ----
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const FORM_DRAFT_KEY = "sm_form_draft_v2";
+const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
@@ -260,6 +265,84 @@ export default function FormPage() {
   useEffect(() => {
     if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory]);
+
+  // ---- Restore full form draft on mount (24h TTL) ----
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(FORM_DRAFT_KEY);
+      if (!raw) return;
+      const { savedAt, data } = JSON.parse(raw);
+      if (savedAt && Date.now() - savedAt > DRAFT_TTL_MS) {
+        localStorage.removeItem(FORM_DRAFT_KEY);
+        localStorage.removeItem(CREATIVE_DRAFT_KEY);
+        return;
+      }
+      if (data) {
+        setAnswers(data.answers || {});
+        setStep(data.step ?? 0);
+        setChatHistory(
+          Array.isArray(data.chatHistory) && data.chatHistory.length
+            ? data.chatHistory
+            : chatHistory
+        );
+        setMediaType(data.mediaType || "both");
+        setResult(data.result || null);
+        setImageUrls(data.imageUrls || []);
+        setVideoItems(data.videoItems || []);
+        setActiveImage(data.activeImage || 0);
+        setActiveVideo(data.activeVideo || 0);
+        setAwaitingReady(data.awaitingReady ?? true);
+        setInput(data.input || "");
+      }
+    } catch {}
+    // eslint-disable-next-line
+  }, []);
+
+  // ---- Autosave (throttled) the entire FormPage session + creatives ----
+  useEffect(() => {
+    const t = setTimeout(() => {
+      // 1) Full snapshot for returning to FormPage
+      const payload = {
+        answers, step, chatHistory, mediaType, result,
+        imageUrls, videoItems, activeImage, activeVideo,
+        awaitingReady, input
+      };
+      localStorage.setItem(
+        FORM_DRAFT_KEY,
+        JSON.stringify({ savedAt: Date.now(), data: payload })
+      );
+
+      // 2) Minimal creatives snapshot for CampaignSetup + OAuth bounce
+      const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+      let imgs = imageUrls.slice(0, 2).map(abs);
+      let vids = videoItems.map(v => v?.url).filter(Boolean).slice(0, 2).map(abs);
+      let fbIds = videoItems.map(v => v?.fbVideoId).filter(Boolean).slice(0, 2);
+
+      if (mediaType === "image") { vids = []; fbIds = []; }
+      if (mediaType === "video") { imgs = []; }
+
+      const draftForSetup = {
+        images: imgs,
+        videos: vids,
+        fbVideoIds: fbIds,
+        headline: result?.headline || "",
+        body: result?.body || "",
+        videoScript: (videoItems[activeVideo]?.script || ""),
+        answers,
+        mediaSelection: mediaType,
+        savedAt: Date.now()
+      };
+
+      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+      sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+    }, 150);
+
+    return () => clearTimeout(t);
+  }, [
+    answers, step, chatHistory, mediaType, result,
+    imageUrls, videoItems, activeImage, activeVideo,
+    awaitingReady, input
+  ]);
 
   function handleImageClick(url) {
     setShowModal(true);
@@ -874,17 +957,16 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            // Raw arrays
-            let imgA = imageUrls.map(u => (/^https?:\/\//.test(u) ? u : BACKEND_URL + u)).slice(0, 2);
-            let vidA = videoItems.map(v => (/^https?:\/\//.test(v.url) ? v.url : BACKEND_URL + v.url)).slice(0, 2);
+            const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+
+            let imgA = imageUrls.map(abs).slice(0, 2);
+            let vidA = videoItems.map(v => abs(v.url)).slice(0, 2);
             let fbIds = videoItems.map(v => v.fbVideoId).filter(Boolean).slice(0, 2);
 
-            // Filter by selection
             if (mediaType === "image") { vidA = []; fbIds = []; }
             if (mediaType === "video") { imgA = []; }
 
-            // Save a draft so creatives survive the Facebook connect redirect
-            sessionStorage.setItem("draft_form_creatives", JSON.stringify({
+            const draftForSetup = {
               images: imgA,
               videos: vidA,
               fbVideoIds: fbIds,
@@ -892,14 +974,19 @@ export default function FormPage() {
               body: result?.body || "",
               videoScript: videoItems[0]?.script || videoScript || "",
               answers,
-              mediaSelection: mediaType
-            }));
+              mediaSelection: mediaType,
+              savedAt: Date.now()
+            };
+
+            // Persist both for bounce + long-lived 24h restore
+            sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+            localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+            localStorage.setItem("smartmark_media_selection", mediaType);
 
             // Legacy keys (optional)
             if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
             if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
             if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
-            localStorage.setItem("smartmark_media_selection", mediaType);
 
             navigate("/setup", {
               state: {
