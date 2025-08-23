@@ -37,7 +37,7 @@ const useIsMobile = () => {
 
 // FB connection flag
 const FB_CONN_KEY = "smartmark_fb_connected";
-const FB_CONN_MAX_AGE = 2.5 * 24 * 60 * 60 * 1000;
+const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000; // ← 3 days
 
 // Persisted creatives (keyed by adAccount -> campaignId)
 const CREATIVE_MAP_KEY = (actId) => `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
@@ -285,6 +285,29 @@ const CampaignSetup = () => {
     return false;
   });
 
+  // Helper to refresh the 3-day window on successful pings
+  const touchFbConn = () => {
+    try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+  };
+
+  // Validate stored session on mount; flip to blue if backend session expired
+  useEffect(() => {
+    const saved = localStorage.getItem(FB_CONN_KEY);
+    if (!saved) return;
+    const { connected, time } = JSON.parse(saved);
+    if (!connected) return;
+    if (Date.now() - time > FB_CONN_MAX_AGE) {
+      localStorage.removeItem(FB_CONN_KEY);
+      setFbConnected(false);
+      return;
+    }
+    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(() => { setFbConnected(true); touchFbConn(); })
+      .catch(() => { localStorage.removeItem(FB_CONN_KEY); setFbConnected(false); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // UI state
   const [adAccounts, setAdAccounts] = useState([]);
 
@@ -327,7 +350,7 @@ const CampaignSetup = () => {
     mediaSelection: navMediaSelection
   } = location.state || {};
 
-  // --- Campaign Duration (max 14 days) — COMPACT WHEELS VERSION ---
+  // --- Campaign Duration (compact wheels) ---
   const [startDate, setStartDate] = useState(() => {
     const existing = form.startDate || "";
     return existing || new Date(defaultStart).toISOString().slice(0, 16);
@@ -425,7 +448,7 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, []);
 
-  // keep draft fresh while editing (so video carousel reloads even after long gaps)
+  // keep draft fresh while editing
   useEffect(() => {
     const hasDraft =
       (draftCreatives.images && draftCreatives.images.length) ||
@@ -445,16 +468,18 @@ const CampaignSetup = () => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
-      localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+      try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
       window.history.replaceState({}, document.title, "/setup");
     }
   }, [location.search]);
 
   useEffect(() => {
-    if (fbConnected) localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+    if (fbConnected) {
+      try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+    }
   }, [fbConnected]);
 
-  // Apply nav creatives to draft (NEVER to existing campaigns)
+  // Apply nav creatives to draft
   useEffect(() => {
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
@@ -470,12 +495,12 @@ const CampaignSetup = () => {
     }
   }, [navImageUrls, navVideoUrls, navFbVideoIds, navMediaSelection]);
 
-  // Fetch ad accounts / pages
+  // Fetch ad accounts / pages (and refresh 3-day window on success)
   useEffect(() => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
       .then(res => res.json())
-      .then(json => setAdAccounts(json.data || []))
+      .then(json => { setAdAccounts(json.data || []); touchFbConn(); })
       .catch(() => {});
   }, [fbConnected]);
 
@@ -483,7 +508,7 @@ const CampaignSetup = () => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
       .then(res => res.json())
-      .then(json => setPages(json.data || []))
+      .then(json => { setPages(json.data || []); touchFbConn(); })
       .catch(() => {});
   }, [fbConnected]);
 
@@ -877,7 +902,7 @@ const CampaignSetup = () => {
             onClick={() => {
               window.location.href = `${backendUrl}/auth/facebook`;
               setFbConnected(true);
-              localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+              try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
             }}
             style={{
               padding: "1.15rem 2.8rem",
@@ -900,7 +925,7 @@ const CampaignSetup = () => {
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
 
-          {/* Add Payment Method (moved here; same aesthetic as old Billing) */}
+          {/* Add Payment Method */}
           <button
             onClick={openFbPaymentPopup}
             style={{
@@ -920,7 +945,7 @@ const CampaignSetup = () => {
             Add Payment Method
           </button>
 
-          {/* Campaign Name — same pill container vibe as duration */}
+          {/* Campaign Name */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>
               Campaign Name
@@ -944,7 +969,7 @@ const CampaignSetup = () => {
             </div>
           </div>
 
-          {/* Campaign Duration (compact wheels; unchanged look) */}
+          {/* Campaign Duration (compact wheels) */}
           <div style={{ width:"100%", maxWidth:370, margin:"6px auto 0 auto", display:"flex", flexDirection:"column", gap:10 }}>
             <div style={{ color:"#fff", fontWeight:800, fontSize:"1.10rem" }}>Campaign Duration</div>
 
@@ -986,7 +1011,7 @@ const CampaignSetup = () => {
             </div>
           </div>
 
-          {/* Budget (same container style as duration) */}
+          {/* Budget + Pay & creds */}
           <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>
               Campaign Budget ($)
@@ -1014,7 +1039,6 @@ const CampaignSetup = () => {
               SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
             </div>
 
-            {/* Pay + credentials (appear when budget valid) */}
             {parseFloat(budget) >= 3 && (
               <div style={{ width: "100%", display:"flex", flexDirection:"column", gap:10 }}>
                 <button
@@ -1143,7 +1167,7 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Top row: Title + controls (Billing removed here as requested) */}
+            {/* Top row: Title + controls */}
             <div style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div style={{ fontSize:"1.23rem", fontWeight: 900, color: "#fff" }}>
                 Active Campaigns
@@ -1213,7 +1237,7 @@ const CampaignSetup = () => {
               </div>
             </div>
 
-            {/* Campaign rows (existing + Draft “In progress”) */}
+            {/* Campaign rows */}
             <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:10 }}>
               {rightPaneCampaigns.map(c => {
                 const isDraft = !!c.__isDraft;
