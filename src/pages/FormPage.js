@@ -558,50 +558,50 @@ export default function FormPage() {
           ))}
         </div>
         {/* Prompt bar */}
-        {!loading && step <= CONVO_QUESTIONS.length &&
-          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
-            <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              disabled={loading}
-              autoFocus
-              placeholder={
-                step < CONVO_QUESTIONS.length
-                  ? CONVO_QUESTIONS[step]?.question
-                  : "Type yes to generate, or say what to change..."
-              }
-              style={{
-                flex: 1,
-                padding: "14px 18px",
-                borderRadius: 12,
-                border: "none",
-                outline: "none",
-                fontSize: "1.07rem",
-                fontWeight: 600,
-                background: "#23262a",
-                color: "#fff",
-                boxShadow: "0 1.5px 8px #1acbb932"
-              }}
-            />
-            <button type="submit"
-              style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                border: "none",
-                borderRadius: 12,
-                fontWeight: 700,
-                fontSize: "1.35rem",
-                padding: "0 22px",
-                cursor: "pointer"
-              }}
-              disabled={loading}
-              tabIndex={0}
-              aria-label="Send"
-            >
-              <FaArrowUp />
-            </button>
-          </form>
-        }
+     {!loading && step <= CONVO_QUESTIONS.length &&
+  <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
+    <input
+      value={input}
+      onChange={e => setInput(e.target.value)}
+      disabled={loading}
+      autoFocus
+      placeholder="Your answer…"
+      aria-label="Your answer"
+      autoComplete="off"
+      style={{
+        flex: 1,
+        padding: "14px 18px",
+        borderRadius: 12,
+        border: "none",
+        outline: "none",
+        fontSize: "1.07rem",
+        fontWeight: 600,
+        background: "#23262a",
+        color: "#fff",
+        boxShadow: "0 1.5px 8px #1acbb932"
+      }}
+    />
+    <button
+      type="submit"
+      style={{
+        background: "#14e7b9",
+        color: "#181b20",
+        border: "none",
+        borderRadius: 12,
+        fontWeight: 700,
+        fontSize: "1.35rem",
+        padding: "0 22px",
+        cursor: "pointer"
+      }}
+      disabled={loading}
+      tabIndex={0}
+      aria-label="Send"
+    >
+      <FaArrowUp />
+    </button>
+  </form>
+}
+
         {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI generating...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
       </div>
