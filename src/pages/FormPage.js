@@ -2,7 +2,7 @@
 /* eslint-disable */
 import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp } from "react-icons/fa";
+import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 
 // ===== Constants =====
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -21,14 +21,15 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 
-// Trimmed conversation (removed “main problem” to keep it faster/tighter)
+// Simplified, tighter question set (removed 'mainProblem')
 const CONVO_QUESTIONS = [
-  { key: "url",            question: "What's your website URL?" },
-  { key: "industry",       question: "What industry is your business in?" },
-  { key: "businessName",   question: "What's your business name?" },
-  { key: "idealCustomer",  question: "Describe your ideal customer in one sentence." },
-  { key: "mainBenefit",    question: "What's the main transformation or benefit you promise?" },
+  { key: "url", question: "What's your website URL?" },
+  { key: "industry", question: "What industry is your business in?" },
+  { key: "businessName", question: "What's your business name?" },
+  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
+  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
   { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
+  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" }
 ];
 
 // ---------- Small UI helpers ----------
@@ -58,16 +59,6 @@ function Dotty() {
 }
 function dotStyle(n) {
   return { display: "inline-block", margin: "0 3px", fontSize: 36, color: "#29efb9", animationDelay: `${n * 0.13}s` };
-}
-function LoadingSpinner() {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", height: 150 }}>
-      <div style={{ color: "#b0b8bc", fontWeight: 500, fontSize: "0.99rem", marginBottom: 10 }}>
-        This could take up to 2 minutes <span role="img" aria-label="robot">🤖</span>
-      </div>
-      <Dotty />
-    </div>
-  );
 }
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
@@ -111,7 +102,7 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
   const choices = [
     { key: "image", label: "Image" },
     { key: "both", label: "Both" },
-    { key: "video", label: "Video" },
+    { key: "video", label: "Video" }
   ];
   return (
     <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "18px 0 14px 0" }}>
@@ -216,42 +207,40 @@ function getRandomString() {
 function isGenerateTrigger(input) {
   return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
 }
-function isLikelyQuestion(t) {
-  return /\?$/.test(t) || /^(what|how|why|can|could|should|do|does|is|are|where|when|help)\b/i.test(t.trim());
-}
 async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   try { return await res.json(); } catch { throw new Error("Bad JSON"); }
+}
+function isLikelyQuestion(s) {
+  const t = (s || "").trim().toLowerCase();
+  return t.includes("?") || /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
 }
 
 // =========== Main Component ============
 export default function FormPage() {
   const navigate = useNavigate();
-
   const chatBoxRef = useRef();
 
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through ~5 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
+    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign. Ask me anything at any time.` },
     { from: "gpt", text: "Are you ready to get started? (yes/no)" }
   ]);
 
+  // ---- Chat state
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
 
   // Ad preview state
-  const [mediaType, setMediaType] = useState("both"); // <- selection that flows to Setup
+  const [mediaType, setMediaType] = useState("both");
   const [result, setResult] = useState(null);
-
-  const [imageUrls, setImageUrls] = useState([]); // up to 2
+  const [imageUrls, setImageUrls] = useState([]);
   const [activeImage, setActiveImage] = useState(0);
-
-  const [videoItems, setVideoItems] = useState([]); // [{url, script, fbVideoId}]
+  const [videoItems, setVideoItems] = useState([]);
   const [activeVideo, setActiveVideo] = useState(0);
-
-  const [imageUrl, setImageUrl] = useState(""); // legacy single value
+  const [imageUrl, setImageUrl] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
   const [videoScript, setVideoScript] = useState("");
 
@@ -261,37 +250,6 @@ export default function FormPage() {
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
-
-  // ---- Hard reset the chat + saved draft ----
-  function hardResetChat() {
-    if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
-
-    try {
-      localStorage.removeItem(FORM_DRAFT_KEY);
-      localStorage.removeItem(CREATIVE_DRAFT_KEY);
-      sessionStorage.removeItem("draft_form_creatives");
-    } catch {}
-
-    setAnswers({});
-    setStep(0);
-    setChatHistory([
-      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through ~5 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
-      { from: "gpt", text: "Are you ready to get started? (yes/no)" }
-    ]);
-    setInput("");
-    setResult(null);
-    setImageUrls([]);
-    setVideoItems([]);
-    setActiveImage(0);
-    setActiveVideo(0);
-    setImageUrl("");
-    setVideoUrl("");
-    setVideoScript("");
-    setAwaitingReady(true);
-    setError("");
-    setGenerating(false);
-    setLoading(false);
-  }
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -330,10 +288,38 @@ export default function FormPage() {
     // eslint-disable-next-line
   }, []);
 
+  // ---- Hard reset chat + draft ----
+  function hardResetChat() {
+    if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
+    try {
+      localStorage.removeItem(FORM_DRAFT_KEY);
+      localStorage.removeItem(CREATIVE_DRAFT_KEY);
+      sessionStorage.removeItem("draft_form_creatives");
+    } catch {}
+    setAnswers({});
+    setStep(0);
+    setChatHistory([
+      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign. Ask me anything at any time.` },
+      { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+    ]);
+    setInput("");
+    setResult(null);
+    setImageUrls([]);
+    setVideoItems([]);
+    setActiveImage(0);
+    setActiveVideo(0);
+    setImageUrl("");
+    setVideoUrl("");
+    setVideoScript("");
+    setAwaitingReady(true);
+    setError("");
+    setGenerating(false);
+    setLoading(false);
+  }
+
   // ---- Autosave (throttled) the entire FormPage session + creatives ----
   useEffect(() => {
     const t = setTimeout(() => {
-      // 1) Full snapshot for returning to FormPage
       const payload = {
         answers, step, chatHistory, mediaType, result,
         imageUrls, videoItems, activeImage, activeVideo,
@@ -344,7 +330,6 @@ export default function FormPage() {
         JSON.stringify({ savedAt: Date.now(), data: payload })
       );
 
-      // 2) Minimal creatives snapshot for CampaignSetup + OAuth bounce
       const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
       let imgs = imageUrls.slice(0, 2).map(abs);
       let vids = videoItems.map(v => v?.url).filter(Boolean).slice(0, 2).map(abs);
@@ -376,14 +361,8 @@ export default function FormPage() {
     awaitingReady, input
   ]);
 
-  function handleImageClick(url) {
-    setShowModal(true);
-    setModalImg(url);
-  }
-  function handleModalClose() {
-    setShowModal(false);
-    setModalImg("");
-  }
+  function handleImageClick(url) { setShowModal(true); setModalImg(url); }
+  function handleModalClose() { setShowModal(false); setModalImg(""); }
 
   // ---- API calls (defensive) ----
   async function fetchImageOnce(token) {
@@ -422,20 +401,28 @@ export default function FormPage() {
     }
   }
 
-  // ---- Assistant (server-side GPT/rule-based) ----
-  async function askAssistant(text) {
+  // ---- Ask OpenAI when a message looks like a question ----
+  async function askGPTIfQuestion(userText) {
+    if (!isLikelyQuestion(userText)) return; // don’t spam GPT for normal answers
     try {
-      setChatHistory(ch => [...ch, { from: "user", text }]);
-      const res = await fetch(`${API_BASE}/gpt-chat`, {
+      const history = chatHistory.slice(-8).map(m => ({
+        role: m.from === "gpt" ? "assistant" : "user",
+        content: m.text
+      }));
+      history.push({ role: "user", content: userText });
+
+      const resp = await fetch(`${API_BASE}/gpt-chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text })
+        body: JSON.stringify({ message: userText, history })
       });
-      const data = await safeJson(res);
-      const reply = data?.reply || "I’m here! Ask me anything about your campaign.";
-      setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
+      const data = await safeJson(resp);
+      if (data?.reply) {
+        setChatHistory(ch => [...ch, { from: "gpt", text: data.reply }]);
+      }
     } catch (e) {
-      setChatHistory(ch => [...ch, { from: "gpt", text: "Hmm, I couldn't reach the assistant. Try again in a moment." }]);
+      // silent fail; keep UX smooth
+      console.warn("gpt-chat failed:", e.message);
     }
   }
 
@@ -446,39 +433,34 @@ export default function FormPage() {
     const value = (input || "").trim();
     if (!value) return;
 
-    // If user asks a natural question at any time, answer via assistant without altering the flow
-    if (!awaitingReady && isLikelyQuestion(value)) {
-      setInput("");
-      await askAssistant(value);
-      return;
-    }
+    // Always render the user's message
+    setChatHistory(ch => [...ch, { from: "user", text: value }]);
+    setInput("");
+
+    // Ask GPT if it looks like a question (runs in background)
+    askGPTIfQuestion(value);
 
     // Ready gate
     if (awaitingReady) {
-      setChatHistory(ch => [...ch, { from: "user", text: value }]);
       if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
         setAwaitingReady(false);
         setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[0].question }]);
         setStep(0);
-        setInput("");
         return;
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
         setChatHistory(ch => [...ch, { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }]);
-        setInput("");
         return;
       } else {
         setChatHistory(ch => [...ch, { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }]);
-        setInput("");
         return;
       }
     }
 
-    // Generate trigger
+    // If we already collected all answers and user says 'generate' → go generate
     if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
       setLoading(true);
       setGenerating(true);
-      setChatHistory(ch => [...ch, { from: "user", text: value }, { from: "gpt", text: "AI generating..." }]);
-      setInput("");
+      setChatHistory(ch => [...ch, { from: "gpt", text: "AI generating..." }]);
 
       setTimeout(async () => {
         const tokenA = getRandomString();
@@ -522,35 +504,35 @@ export default function FormPage() {
           setGenerating(false);
           setLoading(false);
         }
-      }, 500);
+      }, 400);
       return;
     }
 
-    // Normal Q&A
+    // Normal Q&A capture
     const currentQ = CONVO_QUESTIONS[step];
-    const newAnswers = { ...answers, [currentQ.key]: value };
-    setAnswers(newAnswers);
-    setChatHistory(ch => [...ch, { from: "user", text: value }]);
-    setInput("");
+    if (currentQ) {
+      const newAnswers = { ...answers, [currentQ.key]: value };
+      setAnswers(newAnswers);
 
-    // Conditional skip (not used now, but kept future-proof)
-    let nextStep = step + 1;
-    while (
-      CONVO_QUESTIONS[nextStep] &&
-      CONVO_QUESTIONS[nextStep].conditional &&
-      newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
-    ) {
-      nextStep += 1;
-    }
+      // Conditional skip
+      let nextStep = step + 1;
+      while (
+        CONVO_QUESTIONS[nextStep] &&
+        CONVO_QUESTIONS[nextStep].conditional &&
+        newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
+      ) {
+        nextStep += 1;
+      }
 
-    if (!CONVO_QUESTIONS[nextStep]) {
-      setChatHistory(ch => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
+      if (!CONVO_QUESTIONS[nextStep]) {
+        setChatHistory(ch => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
+        setStep(nextStep);
+        return;
+      }
+
       setStep(nextStep);
-      return;
+      setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
     }
-
-    setStep(nextStep);
-    setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
   }
 
   // Regenerate actions
@@ -580,19 +562,19 @@ export default function FormPage() {
       background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
       display: "flex", flexDirection: "column", alignItems: "center"
     }}>
-      {/* Top Bar (Back button like CampaignSetup) */}
+      {/* Top Bar with Back */}
       <div
         style={{
           width: "100%",
           display: "flex",
-          justifyContent: "flex-start",
+          justifyContent: "space-between",
           alignItems: "center",
           padding: "32px 36px 0 36px",
           boxSizing: "border-box"
         }}
       >
         <button
-          onClick={() => navigate('/')}
+          onClick={() => navigate("/")}
           style={{
             background: "#202824e0",
             color: "#fff",
@@ -603,50 +585,26 @@ export default function FormPage() {
             fontSize: "1.08rem",
             letterSpacing: "0.7px",
             cursor: "pointer",
-            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)"
+            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8
           }}
+          aria-label="Back"
         >
-          ← Back
+          <FaArrowLeft />
+          Back
         </button>
       </div>
 
       {/* ---- Chat Panel ---- */}
       <div style={{
-        width: "100%", maxWidth: 510, minHeight: 370, marginTop: 20, marginBottom: 26,
+        width: "100%", maxWidth: 510, minHeight: 370, marginTop: 34, marginBottom: 26,
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
         padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
-        {/* Header with Refresh */}
-        <div style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: 8
-        }}>
-          <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, letterSpacing: 1.2 }}>
-            AI Ad Manager
-          </div>
-          <button
-            onClick={hardResetChat}
-            title="Refresh chat"
-            aria-label="Refresh chat"
-            style={{
-              background: "#14e7b9",
-              color: "#181b20",
-              border: "none",
-              borderRadius: 10,
-              width: 36,
-              height: 36,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              cursor: "pointer",
-              boxShadow: "0 2px 10px rgba(20,231,185,0.35)"
-            }}
-          >
-            <FaSyncAlt />
-          </button>
+        <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2 }}>
+          AI Ad Manager
         </div>
 
         {/* Scrollable chat history */}
@@ -654,7 +612,7 @@ export default function FormPage() {
           width: "100%", height: 160, maxHeight: 180, overflowY: "auto",
           marginBottom: 16, paddingRight: 4, background: "#191b22", borderRadius: 12
         }}>
-          {chatHistory.slice(-20).map((msg, i) => (
+          {chatHistory.slice(-24).map((msg, i) => (
             <div key={i}
               style={{
                 textAlign: msg.from === "gpt" ? "left" : "right",
@@ -673,9 +631,31 @@ export default function FormPage() {
           ))}
         </div>
 
-        {/* Prompt bar */}
-        {!loading && step <= CONVO_QUESTIONS.length &&
-          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
+        {/* Prompt bar with Reset + Send */}
+        {!loading && (
+          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
+            <button
+              type="button"
+              onClick={hardResetChat}
+              title="Reset chat"
+              aria-label="Reset chat"
+              style={{
+                background: "#23262a",
+                color: "#9cefdc",
+                border: "none",
+                borderRadius: 12,
+                padding: "0 14px",
+                height: 48,
+                cursor: "pointer",
+                boxShadow: "0 1.5px 8px #1acbb932",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+            >
+              <FaSyncAlt />
+            </button>
+
             <input
               value={input}
               onChange={e => setInput(e.target.value)}
@@ -707,7 +687,8 @@ export default function FormPage() {
                 fontWeight: 700,
                 fontSize: "1.35rem",
                 padding: "0 22px",
-                cursor: "pointer"
+                cursor: "pointer",
+                height: 48
               }}
               disabled={loading}
               tabIndex={0}
@@ -716,7 +697,7 @@ export default function FormPage() {
               <FaArrowUp />
             </button>
           </form>
-        }
+        )}
 
         {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI generating...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
@@ -807,7 +788,6 @@ export default function FormPage() {
                     cursor: "pointer"
                   }}
                   onClick={() => handleImageClick(imageUrls[activeImage])}
-                  title="Click to view larger"
                 />
                 <Arrow side="left" onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
                 <Arrow side="right" onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
@@ -829,22 +809,10 @@ export default function FormPage() {
           </div>
 
           <div style={{ padding: "17px 18px 4px 18px" }}>
-            <div style={{
-              color: "#191c1e",
-              fontWeight: 800,
-              fontSize: 17,
-              marginBottom: 5,
-              fontFamily: AD_FONT
-            }}>
+            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {result?.headline || "Don't Miss Our Limited-Time Offer"}
             </div>
-            <div style={{
-              color: "#3a4149",
-              fontSize: 15,
-              fontWeight: 600,
-              marginBottom: 3,
-              minHeight: 18
-            }}>
+            <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
               {result?.body || "Ad copy goes here..."}
             </div>
           </div>
@@ -881,7 +849,6 @@ export default function FormPage() {
             }}
             onClick={() => {}}
           >
-            <FaEdit style={{ fontSize: 15 }} />
             Edit
           </button>
         </div>
@@ -953,12 +920,7 @@ export default function FormPage() {
                   key={videoItems[activeVideo]?.url || "video"}
                   src={videoItems[activeVideo]?.url}
                   controls
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    borderRadius: 0,
-                    background: "#111"
-                  }}
+                  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
                 />
                 <Arrow side="left" onClick={() => {
                   const next = (activeVideo + videoItems.length - 1) % videoItems.length;
@@ -994,23 +956,11 @@ export default function FormPage() {
           </div>
 
           <div style={{ padding: "17px 18px 4px 18px" }}>
-            <div style={{
-              color: "#191c1e",
-              fontWeight: 800,
-              fontSize: 17,
-              marginBottom: 5,
-              fontFamily: AD_FONT
-            }}>
+            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {result?.headline || "Welcome New Customers Instantly!"}
             </div>
             {videoItems.length > 0 && (videoItems[activeVideo]?.script || videoScript) && (
-              <div style={{
-                color: "#3a4149",
-                fontSize: 15,
-                fontWeight: 600,
-                marginBottom: 3,
-                minHeight: 18
-              }}>
+              <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
                 <b>Script:</b> {videoItems[activeVideo]?.script || videoScript}
               </div>
             )}
@@ -1048,7 +998,6 @@ export default function FormPage() {
             }}
             onClick={() => {}}
           >
-            <FaEdit style={{ fontSize: 15 }} />
             Edit
           </button>
         </div>
@@ -1094,12 +1043,10 @@ export default function FormPage() {
               savedAt: Date.now()
             };
 
-            // Persist both for bounce + long-lived 24h restore
-            sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+            sessionStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem("smartmark_media_selection", mediaType);
 
-            // Legacy keys (optional)
             if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
             if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
             if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
