@@ -56,7 +56,6 @@ function Dotty() {
       </style>
     </span>
   );
-
 }
 function dotStyle(n) {
   return { display: "inline-block", margin: "0 3px", fontSize: 36, color: "#29efb9", animationDelay: `${n * 0.13}s` };
@@ -260,6 +259,37 @@ export default function FormPage() {
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
+
+  // ---- Hard reset the chat + saved draft ----
+  function hardResetChat() {
+    if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
+
+    try {
+      localStorage.removeItem(FORM_DRAFT_KEY);
+      localStorage.removeItem(CREATIVE_DRAFT_KEY);
+      sessionStorage.removeItem("draft_form_creatives");
+    } catch {}
+
+    setAnswers({});
+    setStep(0);
+    setChatHistory([
+      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
+      { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+    ]);
+    setInput("");
+    setResult(null);
+    setImageUrls([]);
+    setVideoItems([]);
+    setActiveImage(0);
+    setActiveVideo(0);
+    setImageUrl("");
+    setVideoUrl("");
+    setVideoScript("");
+    setAwaitingReady(true);
+    setError("");
+    setGenerating(false);
+    setLoading(false);
+  }
 
   // Scroll chat to bottom
   useEffect(() => {
@@ -531,9 +561,39 @@ export default function FormPage() {
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
         padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
-        <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2 }}>
-          AI Ad Manager
+        {/* Header with Refresh */}
+        <div style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 8
+        }}>
+          <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, letterSpacing: 1.2 }}>
+            AI Ad Manager
+          </div>
+          <button
+            onClick={hardResetChat}
+            title="Refresh chat"
+            aria-label="Refresh chat"
+            style={{
+              background: "#14e7b9",
+              color: "#181b20",
+              border: "none",
+              borderRadius: 10,
+              width: 36,
+              height: 36,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 2px 10px rgba(20,231,185,0.35)"
+            }}
+          >
+            <FaSyncAlt />
+          </button>
         </div>
+
         {/* Scrollable chat history */}
         <div ref={chatBoxRef} style={{
           width: "100%", height: 160, maxHeight: 180, overflowY: "auto",
@@ -557,50 +617,51 @@ export default function FormPage() {
             </div>
           ))}
         </div>
+
         {/* Prompt bar */}
-     {!loading && step <= CONVO_QUESTIONS.length &&
-  <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
-    <input
-      value={input}
-      onChange={e => setInput(e.target.value)}
-      disabled={loading}
-      autoFocus
-      placeholder="Your answer…"
-      aria-label="Your answer"
-      autoComplete="off"
-      style={{
-        flex: 1,
-        padding: "14px 18px",
-        borderRadius: 12,
-        border: "none",
-        outline: "none",
-        fontSize: "1.07rem",
-        fontWeight: 600,
-        background: "#23262a",
-        color: "#fff",
-        boxShadow: "0 1.5px 8px #1acbb932"
-      }}
-    />
-    <button
-      type="submit"
-      style={{
-        background: "#14e7b9",
-        color: "#181b20",
-        border: "none",
-        borderRadius: 12,
-        fontWeight: 700,
-        fontSize: "1.35rem",
-        padding: "0 22px",
-        cursor: "pointer"
-      }}
-      disabled={loading}
-      tabIndex={0}
-      aria-label="Send"
-    >
-      <FaArrowUp />
-    </button>
-  </form>
-}
+        {!loading && step <= CONVO_QUESTIONS.length &&
+          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10 }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              disabled={loading}
+              autoFocus
+              placeholder="Your answer…"
+              aria-label="Your answer"
+              autoComplete="off"
+              style={{
+                flex: 1,
+                padding: "14px 18px",
+                borderRadius: 12,
+                border: "none",
+                outline: "none",
+                fontSize: "1.07rem",
+                fontWeight: 600,
+                background: "#23262a",
+                color: "#fff",
+                boxShadow: "0 1.5px 8px #1acbb932"
+              }}
+            />
+            <button
+              type="submit"
+              style={{
+                background: "#14e7b9",
+                color: "#181b20",
+                border: "none",
+                borderRadius: 12,
+                fontWeight: 700,
+                fontSize: "1.35rem",
+                padding: "0 22px",
+                cursor: "pointer"
+              }}
+              disabled={loading}
+              tabIndex={0}
+              aria-label="Send"
+            >
+              <FaArrowUp />
+            </button>
+          </form>
+        }
 
         {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI generating...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
