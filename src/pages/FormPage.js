@@ -21,15 +21,14 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 
+// Trimmed conversation (removed “main problem” to keep it faster/tighter)
 const CONVO_QUESTIONS = [
-  { key: "url", question: "What's your website URL?" },
-  { key: "industry", question: "What industry is your business in?" },
-  { key: "businessName", question: "What's your business name?" },
-  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
-  { key: "mainProblem", question: "What's the main problem your customer wants solved?" },
-  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
+  { key: "url",            question: "What's your website URL?" },
+  { key: "industry",       question: "What industry is your business in?" },
+  { key: "businessName",   question: "What's your business name?" },
+  { key: "idealCustomer",  question: "Describe your ideal customer in one sentence." },
+  { key: "mainBenefit",    question: "What's the main transformation or benefit you promise?" },
   { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
-  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
 ];
 
 // ---------- Small UI helpers ----------
@@ -217,6 +216,9 @@ function getRandomString() {
 function isGenerateTrigger(input) {
   return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
 }
+function isLikelyQuestion(t) {
+  return /\?$/.test(t) || /^(what|how|why|can|could|should|do|does|is|are|where|when|help)\b/i.test(t.trim());
+}
 async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   try { return await res.json(); } catch { throw new Error("Bad JSON"); }
@@ -231,7 +233,7 @@ export default function FormPage() {
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
+    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through ~5 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
     { from: "gpt", text: "Are you ready to get started? (yes/no)" }
   ]);
 
@@ -273,7 +275,7 @@ export default function FormPage() {
     setAnswers({});
     setStep(0);
     setChatHistory([
-      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through about 10 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
+      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through ~5 quick questions to create your ad campaign. You can ask me anything about ads, marketing, or correct an answer anytime!` },
       { from: "gpt", text: "Are you ready to get started? (yes/no)" }
     ]);
     setInput("");
@@ -420,12 +422,36 @@ export default function FormPage() {
     }
   }
 
+  // ---- Assistant (server-side GPT/rule-based) ----
+  async function askAssistant(text) {
+    try {
+      setChatHistory(ch => [...ch, { from: "user", text }]);
+      const res = await fetch(`${API_BASE}/gpt-chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text })
+      });
+      const data = await safeJson(res);
+      const reply = data?.reply || "I’m here! Ask me anything about your campaign.";
+      setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
+    } catch (e) {
+      setChatHistory(ch => [...ch, { from: "gpt", text: "Hmm, I couldn't reach the assistant. Try again in a moment." }]);
+    }
+  }
+
   // ---- Chat flow handler ----
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
     const value = (input || "").trim();
     if (!value) return;
+
+    // If user asks a natural question at any time, answer via assistant without altering the flow
+    if (!awaitingReady && isLikelyQuestion(value)) {
+      setInput("");
+      await askAssistant(value);
+      return;
+    }
 
     // Ready gate
     if (awaitingReady) {
@@ -507,7 +533,7 @@ export default function FormPage() {
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
 
-    // Conditional skip
+    // Conditional skip (not used now, but kept future-proof)
     let nextStep = step + 1;
     while (
       CONVO_QUESTIONS[nextStep] &&
@@ -554,10 +580,39 @@ export default function FormPage() {
       background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
       display: "flex", flexDirection: "column", alignItems: "center"
     }}>
+      {/* Top Bar (Back button like CampaignSetup) */}
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "flex-start",
+          alignItems: "center",
+          padding: "32px 36px 0 36px",
+          boxSizing: "border-box"
+        }}
+      >
+        <button
+          onClick={() => navigate('/')}
+          style={{
+            background: "#202824e0",
+            color: "#fff",
+            border: "none",
+            borderRadius: "1.3rem",
+            padding: "0.72rem 1.8rem",
+            fontWeight: 700,
+            fontSize: "1.08rem",
+            letterSpacing: "0.7px",
+            cursor: "pointer",
+            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)"
+          }}
+        >
+          ← Back
+        </button>
+      </div>
 
       {/* ---- Chat Panel ---- */}
       <div style={{
-        width: "100%", maxWidth: 510, minHeight: 370, marginTop: 54, marginBottom: 26,
+        width: "100%", maxWidth: 510, minHeight: 370, marginTop: 20, marginBottom: 26,
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
         padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
