@@ -243,7 +243,7 @@ Website homepage text:
   }
 });
 
-// ----------------- Images (better overlay design) -----------------
+// ----------------- Images (varied premium overlays) -----------------
 const PEXELS_BASE_URL = 'https://api.pexels.com/v1/search';
 
 const IMAGE_KEYWORD_MAP = [
@@ -268,24 +268,26 @@ function getImageKeyword(industry = '', url = '') {
   return industry || 'ecommerce';
 }
 
-// palette helper
-async function getPalette(buf) {
-  try {
-    const stats = await sharp(buf).stats();
-    // Pick brightest and darkest channel mean to decide text color
-    const r = stats.channels[0].mean, g = stats.channels[1].mean, b = stats.channels[2].mean;
-    const luminance = (0.2126*r + 0.7152*g + 0.0722*b) / 255;
-    const text = luminance > 0.6 ? '#0f1419' : '#f6f7f8';
-    return { text, primary: luminance > 0.6 ? '#0f1419' : '#f6f7f8' };
-  } catch { return { text: '#0f1419', primary: '#f6f7f8' }; }
-}
-
 function escSVG(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
 
-async function buildOverlayImage({ imageUrl, answers = {}, url = '' }) {
-  // Headline + CTA (2–4 words / 2–3 words)
+function chooseTemplate(seedStr = '') {
+  // 1..4 stable on seed
+  let hash = 0; for (const c of String(seedStr)) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+  return (hash % 4) + 1;
+}
+
+function fontForHeadline(text) {
+  const len = (text || '').length;
+  if (len <= 14) return 56;
+  if (len <= 20) return 50;
+  if (len <= 26) return 44;
+  return 38;
+}
+
+async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
+  // Headline + CTA (2–4 words / 2–3 words — CTA presented as label, not a clickable-looking button)
   let websiteKeywords = [];
   if (url && /^https?:\/\//i.test(url)) {
     try {
@@ -298,9 +300,9 @@ async function buildOverlayImage({ imageUrl, answers = {}, url = '' }) {
 
   const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-Write a stylish ad overlay for a stock image.
-- Headline: 2–4 words, brand-forward.
-- CTA: 2–3 words ending with "!".
+Design copy for a stylish ad overlay (no button look).
+- Headline: 2–4 words, brand-forward, compelling.
+- CTA label: 2–3 words ending with "!".
 
 Return ONLY JSON: {"headline":"...","cta":"..."}.
 BUSINESS:
@@ -325,69 +327,97 @@ KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     cta = (parsed.cta || cta).toUpperCase();
   } catch {}
 
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-  const baseBuf = Buffer.from(imgRes.data);
-  const { text: textColor } = await getPalette(baseBuf);
-
+  // Prepare base image
   const W = 1200, H = 627;
-  const innerPad = 24;
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+  const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
+  const base64 = baseBuf.toString('base64');
 
-  // Build modern overlay:
-  // - soft vignette
-  // - angled gradient ribbon for headline
-  // - glossy CTA pill with subtle glow
-  // - tiny brand tag if available
+  // Accent palette
+  const ACCENT_A = '#14e7b9';
+  const ACCENT_B = '#10bfa0';
+  const DARK = '#0b0d10';
+  const LIGHT = '#f2f5f6';
+
+  const fontSize = fontForHeadline(headline);
   const brand = (answers.businessName || '').toUpperCase().slice(0, 30);
+  const t = chooseTemplate(seed || answers?.businessName || headline || Date.now());
 
+  // 4 tasteful templates, all non-clickable CTA presentations
   const svg =
 `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#0b0d10" stop-opacity="0.76"/>
-      <stop offset="100%" stop-color="#1b2026" stop-opacity="0.42"/>
+    <linearGradient id="gradA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="${DARK}" stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#1b2026" stop-opacity="0.45"/>
     </linearGradient>
-    <linearGradient id="pill" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#14e7b9" stop-opacity="0.95"/>
-      <stop offset="100%" stop-color="#10bfa0" stop-opacity="0.95"/>
-    </linearGradient>
-    <radialGradient id="vign" cx="50%" cy="50%" r="60%">
-      <stop offset="60%" stop-color="#00000000"/>
+    <linearGradient id="gradB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#00000000"/>
       <stop offset="100%" stop-color="#000000aa"/>
-    </radialGradient>
-    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
-      <feOffset dx="0" dy="2" result="off"/>
-      <feMerge><feMergeNode in="off"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
+    </linearGradient>
+    <filter id="blurGlass"><feGaussianBlur stdDeviation="8"/></filter>
+    <filter id="shadow"><feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#00000088"/></filter>
   </defs>
 
-  <!-- base -->
-  <image href="data:image/jpeg;base64,${(await sharp(baseBuf).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer()).toString('base64')}" x="0" y="0" width="${W}" height="${H}"/>
-  <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vign)"/>
+  <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
+  ${t === 1 ? `
+    <!-- Template 1: Angled ribbon + small outline CTA tag -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gradB)"/>
+    <g transform="skewX(-8)">
+      <rect x="24" y="70" rx="18" width="${W-48}" height="120" fill="url(#gradA)" filter="url(#shadow)"/>
+    </g>
+    <text x="${W/2}" y="150" text-anchor="middle" font-family="Times New Roman, Times, serif"
+          font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2"
+          style="paint-order: stroke; stroke: #ffffff44; stroke-width: 0.8;">${escSVG(headline)}</text>
+    <g>
+      <rect x="${W/2-150}" y="200" width="300" height="40" rx="20" fill="none" stroke="${LIGHT}" stroke-width="2"/>
+      <text x="${W/2}" y="229" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+            font-size="20" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
+    </g>
+    ${brand ? `<text x="30" y="${H-24}" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
+  ` : ''}
 
-  <!-- angled ribbon -->
-  <g transform="translate(0,0) skewX(-8)">
-    <rect x="${innerPad}" y="72" rx="18" ry="18" width="${W - innerPad*2}" height="120" fill="url(#ribbon)" filter="url(#shadow)" opacity="0.92"/>
-  </g>
+  ${t === 2 ? `
+    <!-- Template 2: Bottom gradient band, headline left, CTA tag right -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="#00000033"/>
+    <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
+    <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
+          font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+    <g>
+      <rect x="${W-260}" y="${H-84}" width="220" height="42" rx="21" fill="none" stroke="${ACCENT_A}" stroke-width="3"/>
+      <text x="${W-150}" y="${H-56}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+            font-size="20" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
+    </g>
+    ${brand ? `<text x="40" y="52" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffffcc">${escSVG(brand)}</text>` : ''}
+  ` : ''}
 
-  <!-- headline -->
-  <text x="${W/2}" y="150" text-anchor="middle" font-family="Times New Roman, Times, serif"
-        font-size="52" font-weight="700" fill="${textColor}" letter-spacing="2"
-        style="paint-order: stroke; stroke: #ffffff55; stroke-width: 0.8;">
-    ${escSVG(headline)}
-  </text>
+  ${t === 3 ? `
+    <!-- Template 3: Frosted center card (no button), CTA underlined -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gradB)"/>
+    <g filter="url(#shadow)">
+      <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff22"/>
+      <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff11" filter="url(#blurGlass)"/>
+    </g>
+    <text x="${W/2}" y="220" text-anchor="middle" font-family="Times New Roman, Times, serif"
+          font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="1.5"
+          style="paint-order: stroke; stroke: #00000055; stroke-width: 1.2;">${escSVG(headline)}</text>
+    <text x="${W/2}" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+          font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
+    ${brand ? `<text x="${W-30}" y="${H-24}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
+  ` : ''}
 
-  <!-- brand tag (optional) -->
-  ${brand ? `<text x="${innerPad+10}" y="${H-26}" font-family="Helvetica, Arial, sans-serif"
-        font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
-
-  <!-- CTA pill -->
-  <g filter="url(#shadow)">
-    <rect x="${W/2 - 180}" y="${260}" width="360" height="70" rx="35" fill="url(#pill)"/>
-    <text x="${W/2}" y="${260+46}" text-anchor="middle"
-          font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800"
-          fill="#0b1417" letter-spacing="0.6">${escSVG(cta)}</text>
-  </g>
+  ${t === 4 ? `
+    <!-- Template 4: Diagonal accent banner -->
+    <polygon points="0,0 ${W*0.58},0 ${W*0.42},160 0,160" fill="${ACCENT_A}"/>
+    <text x="28" y="108" text-anchor="start" font-family="Times New Roman, Times, serif"
+          font-size="${fontSize}" font-weight="700" fill="#0b1417" letter-spacing="2">${escSVG(headline)}</text>
+    <g>
+      <circle cx="${W-110}" cy="${H-78}" r="40" fill="#00000066" />
+      <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+            font-size="14" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
+    </g>
+    ${brand ? `<text x="${W-30}" y="38" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b1417">${escSVG(brand)}</text>` : ''}
+  ` : ''}
 </svg>`;
 
   const outDir = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
@@ -395,7 +425,6 @@ KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   const file = `${uuidv4()}.jpg`;
   const out = path.join(outDir, file);
 
-  // Render SVG to JPEG
   const buf = await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer();
   fs.writeFileSync(out, buf);
 
@@ -431,7 +460,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 
     let finalUrl = baseUrl;
     try {
-      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url });
+      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url, seed: regenerateToken || answers?.businessName || '' });
       finalUrl = publicUrl;
     } catch (e) {
       console.warn('Overlay failed; using base image:', e.message);
@@ -451,17 +480,16 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   }
 });
 
-// ----------------- Music utils -----------------
+// ----------------- Music utils (server/Music/music) -----------------
 function findMusicDir() {
-  // Search common roots robustly
-  const ROOT = path.resolve(__dirname, '..', '..');       // project root
+  // Explicitly cover your structure: server/Music/music
   const candidates = [
-    path.join(ROOT, 'Music'),
-    path.join(ROOT, 'music'),
-    path.join(ROOT, 'Music', 'music'),   // matches your screenshot
-    path.join(ROOT, 'music', 'music'),
-    path.join(__dirname, '../Music'),
-    path.join(__dirname, '../music')
+    path.join(__dirname, '..', 'Music', 'music'), // <— your path
+    path.join(__dirname, '..', 'music', 'music'),
+    path.join(__dirname, '..', 'Music'),
+    path.join(__dirname, '..', 'music'),
+    path.join(__dirname, '..', '..', 'Music', 'music'),
+    path.join(__dirname, '..', '..', 'music', 'music')
   ];
   for (const p of candidates) {
     try {
@@ -540,11 +568,11 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
 }
 function shuffleDet(arr, seed) {
   const a = [...arr]; const r = seedrandom(seed);
-  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j]] = [a[i]]; }
   return a;
 }
 
-// Short, varied CTAs
+// Short, varied CTAs (used only for video overlay text)
 const CTA_LIBRARY = {
   'Fashion & Accessories': ['Shop New Styles', 'See The Look', 'Style Upgrade'],
   'Beauty & Personal Care': ['Glow Up', 'Fresh Skin', 'New Routine'],
@@ -635,7 +663,8 @@ router.post('/generate-video-ad', async (req, res) => {
     candidates = Array.from(new Set(candidates));
     if (candidates.length < 3) return res.status(404).json({ error: 'Not enough usable clips' });
 
-    const shuffled = shuffleDet(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
+    const rseed = regenerateToken || `${Date.now()}_${Math.random()}`;
+    const shuffled = candidates.sort(() => 0.5 - Math.random()); // simple shuffle
 
     // Work dir
     const tmp = path.join(__dirname, '../tmp');
@@ -667,7 +696,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
 
-    // Script (target ~11–13s so we can tempo-stretch to ~14s)
+    // Script (target ~11–13s so we can tempo-stretch close to 14s)
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products.\n` +
@@ -715,17 +744,16 @@ router.post('/generate-video-ad', async (req, res) => {
     };
     let ttsDur = await ffprobe(ttsPath);
 
-    // Tempo-stretch voice to ~14.0s (so CTA + tail fills 15s nicely)
-    const targetVoice = Math.max(11.5, Math.min(14.2, VIDEO.FINAL - 0.8));
+    // Tempo-stretch voice to ~14.0s
+    const targetVoice = 14.0;
     let voicePath = ttsPath;
     if (ttsDur > 0) {
-      let tempo = targetVoice / ttsDur;               // >1 = slower? (atempo <1 slows; >1 speeds) → ffmpeg expects factor (0.5–2). For slow-down use <1.
-      tempo = Math.max(0.85, Math.min(1.15, tempo));  // keep natural
-      if (Math.abs(tempo - 1) > 0.03) {
+      let factor = targetVoice / ttsDur;        // >1 means we need slower speech → atempo expects speed, so use inverse
+      factor = Math.max(0.85, Math.min(1.15, factor));
+      if (Math.abs(factor - 1) > 0.03) {
         const adj = path.join(tmp, `${uuidv4()}_tempo.mp3`);
         try {
-          // atempo <1 slows down, >1 speeds up. Our tempo computed target/actual, but atempo expects speed factor. We invert:
-          const atempo = (1 / tempo).toFixed(3);
+          const atempo = (1 / factor).toFixed(3);
           await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo}" -c:a aac -b:a 160k "${adj}"`), TO.ATEMPO, 'atempo timeout');
           voicePath = adj;
           ttsDur = await ffprobe(voicePath);
@@ -734,7 +762,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Concat/trim to exactly 15s
-    const need = Math.max(1, Math.ceil(VIDEO.FINAL / VIDEO.CLIP));
+    const need = Math.max(1, Math.ceil(15 / 5));
     while (paths.length < need) paths.push(paths[paths.length - 1]);
 
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
@@ -748,11 +776,11 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(outDir, `${id}.mp4`);
 
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
-    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${VIDEO.FINAL} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
+    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t 15 -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // Overlay timing (CTA shows near end)
-    const overlayStart = Math.max(0, VIDEO.FINAL * 0.72).toFixed(2);
-    const overlayEnd = Math.min(VIDEO.FINAL, ttsDur + 1.0).toFixed(2);
+    // Overlay timing
+    const overlayStart = Math.max(0, 15 * 0.72).toFixed(2);
+    const overlayEnd = Math.min(15, ttsDur + 1.0).toFixed(2);
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const safeTxt = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, ' ').replace(/'/g, '').replace(/[^A-Z0-9\s!]/g, '');
 
@@ -762,7 +790,7 @@ router.post('/generate-video-ad', async (req, res) => {
         : `drawtext=text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
       );
 
-    // Music selection + mix (duck bg under voice, and MIX the two!)
+    // Music selection + proper mix
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
@@ -772,9 +800,8 @@ router.post('/generate-video-ad', async (req, res) => {
         bgKeywords.push(...(await extractKeywords(tx)));
       }
     } catch {}
-    const bgMusicPath = pickMusicFile(bgKeywords);
+    const bgMusicPath = pickMusicFile(bgKeywords); // looks in server/Music/music
 
-    // Build ffmpeg command with proper sidechain duck + amix
     const musicInput = bgMusicPath ? ` -stream_loop -1 -i "${bgMusicPath}"` : '';
     let filterComplex, mapArgs;
     if (bgMusicPath) {
