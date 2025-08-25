@@ -1,4 +1,6 @@
 // server/routes/ai.js
+'use strict';
+
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
@@ -7,9 +9,14 @@ const path = require('path');
 const sharp = require('sharp');
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
+const child_process = require('child_process');
+const util = require('util');
+
+const exec = util.promisify(child_process.exec);
+
+// ----------------- FB helpers -----------------
 const { getFbUserToken } = require('../tokenStore');
 
-// --- helpers ---
 function absolutePublicUrl(relativePath) {
   const base = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
@@ -29,14 +36,15 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data; // { id }
 }
 
-// Load Pexels API key from environment
+// ----------------- Config / OpenAI -----------------
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+const { OpenAI } = require('openai');
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// --- Use system font for overlay (no font file needed) ---
-const TextToSVG = require('text-to-svg');
-const textToSvg = TextToSVG.loadSync(); // Uses default system font
+// Quick ping
+router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
 
-// ----------- UNIVERSAL TRAINING FILE LOADER -----------
+// ----------------- Training context -----------------
 const DATA_DIR = path.join(__dirname, '../data');
 const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
 const MAX_FILE_MB = 1.5;
@@ -44,7 +52,6 @@ const MAX_TOTAL_CHARS = 45_000;
 
 function loadTrainingContext() {
   if (!fs.existsSync(DATA_DIR)) return '';
-
   const files = fs.readdirSync(DATA_DIR)
     .map(f => path.join(DATA_DIR, f))
     .filter(full => {
@@ -60,108 +67,81 @@ function loadTrainingContext() {
     try {
       const ext = path.extname(f).toLowerCase();
       let text = fs.readFileSync(f, 'utf8');
-      if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text), null, 0); } catch {} }
+      if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text)); } catch {} }
       if (!text.trim()) continue;
-
       const block = `\n\n### SOURCE: ${path.basename(f)}\n${text}\n`;
       if ((context.length + block.length) <= MAX_TOTAL_CHARS) {
         context += block;
         console.log(`[training] loaded: ${path.basename(f)} (${block.length} chars)`);
-      } else {
-        console.warn(`[training] skipped (cap): ${path.basename(f)}`);
       }
     } catch (e) {
       console.warn(`[training] failed: ${path.basename(f)} → ${e.message}`);
     }
   }
-  if (!context) console.warn('[training] no training context loaded (empty/filtered).');
+  if (!context) console.warn('[training] no training context loaded.');
   return context.trim();
 }
-
 let customContext = loadTrainingContext();
 
-// ----------- OPENAI -----------
-const { OpenAI } = require('openai');
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// ========== QUICK TEST ENDPOINT ==========
-router.get('/test', (req, res) => {
-  res.json({ msg: "AI route is working!" });
-});
-
-// Robust website scraping (FIXED: trim/validate URL, tolerate redirects, better errors)
+// ----------------- Scraper -----------------
 async function getWebsiteText(url) {
   try {
-    const cleanUrl = String(url || "").trim();
-    if (!cleanUrl || !/^https?:\/\//i.test(cleanUrl)) throw new Error("Invalid URL");
-
-    const { data, headers } = await axios.get(cleanUrl, {
-      timeout: 7000,
-      maxRedirects: 3,
-      validateStatus: (s) => s < 400
+    const clean = String(url || '').trim();
+    if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
+    const { data, headers } = await axios.get(clean, {
+      timeout: 7000, maxRedirects: 3, validateStatus: s => s < 400
     });
-
-    if (!headers['content-type'] || !headers['content-type'].includes('text/html')) {
-      throw new Error('Not an HTML page');
-    }
+    if (!headers['content-type']?.includes('text/html')) throw new Error('Not an HTML page');
 
     const body = String(data)
-      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
-    const lower = body.toLowerCase();
-    if (lower.includes("cloudflare") || lower.includes("access denied") || lower.length < 200) {
-      throw new Error("Failed to get usable website text (blocked or not enough content)");
+    const low = body.toLowerCase();
+    if (low.includes('cloudflare') || low.includes('access denied') || body.length < 200) {
+      throw new Error('Blocked or insufficient content');
     }
     return body.slice(0, 3500);
-  } catch (err) {
-    console.warn("Could not scrape website text for:", url || '(empty)', "Reason:", err.message);
+  } catch (e) {
+    console.warn('Could not scrape website text:', url || '(empty)', e.message);
     return '';
   }
 }
 
-// ========== AI: EXPERT AD COPY GENERATOR ==========
+// ----------------- Copy & audience -----------------
 router.post('/generate-ad-copy', async (req, res) => {
-  const { description = "", businessName = "", url = "" } = req.body;
+  const { description = '', businessName = '', url = '' } = req.body;
   if (!description && !businessName && !url) {
-    return res.status(400).json({ error: "Please provide at least a description." });
+    return res.status(400).json({ error: 'Please provide at least a description.' });
   }
 
   let prompt =
 `You are an expert direct-response ad copywriter.
-
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (45–55 words). Hook → benefit → strong CTA. Friendly, trustworthy, conversion-focused.\n`;
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (45–55 words). Hook → benefit → strong CTA. Friendly, trustworthy, conversion-focused.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite: ${url}`;
   prompt += `\nOutput ONLY the script text.`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: prompt }],
-      max_tokens: 120,
+    const r = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 120
     });
-    const adCopy = response.choices?.[0]?.message?.content?.trim() || "";
-    return res.json({ adCopy });
-  } catch (err) {
-    console.error("Ad Copy Generation Error:", err?.response?.data || err.message);
-    return res.status(500).json({ error: "Failed to generate ad copy" });
+    res.json({ adCopy: r.choices?.[0]?.message?.content?.trim() || '' });
+  } catch (e) {
+    console.error('Ad Copy Generation Error:', e?.response?.data || e.message);
+    res.status(500).json({ error: 'Failed to generate ad copy' });
   }
 });
 
-// ========= audience + helpers (unchanged behavior) =========
 const DEFAULT_AUDIENCE = {
-  brandName: "",
-  demographic: "",
-  ageRange: "18-65",
-  location: "US",
-  interests: "Business, Restaurants",
-  fbInterestIds: [],
-  summary: ""
+  brandName: '', demographic: '', ageRange: '18-65',
+  location: 'US', interests: 'Business, Restaurants', fbInterestIds: [], summary: ''
 };
 
 async function extractKeywords(text) {
@@ -170,37 +150,35 @@ Extract up to 6 compact keywords (one or two words each) from this text that wou
 Return them as a comma-separated list ONLY. No extra words.
 
 TEXT:
-"""${(text || '').slice(0, 3000)}"""
-`.trim();
+"""${(text || '').slice(0, 3000)}"""`.trim();
 
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      messages: [{ role: "user", content: prompt }],
+    const r = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
       max_tokens: 40,
-      temperature: 0.2,
+      temperature: 0.2
     });
-    return (response.choices?.[0]?.message?.content || "")
-      .replace(/[\n.]/g, "")
+    return (r.choices?.[0]?.message?.content || '')
+      .replace(/[\n.]/g, '')
       .toLowerCase()
-      .split(",")
-      .map(k => k.trim())
+      .split(',')
+      .map(s => s.trim())
       .filter(Boolean);
   } catch { return []; }
 }
+
 async function getFbInterestIds(keywords, fbToken) {
-  const results = [];
-  for (let keyword of keywords) {
+  const out = [];
+  for (const k of keywords) {
     try {
-      const resp = await axios.get(`https://graph.facebook.com/v18.0/search`, {
-        params: { type: "adinterest", q: keyword, access_token: fbToken, limit: 1 }
+      const r = await axios.get('https://graph.facebook.com/v18.0/search', {
+        params: { type: 'adinterest', q: k, access_token: fbToken, limit: 1 }
       });
-      if (resp.data?.data?.[0]?.id) {
-        results.push({ id: resp.data.data[0].id, name: resp.data.data[0].name });
-      }
+      if (r.data?.data?.[0]?.id) out.push({ id: r.data.data[0].id, name: r.data.data[0].name });
     } catch {}
   }
-  return results;
+  return out;
 }
 
 router.post('/detect-audience', async (req, res) => {
@@ -209,12 +187,11 @@ router.post('/detect-audience', async (req, res) => {
   if (!url) return res.status(400).json({ error: 'Missing URL' });
 
   const websiteText = await getWebsiteText(url);
-  const safeWebsiteText = (websiteText && websiteText.length > 100) ? websiteText : '[WEBSITE TEXT UNAVAILABLE]';
+  const safe = websiteText.length > 100 ? websiteText : '[WEBSITE TEXT UNAVAILABLE]';
 
   const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
 Analyze this website's homepage content and answer ONLY in the following JSON format:
-
 {
   "brandName": "",
   "demographic": "",
@@ -223,406 +200,377 @@ Analyze this website's homepage content and answer ONLY in the following JSON fo
   "interests": "",
   "summary": ""
 }
-
 Website homepage text:
-"""${safeWebsiteText}"""
-`.trim();
+"""${safe}"""`.trim();
 
   try {
-    const response = await openai.chat.completions.create({
+    const r = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 220,
-      temperature: 0.3,
+      temperature: 0.3
     });
 
-    const aiText = response.choices?.[0]?.message?.content?.trim();
-    let audienceJson = null;
+    const txt = r.choices?.[0]?.message?.content?.trim() || '{}';
+    let aud;
     try {
-      const jsonMatch = aiText.match(/\{[\s\S]*\}/);
-      audienceJson = JSON.parse(jsonMatch ? jsonMatch[0] : aiText);
-      audienceJson = {
-        brandName: audienceJson.brandName || "",
-        demographic: audienceJson.demographic || "",
-        ageRange: /^\d{2}-\d{2}$/.test(audienceJson.ageRange || "") ? audienceJson.ageRange : "18-65",
-        location: typeof audienceJson.location === "string" && audienceJson.location.trim().length > 0 ? audienceJson.location.trim().toUpperCase() : "US",
-        interests: audienceJson.interests && String(audienceJson.interests).length > 0 ? audienceJson.interests : "Business, Restaurants",
-        summary: audienceJson.summary || ""
+      const m = txt.match(/\{[\s\S]*\}/);
+      aud = JSON.parse(m ? m[0] : txt);
+      aud = {
+        brandName: aud.brandName || '',
+        demographic: aud.demographic || '',
+        ageRange: /^\d{2}-\d{2}$/.test(aud.ageRange || '') ? aud.ageRange : '18-65',
+        location: (aud.location || 'US').toString().trim().toUpperCase() || 'US',
+        interests: aud.interests || 'Business, Restaurants',
+        summary: aud.summary || ''
       };
     } catch {
       return res.json({ audience: DEFAULT_AUDIENCE });
     }
 
     if (fbToken) {
-      const keywords = await extractKeywords(websiteText);
-      const fbInterests = await getFbInterestIds(keywords, fbToken);
-      audienceJson.fbInterestIds = fbInterests.map(i => i.id);
-      audienceJson.fbInterestNames = fbInterests.map(i => i.name);
+      const kws = await extractKeywords(websiteText);
+      const fb = await getFbInterestIds(kws, fbToken);
+      aud.fbInterestIds = fb.map(i => i.id);
+      aud.fbInterestNames = fb.map(i => i.name);
     } else {
-      audienceJson.fbInterestIds = [];
-      audienceJson.fbInterestNames = [];
+      aud.fbInterestIds = [];
+      aud.fbInterestNames = [];
     }
-
-    return res.json({ audience: audienceJson });
+    res.json({ audience: aud });
   } catch {
-    return res.json({ audience: DEFAULT_AUDIENCE });
+    res.json({ audience: DEFAULT_AUDIENCE });
   }
 });
 
-// ========= image endpoints =========
-const PEXELS_BASE_URL = "https://api.pexels.com/v1/search";
+// ----------------- Images (better overlay design) -----------------
+const PEXELS_BASE_URL = 'https://api.pexels.com/v1/search';
 
 const IMAGE_KEYWORD_MAP = [
-  { match: ["protein powder","protein","supplement","muscle","fitness","gym"], keyword: "gym workout" },
-  { match: ["clothing","fashion","apparel","accessory"], keyword: "fashion model" },
-  { match: ["makeup","cosmetic","skincare"], keyword: "makeup application" },
-  { match: ["hair","shampoo"], keyword: "hair care" },
-  { match: ["food","pizza","burger","meal","snack"], keyword: "delicious food" },
-  { match: ["baby","kids","toys"], keyword: "happy children" },
-  { match: ["pet","dog","cat"], keyword: "pet dog cat" },
-  { match: ["electronics","phone","laptop","tech"], keyword: "tech gadgets" },
-  { match: ["home","kitchen","decor"], keyword: "modern home" },
-  { match: ["art","painting","craft"], keyword: "painting art" },
-  { match: ["coffee","cafe"], keyword: "coffee shop" },
+  { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
+  { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
+  { match: ['makeup','cosmetic','skincare'], keyword: 'makeup application' },
+  { match: ['hair','shampoo'], keyword: 'hair care' },
+  { match: ['food','pizza','burger','meal','snack'], keyword: 'delicious food' },
+  { match: ['baby','kids','toys'], keyword: 'happy children' },
+  { match: ['pet','dog','cat'], keyword: 'pet dog cat' },
+  { match: ['electronics','phone','laptop','tech'], keyword: 'tech gadgets' },
+  { match: ['home','kitchen','decor'], keyword: 'modern home' },
+  { match: ['art','painting','craft'], keyword: 'painting art' },
+  { match: ['coffee','cafe'], keyword: 'coffee shop' }
 ];
 
-function getImageKeyword(industry = "", url = "") {
+function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) {
     if (row.match.some(m => input.includes(m))) return row.keyword;
   }
-  return industry || "ecommerce";
+  return industry || 'ecommerce';
 }
 
-// ---- Overlay builder reused internally ----
-async function buildOverlayImage({ imageUrl, answers = {}, url = "" }) {
+// palette helper
+async function getPalette(buf) {
+  try {
+    const stats = await sharp(buf).stats();
+    // Pick brightest and darkest channel mean to decide text color
+    const r = stats.channels[0].mean, g = stats.channels[1].mean, b = stats.channels[2].mean;
+    const luminance = (0.2126*r + 0.7152*g + 0.0722*b) / 255;
+    const text = luminance > 0.6 ? '#0f1419' : '#f6f7f8';
+    return { text, primary: luminance > 0.6 ? '#0f1419' : '#f6f7f8' };
+  } catch { return { text: '#0f1419', primary: '#f6f7f8' }; }
+}
+
+function escSVG(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+}
+
+async function buildOverlayImage({ imageUrl, answers = {}, url = '' }) {
+  // Headline + CTA (2–4 words / 2–3 words)
   let websiteKeywords = [];
   if (url && /^https?:\/\//i.test(url)) {
     try {
       const websiteText = await getWebsiteText(url);
       websiteKeywords = await extractKeywords(websiteText);
-    } catch { websiteKeywords = []; }
+    } catch {}
   }
-
-  const keysToShow = ["industry", "businessName", "url", ...Object.keys(answers).filter(k => !["industry","businessName","url"].includes(k))];
+  const keysToShow = ['industry','businessName','url', ...Object.keys(answers).filter(k => !['industry','businessName','url'].includes(k))];
   const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
 
   const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-You are the best Facebook ad copywriter. You are Jeremy Haynes.
+Write a stylish ad overlay for a stock image.
+- Headline: 2–4 words, brand-forward.
+- CTA: 2–3 words ending with "!".
 
-1) Write an overlay headline (2–4 words) and CTA (2–3 words) for a stock ad image, based ONLY on this business + website.
-2) It must be specific and relevant (not generic). CTA must end with "!".
-
-Output ONLY JSON:
-{"headline":"...","cta_box":"..."}
-
-BUSINESS FORM INFO:
+Return ONLY JSON: {"headline":"...","cta":"..."}.
+BUSINESS:
 ${formInfo}
-WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
-`.trim();
+KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
 
-  let headline = "";
-  let ctaText = "";
+  let headline = 'NEW ARRIVALS';
+  let cta = 'SHOP NOW!';
   try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+    const r = await openai.chat.completions.create({
+      model: 'gpt-4o',
       messages: [
-        { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
-        { role: "user", content: prompt }
+        { role: 'system', content: 'Output ONLY valid JSON with keys headline, cta.' },
+        { role: 'user', content: prompt }
       ],
-      max_tokens: 120,
-      temperature: 0.2,
+      max_tokens: 60,
+      temperature: 0.2
     });
-    const raw = response.choices?.[0]?.message?.content?.trim();
-    let parsed = {};
-    try { parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw); } catch { parsed = {}; }
-    headline = (parsed.headline || "GET MORE CLIENTS").toUpperCase();
-    ctaText = (parsed.cta_box || "SHOP NOW!").toUpperCase();
-  } catch {
-    headline = "GET MORE CLIENTS";
-    ctaText = "SHOP NOW!";
-  }
+    const raw = r.choices?.[0]?.message?.content?.trim() || '';
+    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
+    headline = (parsed.headline || headline).toUpperCase();
+    cta = (parsed.cta || cta).toUpperCase();
+  } catch {}
 
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-  const mainW = 1100, mainH = 550;
-  let baseImage = await sharp(imgRes.data).resize(mainW, mainH, { fit: 'cover' }).toBuffer();
+  const baseBuf = Buffer.from(imgRes.data);
+  const { text: textColor } = await getPalette(baseBuf);
 
-  const svgW = 1200, svgH = 627;
-  const borderW = 32, borderGap = 12;
-  const imgX = borderW + borderGap, imgY = borderW + borderGap;
-  const imgW = svgW - (borderW + borderGap) * 2;
-  const imgH = svgH - (borderW + borderGap) * 2;
+  const W = 1200, H = 627;
+  const innerPad = 24;
 
-  const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
-  const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
-  const HEADLINE_BOX_Y = 62;
-  const HEADLINE_FONT_SIZE = 45;
+  // Build modern overlay:
+  // - soft vignette
+  // - angled gradient ribbon for headline
+  // - glossy CTA pill with subtle glow
+  // - tiny brand tag if available
+  const brand = (answers.businessName || '').toUpperCase().slice(0, 30);
 
-  const CTA_BOX_W = 540, CTA_BOX_H = 70;
-  const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
-  const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
-  const CTA_FONT_SIZE = 26;
+  const svg =
+`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0b0d10" stop-opacity="0.76"/>
+      <stop offset="100%" stop-color="#1b2026" stop-opacity="0.42"/>
+    </linearGradient>
+    <linearGradient id="pill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#14e7b9" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#10bfa0" stop-opacity="0.95"/>
+    </linearGradient>
+    <radialGradient id="vign" cx="50%" cy="50%" r="60%">
+      <stop offset="60%" stop-color="#00000000"/>
+      <stop offset="100%" stop-color="#000000aa"/>
+    </radialGradient>
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="6" result="blur"/>
+      <feOffset dx="0" dy="2" result="off"/>
+      <feMerge><feMergeNode in="off"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
 
-  const blurStrength = 15;
-  const headlineImg = await sharp(baseImage)
-    .extract({ left: Math.max(0, Math.round(HEADLINE_BOX_X - imgX)), top: Math.max(0, Math.round(HEADLINE_BOX_Y - imgY)), width: Math.round(HEADLINE_BOX_W), height: Math.round(HEADLINE_BOX_H) })
-    .blur(blurStrength).toBuffer();
+  <!-- base -->
+  <image href="data:image/jpeg;base64,${(await sharp(baseBuf).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer()).toString('base64')}" x="0" y="0" width="${W}" height="${H}"/>
+  <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vign)"/>
 
-  const ctaImg = await sharp(baseImage)
-    .extract({ left: Math.max(0, Math.round(CTA_BOX_X - imgX)), top: Math.max(0, Math.round(CTA_BOX_Y - imgY)), width: Math.round(CTA_BOX_W), height: Math.round(CTA_BOX_H) })
-    .blur(blurStrength).toBuffer();
+  <!-- angled ribbon -->
+  <g transform="translate(0,0) skewX(-8)">
+    <rect x="${innerPad}" y="72" rx="18" ry="18" width="${W - innerPad*2}" height="120" fill="url(#ribbon)" filter="url(#shadow)" opacity="0.92"/>
+  </g>
 
-  const headlineTextColor = "#181b20";
-  const ctaTextColor = "#181b20";
+  <!-- headline -->
+  <text x="${W/2}" y="150" text-anchor="middle" font-family="Times New Roman, Times, serif"
+        font-size="52" font-weight="700" fill="${textColor}" letter-spacing="2"
+        style="paint-order: stroke; stroke: #ffffff55; stroke-width: 0.8;">
+    ${escSVG(headline)}
+  </text>
 
-  function escapeForSVG(text) {
-    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-  }
+  <!-- brand tag (optional) -->
+  ${brand ? `<text x="${innerPad+10}" y="${H-26}" font-family="Helvetica, Arial, sans-serif"
+        font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
 
-  const borderColors = ['#edead9', '#191919', '#193356'];
-  let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-  let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-  while (innerBorderColor === outerBorderColor) innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-
-  const svg = `
-<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="7" y="7" width="${svgW-14}" height="${svgH-14}" fill="none" stroke="${outerBorderColor}" stroke-width="10" rx="34"/>
-  <rect x="27" y="27" width="${svgW-54}" height="${svgH-54}" fill="none" stroke="${innerBorderColor}" stroke-width="5" rx="20"/>
-  <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX+8}" y="${imgY+8}" width="${imgW-16}" height="${imgH-16}" />
-  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" opacity="0.97"/>
-  <rect x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" rx="22" fill="#ffffff38"/>
-  <text x="${svgW/2}" y="${HEADLINE_BOX_Y + HEADLINE_BOX_H/2 + HEADLINE_FONT_SIZE/3}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${HEADLINE_FONT_SIZE}" font-weight="bold" fill="${headlineTextColor}" alignment-baseline="middle" dominant-baseline="middle" letter-spacing="1">${escapeForSVG(headline)}</text>
-  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" opacity="0.97"/>
-  <rect x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" rx="19" fill="#ffffff38"/>
-  <text x="${svgW/2}" y="${CTA_BOX_Y + CTA_BOX_H/2 + CTA_FONT_SIZE/3}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${CTA_FONT_SIZE}" font-weight="bold" fill="${ctaTextColor}" alignment-baseline="middle" dominant-baseline="middle" letter-spacing="0.5">${escapeForSVG(ctaText)}</text>
+  <!-- CTA pill -->
+  <g filter="url(#shadow)">
+    <rect x="${W/2 - 180}" y="${260}" width="360" height="70" rx="35" fill="url(#pill)"/>
+    <text x="${W/2}" y="${260+46}" text-anchor="middle"
+          font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800"
+          fill="#0b1417" letter-spacing="0.6">${escSVG(cta)}</text>
+  </g>
 </svg>`;
 
-  const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
-  if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-  const fileName = `${uuidv4()}.jpg`;
-  const filePath = path.join(generatedPath, fileName);
+  const outDir = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const file = `${uuidv4()}.jpg`;
+  const out = path.join(outDir, file);
 
-  const outBuffer = await sharp({ create: { width: svgW, height: svgH, channels: 3, background: "#edead9" } })
-    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-    .jpeg({ quality: 98 })
-    .toBuffer();
+  // Render SVG to JPEG
+  const buf = await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer();
+  fs.writeFileSync(out, buf);
 
-  fs.writeFileSync(filePath, outBuffer);
-
-  const publicUrl = `/generated/${fileName}`;
-  return { publicUrl, absoluteUrl: absolutePublicUrl(publicUrl) };
+  return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
-    const { url = "", industry = "", regenerateToken = "", answers = {} } = req.body;
+    const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
     const keyword = getImageKeyword(industry, url);
 
     const perPage = 100;
     let photos = [];
     try {
-      const resp = await axios.get("https://api.pexels.com/v1/search", {
+      const r = await axios.get(PEXELS_BASE_URL, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: perPage, cb: Date.now() + (regenerateToken || "") },
-        timeout: 4800,
+        params: { query: keyword, per_page: perPage, cb: Date.now() + (regenerateToken || '') },
+        timeout: 4800
       });
-      photos = resp.data.photos || [];
-    } catch (err) {
-      console.error("Pexels fetch error:", err?.message || err);
-      return res.status(500).json({ error: "Image search failed" });
+      photos = r.data.photos || [];
+    } catch (e) {
+      console.error('Pexels fetch error:', e?.message || e);
+      return res.status(500).json({ error: 'Image search failed' });
     }
-    if (!photos.length) return res.status(404).json({ error: "No images found for this topic." });
-    let imgIdx = 0;
-    if (regenerateToken) {
-      let hash = 0;
-      for (let i = 0; i < regenerateToken.length; i++) hash = (hash * 31 + regenerateToken.charCodeAt(i)) % perPage;
-      imgIdx = Math.abs(hash) % photos.length;
-    } else {
-      imgIdx = Math.floor(Math.random() * photos.length);
-    }
-    const img = photos[imgIdx];
-    const baseImageUrl = img.src.large2x || img.src.original || img.src.large;
+    if (!photos.length) return res.status(404).json({ error: 'No images found.' });
 
-    // NEW: auto-build overlay; fall back to base image if overlay fails
-    let finalUrl = baseImageUrl;
+    const idx = regenerateToken
+      ? Math.abs([...regenerateToken].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)) % photos.length
+      : Math.floor(Math.random() * photos.length);
+
+    const img = photos[idx];
+    const baseUrl = img.src.large2x || img.src.original || img.src.large;
+
+    let finalUrl = baseUrl;
     try {
-      const { publicUrl } = await buildOverlayImage({ imageUrl: baseImageUrl, answers, url });
+      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url });
       finalUrl = publicUrl;
     } catch (e) {
-      console.warn("Overlay generation failed, falling back to base image:", e.message);
+      console.warn('Overlay failed; using base image:', e.message);
     }
 
-    return res.json({
+    res.json({
       imageUrl: finalUrl,
       photographer: img.photographer,
       pexelsUrl: img.url,
       keyword,
       totalResults: photos.length,
-      usedIndex: imgIdx
+      usedIndex: idx
     });
-  } catch (err) {
-    console.error("AI image generation error:", err?.message || err);
-    res.status(500).json({ error: "Failed to fetch stock image", detail: err.message });
+  } catch (e) {
+    console.error('AI image generation error:', e?.message || e);
+    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
 
-// ===== Music selection helper =====
+// ----------------- Music utils -----------------
 function findMusicDir() {
-  // Try several likely locations (case-robust)
+  // Search common roots robustly
+  const ROOT = path.resolve(__dirname, '..', '..');       // project root
   const candidates = [
+    path.join(ROOT, 'Music'),
+    path.join(ROOT, 'music'),
+    path.join(ROOT, 'Music', 'music'),   // matches your screenshot
+    path.join(ROOT, 'music', 'music'),
     path.join(__dirname, '../Music'),
-    path.join(__dirname, '../music'),
-    path.join(__dirname, '../../Music'),
-    path.join(__dirname, '../../music'),
+    path.join(__dirname, '../music')
   ];
   for (const p of candidates) {
-    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
+    try {
+      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
+    } catch {}
   }
   return null;
 }
-
 function pickMusicFile(keywords = []) {
-  const musicBase = findMusicDir();
-  if (!musicBase) return null;
-
-  const files = fs.readdirSync(musicBase).filter(f => /\.mp3$/i.test(f));
+  const base = findMusicDir();
+  if (!base) return null;
+  const files = fs.readdirSync(base).filter(f => /\.mp3$/i.test(f));
   if (!files.length) return null;
 
-  const filesLower = files.map(f => f.toLowerCase());
-  for (let kw of keywords.map(x => String(x).toLowerCase())) {
-    let idx = filesLower.findIndex(f => f === `${kw}.mp3`);
-    if (idx !== -1) return path.join(musicBase, files[idx]);
-    idx = filesLower.findIndex(f => f.includes(kw) && f.endsWith('.mp3'));
-    if (idx !== -1) return path.join(musicBase, files[idx]);
+  const lower = files.map(f => f.toLowerCase());
+  for (const kw of keywords.map(x => String(x).toLowerCase())) {
+    let i = lower.findIndex(f => f === `${kw}.mp3`);
+    if (i !== -1) return path.join(base, files[i]);
+    i = lower.findIndex(f => f.includes(kw));
+    if (i !== -1) return path.join(base, files[i]);
   }
-  // fallback: first track
-  return path.join(musicBase, files[0]);
+  return path.join(base, files[0]);
 }
 
-// ========== AI: GENERATE VIDEO AD ==========
-const PEXELS_VIDEO_BASE = "https://api.pexels.com/videos/search";
-const TTS_VOICE = "alloy";
-const ffmpegPath = 'ffmpeg';
-const child_process = require('child_process');
-const util = require('util');
-const exec = util.promisify(child_process.exec);
+// ----------------- Video generation -----------------
+const PEXELS_VIDEO_BASE = 'https://api.pexels.com/videos/search';
+const TTS_VOICE = 'alloy';
+
 const seedrandom = require('seedrandom');
 
-// ---- CATEGORY MAPPING ----
 const INDUSTRY_MAP = [
-  { names: ["clothing","fashion","accessory","apparel","shoes","jewelry","watches","bags","handbags","backpacks","luggage","hats","sunglasses"], category: "Fashion & Accessories", pexels: "fashion clothing accessories" },
-  { names: ["makeup","cosmetics","skincare","haircare","perfume","fragrance","grooming","beauty"], category: "Beauty & Personal Care", pexels: "makeup beauty skincare" },
-  { names: ["gym","fitness","workout","sports","exercise","weights","protein","supplement","outdoor","yoga","biking","running","health coaching","wellness","coach","personal trainer"], category: "Fitness, Sports & Outdoors", pexels: "fitness gym workout exercise" },
-  { names: ["furniture","home","decor","kitchen","appliance","bedding","bath","art","lamp","rugs","cookware","table","sofa","bed"], category: "Home, Kitchen & Decor", pexels: "home kitchen decor" },
-  { names: ["phone","tablet","laptop","computer","electronics","gadgets","wearable","smartwatch","headphones","camera","drone","tech","device"], category: "Electronics & Gadgets", pexels: "electronics gadgets tech" },
-  { names: ["snack","food","meal kit","grocery","coffee","tea","alcohol","wine","beer","spirits","beverage","drink"], category: "Food & Beverage", pexels: "food drink meal" },
-  { names: ["baby","kids","toys","stroller","child","children","pet","dog","cat","animal","pet food","pet toy"], category: "Baby, Kids & Pets", pexels: "kids baby pets toys" },
-  { names: ["vitamin","supplement","medical","health","wellness","mental","therapy","life coach","coaching","self-care","personal development"], category: "Health & Wellness", pexels: "wellness health happy" },
-  { names: ["art","craft","diy","music","instrument","collectible","hobby","painting","drawing"], category: "Arts, Crafts & Hobbies", pexels: "art craft hobby" },
-  { names: ["course","ebook","subscription","box","event","ticket","digital","learning","online"], category: "Digital, Subscription & Services", pexels: "digital online learning" }
+  { names: ['clothing','fashion','accessory','apparel','shoes','jewelry','watches','bags','handbags','backpacks','luggage','hats','sunglasses'], category: 'Fashion & Accessories', pexels: 'fashion clothing accessories' },
+  { names: ['makeup','cosmetics','skincare','haircare','perfume','fragrance','grooming','beauty'], category: 'Beauty & Personal Care', pexels: 'makeup beauty skincare' },
+  { names: ['gym','fitness','workout','sports','exercise','weights','protein','supplement','outdoor','yoga','biking','running','health coaching','wellness','coach','personal trainer'], category: 'Fitness, Sports & Outdoors', pexels: 'fitness gym workout exercise' },
+  { names: ['furniture','home','decor','kitchen','appliance','bedding','bath','art','lamp','rugs','cookware','table','sofa','bed'], category: 'Home, Kitchen & Decor', pexels: 'home kitchen decor' },
+  { names: ['phone','tablet','laptop','computer','electronics','gadgets','wearable','smartwatch','headphones','camera','drone','tech','device'], category: 'Electronics & Gadgets', pexels: 'electronics gadgets tech' },
+  { names: ['snack','food','meal kit','grocery','coffee','tea','alcohol','wine','beer','spirits','beverage','drink'], category: 'Food & Beverage', pexels: 'food drink meal' },
+  { names: ['baby','kids','toys','stroller','child','children','pet','dog','cat','animal','pet food','pet toy'], category: 'Baby, Kids & Pets', pexels: 'kids baby pets toys' },
+  { names: ['vitamin','supplement','medical','health','wellness','mental','therapy','life coach','coaching','self-care','personal development'], category: 'Health & Wellness', pexels: 'wellness health happy' },
+  { names: ['art','craft','diy','music','instrument','collectible','hobby','painting','drawing'], category: 'Arts, Crafts & Hobbies', pexels: 'art craft hobby' },
+  { names: ['course','ebook','subscription','box','event','ticket','digital','learning','online'], category: 'Digital, Subscription & Services', pexels: 'digital online learning' }
 ];
-function mapIndustry(inputRaw = "") {
-  const input = String(inputRaw || "").toLowerCase();
-  for (const cat of INDUSTRY_MAP) if (cat.names.some(keyword => input.includes(keyword))) return { category: cat.category, pexels: cat.pexels };
-  return { category: "General E-Commerce", pexels: "shopping ecommerce online" };
+function mapIndustry(s = '') {
+  const t = String(s || '').toLowerCase();
+  for (const cat of INDUSTRY_MAP) if (cat.names.some(k => t.includes(k))) return { category: cat.category, pexels: cat.pexels };
+  return { category: 'General E-Commerce', pexels: 'shopping ecommerce online' };
 }
-function withTimeout(promise, ms, errorMsg = "Timeout") {
-  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))]);
+
+function withTimeout(promise, ms, msg = 'Timeout') {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 }
-// FIXED: upfront guard for invalid clip URLs
 async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB = 5) {
   return new Promise((resolve, reject) => {
-    if (!url || !/^https?:\/\//i.test(String(url))) {
-      return reject(new Error("Invalid clip URL"));
-    }
-
+    if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
     const timeout = setTimeout(() => {
-      timedOut = true;
-      writer.close();
-      try { fs.unlinkSync(dest); } catch {}
-      reject(new Error("Download timed out"));
+      timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {} ; reject(new Error('Download timed out'));
     }, timeoutMs);
-
     axios({ url, method: 'GET', responseType: 'stream' })
-      .then(response => {
+      .then(resp => {
         let bytes = 0;
-        response.data.on('data', chunk => {
-          bytes += chunk.length;
+        resp.data.on('data', ch => {
+          bytes += ch.length;
           if (bytes > maxSizeMB * 1024 * 1024 && !timedOut) {
-            timedOut = true;
-            writer.close();
-            try { fs.unlinkSync(dest); } catch {}
-            clearTimeout(timeout);
-            reject(new Error("File too large"));
+            timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {}; clearTimeout(timeout);
+            reject(new Error('File too large'));
           }
         });
-        response.data.pipe(writer);
+        resp.data.pipe(writer);
         writer.on('finish', () => { clearTimeout(timeout); if (!timedOut) resolve(dest); });
-        writer.on('error', err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {} if (!timedOut) reject(err); });
+        writer.on('error', err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {}; if (!timedOut) reject(err); });
       })
-      .catch(err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {} reject(err); });
+      .catch(err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {}; reject(err); });
   });
 }
-function getDeterministicShuffle(arr, seed) {
-  let array = [...arr];
-  let random = seedrandom(seed);
-  for (let i = array.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [array[i], array[j]] = [array[j], array[i]]; }
-  return array;
-}
-function normalizeShortCTA(input) {
-  if (!input) return "Learn More!";
-  const t = input.toLowerCase();
-  if (t.includes("website") || t.includes("purchase")) return "Visit Our Website!";
-  if (t.includes("buy")) return "Buy Now!";
-  if (t.includes("order")) return "Order Now!";
-  if (t.includes("shop")) return "Shop Now!";
-  if (t.includes("sign up") || t.includes("signup")) return "Sign Up!";
-  if (t.includes("call")) return "Call Now!";
-  if (t.includes("learn")) return "Learn More!";
-  if (t.includes("book")) return "Book Now!";
-  if (t.includes("join")) return "Join Now!";
-  if (t.includes("try")) return "Try It Now!";
-  if (t.includes("contact")) return "Contact Us!";
-  if (t.includes("start")) return "Get Started!";
-  if (t.includes("check out")) return "Check Us Out!";
-  if (t.includes("subscribe")) return "Subscribe Now!";
-  return input.replace(/^(visit|make|please|try|interested|contact|reach|check out|order|shop|buy|learn|call|book|join|sign up|subscribe|start)\s*(our)?\s*(website|site|now|today|us)?/i, "")
-    .replace(/[\.\!]+$/, "").trim().split(" ").slice(0, 5).join(" ").replace(/^\w/, c => c.toUpperCase()) + "!";
+function shuffleDet(arr, seed) {
+  const a = [...arr]; const r = seedrandom(seed);
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
 }
 
-// NEW: super-short, varied CTAs (2–3 words) per category
+// Short, varied CTAs
 const CTA_LIBRARY = {
-  "Fashion & Accessories": ["Shop New Styles", "See The Look", "Style Upgrade"],
-  "Beauty & Personal Care": ["Glow Up", "Fresh Skin", "New Routine"],
-  "Fitness, Sports & Outdoors": ["Get Fit Fast", "Start Training", "Crush Goals"],
-  "Home, Kitchen & Decor": ["Refresh Your Home", "Upgrade Your Space", "Make It Cozy"],
-  "Electronics & Gadgets": ["Upgrade Tech", "Smart Upgrade", "Power Your Day"],
-  "Food & Beverage": ["Order Today", "Taste The Good", "Hungry? Order"],
-  "Baby, Kids & Pets": ["Happy Pets", "For Little Ones", "Playtime Ready"],
-  "Health & Wellness": ["Feel Your Best", "Start Healing", "Stress Less"],
-  "Arts, Crafts & Hobbies": ["Create Today", "Make Something", "Art Starts Here"],
-  "Digital, Subscription & Services": ["Start Free Trial", "Unlock Access", "Join Today"],
-  "General E-Commerce": ["Discover More", "Get Yours", "Try It Now"]
+  'Fashion & Accessories': ['Shop New Styles', 'See The Look', 'Style Upgrade'],
+  'Beauty & Personal Care': ['Glow Up', 'Fresh Skin', 'New Routine'],
+  'Fitness, Sports & Outdoors': ['Get Fit Fast', 'Start Training', 'Crush Goals'],
+  'Home, Kitchen & Decor': ['Refresh Your Home', 'Upgrade Your Space', 'Make It Cozy'],
+  'Electronics & Gadgets': ['Upgrade Tech', 'Smart Upgrade', 'Power Your Day'],
+  'Food & Beverage': ['Order Today', 'Taste The Good', 'Hungry? Order'],
+  'Baby, Kids & Pets': ['Happy Pets', 'For Little Ones', 'Playtime Ready'],
+  'Health & Wellness': ['Feel Your Best', 'Start Healing', 'Stress Less'],
+  'Arts, Crafts & Hobbies': ['Create Today', 'Make Something', 'Art Starts Here'],
+  'Digital, Subscription & Services': ['Start Free Trial', 'Unlock Access', 'Join Today'],
+  'General E-Commerce': ['Discover More', 'Get Yours', 'Try It Now']
 };
-function pickCategoryCTA(category = "General E-Commerce", seed = "") {
-  const list = CTA_LIBRARY[category] || CTA_LIBRARY["General E-Commerce"];
+function pickCategoryCTA(category = 'General E-Commerce', seed = '') {
+  const list = CTA_LIBRARY[category] || CTA_LIBRARY['General E-Commerce'];
   const r = seedrandom(seed || String(Date.now()));
-  const choice = list[Math.floor(r() * list.length)] || "Discover More";
-  // enforce 2–3 words
-  const trimmed = choice.split(/\s+/).slice(0, 3).join(" ");
-  return /!$/.test(trimmed) ? trimmed : (trimmed + "!");
+  const choice = list[Math.floor(r() * list.length)] || 'Discover More';
+  const trimmed = choice.split(/\s+/).slice(0, 3).join(' ');
+  return /!$/.test(trimmed) ? trimmed : (trimmed + '!');
 }
 
+// ----------------- Video route -----------------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
-    console.log("Step 1: Starting video ad generation...");
-
-    const { url = "", answers = {}, regenerateToken = "" } = req.body;
+    const { url = '', answers = {}, regenerateToken = '' } = req.body;
 
     const token = getUserToken(req);
     const fbAdAccountId =
@@ -631,8 +579,8 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
-    // ---- Tunables ----
-    const VIDEO_CFG = { WIDTH: 640, HEIGHT: 360, FPS: 24, CLIP_SEC: 5, FINAL_SEC: 15 };
+    // Tunables
+    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5, FINAL: 15 };
     const TO = {
       PEXELS: +(process.env.VID_PEXELS_TIMEOUT_MS || 30000),
       DL: +(process.env.VID_DL_TIMEOUT_MS || 45000),
@@ -641,271 +589,241 @@ router.post('/generate-video-ad', async (req, res) => {
       TRIM: +(process.env.VID_TRIM_TIMEOUT_MS || 20000),
       OVERMUX: +(process.env.VID_OVERLAY_MUX_TIMEOUT_MS || 90000),
       FPROBE: +(process.env.VID_FFPROBE_TIMEOUT_MS || 8000),
+      ATEMPO: 15000
     };
 
-    const productType = answers?.industry || answers?.productType || "";
+    const productType = answers?.industry || answers?.productType || '';
     const { category, pexels } = mapIndustry(productType);
+    const overlayText = answers?.cta ? answers.cta : pickCategoryCTA(category, regenerateToken);
 
-    // CTA (short + varied). If user provided a CTA, normalize it; else pick per-category.
-    const overlayTextRaw = answers?.cta ? normalizeShortCTA(answers.cta) : pickCategoryCTA(category, regenerateToken);
-    const overlayText = overlayTextRaw;
-
-    // Build and sanitize search term
-    let videoKeywords = [pexels];
-    if (productType && !pexels.includes(productType.toLowerCase())) videoKeywords.push(productType);
-    if (url && /^https?:\/\//i.test(String(url).trim())) {
+    // Build search
+    let kw = [pexels];
+    if (productType && !pexels.includes(productType.toLowerCase())) kw.push(productType);
+    if (url && /^https?:\/\//i.test(url)) {
       try {
-        const websiteText = await withTimeout(getWebsiteText(url), 8000, "Website text fetch timed out");
-        const siteKeywords = (await extractKeywords(websiteText)).slice(0, 2);
-        videoKeywords.push(...siteKeywords);
-      } catch { console.log("Warning: website text unavailable or timeout"); }
+        const tx = await withTimeout(getWebsiteText(url), 8000, 'site kw timeout');
+        kw.push(...(await extractKeywords(tx)).slice(0, 2));
+      } catch {}
     }
-    videoKeywords = Array.from(new Set(videoKeywords.filter(Boolean)));
-    const sanitize = (s) => String(s || "").toLowerCase().replace(/['"]/g, "").replace(/[^a-z0-9\s]/gi, " ").replace(/\s+/g, " ").trim();
-    const searchTerm = sanitize(videoKeywords.slice(0, 2).join(" ")) || sanitize(pexels) || "shopping";
-    console.log("Step 3: Pexels search term:", searchTerm);
+    kw = Array.from(new Set(kw.filter(Boolean)));
+    const sanitize = s => String(s || '').toLowerCase().replace(/['"]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const term = sanitize(kw.slice(0, 2).join(' ')) || sanitize(pexels) || 'shopping';
 
-    // Fetch Pexels videos
-    let videoClips = [];
+    // Fetch pexels videos
+    let clips = [];
     try {
-      const resp = await withTimeout(
-        axios.get(PEXELS_VIDEO_BASE, { headers: { Authorization: PEXELS_API_KEY }, params: { query: searchTerm, per_page: 70, cb: Date.now() + (regenerateToken || "") } }),
-        TO.PEXELS,
-        "Pexels API timed out"
+      const r = await withTimeout(
+        axios.get(PEXELS_VIDEO_BASE, { headers: { Authorization: PEXELS_API_KEY }, params: { query: term, per_page: 70, cb: Date.now() + (regenerateToken || '') } }),
+        TO.PEXELS, 'Pexels API timed out'
       );
-      videoClips = resp.data.videos || [];
-    } catch (err) {
-      console.error("FFMPEG ERROR: Pexels fetch failed", err?.response?.data || err.message || err);
-      return res.status(500).json({ error: "Stock video fetch failed", detail: err?.message || String(err) });
+      clips = r.data.videos || [];
+    } catch (e) {
+      console.error('Pexels fetch failed', e?.response?.data || e.message);
+      return res.status(500).json({ error: 'Stock video fetch failed', detail: e.message });
     }
-    if (!videoClips || videoClips.length < 3) {
-      return res.status(404).json({ error: "Not enough stock videos found" });
-    }
+    if (!clips?.length) return res.status(404).json({ error: 'No stock videos found' });
 
-    // Build candidate links safely (require valid MP4 link)
+    // Candidate links
     let candidates = [];
-    for (let v of videoClips) {
+    for (const v of clips) {
       const files = (v.video_files || [])
-        .filter(f => f && typeof f.link === 'string' && /\.mp4(\?|$)/i.test(f.link))
-        .sort((a, b) => (a.width || 9999) - (b.width || 9999)); // prefer smaller
-      const best = files.find(f => f.quality === 'sd' && f.link) || files[0];
+        .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
+        .sort((a,b) => (a.width || 9999) - (b.width || 9999));
+      const best = files.find(f => f.quality === 'sd') || files[0];
       if (best?.link) candidates.push(best.link);
     }
-    candidates = Array.from(new Set(candidates)).filter(Boolean);
-    if (candidates.length < 3) return res.status(404).json({ error: "Not enough SD MP4 clips with valid links" });
+    candidates = Array.from(new Set(candidates));
+    if (candidates.length < 3) return res.status(404).json({ error: 'Not enough usable clips' });
 
-    const shuffled = getDeterministicShuffle(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
+    const shuffled = shuffleDet(candidates, regenerateToken || `${Date.now()}_${Math.random()}`);
 
     // Work dir
-    const tempDir = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const tmp = path.join(__dirname, '../tmp');
+    if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
 
-    // Download + scale (robust loop; skip bad candidates)
-    const videoPaths = [];
-    const { WIDTH, HEIGHT, FPS, CLIP_SEC } = VIDEO_CFG;
-    const ffmpegPathLocal = 'ffmpeg';
-    const ffprobePathLocal = 'ffprobe';
-
-    let ptr = 0;
-    while (videoPaths.length < 3 && ptr < shuffled.length) {
-      const srcLink = shuffled[ptr++];
-      const dest = path.join(tempDir, `${uuidv4()}.mp4`);
+    // Download + scale
+    const paths = [];
+    let p = 0;
+    while (paths.length < 3 && p < shuffled.length) {
+      const src = shuffled[p++];
+      const raw = path.join(tmp, `${uuidv4()}.mp4`);
       try {
-        await withTimeout(downloadFileWithTimeout(srcLink, dest, TO.DL, 6), TO.DL + 2000, "Download step timed out");
-        const scaledPath = dest.replace('.mp4', '_scaled.mp4');
+        await withTimeout(downloadFileWithTimeout(src, raw, TO.DL, 6), TO.DL + 2000, 'download timeout');
+        const scaled = raw.replace('.mp4', '_s.mp4');
         await withTimeout(
           exec(
-            `${ffmpegPathLocal} -y -i "${dest}" ` +
-            `-vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,` +
-            `pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${FPS}" ` +
-            `-t ${CLIP_SEC} -r ${FPS} -c:v libx264 -preset superfast -crf 26 -an "${scaledPath}"`
+            `ffmpeg -y -i "${raw}" ` +
+            `-vf "scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=decrease,` +
+            `pad=${VIDEO.W}:${VIDEO.H}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${VIDEO.FPS}" ` +
+            `-t ${VIDEO.CLIP} -r ${VIDEO.FPS} -c:v libx264 -preset superfast -crf 26 -an "${scaled}"`
           ),
-          TO.SCALE,
-          "ffmpeg scaling timed out"
+          TO.SCALE, 'scale timeout'
         );
-        try { fs.unlinkSync(dest); } catch {}
-        videoPaths.push(scaledPath);
+        try { fs.unlinkSync(raw); } catch {}
+        paths.push(scaled);
       } catch (e) {
-        try { fs.unlinkSync(dest); } catch {}
-        console.warn("Skipping bad candidate:", (srcLink || "<empty>"), "-", e.message || e);
+        try { fs.unlinkSync(raw); } catch {}
       }
     }
-    if (!videoPaths.length) {
-      return res.status(500).json({ error: "Stock video download failed", detail: "No usable clips after filtering." });
-    }
+    if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
 
-    // GPT script (shorter so it always finishes within 15s)
+    // Script (target ~11–13s so we can tempo-stretch to ~14s)
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
-      `Write a video ad script for an online e-commerce business selling physical products. ` +
-      `Script MUST be 28–36 words (~11–13s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
+      `Write a video ad script for an online e-commerce business selling physical products.\n` +
+      `Script MUST be 28–36 words (~11–13s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'.\n` +
       `No scene directions or SFX — ONLY the spoken words.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
-      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k, v]) => `${k}: ${v}`).join('\n');
+      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k,v]) => `${k}: ${v}`).join('\n');
     }
     if (url) prompt += `\nWebsite: ${url}`;
     prompt += `\nRespond ONLY with the script text.`;
 
-    let script;
+    let script = 'Discover what you love today. Try it now!';
     try {
-      const gptRes = await withTimeout(
+      const r = await withTimeout(
         openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
           max_tokens: 80,
           temperature: 0.6
         }),
-        15000,
-        "OpenAI GPT timed out"
+        15000, 'OpenAI timeout'
       );
-      script = gptRes.choices?.[0]?.message?.content?.trim() || "Discover what you love today. Try it now!";
-    } catch (e) {
-      console.error("FFMPEG ERROR: GPT script gen failed", e);
-      return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
-    }
-
-    // TTS
-    const ttsPath = path.join(tempDir, `${uuidv4()}.mp3`);
-    try {
-      const ttsRes = await withTimeout(
-        openai.audio.speech.create({ model: 'tts-1', voice: TTS_VOICE, input: script }),
-        20000,
-        "OpenAI TTS timed out"
-      );
-      const ttsBuffer = Buffer.from(await ttsRes.arrayBuffer());
-      fs.writeFileSync(ttsPath, ttsBuffer);
-    } catch (e) {
-      console.error("FFMPEG ERROR: TTS step failed", e);
-      return res.status(500).json({ error: "TTS generation failed", detail: e.message });
-    }
-
-    // Probe duration
-    let ttsDuration = 12;
-    try {
-      const { stdout } = await withTimeout(
-        exec(`${ffprobePathLocal} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`),
-        TO.FPROBE,
-        "ffprobe step timed out"
-      );
-      const seconds = parseFloat(stdout.trim());
-      if (!isNaN(seconds) && seconds > 0) ttsDuration = seconds;
+      script = r.choices?.[0]?.message?.content?.trim() || script;
     } catch {}
 
+    // TTS
+    const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
+    try {
+      const ttsRes = await withTimeout(openai.audio.speech.create({ model: 'tts-1', voice: TTS_VOICE, input: script }), 20000, 'TTS timeout');
+      const buf = Buffer.from(await ttsRes.arrayBuffer());
+      fs.writeFileSync(ttsPath, buf);
+    } catch (e) {
+      console.error('TTS failed', e);
+      return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
+    }
+
+    // Probe voice duration
+    const ffprobe = async (file) => {
+      try {
+        const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
+        const s = parseFloat(stdout.trim());
+        return isNaN(s) ? 0 : s;
+      } catch { return 0; }
+    };
+    let ttsDur = await ffprobe(ttsPath);
+
+    // Tempo-stretch voice to ~14.0s (so CTA + tail fills 15s nicely)
+    const targetVoice = Math.max(11.5, Math.min(14.2, VIDEO.FINAL - 0.8));
+    let voicePath = ttsPath;
+    if (ttsDur > 0) {
+      let tempo = targetVoice / ttsDur;               // >1 = slower? (atempo <1 slows; >1 speeds) → ffmpeg expects factor (0.5–2). For slow-down use <1.
+      tempo = Math.max(0.85, Math.min(1.15, tempo));  // keep natural
+      if (Math.abs(tempo - 1) > 0.03) {
+        const adj = path.join(tmp, `${uuidv4()}_tempo.mp3`);
+        try {
+          // atempo <1 slows down, >1 speeds up. Our tempo computed target/actual, but atempo expects speed factor. We invert:
+          const atempo = (1 / tempo).toFixed(3);
+          await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo}" -c:a aac -b:a 160k "${adj}"`), TO.ATEMPO, 'atempo timeout');
+          voicePath = adj;
+          ttsDur = await ffprobe(voicePath);
+        } catch {}
+      }
+    }
+
     // Concat/trim to exactly 15s
-    const finalDuration = VIDEO_CFG.FINAL_SEC;
-    const clipsNeeded = Math.max(1, Math.ceil(finalDuration / CLIP_SEC));
-    while (videoPaths.length < clipsNeeded) videoPaths.push(videoPaths[videoPaths.length - 1]);
+    const need = Math.max(1, Math.ceil(VIDEO.FINAL / VIDEO.CLIP));
+    while (paths.length < need) paths.push(paths[paths.length - 1]);
 
-    const listPath = path.join(tempDir, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, videoPaths.slice(0, clipsNeeded).map(p => `file '${p}'`).join('\n'));
+    const listPath = path.join(tmp, `${uuidv4()}.txt`);
+    fs.writeFileSync(listPath, paths.slice(0, need).map(pth => `file '${pth}'`).join('\n'));
 
-    const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
-    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-    const videoId = uuidv4();
-    const tempConcat = path.join(generatedPath, `${videoId}.concat.mp4`);
-    const tempTrimmed = path.join(generatedPath, `${videoId}.trimmed.mp4`);
-    const outPath = path.join(generatedPath, `${videoId}.mp4`);
+    const outDir = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
+    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    const id = uuidv4();
+    const concatPath = path.join(outDir, `${id}.concat.mp4`);
+    const trimmedPath = path.join(outDir, `${id}.trim.mp4`);
+    const outPath = path.join(outDir, `${id}.mp4`);
 
-    try {
-      await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${tempConcat}"`), TO.CONCAT, "ffmpeg concat timed out");
-    } catch (e) {
-      console.error("FFMPEG ERROR: concat step failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Video concat failed", detail: e.message });
-    }
-    try {
-      await withTimeout(exec(`ffmpeg -y -i "${tempConcat}" -t ${finalDuration} -c copy "${tempTrimmed}"`), TO.TRIM, "ffmpeg trim timed out");
-    } catch (e) {
-      console.error("FFMPEG ERROR: trim step failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Video trim failed", detail: e.message });
-    }
+    await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
+    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${VIDEO.FINAL} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // Overlay timing
-    const overlayStart = (Math.max(0, finalDuration * 0.70)).toFixed(2);
-    const overlayEnd   = Math.min(finalDuration, ttsDuration + 1.0).toFixed(2);
-    const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
-    const safeOverlayText = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, " ").replace(/'/g, "").replace(/[^A-Z0-9\s!]/g, "");
-    const drawTextVideo = (fs.existsSync(fontfile)
-      ? `drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
-      : `drawtext=text='${safeOverlayText}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
-    );
+    // Overlay timing (CTA shows near end)
+    const overlayStart = Math.max(0, VIDEO.FINAL * 0.72).toFixed(2);
+    const overlayEnd = Math.min(VIDEO.FINAL, ttsDur + 1.0).toFixed(2);
+    const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+    const safeTxt = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, ' ').replace(/'/g, '').replace(/[^A-Z0-9\s!]/g, '');
 
-    // Pick background music (keywords from industry + site)
+    const drawText =
+      (fs.existsSync(fontfile)
+        ? `drawtext=fontfile='${fontfile}':text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
+        : `drawtext=text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
+      );
+
+    // Music selection + mix (duck bg under voice, and MIX the two!)
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
     try {
       if (url) {
-        const tx = await withTimeout(getWebsiteText(url), 6000, "site kw timeout");
+        const tx = await withTimeout(getWebsiteText(url), 6000, 'kw timeout');
         bgKeywords.push(...(await extractKeywords(tx)));
       }
     } catch {}
-    const bgMusicPath = pickMusicFile(bgKeywords) || null;
+    const bgMusicPath = pickMusicFile(bgKeywords);
 
-    // Filter graphs
-    // Inputs: 0 = video, 1 = tts, 2 = bg (optional)
+    // Build ffmpeg command with proper sidechain duck + amix
+    const musicInput = bgMusicPath ? ` -stream_loop -1 -i "${bgMusicPath}"` : '';
     let filterComplex, mapArgs;
     if (bgMusicPath) {
-      filterComplex =
-        `[0:v]${drawTextVideo}[vout];` +
-        `[2:a]volume=0.20[a_bg];` +
-        `[1:a]volume=1.0[a_vo];` +
-        `[a_bg][a_vo]sidechaincompress=threshold=0.1:ratio=8:attack=5:release=120[a_mix]`;
-      mapArgs = `-map "[vout]" -map "[a_mix]"`;
+      filterComplex = `[0:v]${drawText}[v];` +
+                      `[1:a]volume=1.0[a_vo];` +
+                      `[2:a]volume=0.25[a_bg];` +
+                      `[a_bg][a_vo]sidechaincompress=threshold=0.2:ratio=8:attack=5:release=150[a_bgduck];` +
+                      `[a_bgduck][a_vo]amix=inputs=2:normalize=0:duration=longest[a_mix]`;
+      mapArgs = `-map "[v]" -map "[a_mix]"`;
     } else {
-      filterComplex =
-        `[0:v]${drawTextVideo}[vout];` +
-        `[1:a]volume=1.0[a_mix]`;
-      mapArgs = `-map "[vout]" -map "[a_mix]"`;
+      filterComplex = `[0:v]${drawText}[v];[1:a]volume=1.0[a_mix]`;
+      mapArgs = `-map "[v]" -map "[a_mix]"`;
     }
 
-    try {
-      const musicInput = bgMusicPath ? ` -stream_loop -1 -i "${bgMusicPath}"` : '';
-      await withTimeout(
-        exec(
-          `ffmpeg -y -i "${tempTrimmed}" -i "${ttsPath}"${musicInput} ` +
-          `-filter_complex "${filterComplex}" ` +
-          `${mapArgs} -shortest ` +
-          `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO_CFG.FPS} ` +
-          `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
-        ),
-        TO.OVERMUX,
-        "ffmpeg overlay+mux timed out"
-      );
-    } catch (e) {
-      console.error("FFMPEG ERROR: overlay+mux failed", e.stderr || e.message || e);
-      return res.status(500).json({ error: "Overlay/mux failed", detail: e.message });
-    }
+    await withTimeout(
+      exec(
+        `ffmpeg -y -i "${trimmedPath}" -i "${voicePath}"${musicInput} ` +
+        `-filter_complex "${filterComplex}" ${mapArgs} -shortest ` +
+        `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
+        `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
+      ),
+      TO.OVERMUX, 'overlay+mux timeout'
+    );
 
-    // Ensure file ready
-    let videoReady = false;
+    // ready?
+    let ok = false;
     for (let i = 0; i < 40; i++) {
-      try {
-        const stats = fs.statSync(outPath);
-        if (stats.size > 200000) { videoReady = true; break; }
-      } catch {}
+      try { if (fs.statSync(outPath).size > 200000) { ok = true; break; } } catch {}
       await new Promise(r => setTimeout(r, 200));
     }
-    if (!videoReady) return res.status(500).json({ error: "Video output file not ready after mux" });
+    if (!ok) return res.status(500).json({ error: 'Video output not ready' });
 
     // Cleanup
-    [tempConcat, tempTrimmed, ...videoPaths, ttsPath, listPath].forEach(p => { try { fs.unlinkSync(p); } catch {} });
+    [concatPath, trimmedPath, ...paths, listPath].forEach(pth => { try { fs.unlinkSync(pth); } catch {} });
+    if (voicePath !== ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
+    try { fs.unlinkSync(voicePath); } catch {}
 
-    const publicVideoUrl = `/generated/${videoId}.mp4`;
+    const publicVideoUrl = `/generated/${id}.mp4`;
     const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
-    // Try upload to ad account if possible
+    // Optional upload to FB
     let fbVideoId = null;
     try {
       if (fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(fbAdAccountId, token, absoluteUrl, 'SmartMark Generated Video', 'Generated by SmartMark');
         fbVideoId = up?.id || null;
-        console.log('Uploaded to Ad Account. video_id:', fbVideoId);
-      } else {
-        console.log('Skipping FB advideos upload (missing fbAdAccountId or token).', { hasToken: !!token, fbAdAccountId: fbAdAccountId || null });
       }
     } catch (e) {
-      console.error('Ad Account video upload failed:', e?.response?.data || e.message);
+      console.error('FB advideos upload failed:', e?.response?.data || e.message);
     }
 
     return res.json({
@@ -918,9 +836,9 @@ router.post('/generate-video-ad', async (req, res) => {
       voice: TTS_VOICE
     });
   } catch (err) {
-    console.error("Video route error:", err);
+    console.error('Video route error:', err);
     if (!res.headersSent) {
-      return res.status(500).json({ error: "Failed to generate video ad", detail: (err && err.message) || "Unknown error" });
+      return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
     }
   }
 });
