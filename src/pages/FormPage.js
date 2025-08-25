@@ -9,6 +9,7 @@ const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const DARK_BG = "#181b20";
 const TEAL = "#14e7b9";
+const SIDE_CHAT_LIMIT = 5; // cap for side Qs/statements
 
 // If you run a local backend with a CRA proxy, set USE_LOCAL_BACKEND=true
 const USE_LOCAL_BACKEND = false;
@@ -229,7 +230,7 @@ function isLikelyQuestion(s) {
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
-// New: detect side-chatty statements (wow/never/amazing/etc.) to answer then re-prompt
+// detect side statements to answer then re-prompt
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
   const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
@@ -240,21 +241,18 @@ function isLikelySideStatement(s) {
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
 
-  // Step-specific checks to avoid blocking valid answers
   const t = (s || "").trim();
   if (!currentQ) return false;
 
   if (currentQ.key === "url") {
-    // URL step: if no URL and it's longer commentary, treat as side chat
     const hasUrl = !!extractFirstUrl(t);
     return !hasUrl && t.split(/\s+/).length > 3;
   }
   if (currentQ.key === "hasOffer") {
     return !/^(yes|no|y|n)$/i.test(t);
   }
-  // For short expected answers (industry/businessName), if it's a long sentence, probably side chat
   if (currentQ.key === "industry" || currentQ.key === "businessName") {
-    return t.length > 80; // long message → likely side comment, not the concise answer
+    return t.length > 80;
   }
   return false;
 }
@@ -275,6 +273,8 @@ export default function FormPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [sideChatCount, setSideChatCount] = useState(0);
+  const [hasGenerated, setHasGenerated] = useState(false);
 
   // Ad preview state
   const [mediaType, setMediaType] = useState("both");
@@ -326,6 +326,8 @@ export default function FormPage() {
         setActiveVideo(data.activeVideo || 0);
         setAwaitingReady(data.awaitingReady ?? true);
         setInput(data.input || "");
+        setSideChatCount(data.sideChatCount || 0);
+        setHasGenerated(!!data.hasGenerated);
       }
     } catch {}
     // eslint-disable-next-line
@@ -358,6 +360,8 @@ export default function FormPage() {
     setError("");
     setGenerating(false);
     setLoading(false);
+    setSideChatCount(0);
+    setHasGenerated(false);
   }
 
   // ---- Autosave (throttled) the entire FormPage session + creatives ----
@@ -366,7 +370,7 @@ export default function FormPage() {
       const payload = {
         answers, step, chatHistory, mediaType, result,
         imageUrls, videoItems, activeImage, activeVideo,
-        awaitingReady, input
+        awaitingReady, input, sideChatCount, hasGenerated
       };
       localStorage.setItem(
         FORM_DRAFT_KEY,
@@ -401,7 +405,7 @@ export default function FormPage() {
   }, [
     answers, step, chatHistory, mediaType, result,
     imageUrls, videoItems, activeImage, activeVideo,
-    awaitingReady, input
+    awaitingReady, input, sideChatCount, hasGenerated
   ]);
 
   function handleImageClick(url) { setShowModal(true); setModalImg(url); }
@@ -426,6 +430,23 @@ export default function FormPage() {
     } catch (e) {
       console.warn("gpt-chat failed:", e.message);
       return null;
+    }
+  }
+
+  // central side-chat handler with cap + optional follow-up prompt
+  async function handleSideChat(userText, followUpPrompt) {
+    if (sideChatCount >= SIDE_CHAT_LIMIT) {
+      // cap reached: nudge back to flow, no GPT call
+      if (followUpPrompt) {
+        setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
+      }
+      return;
+    }
+    setSideChatCount(c => c + 1);
+    const reply = await askGPT(userText);
+    if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
+    if (followUpPrompt) {
+      setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
     }
   }
 
@@ -497,10 +518,10 @@ export default function FormPage() {
     const currentQ = CONVO_QUESTIONS[step];
 
     // =========================
-    // FINAL STAGE SIDE-CHAT
+    // FINAL STAGE (after all Qs)
     // =========================
     if (step >= CONVO_QUESTIONS.length) {
-      if (isGenerateTrigger(value)) {
+      if (!hasGenerated && isGenerateTrigger(value)) {
         setLoading(true);
         setGenerating(true);
         setChatHistory(ch => [...ch, { from: "gpt", text: "AI generating..." }]);
@@ -540,6 +561,7 @@ export default function FormPage() {
             setVideoScript(vids[0]?.script || "");
 
             setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
+            setHasGenerated(true); // <-- prevent future "Ready to generate?" prompts
           } catch (err) {
             console.error("generation failed:", err);
             setError("Generation failed. Please try again.");
@@ -551,10 +573,14 @@ export default function FormPage() {
         return;
       }
 
-      // Any other message here → treat as side chat: answer then re-prompt
-      const reply = await askGPT(value);
-      if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
-      setChatHistory(ch => [...ch, { from: "gpt", text: "Ready to generate your campaign? (yes/no)" }]);
+      // Any other side chat after final stage
+      if (hasGenerated) {
+        // Already generated → answer but do NOT re-prompt "ready to generate"
+        await handleSideChat(value, null);
+      } else {
+        // Not yet generated → answer then re-prompt (unless cap hit inside handler)
+        await handleSideChat(value, "Ready to generate your campaign? (yes/no)");
+      }
       return;
     }
 
@@ -562,9 +588,7 @@ export default function FormPage() {
     // IN-FLOW SIDE-CHAT (questions or wow-type statements)
     // =========================
     if (currentQ && isLikelySideChat(value, currentQ)) {
-      const reply = await askGPT(value);
-      if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
-      setChatHistory(ch => [...ch, { from: "gpt", text: `Ready for the next question?\n${currentQ.question}` }]);
+      await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
       return;
     }
 
