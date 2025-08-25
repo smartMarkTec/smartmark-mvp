@@ -229,6 +229,35 @@ function isLikelyQuestion(s) {
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
+// New: detect side-chatty statements (wow/never/amazing/etc.) to answer then re-prompt
+function isLikelySideStatement(s) {
+  const t = (s || "").trim().toLowerCase();
+  const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
+  const hasBang = t.includes("!");
+  return sentimental.test(t) || hasBang;
+}
+// Decide if this input should be treated as side chat (not captured as an answer)
+function isLikelySideChat(s, currentQ) {
+  if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
+
+  // Step-specific checks to avoid blocking valid answers
+  const t = (s || "").trim();
+  if (!currentQ) return false;
+
+  if (currentQ.key === "url") {
+    // URL step: if no URL and it's longer commentary, treat as side chat
+    const hasUrl = !!extractFirstUrl(t);
+    return !hasUrl && t.split(/\s+/).length > 3;
+  }
+  if (currentQ.key === "hasOffer") {
+    return !/^(yes|no|y|n)$/i.test(t);
+  }
+  // For short expected answers (industry/businessName), if it's a long sentence, probably side chat
+  if (currentQ.key === "industry" || currentQ.key === "businessName") {
+    return t.length > 80; // long message → likely side comment, not the concise answer
+  }
+  return false;
+}
 
 // =========== Main Component ============
 export default function FormPage() {
@@ -378,7 +407,7 @@ export default function FormPage() {
   function handleImageClick(url) { setShowModal(true); setModalImg(url); }
   function handleModalClose() { setShowModal(false); setModalImg(""); }
 
-  // ---- Ask OpenAI (used only for side questions) ----
+  // ---- Ask OpenAI (used for side chat & FAQs) ----
   async function askGPT(userText) {
     try {
       const history = chatHistory.slice(-8).map(m => ({
@@ -468,17 +497,9 @@ export default function FormPage() {
     const currentQ = CONVO_QUESTIONS[step];
 
     // =========================
-    // FINAL STAGE SIDE-QUESTIONS
+    // FINAL STAGE SIDE-CHAT
     // =========================
     if (step >= CONVO_QUESTIONS.length) {
-      // If the user asks a question here, answer it, then re-prompt to generate
-      if (isLikelyQuestion(value)) {
-        const reply = await askGPT(value);
-        if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
-        setChatHistory(ch => [...ch, { from: "gpt", text: "Ready to generate your campaign? (yes/no)" }]);
-        return;
-      }
-      // If they say yes/generate, proceed
       if (isGenerateTrigger(value)) {
         setLoading(true);
         setGenerating(true);
@@ -529,15 +550,18 @@ export default function FormPage() {
         }, 400);
         return;
       }
-      // Otherwise, gently nudge to confirm or clarify
-      setChatHistory(ch => [...ch, { from: "gpt", text: "Please type 'yes' to generate, or tell me what you'd like to change." }]);
+
+      // Any other message here → treat as side chat: answer then re-prompt
+      const reply = await askGPT(value);
+      if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
+      setChatHistory(ch => [...ch, { from: "gpt", text: "Ready to generate your campaign? (yes/no)" }]);
       return;
     }
 
     // =========================
-    // IN-FLOW SIDE-QUESTIONS
+    // IN-FLOW SIDE-CHAT (questions or wow-type statements)
     // =========================
-    if (currentQ && isLikelyQuestion(value)) {
+    if (currentQ && isLikelySideChat(value, currentQ)) {
       const reply = await askGPT(value);
       if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
       setChatHistory(ch => [...ch, { from: "gpt", text: `Ready for the next question?\n${currentQ.question}` }]);
@@ -550,7 +574,7 @@ export default function FormPage() {
     if (currentQ) {
       let answerToSave = value;
 
-      // Robust URL capture for the website question
+      // Robust URL capture for the website question (preserves scraping flow)
       if (currentQ.key === "url") {
         const firstUrl = extractFirstUrl(value);
         if (firstUrl) answerToSave = firstUrl;
