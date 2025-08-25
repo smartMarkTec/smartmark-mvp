@@ -337,6 +337,7 @@ function chooseTemplate(seedStr = '') {
 }
 
 // ---------- overlay builder (varied templates, generic-safe copy) ----------
+
 async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
   const { category } = mapIndustry(answers?.industry || '');
   const brand = (answers?.businessName || '').toUpperCase().slice(0, 30);
@@ -418,8 +419,9 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
           style="paint-order: stroke; stroke: #ffffff44; stroke-width: 0.8;">${escSVG(headline)}</text>
     <g>
       <rect x="${W/2-150}" y="200" width="300" height="40" rx="20" fill="none" stroke="${LIGHT}" stroke-width="2"/>
+      <!-- CTA size +2px (20 -> 22) -->
       <text x="${W/2}" y="229" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-            font-size="20" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
+            font-size="22" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
     </g>
     ${brand ? `<text x="30" y="${H-24}" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
   ` : ''}
@@ -428,8 +430,9 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
     <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+    <!-- CTA size +2px (20 -> 22) -->
     <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
-          font-size="20" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
+          font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
     ${brand ? `<text x="40" y="52" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffffcc">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
@@ -439,8 +442,9 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <text x="${W/2}" y="220" text-anchor="middle" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="1.5"
           style="paint-order: stroke; stroke: #00000055; stroke-width: 1.2;">${escSVG(headline)}</text>
+    <!-- CTA size +2px (22 -> 24) -->
     <text x="${W/2}" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-          font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
+          font-size="24" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
     ${brand ? `<text x="${W-30}" y="${H-24}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
@@ -448,8 +452,9 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <polygon points="0,0 ${W*0.58},0 ${W*0.42},160 0,160" fill="${ACCENT_A}"/>
     <text x="28" y="108" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="#0b1417" letter-spacing="2">${escSVG(headline)}</text>
+    <!-- CTA size +2px (14 -> 16) -->
     <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-          font-size="14" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
+          font-size="16" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
     ${brand ? `<text x="${W-30}" y="38" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b1417">${escSVG(brand)}</text>` : ''}
   ` : ''}
 </svg>`;
@@ -460,6 +465,7 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   fs.writeFileSync(path.join(outDir, file), await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer());
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
+
 
 // ---------- image endpoints ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
