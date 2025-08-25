@@ -223,9 +223,7 @@ function extractFirstUrl(s = "") {
 }
 function isLikelyQuestion(s) {
   const t = (s || "").trim().toLowerCase();
-  // If message is just a URL, it's not a question even if it contains '?'
   if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
-  // Look for question marks OUTSIDE of URLs
   const textWithoutUrls = stripUrls(t);
   const hasQMark = textWithoutUrls.includes("?");
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
@@ -466,10 +464,79 @@ export default function FormPage() {
       }
     }
 
-    // Current question
+    // Current question object (if any)
     const currentQ = CONVO_QUESTIONS[step];
 
-    // In-flow: if user asks a side question → answer + re-prompt SAME question; do NOT advance or record
+    // =========================
+    // FINAL STAGE SIDE-QUESTIONS
+    // =========================
+    if (step >= CONVO_QUESTIONS.length) {
+      // If the user asks a question here, answer it, then re-prompt to generate
+      if (isLikelyQuestion(value)) {
+        const reply = await askGPT(value);
+        if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
+        setChatHistory(ch => [...ch, { from: "gpt", text: "Ready to generate your campaign? (yes/no)" }]);
+        return;
+      }
+      // If they say yes/generate, proceed
+      if (isGenerateTrigger(value)) {
+        setLoading(true);
+        setGenerating(true);
+        setChatHistory(ch => [...ch, { from: "gpt", text: "AI generating..." }]);
+
+        setTimeout(async () => {
+          const tokenA = getRandomString();
+          const tokenB = getRandomString();
+
+          try {
+            const [data, img1, img2, vid1, vid2] = await Promise.all([
+              fetch(`${API_BASE}/generate-campaign-assets`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ answers })
+              }).then(safeJson).catch(() => ({})),
+              fetchImageOnce(tokenA),
+              fetchImageOnce(tokenB),
+              fetchVideoOnce(tokenA),
+              fetchVideoOnce(tokenB)
+            ]);
+
+            setResult({
+              headline: data?.headline || "",
+              body: data?.body || "",
+              image_overlay_text: data?.image_overlay_text || ""
+            });
+
+            const imgs = [img1, img2].filter(Boolean).slice(0, 2);
+            setImageUrls(imgs);
+            setActiveImage(0);
+            setImageUrl(imgs[0] || "");
+
+            const vids = [vid1, vid2].filter(v => v && v.url).slice(0, 2);
+            setVideoItems(vids);
+            setActiveVideo(0);
+            setVideoUrl(vids[0]?.url || "");
+            setVideoScript(vids[0]?.script || "");
+
+            setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
+          } catch (err) {
+            console.error("generation failed:", err);
+            setError("Generation failed. Please try again.");
+          } finally {
+            setGenerating(false);
+            setLoading(false);
+          }
+        }, 400);
+        return;
+      }
+      // Otherwise, gently nudge to confirm or clarify
+      setChatHistory(ch => [...ch, { from: "gpt", text: "Please type 'yes' to generate, or tell me what you'd like to change." }]);
+      return;
+    }
+
+    // =========================
+    // IN-FLOW SIDE-QUESTIONS
+    // =========================
     if (currentQ && isLikelyQuestion(value)) {
       const reply = await askGPT(value);
       if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
@@ -477,63 +544,13 @@ export default function FormPage() {
       return;
     }
 
-    // If all questions done and user says 'generate' → go generate
-    if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
-      setLoading(true);
-      setGenerating(true);
-      setChatHistory(ch => [...ch, { from: "gpt", text: "AI generating..." }]);
-
-      setTimeout(async () => {
-        const tokenA = getRandomString();
-        const tokenB = getRandomString();
-
-        try {
-          const [data, img1, img2, vid1, vid2] = await Promise.all([
-            fetch(`${API_BASE}/generate-campaign-assets`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ answers })
-            }).then(safeJson).catch(() => ({})),
-            fetchImageOnce(tokenA),
-            fetchImageOnce(tokenB),
-            fetchVideoOnce(tokenA),
-            fetchVideoOnce(tokenB)
-          ]);
-
-          setResult({
-            headline: data?.headline || "",
-            body: data?.body || "",
-            image_overlay_text: data?.image_overlay_text || ""
-          });
-
-          const imgs = [img1, img2].filter(Boolean).slice(0, 2);
-          setImageUrls(imgs);
-          setActiveImage(0);
-          setImageUrl(imgs[0] || "");
-
-          const vids = [vid1, vid2].filter(v => v && v.url).slice(0, 2);
-          setVideoItems(vids);
-          setActiveVideo(0);
-          setVideoUrl(vids[0]?.url || "");
-          setVideoScript(vids[0]?.script || "");
-
-          setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
-        } catch (err) {
-          console.error("generation failed:", err);
-          setError("Generation failed. Please try again.");
-        } finally {
-          setGenerating(false);
-          setLoading(false);
-        }
-      }, 400);
-      return;
-    }
-
+    // =========================
     // Normal Q&A capture (record answer + advance)
+    // =========================
     if (currentQ) {
       let answerToSave = value;
 
-      // Be robust for URL question: extract a URL if present (so query '?' won't trip logic)
+      // Robust URL capture for the website question
       if (currentQ.key === "url") {
         const firstUrl = extractFirstUrl(value);
         if (firstUrl) answerToSave = firstUrl;
