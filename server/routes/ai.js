@@ -11,12 +11,11 @@ const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
 const child_process = require('child_process');
 const util = require('util');
-
 const exec = util.promisify(child_process.exec);
 
-// ----------------- FB helpers -----------------
 const { getFbUserToken } = require('../tokenStore');
 
+// ---------- helpers ----------
 function absolutePublicUrl(relativePath) {
   const base = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
@@ -36,15 +35,21 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data; // { id }
 }
 
-// ----------------- Config / OpenAI -----------------
-const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+// ---------- OpenAI ----------
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// Quick ping
+// ---------- constants ----------
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+const PEXELS_BASE_URL = 'https://api.pexels.com/v1/search';
+const PEXELS_VIDEO_BASE = 'https://api.pexels.com/videos/search';
+
+const TTS_VOICE = 'alloy';
+
+// quick ping
 router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
 
-// ----------------- Training context -----------------
+// ---------- training context ----------
 const DATA_DIR = path.join(__dirname, '../data');
 const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
 const MAX_FILE_MB = 1.5;
@@ -62,7 +67,7 @@ function loadTrainingContext() {
       } catch { return false; }
     });
 
-  let context = '';
+  let ctx = '';
   for (const f of files) {
     try {
       const ext = path.extname(f).toLowerCase();
@@ -70,27 +75,19 @@ function loadTrainingContext() {
       if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text)); } catch {} }
       if (!text.trim()) continue;
       const block = `\n\n### SOURCE: ${path.basename(f)}\n${text}\n`;
-      if ((context.length + block.length) <= MAX_TOTAL_CHARS) {
-        context += block;
-        console.log(`[training] loaded: ${path.basename(f)} (${block.length} chars)`);
-      }
-    } catch (e) {
-      console.warn(`[training] failed: ${path.basename(f)} → ${e.message}`);
-    }
+      if (ctx.length + block.length <= MAX_TOTAL_CHARS) ctx += block;
+    } catch {}
   }
-  if (!context) console.warn('[training] no training context loaded.');
-  return context.trim();
+  return ctx.trim();
 }
 let customContext = loadTrainingContext();
 
-// ----------------- Scraper -----------------
+// ---------- scraper ----------
 async function getWebsiteText(url) {
   try {
     const clean = String(url || '').trim();
     if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
-    const { data, headers } = await axios.get(clean, {
-      timeout: 7000, maxRedirects: 3, validateStatus: s => s < 400
-    });
+    const { data, headers } = await axios.get(clean, { timeout: 7000, maxRedirects: 3, validateStatus: s => s < 400 });
     if (!headers['content-type']?.includes('text/html')) throw new Error('Not an HTML page');
 
     const body = String(data)
@@ -100,23 +97,18 @@ async function getWebsiteText(url) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    const low = body.toLowerCase();
-    if (low.includes('cloudflare') || low.includes('access denied') || body.length < 200) {
-      throw new Error('Blocked or insufficient content');
-    }
+    if (body.length < 200 || /cloudflare|access denied/i.test(body)) throw new Error('blocked/short');
     return body.slice(0, 3500);
   } catch (e) {
-    console.warn('Could not scrape website text:', url || '(empty)', e.message);
+    console.warn('scrape fail:', url || '(empty)', e.message);
     return '';
   }
 }
 
-// ----------------- Copy & audience -----------------
+// ---------- copy gen ----------
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = '', businessName = '', url = '' } = req.body;
-  if (!description && !businessName && !url) {
-    return res.status(400).json({ error: 'Please provide at least a description.' });
-  }
+  if (!description && !businessName && !url) return res.status(400).json({ error: 'Please provide at least a description.' });
 
   let prompt =
 `You are an expert direct-response ad copywriter.
@@ -134,11 +126,12 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
     });
     res.json({ adCopy: r.choices?.[0]?.message?.content?.trim() || '' });
   } catch (e) {
-    console.error('Ad Copy Generation Error:', e?.response?.data || e.message);
+    console.error('adcopy fail:', e?.response?.data || e.message);
     res.status(500).json({ error: 'Failed to generate ad copy' });
   }
 });
 
+// ---------- audience helpers ----------
 const DEFAULT_AUDIENCE = {
   brandName: '', demographic: '', ageRange: '18-65',
   location: 'US', interests: 'Business, Restaurants', fbInterestIds: [], summary: ''
@@ -243,9 +236,7 @@ Website homepage text:
   }
 });
 
-// ----------------- Images (varied premium overlays) -----------------
-const PEXELS_BASE_URL = 'https://api.pexels.com/v1/search';
-
+// ---------- image search keyword map ----------
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
@@ -257,27 +248,89 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['electronics','phone','laptop','tech'], keyword: 'tech gadgets' },
   { match: ['home','kitchen','decor'], keyword: 'modern home' },
   { match: ['art','painting','craft'], keyword: 'painting art' },
-  { match: ['coffee','cafe'], keyword: 'coffee shop' }
+  { match: ['coffee','cafe'], keyword: 'coffee shop' },
 ];
 
 function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
-  for (const row of IMAGE_KEYWORD_MAP) {
-    if (row.match.some(m => input.includes(m))) return row.keyword;
-  }
+  for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
 
+// ---------- category map for copy fallbacks ----------
+const INDUSTRY_MAP = [
+  { names: ['clothing','fashion','accessory','apparel','shoes','jewelry','watches','bags','handbags','backpacks','luggage','hats','sunglasses'], category: 'Fashion & Accessories', pexels: 'fashion clothing accessories' },
+  { names: ['makeup','cosmetics','skincare','haircare','perfume','fragrance','grooming','beauty'], category: 'Beauty & Personal Care', pexels: 'makeup beauty skincare' },
+  { names: ['gym','fitness','workout','sports','exercise','weights','protein','supplement','outdoor','yoga','biking','running','health coaching','wellness','coach','personal trainer'], category: 'Fitness, Sports & Outdoors', pexels: 'fitness gym workout exercise' },
+  { names: ['furniture','home','decor','kitchen','appliance','bedding','bath','art','lamp','rugs','cookware','table','sofa','bed'], category: 'Home, Kitchen & Decor', pexels: 'home kitchen decor' },
+  { names: ['phone','tablet','laptop','computer','electronics','gadgets','wearable','smartwatch','headphones','camera','drone','tech','device'], category: 'Electronics & Gadgets', pexels: 'electronics gadgets tech' },
+  { names: ['snack','food','meal kit','grocery','coffee','tea','alcohol','wine','beer','spirits','beverage','drink'], category: 'Food & Beverage', pexels: 'food drink meal' },
+  { names: ['baby','kids','toys','stroller','child','children','pet','dog','cat','animal','pet food','pet toy'], category: 'Baby, Kids & Pets', pexels: 'kids baby pets toys' },
+  { names: ['vitamin','supplement','medical','health','wellness','mental','therapy','life coach','coaching','self-care','personal development'], category: 'Health & Wellness', pexels: 'wellness health happy' },
+  { names: ['art','craft','diy','music','instrument','collectible','hobby','painting','drawing'], category: 'Arts, Crafts & Hobbies', pexels: 'art craft hobby' },
+  { names: ['course','ebook','subscription','box','event','ticket','digital','learning','online'], category: 'Digital, Subscription & Services', pexels: 'digital online learning' }
+];
+function mapIndustry(inputRaw = '') {
+  const input = String(inputRaw || '').toLowerCase();
+  for (const cat of INDUSTRY_MAP) if (cat.names.some(keyword => input.includes(keyword))) return { category: cat.category, pexels: cat.pexels };
+  return { category: 'General E-Commerce', pexels: 'shopping ecommerce online' };
+}
+
+// ---------- headline/cta fallbacks + sanity ----------
+const FALLBACK_HEADLINES = {
+  'Fashion & Accessories': ['Everyday Style', 'Fresh Looks', 'Modern Essentials', 'New Season Pieces', 'Wardrobe Refresh', 'Timeless Style'],
+  'Beauty & Personal Care': ['Glow Every Day', 'Skin First', 'Beauty That Works', 'Fresh Routine', 'Care You Feel'],
+  'Fitness, Sports & Outdoors': ['Move Better', 'Train Smarter', 'Ready. Set. Go.', 'Strong Starts Here'],
+  'Home, Kitchen & Decor': ['Make Home Yours', 'Cozy Looks Good', 'Refresh Your Space', 'Simple Upgrades'],
+  'Electronics & Gadgets': ['Smart Starts Here', 'Upgrade Your Tech', 'Power Your Day', 'Next-Gen Gear'],
+  'Food & Beverage': ['Crave Worthy', 'Good Food Fast', 'Taste This', 'Delicious Delivered'],
+  'Baby, Kids & Pets': ['For Little Moments', 'Happy Pets', 'Playtime Ready', 'Family Favorites'],
+  'Health & Wellness': ['Feel Your Best', 'Wellness That Works', 'Small Steps, Big Wins'],
+  'Arts, Crafts & Hobbies': ['Create Today', 'Make Something', 'Craft Your Way'],
+  'Digital, Subscription & Services': ['Unlock More', 'Join In', 'Get Access'],
+  'General E-Commerce': ['Find What You Love', 'Great Picks Today', 'Everyday Essentials']
+};
+const FALLBACK_CTA = {
+  'Fashion & Accessories': ['Shop New', 'See The Edit', 'Explore'],
+  'Beauty & Personal Care': ['Start Now', 'See Routine', 'Explore'],
+  'Fitness, Sports & Outdoors': ['Start Today', 'Get Moving', 'Explore'],
+  'Home, Kitchen & Decor': ['See More', 'Explore', 'Shop Home'],
+  'Electronics & Gadgets': ['Upgrade Now', 'See More', 'Explore'],
+  'Food & Beverage': ['Order Now', 'Taste It', 'See Menu'],
+  'Baby, Kids & Pets': ['Shop Now', 'See Picks', 'Explore'],
+  'Health & Wellness': ['Start Now', 'Learn More', 'Explore'],
+  'Arts, Crafts & Hobbies': ['Create Now', 'See Kits', 'Explore'],
+  'Digital, Subscription & Services': ['Join Now', 'Start Free', 'Explore'],
+  'General E-Commerce': ['Shop Now', 'Learn More', 'Explore']
+};
+function seededPick(arr, seed) {
+  let h = 0; for (const c of String(seed || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return arr[h % arr.length];
+}
+function cleanHeadline(h) {
+  h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (!h) return '';
+  // disallow awkward combos like “UNISEX ... FORWARD”
+  if (/unisex/i.test(h) && /forward/i.test(h)) return '';
+  // enforce 2–4 words and natural nouns
+  const words = h.split(' ');
+  if (words.length < 2 || words.length > 5) return '';
+  const containsCommonNoun = /\b(style|fashion|beauty|skin|gear|home|decor|tech|gadget|food|taste|pets?|kids?|wellness|art|craft|tools?|deals?|gifts?|essentials?|sale|collection|edit|look|routine)\b/i.test(h);
+  if (!containsCommonNoun) return '';
+  return h.toUpperCase();
+}
+function cleanCTA(c) {
+  c = String(c || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (!c) return '';
+  let words = c.split(' ').slice(0, 3).join(' ');
+  if (!/[.!?]$/.test(words)) words += '!';
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 function escSVG(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  return String(s || '')
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
-
-function chooseTemplate(seedStr = '') {
-  // 1..4 stable on seed
-  let hash = 0; for (const c of String(seedStr)) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
-  return (hash % 4) + 1;
-}
-
 function fontForHeadline(text) {
   const len = (text || '').length;
   if (len <= 14) return 56;
@@ -285,65 +338,73 @@ function fontForHeadline(text) {
   if (len <= 26) return 44;
   return 38;
 }
+function chooseTemplate(seedStr = '') {
+  let h = 0; for (const c of String(seedStr)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return (h % 4) + 1;
+}
 
+// ---------- image overlay builder (premium, varied, copy-sane) ----------
 async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
-  // Headline + CTA (2–4 words / 2–3 words — CTA presented as label, not a clickable-looking button)
+  const { category } = mapIndustry(answers?.industry || '');
+  const brand = (answers?.businessName || '').toUpperCase().slice(0, 30);
+
+  // derive context for prompt
   let websiteKeywords = [];
   if (url && /^https?:\/\//i.test(url)) {
     try {
-      const websiteText = await getWebsiteText(url);
-      websiteKeywords = await extractKeywords(websiteText);
+      const t = await getWebsiteText(url);
+      websiteKeywords = await extractKeywords(t);
     } catch {}
   }
   const keysToShow = ['industry','businessName','url', ...Object.keys(answers).filter(k => !['industry','businessName','url'].includes(k))];
   const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
 
-  const prompt = `
+  // ask model
+  let headline = '';
+  let cta = '';
+  try {
+    const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-Design copy for a stylish ad overlay (no button look).
-- Headline: 2–4 words, brand-forward, compelling.
-- CTA label: 2–3 words ending with "!".
-
-Return ONLY JSON: {"headline":"...","cta":"..."}.
+Write tasteful overlay copy for a stock ad image (NO weird phrasing).
+- Headline: 2–4 words, natural, brand-suitable.
+- CTA label: 2–3 words, ends with "!". Avoid marketing cliches if they read awkward.
+Return ONLY JSON:
+{"headline":"...","cta":"..."}
 BUSINESS:
 ${formInfo}
-KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
+WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
 
-  let headline = 'NEW ARRIVALS';
-  let cta = 'SHOP NOW!';
-  try {
     const r = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
-        { role: 'system', content: 'Output ONLY valid JSON with keys headline, cta.' },
+        { role: 'system', content: 'Output ONLY valid JSON with keys headline and cta. No explanations.' },
         { role: 'user', content: prompt }
       ],
       max_tokens: 60,
-      temperature: 0.2
+      temperature: 0.3
     });
     const raw = r.choices?.[0]?.message?.content?.trim() || '';
     const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-    headline = (parsed.headline || headline).toUpperCase();
-    cta = (parsed.cta || cta).toUpperCase();
+    headline = cleanHeadline(parsed.headline);
+    cta = cleanCTA(parsed.cta);
   } catch {}
 
-  // Prepare base image
+  // sensible fallbacks
+  if (!headline) headline = seededPick(FALLBACK_HEADLINES[category] || FALLBACK_HEADLINES['General E-Commerce'], brand || seed || Date.now()).toUpperCase();
+  if (!cta) cta = cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], brand || seed || Date.now()));
+
+  // img base
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
   const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
   const base64 = baseBuf.toString('base64');
 
-  // Accent palette
   const ACCENT_A = '#14e7b9';
-  const ACCENT_B = '#10bfa0';
   const DARK = '#0b0d10';
   const LIGHT = '#f2f5f6';
-
   const fontSize = fontForHeadline(headline);
-  const brand = (answers.businessName || '').toUpperCase().slice(0, 30);
-  const t = chooseTemplate(seed || answers?.businessName || headline || Date.now());
+  const t = chooseTemplate(seed || brand || headline || Date.now());
 
-  // 4 tasteful templates, all non-clickable CTA presentations
   const svg =
 `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -360,8 +421,8 @@ KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   </defs>
 
   <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
+
   ${t === 1 ? `
-    <!-- Template 1: Angled ribbon + small outline CTA tag -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gradB)"/>
     <g transform="skewX(-8)">
       <rect x="24" y="70" rx="18" width="${W-48}" height="120" fill="url(#gradA)" filter="url(#shadow)"/>
@@ -378,44 +439,31 @@ KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   ` : ''}
 
   ${t === 2 ? `
-    <!-- Template 2: Bottom gradient band, headline left, CTA tag right -->
-    <rect x="0" y="0" width="${W}" height="${H}" fill="#00000033"/>
     <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
     <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-    <g>
-      <rect x="${W-260}" y="${H-84}" width="220" height="42" rx="21" fill="none" stroke="${ACCENT_A}" stroke-width="3"/>
-      <text x="${W-150}" y="${H-56}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-            font-size="20" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
-    </g>
+    <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
+          font-size="20" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
     ${brand ? `<text x="40" y="52" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffffcc">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
   ${t === 3 ? `
-    <!-- Template 3: Frosted center card (no button), CTA underlined -->
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gradB)"/>
-    <g filter="url(#shadow)">
-      <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff22"/>
-      <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff11" filter="url(#blurGlass)"/>
-    </g>
+    <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff22" filter="url(#shadow)"/>
+    <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff11" filter="url(#blurGlass)"/>
     <text x="${W/2}" y="220" text-anchor="middle" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="1.5"
           style="paint-order: stroke; stroke: #00000055; stroke-width: 1.2;">${escSVG(headline)}</text>
     <text x="${W/2}" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-          font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
+          font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
     ${brand ? `<text x="${W-30}" y="${H-24}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
   ${t === 4 ? `
-    <!-- Template 4: Diagonal accent banner -->
     <polygon points="0,0 ${W*0.58},0 ${W*0.42},160 0,160" fill="${ACCENT_A}"/>
     <text x="28" y="108" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="#0b1417" letter-spacing="2">${escSVG(headline)}</text>
-    <g>
-      <circle cx="${W-110}" cy="${H-78}" r="40" fill="#00000066" />
-      <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-            font-size="14" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
-    </g>
+    <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
+          font-size="14" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
     ${brand ? `<text x="${W-30}" y="38" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b1417">${escSVG(brand)}</text>` : ''}
   ` : ''}
 </svg>`;
@@ -431,22 +479,22 @@ KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
+// ---------- image endpoints ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
     const keyword = getImageKeyword(industry, url);
 
-    const perPage = 100;
     let photos = [];
     try {
       const r = await axios.get(PEXELS_BASE_URL, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: perPage, cb: Date.now() + (regenerateToken || '') },
+        params: { query: keyword, per_page: 100, cb: Date.now() + (regenerateToken || '') },
         timeout: 4800
       });
       photos = r.data.photos || [];
     } catch (e) {
-      console.error('Pexels fetch error:', e?.message || e);
+      console.error('Pexels img fetch error:', e?.message || e);
       return res.status(500).json({ error: 'Image search failed' });
     }
     if (!photos.length) return res.status(404).json({ error: 'No images found.' });
@@ -463,7 +511,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
       const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url, seed: regenerateToken || answers?.businessName || '' });
       finalUrl = publicUrl;
     } catch (e) {
-      console.warn('Overlay failed; using base image:', e.message);
+      console.warn('Overlay build fail; using base image:', e.message);
     }
 
     res.json({
@@ -475,16 +523,15 @@ router.post('/generate-image-from-prompt', async (req, res) => {
       usedIndex: idx
     });
   } catch (e) {
-    console.error('AI image generation error:', e?.message || e);
+    console.error('image route fail:', e?.message || e);
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
 
-// ----------------- Music utils (server/Music/music) -----------------
+// ---------- music utils (ensure server/Music/music) ----------
 function findMusicDir() {
-  // Explicitly cover your structure: server/Music/music
   const candidates = [
-    path.join(__dirname, '..', 'Music', 'music'), // <— your path
+    path.join(__dirname, '..', 'Music', 'music'), // your exact path
     path.join(__dirname, '..', 'music', 'music'),
     path.join(__dirname, '..', 'Music'),
     path.join(__dirname, '..', 'music'),
@@ -492,9 +539,7 @@ function findMusicDir() {
     path.join(__dirname, '..', '..', 'music', 'music')
   ];
   for (const p of candidates) {
-    try {
-      if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
-    } catch {}
+    try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p; } catch {}
   }
   return null;
 }
@@ -514,29 +559,8 @@ function pickMusicFile(keywords = []) {
   return path.join(base, files[0]);
 }
 
-// ----------------- Video generation -----------------
-const PEXELS_VIDEO_BASE = 'https://api.pexels.com/videos/search';
-const TTS_VOICE = 'alloy';
-
+// ---------- video generation ----------
 const seedrandom = require('seedrandom');
-
-const INDUSTRY_MAP = [
-  { names: ['clothing','fashion','accessory','apparel','shoes','jewelry','watches','bags','handbags','backpacks','luggage','hats','sunglasses'], category: 'Fashion & Accessories', pexels: 'fashion clothing accessories' },
-  { names: ['makeup','cosmetics','skincare','haircare','perfume','fragrance','grooming','beauty'], category: 'Beauty & Personal Care', pexels: 'makeup beauty skincare' },
-  { names: ['gym','fitness','workout','sports','exercise','weights','protein','supplement','outdoor','yoga','biking','running','health coaching','wellness','coach','personal trainer'], category: 'Fitness, Sports & Outdoors', pexels: 'fitness gym workout exercise' },
-  { names: ['furniture','home','decor','kitchen','appliance','bedding','bath','art','lamp','rugs','cookware','table','sofa','bed'], category: 'Home, Kitchen & Decor', pexels: 'home kitchen decor' },
-  { names: ['phone','tablet','laptop','computer','electronics','gadgets','wearable','smartwatch','headphones','camera','drone','tech','device'], category: 'Electronics & Gadgets', pexels: 'electronics gadgets tech' },
-  { names: ['snack','food','meal kit','grocery','coffee','tea','alcohol','wine','beer','spirits','beverage','drink'], category: 'Food & Beverage', pexels: 'food drink meal' },
-  { names: ['baby','kids','toys','stroller','child','children','pet','dog','cat','animal','pet food','pet toy'], category: 'Baby, Kids & Pets', pexels: 'kids baby pets toys' },
-  { names: ['vitamin','supplement','medical','health','wellness','mental','therapy','life coach','coaching','self-care','personal development'], category: 'Health & Wellness', pexels: 'wellness health happy' },
-  { names: ['art','craft','diy','music','instrument','collectible','hobby','painting','drawing'], category: 'Arts, Crafts & Hobbies', pexels: 'art craft hobby' },
-  { names: ['course','ebook','subscription','box','event','ticket','digital','learning','online'], category: 'Digital, Subscription & Services', pexels: 'digital online learning' }
-];
-function mapIndustry(s = '') {
-  const t = String(s || '').toLowerCase();
-  for (const cat of INDUSTRY_MAP) if (cat.names.some(k => t.includes(k))) return { category: cat.category, pexels: cat.pexels };
-  return { category: 'General E-Commerce', pexels: 'shopping ecommerce online' };
-}
 
 function withTimeout(promise, ms, msg = 'Timeout') {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
@@ -547,7 +571,7 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
     const timeout = setTimeout(() => {
-      timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {} ; reject(new Error('Download timed out'));
+      timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {}; reject(new Error('Download timed out'));
     }, timeoutMs);
     axios({ url, method: 'GET', responseType: 'stream' })
       .then(resp => {
@@ -566,15 +590,9 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
       .catch(err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {}; reject(err); });
   });
 }
-function shuffleDet(arr, seed) {
-  const a = [...arr]; const r = seedrandom(seed);
-  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j]] = [a[i]]; }
-  return a;
-}
 
-// Short, varied CTAs (used only for video overlay text)
 const CTA_LIBRARY = {
-  'Fashion & Accessories': ['Shop New Styles', 'See The Look', 'Style Upgrade'],
+  'Fashion & Accessories': ['Shop New Styles', 'See The Edit', 'Style Upgrade'],
   'Beauty & Personal Care': ['Glow Up', 'Fresh Skin', 'New Routine'],
   'Fitness, Sports & Outdoors': ['Get Fit Fast', 'Start Training', 'Crush Goals'],
   'Home, Kitchen & Decor': ['Refresh Your Home', 'Upgrade Your Space', 'Make It Cozy'],
@@ -588,13 +606,12 @@ const CTA_LIBRARY = {
 };
 function pickCategoryCTA(category = 'General E-Commerce', seed = '') {
   const list = CTA_LIBRARY[category] || CTA_LIBRARY['General E-Commerce'];
-  const r = seedrandom(seed || String(Date.now()));
-  const choice = list[Math.floor(r() * list.length)] || 'Discover More';
+  let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const choice = list[h % list.length] || 'Discover More';
   const trimmed = choice.split(/\s+/).slice(0, 3).join(' ');
   return /!$/.test(trimmed) ? trimmed : (trimmed + '!');
 }
 
-// ----------------- Video route -----------------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -607,7 +624,7 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
-    // Tunables
+    // Tunables (keep loads snappy)
     const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5, FINAL: 15 };
     const TO = {
       PEXELS: +(process.env.VID_PEXELS_TIMEOUT_MS || 30000),
@@ -624,20 +641,19 @@ router.post('/generate-video-ad', async (req, res) => {
     const { category, pexels } = mapIndustry(productType);
     const overlayText = answers?.cta ? answers.cta : pickCategoryCTA(category, regenerateToken);
 
-    // Build search
-    let kw = [pexels];
-    if (productType && !pexels.includes(productType.toLowerCase())) kw.push(productType);
+    // Build/search terms
+    let termParts = [pexels];
+    if (productType && !pexels.includes(productType.toLowerCase())) termParts.push(productType);
     if (url && /^https?:\/\//i.test(url)) {
       try {
         const tx = await withTimeout(getWebsiteText(url), 8000, 'site kw timeout');
-        kw.push(...(await extractKeywords(tx)).slice(0, 2));
+        termParts.push(...(await extractKeywords(tx)).slice(0, 2));
       } catch {}
     }
-    kw = Array.from(new Set(kw.filter(Boolean)));
     const sanitize = s => String(s || '').toLowerCase().replace(/['"]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
-    const term = sanitize(kw.slice(0, 2).join(' ')) || sanitize(pexels) || 'shopping';
+    const term = sanitize([...new Set(termParts.filter(Boolean))].slice(0, 2).join(' ')) || 'shopping';
 
-    // Fetch pexels videos
+    // Fetch stock clips
     let clips = [];
     try {
       const r = await withTimeout(
@@ -646,7 +662,7 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       clips = r.data.videos || [];
     } catch (e) {
-      console.error('Pexels fetch failed', e?.response?.data || e.message);
+      console.error('Pexels vid fetch failed', e?.response?.data || e.message);
       return res.status(500).json({ error: 'Stock video fetch failed', detail: e.message });
     }
     if (!clips?.length) return res.status(404).json({ error: 'No stock videos found' });
@@ -663,18 +679,15 @@ router.post('/generate-video-ad', async (req, res) => {
     candidates = Array.from(new Set(candidates));
     if (candidates.length < 3) return res.status(404).json({ error: 'Not enough usable clips' });
 
-    const rseed = regenerateToken || `${Date.now()}_${Math.random()}`;
-    const shuffled = candidates.sort(() => 0.5 - Math.random()); // simple shuffle
-
     // Work dir
     const tmp = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
 
-    // Download + scale
+    // Download + scale 3 short clips
     const paths = [];
     let p = 0;
-    while (paths.length < 3 && p < shuffled.length) {
-      const src = shuffled[p++];
+    while (paths.length < 3 && p < candidates.length) {
+      const src = candidates[p++];
       const raw = path.join(tmp, `${uuidv4()}.mp4`);
       try {
         await withTimeout(downloadFileWithTimeout(src, raw, TO.DL, 6), TO.DL + 2000, 'download timeout');
@@ -696,7 +709,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
 
-    // Script (target ~11–13s so we can tempo-stretch close to 14s)
+    // Script (~11–13s spoken)
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products.\n` +
@@ -712,12 +725,7 @@ router.post('/generate-video-ad', async (req, res) => {
     let script = 'Discover what you love today. Try it now!';
     try {
       const r = await withTimeout(
-        openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 80,
-          temperature: 0.6
-        }),
+        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 80, temperature: 0.6 }),
         15000, 'OpenAI timeout'
       );
       script = r.choices?.[0]?.message?.content?.trim() || script;
@@ -734,37 +742,34 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
     }
 
-    // Probe voice duration
-    const ffprobe = async (file) => {
+    // Probe voice duration and tempo-stretch to ~14.0s
+    const probe = async (file) => {
       try {
-        const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
+        const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), 8000, 'ffprobe timeout');
         const s = parseFloat(stdout.trim());
         return isNaN(s) ? 0 : s;
       } catch { return 0; }
     };
-    let ttsDur = await ffprobe(ttsPath);
-
-    // Tempo-stretch voice to ~14.0s
+    let ttsDur = await probe(ttsPath);
     const targetVoice = 14.0;
     let voicePath = ttsPath;
     if (ttsDur > 0) {
-      let factor = targetVoice / ttsDur;        // >1 means we need slower speech → atempo expects speed, so use inverse
+      let factor = targetVoice / ttsDur; // >1 → slow down (atempo wants speed -> use 1/factor)
       factor = Math.max(0.85, Math.min(1.15, factor));
       if (Math.abs(factor - 1) > 0.03) {
         const adj = path.join(tmp, `${uuidv4()}_tempo.mp3`);
         try {
           const atempo = (1 / factor).toFixed(3);
-          await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo}" -c:a aac -b:a 160k "${adj}"`), TO.ATEMPO, 'atempo timeout');
+          await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo},apad=pad_dur=15" -c:a aac -b:a 160k "${adj}"`), 15000, 'atempo timeout');
           voicePath = adj;
-          ttsDur = await ffprobe(voicePath);
+          ttsDur = await probe(voicePath);
         } catch {}
       }
     }
 
-    // Concat/trim to exactly 15s
+    // Concat clips to exactly 15s
     const need = Math.max(1, Math.ceil(15 / 5));
     while (paths.length < need) paths.push(paths[paths.length - 1]);
-
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, paths.slice(0, need).map(pth => `file '${pth}'`).join('\n'));
 
@@ -775,22 +780,21 @@ router.post('/generate-video-ad', async (req, res) => {
     const trimmedPath = path.join(outDir, `${id}.trim.mp4`);
     const outPath = path.join(outDir, `${id}.mp4`);
 
-    await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
-    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t 15 -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
+    await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), 30000, 'concat timeout');
+    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t 15 -c copy "${trimmedPath}"`), 20000, 'trim timeout');
 
     // Overlay timing
-    const overlayStart = Math.max(0, 15 * 0.72).toFixed(2);
+    const overlayStart = (15 * 0.72).toFixed(2);
     const overlayEnd = Math.min(15, ttsDur + 1.0).toFixed(2);
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const safeTxt = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, ' ').replace(/'/g, '').replace(/[^A-Z0-9\s!]/g, '');
-
     const drawText =
       (fs.existsSync(fontfile)
         ? `drawtext=fontfile='${fontfile}':text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
         : `drawtext=text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
       );
 
-    // Music selection + proper mix
+    // Pick background music (server/Music/music) and MIX it audibly
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
@@ -800,33 +804,35 @@ router.post('/generate-video-ad', async (req, res) => {
         bgKeywords.push(...(await extractKeywords(tx)));
       }
     } catch {}
-    const bgMusicPath = pickMusicFile(bgKeywords); // looks in server/Music/music
+    const bgMusicPath = pickMusicFile(bgKeywords);
+    console.log('BG music file:', bgMusicPath || 'NONE (voice only)');
 
     const musicInput = bgMusicPath ? ` -stream_loop -1 -i "${bgMusicPath}"` : '';
+    // make bg clearly audible but duck under voice
     let filterComplex, mapArgs;
     if (bgMusicPath) {
       filterComplex = `[0:v]${drawText}[v];` +
-                      `[1:a]volume=1.0[a_vo];` +
-                      `[2:a]volume=0.25[a_bg];` +
-                      `[a_bg][a_vo]sidechaincompress=threshold=0.2:ratio=8:attack=5:release=150[a_bgduck];` +
-                      `[a_bgduck][a_vo]amix=inputs=2:normalize=0:duration=longest[a_mix]`;
+                      `[1:a]volume=1.0,apad=pad_dur=15[a_vo];` +
+                      `[2:a]volume=0.55,highpass=f=60,lowpass=f=12000[a_bg];` +
+                      `[a_bg][a_vo]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[a_duck];` +
+                      `[a_duck][a_vo]amix=inputs=2:weights=1 1:duration=first:normalize=1[a_mix]`;
       mapArgs = `-map "[v]" -map "[a_mix]"`;
     } else {
-      filterComplex = `[0:v]${drawText}[v];[1:a]volume=1.0[a_mix]`;
+      filterComplex = `[0:v]${drawText}[v];[1:a]volume=1.0,apad=pad_dur=15[a_mix]`;
       mapArgs = `-map "[v]" -map "[a_mix]"`;
     }
 
     await withTimeout(
       exec(
         `ffmpeg -y -i "${trimmedPath}" -i "${voicePath}"${musicInput} ` +
-        `-filter_complex "${filterComplex}" ${mapArgs} -shortest ` +
-        `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
+        `-filter_complex "${filterComplex}" ${mapArgs} ` +
+        `-shortest -c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
         `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
       ),
-      TO.OVERMUX, 'overlay+mux timeout'
+      90000, 'overlay+mux timeout'
     );
 
-    // ready?
+    // file ready?
     let ok = false;
     for (let i = 0; i < 40; i++) {
       try { if (fs.statSync(outPath).size > 200000) { ok = true; break; } } catch {}
@@ -834,7 +840,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!ok) return res.status(500).json({ error: 'Video output not ready' });
 
-    // Cleanup
+    // cleanup
     [concatPath, trimmedPath, ...paths, listPath].forEach(pth => { try { fs.unlinkSync(pth); } catch {} });
     if (voicePath !== ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
     try { fs.unlinkSync(voicePath); } catch {}
@@ -842,7 +848,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const publicVideoUrl = `/generated/${id}.mp4`;
     const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
-    // Optional upload to FB
+    // optional FB upload
     let fbVideoId = null;
     try {
       if (fbAdAccountId && token) {
@@ -850,7 +856,7 @@ router.post('/generate-video-ad', async (req, res) => {
         fbVideoId = up?.id || null;
       }
     } catch (e) {
-      console.error('FB advideos upload failed:', e?.response?.data || e.message);
+      console.error('FB upload fail:', e?.response?.data || e.message);
     }
 
     return res.json({
@@ -863,10 +869,8 @@ router.post('/generate-video-ad', async (req, res) => {
       voice: TTS_VOICE
     });
   } catch (err) {
-    console.error('Video route error:', err);
-    if (!res.headersSent) {
-      return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
-    }
+    console.error('video route error:', err);
+    if (!res.headersSent) return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
 });
 
