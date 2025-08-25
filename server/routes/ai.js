@@ -336,8 +336,7 @@ function chooseTemplate(seedStr = '') {
   return (h % 4) + 1;
 }
 
-// ---------- overlay builder (varied templates, generic-safe copy) ----------
-
+// ---------- overlay builder (varied templates, CTA slightly larger) ----------
 async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
   const { category } = mapIndustry(answers?.industry || '');
   const brand = (answers?.businessName || '').toUpperCase().slice(0, 30);
@@ -419,7 +418,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
           style="paint-order: stroke; stroke: #ffffff44; stroke-width: 0.8;">${escSVG(headline)}</text>
     <g>
       <rect x="${W/2-150}" y="200" width="300" height="40" rx="20" fill="none" stroke="${LIGHT}" stroke-width="2"/>
-      <!-- CTA size +2px (20 -> 22) -->
       <text x="${W/2}" y="229" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
             font-size="22" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
     </g>
@@ -430,7 +428,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
     <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-    <!-- CTA size +2px (20 -> 22) -->
     <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
           font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
     ${brand ? `<text x="40" y="52" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffffcc">${escSVG(brand)}</text>` : ''}
@@ -442,7 +439,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <text x="${W/2}" y="220" text-anchor="middle" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="1.5"
           style="paint-order: stroke; stroke: #00000055; stroke-width: 1.2;">${escSVG(headline)}</text>
-    <!-- CTA size +2px (22 -> 24) -->
     <text x="${W/2}" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
           font-size="24" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
     ${brand ? `<text x="${W-30}" y="${H-24}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
@@ -452,7 +448,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <polygon points="0,0 ${W*0.58},0 ${W*0.42},160 0,160" fill="${ACCENT_A}"/>
     <text x="28" y="108" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="#0b1417" letter-spacing="2">${escSVG(headline)}</text>
-    <!-- CTA size +2px (14 -> 16) -->
     <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
           font-size="16" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
     ${brand ? `<text x="${W-30}" y="38" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b1417">${escSVG(brand)}</text>` : ''}
@@ -466,53 +461,10 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
-
-// ---------- image endpoints ----------
-router.post('/generate-image-from-prompt', async (req, res) => {
-  try {
-    const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
-    const keyword = getImageKeyword(industry, url);
-
-    let photos = [];
-    try {
-      const r = await axios.get(PEXELS_BASE_URL, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 100, cb: Date.now() + (regenerateToken || '') },
-        timeout: 4800
-      });
-      photos = r.data.photos || [];
-    } catch (e) {
-      console.error('Pexels img fetch error:', e?.message || e);
-      return res.status(500).json({ error: 'Image search failed' });
-    }
-    if (!photos.length) return res.status(404).json({ error: 'No images found.' });
-
-    const idx = regenerateToken
-      ? Math.abs([...regenerateToken].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)) % photos.length
-      : Math.floor(Math.random() * photos.length);
-
-    const img = photos[idx];
-    const baseUrl = img.src.large2x || img.src.original || img.src.large;
-
-    let finalUrl = baseUrl;
-    try {
-      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url, seed: regenerateToken || answers?.businessName || '' });
-      finalUrl = publicUrl;
-    } catch (e) {
-      console.warn('Overlay build fail; using base image:', e.message);
-    }
-
-    res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
-  } catch (e) {
-    console.error('image route fail:', e?.message || e);
-    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
-  }
-});
-
 // ---------- music (server/Music/music) ----------
 function findMusicDir() {
   const candidates = [
-    path.join(__dirname, '..', 'Music', 'music'), // your path
+    path.join(__dirname, '..', 'Music', 'music'),
     path.join(__dirname, '..', 'music', 'music'),
     path.join(__dirname, '..', 'Music'),
     path.join(__dirname, '..', 'music'),
@@ -540,9 +492,8 @@ function pickMusicFile(keywords = []) {
   return path.join(base, files[0]);
 }
 
-// ---------- video generation ----------
+// ---------- util ----------
 const TTS_VOICE = 'alloy';
-
 function withTimeout(promise, ms, msg = 'Timeout') {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 }
@@ -588,6 +539,7 @@ function pickCategoryCTA(category = 'General E-Commerce', seed = '') {
   return /!$/.test(trimmed) ? trimmed : (trimmed + '!');
 }
 
+// ---------- video generation (EXACT 15s voice + visuals; overlay 4s) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -670,7 +622,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
 
-    // script: target ~12.5–13.5s spoken → we stretch to ~14s
+    // script: ~12.5–13.5s spoken, then stretch to EXACT 15.0s
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products.\n` +
@@ -701,7 +653,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
     }
 
-    // probe + stretch to ~14.0s
+    // probe helper
     const probe = async (file) => {
       try {
         const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
@@ -709,25 +661,28 @@ router.post('/generate-video-ad', async (req, res) => {
         return isNaN(s) ? 0 : s;
       } catch { return 0; }
     };
+
+    // Stretch/compress VO to EXACT 15.0s: tempo = dur/target, then pad+trim
+    const target = VIDEO.FINAL;
     let ttsDur = await probe(ttsPath);
-    const targetVoice = 14.0;
-    let voicePath = ttsPath;
-    if (ttsDur > 0) {
-      let factor = targetVoice / ttsDur;                 // >1 means slow down (we use 1/factor in atempo)
-      factor = Math.max(0.88, Math.min(1.12, factor));   // gentle
-      if (Math.abs(factor - 1) > 0.03) {
-        const adj = path.join(tmp, `${uuidv4()}_tempo.mp3`);
-        try {
-          const atempo = (1 / factor).toFixed(3);
-          await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo},apad=pad_dur=15" -c:a aac -b:a 160k "${adj}"`), TO.ATEMPO, 'atempo timeout');
-          voicePath = adj;
-          ttsDur = await probe(voicePath);
-        } catch {}
-      }
+    const voicePath = path.join(tmp, `${uuidv4()}_voice15.mp3`);
+    if (ttsDur <= 0) { ttsDur = target; }
+    let tempo = ttsDur / target;                  // duration -> 15s
+    tempo = Math.max(0.5, Math.min(2.0, tempo));  // atempo bounds
+    try {
+      await withTimeout(
+        exec(
+          `ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${tempo},apad=pad_dur=${target},atrim=0:${target}" -c:a aac -b:a 160k -ar 44100 "${voicePath}"`
+        ),
+        TO.ATEMPO, 'tempo adjust timeout'
+      );
+    } catch {
+      // fallback: copy + trim to 15s
+      await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -t ${target} -c:a aac -b:a 160k -ar 44100 "${voicePath}"`), TO.ATEMPO, 'tempo fallback timeout');
     }
 
-    // concat exactly 15s
-    const need = Math.max(1, Math.ceil(VIDEO.FINAL / VIDEO.CLIP)); // => 3
+    // concat video exactly 15s
+    const need = Math.max(1, Math.ceil(VIDEO.FINAL / VIDEO.CLIP)); // 3
     while (paths.length < need) paths.push(paths[paths.length - 1]);
 
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
@@ -743,9 +698,10 @@ router.post('/generate-video-ad', async (req, res) => {
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
     await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${VIDEO.FINAL} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // overlay timing
-    const overlayStart = (VIDEO.FINAL * 0.72).toFixed(2);
-    const overlayEnd = Math.min(VIDEO.FINAL, ttsDur + 1.0).toFixed(2);
+    // overlay window: ALWAYS 4s (within 3–5s), at the end
+    const overlayDur = 4.0;
+    const overlayStart = (VIDEO.FINAL - overlayDur).toFixed(2); // e.g., 11.00
+    const overlayEnd = VIDEO.FINAL.toFixed(2);                  // 15.00
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const safeTxt = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, ' ').replace(/'/g, '').replace(/[^A-Z0-9\s!]/g, '');
     const drawText =
@@ -754,7 +710,7 @@ router.post('/generate-video-ad', async (req, res) => {
         : `drawtext=text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
       );
 
-    // background music (audible + ducked). No stream_loop; we trim at output with -t 15.
+    // background music (audible + ducked), both tracks EXACT 15s
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
@@ -767,22 +723,24 @@ router.post('/generate-video-ad', async (req, res) => {
     if (bgMusicPath) {
       filterComplex =
         `[0:v]${drawText}[v];` +
-        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=1.0,apad=pad_dur=15[vo];` +
-        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.8,highpass=f=60,lowpass=f=12000[bg];` +
-        `[bg][vo]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[duck];` +
-        `[duck][vo]amix=inputs=2:duration=first:normalize=1[mix]`;
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${VIDEO.FINAL},apad=pad_dur=${VIDEO.FINAL}[voice];` +
+        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,apad=pad_dur=${VIDEO.FINAL},atrim=0:${VIDEO.FINAL}[bg];` +
+        `[bg][voice]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[duck];` +
+        `[voice][duck]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
-      filterComplex = `[0:v]${drawText}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=1.0,apad=pad_dur=15[mix]`;
+      filterComplex =
+        `[0:v]${drawText}[v];` +
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${VIDEO.FINAL},apad=pad_dur=${VIDEO.FINAL}[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
 
-    // HARD CAP to 15s at output to avoid any 25s anomalies
+    // Force output to 15.0s (visuals keep going until script ends; both are 15s)
     await withTimeout(
       exec(
         `ffmpeg -y -i "${trimmedPath}" -i "${voicePath}"${musicInput} ` +
         `-filter_complex "${filterComplex}" ${mapArgs} ` +
-        `-t ${VIDEO.FINAL} -shortest ` + // <— force 15s
+        `-t ${VIDEO.FINAL} ` + // hard cap to 15s
         `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
         `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
       ),
@@ -799,7 +757,7 @@ router.post('/generate-video-ad', async (req, res) => {
 
     // cleanup
     [concatPath, trimmedPath, ...paths, listPath].forEach(pth => { try { fs.unlinkSync(pth); } catch {} });
-    if (voicePath !== ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
+    try { fs.unlinkSync(ttsPath); } catch {}
     try { fs.unlinkSync(voicePath); } catch {}
 
     const publicVideoUrl = `/generated/${id}.mp4`;
@@ -831,4 +789,47 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
+// ---------- image endpoints ----------
+router.post('/generate-image-from-prompt', async (req, res) => {
+  try {
+    const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
+    const keyword = getImageKeyword(industry, url);
+
+    let photos = [];
+    try {
+      const r = await axios.get(PEXELS_BASE_URL, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: keyword, per_page: 100, cb: Date.now() + (regenerateToken || '') },
+        timeout: 4800
+      });
+      photos = r.data.photos || [];
+    } catch (e) {
+      console.error('Pexels img fetch error:', e?.message || e);
+      return res.status(500).json({ error: 'Image search failed' });
+    }
+    if (!photos.length) return res.status(404).json({ error: 'No images found.' });
+
+    const idx = regenerateToken
+      ? Math.abs([...regenerateToken].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)) % photos.length
+      : Math.floor(Math.random() * photos.length);
+
+    const img = photos[idx];
+    const baseUrl = img.src.large2x || img.src.original || img.src.large;
+
+    let finalUrl = baseUrl;
+    try {
+      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url, seed: regenerateToken || answers?.businessName || '' });
+      finalUrl = publicUrl;
+    } catch (e) {
+      console.warn('Overlay build fail; using base image:', e.message);
+    }
+
+    res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
+  } catch (e) {
+    console.error('image route fail:', e?.message || e);
+    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+  }
+});
+
+// ---------- exports ----------
 module.exports = router;
