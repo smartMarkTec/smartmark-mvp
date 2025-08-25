@@ -364,46 +364,8 @@ export default function FormPage() {
   function handleImageClick(url) { setShowModal(true); setModalImg(url); }
   function handleModalClose() { setShowModal(false); setModalImg(""); }
 
-  // ---- API calls (defensive) ----
-  async function fetchImageOnce(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      return data?.imageUrl || "";
-    } catch (e) {
-      console.warn("image fetch failed:", e.message);
-      return "";
-    }
-  }
-  async function fetchVideoOnce(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      const vUrl = data?.videoUrl
-        ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
-        : "";
-      return {
-        url: vUrl,
-        script: data?.script || data?.video?.script || "",
-        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
-      };
-    } catch (e) {
-      console.warn("video fetch failed:", e.message);
-      return { url: "", script: "", fbVideoId: null };
-    }
-  }
-
-  // ---- Ask OpenAI when a message looks like a question ----
-  async function askGPTIfQuestion(userText) {
-    if (!isLikelyQuestion(userText)) return; // don’t spam GPT for normal answers
+  // ---- Ask OpenAI (used only for side questions) ----
+  async function askGPT(userText) {
     try {
       const history = chatHistory.slice(-8).map(m => ({
         role: m.from === "gpt" ? "assistant" : "user",
@@ -417,12 +379,10 @@ export default function FormPage() {
         body: JSON.stringify({ message: userText, history })
       });
       const data = await safeJson(resp);
-      if (data?.reply) {
-        setChatHistory(ch => [...ch, { from: "gpt", text: data.reply }]);
-      }
+      return data?.reply || null;
     } catch (e) {
-      // silent fail; keep UX smooth
       console.warn("gpt-chat failed:", e.message);
+      return null;
     }
   }
 
@@ -436,9 +396,6 @@ export default function FormPage() {
     // Always render the user's message
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
-
-    // Ask GPT if it looks like a question (runs in background)
-    askGPTIfQuestion(value);
 
     // Ready gate
     if (awaitingReady) {
@@ -456,7 +413,16 @@ export default function FormPage() {
       }
     }
 
-    // If we already collected all answers and user says 'generate' → go generate
+    // In-flow: if user asks a side question → answer + re-prompt SAME question; do NOT advance or record
+    const currentQ = CONVO_QUESTIONS[step];
+    if (currentQ && isLikelyQuestion(value)) {
+      const reply = await askGPT(value);
+      if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
+      setChatHistory(ch => [...ch, { from: "gpt", text: `Ready for the next question?\n${currentQ.question}` }]);
+      return;
+    }
+
+    // If all questions done and user says 'generate' → go generate
     if (step === CONVO_QUESTIONS.length && isGenerateTrigger(value)) {
       setLoading(true);
       setGenerating(true);
@@ -508,8 +474,7 @@ export default function FormPage() {
       return;
     }
 
-    // Normal Q&A capture
-    const currentQ = CONVO_QUESTIONS[step];
+    // Normal Q&A capture (record answer + advance)
     if (currentQ) {
       const newAnswers = { ...answers, [currentQ.key]: value };
       setAnswers(newAnswers);
@@ -532,6 +497,43 @@ export default function FormPage() {
 
       setStep(nextStep);
       setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
+    }
+  }
+
+  // ---- API calls (defensive) ----
+  async function fetchImageOnce(token) {
+    try {
+      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      return data?.imageUrl || "";
+    } catch (e) {
+      console.warn("image fetch failed:", e.message);
+      return "";
+    }
+  }
+  async function fetchVideoOnce(token) {
+    try {
+      const resp = await fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      const vUrl = data?.videoUrl
+        ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
+        : "";
+      return {
+        url: vUrl,
+        script: data?.script || data?.video?.script || "",
+        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
+      };
+    } catch (e) {
+      console.warn("video fetch failed:", e.message);
+      return { url: "", script: "", fbVideoId: null };
     }
   }
 
@@ -599,7 +601,7 @@ export default function FormPage() {
 
       {/* ---- Chat Panel ---- */}
       <div style={{
-        width: "100%", maxWidth: 510, minHeight: 370, marginTop: 34, marginBottom: 26,
+        width: "100%", maxWidth: 560, /* slightly wider */ minHeight: 370, marginTop: 34, marginBottom: 26,
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
         padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
@@ -623,8 +625,12 @@ export default function FormPage() {
                 background: msg.from === "gpt" ? "#161a1f" : "#14e7b9",
                 borderRadius: msg.from === "gpt" ? "14px 18px 18px 7px" : "16px 12px 7px 17px",
                 padding: "10px 18px",
-                maxWidth: "96%",
-                display: "inline-block"
+                maxWidth: "98%",
+                boxSizing: "border-box",
+                display: "inline-block",
+                overflowWrap: "anywhere",
+                wordBreak: "break-word",
+                whiteSpace: "pre-wrap"
               }}>
               {msg.text}
             </div>
@@ -1043,7 +1049,8 @@ export default function FormPage() {
               savedAt: Date.now()
             };
 
-            sessionStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+            // match the autosave key used elsewhere
+            sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem("smartmark_media_selection", mediaType);
 
