@@ -39,10 +39,8 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
-const PEXELS_BASE_URL = 'https://api.pexels.com/v1/search';
-const PEXELS_VIDEO_BASE = 'https://api.pexels.com/videos/search';
-
-router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
+const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
+const PEXELS_VID_BASE = 'https://api.pexels.com/videos/search';
 
 // ---------- training context ----------
 const DATA_DIR = path.join(__dirname, '../data');
@@ -61,7 +59,6 @@ function loadTrainingContext() {
         return st.isFile() && ALLOWED_EXT.has(ext) && st.size <= MAX_FILE_MB * 1024 * 1024;
       } catch { return false; }
     });
-
   let ctx = '';
   for (const f of files) {
     try {
@@ -83,19 +80,16 @@ async function getWebsiteText(url) {
     const clean = String(url || '').trim();
     if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
     const { data, headers } = await axios.get(clean, { timeout: 7000, maxRedirects: 3, validateStatus: s => s < 400 });
-    if (!headers['content-type']?.includes('text/html')) throw new Error('Not an HTML page');
-
+    if (!headers['content-type']?.includes('text/html')) throw new Error('Not HTML');
     const body = String(data)
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-
     if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
     return body.slice(0, 3500);
   } catch (e) {
-    // Quiet down noisy targets that rate-limit
     if (String(url || '').includes('chewy.com')) {
       console.warn('scrape soft-fail (rate limited):', url);
     } else {
@@ -236,7 +230,7 @@ Website homepage text:
   }
 });
 
-// ---------- image keyword map ----------
+// ---------- image keyword map & templates ----------
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
@@ -250,14 +244,12 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['art','painting','craft'], keyword: 'painting art' },
   { match: ['coffee','cafe'], keyword: 'coffee shop' }
 ];
-
 function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
 
-// ---------- category map & sane copy ----------
 const INDUSTRY_MAP = [
   { names: ['clothing','fashion','accessory','apparel','shoes','jewelry','watches','bags','handbags','backpacks','luggage','hats','sunglasses'], category: 'Fashion & Accessories', pexels: 'fashion clothing accessories' },
   { names: ['makeup','cosmetics','skincare','haircare','perfume','fragrance','grooming','beauty'], category: 'Beauty & Personal Care', pexels: 'makeup beauty skincare' },
@@ -272,10 +264,11 @@ const INDUSTRY_MAP = [
 ];
 function mapIndustry(inputRaw = '') {
   const input = String(inputRaw || '').toLowerCase();
-  for (const cat of INDUSTRY_MAP) if (cat.names.some(keyword => input.includes(keyword))) return { category: cat.category, pexels: cat.pexels };
+  for (const cat of INDUSTRY_MAP) if (cat.names.some(k => input.includes(k))) return { category: cat.category, pexels: cat.pexels };
   return { category: 'General E-Commerce', pexels: 'shopping ecommerce online' };
 }
 
+// sane copy fallbacks
 const FALLBACK_HEADLINES = {
   'Fashion & Accessories': ['New Arrivals', 'Everyday Style', 'Modern Essentials', 'Wardrobe Refresh'],
   'Beauty & Personal Care': ['Glow Every Day', 'Your Best Skin', 'Beauty That Works'],
@@ -304,12 +297,9 @@ const FALLBACK_CTA = {
 };
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
 
-function seededPick(arr, seed) {
-  let h = 0; for (const c of String(seed || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return arr[arr.length ? (h % arr.length) : 0] || '';
-}
+function seededPick(arr, seed) { let h = 0; for (const c of String(seed||'')) h = (h*31 + c.charCodeAt(0))>>>0; return arr[arr.length ? h % arr.length : 0] || ''; }
 function cleanHeadline(h) {
-  h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
+  h = String(h || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
   if (!h || BANNED_TERMS.test(h)) return '';
   const words = h.split(' ');
   if (words.length < 2 || words.length > 4) return '';
@@ -318,60 +308,49 @@ function cleanHeadline(h) {
   return h.toUpperCase();
 }
 function cleanCTA(c) {
-  c = String(c || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
+  c = String(c || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
   if (!c) return '';
-  let words = c.split(' ').slice(0, 3).join(' ');
+  let words = c.split(' ').slice(0,3).join(' ');
   if (!/[.!?]$/.test(words)) words += '!';
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 function escSVG(s) {
-  return String(s || '')
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;').replace(/'/g,'&apos;');
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
 function fontForHeadline(text) {
-  const len = (text || '').length;
+  const len = (text||'').length;
   if (len <= 14) return 56;
   if (len <= 20) return 50;
   if (len <= 26) return 44;
   return 38;
 }
-function chooseTemplate(seedStr = '') {
-  let h = 0; for (const c of String(seedStr)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return (h % 4) + 1;
-}
+function chooseImgTemplate(seedStr=''){ let h=0; for(const c of String(seedStr)) h=(h*31+c.charCodeAt(0))>>>0; return (h%4)+1; }
 
 // ---------- overlay builder (images) ----------
 async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
   const { category } = mapIndustry(answers?.industry || '');
-  const brand = (answers?.businessName || '').toUpperCase().slice(0, 30);
+  const brand = (answers?.businessName || '').toUpperCase().slice(0,30);
 
   let websiteKeywords = [];
-  if (url && /^https?:\/\//i.test(url)) {
-    try { websiteKeywords = await extractKeywords(await getWebsiteText(url)); } catch {}
-  }
+  if (url && /^https?:\/\//i.test(url)) { try { websiteKeywords = await extractKeywords(await getWebsiteText(url)); } catch {} }
+
   const keysToShow = ['industry','businessName','url', ...Object.keys(answers).filter(k => !['industry','businessName','url'].includes(k))];
   const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
 
-  let headline = '';
-  let cta = '';
+  let headline = '', cta = '';
   try {
-    const prompt = `
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-Write overlay copy for a stock ad image. Keep it normal and generic if unsure.
-- Headline: 2–4 words, natural (avoid awkward words like "unisex", "global", "finds", "forward", "chic").
-- CTA label: 2–3 words, ends with "!". No button-emoji style.
-Return ONLY JSON:
-{"headline":"...","cta":"..."}
-BUSINESS:
-${formInfo}
-WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
-
     const r = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         { role: 'system', content: 'Output ONLY valid JSON with keys headline and cta. No explanations.' },
-        { role: 'user', content: prompt }
+        { role: 'user', content:
+`${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
+Write overlay copy for a stock ad image. Keep it normal/generic if unsure.
+- Headline: 2–4 words, natural (avoid awkward words like "unisex", "global", "finds", "forward", "chic").
+- CTA label: 2–3 words, ends with "!". Return ONLY JSON: {"headline":"...","cta":"..."}
+BUSINESS:
+${formInfo}
+WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]` }
       ],
       max_tokens: 60,
       temperature: 0.2
@@ -381,7 +360,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     headline = cleanHeadline(parsed.headline);
     cta = cleanCTA(parsed.cta);
   } catch {}
-
   if (!headline) headline = cleanHeadline(seededPick(FALLBACK_HEADLINES[category] || FALLBACK_HEADLINES['General E-Commerce'], brand || seed || Date.now())) || 'EVERYDAY ESSENTIALS';
   if (!cta) cta = cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], brand || seed || Date.now())) || 'Shop Now!';
 
@@ -390,19 +368,13 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
   const base64 = baseBuf.toString('base64');
 
-  const ACCENT_A = '#14e7b9';
-  const DARK = '#0b0d10';
-  const LIGHT = '#f2f5f6';
+  const ACCENT = '#14e7b9', DARK = '#0b0d10', LIGHT = '#f2f5f6';
   const fontSize = fontForHeadline(headline);
-  const t = chooseTemplate(seed || brand || headline || Date.now());
+  const t = chooseImgTemplate(seed || brand || headline || Date.now());
 
   const svg =
 `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="gradA" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="${DARK}" stop-opacity="0.85"/>
-      <stop offset="100%" stop-color="#1b2026" stop-opacity="0.45"/>
-    </linearGradient>
     <linearGradient id="gradB" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#00000000"/>
       <stop offset="100%" stop-color="#000000aa"/>
@@ -410,51 +382,13 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <filter id="blurGlass"><feGaussianBlur stdDeviation="8"/></filter>
     <filter id="shadow"><feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#00000088"/></filter>
   </defs>
-
   <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-
-  ${t === 1 ? `
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gradB)"/>
-    <g transform="skewX(-8)">
-      <rect x="24" y="70" rx="18" width="${W-48}" height="120" fill="url(#gradA)" filter="url(#shadow)"/>
-    </g>
-    <text x="${W/2}" y="150" text-anchor="middle" font-family="Times New Roman, Times, serif"
-          font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2"
-          style="paint-order: stroke; stroke: #ffffff44; stroke-width: 0.8;">${escSVG(headline)}</text>
-    <g>
-      <rect x="${W/2-150}" y="200" width="300" height="40" rx="20" fill="none" stroke="${LIGHT}" stroke-width="2"/>
-      <text x="${W/2}" y="229" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-            font-size="22" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
-    </g>
-  ` : ''}
-
-  ${t === 2 ? `
-    <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
-    <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
-          font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-    <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
-          font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
-  ` : ''}
-
-  ${t === 3 ? `
-    <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff22" filter="url(#shadow)"/>
-    <rect x="${W/2-430}" y="140" width="860" height="180" rx="22" fill="#ffffff11" filter="url(#blurGlass)"/>
-    <text x="${W/2}" y="220" text-anchor="middle" font-family="Times New Roman, Times, serif"
-          font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="1.5"
-          style="paint-order: stroke; stroke: #00000055; stroke-width: 1.2;">${escSVG(headline)}</text>
-    <text x="${W/2}" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-          font-size="24" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
-  ` : ''}
-
-  ${t === 4 ? `
-    <polygon points="0,0 ${W*0.58},0 ${W*0.42},160 0,160" fill="${ACCENT_A}"/>
-    <text x="28" y="108" text-anchor="start" font-family="Times New Roman, Times, serif"
-          font-size="${fontSize}" font-weight="700" fill="#0b1417" letter-spacing="2">${escSVG(headline)}</text>
-    <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-          font-size="16" font-weight="800" fill="#f2f5f6" letter-spacing="1">${escSVG(cta)}</text>
-  ` : ''}
+  <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
+  <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
+        font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+  <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
+        font-size="22" font-weight="800" fill="${ACCENT}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
 </svg>`;
-
   const outDir = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const file = `${uuidv4()}.jpg`;
@@ -472,9 +406,7 @@ function findMusicDir() {
     path.join(__dirname, '..', '..', 'Music', 'music'),
     path.join(__dirname, '..', '..', 'music', 'music')
   ];
-  for (const p of candidates) {
-    try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p; } catch {}
-  }
+  for (const p of candidates) { try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p; } catch {} }
   return null;
 }
 function pickMusicFile(keywords = []) {
@@ -482,19 +414,15 @@ function pickMusicFile(keywords = []) {
   if (!base) return null;
   const files = fs.readdirSync(base).filter(f => /\.mp3$/i.test(f));
   if (!files.length) return null;
-
   const lower = files.map(f => f.toLowerCase());
   for (const kw of keywords.map(x => String(x).toLowerCase())) {
-    let i = lower.findIndex(f => f === `${kw}.mp3`);
-    if (i !== -1) return path.join(base, files[i]);
-    i = lower.findIndex(f => f.includes(kw));
-    if (i !== -1) return path.join(base, files[i]);
+    let i = lower.findIndex(f => f === `${kw}.mp3`); if (i !== -1) return path.join(base, files[i]);
+    i = lower.findIndex(f => f.includes(kw)); if (i !== -1) return path.join(base, files[i]);
   }
   return path.join(base, files[0]);
 }
 
-// ---------- util ----------
-const TTS_VOICE = 'alloy';
+// ---------- small utils ----------
 function withTimeout(promise, ms, msg = 'Timeout') {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
 }
@@ -518,36 +446,15 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
       .catch(err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {}; reject(err); });
   });
 }
-
-// ---------- dynamic phrase helpers for video ----------
+const BANNED_TERMS_VIDEO = BANNED_TERMS;
+function limitChars(s,max){ s=String(s||'').trim(); if(s.length<=max) return s; return s.slice(0,max-1).replace(/\s+\S*$/,'')+'…'; }
 function sanitizePhrase(p) {
-  p = String(p || '').replace(/[“”"’]/g, "'").replace(/[^a-z0-9 '!&\-]/gi, ' ').replace(/\s+/g, ' ').trim();
-  if (!p) return '';
-  if (BANNED_TERMS.test(p)) return '';
-  // cap to 2–5 words
+  p = String(p || '').replace(/[“”"’]/g, "'").replace(/[^a-z0-9 '!&\-]/gi,' ').replace(/\s+/g,' ').trim();
+  if (!p || BANNED_TERMS_VIDEO.test(p)) return '';
   const w = p.split(' ').filter(Boolean);
-  const trimmed = w.slice(0, Math.max(2, Math.min(5, w.length))).join(' ');
-  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-}
-function extractPhrases(script, overlayText) {
-  const txt = String(script || '').replace(/\s+/g, ' ').trim();
-  const cta = String(overlayText || '').replace(/[.!?\s]+$/,'').trim();
-  const body = txt.replace(new RegExp(cta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '!?\\.?$', 'i'), '').trim();
-
-  // try to get 2 emphasis chunks: start and middle
-  let sentences = body.split(/(?<=[.!?])\s+/).filter(s => s && s.length > 6);
-  if (sentences.length === 0) sentences = [body];
-
-  const first = sanitizePhrase(sentences[0]);
-  const midIdx = Math.floor(sentences.length / 2);
-  const middleRaw = sentences[midIdx] || sentences[0];
-  // prefer 3–4 words from the middle
-  const middle = sanitizePhrase(middleRaw.split(' ').slice(0, 4).join(' '));
-
-  const out = [];
-  if (first && !/^\d/.test(first)) out.push(first);
-  if (middle && middle !== first) out.push(middle);
-  return out.slice(0, 2);
+  p = w.slice(0, Math.max(2, Math.min(5, w.length))).join(' ');
+  p = limitChars(p, 28);
+  return p.charAt(0).toUpperCase() + p.slice(1);
 }
 function safeFFText(t) {
   return String(t || '')
@@ -557,50 +464,90 @@ function safeFFText(t) {
     .replace(/[^A-Za-z0-9 !?&\\'\\:\\-]/g, ' ')
     .toUpperCase();
 }
-function chooseVidStyle(seedStr = '') {
-  let h = 0; for (const c of String(seedStr || 'x')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return (h % 3) + 1; // 1..3
+function fontForVideoText(s){
+  const l = (s||'').length;
+  if (l <= 12) return 48;
+  if (l <= 18) return 42;
+  if (l <= 24) return 36;
+  return 32;
 }
+function extractPhrases(script, overlayText) {
+  const txt = String(script || '').replace(/\s+/g,' ').trim();
+  const cta = String(overlayText || '').replace(/[.!?\s]+$/,'').trim();
+  const body = txt.replace(new RegExp(cta.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '!?\\.?$', 'i'), '').trim();
+  let sentences = body.split(/(?<=[.!?])\s+/).filter(s => s && s.length > 6);
+  if (sentences.length === 0) sentences = [body];
+  const first = sanitizePhrase(sentences[0]);
+  const midIdx = Math.floor(sentences.length / 2);
+  const middle = sanitizePhrase((sentences[midIdx] || sentences[0]).split(' ').slice(0, 4).join(' '));
+  const out = [];
+  if (first && !/^\d/.test(first)) out.push(first);
+  if (middle && middle !== first) out.push(middle);
+  return out.slice(0,2);
+}
+function chooseVidStyle(seedStr=''){ let h=0; for(const c of String(seedStr||'x')) h=(h*31+c.charCodeAt(0))>>>0; return (h%3)+1; }
 
-// Build draw filters string for dynamic overlays (variety)
-function buildDynamicTextFilters({ style, phrases, W, H, fontfile, startPairs }) {
+// build draw filters for dynamic overlays (variety) + base grading (cool like images)
+function buildVideoFilters({ style, phrases, W, H, fontfile, finalDur, ctaText, ctaWindow }) {
+  const baseGrading = `fps=24,eq=contrast=1.05:saturation=1.15:brightness=0.02,vignette,format=yuv420p`;
   const font = fontfile ? `fontfile='${fontfile}':` : '';
-  const lines = [];
+  const shadow = 'shadowcolor=black@0.7:shadowx=3:shadowy=3';
+  const lines = [`${baseGrading}`];
 
-  const baseShadow = 'shadowcolor=black@0.7:shadowx=3:shadowy=3';
-  if (style === 1) {
-    // Center band + text pops
-    for (let i = 0; i < phrases.length; i++) {
-      const [s, e] = startPairs[i] || [2 + i * 4, 4 + i * 4];
+  // subtle frame lines (echo image border vibe)
+  lines.push(`drawbox=x=8:y=8:w=iw-16:h=ih-16:color=white@0.12:t=2`);
+  lines.push(`drawbox=x=16:y=16:w=iw-32:h=ih-32:color=white@0.10:t=2`);
+
+  // mid emphasis windows (avoid last CTA window)
+  const [ctaStart, ctaEnd] = ctaWindow;
+  const win1s = Math.max(1.2, Math.min(ctaStart-4.5, finalDur*0.25));
+  const win1e = Math.min(ctaStart-0.8, win1s + 2.2);
+  const win2s = Math.max(win1e+0.6, Math.min(ctaStart-2.3, finalDur*0.55));
+  const win2e = Math.min(ctaStart-0.6, win2s + 2.2);
+
+  const wins = [[win1s, win1e], [win2s, win2e]];
+  const accent = '0x14e7b9';
+
+  phrases.forEach((ph, i) => {
+    const [s, e] = wins[i];
+    const fs = fontForVideoText(ph);
+    const text = safeFFText(ph);
+
+    if (style === 1) {
+      // center band
       const y = Math.round(H * 0.30 + i * 60);
       lines.push(
-        `drawbox=x=50:y=${y - 34}:w=${W - 100}:h=64:color=black@0.40:t=64:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
-        `drawtext=${font}text='${safeFFText(phrases[i])}':fontcolor=white@0.98:fontsize=42:${baseShadow}:x=(w-text_w)/2:y=${y - 8}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
+        `drawbox=x=50:y=${y-34}:w=${W-100}:h=64:color=black@0.40:t=64:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
+        `drawtext=${font}text='${text}':fontcolor=white@0.98:fontsize=${fs}:${shadow}:x=(w-text_w)/2:y=${y-8}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
       );
-    }
-  } else if (style === 2) {
-    // Lower-third ribbon + underlined text
-    for (let i = 0; i < phrases.length; i++) {
-      const [s, e] = startPairs[i] || [2 + i * 4, 4 + i * 4];
+    } else if (style === 2) {
+      // lower ribbon accent
       const y = Math.round(H * 0.78);
       lines.push(
-        `drawbox=x=0:y=${y - 36}:w=${W}:h=60:color=black@0.45:t=fill:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
-        `drawtext=${font}text='${safeFFText(phrases[i])}':fontcolor=0x14e7b9:fontsize=38:${baseShadow}:x=(w-text_w)/2:y=${y - 14}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
+        `drawbox=x=0:y=${y-36}:w=${W}:h=60:color=black@0.45:t=fill:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
+        `drawtext=${font}text='${text}':fontcolor=${accent}:fontsize=${fs}:${shadow}:x=(w-text_w)/2:y=${y-14}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
       );
-    }
-  } else {
-    // Subtitle-style centered mid-screen
-    for (let i = 0; i < phrases.length; i++) {
-      const [s, e] = startPairs[i] || [2 + i * 4, 4 + i * 4];
+    } else {
+      // glassy mid box
       lines.push(
-        `drawtext=${font}text='${safeFFText(phrases[i])}':fontcolor=white@0.96:fontsize=40:${baseShadow}:box=1:boxcolor=0x0b0d10@0.45:boxborderw=20:x=(w-text_w)/2:y=(h*0.52):enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
+        `drawbox=x=(w-620)/2:y=(h*0.52-48):w=620:h=72:color=white@0.18:t=fill:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
+        `drawtext=${font}text='${text}':fontcolor=white@0.96:fontsize=${fs}:${shadow}:x=(w-text_w)/2:y=(h*0.52-18):enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
       );
     }
-  }
+  });
+
+  // FINAL CTA 3–5s at end
+  const ctaFs = fontForVideoText(ctaText);
+  const cta = safeFFText(ctaText);
+  const [cs, ce] = ctaWindow;
+  lines.push(
+    `drawtext=${font}text='${cta}':fontcolor=white@0.96:fontsize=${ctaFs}:${shadow}:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${cs.toFixed(2)},${ce.toFixed(2)})'`
+  );
+
   return lines.join(',');
 }
 
-// ---------- video generation (EXACT 15s voice + visuals; dynamic overlays; CTA 4s) ----------
+// ---------- video generation (NATURAL VO speed; duration = VO; overlays fit; cool design) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -610,13 +557,11 @@ router.post('/generate-video-ad', async (req, res) => {
     const fbAdAccountId =
       req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
 
-    // EXACT 15s output
-    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5, FINAL: 15 };
-    const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000, ATEMPO: 20000 };
+    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 }; // clip length ~5s for variety
+    const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000 };
 
     const productType = answers?.industry || answers?.productType || '';
     const { category, pexels } = mapIndustry(productType);
-    // end CTA (always 4s visible near end)
     const overlayText = answers?.cta ? cleanCTA(answers.cta) : cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], regenerateToken));
 
     // search term
@@ -625,14 +570,14 @@ router.post('/generate-video-ad', async (req, res) => {
     if (url && /^https?:\/\//i.test(url)) {
       try { const tx = await withTimeout(getWebsiteText(url), 8000, 'site kw timeout'); termParts.push(...(await extractKeywords(tx)).slice(0, 2)); } catch {}
     }
-    const sanitize = s => String(s || '').toLowerCase().replace(/['"]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const sanitize = s => String(s || '').toLowerCase().replace(/['"]/g,'').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
     const term = sanitize([...new Set(termParts.filter(Boolean))].slice(0, 2).join(' ')) || 'shopping';
 
     // fetch stock clips
     let clips = [];
     try {
       const r = await withTimeout(
-        axios.get(PEXELS_VIDEO_BASE, { headers: { Authorization: PEXELS_API_KEY }, params: { query: term, per_page: 70, cb: Date.now() + (regenerateToken || '') } }),
+        axios.get(PEXELS_VID_BASE, { headers: { Authorization: PEXELS_API_KEY }, params: { query: term, per_page: 70, cb: Date.now() + (regenerateToken || '') } }),
         TO.PEXELS, 'Pexels API timed out'
       );
       clips = r.data.videos || [];
@@ -684,39 +629,37 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
 
-    // script: ~12.5–13.5s spoken, then stretch to EXACT 15.0s
+    // script (~natural 12–16s), NORMAL speed
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products.\n` +
-      `Script MUST be 30–38 words (~12.5–13.5s spoken). Hook → benefit → finish with this exact CTA: '${overlayText}'.\n` +
+      `Script target ~12–16 seconds spoken at normal pace. Hook → benefit → finish with this exact CTA: '${overlayText}'.\n` +
       `Keep wording normal/generic if unsure. Avoid awkward terms like "unisex", "global", "finds", "forward", "chic".\n` +
       `ONLY the spoken words.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
-    if (answers && Object.keys(answers).length) {
-      prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k,v]) => `${k}: ${v}`).join('\n');
-    }
+    if (answers && Object.keys(answers).length) prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k,v]) => `${k}: ${v}`).join('\n');
     if (url) prompt += `\nWebsite: ${url}`;
 
     let script = 'Discover what you love today. Try it now!';
     try {
       const r = await withTimeout(
-        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 90, temperature: 0.5 }),
+        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 110, temperature: 0.5 }),
         15000, 'OpenAI timeout'
       );
       script = (r.choices?.[0]?.message?.content?.trim() || script).replace(/\s+/g, ' ');
     } catch {}
 
-    // TTS
+    // TTS (mp3 natural)
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
-      const ttsRes = await withTimeout(openai.audio.speech.create({ model: 'tts-1', voice: TTS_VOICE, input: script }), 20000, 'TTS timeout');
+      const ttsRes = await withTimeout(openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script }), 20000, 'TTS timeout');
       fs.writeFileSync(ttsPath, Buffer.from(await ttsRes.arrayBuffer()));
     } catch (e) {
       console.error('TTS failed', e);
       return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
     }
 
-    // probe helper
+    // probe duration
     const probe = async (file) => {
       try {
         const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
@@ -724,29 +667,15 @@ router.post('/generate-video-ad', async (req, res) => {
         return isNaN(s) ? 0 : s;
       } catch { return 0; }
     };
-
-    // Stretch/compress VO to EXACT 15.0s: tempo = dur/target, then pad+trim (write AAC to .m4a to avoid container error)
-    const target = VIDEO.FINAL;
     let ttsDur = await probe(ttsPath);
-    const voicePath = path.join(tmp, `${uuidv4()}_voice15.m4a`);
-    if (ttsDur <= 0) { ttsDur = target; }
-    let tempo = ttsDur / target;                  // duration -> 15s
-    tempo = Math.max(0.5, Math.min(2.0, tempo));  // atempo bounds
-    try {
-      await withTimeout(
-        exec(
-          `ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${tempo},apad=pad_dur=${target},atrim=0:${target}" -c:a aac -b:a 160k -ar 44100 "${voicePath}"`
-        ),
-        TO.ATEMPO, 'tempo adjust timeout'
-      );
-    } catch {
-      await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -t ${target} -c:a aac -b:a 160k -ar 44100 "${voicePath}"`), TO.ATEMPO, 'tempo fallback timeout');
-    }
+    if (ttsDur <= 0) ttsDur = 12;
 
-    // concat video exactly 15s
-    const need = Math.max(1, Math.ceil(VIDEO.FINAL / VIDEO.CLIP)); // 3
+    // FINAL duration = voice duration (no slowdowns). Hard cap bounds just for sanity.
+    const finalDur = Math.min(Math.max(ttsDur, 6.0), 30.0);
+
+    // concat sufficient clips to cover voice
+    const need = Math.max(1, Math.ceil(finalDur / VIDEO.CLIP));
     while (paths.length < need) paths.push(paths[paths.length - 1]);
-
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, paths.slice(0, need).map(pth => `file '${pth}'`).join('\n'));
 
@@ -758,64 +687,54 @@ router.post('/generate-video-ad', async (req, res) => {
     const outPath = path.join(outDir, `${id}.mp4`);
 
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
-    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${VIDEO.FINAL} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
+    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // dynamic mid-video overlays (2 phrases between 2–9s), style 1..3
+    // dynamic overlays
     const vidStyle = chooseVidStyle(regenerateToken || answers?.businessName || category || Date.now());
     const midPhrases = extractPhrases(script, overlayText);
-    const startPairs = [[2.0, 4.2], [6.0, 8.2]]; // don't collide with final CTA window
+    const overlayDur = Math.max(3.0, Math.min(5.0, finalDur * 0.25)); // 3–5s
+    const ctaStart = Math.max(0.6, finalDur - overlayDur), ctaEnd = finalDur;
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    const dynFilters = buildDynamicTextFilters({
+    const videoFilter = buildVideoFilters({
       style: vidStyle,
       phrases: midPhrases,
       W: VIDEO.W, H: VIDEO.H,
       fontfile,
-      startPairs
+      finalDur,
+      ctaText: overlayText,
+      ctaWindow: [ctaStart, ctaEnd]
     });
 
-    // final CTA window: ALWAYS 4s (within 3–5s), at the end
-    const overlayDur = 4.0;
-    const overlayStart = (VIDEO.FINAL - overlayDur).toFixed(2); // 11.00
-    const overlayEnd = VIDEO.FINAL.toFixed(2);                  // 15.00
-    const safeCTA = safeFFText(overlayText);
-    const ctaText = fontfile
-      ? `drawtext=fontfile='${fontfile}':text='${safeCTA}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
-      : `drawtext=text='${safeCTA}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`;
-
-    // chain all video overlays
-    const videoFilter = [dynFilters, ctaText].filter(Boolean).join(',');
-
-    // background music (ducked), audio EXACT 15s
+    // background music (ducked) — trimmed/padded to finalDur
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
     try { if (url) { const tx = await withTimeout(getWebsiteText(url), 6000, 'kw timeout'); bgKeywords.push(...(await extractKeywords(tx))); } } catch {}
     const bgMusicPath = pickMusicFile(bgKeywords);
-    console.log('BG music file:', bgMusicPath || 'NONE');
 
     const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
     let filterComplex, mapArgs;
     if (bgMusicPath) {
       filterComplex =
         `[0:v]${videoFilter}[v];` +
-        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${VIDEO.FINAL},apad=pad_dur=${VIDEO.FINAL}[voice];` +
-        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,apad=pad_dur=${VIDEO.FINAL},atrim=0:${VIDEO.FINAL}[bg];` +
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
+        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,apad=pad_dur=${finalDur.toFixed(2)},atrim=0:${finalDur.toFixed(2)}[bg];` +
         `[bg][voice]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[duck];` +
         `[voice][duck]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
       filterComplex =
         `[0:v]${videoFilter}[v];` +
-        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${VIDEO.FINAL},apad=pad_dur=${VIDEO.FINAL}[mix]`;
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
 
-    // compose to EXACT 15.0s
+    // compose (no tempo change; natural speed)
     await withTimeout(
       exec(
-        `ffmpeg -y -i "${trimmedPath}" -i "${voicePath}"${musicInput} ` +
+        `ffmpeg -y -i "${trimmedPath}" -i "${ttsPath}"${musicInput} ` +
         `-filter_complex "${filterComplex}" ${mapArgs} ` +
-        `-t ${VIDEO.FINAL} ` + // hard cap 15s
+        `-t ${finalDur.toFixed(2)} ` +
         `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
         `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
       ),
@@ -833,7 +752,6 @@ router.post('/generate-video-ad', async (req, res) => {
     // cleanup
     [concatPath, trimmedPath, ...paths, listPath].forEach(pth => { try { fs.unlinkSync(pth); } catch {} });
     try { fs.unlinkSync(ttsPath); } catch {}
-    try { fs.unlinkSync(voicePath); } catch {}
 
     const publicVideoUrl = `/generated/${id}.mp4`;
     const absoluteUrl = absolutePublicUrl(publicVideoUrl);
@@ -853,10 +771,10 @@ router.post('/generate-video-ad', async (req, res) => {
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
       fbVideoId,
-      video: { url: publicVideoUrl, script, overlayText, voice: TTS_VOICE },
+      video: { url: publicVideoUrl, script, overlayText, voice: 'alloy' },
       script,
       overlayText,
-      voice: TTS_VOICE
+      voice: 'alloy'
     });
   } catch (err) {
     console.error('video route error:', err);
@@ -864,7 +782,7 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-// ---------- image endpoints ----------
+// ---------- image fetch + overlay ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
@@ -872,7 +790,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 
     let photos = [];
     try {
-      const r = await axios.get(PEXELS_BASE_URL, {
+      const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
         params: { query: keyword, per_page: 100, cb: Date.now() + (regenerateToken || '') },
         timeout: 4800
@@ -906,5 +824,4 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   }
 });
 
-// ---------- exports ----------
 module.exports = router;
