@@ -32,21 +32,16 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   form.append('name', name);
   form.append('description', description);
   const resp = await axios.post(url, form, { headers: form.getHeaders(), params: { access_token: userAccessToken } });
-  return resp.data; // { id }
+  return resp.data;
 }
 
-// ---------- OpenAI ----------
+// ---------- OpenAI / Pexels ----------
 const { OpenAI } = require('openai');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-// ---------- constants ----------
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 const PEXELS_BASE_URL = 'https://api.pexels.com/v1/search';
 const PEXELS_VIDEO_BASE = 'https://api.pexels.com/videos/search';
 
-const TTS_VOICE = 'alloy';
-
-// quick ping
 router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
 
 // ---------- training context ----------
@@ -105,7 +100,7 @@ async function getWebsiteText(url) {
   }
 }
 
-// ---------- copy gen ----------
+// ---------- ad copy ----------
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = '', businessName = '', url = '' } = req.body;
   if (!description && !businessName && !url) return res.status(400).json({ error: 'Please provide at least a description.' });
@@ -236,7 +231,7 @@ Website homepage text:
   }
 });
 
-// ---------- image search keyword map ----------
+// ---------- image keyword map ----------
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
@@ -248,7 +243,7 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['electronics','phone','laptop','tech'], keyword: 'tech gadgets' },
   { match: ['home','kitchen','decor'], keyword: 'modern home' },
   { match: ['art','painting','craft'], keyword: 'painting art' },
-  { match: ['coffee','cafe'], keyword: 'coffee shop' },
+  { match: ['coffee','cafe'], keyword: 'coffee shop' }
 ];
 
 function getImageKeyword(industry = '', url = '') {
@@ -257,7 +252,7 @@ function getImageKeyword(industry = '', url = '') {
   return industry || 'ecommerce';
 }
 
-// ---------- category map for copy fallbacks ----------
+// ---------- category map & sane copy ----------
 const INDUSTRY_MAP = [
   { names: ['clothing','fashion','accessory','apparel','shoes','jewelry','watches','bags','handbags','backpacks','luggage','hats','sunglasses'], category: 'Fashion & Accessories', pexels: 'fashion clothing accessories' },
   { names: ['makeup','cosmetics','skincare','haircare','perfume','fragrance','grooming','beauty'], category: 'Beauty & Personal Care', pexels: 'makeup beauty skincare' },
@@ -276,25 +271,24 @@ function mapIndustry(inputRaw = '') {
   return { category: 'General E-Commerce', pexels: 'shopping ecommerce online' };
 }
 
-// ---------- headline/cta fallbacks + sanity ----------
 const FALLBACK_HEADLINES = {
-  'Fashion & Accessories': ['Everyday Style', 'Fresh Looks', 'Modern Essentials', 'New Season Pieces', 'Wardrobe Refresh', 'Timeless Style'],
-  'Beauty & Personal Care': ['Glow Every Day', 'Skin First', 'Beauty That Works', 'Fresh Routine', 'Care You Feel'],
-  'Fitness, Sports & Outdoors': ['Move Better', 'Train Smarter', 'Ready. Set. Go.', 'Strong Starts Here'],
-  'Home, Kitchen & Decor': ['Make Home Yours', 'Cozy Looks Good', 'Refresh Your Space', 'Simple Upgrades'],
-  'Electronics & Gadgets': ['Smart Starts Here', 'Upgrade Your Tech', 'Power Your Day', 'Next-Gen Gear'],
-  'Food & Beverage': ['Crave Worthy', 'Good Food Fast', 'Taste This', 'Delicious Delivered'],
-  'Baby, Kids & Pets': ['For Little Moments', 'Happy Pets', 'Playtime Ready', 'Family Favorites'],
-  'Health & Wellness': ['Feel Your Best', 'Wellness That Works', 'Small Steps, Big Wins'],
+  'Fashion & Accessories': ['New Arrivals', 'Everyday Style', 'Modern Essentials', 'Wardrobe Refresh'],
+  'Beauty & Personal Care': ['Glow Every Day', 'Your Best Skin', 'Beauty That Works'],
+  'Fitness, Sports & Outdoors': ['Move Better', 'Train Smarter', 'Strong Starts Here'],
+  'Home, Kitchen & Decor': ['Make Home Yours', 'Refresh Your Space', 'Cozy Looks Good'],
+  'Electronics & Gadgets': ['Upgrade Your Tech', 'Smart Starts Here', 'Next-Gen Gear'],
+  'Food & Beverage': ['Good Food Fast', 'Taste Something Great', 'Delicious Delivered'],
+  'Baby, Kids & Pets': ['For Little Moments', 'Happy Pets', 'Family Favorites'],
+  'Health & Wellness': ['Feel Your Best', 'Wellness That Works'],
   'Arts, Crafts & Hobbies': ['Create Today', 'Make Something', 'Craft Your Way'],
   'Digital, Subscription & Services': ['Unlock More', 'Join In', 'Get Access'],
   'General E-Commerce': ['Find What You Love', 'Great Picks Today', 'Everyday Essentials']
 };
 const FALLBACK_CTA = {
-  'Fashion & Accessories': ['Shop New', 'See The Edit', 'Explore'],
+  'Fashion & Accessories': ['Shop Now', 'See The Edit', 'Explore'],
   'Beauty & Personal Care': ['Start Now', 'See Routine', 'Explore'],
   'Fitness, Sports & Outdoors': ['Start Today', 'Get Moving', 'Explore'],
-  'Home, Kitchen & Decor': ['See More', 'Explore', 'Shop Home'],
+  'Home, Kitchen & Decor': ['Shop Home', 'See More', 'Explore'],
   'Electronics & Gadgets': ['Upgrade Now', 'See More', 'Explore'],
   'Food & Beverage': ['Order Now', 'Taste It', 'See Menu'],
   'Baby, Kids & Pets': ['Shop Now', 'See Picks', 'Explore'],
@@ -303,20 +297,19 @@ const FALLBACK_CTA = {
   'Digital, Subscription & Services': ['Join Now', 'Start Free', 'Explore'],
   'General E-Commerce': ['Shop Now', 'Learn More', 'Explore']
 };
+const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
+
 function seededPick(arr, seed) {
   let h = 0; for (const c of String(seed || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return arr[h % arr.length];
 }
 function cleanHeadline(h) {
   h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
-  if (!h) return '';
-  // disallow awkward combos like “UNISEX ... FORWARD”
-  if (/unisex/i.test(h) && /forward/i.test(h)) return '';
-  // enforce 2–4 words and natural nouns
+  if (!h || BANNED_TERMS.test(h)) return '';
   const words = h.split(' ');
-  if (words.length < 2 || words.length > 5) return '';
-  const containsCommonNoun = /\b(style|fashion|beauty|skin|gear|home|decor|tech|gadget|food|taste|pets?|kids?|wellness|art|craft|tools?|deals?|gifts?|essentials?|sale|collection|edit|look|routine)\b/i.test(h);
-  if (!containsCommonNoun) return '';
+  if (words.length < 2 || words.length > 4) return '';
+  const okNoun = /\b(style|fashion|beauty|skin|gear|home|decor|tech|gadget|food|taste|pet|kids?|wellness|art|craft|tools?|deals?|gifts?|essentials?|sale|collection|edit|look|routine|arrivals)\b/i.test(h);
+  if (!okNoun) return '';
   return h.toUpperCase();
 }
 function cleanCTA(c) {
@@ -343,31 +336,26 @@ function chooseTemplate(seedStr = '') {
   return (h % 4) + 1;
 }
 
-// ---------- image overlay builder (premium, varied, copy-sane) ----------
+// ---------- overlay builder (varied templates, generic-safe copy) ----------
 async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
   const { category } = mapIndustry(answers?.industry || '');
   const brand = (answers?.businessName || '').toUpperCase().slice(0, 30);
 
-  // derive context for prompt
   let websiteKeywords = [];
   if (url && /^https?:\/\//i.test(url)) {
-    try {
-      const t = await getWebsiteText(url);
-      websiteKeywords = await extractKeywords(t);
-    } catch {}
+    try { websiteKeywords = await extractKeywords(await getWebsiteText(url)); } catch {}
   }
   const keysToShow = ['industry','businessName','url', ...Object.keys(answers).filter(k => !['industry','businessName','url'].includes(k))];
   const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
 
-  // ask model
   let headline = '';
   let cta = '';
   try {
     const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-Write tasteful overlay copy for a stock ad image (NO weird phrasing).
-- Headline: 2–4 words, natural, brand-suitable.
-- CTA label: 2–3 words, ends with "!". Avoid marketing cliches if they read awkward.
+Write overlay copy for a stock ad image. Keep it normal and generic if unsure.
+- Headline: 2–4 words, natural (avoid awkward words like "unisex", "global", "finds", "forward", "chic").
+- CTA label: 2–3 words, ends with "!". No button-emoji style.
 Return ONLY JSON:
 {"headline":"...","cta":"..."}
 BUSINESS:
@@ -381,7 +369,7 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
         { role: 'user', content: prompt }
       ],
       max_tokens: 60,
-      temperature: 0.3
+      temperature: 0.2
     });
     const raw = r.choices?.[0]?.message?.content?.trim() || '';
     const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
@@ -389,11 +377,9 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     cta = cleanCTA(parsed.cta);
   } catch {}
 
-  // sensible fallbacks
   if (!headline) headline = seededPick(FALLBACK_HEADLINES[category] || FALLBACK_HEADLINES['General E-Commerce'], brand || seed || Date.now()).toUpperCase();
   if (!cta) cta = cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], brand || seed || Date.now()));
 
-  // img base
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
   const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
@@ -471,11 +457,7 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
   const outDir = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
   if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
   const file = `${uuidv4()}.jpg`;
-  const out = path.join(outDir, file);
-
-  const buf = await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer();
-  fs.writeFileSync(out, buf);
-
+  fs.writeFileSync(path.join(outDir, file), await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer());
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
@@ -514,24 +496,17 @@ router.post('/generate-image-from-prompt', async (req, res) => {
       console.warn('Overlay build fail; using base image:', e.message);
     }
 
-    res.json({
-      imageUrl: finalUrl,
-      photographer: img.photographer,
-      pexelsUrl: img.url,
-      keyword,
-      totalResults: photos.length,
-      usedIndex: idx
-    });
+    res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
   } catch (e) {
     console.error('image route fail:', e?.message || e);
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
 
-// ---------- music utils (ensure server/Music/music) ----------
+// ---------- music (server/Music/music) ----------
 function findMusicDir() {
   const candidates = [
-    path.join(__dirname, '..', 'Music', 'music'), // your exact path
+    path.join(__dirname, '..', 'Music', 'music'), // your path
     path.join(__dirname, '..', 'music', 'music'),
     path.join(__dirname, '..', 'Music'),
     path.join(__dirname, '..', 'music'),
@@ -560,7 +535,7 @@ function pickMusicFile(keywords = []) {
 }
 
 // ---------- video generation ----------
-const seedrandom = require('seedrandom');
+const TTS_VOICE = 'alloy';
 
 function withTimeout(promise, ms, msg = 'Timeout') {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms))]);
@@ -570,18 +545,13 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {}; reject(new Error('Download timed out'));
-    }, timeoutMs);
+    const timeout = setTimeout(() => { timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {}; reject(new Error('Download timed out')); }, timeoutMs);
     axios({ url, method: 'GET', responseType: 'stream' })
       .then(resp => {
         let bytes = 0;
         resp.data.on('data', ch => {
           bytes += ch.length;
-          if (bytes > maxSizeMB * 1024 * 1024 && !timedOut) {
-            timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {}; clearTimeout(timeout);
-            reject(new Error('File too large'));
-          }
+          if (bytes > maxSizeMB * 1024 * 1024 && !timedOut) { timedOut = true; writer.close(); try { fs.unlinkSync(dest); } catch {}; clearTimeout(timeout); reject(new Error('File too large')); }
         });
         resp.data.pipe(writer);
         writer.on('finish', () => { clearTimeout(timeout); if (!timedOut) resolve(dest); });
@@ -619,41 +589,26 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const token = getUserToken(req);
     const fbAdAccountId =
-      req.body.fbAdAccountId ||
-      req.query.adAccountId ||
-      req.headers['x-fb-ad-account-id'] ||
-      null;
+      req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
 
-    // Tunables (keep loads snappy)
+    // EXACT 15s output
     const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5, FINAL: 15 };
-    const TO = {
-      PEXELS: +(process.env.VID_PEXELS_TIMEOUT_MS || 30000),
-      DL: +(process.env.VID_DL_TIMEOUT_MS || 45000),
-      SCALE: +(process.env.VID_SCALE_TIMEOUT_MS || 45000),
-      CONCAT: +(process.env.VID_CONCAT_TIMEOUT_MS || 30000),
-      TRIM: +(process.env.VID_TRIM_TIMEOUT_MS || 20000),
-      OVERMUX: +(process.env.VID_OVERLAY_MUX_TIMEOUT_MS || 90000),
-      FPROBE: +(process.env.VID_FFPROBE_TIMEOUT_MS || 8000),
-      ATEMPO: 15000
-    };
+    const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000, ATEMPO: 15000 };
 
     const productType = answers?.industry || answers?.productType || '';
     const { category, pexels } = mapIndustry(productType);
     const overlayText = answers?.cta ? answers.cta : pickCategoryCTA(category, regenerateToken);
 
-    // Build/search terms
+    // search term
     let termParts = [pexels];
     if (productType && !pexels.includes(productType.toLowerCase())) termParts.push(productType);
     if (url && /^https?:\/\//i.test(url)) {
-      try {
-        const tx = await withTimeout(getWebsiteText(url), 8000, 'site kw timeout');
-        termParts.push(...(await extractKeywords(tx)).slice(0, 2));
-      } catch {}
+      try { const tx = await withTimeout(getWebsiteText(url), 8000, 'site kw timeout'); termParts.push(...(await extractKeywords(tx)).slice(0, 2)); } catch {}
     }
     const sanitize = s => String(s || '').toLowerCase().replace(/['"]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
     const term = sanitize([...new Set(termParts.filter(Boolean))].slice(0, 2).join(' ')) || 'shopping';
 
-    // Fetch stock clips
+    // fetch stock clips
     let clips = [];
     try {
       const r = await withTimeout(
@@ -667,7 +622,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!clips?.length) return res.status(404).json({ error: 'No stock videos found' });
 
-    // Candidate links
+    // candidate links
     let candidates = [];
     for (const v of clips) {
       const files = (v.video_files || [])
@@ -679,11 +634,11 @@ router.post('/generate-video-ad', async (req, res) => {
     candidates = Array.from(new Set(candidates));
     if (candidates.length < 3) return res.status(404).json({ error: 'Not enough usable clips' });
 
-    // Work dir
+    // work dir
     const tmp = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
 
-    // Download + scale 3 short clips
+    // download + scale 3x5s
     const paths = [];
     let p = 0;
     while (paths.length < 3 && p < candidates.length) {
@@ -709,23 +664,22 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
 
-    // Script (~11–13s spoken)
+    // script: target ~12.5–13.5s spoken → we stretch to ~14s
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products.\n` +
-      `Script MUST be 28–36 words (~11–13s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'.\n` +
-      `No scene directions or SFX — ONLY the spoken words.`;
+      `Script MUST be 30–38 words (~12.5–13.5s spoken). Hook → benefit → finish with this exact CTA: '${overlayText}'.\n` +
+      `ONLY the spoken words.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
       prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k,v]) => `${k}: ${v}`).join('\n');
     }
     if (url) prompt += `\nWebsite: ${url}`;
-    prompt += `\nRespond ONLY with the script text.`;
 
     let script = 'Discover what you love today. Try it now!';
     try {
       const r = await withTimeout(
-        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 80, temperature: 0.6 }),
+        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 90, temperature: 0.5 }),
         15000, 'OpenAI timeout'
       );
       script = r.choices?.[0]?.message?.content?.trim() || script;
@@ -735,17 +689,16 @@ router.post('/generate-video-ad', async (req, res) => {
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await withTimeout(openai.audio.speech.create({ model: 'tts-1', voice: TTS_VOICE, input: script }), 20000, 'TTS timeout');
-      const buf = Buffer.from(await ttsRes.arrayBuffer());
-      fs.writeFileSync(ttsPath, buf);
+      fs.writeFileSync(ttsPath, Buffer.from(await ttsRes.arrayBuffer()));
     } catch (e) {
       console.error('TTS failed', e);
       return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
     }
 
-    // Probe voice duration and tempo-stretch to ~14.0s
+    // probe + stretch to ~14.0s
     const probe = async (file) => {
       try {
-        const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), 8000, 'ffprobe timeout');
+        const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
         const s = parseFloat(stdout.trim());
         return isNaN(s) ? 0 : s;
       } catch { return 0; }
@@ -754,22 +707,23 @@ router.post('/generate-video-ad', async (req, res) => {
     const targetVoice = 14.0;
     let voicePath = ttsPath;
     if (ttsDur > 0) {
-      let factor = targetVoice / ttsDur; // >1 → slow down (atempo wants speed -> use 1/factor)
-      factor = Math.max(0.85, Math.min(1.15, factor));
+      let factor = targetVoice / ttsDur;                 // >1 means slow down (we use 1/factor in atempo)
+      factor = Math.max(0.88, Math.min(1.12, factor));   // gentle
       if (Math.abs(factor - 1) > 0.03) {
         const adj = path.join(tmp, `${uuidv4()}_tempo.mp3`);
         try {
           const atempo = (1 / factor).toFixed(3);
-          await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo},apad=pad_dur=15" -c:a aac -b:a 160k "${adj}"`), 15000, 'atempo timeout');
+          await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -filter:a "atempo=${atempo},apad=pad_dur=15" -c:a aac -b:a 160k "${adj}"`), TO.ATEMPO, 'atempo timeout');
           voicePath = adj;
           ttsDur = await probe(voicePath);
         } catch {}
       }
     }
 
-    // Concat clips to exactly 15s
-    const need = Math.max(1, Math.ceil(15 / 5));
+    // concat exactly 15s
+    const need = Math.max(1, Math.ceil(VIDEO.FINAL / VIDEO.CLIP)); // => 3
     while (paths.length < need) paths.push(paths[paths.length - 1]);
+
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, paths.slice(0, need).map(pth => `file '${pth}'`).join('\n'));
 
@@ -780,12 +734,12 @@ router.post('/generate-video-ad', async (req, res) => {
     const trimmedPath = path.join(outDir, `${id}.trim.mp4`);
     const outPath = path.join(outDir, `${id}.mp4`);
 
-    await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), 30000, 'concat timeout');
-    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t 15 -c copy "${trimmedPath}"`), 20000, 'trim timeout');
+    await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
+    await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${VIDEO.FINAL} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // Overlay timing
-    const overlayStart = (15 * 0.72).toFixed(2);
-    const overlayEnd = Math.min(15, ttsDur + 1.0).toFixed(2);
+    // overlay timing
+    const overlayStart = (VIDEO.FINAL * 0.72).toFixed(2);
+    const overlayEnd = Math.min(VIDEO.FINAL, ttsDur + 1.0).toFixed(2);
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const safeTxt = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, ' ').replace(/'/g, '').replace(/[^A-Z0-9\s!]/g, '');
     const drawText =
@@ -794,45 +748,42 @@ router.post('/generate-video-ad', async (req, res) => {
         : `drawtext=text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
       );
 
-    // Pick background music (server/Music/music) and MIX it audibly
+    // background music (audible + ducked). No stream_loop; we trim at output with -t 15.
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
-    try {
-      if (url) {
-        const tx = await withTimeout(getWebsiteText(url), 6000, 'kw timeout');
-        bgKeywords.push(...(await extractKeywords(tx)));
-      }
-    } catch {}
+    try { if (url) { const tx = await withTimeout(getWebsiteText(url), 6000, 'kw timeout'); bgKeywords.push(...(await extractKeywords(tx))); } } catch {}
     const bgMusicPath = pickMusicFile(bgKeywords);
-    console.log('BG music file:', bgMusicPath || 'NONE (voice only)');
+    console.log('BG music file:', bgMusicPath || 'NONE');
 
-    const musicInput = bgMusicPath ? ` -stream_loop -1 -i "${bgMusicPath}"` : '';
-    // make bg clearly audible but duck under voice
+    const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
     let filterComplex, mapArgs;
     if (bgMusicPath) {
-      filterComplex = `[0:v]${drawText}[v];` +
-                      `[1:a]volume=1.0,apad=pad_dur=15[a_vo];` +
-                      `[2:a]volume=0.55,highpass=f=60,lowpass=f=12000[a_bg];` +
-                      `[a_bg][a_vo]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[a_duck];` +
-                      `[a_duck][a_vo]amix=inputs=2:weights=1 1:duration=first:normalize=1[a_mix]`;
-      mapArgs = `-map "[v]" -map "[a_mix]"`;
+      filterComplex =
+        `[0:v]${drawText}[v];` +
+        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=1.0,apad=pad_dur=15[vo];` +
+        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.8,highpass=f=60,lowpass=f=12000[bg];` +
+        `[bg][vo]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[duck];` +
+        `[duck][vo]amix=inputs=2:duration=first:normalize=1[mix]`;
+      mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
-      filterComplex = `[0:v]${drawText}[v];[1:a]volume=1.0,apad=pad_dur=15[a_mix]`;
-      mapArgs = `-map "[v]" -map "[a_mix]"`;
+      filterComplex = `[0:v]${drawText}[v];[1:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=1.0,apad=pad_dur=15[mix]`;
+      mapArgs = `-map "[v]" -map "[mix]"`;
     }
 
+    // HARD CAP to 15s at output to avoid any 25s anomalies
     await withTimeout(
       exec(
         `ffmpeg -y -i "${trimmedPath}" -i "${voicePath}"${musicInput} ` +
         `-filter_complex "${filterComplex}" ${mapArgs} ` +
-        `-shortest -c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
+        `-t ${VIDEO.FINAL} -shortest ` + // <— force 15s
+        `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
         `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
       ),
-      90000, 'overlay+mux timeout'
+      TO.OVERMUX, 'overlay+mux timeout'
     );
 
-    // file ready?
+    // ensure ready
     let ok = false;
     for (let i = 0; i < 40; i++) {
       try { if (fs.statSync(outPath).size > 200000) { ok = true; break; } } catch {}
