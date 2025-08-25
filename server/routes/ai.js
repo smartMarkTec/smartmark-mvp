@@ -74,7 +74,9 @@ function loadTrainingContext() {
 }
 let customContext = loadTrainingContext();
 
-// ---------- scraper ----------
+router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
+
+// ---------- scraper (tolerant) ----------
 async function getWebsiteText(url) {
   try {
     const clean = String(url || '').trim();
@@ -90,16 +92,12 @@ async function getWebsiteText(url) {
     if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
     return body.slice(0, 3500);
   } catch (e) {
-    if (String(url || '').includes('chewy.com')) {
-      console.warn('scrape soft-fail (rate limited):', url);
-    } else {
-      console.warn('scrape fail:', url || '(empty)', e.message);
-    }
+    console.warn('scrape fail:', url || '(empty)', e.message);
     return '';
   }
 }
 
-// ---------- ad copy ----------
+// ---------- ad copy (unchanged) ----------
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = '', businessName = '', url = '' } = req.body;
   if (!description && !businessName && !url) return res.status(400).json({ error: 'Please provide at least a description.' });
@@ -230,7 +228,7 @@ Website homepage text:
   }
 });
 
-// ---------- image keyword map & templates ----------
+// ---------- simple keyword map (images) ----------
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
@@ -250,70 +248,7 @@ function getImageKeyword(industry = '', url = '') {
   return industry || 'ecommerce';
 }
 
-const INDUSTRY_MAP = [
-  { names: ['clothing','fashion','accessory','apparel','shoes','jewelry','watches','bags','handbags','backpacks','luggage','hats','sunglasses'], category: 'Fashion & Accessories', pexels: 'fashion clothing accessories' },
-  { names: ['makeup','cosmetics','skincare','haircare','perfume','fragrance','grooming','beauty'], category: 'Beauty & Personal Care', pexels: 'makeup beauty skincare' },
-  { names: ['gym','fitness','workout','sports','exercise','weights','protein','supplement','outdoor','yoga','biking','running','health coaching','wellness','coach','personal trainer'], category: 'Fitness, Sports & Outdoors', pexels: 'fitness gym workout exercise' },
-  { names: ['furniture','home','decor','kitchen','appliance','bedding','bath','art','lamp','rugs','cookware','table','sofa','bed'], category: 'Home, Kitchen & Decor', pexels: 'home kitchen decor' },
-  { names: ['phone','tablet','laptop','computer','electronics','gadgets','wearable','smartwatch','headphones','camera','drone','tech','device'], category: 'Electronics & Gadgets', pexels: 'electronics gadgets tech' },
-  { names: ['snack','food','meal kit','grocery','coffee','tea','alcohol','wine','beer','spirits','beverage','drink'], category: 'Food & Beverage', pexels: 'food drink meal' },
-  { names: ['baby','kids','toys','stroller','child','children','pet','dog','cat','animal','pet food','pet toy'], category: 'Baby, Kids & Pets', pexels: 'kids baby pets toys' },
-  { names: ['vitamin','supplement','medical','health','wellness','mental','therapy','life coach','coaching','self-care','personal development'], category: 'Health & Wellness', pexels: 'wellness health happy' },
-  { names: ['art','craft','diy','music','instrument','collectible','hobby','painting','drawing'], category: 'Arts, Crafts & Hobbies', pexels: 'art craft hobby' },
-  { names: ['course','ebook','subscription','box','event','ticket','digital','learning','online'], category: 'Digital, Subscription & Services', pexels: 'digital online learning' }
-];
-function mapIndustry(inputRaw = '') {
-  const input = String(inputRaw || '').toLowerCase();
-  for (const cat of INDUSTRY_MAP) if (cat.names.some(k => input.includes(k))) return { category: cat.category, pexels: cat.pexels };
-  return { category: 'General E-Commerce', pexels: 'shopping ecommerce online' };
-}
-
-// sane copy fallbacks
-const FALLBACK_HEADLINES = {
-  'Fashion & Accessories': ['New Arrivals', 'Everyday Style', 'Modern Essentials', 'Wardrobe Refresh'],
-  'Beauty & Personal Care': ['Glow Every Day', 'Your Best Skin', 'Beauty That Works'],
-  'Fitness, Sports & Outdoors': ['Move Better', 'Train Smarter', 'Strong Starts Here'],
-  'Home, Kitchen & Decor': ['Make Home Yours', 'Refresh Your Space', 'Cozy Looks Good'],
-  'Electronics & Gadgets': ['Upgrade Your Tech', 'Smart Starts Here', 'Next-Gen Gear'],
-  'Food & Beverage': ['Good Food Fast', 'Taste Something Great', 'Delicious Delivered'],
-  'Baby, Kids & Pets': ['For Little Moments', 'Happy Pets', 'Family Favorites'],
-  'Health & Wellness': ['Feel Your Best', 'Wellness That Works'],
-  'Arts, Crafts & Hobbies': ['Create Today', 'Make Something', 'Craft Your Way'],
-  'Digital, Subscription & Services': ['Unlock More', 'Join In', 'Get Access'],
-  'General E-Commerce': ['Find What You Love', 'Great Picks Today', 'Everyday Essentials']
-};
-const FALLBACK_CTA = {
-  'Fashion & Accessories': ['Shop Now', 'See The Edit', 'Explore'],
-  'Beauty & Personal Care': ['Start Now', 'See Routine', 'Explore'],
-  'Fitness, Sports & Outdoors': ['Start Today', 'Get Moving', 'Explore'],
-  'Home, Kitchen & Decor': ['Shop Home', 'See More', 'Explore'],
-  'Electronics & Gadgets': ['Upgrade Now', 'See More', 'Explore'],
-  'Food & Beverage': ['Order Now', 'Taste It', 'See Menu'],
-  'Baby, Kids & Pets': ['Shop Now', 'See Picks', 'Explore'],
-  'Health & Wellness': ['Start Now', 'Learn More', 'Explore'],
-  'Arts, Crafts & Hobbies': ['Create Now', 'See Kits', 'Explore'],
-  'Digital, Subscription & Services': ['Join Now', 'Start Free', 'Explore'],
-  'General E-Commerce': ['Shop Now', 'Learn More', 'Explore']
-};
-const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
-
-function seededPick(arr, seed) { let h = 0; for (const c of String(seed||'')) h = (h*31 + c.charCodeAt(0))>>>0; return arr[arr.length ? h % arr.length : 0] || ''; }
-function cleanHeadline(h) {
-  h = String(h || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
-  if (!h || BANNED_TERMS.test(h)) return '';
-  const words = h.split(' ');
-  if (words.length < 2 || words.length > 4) return '';
-  const okNoun = /\b(style|fashion|beauty|skin|gear|home|decor|tech|gadget|food|taste|pet|kids?|wellness|art|craft|tools?|deals?|gifts?|essentials?|sale|collection|edit|look|routine|arrivals)\b/i.test(h);
-  if (!okNoun) return '';
-  return h.toUpperCase();
-}
-function cleanCTA(c) {
-  c = String(c || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
-  if (!c) return '';
-  let words = c.split(' ').slice(0,3).join(' ');
-  if (!/[.!?]$/.test(words)) words += '!';
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
+// ---------- simple, clean overlay image (kept) ----------
 function escSVG(s) {
   return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;');
 }
@@ -324,53 +259,38 @@ function fontForHeadline(text) {
   if (len <= 26) return 44;
   return 38;
 }
-function chooseImgTemplate(seedStr=''){ let h=0; for(const c of String(seedStr)) h=(h*31+c.charCodeAt(0))>>>0; return (h%4)+1; }
+const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
+function cleanHeadline(h) {
+  h = String(h || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
+  if (!h || BANNED_TERMS.test(h)) return '';
+  const words = h.split(' ');
+  if (words.length < 2 || words.length > 4) return '';
+  return h.toUpperCase();
+}
+function cleanCTA(c) {
+  c = String(c || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
+  if (!c) return '';
+  let words = c.split(' ').slice(0,3).join(' ');
+  if (!/[.!?]$/.test(words)) words += '!';
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+const FALLBACK_HEADLINES = {
+  'Fashion': ['New Arrivals', 'Everyday Style', 'Modern Looks', 'Wardrobe Refresh'],
+  'General': ['Find What You Love', 'Great Picks Today', 'Everyday Essentials']
+};
+const FALLBACK_CTA = ['Shop Now!', 'See More!', 'Learn More!'];
 
-// ---------- overlay builder (images) ----------
-async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
-  const { category } = mapIndustry(answers?.industry || '');
-  const brand = (answers?.businessName || '').toUpperCase().slice(0,30);
-
-  let websiteKeywords = [];
-  if (url && /^https?:\/\//i.test(url)) { try { websiteKeywords = await extractKeywords(await getWebsiteText(url)); } catch {} }
-
-  const keysToShow = ['industry','businessName','url', ...Object.keys(answers).filter(k => !['industry','businessName','url'].includes(k))];
-  const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
-
-  let headline = '', cta = '';
-  try {
-    const r = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: 'Output ONLY valid JSON with keys headline and cta. No explanations.' },
-        { role: 'user', content:
-`${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-Write overlay copy for a stock ad image. Keep it normal/generic if unsure.
-- Headline: 2–4 words, natural (avoid awkward words like "unisex", "global", "finds", "forward", "chic").
-- CTA label: 2–3 words, ends with "!". Return ONLY JSON: {"headline":"...","cta":"..."}
-BUSINESS:
-${formInfo}
-WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]` }
-      ],
-      max_tokens: 60,
-      temperature: 0.2
-    });
-    const raw = r.choices?.[0]?.message?.content?.trim() || '';
-    const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw);
-    headline = cleanHeadline(parsed.headline);
-    cta = cleanCTA(parsed.cta);
-  } catch {}
-  if (!headline) headline = cleanHeadline(seededPick(FALLBACK_HEADLINES[category] || FALLBACK_HEADLINES['General E-Commerce'], brand || seed || Date.now())) || 'EVERYDAY ESSENTIALS';
-  if (!cta) cta = cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], brand || seed || Date.now())) || 'Shop Now!';
-
+async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '' }) {
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
   const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
   const base64 = baseBuf.toString('base64');
 
-  const ACCENT = '#14e7b9', DARK = '#0b0d10', LIGHT = '#f2f5f6';
+  let headline = cleanHeadline(headlineHint) || FALLBACK_HEADLINES.General[Math.floor(Math.random()*FALLBACK_HEADLINES.General.length)].toUpperCase();
+  let cta = cleanCTA(ctaHint) || FALLBACK_CTA[0];
+
+  const ACCENT = '#14e7b9', LIGHT = '#f2f5f6';
   const fontSize = fontForHeadline(headline);
-  const t = chooseImgTemplate(seed || brand || headline || Date.now());
 
   const svg =
 `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -379,11 +299,9 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]` }
       <stop offset="0%" stop-color="#00000000"/>
       <stop offset="100%" stop-color="#000000aa"/>
     </linearGradient>
-    <filter id="blurGlass"><feGaussianBlur stdDeviation="8"/></filter>
-    <filter id="shadow"><feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#00000088"/></filter>
   </defs>
   <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-  <rect x="0" y="${H-150}" width="${W}" height="150" fill="url(#gradB)"/>
+  <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#gradB)"/>
   <text x="40" y="${H-60}" text-anchor="start" font-family="Times New Roman, Times, serif"
         font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
   <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
@@ -402,9 +320,7 @@ function findMusicDir() {
     path.join(__dirname, '..', 'Music', 'music'),
     path.join(__dirname, '..', 'music', 'music'),
     path.join(__dirname, '..', 'Music'),
-    path.join(__dirname, '..', 'music'),
-    path.join(__dirname, '..', '..', 'Music', 'music'),
-    path.join(__dirname, '..', '..', 'music', 'music')
+    path.join(__dirname, '..', 'music')
   ];
   for (const p of candidates) { try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p; } catch {} }
   return null;
@@ -446,16 +362,6 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
       .catch(err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {}; reject(err); });
   });
 }
-const BANNED_TERMS_VIDEO = BANNED_TERMS;
-function limitChars(s,max){ s=String(s||'').trim(); if(s.length<=max) return s; return s.slice(0,max-1).replace(/\s+\S*$/,'')+'…'; }
-function sanitizePhrase(p) {
-  p = String(p || '').replace(/[“”"’]/g, "'").replace(/[^a-z0-9 '!&\-]/gi,' ').replace(/\s+/g,' ').trim();
-  if (!p || BANNED_TERMS_VIDEO.test(p)) return '';
-  const w = p.split(' ').filter(Boolean);
-  p = w.slice(0, Math.max(2, Math.min(5, w.length))).join(' ');
-  p = limitChars(p, 28);
-  return p.charAt(0).toUpperCase() + p.slice(1);
-}
 function safeFFText(t) {
   return String(t || '')
     .replace(/[\n\r]/g, ' ')
@@ -464,90 +370,19 @@ function safeFFText(t) {
     .replace(/[^A-Za-z0-9 !?&\\'\\:\\-]/g, ' ')
     .toUpperCase();
 }
-function fontForVideoText(s){
-  const l = (s||'').length;
-  if (l <= 12) return 48;
-  if (l <= 18) return 42;
-  if (l <= 24) return 36;
-  return 32;
-}
-function extractPhrases(script, overlayText) {
-  const txt = String(script || '').replace(/\s+/g,' ').trim();
-  const cta = String(overlayText || '').replace(/[.!?\s]+$/,'').trim();
-  const body = txt.replace(new RegExp(cta.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '!?\\.?$', 'i'), '').trim();
-  let sentences = body.split(/(?<=[.!?])\s+/).filter(s => s && s.length > 6);
-  if (sentences.length === 0) sentences = [body];
-  const first = sanitizePhrase(sentences[0]);
-  const midIdx = Math.floor(sentences.length / 2);
-  const middle = sanitizePhrase((sentences[midIdx] || sentences[0]).split(' ').slice(0, 4).join(' '));
-  const out = [];
-  if (first && !/^\d/.test(first)) out.push(first);
-  if (middle && middle !== first) out.push(middle);
-  return out.slice(0,2);
-}
-function chooseVidStyle(seedStr=''){ let h=0; for(const c of String(seedStr||'x')) h=(h*31+c.charCodeAt(0))>>>0; return (h%3)+1; }
-
-// build draw filters for dynamic overlays (variety) + base grading (cool like images)
-function buildVideoFilters({ style, phrases, W, H, fontfile, finalDur, ctaText, ctaWindow }) {
-  const baseGrading = `fps=24,eq=contrast=1.05:saturation=1.15:brightness=0.02,vignette,format=yuv420p`;
-  const font = fontfile ? `fontfile='${fontfile}':` : '';
-  const shadow = 'shadowcolor=black@0.7:shadowx=3:shadowy=3';
-  const lines = [`${baseGrading}`];
-
-  // subtle frame lines (echo image border vibe)
-  lines.push(`drawbox=x=8:y=8:w=iw-16:h=ih-16:color=white@0.12:t=2`);
-  lines.push(`drawbox=x=16:y=16:w=iw-32:h=ih-32:color=white@0.10:t=2`);
-
-  // mid emphasis windows (avoid last CTA window)
-  const [ctaStart, ctaEnd] = ctaWindow;
-  const win1s = Math.max(1.2, Math.min(ctaStart-4.5, finalDur*0.25));
-  const win1e = Math.min(ctaStart-0.8, win1s + 2.2);
-  const win2s = Math.max(win1e+0.6, Math.min(ctaStart-2.3, finalDur*0.55));
-  const win2e = Math.min(ctaStart-0.6, win2s + 2.2);
-
-  const wins = [[win1s, win1e], [win2s, win2e]];
-  const accent = '0x14e7b9';
-
-  phrases.forEach((ph, i) => {
-    const [s, e] = wins[i];
-    const fs = fontForVideoText(ph);
-    const text = safeFFText(ph);
-
-    if (style === 1) {
-      // center band
-      const y = Math.round(H * 0.30 + i * 60);
-      lines.push(
-        `drawbox=x=50:y=${y-34}:w=${W-100}:h=64:color=black@0.40:t=64:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
-        `drawtext=${font}text='${text}':fontcolor=white@0.98:fontsize=${fs}:${shadow}:x=(w-text_w)/2:y=${y-8}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
-      );
-    } else if (style === 2) {
-      // lower ribbon accent
-      const y = Math.round(H * 0.78);
-      lines.push(
-        `drawbox=x=0:y=${y-36}:w=${W}:h=60:color=black@0.45:t=fill:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
-        `drawtext=${font}text='${text}':fontcolor=${accent}:fontsize=${fs}:${shadow}:x=(w-text_w)/2:y=${y-14}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
-      );
-    } else {
-      // glassy mid box
-      lines.push(
-        `drawbox=x=(w-620)/2:y=(h*0.52-48):w=620:h=72:color=white@0.18:t=fill:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
-        `drawtext=${font}text='${text}':fontcolor=white@0.96:fontsize=${fs}:${shadow}:x=(w-text_w)/2:y=(h*0.52-18):enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
-      );
-    }
-  });
-
-  // FINAL CTA 3–5s at end
-  const ctaFs = fontForVideoText(ctaText);
-  const cta = safeFFText(ctaText);
-  const [cs, ce] = ctaWindow;
-  lines.push(
-    `drawtext=${font}text='${cta}':fontcolor=white@0.96:fontsize=${ctaFs}:${shadow}:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${cs.toFixed(2)},${ce.toFixed(2)})'`
-  );
-
-  return lines.join(',');
+function simpleCTA(input) {
+  const t = String(input || '').toLowerCase();
+  if (t.includes('buy')) return 'BUY NOW!';
+  if (t.includes('shop')) return 'SHOP NOW!';
+  if (t.includes('order')) return 'ORDER NOW!';
+  if (t.includes('join')) return 'JOIN NOW!';
+  if (t.includes('sign')) return 'SIGN UP!';
+  if (t.includes('book')) return 'BOOK NOW!';
+  if (t.includes('learn')) return 'LEARN MORE!';
+  return 'SHOP NOW!';
 }
 
-// ---------- video generation (NATURAL VO speed; duration = VO; overlays fit; cool design) ----------
+// ---------- VIDEO (simple MVP: normal voice, >=15s visuals, clean CTA band, music) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -557,27 +392,19 @@ router.post('/generate-video-ad', async (req, res) => {
     const fbAdAccountId =
       req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
 
-    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 }; // clip length ~5s for variety
+    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 }; // simple 3 cuts (5s each) for 15s
     const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000 };
 
-    const productType = answers?.industry || answers?.productType || '';
-    const { category, pexels } = mapIndustry(productType);
-    const overlayText = answers?.cta ? cleanCTA(answers.cta) : cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], regenerateToken));
-
     // search term
-    let termParts = [pexels];
-    if (productType && !pexels.includes(productType.toLowerCase())) termParts.push(productType);
-    if (url && /^https?:\/\//i.test(url)) {
-      try { const tx = await withTimeout(getWebsiteText(url), 8000, 'site kw timeout'); termParts.push(...(await extractKeywords(tx)).slice(0, 2)); } catch {}
-    }
-    const sanitize = s => String(s || '').toLowerCase().replace(/['"]/g,'').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
-    const term = sanitize([...new Set(termParts.filter(Boolean))].slice(0, 2).join(' ')) || 'shopping';
+    const industry = answers?.industry || answers?.productType || '';
+    let term = 'shopping';
+    if (industry) term = industry.toLowerCase().replace(/[^a-z0-9\s]/g,' ').trim() || term;
 
-    // fetch stock clips
+    // fetch Pexels videos
     let clips = [];
     try {
       const r = await withTimeout(
-        axios.get(PEXELS_VID_BASE, { headers: { Authorization: PEXELS_API_KEY }, params: { query: term, per_page: 70, cb: Date.now() + (regenerateToken || '') } }),
+        axios.get(PEXELS_VID_BASE, { headers: { Authorization: PEXELS_API_KEY }, params: { query: term, per_page: 60, cb: Date.now() + (regenerateToken || '') } }),
         TO.PEXELS, 'Pexels API timed out'
       );
       clips = r.data.videos || [];
@@ -592,7 +419,7 @@ router.post('/generate-video-ad', async (req, res) => {
     for (const v of clips) {
       const files = (v.video_files || [])
         .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
-        .sort((a,b) => (a.width || 9999) - (b.width || 9999));
+        .sort((a,b) => (a.width || 9999) - (b.width || 9999)); // prefer smaller for speed
       const best = files.find(f => f.quality === 'sd') || files[0];
       if (best?.link) candidates.push(best.link);
     }
@@ -627,29 +454,31 @@ router.post('/generate-video-ad', async (req, res) => {
         try { fs.unlinkSync(raw); } catch {}
       }
     }
-    if (!paths.length) return res.status(500).json({ error: 'All stock clips failed' });
+    if (paths.length < 3) return res.status(500).json({ error: 'Video preparation failed' });
 
-    // script (~natural 12–16s), NORMAL speed
+    // script: simple words, ~15s target (we still match visuals to VO to be safe)
+    const ctaText = simpleCTA(answers?.cta);
     let prompt =
-      (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
-      `Write a video ad script for an online e-commerce business selling physical products.\n` +
-      `Script target ~12–16 seconds spoken at normal pace. Hook → benefit → finish with this exact CTA: '${overlayText}'.\n` +
-      `Keep wording normal/generic if unsure. Avoid awkward terms like "unisex", "global", "finds", "forward", "chic".\n` +
-      `ONLY the spoken words.`;
-    if (productType) prompt += `\nProduct category: ${productType}`;
-    if (answers && Object.keys(answers).length) prompt += '\nBusiness Details:\n' + Object.entries(answers).map(([k,v]) => `${k}: ${v}`).join('\n');
+      `Write a simple, clear spoken ad script for an online store.\n` +
+      `Natural language. Avoid fancy terms. Keep it friendly.\n` +
+      `End with this exact CTA: '${ctaText}'.\n` +
+      `Target about 15 seconds at normal speaking pace. ONLY the spoken words.`;
+    if (industry) prompt += `\nCategory: ${industry}`;
+    if (answers?.businessName) prompt += `\nBrand: ${answers.businessName}`;
     if (url) prompt += `\nWebsite: ${url}`;
 
-    let script = 'Discover what you love today. Try it now!';
+    let script = 'Discover what you love today. Shop now!';
     try {
       const r = await withTimeout(
-        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 110, temperature: 0.5 }),
+        openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 110, temperature: 0.4 }),
         15000, 'OpenAI timeout'
       );
       script = (r.choices?.[0]?.message?.content?.trim() || script).replace(/\s+/g, ' ');
+      // scrub any awkward words
+      script = script.replace(BANNED_TERMS, '').replace(/\s{2,}/g, ' ').trim();
     } catch {}
 
-    // TTS (mp3 natural)
+    // TTS (normal speed)
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await withTimeout(openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script }), 20000, 'TTS timeout');
@@ -659,21 +488,21 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
     }
 
-    // probe duration
-    const probe = async (file) => {
+    // probe vo duration
+    async function probeDur(file) {
       try {
         const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
         const s = parseFloat(stdout.trim());
         return isNaN(s) ? 0 : s;
       } catch { return 0; }
-    };
-    let ttsDur = await probe(ttsPath);
-    if (ttsDur <= 0) ttsDur = 12;
+    }
+    let voDur = await probeDur(ttsPath);
+    if (voDur <= 0) voDur = 12.0;
 
-    // FINAL duration = voice duration (no slowdowns). Hard cap bounds just for sanity.
-    const finalDur = Math.min(Math.max(ttsDur, 6.0), 30.0);
+    // final duration = max(15s, VO). visuals never end before voice.
+    const finalDur = Math.max(15.0, Math.min(voDur, 30.0));
 
-    // concat sufficient clips to cover voice
+    // concat enough 5s cuts to cover finalDur
     const need = Math.max(1, Math.ceil(finalDur / VIDEO.CLIP));
     while (paths.length < need) paths.push(paths[paths.length - 1]);
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
@@ -689,38 +518,35 @@ router.post('/generate-video-ad', async (req, res) => {
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
     await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // dynamic overlays
-    const vidStyle = chooseVidStyle(regenerateToken || answers?.businessName || category || Date.now());
-    const midPhrases = extractPhrases(script, overlayText);
-    const overlayDur = Math.max(3.0, Math.min(5.0, finalDur * 0.25)); // 3–5s
-    const ctaStart = Math.max(0.6, finalDur - overlayDur), ctaEnd = finalDur;
+    // clean, simple bottom CTA band (3.5s at end)
+    const bandStart = Math.max(0.6, finalDur - 3.5), bandEnd = finalDur;
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    const videoFilter = buildVideoFilters({
-      style: vidStyle,
-      phrases: midPhrases,
-      W: VIDEO.W, H: VIDEO.H,
-      fontfile,
-      finalDur,
-      ctaText: overlayText,
-      ctaWindow: [ctaStart, ctaEnd]
-    });
+    const cta = safeFFText(ctaText);
+    const videoFilter =
+      `fps=${VIDEO.FPS},format=yuv420p,` +
+      `drawbox=x=0:y=h-84:w=iw:h=84:color=black@0.42:t=fill:enable='between(t,${bandStart.toFixed(2)},${bandEnd.toFixed(2)})',` +
+      (fs.existsSync(fontfile)
+        ? `drawtext=fontfile='${fontfile}':text='${cta}':fontcolor=white@0.98:fontsize=36:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=h-66:enable='between(t,${bandStart.toFixed(2)},${bandEnd.toFixed(2)})'`
+        : `drawtext=text='${cta}':fontcolor=white@0.98:fontsize=36:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=h-66:enable='between(t,${bandStart.toFixed(2)},${bandEnd.toFixed(2)})'`
+      );
 
-    // background music (ducked) — trimmed/padded to finalDur
+    // background music (constant low volume), trimmed/padded to finalDur
     let bgKeywords = [];
-    if (productType) bgKeywords.push(productType);
-    if (category) bgKeywords.push(category.split(' ')[0]);
-    try { if (url) { const tx = await withTimeout(getWebsiteText(url), 6000, 'kw timeout'); bgKeywords.push(...(await extractKeywords(tx))); } } catch {}
-    const bgMusicPath = pickMusicFile(bgKeywords);
-
+    if (industry) bgKeywords.push(industry);
+    if (answers?.businessName) bgKeywords.push(answers.businessName);
+    let bgMusicPath = null;
+    try { bgMusicPath = pickMusicFile(bgKeywords); } catch {}
     const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
+
+    // Build audio filter: keep voice natural speed; pad or trim mix to finalDur
+    // Also avoid the previous mp3/aac container mismatch by NOT re-encoding to mp3; we mux to MP4/AAC only.
     let filterComplex, mapArgs;
     if (bgMusicPath) {
       filterComplex =
         `[0:v]${videoFilter}[v];` +
         `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
-        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,apad=pad_dur=${finalDur.toFixed(2)},atrim=0:${finalDur.toFixed(2)}[bg];` +
-        `[bg][voice]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[duck];` +
-        `[voice][duck]amix=inputs=2:duration=first:normalize=1[mix]`;
+        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.20,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
+        `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
       filterComplex =
@@ -729,7 +555,6 @@ router.post('/generate-video-ad', async (req, res) => {
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
 
-    // compose (no tempo change; natural speed)
     await withTimeout(
       exec(
         `ffmpeg -y -i "${trimmedPath}" -i "${ttsPath}"${musicInput} ` +
@@ -771,9 +596,9 @@ router.post('/generate-video-ad', async (req, res) => {
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
       fbVideoId,
-      video: { url: publicVideoUrl, script, overlayText, voice: 'alloy' },
+      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy' },
       script,
-      overlayText,
+      overlayText: ctaText,
       voice: 'alloy'
     });
   } catch (err) {
@@ -782,7 +607,7 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-// ---------- image fetch + overlay ----------
+// ---------- IMAGE: fetch + overlay (kept) ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
@@ -809,9 +634,13 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const img = photos[idx];
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
+    // Simple, clean overlay using businessName/cta when available
+    const headlineHint = answers?.businessName ? `${answers.businessName}` : (industry ? 'New Arrivals' : 'Great Picks');
+    const ctaHint = answers?.cta || 'Shop Now!';
+
     let finalUrl = baseUrl;
     try {
-      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, answers, url, seed: regenerateToken || answers?.businessName || '' });
+      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint });
       finalUrl = publicUrl;
     } catch (e) {
       console.warn('Overlay build fail; using base image:', e.message);
