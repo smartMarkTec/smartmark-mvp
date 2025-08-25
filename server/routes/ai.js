@@ -294,11 +294,132 @@ function getImageKeyword(industry = "", url = "") {
   return industry || "ecommerce";
 }
 
+// ---- Overlay builder reused internally ----
+async function buildOverlayImage({ imageUrl, answers = {}, url = "" }) {
+  let websiteKeywords = [];
+  if (url && /^https?:\/\//i.test(url)) {
+    try {
+      const websiteText = await getWebsiteText(url);
+      websiteKeywords = await extractKeywords(websiteText);
+    } catch { websiteKeywords = []; }
+  }
+
+  const keysToShow = ["industry", "businessName", "url", ...Object.keys(answers).filter(k => !["industry","businessName","url"].includes(k))];
+  const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
+
+  const prompt = `
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
+You are the best Facebook ad copywriter. You are Jeremy Haynes.
+
+1) Write an overlay headline (2–4 words) and CTA (2–3 words) for a stock ad image, based ONLY on this business + website.
+2) It must be specific and relevant (not generic). CTA must end with "!".
+
+Output ONLY JSON:
+{"headline":"...","cta_box":"..."}
+
+BUSINESS FORM INFO:
+${formInfo}
+WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
+`.trim();
+
+  let headline = "";
+  let ctaText = "";
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
+        { role: "user", content: prompt }
+      ],
+      max_tokens: 120,
+      temperature: 0.2,
+    });
+    const raw = response.choices?.[0]?.message?.content?.trim();
+    let parsed = {};
+    try { parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw); } catch { parsed = {}; }
+    headline = (parsed.headline || "GET MORE CLIENTS").toUpperCase();
+    ctaText = (parsed.cta_box || "SHOP NOW!").toUpperCase();
+  } catch {
+    headline = "GET MORE CLIENTS";
+    ctaText = "SHOP NOW!";
+  }
+
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+  const mainW = 1100, mainH = 550;
+  let baseImage = await sharp(imgRes.data).resize(mainW, mainH, { fit: 'cover' }).toBuffer();
+
+  const svgW = 1200, svgH = 627;
+  const borderW = 32, borderGap = 12;
+  const imgX = borderW + borderGap, imgY = borderW + borderGap;
+  const imgW = svgW - (borderW + borderGap) * 2;
+  const imgH = svgH - (borderW + borderGap) * 2;
+
+  const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
+  const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
+  const HEADLINE_BOX_Y = 62;
+  const HEADLINE_FONT_SIZE = 45;
+
+  const CTA_BOX_W = 540, CTA_BOX_H = 70;
+  const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
+  const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
+  const CTA_FONT_SIZE = 26;
+
+  const blurStrength = 15;
+  const headlineImg = await sharp(baseImage)
+    .extract({ left: Math.max(0, Math.round(HEADLINE_BOX_X - imgX)), top: Math.max(0, Math.round(HEADLINE_BOX_Y - imgY)), width: Math.round(HEADLINE_BOX_W), height: Math.round(HEADLINE_BOX_H) })
+    .blur(blurStrength).toBuffer();
+
+  const ctaImg = await sharp(baseImage)
+    .extract({ left: Math.max(0, Math.round(CTA_BOX_X - imgX)), top: Math.max(0, Math.round(CTA_BOX_Y - imgY)), width: Math.round(CTA_BOX_W), height: Math.round(CTA_BOX_H) })
+    .blur(blurStrength).toBuffer();
+
+  const headlineTextColor = "#181b20";
+  const ctaTextColor = "#181b20";
+
+  function escapeForSVG(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+  }
+
+  const borderColors = ['#edead9', '#191919', '#193356'];
+  let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+  let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+  while (innerBorderColor === outerBorderColor) innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
+
+  const svg = `
+<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
+  <rect x="7" y="7" width="${svgW-14}" height="${svgH-14}" fill="none" stroke="${outerBorderColor}" stroke-width="10" rx="34"/>
+  <rect x="27" y="27" width="${svgW-54}" height="${svgH-54}" fill="none" stroke="${innerBorderColor}" stroke-width="5" rx="20"/>
+  <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
+  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX+8}" y="${imgY+8}" width="${imgW-16}" height="${imgH-16}" />
+  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" opacity="0.97"/>
+  <rect x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" rx="22" fill="#ffffff38"/>
+  <text x="${svgW/2}" y="${HEADLINE_BOX_Y + HEADLINE_BOX_H/2 + HEADLINE_FONT_SIZE/3}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${HEADLINE_FONT_SIZE}" font-weight="bold" fill="${headlineTextColor}" alignment-baseline="middle" dominant-baseline="middle" letter-spacing="1">${escapeForSVG(headline)}</text>
+  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" opacity="0.97"/>
+  <rect x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" rx="19" fill="#ffffff38"/>
+  <text x="${svgW/2}" y="${CTA_BOX_Y + CTA_BOX_H/2 + CTA_FONT_SIZE/3}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${CTA_FONT_SIZE}" font-weight="bold" fill="${ctaTextColor}" alignment-baseline="middle" dominant-baseline="middle" letter-spacing="0.5">${escapeForSVG(ctaText)}</text>
+</svg>`;
+
+  const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
+  if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
+  const fileName = `${uuidv4()}.jpg`;
+  const filePath = path.join(generatedPath, fileName);
+
+  const outBuffer = await sharp({ create: { width: svgW, height: svgH, channels: 3, background: "#edead9" } })
+    .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
+    .jpeg({ quality: 98 })
+    .toBuffer();
+
+  fs.writeFileSync(filePath, outBuffer);
+
+  const publicUrl = `/generated/${fileName}`;
+  return { publicUrl, absoluteUrl: absolutePublicUrl(publicUrl) };
+}
+
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
-    const { url = "", industry = "", regenerateToken = "" } = req.body;
+    const { url = "", industry = "", regenerateToken = "", answers = {} } = req.body;
     const keyword = getImageKeyword(industry, url);
-    
+
     const perPage = 100;
     let photos = [];
     try {
@@ -322,8 +443,19 @@ router.post('/generate-image-from-prompt', async (req, res) => {
       imgIdx = Math.floor(Math.random() * photos.length);
     }
     const img = photos[imgIdx];
+    const baseImageUrl = img.src.large2x || img.src.original || img.src.large;
+
+    // NEW: auto-build overlay; fall back to base image if overlay fails
+    let finalUrl = baseImageUrl;
+    try {
+      const { publicUrl } = await buildOverlayImage({ imageUrl: baseImageUrl, answers, url });
+      finalUrl = publicUrl;
+    } catch (e) {
+      console.warn("Overlay generation failed, falling back to base image:", e.message);
+    }
+
     return res.json({
-      imageUrl: img.src.large2x || img.src.original || img.src.large,
+      imageUrl: finalUrl,
       photographer: img.photographer,
       pexelsUrl: img.url,
       keyword,
@@ -336,154 +468,37 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   }
 });
 
-router.post('/generate-image-with-overlay', async (req, res) => {
-  try {
-    const { imageUrl, answers = {}, url = "" } = req.body;
-    if (!imageUrl) return res.status(400).json({ error: "imageUrl required" });
-
-    let websiteKeywords = [];
-    if (url && /^https?:\/\//i.test(url)) {
-      try {
-        const websiteText = await getWebsiteText(url);
-        websiteKeywords = await extractKeywords(websiteText);
-      } catch { websiteKeywords = []; }
-    }
-
-    const keysToShow = ["industry", "businessName", "url", ...Object.keys(answers).filter(k => !["industry","businessName","url"].includes(k))];
-    const formInfo = keysToShow.map(k => answers[k] && `${k}: ${answers[k]}`).filter(Boolean).join('\n');
-
-    const prompt = `
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}
-You are the best Facebook ad copywriter. You are Jeremy Haynes.
-
-1) Write an overlay headline (3–5 words) and CTA (3–6 words) for a stock ad image, based ONLY on this business + website.
-2) It must be specific and relevant (not generic). CTA must end with "!".
-
-Output ONLY JSON:
-{"headline":"...","cta_box":"..."}
-
-BUSINESS FORM INFO:
-${formInfo}
-WEBSITE KEYWORDS: [${websiteKeywords.join(", ")}]
-`.trim();
-
-    let headline = "";
-    let ctaText = "";
-    try {
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o",
-        messages: [
-          { role: "system", content: "You are a world-class Facebook ad overlay expert. Output ONLY valid JSON. Do not explain." },
-          { role: "user", content: prompt }
-        ],
-        max_tokens: 120,
-        temperature: 0.2,
-      });
-      const raw = response.choices?.[0]?.message?.content?.trim();
-      let parsed = {};
-      try { parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || raw); } catch { parsed = {}; }
-      headline = (parsed.headline || "GET MORE CLIENTS NOW!").toUpperCase();
-      ctaText = (parsed.cta_box || "BOOK YOUR FREE CALL!").toUpperCase();
-    } catch {
-      headline = "AI ERROR - CONTACT SUPPORT";
-      ctaText = "SEE DETAILS!";
-    }
-
-    const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-    const mainW = 1100, mainH = 550;
-    let baseImage = await sharp(imgRes.data).resize(mainW, mainH, { fit: 'cover' }).toBuffer();
-
-    const svgW = 1200, svgH = 627;
-    const borderW = 32, borderGap = 12;
-    const imgX = borderW + borderGap, imgY = borderW + borderGap;
-    const imgW = svgW - (borderW + borderGap) * 2;
-    const imgH = svgH - (borderW + borderGap) * 2;
-
-    const HEADLINE_BOX_W = 956, HEADLINE_BOX_H = 134;
-    const HEADLINE_BOX_X = svgW / 2 - HEADLINE_BOX_W / 2;
-    const HEADLINE_BOX_Y = 62;
-    const HEADLINE_FONT_SIZE = 45;
-
-    const CTA_BOX_W = 540, CTA_BOX_H = 70;
-    const CTA_BOX_X = svgW / 2 - CTA_BOX_W / 2;
-    const CTA_BOX_Y = HEADLINE_BOX_Y + HEADLINE_BOX_H + 34;
-    const CTA_FONT_SIZE = 26;
-
-    const blurStrength = 15;
-    const headlineImg = await sharp(baseImage)
-      .extract({ left: Math.max(0, Math.round(HEADLINE_BOX_X - imgX)), top: Math.max(0, Math.round(HEADLINE_BOX_Y - imgY)), width: Math.round(HEADLINE_BOX_W), height: Math.round(HEADLINE_BOX_H) })
-      .blur(blurStrength).toBuffer();
-
-    const ctaImg = await sharp(baseImage)
-      .extract({ left: Math.max(0, Math.round(CTA_BOX_X - imgX)), top: Math.max(0, Math.round(CTA_BOX_Y - imgY)), width: Math.round(CTA_BOX_W), height: Math.round(CTA_BOX_H) })
-      .blur(blurStrength).toBuffer();
-
-    const headlineTextColor = "#181b20";
-    const ctaTextColor = "#181b20";
-
-    function escapeForSVG(text) {
-      return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-    }
-
-    const borderColors = ['#edead9', '#191919', '#193356'];
-    let outerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-    let innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-    while (innerBorderColor === outerBorderColor) innerBorderColor = borderColors[Math.floor(Math.random() * borderColors.length)];
-
-    const svg = `
-<svg width="${svgW}" height="${svgH}" xmlns="http://www.w3.org/2000/svg">
-  <rect x="7" y="7" width="${svgW-14}" height="${svgH-14}" fill="none" stroke="${outerBorderColor}" stroke-width="10" rx="34"/>
-  <rect x="27" y="27" width="${svgW-54}" height="${svgH-54}" fill="none" stroke="${innerBorderColor}" stroke-width="5" rx="20"/>
-  <rect x="0" y="0" width="${svgW}" height="${svgH}" fill="#edead9" rx="26"/>
-  <image href="data:image/jpeg;base64,${baseImage.toString('base64')}" x="${imgX+8}" y="${imgY+8}" width="${imgW-16}" height="${imgH-16}" />
-  <image href="data:image/jpeg;base64,${headlineImg.toString('base64')}" x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" opacity="0.97"/>
-  <rect x="${HEADLINE_BOX_X}" y="${HEADLINE_BOX_Y}" width="${HEADLINE_BOX_W}" height="${HEADLINE_BOX_H}" rx="22" fill="#ffffff38"/>
-  <text x="${svgW/2}" y="${HEADLINE_BOX_Y + HEADLINE_BOX_H/2 + HEADLINE_FONT_SIZE/3}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${HEADLINE_FONT_SIZE}" font-weight="bold" fill="${headlineTextColor}" alignment-baseline="middle" dominant-baseline="middle" letter-spacing="1">${escapeForSVG(headline)}</text>
-  <image href="data:image/jpeg;base64,${ctaImg.toString('base64')}" x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" opacity="0.97"/>
-  <rect x="${CTA_BOX_X}" y="${CTA_BOX_Y}" width="${CTA_BOX_W}" height="${CTA_BOX_H}" rx="19" fill="#ffffff38"/>
-  <text x="${svgW/2}" y="${CTA_BOX_Y + CTA_BOX_H/2 + CTA_FONT_SIZE/3}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${CTA_FONT_SIZE}" font-weight="bold" fill="${ctaTextColor}" alignment-baseline="middle" dominant-baseline="middle" letter-spacing="0.5">${escapeForSVG(ctaText)}</text>
-</svg>`;
-
-    const generatedPath = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
-    if (!fs.existsSync(generatedPath)) fs.mkdirSync(generatedPath, { recursive: true });
-    const fileName = `${uuidv4()}.jpg`;
-    const filePath = path.join(generatedPath, fileName);
-
-    const outBuffer = await sharp({ create: { width: svgW, height: svgH, channels: 3, background: "#edead9" } })
-      .composite([{ input: Buffer.from(svg), top: 0, left: 0 }])
-      .jpeg({ quality: 98 })
-      .toBuffer();
-
-    fs.writeFileSync(filePath, outBuffer);
-
-    const publicUrl = `/generated/${fileName}`;
-    console.log("Glass overlay image saved at:", filePath, "and served as:", publicUrl);
-
-    return res.json({
-      imageUrl: publicUrl,
-      absoluteImageUrl: absolutePublicUrl(publicUrl),
-      overlay: { headline, ctaText }
-    });
-  } catch (err) {
-    console.error("Image overlay error:", err.message);
-    return res.status(500).json({ error: "Failed to overlay image", detail: err.message });
-  }
-});
-
 // ===== Music selection helper =====
+function findMusicDir() {
+  // Try several likely locations (case-robust)
+  const candidates = [
+    path.join(__dirname, '../Music'),
+    path.join(__dirname, '../music'),
+    path.join(__dirname, '../../Music'),
+    path.join(__dirname, '../../music'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p;
+  }
+  return null;
+}
+
 function pickMusicFile(keywords = []) {
-  const musicDir = path.join(__dirname, '../Music');
-  if (!fs.existsSync(musicDir)) return null;
-  const files = fs.readdirSync(musicDir);
+  const musicBase = findMusicDir();
+  if (!musicBase) return null;
+
+  const files = fs.readdirSync(musicBase).filter(f => /\.mp3$/i.test(f));
+  if (!files.length) return null;
+
   const filesLower = files.map(f => f.toLowerCase());
   for (let kw of keywords.map(x => String(x).toLowerCase())) {
     let idx = filesLower.findIndex(f => f === `${kw}.mp3`);
-    if (idx !== -1) return path.join(musicDir, files[idx]);
+    if (idx !== -1) return path.join(musicBase, files[idx]);
     idx = filesLower.findIndex(f => f.includes(kw) && f.endsWith('.mp3'));
-    if (idx !== -1) return path.join(musicDir, files[idx]);
+    if (idx !== -1) return path.join(musicBase, files[idx]);
   }
-  if (files.length > 0) return path.join(musicDir, files[0]);
-  return null;
+  // fallback: first track
+  return path.join(musicBase, files[0]);
 }
 
 // ========== AI: GENERATE VIDEO AD ==========
@@ -579,6 +594,29 @@ function normalizeShortCTA(input) {
     .replace(/[\.\!]+$/, "").trim().split(" ").slice(0, 5).join(" ").replace(/^\w/, c => c.toUpperCase()) + "!";
 }
 
+// NEW: super-short, varied CTAs (2–3 words) per category
+const CTA_LIBRARY = {
+  "Fashion & Accessories": ["Shop New Styles", "See The Look", "Style Upgrade"],
+  "Beauty & Personal Care": ["Glow Up", "Fresh Skin", "New Routine"],
+  "Fitness, Sports & Outdoors": ["Get Fit Fast", "Start Training", "Crush Goals"],
+  "Home, Kitchen & Decor": ["Refresh Your Home", "Upgrade Your Space", "Make It Cozy"],
+  "Electronics & Gadgets": ["Upgrade Tech", "Smart Upgrade", "Power Your Day"],
+  "Food & Beverage": ["Order Today", "Taste The Good", "Hungry? Order"],
+  "Baby, Kids & Pets": ["Happy Pets", "For Little Ones", "Playtime Ready"],
+  "Health & Wellness": ["Feel Your Best", "Start Healing", "Stress Less"],
+  "Arts, Crafts & Hobbies": ["Create Today", "Make Something", "Art Starts Here"],
+  "Digital, Subscription & Services": ["Start Free Trial", "Unlock Access", "Join Today"],
+  "General E-Commerce": ["Discover More", "Get Yours", "Try It Now"]
+};
+function pickCategoryCTA(category = "General E-Commerce", seed = "") {
+  const list = CTA_LIBRARY[category] || CTA_LIBRARY["General E-Commerce"];
+  const r = seedrandom(seed || String(Date.now()));
+  const choice = list[Math.floor(r() * list.length)] || "Discover More";
+  // enforce 2–3 words
+  const trimmed = choice.split(/\s+/).slice(0, 3).join(" ");
+  return /!$/.test(trimmed) ? trimmed : (trimmed + "!");
+}
+
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -586,7 +624,6 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const { url = "", answers = {}, regenerateToken = "" } = req.body;
 
-    // pull token + ad account id from anywhere reasonable
     const token = getUserToken(req);
     const fbAdAccountId =
       req.body.fbAdAccountId ||
@@ -595,7 +632,7 @@ router.post('/generate-video-ad', async (req, res) => {
       null;
 
     // ---- Tunables ----
-    const VIDEO_CFG = { WIDTH: 640, HEIGHT: 360, FPS: 24, CLIP_SEC: 5, MIN_FINAL: 12, HEADROOM: 2.5 };
+    const VIDEO_CFG = { WIDTH: 640, HEIGHT: 360, FPS: 24, CLIP_SEC: 5, FINAL_SEC: 15 };
     const TO = {
       PEXELS: +(process.env.VID_PEXELS_TIMEOUT_MS || 30000),
       DL: +(process.env.VID_DL_TIMEOUT_MS || 45000),
@@ -607,10 +644,13 @@ router.post('/generate-video-ad', async (req, res) => {
     };
 
     const productType = answers?.industry || answers?.productType || "";
-    const overlayText = normalizeShortCTA(answers?.cta);
     const { category, pexels } = mapIndustry(productType);
 
-    // Build and sanitize search term (FIXED)
+    // CTA (short + varied). If user provided a CTA, normalize it; else pick per-category.
+    const overlayTextRaw = answers?.cta ? normalizeShortCTA(answers.cta) : pickCategoryCTA(category, regenerateToken);
+    const overlayText = overlayTextRaw;
+
+    // Build and sanitize search term
     let videoKeywords = [pexels];
     if (productType && !pexels.includes(productType.toLowerCase())) videoKeywords.push(productType);
     if (url && /^https?:\/\//i.test(String(url).trim())) {
@@ -625,7 +665,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const searchTerm = sanitize(videoKeywords.slice(0, 2).join(" ")) || sanitize(pexels) || "shopping";
     console.log("Step 3: Pexels search term:", searchTerm);
 
-    // Fetch Pexels videos (FIXED: require real .link)
+    // Fetch Pexels videos
     let videoClips = [];
     try {
       const resp = await withTimeout(
@@ -660,7 +700,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const tempDir = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
 
-    // Download + scale (FIXED: robust loop; skip bad candidates)
+    // Download + scale (robust loop; skip bad candidates)
     const videoPaths = [];
     const { WIDTH, HEIGHT, FPS, CLIP_SEC } = VIDEO_CFG;
     const ffmpegPathLocal = 'ffmpeg';
@@ -694,11 +734,11 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Stock video download failed", detail: "No usable clips after filtering." });
     }
 
-    // GPT script
+    // GPT script (shorter so it always finishes within 15s)
     let prompt =
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products. ` +
-      `Script MUST be 35–45 words (~12–15s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
+      `Script MUST be 28–36 words (~11–13s spoken). Hook → benefit → end with this exact CTA: '${overlayText}'. ` +
       `No scene directions or SFX — ONLY the spoken words.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -713,13 +753,13 @@ router.post('/generate-video-ad', async (req, res) => {
         openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 90,
+          max_tokens: 80,
           temperature: 0.6
         }),
         15000,
         "OpenAI GPT timed out"
       );
-      script = gptRes.choices?.[0]?.message?.content?.trim() || "Discover what you love today. Shop now!";
+      script = gptRes.choices?.[0]?.message?.content?.trim() || "Discover what you love today. Try it now!";
     } catch (e) {
       console.error("FFMPEG ERROR: GPT script gen failed", e);
       return res.status(500).json({ error: "GPT script generation failed", detail: e.message });
@@ -741,7 +781,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
 
     // Probe duration
-    let ttsDuration = 13;
+    let ttsDuration = 12;
     try {
       const { stdout } = await withTimeout(
         exec(`${ffprobePathLocal} -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${ttsPath}"`),
@@ -752,8 +792,8 @@ router.post('/generate-video-ad', async (req, res) => {
       if (!isNaN(seconds) && seconds > 0) ttsDuration = seconds;
     } catch {}
 
-    // Concat/trim/overlay
-    let finalDuration = Math.max(VIDEO_CFG.MIN_FINAL, Math.min(ttsDuration + VIDEO_CFG.HEADROOM, 18));
+    // Concat/trim to exactly 15s
+    const finalDuration = VIDEO_CFG.FINAL_SEC;
     const clipsNeeded = Math.max(1, Math.ceil(finalDuration / CLIP_SEC));
     while (videoPaths.length < clipsNeeded) videoPaths.push(videoPaths[videoPaths.length - 1]);
 
@@ -780,23 +820,54 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: "Video trim failed", detail: e.message });
     }
 
-    const overlayStart = (finalDuration * 0.70).toFixed(2);
+    // Overlay timing
+    const overlayStart = (Math.max(0, finalDuration * 0.70)).toFixed(2);
     const overlayEnd   = Math.min(finalDuration, ttsDuration + 1.0).toFixed(2);
     const fontfile = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
     const safeOverlayText = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, " ").replace(/'/g, "").replace(/[^A-Z0-9\s!]/g, "");
-    const drawText = (fs.existsSync(fontfile)
+    const drawTextVideo = (fs.existsSync(fontfile)
       ? `drawtext=fontfile='${fontfile}':text='${safeOverlayText}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
       : `drawtext=text='${safeOverlayText}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
     );
 
+    // Pick background music (keywords from industry + site)
+    let bgKeywords = [];
+    if (productType) bgKeywords.push(productType);
+    if (category) bgKeywords.push(category.split(' ')[0]);
     try {
+      if (url) {
+        const tx = await withTimeout(getWebsiteText(url), 6000, "site kw timeout");
+        bgKeywords.push(...(await extractKeywords(tx)));
+      }
+    } catch {}
+    const bgMusicPath = pickMusicFile(bgKeywords) || null;
+
+    // Filter graphs
+    // Inputs: 0 = video, 1 = tts, 2 = bg (optional)
+    let filterComplex, mapArgs;
+    if (bgMusicPath) {
+      filterComplex =
+        `[0:v]${drawTextVideo}[vout];` +
+        `[2:a]volume=0.20[a_bg];` +
+        `[1:a]volume=1.0[a_vo];` +
+        `[a_bg][a_vo]sidechaincompress=threshold=0.1:ratio=8:attack=5:release=120[a_mix]`;
+      mapArgs = `-map "[vout]" -map "[a_mix]"`;
+    } else {
+      filterComplex =
+        `[0:v]${drawTextVideo}[vout];` +
+        `[1:a]volume=1.0[a_mix]`;
+      mapArgs = `-map "[vout]" -map "[a_mix]"`;
+    }
+
+    try {
+      const musicInput = bgMusicPath ? ` -stream_loop -1 -i "${bgMusicPath}"` : '';
       await withTimeout(
         exec(
-          `ffmpeg -y -i "${tempTrimmed}" -i "${ttsPath}" ` +
-          `-filter:v "${drawText}" ` +
-          `-map 0:v:0 -map 1:a:0 -shortest ` +
-          `-c:v libx264 -preset superfast -crf 26 -r ${FPS} ` +
-          `-c:a aac -b:a 128k -ar 44100 -movflags +faststart "${outPath}"`
+          `ffmpeg -y -i "${tempTrimmed}" -i "${ttsPath}"${musicInput} ` +
+          `-filter_complex "${filterComplex}" ` +
+          `${mapArgs} -shortest ` +
+          `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO_CFG.FPS} ` +
+          `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
         ),
         TO.OVERMUX,
         "ffmpeg overlay+mux timed out"
