@@ -211,9 +211,25 @@ async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   try { return await res.json(); } catch { throw new Error("Bad JSON"); }
 }
+
+// URL helpers to avoid false "question" positives
+const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
+function stripUrls(s = "") {
+  return (s || "").replace(URL_REGEX, "");
+}
+function extractFirstUrl(s = "") {
+  const m = (s || "").match(URL_REGEX);
+  return m ? m[0] : null;
+}
 function isLikelyQuestion(s) {
   const t = (s || "").trim().toLowerCase();
-  return t.includes("?") || /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
+  // If message is just a URL, it's not a question even if it contains '?'
+  if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
+  // Look for question marks OUTSIDE of URLs
+  const textWithoutUrls = stripUrls(t);
+  const hasQMark = textWithoutUrls.includes("?");
+  const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
+  return hasQMark || startsWithQword;
 }
 
 // =========== Main Component ============
@@ -386,6 +402,43 @@ export default function FormPage() {
     }
   }
 
+  // ---- API calls (defensive) ----
+  async function fetchImageOnce(token) {
+    try {
+      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      return data?.imageUrl || "";
+    } catch (e) {
+      console.warn("image fetch failed:", e.message);
+      return "";
+    }
+  }
+  async function fetchVideoOnce(token) {
+    try {
+      const resp = await fetch(`${API_BASE}/generate-video-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      const vUrl = data?.videoUrl
+        ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
+        : "";
+      return {
+        url: vUrl,
+        script: data?.script || data?.video?.script || "",
+        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
+      };
+    } catch (e) {
+      console.warn("video fetch failed:", e.message);
+      return { url: "", script: "", fbVideoId: null };
+    }
+  }
+
   // ---- Chat flow handler ----
   async function handleUserInput(e) {
     e.preventDefault();
@@ -413,8 +466,10 @@ export default function FormPage() {
       }
     }
 
-    // In-flow: if user asks a side question → answer + re-prompt SAME question; do NOT advance or record
+    // Current question
     const currentQ = CONVO_QUESTIONS[step];
+
+    // In-flow: if user asks a side question → answer + re-prompt SAME question; do NOT advance or record
     if (currentQ && isLikelyQuestion(value)) {
       const reply = await askGPT(value);
       if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
@@ -476,7 +531,15 @@ export default function FormPage() {
 
     // Normal Q&A capture (record answer + advance)
     if (currentQ) {
-      const newAnswers = { ...answers, [currentQ.key]: value };
+      let answerToSave = value;
+
+      // Be robust for URL question: extract a URL if present (so query '?' won't trip logic)
+      if (currentQ.key === "url") {
+        const firstUrl = extractFirstUrl(value);
+        if (firstUrl) answerToSave = firstUrl;
+      }
+
+      const newAnswers = { ...answers, [currentQ.key]: answerToSave };
       setAnswers(newAnswers);
 
       // Conditional skip
@@ -497,43 +560,6 @@ export default function FormPage() {
 
       setStep(nextStep);
       setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
-    }
-  }
-
-  // ---- API calls (defensive) ----
-  async function fetchImageOnce(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      return data?.imageUrl || "";
-    } catch (e) {
-      console.warn("image fetch failed:", e.message);
-      return "";
-    }
-  }
-  async function fetchVideoOnce(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      const vUrl = data?.videoUrl
-        ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
-        : "";
-      return {
-        url: vUrl,
-        script: data?.script || data?.video?.script || "",
-        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
-      };
-    } catch (e) {
-      console.warn("video fetch failed:", e.message);
-      return { url: "", script: "", fbVideoId: null };
     }
   }
 
@@ -1049,7 +1075,6 @@ export default function FormPage() {
               savedAt: Date.now()
             };
 
-            // match the autosave key used elsewhere
             sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem("smartmark_media_selection", mediaType);
