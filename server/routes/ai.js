@@ -92,10 +92,15 @@ async function getWebsiteText(url) {
       .replace(/\s+/g, ' ')
       .trim();
 
-    if (body.length < 200 || /cloudflare|access denied/i.test(body)) throw new Error('blocked/short');
+    if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
     return body.slice(0, 3500);
   } catch (e) {
-    console.warn('scrape fail:', url || '(empty)', e.message);
+    // Quiet down noisy targets that rate-limit
+    if (String(url || '').includes('chewy.com')) {
+      console.warn('scrape soft-fail (rate limited):', url);
+    } else {
+      console.warn('scrape fail:', url || '(empty)', e.message);
+    }
     return '';
   }
 }
@@ -301,7 +306,7 @@ const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|
 
 function seededPick(arr, seed) {
   let h = 0; for (const c of String(seed || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return arr[h % arr.length];
+  return arr[arr.length ? (h % arr.length) : 0] || '';
 }
 function cleanHeadline(h) {
   h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
@@ -336,7 +341,7 @@ function chooseTemplate(seedStr = '') {
   return (h % 4) + 1;
 }
 
-// ---------- overlay builder (varied templates, CTA slightly larger) ----------
+// ---------- overlay builder (images) ----------
 async function buildOverlayImage({ imageUrl, answers = {}, url = '', seed = '' }) {
   const { category } = mapIndustry(answers?.industry || '');
   const brand = (answers?.businessName || '').toUpperCase().slice(0, 30);
@@ -377,8 +382,8 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     cta = cleanCTA(parsed.cta);
   } catch {}
 
-  if (!headline) headline = seededPick(FALLBACK_HEADLINES[category] || FALLBACK_HEADLINES['General E-Commerce'], brand || seed || Date.now()).toUpperCase();
-  if (!cta) cta = cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], brand || seed || Date.now()));
+  if (!headline) headline = cleanHeadline(seededPick(FALLBACK_HEADLINES[category] || FALLBACK_HEADLINES['General E-Commerce'], brand || seed || Date.now())) || 'EVERYDAY ESSENTIALS';
+  if (!cta) cta = cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], brand || seed || Date.now())) || 'Shop Now!';
 
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -421,7 +426,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
       <text x="${W/2}" y="229" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
             font-size="22" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
     </g>
-    ${brand ? `<text x="30" y="${H-24}" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
   ${t === 2 ? `
@@ -430,7 +434,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
           font-size="${fontSize}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
     <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif"
           font-size="22" font-weight="800" fill="${ACCENT_A}" letter-spacing="1" text-decoration="underline">${escSVG(cta)}</text>
-    ${brand ? `<text x="40" y="52" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffffcc">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
   ${t === 3 ? `
@@ -441,7 +444,6 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
           style="paint-order: stroke; stroke: #00000055; stroke-width: 1.2;">${escSVG(headline)}</text>
     <text x="${W/2}" y="260" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
           font-size="24" font-weight="800" fill="${ACCENT_A}" letter-spacing="1">${escSVG(cta)}</text>
-    ${brand ? `<text x="${W-30}" y="${H-24}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#e6eef2aa">${escSVG(brand)}</text>` : ''}
   ` : ''}
 
   ${t === 4 ? `
@@ -449,8 +451,7 @@ WEBSITE KEYWORDS: [${websiteKeywords.join(', ')}]`.trim();
     <text x="28" y="108" text-anchor="start" font-family="Times New Roman, Times, serif"
           font-size="${fontSize}" font-weight="700" fill="#0b1417" letter-spacing="2">${escSVG(headline)}</text>
     <text x="${W-110}" y="${H-70}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif"
-          font-size="16" font-weight="800" fill="${LIGHT}" letter-spacing="1">${escSVG(cta)}</text>
-    ${brand ? `<text x="${W-30}" y="38" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0b1417">${escSVG(brand)}</text>` : ''}
+          font-size="16" font-weight="800" fill="#f2f5f6" letter-spacing="1">${escSVG(cta)}</text>
   ` : ''}
 </svg>`;
 
@@ -518,28 +519,88 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
   });
 }
 
-const CTA_LIBRARY = {
-  'Fashion & Accessories': ['Shop New Styles', 'See The Edit', 'Style Upgrade'],
-  'Beauty & Personal Care': ['Glow Up', 'Fresh Skin', 'New Routine'],
-  'Fitness, Sports & Outdoors': ['Get Fit Fast', 'Start Training', 'Crush Goals'],
-  'Home, Kitchen & Decor': ['Refresh Your Home', 'Upgrade Your Space', 'Make It Cozy'],
-  'Electronics & Gadgets': ['Upgrade Tech', 'Smart Upgrade', 'Power Your Day'],
-  'Food & Beverage': ['Order Today', 'Taste The Good', 'Hungry? Order'],
-  'Baby, Kids & Pets': ['Happy Pets', 'For Little Ones', 'Playtime Ready'],
-  'Health & Wellness': ['Feel Your Best', 'Start Healing', 'Stress Less'],
-  'Arts, Crafts & Hobbies': ['Create Today', 'Make Something', 'Art Starts Here'],
-  'Digital, Subscription & Services': ['Start Free Trial', 'Unlock Access', 'Join Today'],
-  'General E-Commerce': ['Discover More', 'Get Yours', 'Try It Now']
-};
-function pickCategoryCTA(category = 'General E-Commerce', seed = '') {
-  const list = CTA_LIBRARY[category] || CTA_LIBRARY['General E-Commerce'];
-  let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const choice = list[h % list.length] || 'Discover More';
-  const trimmed = choice.split(/\s+/).slice(0, 3).join(' ');
-  return /!$/.test(trimmed) ? trimmed : (trimmed + '!');
+// ---------- dynamic phrase helpers for video ----------
+function sanitizePhrase(p) {
+  p = String(p || '').replace(/[“”"’]/g, "'").replace(/[^a-z0-9 '!&\-]/gi, ' ').replace(/\s+/g, ' ').trim();
+  if (!p) return '';
+  if (BANNED_TERMS.test(p)) return '';
+  // cap to 2–5 words
+  const w = p.split(' ').filter(Boolean);
+  const trimmed = w.slice(0, Math.max(2, Math.min(5, w.length))).join(' ');
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+function extractPhrases(script, overlayText) {
+  const txt = String(script || '').replace(/\s+/g, ' ').trim();
+  const cta = String(overlayText || '').replace(/[.!?\s]+$/,'').trim();
+  const body = txt.replace(new RegExp(cta.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '!?\\.?$', 'i'), '').trim();
+
+  // try to get 2 emphasis chunks: start and middle
+  let sentences = body.split(/(?<=[.!?])\s+/).filter(s => s && s.length > 6);
+  if (sentences.length === 0) sentences = [body];
+
+  const first = sanitizePhrase(sentences[0]);
+  const midIdx = Math.floor(sentences.length / 2);
+  const middleRaw = sentences[midIdx] || sentences[0];
+  // prefer 3–4 words from the middle
+  const middle = sanitizePhrase(middleRaw.split(' ').slice(0, 4).join(' '));
+
+  const out = [];
+  if (first && !/^\d/.test(first)) out.push(first);
+  if (middle && middle !== first) out.push(middle);
+  return out.slice(0, 2);
+}
+function safeFFText(t) {
+  return String(t || '')
+    .replace(/[\n\r]/g, ' ')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'")
+    .replace(/[^A-Za-z0-9 !?&\\'\\:\\-]/g, ' ')
+    .toUpperCase();
+}
+function chooseVidStyle(seedStr = '') {
+  let h = 0; for (const c of String(seedStr || 'x')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return (h % 3) + 1; // 1..3
 }
 
-// ---------- video generation (EXACT 15s voice + visuals; overlay 4s) ----------
+// Build draw filters string for dynamic overlays (variety)
+function buildDynamicTextFilters({ style, phrases, W, H, fontfile, startPairs }) {
+  const font = fontfile ? `fontfile='${fontfile}':` : '';
+  const lines = [];
+
+  const baseShadow = 'shadowcolor=black@0.7:shadowx=3:shadowy=3';
+  if (style === 1) {
+    // Center band + text pops
+    for (let i = 0; i < phrases.length; i++) {
+      const [s, e] = startPairs[i] || [2 + i * 4, 4 + i * 4];
+      const y = Math.round(H * 0.30 + i * 60);
+      lines.push(
+        `drawbox=x=50:y=${y - 34}:w=${W - 100}:h=64:color=black@0.40:t=64:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
+        `drawtext=${font}text='${safeFFText(phrases[i])}':fontcolor=white@0.98:fontsize=42:${baseShadow}:x=(w-text_w)/2:y=${y - 8}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
+      );
+    }
+  } else if (style === 2) {
+    // Lower-third ribbon + underlined text
+    for (let i = 0; i < phrases.length; i++) {
+      const [s, e] = startPairs[i] || [2 + i * 4, 4 + i * 4];
+      const y = Math.round(H * 0.78);
+      lines.push(
+        `drawbox=x=0:y=${y - 36}:w=${W}:h=60:color=black@0.45:t=fill:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`,
+        `drawtext=${font}text='${safeFFText(phrases[i])}':fontcolor=0x14e7b9:fontsize=38:${baseShadow}:x=(w-text_w)/2:y=${y - 14}:enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
+      );
+    }
+  } else {
+    // Subtitle-style centered mid-screen
+    for (let i = 0; i < phrases.length; i++) {
+      const [s, e] = startPairs[i] || [2 + i * 4, 4 + i * 4];
+      lines.push(
+        `drawtext=${font}text='${safeFFText(phrases[i])}':fontcolor=white@0.96:fontsize=40:${baseShadow}:box=1:boxcolor=0x0b0d10@0.45:boxborderw=20:x=(w-text_w)/2:y=(h*0.52):enable='between(t,${s.toFixed(2)},${e.toFixed(2)})'`
+      );
+    }
+  }
+  return lines.join(',');
+}
+
+// ---------- video generation (EXACT 15s voice + visuals; dynamic overlays; CTA 4s) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -551,11 +612,12 @@ router.post('/generate-video-ad', async (req, res) => {
 
     // EXACT 15s output
     const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5, FINAL: 15 };
-    const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000, ATEMPO: 15000 };
+    const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000, ATEMPO: 20000 };
 
     const productType = answers?.industry || answers?.productType || '';
     const { category, pexels } = mapIndustry(productType);
-    const overlayText = answers?.cta ? answers.cta : pickCategoryCTA(category, regenerateToken);
+    // end CTA (always 4s visible near end)
+    const overlayText = answers?.cta ? cleanCTA(answers.cta) : cleanCTA(seededPick(FALLBACK_CTA[category] || FALLBACK_CTA['General E-Commerce'], regenerateToken));
 
     // search term
     let termParts = [pexels];
@@ -627,6 +689,7 @@ router.post('/generate-video-ad', async (req, res) => {
       (customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : '') +
       `Write a video ad script for an online e-commerce business selling physical products.\n` +
       `Script MUST be 30–38 words (~12.5–13.5s spoken). Hook → benefit → finish with this exact CTA: '${overlayText}'.\n` +
+      `Keep wording normal/generic if unsure. Avoid awkward terms like "unisex", "global", "finds", "forward", "chic".\n` +
       `ONLY the spoken words.`;
     if (productType) prompt += `\nProduct category: ${productType}`;
     if (answers && Object.keys(answers).length) {
@@ -640,7 +703,7 @@ router.post('/generate-video-ad', async (req, res) => {
         openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 90, temperature: 0.5 }),
         15000, 'OpenAI timeout'
       );
-      script = r.choices?.[0]?.message?.content?.trim() || script;
+      script = (r.choices?.[0]?.message?.content?.trim() || script).replace(/\s+/g, ' ');
     } catch {}
 
     // TTS
@@ -662,10 +725,10 @@ router.post('/generate-video-ad', async (req, res) => {
       } catch { return 0; }
     };
 
-    // Stretch/compress VO to EXACT 15.0s: tempo = dur/target, then pad+trim
+    // Stretch/compress VO to EXACT 15.0s: tempo = dur/target, then pad+trim (write AAC to .m4a to avoid container error)
     const target = VIDEO.FINAL;
     let ttsDur = await probe(ttsPath);
-    const voicePath = path.join(tmp, `${uuidv4()}_voice15.mp3`);
+    const voicePath = path.join(tmp, `${uuidv4()}_voice15.m4a`);
     if (ttsDur <= 0) { ttsDur = target; }
     let tempo = ttsDur / target;                  // duration -> 15s
     tempo = Math.max(0.5, Math.min(2.0, tempo));  // atempo bounds
@@ -677,7 +740,6 @@ router.post('/generate-video-ad', async (req, res) => {
         TO.ATEMPO, 'tempo adjust timeout'
       );
     } catch {
-      // fallback: copy + trim to 15s
       await withTimeout(exec(`ffmpeg -y -i "${ttsPath}" -t ${target} -c:a aac -b:a 160k -ar 44100 "${voicePath}"`), TO.ATEMPO, 'tempo fallback timeout');
     }
 
@@ -698,19 +760,32 @@ router.post('/generate-video-ad', async (req, res) => {
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
     await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${VIDEO.FINAL} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // overlay window: ALWAYS 4s (within 3–5s), at the end
-    const overlayDur = 4.0;
-    const overlayStart = (VIDEO.FINAL - overlayDur).toFixed(2); // e.g., 11.00
-    const overlayEnd = VIDEO.FINAL.toFixed(2);                  // 15.00
+    // dynamic mid-video overlays (2 phrases between 2–9s), style 1..3
+    const vidStyle = chooseVidStyle(regenerateToken || answers?.businessName || category || Date.now());
+    const midPhrases = extractPhrases(script, overlayText);
+    const startPairs = [[2.0, 4.2], [6.0, 8.2]]; // don't collide with final CTA window
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    const safeTxt = String(overlayText).toUpperCase().replace(/[\n\r:"]/g, ' ').replace(/'/g, '').replace(/[^A-Z0-9\s!]/g, '');
-    const drawText =
-      (fs.existsSync(fontfile)
-        ? `drawtext=fontfile='${fontfile}':text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
-        : `drawtext=text='${safeTxt}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
-      );
+    const dynFilters = buildDynamicTextFilters({
+      style: vidStyle,
+      phrases: midPhrases,
+      W: VIDEO.W, H: VIDEO.H,
+      fontfile,
+      startPairs
+    });
 
-    // background music (audible + ducked), both tracks EXACT 15s
+    // final CTA window: ALWAYS 4s (within 3–5s), at the end
+    const overlayDur = 4.0;
+    const overlayStart = (VIDEO.FINAL - overlayDur).toFixed(2); // 11.00
+    const overlayEnd = VIDEO.FINAL.toFixed(2);                  // 15.00
+    const safeCTA = safeFFText(overlayText);
+    const ctaText = fontfile
+      ? `drawtext=fontfile='${fontfile}':text='${safeCTA}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`
+      : `drawtext=text='${safeCTA}':fontcolor=white@0.96:fontsize=42:box=0:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${overlayStart},${overlayEnd})'`;
+
+    // chain all video overlays
+    const videoFilter = [dynFilters, ctaText].filter(Boolean).join(',');
+
+    // background music (ducked), audio EXACT 15s
     let bgKeywords = [];
     if (productType) bgKeywords.push(productType);
     if (category) bgKeywords.push(category.split(' ')[0]);
@@ -722,7 +797,7 @@ router.post('/generate-video-ad', async (req, res) => {
     let filterComplex, mapArgs;
     if (bgMusicPath) {
       filterComplex =
-        `[0:v]${drawText}[v];` +
+        `[0:v]${videoFilter}[v];` +
         `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${VIDEO.FINAL},apad=pad_dur=${VIDEO.FINAL}[voice];` +
         `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,apad=pad_dur=${VIDEO.FINAL},atrim=0:${VIDEO.FINAL}[bg];` +
         `[bg][voice]sidechaincompress=threshold=0.12:ratio=6:attack=6:release=180[duck];` +
@@ -730,17 +805,17 @@ router.post('/generate-video-ad', async (req, res) => {
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
       filterComplex =
-        `[0:v]${drawText}[v];` +
+        `[0:v]${videoFilter}[v];` +
         `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${VIDEO.FINAL},apad=pad_dur=${VIDEO.FINAL}[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
 
-    // Force output to 15.0s (visuals keep going until script ends; both are 15s)
+    // compose to EXACT 15.0s
     await withTimeout(
       exec(
         `ffmpeg -y -i "${trimmedPath}" -i "${voicePath}"${musicInput} ` +
         `-filter_complex "${filterComplex}" ${mapArgs} ` +
-        `-t ${VIDEO.FINAL} ` + // hard cap to 15s
+        `-t ${VIDEO.FINAL} ` + // hard cap 15s
         `-c:v libx264 -preset superfast -crf 26 -r ${VIDEO.FPS} ` +
         `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
       ),
