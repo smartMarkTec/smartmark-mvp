@@ -21,7 +21,6 @@ function absolutePublicUrl(relativePath) {
   if (!relativePath) return '';
   return relativePath.startsWith('http') ? relativePath : `${base}${relativePath}`;
 }
-
 function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
@@ -377,6 +376,7 @@ const generator = {
           const imgResp = await axios.post(`${api}/generate-image-from-prompt`, {
             url: url || form?.url || '',
             industry: answers?.industry || form?.industry || '',
+            answers,
             regenerateToken: regTok
           }, { timeout: 45000 });
 

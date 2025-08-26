@@ -127,6 +127,28 @@ async function getWebsiteText(url) {
   }
 }
 
+// ---------- topic derivation (to keep media on-topic) ----------
+const STOP = new Set('a,an,and,are,at,be,by,for,from,go,have,i,in,is,it,of,on,or,our,out,shop,sign,learn,now,join,book,more,the,this,to,up,with,your,our,you,we,they,them,as,that,than,then,over,under,off,new,latest,deal,save,sale,free'.split(','));
+function topKeywords(str, limit = 4) {
+  const words = String(str || '').toLowerCase()
+    .replace(/https?:\/\/\S+/g,' ')
+    .replace(/[^a-z0-9\s]/g,' ')
+    .split(/\s+/).filter(w => w && !STOP.has(w) && w.length > 2);
+  const seen = new Set();
+  const out = [];
+  for (const w of words) { if (!seen.has(w)) { seen.add(w); out.push(w); if (out.length >= limit) break; } }
+  return out;
+}
+function deriveTopicKeywords(answers = {}, url = '', fallback = 'ecommerce') {
+  const parts = [
+    answers.industry, answers.productType, answers.category, answers.subcategory,
+    answers.description, answers.mainBenefit, answers.offer, answers.keywords,
+    url
+  ].filter(Boolean).join(' ');
+  const kws = topKeywords(parts, 5);
+  return kws.length ? kws.join(' ') : (answers.industry || fallback);
+}
+
 // ---------- ad copy ----------
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = '', businessName = '', url = '' } = req.body;
@@ -347,7 +369,9 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['art','painting','craft'], keyword: 'painting art' },
   { match: ['coffee','cafe'], keyword: 'coffee shop' },
 ];
-function getImageKeyword(industry = '', url = '') {
+function getImageKeyword(industry = '', url = '', answers = {}) {
+  const derived = deriveTopicKeywords(answers, url, industry || 'ecommerce');
+  if (derived && derived.trim().length > 0) return derived;
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
@@ -390,7 +414,7 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
-      <text x="40" y="${H-56}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">${escSVG(headline)}</text>
+      <text x="40" y="${H-56}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
       <text x="${W-40}" y="${H-52}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
@@ -546,11 +570,8 @@ router.post('/generate-video-ad', async (req, res) => {
       TRIM: 20000, OVERMUX: 90000, FPROBE: 8000
     };
 
-    const industry = answers?.industry || answers?.productType || '';
-    const term = (industry || 'shopping')
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, ' ')
-      .trim() || 'shopping';
+    // --- force topical relevance for stock search
+    const topic = deriveTopicKeywords(answers, url, answers.industry || 'shopping') || 'shopping';
 
     const ctaText = simpleCTA(answers?.cta);
 
@@ -560,7 +581,7 @@ router.post('/generate-video-ad', async (req, res) => {
       const r = await withTimeout(
         axios.get('https://api.pexels.com/videos/search', {
           headers: { Authorization: PEXELS_API_KEY },
-          params: { query: term, per_page: 70, cb: Date.now() + (regenerateToken || '') }
+          params: { query: topic, per_page: 70, cb: Date.now() + (regenerateToken || '') }
         }),
         TO.PEXELS,
         'Pexels API timed out'
@@ -585,7 +606,7 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const shuffled = getDeterministicShuffle(
       candidates,
-      regenerateToken || answers?.businessName || term || Date.now()
+      regenerateToken || answers?.businessName || topic || Date.now()
     );
 
     // work dir
@@ -617,12 +638,13 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'Video preparation failed' });
 
-    // ----- simple script (no domains) -----
+    // ----- script (no domains) -----
     let prompt =
       `Write a simple, clear spoken ad script for an online store.\n` +
       `Target ~15 seconds at normal speaking pace (~60–75 words). Avoid fancy terms; do NOT mention a website or domain.\n` +
-      `End with this exact CTA: '${ctaText}'. ONLY the spoken words.`;
-    if (industry) prompt += `\nCategory: ${industry}`;
+      `End with this exact CTA: '${ctaText}'. ONLY the spoken words.\n` +
+      `Topic keywords (guide only): ${topic}`;
+    if (answers?.industry) prompt += `\nCategory: ${answers.industry}`;
     if (answers?.businessName) prompt += `\nBrand: ${answers.businessName}`;
     if (url) prompt += `\nWebsite (for context only, do not say it): ${url}`;
 
@@ -703,9 +725,9 @@ router.post('/generate-video-ad', async (req, res) => {
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosen = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
-    const fontParam = chosen ? `fontfile='${chosen}':` : '';
+    const fontParam = chosen ? `fontfile='${chosen}':` : ''; // Fontconfig warning may appear but is harmless.
 
-    const brandLine = safeFFText(answers?.businessName || industry || 'JUST DROPPED');
+    const brandLine = safeFFText(answers?.businessName || topic || 'JUST DROPPED');
     const ctaTxt    = safeFFText(ctaText);
 
     // Base grading + vignette
@@ -729,30 +751,30 @@ router.post('/generate-video-ad', async (req, res) => {
     const outroStart = Math.max(0.0, finalDur - 2.8);
     const outroEnd   = finalDur;
 
-    // Build overlay chain per variant
+    // Build overlay chain per variant (FIX: use iw/ih; never w=w/h=h)
     let overlayChain;
     if (styleVariant === 1) {
       // Lower-third intro band + end CTA badge
-      const boxIntro  = `drawbox=x=0:y=h-120:w=w:h=120:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
-      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=32:x=40:y=h-88:enable='between(t,${introStart+0.2},${introEnd})'`;
-      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=h-90:enable='between(t,${introStart+0.5},${introEnd})'`;
+      const boxIntro  = `drawbox=x=0:y=ih-120:w=iw:h=120:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=32:x=40:y=h-88:enable='between(t,${(introStart+0.2).toFixed(2)},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=h-90:enable='between(t,${(introStart+0.5).toFixed(2)},${introEnd})'`;
 
-      const boxOutro  = `drawbox=x=0:y=0:w=w:h=h:color=black@0.28:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.28:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
       const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=34:x=(w-tw)/2:y=(h/2-30):enable='between(t,${outroStart},${outroEnd})'`;
       const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=38:box=1:boxcolor=0x0b0d10@0.75:boxborderw=20:x=(w-tw)/2:y=(h/2+12):enable='between(t,${outroStart},${outroEnd})'`;
       overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1, txtOutro2].join(',');
     } else {
       // Top-bar intro strip + full-bleed dim end card
-      const boxIntro  = `drawbox=x=0:y=0:w=w:h=96:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
-      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=30:enable='between(t,${introStart+0.15},${introEnd})'`;
-      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=24:box=1:boxcolor=0x14e7b9@0.85:boxborderw=12:x=w-tw-40:y=30:enable='between(t,${introStart+0.45},${introEnd})'`;
+      const boxIntro  = `drawbox=x=0:y=0:w=iw:h=96:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=30:enable='between(t,${(introStart+0.15).toFixed(2)},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=24:box=1:boxcolor=0x14e7b9@0.85:boxborderw=12:x=w-tw-40:y=30:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd})'`;
 
-      const boxOutro  = `drawbox=x=0:y=0:w=w:h=h:color=black@0.35:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.35:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
       const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=42:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2-10):enable='between(t,${outroStart},${outroEnd})'`;
       overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1].join(',');
     }
 
-    // ----- audio: VO + optional BG music -----
+    // ----- audio: VO + optional BG music (robust to mono VO) -----
     let bgMusicPath = null;
     try {
       const bgKeywords = [];
@@ -766,14 +788,14 @@ router.post('/generate-video-ad', async (req, res) => {
     if (bgMusicPath) {
       filterComplex =
         `[0:v]${overlayChain}[v];` +
-        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
-        `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.20,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
+        `[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,volume=1.0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
+        `[2:a]aresample=44100,volume=0.20,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
         `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
       filterComplex =
         `[0:v]${overlayChain}[v];` +
-        `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
+        `[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
 
@@ -838,7 +860,7 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-// ---------- IMAGE: fetch + overlay (kept) ----------
+// ---------- IMAGE: fetch + overlay ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { regenerateToken = '' } = req.body || {};
@@ -847,7 +869,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const url = answers.url || top.url || '';
     const industry = answers.industry || top.industry || '';
 
-    const keyword = getImageKeyword(industry, url);
+    const keyword = getImageKeyword(industry, url, answers);
 
     let photos = [];
     try {
@@ -888,7 +910,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   }
 });
 
-// ---------- IMAGE: overlay specific URL (kept) ----------
+// ---------- IMAGE: overlay specific URL ----------
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, answers = {}, regenerateToken = '' } = req.body || {};
