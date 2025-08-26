@@ -3,6 +3,27 @@
 
 const express = require('express');
 const router = express.Router();
+// --- CORS for Vercel frontend ---
+const ALLOW_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://smartmark-mvp.vercel.app',
+  process.env.FRONTEND_ORIGIN,
+].filter(Boolean));
+
+router.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOW_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') return res.sendStatus(204); // preflight OK
+  next();
+});
+
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
