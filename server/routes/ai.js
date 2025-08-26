@@ -10,6 +10,7 @@ const ALLOW_ORIGINS = new Set([
   'http://127.0.0.1:3000',
   'https://smartmark-mvp.vercel.app',
   process.env.FRONTEND_ORIGIN,
+  process.env.FRONTEND_URL,
 ].filter(Boolean));
 
 router.use((req, res, next) => {
@@ -49,6 +50,16 @@ function absolutePublicUrl(relativePath) {
   if (!relativePath) return '';
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
   return `${base}${relativePath}`;
+}
+function getGeneratedDir() {
+  if (process.env.GENERATED_DIR) return process.env.GENERATED_DIR;
+  if (process.env.RENDER) return '/tmp/generated';
+  return path.join(__dirname, '../public/generated');
+}
+function ensureGeneratedDir() {
+  const dir = getGeneratedDir();
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  return dir;
 }
 function getUserToken(req) {
   return req?.body?.userAccessToken || getFbUserToken() || null;
@@ -144,7 +155,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
   }
 });
 
-// ---------- generate-campaign-assets (fixes 404 used by frontend) ----------
+// ---------- generate-campaign-assets ----------
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
     const { answers = {}, url = '' } = req.body;
@@ -436,11 +447,10 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
 
   const svg = renderImageSVG({ W, H, base64, headline, cta, tpl });
 
-  // write to /public so assets load via https://.../generated/*
-  const outDir = path.join(__dirname, '../public/generated');
-  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  fs.writeFileSync(path.join(outDir, file), await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer());
+  const outPath = path.join(outDir, file);
+  fs.writeFileSync(outPath, await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer());
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
@@ -498,9 +508,9 @@ function safeFFText(t){
   return String(t||'')
     .replace(/[\n\r]/g,' ')
     .replace(/[:]/g,' ')
-    .replace(/[\\'"]/g,'')               // remove quotes & backslashes to avoid parse errors
-    .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'') // strip domains/urls
-    .replace(/\b(dot|com|net|org|io|co)\b/gi,'') // strip spoken domain parts
+    .replace(/[\\'"]/g,'')
+    .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'')
+    .replace(/\b(dot|com|net|org|io|co)\b/gi,'')
     .replace(/[^A-Za-z0-9 !?\-]/g,' ')
     .replace(/\s+/g,' ')
     .trim()
@@ -544,7 +554,6 @@ router.post('/generate-video-ad', async (req, res) => {
       .replace(/[^a-z0-9\s]/g, ' ')
       .trim() || 'shopping';
 
-    // ✅ Define CTA once and reuse
     const ctaText = simpleCTA(answers?.cta);
 
     // ----- fetch stock clips -----
@@ -658,7 +667,7 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         const { stdout } = await withTimeout(
           exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`),
-          TO.FPROBE,
+          8000,
           'ffprobe timeout'
         );
         const s = parseFloat(stdout.trim());
@@ -675,8 +684,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
     fs.writeFileSync(listPath, paths.slice(0, need).map(pth => `file '${pth}'`).join('\n'));
 
-    const outDir = path.join(__dirname, '../public/generated');
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    const outDir = ensureGeneratedDir();
     const id = uuidv4();
     const concatPath = path.join(outDir, `${id}.concat.mp4`);
     const trimmedPath = path.join(outDir, `${id}.trim.mp4`);
@@ -684,12 +692,12 @@ router.post('/generate-video-ad', async (req, res) => {
 
     await withTimeout(
       exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`),
-      TO.CONCAT,
+      30000,
       'concat timeout'
     );
     await withTimeout(
       exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`),
-      TO.TRIM,
+      20000,
       'trim timeout'
     );
 
@@ -715,15 +723,13 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     const subs = chunkWords(script);
     const avg = voDur / Math.max(1, subs.length);
-    const per = Math.max(0.55, avg * 0.85); // slightly faster to keep up
+    const per = Math.max(0.55, avg * 0.85);
 
-    // two simple variants
     let h = 0;
     for (const c of String(regenerateToken || answers?.businessName || Date.now()))
       h = (h * 31 + c.charCodeAt(0)) >>> 0;
     const styleVariant = (h % 2) + 1;
 
-    // fonts
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosen = fs.existsSync(serifFont)
@@ -735,7 +741,7 @@ router.post('/generate-video-ad', async (req, res) => {
     subs.forEach((s, idx) => {
       const t0 = Math.min(voDur, idx * per).toFixed(2);
       let t1 = Math.min(voDur, (idx + 1) * per);
-      if (idx === subs.length - 1) t1 = voDur; // run to end of VO
+      if (idx === subs.length - 1) t1 = voDur;
       const txt = safeFFText(s);
       const yPos = styleVariant === 1 ? `h*0.86-text_h` : `h*0.78-text_h/2`;
       const common = `fontcolor=white@0.98:bordercolor=black@0.85:borderw=2:fontsize=30:x=(w-text_w)/2:y=${yPos}:enable='between(t,${t0},${t1.toFixed(2)})'`;
@@ -745,7 +751,6 @@ router.post('/generate-video-ad', async (req, res) => {
       textFilters.push(draw);
     });
 
-    // ----- CTA pop-up (last ~3s) -----
     const ctaStart = Math.max(0, voDur - 3).toFixed(2);
     const ctaEnd = voDur.toFixed(2);
     const ctaTxt = safeFFText(ctaText);
@@ -759,7 +764,7 @@ router.post('/generate-video-ad', async (req, res) => {
 
     // ----- background music (under VO) -----
     let bgKeywords = [];
-    if (industry) bgKeywords.push(industry);
+    if (answers?.industry) bgKeywords.push(answers.industry);
     if (answers?.businessName) bgKeywords.push(answers.businessName);
     let bgMusicPath = null;
     try { bgMusicPath = pickMusicFile(bgKeywords); } catch {}
@@ -788,7 +793,7 @@ router.post('/generate-video-ad', async (req, res) => {
         `-c:v libx264 -preset veryfast -crf 22 -r ${VIDEO.FPS} -pix_fmt yuv420p ` +
         `-c:a aac -b:a 192k -ar 44100 -movflags +faststart "${outPath}"`
       ),
-      TO.OVERMUX,
+      90000,
       'overlay+mux timeout'
     );
 
@@ -824,14 +829,13 @@ router.post('/generate-video-ad', async (req, res) => {
       console.error('FB upload fail:', e?.response?.data || e.message);
     }
 
-    // ✅ Return ctaText explicitly (and overlayText for backward compat)
     return res.json({
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
       fbVideoId,
       script,
-      ctaText,                  // <— added
-      overlayText: ctaText,     // keep for existing clients
+      ctaText,
+      overlayText: ctaText,
       voice: 'alloy',
       video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy' }
     });
@@ -842,12 +846,10 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-
-// ---------- IMAGE: fetch + overlay ----------
+// ---------- IMAGE: fetch + overlay (pick + lightweight inline overlay) ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
-    // accept either top-level fields or {answers}
-    const { regenerateToken = '' } = req.body;
+    const { regenerateToken = '' } = req.body || {};
     const top = req.body || {};
     const answers = top.answers || top;
     const url = answers.url || top.url || '';
@@ -876,11 +878,11 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const img = photos[idx];
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
-    const headlineHint = answers?.businessName ? `${answers.businessName}` : (industry ? 'New Arrivals' : 'Great Picks');
-    const ctaHint = answers?.cta || 'Shop Now!';
-
+    // Try to overlay immediately so caller gets a /generated/* URL.
     let finalUrl = baseUrl;
     try {
+      const headlineHint = answers?.businessName ? `${answers.businessName}` : (industry ? 'New Arrivals' : 'Great Picks');
+      const ctaHint = answers?.cta || 'Shop Now!';
       const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint, seed });
       finalUrl = publicUrl;
     } catch (e) {
@@ -891,6 +893,33 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   } catch (e) {
     console.error('image route fail:', e?.message || e);
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+  }
+});
+
+// ---------- IMAGE: overlay specific URL (used by SmartCampaignEngine) ----------
+router.post('/generate-image-with-overlay', async (req, res) => {
+  try {
+    const { imageUrl, answers = {}, regenerateToken = '' } = req.body || {};
+    if (!imageUrl) return res.status(400).json({ error: 'Missing imageUrl' });
+
+    const headlineHint = answers?.businessName ? `${answers.businessName}` : (answers?.industry ? 'New Arrivals' : 'Great Picks');
+    const ctaHint = answers?.cta || 'Shop Now!';
+
+    const { publicUrl, absoluteUrl } = await buildOverlayImage({
+      imageUrl,
+      headlineHint,
+      ctaHint,
+      seed: regenerateToken || answers?.businessName || Date.now()
+    });
+
+    res.json({ imageUrl: publicUrl, absoluteUrl });
+  } catch (e) {
+    console.error('image overlay fail:', e?.message || e);
+    // Fallback: just return original (absolute if needed)
+    const original = /^https?:\/\//i.test(String(req.body?.imageUrl || ''))
+      ? req.body.imageUrl
+      : absolutePublicUrl(String(req.body?.imageUrl || ''));
+    res.json({ imageUrl: original, absoluteUrl: original, warning: 'Overlay failed; returned original image' });
   }
 });
 

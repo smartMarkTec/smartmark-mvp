@@ -201,31 +201,22 @@ function rankAds(listByAdId, kpi = 'cpc') {
   const EPS = 1e-9;
 
   const byCpcThenCtr = (a, b) => {
-    // Primary: lower CPC wins; treat null as +∞
     const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
     const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
     if (Math.abs(ac - bc) > EPS) return ac - bc;
-
-    // Tie / both null: higher CTR wins; treat null as -∞
     const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
     const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
     if (Math.abs(actr - bctr) > EPS) return bctr - actr;
-
-    // Final stable tiebreak to keep deterministic order
     return String(a.adId).localeCompare(String(b.adId));
   };
 
   const byCtrThenCpc = (a, b) => {
-    // Primary: higher CTR wins
     const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
     const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
     if (Math.abs(actr - bctr) > EPS) return bctr - actr;
-
-    // Tie: lower CPC wins
     const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
     const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
     if (Math.abs(ac - bc) > EPS) return ac - bc;
-
     return String(a.adId).localeCompare(String(b.adId));
   };
 
@@ -400,15 +391,23 @@ const generator = {
           const pickedUrl = imgResp.data?.imageUrl;
           if (!pickedUrl) continue;
 
-          const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-            imageUrl: pickedUrl,
-            answers,
-            url: url || form?.url || ''
-          }, { timeout: 90000 });
+          // If we already got a /generated/* URL, skip redundant overlay
+          const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
+          let imageUrl = pickedUrl;
 
-          let imageUrl = overlayResp.data?.imageUrl || pickedUrl;
+          if (!alreadyGenerated) {
+            try {
+              const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
+                imageUrl: pickedUrl,
+                answers,
+                url: url || form?.url || '',
+                regenerateToken: regTok
+              }, { timeout: 90000 });
+              imageUrl = overlayResp.data?.imageUrl || pickedUrl;
+            } catch {}
+          }
+
           imageUrl = absolutePublicUrl(imageUrl);
-
           out.push({ kind: 'image', variantId: `img_${i + 1}`, imageUrl, adCopy: copy });
         } catch {}
       }
@@ -562,10 +561,7 @@ async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, chall
   await setAdsetDailyBudget({ adsetId: challengerAdsetId, dailyBudgetCents: chall, userToken });
 }
 
-// ... existing requires and helpers above remain unchanged ...
-
 async function getAdsetDetails({ adsetId, userToken }) {
-  // Pull enough fields to reproduce a similar ad set (no is_autobid)
   const FIELDS = [
     'name','campaign_id','daily_budget','billing_event','optimization_goal','bid_strategy',
     'targeting','promoted_object','attribution_spec','start_time','end_time'
@@ -573,21 +569,18 @@ async function getAdsetDetails({ adsetId, userToken }) {
   return fbGetV(FB_API_VER, adsetId, { access_token: userToken, fields: FIELDS });
 }
 
-// --- replace ensureChallengerAdsetClone() with this ---
 async function ensureChallengerAdsetClone({
   accountId, campaignId, sourceAdsetId, userToken,
   nameSuffix = 'Challengers', dailyBudgetCents = 300
 }) {
   const src = await getAdsetDetails({ adsetId: sourceAdsetId, userToken });
 
-  // Build a clean body. DO NOT include deprecated/read-only fields like is_autobid.
   const body = {
     name: `${src.name || 'Ad Set'} - ${nameSuffix}`,
     campaign_id: campaignId,
     daily_budget: Math.max(100, Number(dailyBudgetCents || src.daily_budget || 300)),
     billing_event: src.billing_event || 'IMPRESSIONS',
     optimization_goal: src.optimization_goal || 'LINK_CLICKS',
-    // Include bid_strategy only if present/valid
     ...(src.bid_strategy ? { bid_strategy: src.bid_strategy } : {}),
     ...(src.targeting ? { targeting: src.targeting } : {}),
     ...(src.promoted_object ? { promoted_object: src.promoted_object } : {}),
@@ -663,7 +656,7 @@ const deployer = {
   pauseAds,
   setAdsetDailyBudget,
   splitBudgetBetweenChampionAndChallengers,
-  ensureChallengerAdsetClone // <-- NEW export
+  ensureChallengerAdsetClone
 };
 
 module.exports = { policy, analyzer, generator, deployer, testing };

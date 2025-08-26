@@ -33,7 +33,7 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-FB-AD-ACCOUNT-ID'],
   optionsSuccessStatus: 204,
 };
 
@@ -64,6 +64,9 @@ if (process.env.RENDER) {
   try { fs.mkdirSync(generatedPath, { recursive: true }); } catch {}
   console.log('Serving /generated from:', generatedPath);
 }
+// Expose dir path for other modules (ai.js) to write consistently
+process.env.GENERATED_DIR = generatedPath;
+
 app.use('/generated', express.static(generatedPath));
 
 /** ===== Local fallback image (no external DNS) ===== */
@@ -135,8 +138,6 @@ app.use((err, req, res, next) => {
 });
 
 // ---- Background scheduler intentionally disabled ----
-// Timeframes are now controlled per-campaign from the UI (Campaign Duration).
-// (If you ever need it again, re-enable ./scheduler/jobs start here.)
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
