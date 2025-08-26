@@ -21,7 +21,6 @@ router.use((req, res, next) => {
   }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  // include x-fb-ad-account-id for your header usage
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID');
   res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
@@ -391,7 +390,7 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
-      <text x="40" y="${H-56}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      <text x="40" y="${H-56}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">${escSVG(headline)}</text>
       <text x="${W-40}" y="${H-52}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
@@ -401,8 +400,8 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
       <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="0" width="${W}" height="140" fill="url(#g2)"/>
-      <text x="40" y="92" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W-40}" y="98" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <text x="40" y="92" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">${escSVG(headline)}</text>
+      <text x="${W-40}" y="98" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#14e7b9" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
   if (tpl === 3) {
@@ -503,7 +502,6 @@ function getDeterministicShuffle(arr, seed) {
   for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
   return a;
 }
-// safe text for ffmpeg drawtext
 function safeFFText(t){
   return String(t||'')
     .replace(/[\n\r]/g,' ')
@@ -529,11 +527,11 @@ function simpleCTA(input) {
   return 'SHOP NOW!';
 }
 
-// ---------- VIDEO ----------
+// ---------- VIDEO (modern, 2 variants, no subtitles) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
-    const { url = '', answers = {}, regenerateToken = '' } = req.body;
+    const { url = '', answers = {}, regenerateToken = '', variant = null } = req.body;
 
     const token = getUserToken(req);
     const fbAdAccountId =
@@ -648,7 +646,7 @@ router.post('/generate-video-ad', async (req, res) => {
         .trim();
     } catch {}
 
-    // ----- TTS (normal) -----
+    // ----- TTS (voiceover) -----
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await withTimeout(
@@ -667,7 +665,7 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         const { stdout } = await withTimeout(
           exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`),
-          8000,
+          TO.FPROBE,
           'ffprobe timeout'
         );
         const s = parseFloat(stdout.trim());
@@ -692,95 +690,89 @@ router.post('/generate-video-ad', async (req, res) => {
 
     await withTimeout(
       exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`),
-      30000,
+      TO.CONCAT,
       'concat timeout'
     );
     await withTimeout(
       exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`),
-      20000,
+      TO.TRIM,
       'trim timeout'
     );
 
-    // ----- subtitles (3–4 words) -----
-    function chunkWords(text) {
-      const cleaned = String(text || '')
-        .replace(/[“”"’]/g, "'")
-        .replace(/[\(\)\[\]\{\}]/g, ' ')
-        .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi, '')
-        .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
-        .replace(/[^a-z0-9 '!&\-\.?]/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const words = cleaned.split(' ').filter(Boolean);
-      const chunks = [];
-      let i = 0;
-      while (i < words.length) {
-        const grp = (i % 2 === 0) ? 3 : 4;
-        chunks.push(words.slice(i, i + grp).join(' '));
-        i += grp;
-      }
-      return chunks;
-    }
-    const subs = chunkWords(script);
-    const avg = voDur / Math.max(1, subs.length);
-    const per = Math.max(0.55, avg * 0.85);
-
-    let h = 0;
-    for (const c of String(regenerateToken || answers?.businessName || Date.now()))
-      h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    const styleVariant = (h % 2) + 1;
-
+    // ----- modern overlays (no subs) -----
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
-    const sansFont = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    const chosen = fs.existsSync(serifFont)
-      ? serifFont
-      : (fs.existsSync(sansFont) ? sansFont : null);
+    const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+    const chosen = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
+    const fontParam = chosen ? `fontfile='${chosen}':` : '';
 
-    const baseChain = `fps=${VIDEO.FPS},format=yuv420p`;
-    const textFilters = [];
-    subs.forEach((s, idx) => {
-      const t0 = Math.min(voDur, idx * per).toFixed(2);
-      let t1 = Math.min(voDur, (idx + 1) * per);
-      if (idx === subs.length - 1) t1 = voDur;
-      const txt = safeFFText(s);
-      const yPos = styleVariant === 1 ? `h*0.86-text_h` : `h*0.78-text_h/2`;
-      const common = `fontcolor=white@0.98:bordercolor=black@0.85:borderw=2:fontsize=30:x=(w-text_w)/2:y=${yPos}:enable='between(t,${t0},${t1.toFixed(2)})'`;
-      const draw = chosen
-        ? `drawtext=fontfile='${chosen}':text='${txt}':${common}`
-        : `drawtext=text='${txt}':${common}`;
-      textFilters.push(draw);
-    });
+    const brandLine = safeFFText(answers?.businessName || industry || 'JUST DROPPED');
+    const ctaTxt    = safeFFText(ctaText);
 
-    const ctaStart = Math.max(0, voDur - 3).toFixed(2);
-    const ctaEnd = voDur.toFixed(2);
-    const ctaTxt = safeFFText(ctaText);
-    const ctaY = `h*0.74-text_h/2`;
-    const ctaCommon = `fontcolor=white@0.99:fontsize=38:box=1:boxcolor=0x0b0d10aa:boxborderw=18:x=(w-text_w)/2:y=${ctaY}:enable='between(t,${ctaStart},${ctaEnd})'`;
-    const ctaDraw = chosen
-      ? `drawtext=fontfile='${chosen}':text='${ctaTxt}':${ctaCommon}`
-      : `drawtext=text='${ctaTxt}':${ctaCommon}`;
+    // Base grading + vignette
+    const baseVideoChain =
+      `scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=decrease,` +
+      `pad=${VIDEO.W}:${VIDEO.H}:(ow-iw)/2:(oh-ih)/2,` +
+      `setsar=1,format=yuv420p,fps=${VIDEO.FPS},` +
+      `eq=contrast=1.08:saturation=1.15:brightness=0.02,` +
+      `unsharp=3:3:0.5:3:3:0.0,` +
+      `vignette=PI/6:0.5`;
 
-    const videoFilter = [baseChain, ...textFilters, ctaDraw].join(',');
+    // Variant chooser (1 = lower third intro, 2 = top bar intro)
+    let styleVariant = Number(variant);
+    if (![1,2].includes(styleVariant)) {
+      let h = 0; for (const c of String(regenerateToken || answers?.businessName || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+      styleVariant = (h % 2) + 1;
+    }
 
-    // ----- background music (under VO) -----
-    let bgKeywords = [];
-    if (answers?.industry) bgKeywords.push(answers.industry);
-    if (answers?.businessName) bgKeywords.push(answers.businessName);
+    // Timings
+    const introStart = 0.40, introEnd = Math.min(4.2, Math.max(2.2, finalDur * 0.25));
+    const outroStart = Math.max(0.0, finalDur - 2.8);
+    const outroEnd   = finalDur;
+
+    // Build overlay chain per variant
+    let overlayChain;
+    if (styleVariant === 1) {
+      // Lower-third intro band + end CTA badge
+      const boxIntro  = `drawbox=x=0:y=h-120:w=w:h=120:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=32:x=40:y=h-88:enable='between(t,${introStart+0.2},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=h-90:enable='between(t,${introStart+0.5},${introEnd})'`;
+
+      const boxOutro  = `drawbox=x=0:y=0:w=w:h=h:color=black@0.28:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=34:x=(w-tw)/2:y=(h/2-30):enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=38:box=1:boxcolor=0x0b0d10@0.75:boxborderw=20:x=(w-tw)/2:y=(h/2+12):enable='between(t,${outroStart},${outroEnd})'`;
+      overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1, txtOutro2].join(',');
+    } else {
+      // Top-bar intro strip + full-bleed dim end card
+      const boxIntro  = `drawbox=x=0:y=0:w=w:h=96:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=30:enable='between(t,${introStart+0.15},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=24:box=1:boxcolor=0x14e7b9@0.85:boxborderw=12:x=w-tw-40:y=30:enable='between(t,${introStart+0.45},${introEnd})'`;
+
+      const boxOutro  = `drawbox=x=0:y=0:w=w:h=h:color=black@0.35:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=42:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2-10):enable='between(t,${outroStart},${outroEnd})'`;
+      overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1].join(',');
+    }
+
+    // ----- audio: VO + optional BG music -----
     let bgMusicPath = null;
-    try { bgMusicPath = pickMusicFile(bgKeywords); } catch {}
+    try {
+      const bgKeywords = [];
+      if (answers?.industry) bgKeywords.push(answers.industry);
+      if (answers?.businessName) bgKeywords.push(answers.businessName);
+      bgMusicPath = pickMusicFile(bgKeywords);
+    } catch {}
 
     const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
     let filterComplex, mapArgs;
     if (bgMusicPath) {
       filterComplex =
-        `[0:v]${videoFilter}[v];` +
+        `[0:v]${overlayChain}[v];` +
         `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
         `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.20,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
         `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
       filterComplex =
-        `[0:v]${videoFilter}[v];` +
+        `[0:v]${overlayChain}[v];` +
         `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
@@ -793,7 +785,7 @@ router.post('/generate-video-ad', async (req, res) => {
         `-c:v libx264 -preset veryfast -crf 22 -r ${VIDEO.FPS} -pix_fmt yuv420p ` +
         `-c:a aac -b:a 192k -ar 44100 -movflags +faststart "${outPath}"`
       ),
-      90000,
+      TO.OVERMUX,
       'overlay+mux timeout'
     );
 
@@ -833,11 +825,11 @@ router.post('/generate-video-ad', async (req, res) => {
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
       fbVideoId,
+      variant: styleVariant,
       script,
       ctaText,
-      overlayText: ctaText,
       voice: 'alloy',
-      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy' }
+      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: styleVariant }
     });
   } catch (err) {
     console.error('video route error:', err);
@@ -846,7 +838,7 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-// ---------- IMAGE: fetch + overlay (pick + lightweight inline overlay) ----------
+// ---------- IMAGE: fetch + overlay (kept) ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { regenerateToken = '' } = req.body || {};
@@ -896,7 +888,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   }
 });
 
-// ---------- IMAGE: overlay specific URL (used by SmartCampaignEngine) ----------
+// ---------- IMAGE: overlay specific URL (kept) ----------
 router.post('/generate-image-with-overlay', async (req, res) => {
   try {
     const { imageUrl, answers = {}, regenerateToken = '' } = req.body || {};
@@ -915,7 +907,6 @@ router.post('/generate-image-with-overlay', async (req, res) => {
     res.json({ imageUrl: publicUrl, absoluteUrl });
   } catch (e) {
     console.error('image overlay fail:', e?.message || e);
-    // Fallback: just return original (absolute if needed)
     const original = /^https?:\/\//i.test(String(req.body?.imageUrl || ''))
       ? req.body.imageUrl
       : absolutePublicUrl(String(req.body?.imageUrl || ''));

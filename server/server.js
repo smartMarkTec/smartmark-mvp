@@ -13,18 +13,18 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const sharp = require('sharp'); // needed for fallback image
+const sharp = require('sharp');
 
 const app = express();
 
-// --- Allowed origins (fill FRONTEND_URL in .env for Render/Vercel) ---
+// --- Allowed origins ---
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://smartmark-mvp.vercel.app',
   'http://localhost:3000'
 ].filter(Boolean);
 
-// --- CORS (credentials + dynamic origin reflection) ---
+// --- CORS ---
 const corsOptions = {
   origin(origin, cb) {
     if (!origin) return cb(null, true);
@@ -54,7 +54,7 @@ app.set('trust proxy', 1);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// --- Serve generated images & videos for AI overlays ---
+// --- Serve generated assets for AI overlays ---
 let generatedPath;
 if (process.env.RENDER) {
   generatedPath = '/tmp/generated';
@@ -64,28 +64,19 @@ if (process.env.RENDER) {
   try { fs.mkdirSync(generatedPath, { recursive: true }); } catch {}
   console.log('Serving /generated from:', generatedPath);
 }
-// Expose dir path for other modules (ai.js) to write consistently
 process.env.GENERATED_DIR = generatedPath;
-
 app.use('/generated', express.static(generatedPath));
 
-/** ===== Local fallback image (no external DNS) ===== */
-app.get('/__fallback/1200.jpg', async (req, res) => {
+/** ===== Local fallback image ===== */
+app.get('/__fallback/1200.jpg', async (_req, res) => {
   try {
     const buf = await sharp({
-      create: {
-        width: 1200,
-        height: 1200,
-        channels: 3,
-        background: { r: 30, g: 200, b: 133 }
-      }
-    })
-      .jpeg({ quality: 82 })
-      .toBuffer();
+      create: { width: 1200, height: 1200, channels: 3, background: { r: 30, g: 200, b: 133 } }
+    }).jpeg({ quality: 82 }).toBuffer();
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.end(buf);
-  } catch (e) {
+  } catch {
     res.status(500).send('fallback image error');
   }
 });
@@ -103,7 +94,7 @@ app.use('/api', campaignRoutes);
 const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
 
-// Mount MOCK routes FIRST so they don't get swallowed by /smart router
+// Mount MOCK routes FIRST
 const smartMockRoutes = require('./routes/smartMock');
 app.use(smartMockRoutes);
 
@@ -111,12 +102,12 @@ const smartRoutes = require('./routes/smart');
 app.use('/smart', smartRoutes);
 
 // --- Health check ---
-app.get('/healthz', (req, res) => {
+app.get('/healthz', (_req, res) => {
   res.json({ status: 'OK', uptime: process.uptime() });
 });
 
 // --- Root ---
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({ status: 'SmartMark backend running', time: new Date().toISOString() });
 });
 
@@ -125,7 +116,7 @@ app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// --- Global error handler (must be last) ---
+// --- Global error handler ---
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err?.stack || err);
   if (res.headersSent) return next(err);

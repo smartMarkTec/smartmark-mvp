@@ -45,7 +45,6 @@ const FB_API_VER = 'v23.0';
 
 // =========================
 /* POLICY */
-// =========================
 const policy = {
   WINDOWS: { RECENT_DAYS: 3, PRIOR_DAYS: 3 },
   VARIANTS: {
@@ -110,8 +109,7 @@ const policy = {
 };
 
 // =========================
-// TEST MOCKS: in-memory insight overrides
-// =========================
+// TEST MOCKS
 const _mocks = { adset: {}, ad: {} };
 function _norm(m = {}) {
   const imp = Number(m.impressions || 0);
@@ -136,7 +134,6 @@ const testing = {
 
 // =========================
 /* ANALYZER */
-// =========================
 function dateRange(daysBackStart, daysBackLength) {
   const end = new Date();
   end.setUTCDate(end.getUTCDate() - daysBackStart);
@@ -165,7 +162,6 @@ function parseMetrics(node) {
 }
 
 async function getWindowInsights(id, token, level, windows) {
-  // ---- MOCK SHORT-CIRCUIT ----
   if (level === 'adset' && _mocks.adset[id]) {
     const { recent = {}, prior = {} } = _mocks.adset[id];
     return { recent: _norm(recent), prior: _norm(prior), _ranges: null };
@@ -199,7 +195,6 @@ function rankAds(listByAdId, kpi = 'cpc') {
   }));
 
   const EPS = 1e-9;
-
   const byCpcThenCtr = (a, b) => {
     const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
     const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
@@ -209,7 +204,6 @@ function rankAds(listByAdId, kpi = 'cpc') {
     if (Math.abs(actr - bctr) > EPS) return bctr - actr;
     return String(a.adId).localeCompare(String(b.adId));
   };
-
   const byCtrThenCpc = (a, b) => {
     const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
     const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
@@ -223,7 +217,6 @@ function rankAds(listByAdId, kpi = 'cpc') {
   rows.sort(kpi === 'ctr' ? byCtrThenCpc : byCpcThenCtr);
   return rows.map(r => ({ adId: r.adId, value: kpi === 'ctr' ? r.ctr : r.cpc, windows: r.windows }));
 }
-
 
 function hoursSince(iso) {
   if (!iso) return Infinity;
@@ -360,7 +353,6 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
-// =========================
 const generator = {
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
     const api = baseUrl() + '/api';
@@ -391,7 +383,6 @@ const generator = {
           const pickedUrl = imgResp.data?.imageUrl;
           if (!pickedUrl) continue;
 
-          // If we already got a /generated/* URL, skip redundant overlay
           const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
           let imageUrl = pickedUrl;
 
@@ -419,8 +410,9 @@ const generator = {
           const regTok = `${Date.now()}_vid_${i}_${Math.random().toString(36).slice(2, 8)}`;
           const vidResp = await axios.post(`${api}/generate-video-ad`, {
             url: url || form?.url || '',
-            answers: { ...answers, cta: 'Learn More!' },
-            regenerateToken: regTok
+            answers: { ...answers, cta: answers?.cta || 'Learn More!' },
+            regenerateToken: regTok,
+            variant: (i % 2) + 1 // ask API for two clean variations
           }, { timeout: 180000 });
 
           const absoluteVideoUrl = vidResp.data?.absoluteVideoUrl || absolutePublicUrl(vidResp.data?.videoUrl || '');
@@ -430,7 +422,8 @@ const generator = {
             video: {
               relativeUrl: vidResp.data?.videoUrl || '',
               absoluteUrl: absoluteVideoUrl || '',
-              fbVideoId: vidResp.data?.fbVideoId || null
+              fbVideoId: vidResp.data?.fbVideoId || null,
+              variant: vidResp.data?.variant || ((i % 2) + 1)
             },
             adCopy: copy
           });
@@ -442,13 +435,12 @@ const generator = {
   },
 
   async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both' }) {
-    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 1 } });
+    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 2 } });
   }
 };
 
 // =========================
 /* DEPLOYER (+ dryRun for tests) */
-// =========================
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
   if (!m) throw new Error('Invalid image data URL');
