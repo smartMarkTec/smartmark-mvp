@@ -412,7 +412,7 @@ const generator = {
             url: url || form?.url || '',
             answers: { ...answers, cta: answers?.cta || 'Learn More!' },
             regenerateToken: regTok,
-            variant: (i % 2) + 1 // ask API for two clean variations
+            variant: (i % 2) + 1
           }, { timeout: 180000 });
 
           const absoluteVideoUrl = vidResp.data?.absoluteVideoUrl || absolutePublicUrl(vidResp.data?.videoUrl || '');

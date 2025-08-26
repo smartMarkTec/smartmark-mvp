@@ -127,15 +127,14 @@ async function getWebsiteText(url) {
   }
 }
 
-// ---------- topic derivation (to keep media on-topic) ----------
+// ---------- topic derivation ----------
 const STOP = new Set('a,an,and,are,at,be,by,for,from,go,have,i,in,is,it,of,on,or,our,out,shop,sign,learn,now,join,book,more,the,this,to,up,with,your,our,you,we,they,them,as,that,than,then,over,under,off,new,latest,deal,save,sale,free'.split(','));
 function topKeywords(str, limit = 4) {
   const words = String(str || '').toLowerCase()
     .replace(/https?:\/\/\S+/g,' ')
     .replace(/[^a-z0-9\s]/g,' ')
     .split(/\s+/).filter(w => w && !STOP.has(w) && w.length > 2);
-  const seen = new Set();
-  const out = [];
+  const seen = new Set(); const out = [];
   for (const w of words) { if (!seen.has(w)) { seen.add(w); out.push(w); if (out.length >= limit) break; } }
   return out;
 }
@@ -369,13 +368,6 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['art','painting','craft'], keyword: 'painting art' },
   { match: ['coffee','cafe'], keyword: 'coffee shop' },
 ];
-function getImageKeyword(industry = '', url = '', answers = {}) {
-  const derived = deriveTopicKeywords(answers, url, industry || 'ecommerce');
-  if (derived && derived.trim().length > 0) return derived;
-  const input = `${industry} ${url}`.toLowerCase();
-  for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
-  return industry || 'ecommerce';
-}
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
 function fitFont(text, maxW, startFs, minFs=30){let fs=startFs;while(fs>minFs&&estWidth(text,fs)>maxW)fs-=2;return fs}
@@ -405,6 +397,14 @@ function cleanCTA(c){
 }
 const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
 const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
+
+function getImageKeyword(industry = '', url = '', answers = {}) {
+  const derived = deriveTopicKeywords(answers, url, industry || 'ecommerce');
+  if (derived && derived.trim().length > 0) return derived;
+  const input = `${industry} ${url}`.toLowerCase();
+  for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
+  return industry || 'ecommerce';
+}
 
 function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
   const ACCENT = '#14e7b9', LIGHT = '#f2f5f6'; const MAX_W = W - 80;
@@ -551,7 +551,7 @@ function simpleCTA(input) {
   return 'SHOP NOW!';
 }
 
-// ---------- VIDEO (modern, 2 variants, no subtitles) ----------
+// ---------- VIDEO (square 640x640; vertical-friendly; 2 variants) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -564,15 +564,15 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
-    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 };
+    // Square canvas for universal placements (vertical-friendly)
+    const VIDEO = { W: 640, H: 640, FPS: 24, CLIP: 5 };
     const TO = {
-      PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000,
+      PEXELS: 30000, DL: 45000, SCALE: 60000, CONCAT: 30000,
       TRIM: 20000, OVERMUX: 90000, FPROBE: 8000
     };
 
-    // --- force topical relevance for stock search
+    // topical relevance
     const topic = deriveTopicKeywords(answers, url, answers.industry || 'shopping') || 'shopping';
-
     const ctaText = simpleCTA(answers?.cta);
 
     // ----- fetch stock clips -----
@@ -613,7 +613,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const tmp = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
 
-    // download + scale
+    // download + square compose (blurred fill + crisp center)
     const paths = [];
     let p = 0;
     while (paths.length < 3 && p < shuffled.length) {
@@ -622,12 +622,21 @@ router.post('/generate-video-ad', async (req, res) => {
       try {
         await withTimeout(downloadFileWithTimeout(src, raw, TO.DL, 6), TO.DL + 2000, 'download timeout');
         const scaled = raw.replace('.mp4', '_s.mp4');
+
+        // Build square filter: adapt to portrait/landscape automatically
+        const perClipFilter =
+          `[0:v]scale='if(gte(iw/ih,1),${VIDEO.W},-2)':'if(gte(iw/ih,1),-2,${VIDEO.H})',setsar=1[vfit];` +
+          `[0:v]scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=increase,` +
+          `boxblur=luma_radius=30:luma_power=1:chroma_radius=30:chroma_power=1,` +
+          `crop=${VIDEO.W}:${VIDEO.H}[bg];` +
+          `[bg][vfit]overlay=(W-w)/2:(H-h)/2,format=yuv420p,fps=${VIDEO.FPS}[outv]`;
+
         await withTimeout(
           exec(
             `ffmpeg -y -i "${raw}" ` +
-            `-vf "scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=decrease,` +
-            `pad=${VIDEO.W}:${VIDEO.H}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,fps=${VIDEO.FPS}" ` +
-            `-t ${VIDEO.CLIP} -r ${VIDEO.FPS} -c:v libx264 -preset veryfast -crf 22 -an "${scaled}"`
+            `-filter_complex "${perClipFilter}" -map "[outv]" ` +
+            `-t ${VIDEO.CLIP} -r ${VIDEO.FPS} ` +
+            `-c:v libx264 -preset veryfast -crf 22 -an "${scaled}"`
           ),
           TO.SCALE,
           'scale timeout'
@@ -641,7 +650,7 @@ router.post('/generate-video-ad', async (req, res) => {
     // ----- script (no domains) -----
     let prompt =
       `Write a simple, clear spoken ad script for an online store.\n` +
-      `Target ~15 seconds at normal speaking pace (~60–75 words). Avoid fancy terms; do NOT mention a website or domain.\n` +
+      `Target ~15 seconds (~60–75 words). Avoid fancy terms; do NOT mention a website or domain.\n` +
       `End with this exact CTA: '${ctaText}'. ONLY the spoken words.\n` +
       `Topic keywords (guide only): ${topic}`;
     if (answers?.industry) prompt += `\nCategory: ${answers.industry}`;
@@ -668,7 +677,7 @@ router.post('/generate-video-ad', async (req, res) => {
         .trim();
     } catch {}
 
-    // ----- TTS (voiceover) -----
+    // ----- TTS -----
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await withTimeout(
@@ -696,7 +705,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     let voDur = await probeDur(ttsPath);
     if (voDur <= 0) voDur = 12.0;
-    const finalDur = Math.max(15.0, Math.min(voDur, 30.0)); // never under 15s
+    const finalDur = Math.max(15.0, Math.min(voDur, 30.0));
 
     // ----- concat cuts -----
     const need = Math.max(1, Math.ceil(finalDur / VIDEO.CLIP));
@@ -721,60 +730,60 @@ router.post('/generate-video-ad', async (req, res) => {
       'trim timeout'
     );
 
-    // ----- modern overlays (no subs) -----
+    // ----- modern overlays for square (no subs) -----
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosen = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
-    const fontParam = chosen ? `fontfile='${chosen}':` : ''; // Fontconfig warning may appear but is harmless.
+    const fontParam = chosen ? `fontfile='${chosen}':` : '';
 
     const brandLine = safeFFText(answers?.businessName || topic || 'JUST DROPPED');
     const ctaTxt    = safeFFText(ctaText);
 
-    // Base grading + vignette
     const baseVideoChain =
-      `scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=decrease,` +
-      `pad=${VIDEO.W}:${VIDEO.H}:(ow-iw)/2:(oh-ih)/2,` +
-      `setsar=1,format=yuv420p,fps=${VIDEO.FPS},` +
+      `format=yuv420p,fps=${VIDEO.FPS},` +
       `eq=contrast=1.08:saturation=1.15:brightness=0.02,` +
       `unsharp=3:3:0.5:3:3:0.0,` +
       `vignette=PI/6:0.5`;
 
-    // Variant chooser (1 = lower third intro, 2 = top bar intro)
+    // Variant selection (1/2)
     let styleVariant = Number(variant);
     if (![1,2].includes(styleVariant)) {
       let h = 0; for (const c of String(regenerateToken || answers?.businessName || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
       styleVariant = (h % 2) + 1;
     }
 
-    // Timings
-    const introStart = 0.40, introEnd = Math.min(4.2, Math.max(2.2, finalDur * 0.25));
+    const introStart = 0.40;
+    const introEnd   = Math.min(4.2, Math.max(2.2, finalDur * 0.25));
     const outroStart = Math.max(0.0, finalDur - 2.8);
     const outroEnd   = finalDur;
 
-    // Build overlay chain per variant (FIX: use iw/ih; never w=w/h=h)
+    // sizes for 640x640
+    const INTRO_H = Math.round(VIDEO.H * 0.22); // ~141
+    const INTRO_TXT_Y = VIDEO.H - INTRO_H + Math.round(INTRO_H * 0.38);
+    const TOP_H   = Math.round(VIDEO.H * 0.14);
+    const TOP_TXT_Y = Math.round(TOP_H * 0.28);
+
     let overlayChain;
     if (styleVariant === 1) {
-      // Lower-third intro band + end CTA badge
-      const boxIntro  = `drawbox=x=0:y=ih-120:w=iw:h=120:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
-      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=32:x=40:y=h-88:enable='between(t,${(introStart+0.2).toFixed(2)},${introEnd})'`;
-      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=h-90:enable='between(t,${(introStart+0.5).toFixed(2)},${introEnd})'`;
+      const boxIntro  = `drawbox=x=0:y=ih-${INTRO_H}:w=iw:h=${INTRO_H}:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=34:x=40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.2).toFixed(2)},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=28:box=1:boxcolor=0x14e7b9@0.85:boxborderw=18:x=w-tw-40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.5).toFixed(2)},${introEnd})'`;
 
-      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.28:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
-      const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=34:x=(w-tw)/2:y=(h/2-30):enable='between(t,${outroStart},${outroEnd})'`;
-      const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=38:box=1:boxcolor=0x0b0d10@0.75:boxborderw=20:x=(w-tw)/2:y=(h/2+12):enable='between(t,${outroStart},${outroEnd})'`;
+      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.30:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=38:x=(w-tw)/2:y=(h/2-46):enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=44:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2+6):enable='between(t,${outroStart},${outroEnd})'`;
       overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1, txtOutro2].join(',');
     } else {
-      // Top-bar intro strip + full-bleed dim end card
-      const boxIntro  = `drawbox=x=0:y=0:w=iw:h=96:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
-      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=30:enable='between(t,${(introStart+0.15).toFixed(2)},${introEnd})'`;
-      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=24:box=1:boxcolor=0x14e7b9@0.85:boxborderw=12:x=w-tw-40:y=30:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd})'`;
+      const boxIntro  = `drawbox=x=0:y=0:w=iw:h=${TOP_H}:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.15).toFixed(2)},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd})'`;
 
       const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.35:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
-      const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=42:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2-10):enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=46:box=1:boxcolor=0x0b0d10@0.75:boxborderw=26:x=(w-tw)/2:y=(h/2-18):enable='between(t,${outroStart},${outroEnd})'`;
       overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1].join(',');
     }
 
-    // ----- audio: VO + optional BG music (robust to mono VO) -----
+    // ----- audio: VO + optional BG music -----
     let bgMusicPath = null;
     try {
       const bgKeywords = [];
@@ -859,6 +868,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
 });
+
 
 // ---------- IMAGE: fetch + overlay ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
