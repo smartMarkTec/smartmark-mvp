@@ -551,7 +551,7 @@ function simpleCTA(input) {
   return 'SHOP NOW!';
 }
 
-// ---------- VIDEO (square 640x640; vertical-friendly; 2 variants; side-curtains fade out) ----------
+// ---------- VIDEO (fast path: single pass, looped clip, square, curtains fade) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -564,116 +564,68 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
-    // Square canvas for universal placements (vertical-friendly)
-    const VIDEO = { W: 640, H: 640, FPS: 24, CLIP: 5 };
-    const TO = {
-      PEXELS: 30000, DL: 45000, SCALE: 60000, CONCAT: 30000,
-      TRIM: 20000, OVERMUX: 90000, FPROBE: 8000
-    };
+    // Square is cheaper to render and vertical-friendly
+    const VIDEO = { W: 640, H: 640, FPS: 24 };
+    const TO = { PEXELS: 20000, DL: 35000, FPROBE: 8000, OVERMUX: 70000 };
 
-    // topical relevance
-    const topic = deriveTopicKeywords(answers, url, answers.industry || 'shopping') || 'shopping';
+    const topic = deriveTopicKeywords(answers, url, 'shopping');
     const ctaText = simpleCTA(answers?.cta);
 
-    // ----- fetch stock clips -----
-    let clips = [];
+    // ----- fetch ONE small stock clip (faster) -----
+    let clipUrl = null;
     try {
       const r = await withTimeout(
         axios.get('https://api.pexels.com/videos/search', {
           headers: { Authorization: PEXELS_API_KEY },
-          params: { query: topic, per_page: 70, cb: Date.now() + (regenerateToken || '') }
+          params: { query: topic, per_page: 25, cb: Date.now() + (regenerateToken || '') }
         }),
         TO.PEXELS,
         'Pexels API timed out'
       );
-      clips = r.data.videos || [];
+      const videos = r.data?.videos || [];
+      // choose the smallest mp4 (fastest decode)
+      for (const v of videos) {
+        const files = (v.video_files || [])
+          .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
+          .sort((a, b) => (a.width || 9999) - (b.width || 9999));
+        if (files[0]?.link) { clipUrl = files[0].link; break; }
+      }
     } catch (e) {
-      console.error('Pexels vid fetch failed', e?.response?.data || e.message);
-      return res.status(500).json({ error: 'Stock video fetch failed', detail: e.message });
+      console.error('Pexels fetch failed', e?.response?.data || e.message);
+      return res.status(500).json({ error: 'Stock video fetch failed' });
     }
-    if (!clips?.length) return res.status(404).json({ error: 'No stock videos found' });
+    if (!clipUrl) return res.status(404).json({ error: 'No stock video found' });
 
-    let candidates = [];
-    for (const v of clips) {
-      const files = (v.video_files || [])
-        .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
-        .sort((a, b) => (a.width || 9999) - (b.width || 9999));
-      const best = files.find(f => f.quality === 'sd') || files[0];
-      if (best?.link) candidates.push(best.link);
-    }
-    candidates = Array.from(new Set(candidates));
-    if (candidates.length < 3) return res.status(404).json({ error: 'Not enough usable clips' });
-
-    const shuffled = getDeterministicShuffle(
-      candidates,
-      regenerateToken || answers?.businessName || topic || Date.now()
-    );
-
-    // work dir
+    // download a single clip (<=5MB) — then we loop it in ffmpeg
     const tmp = path.join(__dirname, '../tmp');
-    if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
+    try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
+    const raw = path.join(tmp, `${uuidv4()}.mp4`);
+    await withTimeout(downloadFileWithTimeout(clipUrl, raw, TO.DL, 5), TO.DL + 1000, 'download timeout');
 
-    // download + square compose (blurred fill + crisp center)
-    const paths = [];
-    let p = 0;
-    while (paths.length < 3 && p < shuffled.length) {
-      const src = shuffled[p++];
-      const raw = path.join(tmp, `${uuidv4()}.mp4`);
-      try {
-        await withTimeout(downloadFileWithTimeout(src, raw, TO.DL, 6), TO.DL + 2000, 'download timeout');
-        const scaled = raw.replace('.mp4', '_s.mp4');
-
-        // Build square filter: adapt to portrait/landscape automatically
-        const perClipFilter =
-          `[0:v]scale='if(gte(iw/ih,1),${VIDEO.W},-2)':'if(gte(iw/ih,1),-2,${VIDEO.H})',setsar=1[vfit];` +
-          `[0:v]scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=increase,` +
-          `boxblur=luma_radius=30:luma_power=1:chroma_radius=30:chroma_power=1,` +
-          `crop=${VIDEO.W}:${VIDEO.H}[bg];` +
-          `[bg][vfit]overlay=(W-w)/2:(H-h)/2,format=yuv420p,fps=${VIDEO.FPS}[outv]`;
-
-        await withTimeout(
-          exec(
-            `ffmpeg -y -i "${raw}" ` +
-            `-filter_complex "${perClipFilter}" -map "[outv]" ` +
-            `-t ${VIDEO.CLIP} -r ${VIDEO.FPS} ` +
-            `-c:v libx264 -preset veryfast -crf 22 -an "${scaled}"`
-          ),
-          TO.SCALE,
-          'scale timeout'
-        );
-        try { fs.unlinkSync(raw); } catch {}
-        paths.push(scaled);
-      } catch (e) { try { fs.unlinkSync(raw); } catch {} }
-    }
-    if (!paths.length) return res.status(500).json({ error: 'Video preparation failed' });
-
-    // ----- script (no domains) -----
+    // ----- script (kept compact) -----
     let prompt =
-      `Write a simple, clear spoken ad script for an online store.\n` +
-      `Target ~15 seconds (~60–75 words). Avoid fancy terms; do NOT mention a website or domain.\n` +
-      `End with this exact CTA: '${ctaText}'. ONLY the spoken words.\n` +
-      `Topic keywords (guide only): ${topic}`;
-    if (answers?.industry) prompt += `\nCategory: ${answers.industry}`;
-    if (answers?.businessName) prompt += `\nBrand: ${answers.businessName}`;
-    if (url) prompt += `\nWebsite (for context only, do not say it): ${url}`;
-
+      `Write a simple, clear spoken ad script for an online store (~60–70 words). ` +
+      `Do NOT mention a website. End with this exact CTA: '${ctaText}'. ` +
+      `Topic: ${topic}` +
+      (answers?.industry ? `\nCategory: ${answers.industry}` : '') +
+      (answers?.businessName ? `\nBrand: ${answers.businessName}` : '') +
+      (url ? `\nWebsite (context only): ${url}` : '');
     let script = 'Discover what you love today. Shop now!';
     try {
       const r = await withTimeout(
         openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 150,
-          temperature: 0.4
+          max_tokens: 140,
+          temperature: 0.35
         }),
-        15000,
+        12000,
         'OpenAI timeout'
       );
       script = (r.choices?.[0]?.message?.content?.trim() || script)
         .replace(/\s+/g, ' ')
         .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi, '')
         .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
-        .replace(/\s{2,}/g, ' ')
         .trim();
     } catch {}
 
@@ -682,16 +634,16 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       const ttsRes = await withTimeout(
         openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script }),
-        20000,
+        15000,
         'TTS timeout'
       );
       fs.writeFileSync(ttsPath, Buffer.from(await ttsRes.arrayBuffer()));
     } catch (e) {
       console.error('TTS failed', e);
-      return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
+      return res.status(500).json({ error: 'TTS generation failed' });
     }
 
-    // ----- durations -----
+    // measure VO dur
     async function probeDur(file) {
       try {
         const { stdout } = await withTimeout(
@@ -704,33 +656,12 @@ router.post('/generate-video-ad', async (req, res) => {
       } catch { return 0; }
     }
     let voDur = await probeDur(ttsPath);
-    if (voDur <= 0) voDur = 12.0;
-    const finalDur = Math.max(15.0, Math.min(voDur, 30.0));
+    if (voDur <= 0) voDur = 10.5;
 
-    // ----- concat cuts -----
-    const need = Math.max(1, Math.ceil(finalDur / VIDEO.CLIP));
-    while (paths.length < need) paths.push(paths[paths.length - 1]);
-    const listPath = path.join(tmp, `${uuidv4()}.txt`);
-    fs.writeFileSync(listPath, paths.slice(0, need).map(pth => `file '${pth}'`).join('\n'));
+    // keep total short to fit Render request window
+    const finalDur = Math.min(Math.max(voDur, 10.0), 12.0);
 
-    const outDir = ensureGeneratedDir();
-    const id = uuidv4();
-    const concatPath = path.join(outDir, `${id}.concat.mp4`);
-    const trimmedPath = path.join(outDir, `${id}.trim.mp4`);
-    const outPath = path.join(outDir, `${id}.mp4`);
-
-    await withTimeout(
-      exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`),
-      TO.CONCAT,
-      'concat timeout'
-    );
-    await withTimeout(
-      exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`),
-      TO.TRIM,
-      'trim timeout'
-    );
-
-    // ----- modern overlays for square (no subs) -----
+    // ----- overlays (two variants) -----
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosen = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
@@ -739,77 +670,74 @@ router.post('/generate-video-ad', async (req, res) => {
     const brandLine = safeFFText(answers?.businessName || topic || 'JUST DROPPED');
     const ctaTxt    = safeFFText(ctaText);
 
-    const baseVideoChain =
-      `format=yuv420p,fps=${VIDEO.FPS},` +
-      `eq=contrast=1.08:saturation=1.15:brightness=0.02,` +
-      `unsharp=3:3:0.5:3:3:0.0,` +
-      `vignette=PI/6:0.5`;
-
-    // Variant selection (1/2)
     let styleVariant = Number(variant);
     if (![1,2].includes(styleVariant)) {
       let h = 0; for (const c of String(regenerateToken || answers?.businessName || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
       styleVariant = (h % 2) + 1;
     }
 
-    const introStart = 0.40;
-    const introEnd   = Math.min(4.2, Math.max(2.2, finalDur * 0.25));
-    const outroStart = Math.max(0.0, finalDur - 2.8);
+    const introStart = 0.30;
+    const introEnd   = Math.min(3.2, Math.max(1.8, finalDur * 0.25));
+    const outroStart = Math.max(0.0, finalDur - 2.4);
     const outroEnd   = finalDur;
 
-    // sizes for 640x640
-    const INTRO_H = Math.round(VIDEO.H * 0.22);
-    const INTRO_TXT_Y = VIDEO.H - INTRO_H + Math.round(INTRO_H * 0.38);
-    const TOP_H   = Math.round(VIDEO.H * 0.14);
-    const TOP_TXT_Y = Math.round(TOP_H * 0.28);
+    const INTRO_H = Math.round(VIDEO.H * 0.20);
+    const INTRO_TXT_Y = VIDEO.H - INTRO_H + Math.round(INTRO_H * 0.36);
+    const TOP_H   = Math.round(VIDEO.H * 0.13);
+    const TOP_TXT_Y = Math.round(TOP_H * 0.30);
 
-    // ► CURTAINS (side black bars that fade out quickly)
-    const CUR_W = Math.round(VIDEO.W * 0.13);   // 13% width per side
-    const CUR_HOLD = 0.35;                      // seconds to hold before fade
-    const CUR_FADE = 0.65;                      // fade duration
+    // Curtains fade settings
+    const CUR_W   = Math.round(VIDEO.W * 0.12);
+    const CUR_HOLD = 0.25;
+    const CUR_FADE = 0.55;
 
-    // Text overlays (no 'w' bare; use iw/ih to avoid earlier ffmpeg expr errors)
     let textChain;
     if (styleVariant === 1) {
       const boxIntro  = `drawbox=x=0:y=ih-${INTRO_H}:w=iw:h=${INTRO_H}:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
-      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=34:x=40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.2).toFixed(2)},${introEnd})'`;
-      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=28:box=1:boxcolor=0x14e7b9@0.85:boxborderw=18:x=w-tw-40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.5).toFixed(2)},${introEnd})'`;
-      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.30:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
-      const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=38:x=(w-tw)/2:y=(h/2-46):enable='between(t,${outroStart},${outroEnd})'`;
-      const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=44:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2+6):enable='between(t,${outroStart},${outroEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=32:x=40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.15).toFixed(2)},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd})'`;
+      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.28:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=36:x=(w-tw)/2:y=(h/2-42):enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=42:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2+4):enable='between(t,${outroStart},${outroEnd})'`;
       textChain = [boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1, txtOutro2].join(',');
     } else {
       const boxIntro  = `drawbox=x=0:y=0:w=iw:h=${TOP_H}:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
-      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.15).toFixed(2)},${introEnd})'`;
-      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd})'`;
-      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.35:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
-      const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=46:box=1:boxcolor=0x0b0d10@0.75:boxborderw=26:x=(w-tw)/2:y=(h/2-18):enable='between(t,${outroStart},${outroEnd})'`;
+      const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=28:x=40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.12).toFixed(2)},${introEnd})'`;
+      const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=24:box=1:boxcolor=0x14e7b9@0.85:boxborderw=14:x=w-tw-40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.42).toFixed(2)},${introEnd})'`;
+      const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.32:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
+      const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=44:box=1:boxcolor=0x0b0d10@0.75:boxborderw=22:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart},${outroEnd})'`;
       textChain = [boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1].join(',');
     }
 
-    // ----- audio: VO + optional BG music -----
+    // Optional BG music (very low volume)
     let bgMusicPath = null;
     try {
-      const bgKeywords = [];
-      if (answers?.industry) bgKeywords.push(answers.industry);
-      if (answers?.businessName) bgKeywords.push(answers.businessName);
-      bgMusicPath = pickMusicFile(bgKeywords);
+      const keys = [];
+      if (answers?.industry) keys.push(answers.industry);
+      if (answers?.businessName) keys.push(answers.businessName);
+      bgMusicPath = pickMusicFile(keys);
     } catch {}
 
     const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
 
-    // Build a multi-input filter graph so we can fade the side curtains out.
-    // Steps:
-    //   1) [0:v] base look
-    //   2) left/right color sources with fade-out
-    //   3) overlay curtains -> [base2]
-    //   4) apply text overlays -> [v]
+    // --- single-pass FFmpeg: loop clip -> blur fill -> curtains fade -> text -> mux VO(+bg) ---
+    const outDir = ensureGeneratedDir();
+    const id = uuidv4();
+    const outPath = path.join(outDir, `${id}.mp4`);
+
+    const baseLook = `eq=contrast=1.06:saturation=1.12:brightness=0.02,vignette=PI/6:0.45`;
     const videoGraph = [
-      `[0:v]${baseVideoChain}[b]`,
-      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${CUR_HOLD.toFixed(2)}:d=${CUR_FADE.toFixed(2)}:alpha=1[left]`,
-      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${CUR_HOLD.toFixed(2)}:d=${CUR_FADE.toFixed(2)}:alpha=1[right]`,
+      // split for background & fit
+      `[0:v]split=2[v0][v1]`,
+      `[v0]scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=increase,boxblur=luma_radius=20:luma_power=1:chroma_radius=20:chroma_power=1,crop=${VIDEO.W}:${VIDEO.H}[bg]`,
+      `[v1]scale='if(gte(iw/ih,1),${VIDEO.W},-2)':'if(gte(iw/ih,1),-2,${VIDEO.H})',setsar=1[vfit]`,
+      `[bg][vfit]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,format=yuv420p,fps=${VIDEO.FPS},${baseLook}[b]`,
+      // curtains that fade away
+      `color=c=black@0.85:s=${Math.round(VIDEO.W*0.12)}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${0.25}:d=${0.55}:alpha=1[left]`,
+      `color=c=black@0.85:s=${Math.round(VIDEO.W*0.12)}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${0.25}:d=${0.55}:alpha=1[right]`,
       `[b][left]overlay=shortest=1:x=0:y=0[bl]`,
       `[bl][right]overlay=shortest=1:x=main_w-overlay_w:y=0[base2]`,
+      // text overlays last
       `[base2]${textChain}[v]`
     ].join(';');
 
@@ -817,7 +745,7 @@ router.post('/generate-video-ad', async (req, res) => {
     if (bgMusicPath) {
       filterComplex =
         `${videoGraph};` +
-        `[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,volume=1.0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
+        `[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
         `[2:a]aresample=44100,volume=0.20,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
         `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
@@ -830,26 +758,19 @@ router.post('/generate-video-ad', async (req, res) => {
 
     await withTimeout(
       exec(
-        `ffmpeg -y -i "${trimmedPath}" -i "${ttsPath}"${musicInput} ` +
+        // loop the clip so we don't need concat/trim
+        `ffmpeg -y -stream_loop -1 -i "${raw}" -i "${ttsPath}"${musicInput} ` +
         `-filter_complex "${filterComplex}" ${mapArgs} ` +
         `-t ${finalDur.toFixed(2)} ` +
-        `-c:v libx264 -preset veryfast -crf 22 -r ${VIDEO.FPS} -pix_fmt yuv420p ` +
-        `-c:a aac -b:a 192k -ar 44100 -movflags +faststart "${outPath}"`
+        `-c:v libx264 -preset superfast -crf 24 -r ${VIDEO.FPS} -pix_fmt yuv420p ` +
+        `-c:a aac -b:a 160k -ar 44100 -movflags +faststart "${outPath}"`
       ),
       TO.OVERMUX,
       'overlay+mux timeout'
     );
 
-    // ensure ready
-    let ok = false;
-    for (let i = 0; i < 40; i++) {
-      try { if (fs.statSync(outPath).size > 200000) { ok = true; break; } } catch {}
-      await new Promise(r => setTimeout(r, 200));
-    }
-    if (!ok) return res.status(500).json({ error: 'Video output not ready' });
-
-    // cleanup
-    [concatPath, trimmedPath, ...paths, listPath].forEach(pth => { try { fs.unlinkSync(pth); } catch {} });
+    // cleanup quick
+    try { fs.unlinkSync(raw); } catch {}
     try { fs.unlinkSync(ttsPath); } catch {}
 
     const publicVideoUrl = `/generated/${id}.mp4`;
@@ -860,11 +781,8 @@ router.post('/generate-video-ad', async (req, res) => {
     try {
       if (fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(
-          fbAdAccountId,
-          token,
-          absoluteUrl,
-          'SmartMark Generated Video',
-          'Generated by SmartMark'
+          fbAdAccountId, token, absoluteUrl,
+          'SmartMark Generated Video', 'Generated by SmartMark'
         );
         fbVideoId = up?.id || null;
       }
