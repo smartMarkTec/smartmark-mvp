@@ -43,7 +43,7 @@ const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 const PEXELS_VID_BASE = 'https://api.pexels.com/videos/search';
 
-// ---------- training context (optional) ----------
+// ---------- training context ----------
 const DATA_DIR = path.join(__dirname, '../data');
 const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
 const MAX_FILE_MB = 1.5;
@@ -249,8 +249,8 @@ function getImageKeyword(industry = '', url = '') {
   return industry || 'ecommerce';
 }
 
-// ---------- simple copy helpers for overlays ----------
-function escSVG(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&apos;'); }
+// ---------- copy sanitizers for overlays ----------
+function escSVG(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fontForHeadline(text) { const len=(text||'').length; if(len<=14)return 56; if(len<=20)return 50; if(len<=26)return 44; return 38; }
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
 function cleanHeadline(h) {
@@ -270,65 +270,50 @@ function cleanCTA(c) {
 const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
 const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
 
-// ---------- 4 image templates (variety) ----------
+// ---------- 4 image templates (kept) ----------
 function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
-  const ACCENT = '#14e7b9', LIGHT = '#f2f5f6', DARK = '#0b0d10';
+  const ACCENT = '#14e7b9', LIGHT = '#f2f5f6';
   const fs = fontForHeadline(headline);
 
-  // 4 simple, distinct looks
   if (tpl === 1) {
-    // Bottom gradient band (clean)
     return `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#0000"/>
-          <stop offset="100%" stop-color="#000a"/>
-        </linearGradient>
-      </defs>
+      <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
       <text x="40" y="${H-60}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
   if (tpl === 2) {
-    // Top soft band
     return `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#000a"/>
-          <stop offset="100%" stop-color="#0000"/>
-        </linearGradient>
-      </defs>
+      <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="0" width="${W}" height="140" fill="url(#g2)"/>
       <text x="40" y="90" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W-40}" y="96" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <text x="${W-40}" y="96" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
   if (tpl === 3) {
-    // Center glass card
     return `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="${(W-860)/2}" y="${(H-160)/2}" width="860" height="160" rx="20" fill="#ffffff29"/>
       <text x="${W/2}" y="${H/2-10}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W/2}" y="${H/2+42}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <text x="${W/2}" y="${H/2+42}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
-  // 4: Left ribbon
   return `
   <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
     <rect x="0" y="0" width="320" height="${H}" fill="#0b0d10aa"/>
     <text x="28" y="${H/2-10}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">${escSVG(headline)}</text>
-    <text x="28" y="${H/2+42}" font-family="Helvetica, Arial, sans-serif" font-size="22" font-weight="800" fill="#14e7b9" text-decoration="underline">${escSVG(cta)}</text>
+    <text x="28" y="${H/2+42}" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="#14e7b9" text-decoration="underline">${escSVG(cta)}</text>
   </svg>`;
 }
 
-// ---------- build overlay image w/ variety ----------
+// ---------- build overlay image ----------
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '' }) {
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -338,7 +323,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   let headline = cleanHeadline(headlineHint) || (FALLBACK_HEADLINES[Math.floor(Math.random()*FALLBACK_HEADLINES.length)]).toUpperCase();
   let cta = cleanCTA(ctaHint) || FALLBACK_CTA[0];
 
-  // pick template 1..4 using seed
+  // template pick 1..4 (stable by seed)
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
   const tpl = (h % 4) + 1;
 
@@ -399,13 +384,18 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 30000, maxSizeMB =
       .catch(err => { clearTimeout(timeout); try { fs.unlinkSync(dest); } catch {}; reject(err); });
   });
 }
+
+//— SAFER text for drawtext (no quotes/colons/backslashes) —
 function safeFFText(t) {
   return String(t || '')
     .replace(/[\n\r]/g, ' ')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "\\'")
-    .replace(/[^A-Za-z0-9 !?&\\'\\:\\-]/g, ' ')
-    .toUpperCase();
+    .replace(/[:]/g, ' ')
+    .replace(/[\\'"]/g, '')          // drop all quotes & backslashes
+    .replace(/[^A-Za-z0-9 !?\-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+    .slice(0, 36); // keep short
 }
 function simpleCTA(input) {
   const t = String(input || '').toLowerCase();
@@ -421,24 +411,20 @@ function simpleCTA(input) {
 function getDeterministicShuffle(arr, seed) {
   const rng = seedrandom(String(seed || Date.now()));
   const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rng() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j]]; }
   return a;
 }
 
-// ---------- VIDEO: clean subtitles (3–4 words), normal VO, music, >=15s visuals ----------
+// ---------- VIDEO: clean subtitles (aligned), two simple styles, normal VO, music, visuals >=15s ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
     const { url = '', answers = {}, regenerateToken = '' } = req.body;
 
     const token = getUserToken(req);
-    const fbAdAccountId =
-      req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
+    const fbAdAccountId = req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
 
-    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 }; // use 5s cuts
+    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 }; // 5s cuts
     const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000 };
 
     // ----- pick stock videos with variety -----
@@ -475,7 +461,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const tmp = path.join(__dirname, '../tmp');
     if (!fs.existsSync(tmp)) fs.mkdirSync(tmp, { recursive: true });
 
-    // download + scale first good clips
+    // download + scale
     const paths = [];
     let p = 0;
     while (paths.length < 3 && p < shuffled.length) {
@@ -495,17 +481,15 @@ router.post('/generate-video-ad', async (req, res) => {
         );
         try { fs.unlinkSync(raw); } catch {}
         paths.push(scaled);
-      } catch (e) {
-        try { fs.unlinkSync(raw); } catch {}
-      }
+      } catch (e) { try { fs.unlinkSync(raw); } catch {} }
     }
     if (!paths.length) return res.status(500).json({ error: 'Video preparation failed' });
 
-    // ----- simple script (normal words), ends with CTA as part of script -----
+    // ----- simple script (plain words), ends with CTA -----
     const ctaText = simpleCTA(answers?.cta);
     let prompt =
       `Write a simple, clear spoken ad script for an online store.\n` +
-      `Natural language. Avoid fancy terms. End with this exact CTA: '${ctaText}'.\n` +
+      `Avoid fancy terms. End with this exact CTA: '${ctaText}'.\n` +
       `Target about 15 seconds at normal speaking pace. ONLY the spoken words.`;
     if (industry) prompt += `\nCategory: ${industry}`;
     if (answers?.businessName) prompt += `\nBrand: ${answers.businessName}`;
@@ -517,8 +501,7 @@ router.post('/generate-video-ad', async (req, res) => {
         openai.chat.completions.create({ model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 110, temperature: 0.4 }),
         15000, 'OpenAI timeout'
       );
-      script = (r.choices?.[0]?.message?.content?.trim() || script).replace(/\s+/g, ' ');
-      script = script.replace(BANNED_TERMS, '').replace(/\s{2,}/g, ' ').trim();
+      script = (r.choices?.[0]?.message?.content?.trim() || script).replace(/\s+/g, ' ').replace(BANNED_TERMS, '').replace(/\s{2,}/g, ' ').trim();
     } catch {}
 
     // ----- TTS (natural) -----
@@ -542,7 +525,7 @@ router.post('/generate-video-ad', async (req, res) => {
     let voDur = await probeDur(ttsPath);
     if (voDur <= 0) voDur = 12.0;
 
-    // visuals must not end before VO; at least 15s
+    // visuals must not end before VO; at least 15s if VO shorter
     const finalDur = Math.max(15.0, Math.min(voDur, 30.0));
 
     // concat enough cuts
@@ -561,7 +544,7 @@ router.post('/generate-video-ad', async (req, res) => {
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
     await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // ----- SUBTITLES (center, modest font, 3–4 words per card) -----
+    // ----- SUBTITLES (aligned to VO). Two simple styles: 1=center, 2=lower-third w/ soft box) -----
     function chunkWords(text) {
       const cleaned = String(text || '')
         .replace(/[“”"’]/g, "'")
@@ -573,30 +556,37 @@ router.post('/generate-video-ad', async (req, res) => {
       const chunks = [];
       let i = 0;
       while (i < words.length) {
-        const grp = (i % 2 === 0) ? 3 : 4; // alternate 3/4 for rhythm
+        const grp = (i % 2 === 0) ? 3 : 4; // 3–4 rhythm
         chunks.push(words.slice(i, i + grp).join(' '));
         i += grp;
       }
       return chunks;
     }
     const subs = chunkWords(script);
-    const per = Math.max(0.7, finalDur / Math.max(1, subs.length)); // keep them readable
+    const per = Math.max(0.6, voDur / Math.max(1, subs.length)); // allocate across VO exactly
+    // Choose style by seed
+    let h = 0; for (const c of String(regenerateToken || answers?.businessName || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
+    const styleVariant = (h % 2) + 1; // 1 or 2
+
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const baseChain = `fps=${VIDEO.FPS},format=yuv420p`;
     const texts = [];
     subs.forEach((s, idx) => {
-      const t0 = (idx * per).toFixed(2);
-      const t1 = Math.min(finalDur, (idx + 1) * per).toFixed(2);
-      const txt = safeFFText(s).slice(0, 50); // hard clamp
+      const t0 = Math.min(voDur, idx * per).toFixed(2);
+      const t1 = Math.min(voDur, (idx + 1) * per).toFixed(2);
+      const txt = safeFFText(s);
+      const common = `fontcolor=white@0.98:fontsize=34:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:enable='between(t,${t0},${t1})'`;
+      const pos = styleVariant === 1 ? `y=(h-text_h)/2` : `y=h*0.78-text_h/2`;
+      const extras = styleVariant === 2 ? `:box=1:boxcolor=black@0.35:boxborderw=18` : ``;
       const draw = (fs.existsSync(fontfile)
-        ? `drawtext=fontfile='${fontfile}':text='${txt}':fontcolor=white@0.98:fontsize=34:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${t0},${t1})'`
-        : `drawtext=text='${txt}':fontcolor=white@0.98:fontsize=34:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2:enable='between(t,${t0},${t1})'`
+        ? `drawtext=fontfile='${fontfile}':text='${txt}':${common}:${pos}${extras}`
+        : `drawtext=text='${txt}':${common}:${pos}${extras}`
       );
       texts.push(draw);
     });
     const videoFilter = [baseChain, ...texts].join(',');
 
-    // ----- background music (quiet under VO) -----
+    // ----- background music (under VO) -----
     let bgKeywords = [];
     if (industry) bgKeywords.push(industry);
     if (answers?.businessName) bgKeywords.push(answers.businessName);
@@ -671,7 +661,7 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-// ---------- IMAGE: fetch + overlay with 4-style variety ----------
+// ---------- IMAGE: fetch + overlay (unchanged 4-style variety) ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
@@ -698,7 +688,6 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const img = photos[idx];
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
-    // Simple words; we keep it generic if unsure
     const headlineHint = answers?.businessName ? `${answers.businessName}` : (industry ? 'New Arrivals' : 'Great Picks');
     const ctaHint = answers?.cta || 'Shop Now!';
 
