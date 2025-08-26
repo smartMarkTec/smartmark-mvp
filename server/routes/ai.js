@@ -249,9 +249,28 @@ function getImageKeyword(industry = '', url = '') {
   return industry || 'ecommerce';
 }
 
-// ---------- copy sanitizers for overlays ----------
+// ---------- overlay helpers (fit headline into shaded band) ----------
 function escSVG(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function fontForHeadline(text) { const len=(text||'').length; if(len<=14)return 56; if(len<=20)return 50; if(len<=26)return 44; return 38; }
+function estWidth(text, fs) { return (String(text||'').length || 1) * fs * 0.56; } // rough, good enough for fit
+function fitFont(text, maxW, startFs, minFs=30) {
+  let fs = startFs;
+  while (fs > minFs && estWidth(text, fs) > maxW) fs -= 2;
+  return fs;
+}
+function splitTwoLines(text, maxW, startFs) {
+  const words = String(text||'').split(/\s+/).filter(Boolean);
+  if (words.length <= 2) return { lines:[text], fs: fitFont(text, maxW, startFs) };
+  // try balanced split
+  for (let cut = Math.ceil(words.length/2); cut < words.length-1; cut++) {
+    const a = words.slice(0, cut).join(' ');
+    const b = words.slice(cut).join(' ');
+    let fs = startFs;
+    fs = Math.min(fitFont(a, maxW, fs), fitFont(b, maxW, fs));
+    if (estWidth(a, fs) <= maxW && estWidth(b, fs) <= maxW) return { lines:[a, b], fs };
+  }
+  // fallback single line shrink
+  return { lines:[text], fs: fitFont(text, maxW, startFs) };
+}
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
 function cleanHeadline(h) {
   h = String(h || '').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
@@ -270,46 +289,63 @@ function cleanCTA(c) {
 const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
 const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
 
-// ---------- 4 image templates (kept) ----------
+// ---------- 4 image templates (with auto-fit) ----------
 function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
   const ACCENT = '#14e7b9', LIGHT = '#f2f5f6';
-  const fs = fontForHeadline(headline);
+  const MAX_W = W - 80;
 
   if (tpl === 1) {
+    let fs = 56; fs = fitFont(headline, MAX_W-80, fs);
     return `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
-      <text x="40" y="${H-60}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W-40}" y="${H-56}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <text x="40" y="${H-56}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      <text x="${W-40}" y="${H-52}" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
   if (tpl === 2) {
+    let fs = 56; fs = fitFont(headline, MAX_W-80, fs);
     return `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="0" width="${W}" height="140" fill="url(#g2)"/>
-      <text x="40" y="90" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W-40}" y="96" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <text x="40" y="92" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      <text x="${W-40}" y="98" text-anchor="end" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
   if (tpl === 3) {
+    const boxW = 860;
+    const fit = splitTwoLines(headline, boxW-80, 56);
+    const y0 = (H/2) - (fit.lines.length === 2 ? 12 : 0);
     return `
     <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-      <rect x="${(W-860)/2}" y="${(H-160)/2}" width="860" height="160" rx="20" fill="#ffffff29"/>
-      <text x="${W/2}" y="${H/2-10}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <text x="${W/2}" y="${H/2+42}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
+      <rect x="${(W-boxW)/2}" y="${(H-160)/2}" width="${boxW}" height="160" rx="20" fill="#00000028"/>
+      <text x="${W/2}" y="${y0}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">
+        <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
+        ${fit.lines[1] ? `<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+      </text>
+      <text x="${W/2}" y="${H/2+50}" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="${ACCENT}" text-decoration="underline">${escSVG(cta)}</text>
     </svg>`;
   }
+  // tpl 4: left shaded strip width adapts to text
+  const targetFs = 56;
+  const fit = splitTwoLines(headline, W*0.6, targetFs);
+  const needed = Math.min(W*0.7, Math.max(360, Math.max(...fit.lines.map(line => estWidth(line, fit.fs))) + 140));
+  const leftPad = 28;
+  const topY = H/2 - (fit.lines.length === 2 ? fit.fs*0.6 : fit.fs*0.2);
   return `
   <svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-    <rect x="0" y="0" width="320" height="${H}" fill="#0b0d10aa"/>
-    <text x="28" y="${H/2-10}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">${escSVG(headline)}</text>
-    <text x="28" y="${H/2+42}" font-family="Helvetica, Arial, sans-serif" font-size="24" font-weight="800" fill="#14e7b9" text-decoration="underline">${escSVG(cta)}</text>
+    <rect x="0" y="0" width="${needed}" height="${H}" fill="#0b0d10aa"/>
+    <text x="${leftPad+12}" y="${topY}" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+      <tspan x="${leftPad+12}" dy="0">${escSVG(fit.lines[0])}</tspan>
+      ${fit.lines[1] ? `<tspan x="${leftPad+12}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+    </text>
+    <text x="${leftPad+12}" y="${topY + (fit.lines.length===2 ? fit.fs*2.1 : fit.fs*1.4)}" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#14e7b9" text-decoration="underline">${escSVG(cta)}</text>
   </svg>`;
 }
 
@@ -415,7 +451,7 @@ function getDeterministicShuffle(arr, seed) {
   return a;
 }
 
-// ---------- VIDEO: clean subtitles (aligned), two simple styles, normal VO, music, visuals >=15s ----------
+// ---------- VIDEO (subtitles tuned + variety kept) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -424,10 +460,10 @@ router.post('/generate-video-ad', async (req, res) => {
     const token = getUserToken(req);
     const fbAdAccountId = req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
 
-    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 }; // 5s cuts
+    const VIDEO = { W: 640, H: 360, FPS: 24, CLIP: 5 };
     const TO = { PEXELS: 30000, DL: 45000, SCALE: 45000, CONCAT: 30000, TRIM: 20000, OVERMUX: 90000, FPROBE: 8000 };
 
-    // ----- pick stock videos with variety -----
+    // stock variety
     const industry = answers?.industry || answers?.productType || '';
     const term = (industry || 'shopping').toLowerCase().replace(/[^a-z0-9\s]/g,' ').trim() || 'shopping';
 
@@ -485,7 +521,7 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     if (!paths.length) return res.status(500).json({ error: 'Video preparation failed' });
 
-    // ----- simple script (plain words), ends with CTA -----
+    // simple script + CTA
     const ctaText = simpleCTA(answers?.cta);
     let prompt =
       `Write a simple, clear spoken ad script for an online store.\n` +
@@ -504,7 +540,7 @@ router.post('/generate-video-ad', async (req, res) => {
       script = (r.choices?.[0]?.message?.content?.trim() || script).replace(/\s+/g, ' ').replace(BANNED_TERMS, '').replace(/\s{2,}/g, ' ').trim();
     } catch {}
 
-    // ----- TTS (natural) -----
+    // TTS (normal speed)
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await withTimeout(openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script }), 20000, 'TTS timeout');
@@ -514,7 +550,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed', detail: e.message });
     }
 
-    // probe VO duration
+    // duration
     async function probeDur(file) {
       try {
         const { stdout } = await withTimeout(exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`), TO.FPROBE, 'ffprobe timeout');
@@ -524,11 +560,9 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     let voDur = await probeDur(ttsPath);
     if (voDur <= 0) voDur = 12.0;
-
-    // visuals must not end before VO; at least 15s if VO shorter
     const finalDur = Math.max(15.0, Math.min(voDur, 30.0));
 
-    // concat enough cuts
+    // concat cuts
     const need = Math.max(1, Math.ceil(finalDur / VIDEO.CLIP));
     while (paths.length < need) paths.push(paths[paths.length - 1]);
     const listPath = path.join(tmp, `${uuidv4()}.txt`);
@@ -544,7 +578,7 @@ router.post('/generate-video-ad', async (req, res) => {
     await withTimeout(exec(`ffmpeg -y -f concat -safe 0 -i "${listPath}" -c copy "${concatPath}"`), TO.CONCAT, 'concat timeout');
     await withTimeout(exec(`ffmpeg -y -i "${concatPath}" -t ${finalDur.toFixed(2)} -c copy "${trimmedPath}"`), TO.TRIM, 'trim timeout');
 
-    // ----- SUBTITLES (aligned to VO). Two simple styles: 1=center, 2=lower-third w/ soft box) -----
+    // SUBTITLES — simple, crisp, slightly faster pacing (≈10% quicker than VO average)
     function chunkWords(text) {
       const cleaned = String(text || '')
         .replace(/[“”"’]/g, "'")
@@ -563,30 +597,31 @@ router.post('/generate-video-ad', async (req, res) => {
       return chunks;
     }
     const subs = chunkWords(script);
-    const per = Math.max(0.6, voDur / Math.max(1, subs.length)); // allocate across VO exactly
-    // Choose style by seed
+    const avg = voDur / Math.max(1, subs.length);
+    const per = Math.max(0.55, avg * 0.90); // 10% faster to keep up
+    // variant: 1 (lower-third), 2 (slightly higher)
     let h = 0; for (const c of String(regenerateToken || answers?.businessName || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-    const styleVariant = (h % 2) + 1; // 1 or 2
+    const styleVariant = (h % 2) + 1;
 
     const fontfile = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const baseChain = `fps=${VIDEO.FPS},format=yuv420p`;
     const texts = [];
     subs.forEach((s, idx) => {
       const t0 = Math.min(voDur, idx * per).toFixed(2);
-      const t1 = Math.min(voDur, (idx + 1) * per).toFixed(2);
+      let t1 = Math.min(voDur, (idx + 1) * per);
+      if (idx === subs.length - 1) t1 = voDur; // ensure last reaches VO end
       const txt = safeFFText(s);
-      const common = `fontcolor=white@0.98:fontsize=34:shadowcolor=black@0.7:shadowx=3:shadowy=3:x=(w-text_w)/2:enable='between(t,${t0},${t1})'`;
-      const pos = styleVariant === 1 ? `y=(h-text_h)/2` : `y=h*0.78-text_h/2`;
-      const extras = styleVariant === 2 ? `:box=1:boxcolor=black@0.35:boxborderw=18` : ``;
+      const yPos = styleVariant === 1 ? `h*0.86-text_h` : `h*0.78-text_h/2`;
+      const common = `fontcolor=white@0.98:bordercolor=black@0.85:borderw=2:fontsize=32:x=(w-text_w)/2:y=${yPos}:enable='between(t,${t0},${t1.toFixed(2)})'`;
       const draw = (fs.existsSync(fontfile)
-        ? `drawtext=fontfile='${fontfile}':text='${txt}':${common}:${pos}${extras}`
-        : `drawtext=text='${txt}':${common}:${pos}${extras}`
+        ? `drawtext=fontfile='${fontfile}':text='${txt}':${common}`
+        : `drawtext=text='${txt}':${common}`
       );
       texts.push(draw);
     });
     const videoFilter = [baseChain, ...texts].join(',');
 
-    // ----- background music (under VO) -----
+    // background music (under VO)
     let bgKeywords = [];
     if (industry) bgKeywords.push(industry);
     if (answers?.businessName) bgKeywords.push(answers.businessName);
@@ -661,7 +696,7 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-// ---------- IMAGE: fetch + overlay (unchanged 4-style variety) ----------
+// ---------- IMAGE: fetch + overlay (variety kept) ----------
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const { url = '', industry = '', regenerateToken = '', answers = {} } = req.body;
