@@ -551,7 +551,7 @@ function simpleCTA(input) {
   return 'SHOP NOW!';
 }
 
-// ---------- VIDEO (square 640x640; vertical-friendly; 2 variants) ----------
+// ---------- VIDEO (square 640x640; vertical-friendly; 2 variants; side-curtains fade out) ----------
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -758,29 +758,33 @@ router.post('/generate-video-ad', async (req, res) => {
     const outroEnd   = finalDur;
 
     // sizes for 640x640
-    const INTRO_H = Math.round(VIDEO.H * 0.22); // ~141
+    const INTRO_H = Math.round(VIDEO.H * 0.22);
     const INTRO_TXT_Y = VIDEO.H - INTRO_H + Math.round(INTRO_H * 0.38);
     const TOP_H   = Math.round(VIDEO.H * 0.14);
     const TOP_TXT_Y = Math.round(TOP_H * 0.28);
 
-    let overlayChain;
+    // ► CURTAINS (side black bars that fade out quickly)
+    const CUR_W = Math.round(VIDEO.W * 0.13);   // 13% width per side
+    const CUR_HOLD = 0.35;                      // seconds to hold before fade
+    const CUR_FADE = 0.65;                      // fade duration
+
+    // Text overlays (no 'w' bare; use iw/ih to avoid earlier ffmpeg expr errors)
+    let textChain;
     if (styleVariant === 1) {
       const boxIntro  = `drawbox=x=0:y=ih-${INTRO_H}:w=iw:h=${INTRO_H}:color=black@0.55:t=fill:enable='between(t,${introStart},${introEnd})'`;
       const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=34:x=40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.2).toFixed(2)},${introEnd})'`;
       const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=28:box=1:boxcolor=0x14e7b9@0.85:boxborderw=18:x=w-tw-40:y=${INTRO_TXT_Y}:enable='between(t,${(introStart+0.5).toFixed(2)},${introEnd})'`;
-
       const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.30:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
       const txtOutro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=38:x=(w-tw)/2:y=(h/2-46):enable='between(t,${outroStart},${outroEnd})'`;
       const txtOutro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=44:box=1:boxcolor=0x0b0d10@0.75:boxborderw=24:x=(w-tw)/2:y=(h/2+6):enable='between(t,${outroStart},${outroEnd})'`;
-      overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1, txtOutro2].join(',');
+      textChain = [boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1, txtOutro2].join(',');
     } else {
       const boxIntro  = `drawbox=x=0:y=0:w=iw:h=${TOP_H}:color=black@0.50:t=fill:enable='between(t,${introStart},${introEnd})'`;
       const txtIntro1 = `drawtext=${fontParam}text='${brandLine}':fontcolor=white@0.98:fontsize=30:x=40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.15).toFixed(2)},${introEnd})'`;
       const txtIntro2 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=26:box=1:boxcolor=0x14e7b9@0.85:boxborderw=16:x=w-tw-40:y=${TOP_TXT_Y}:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd})'`;
-
       const boxOutro  = `drawbox=x=0:y=0:w=iw:h=ih:color=black@0.35:t=fill:enable='between(t,${outroStart},${outroEnd})'`;
       const txtOutro1 = `drawtext=${fontParam}text='${ctaTxt}':fontcolor=white@0.99:fontsize=46:box=1:boxcolor=0x0b0d10@0.75:boxborderw=26:x=(w-tw)/2:y=(h/2-18):enable='between(t,${outroStart},${outroEnd})'`;
-      overlayChain = [baseVideoChain, boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1].join(',');
+      textChain = [boxIntro, txtIntro1, txtIntro2, boxOutro, txtOutro1].join(',');
     }
 
     // ----- audio: VO + optional BG music -----
@@ -793,17 +797,33 @@ router.post('/generate-video-ad', async (req, res) => {
     } catch {}
 
     const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
+
+    // Build a multi-input filter graph so we can fade the side curtains out.
+    // Steps:
+    //   1) [0:v] base look
+    //   2) left/right color sources with fade-out
+    //   3) overlay curtains -> [base2]
+    //   4) apply text overlays -> [v]
+    const videoGraph = [
+      `[0:v]${baseVideoChain}[b]`,
+      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${CUR_HOLD.toFixed(2)}:d=${CUR_FADE.toFixed(2)}:alpha=1[left]`,
+      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${CUR_HOLD.toFixed(2)}:d=${CUR_FADE.toFixed(2)}:alpha=1[right]`,
+      `[b][left]overlay=shortest=1:x=0:y=0[bl]`,
+      `[bl][right]overlay=shortest=1:x=main_w-overlay_w:y=0[base2]`,
+      `[base2]${textChain}[v]`
+    ].join(';');
+
     let filterComplex, mapArgs;
     if (bgMusicPath) {
       filterComplex =
-        `[0:v]${overlayChain}[v];` +
+        `${videoGraph};` +
         `[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,volume=1.0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
         `[2:a]aresample=44100,volume=0.20,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
         `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
       filterComplex =
-        `[0:v]${overlayChain}[v];` +
+        `${videoGraph};` +
         `[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
       mapArgs = `-map "[v]" -map "[mix]"`;
     }
