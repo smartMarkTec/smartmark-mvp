@@ -4,7 +4,7 @@
 const express = require('express');
 const router = express.Router();
 
-// --- CORS for Vercel frontend (API only) ---
+/* ------------------------ CORS (Vercel/Local) ------------------------ */
 const ALLOW_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -20,13 +20,13 @@ router.use((req, res, next) => {
   }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  // include x-fb-ad-account-id for your header usage
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID');
   res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
+/* ------------------------------ Deps ------------------------------ */
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -43,7 +43,7 @@ const { getFbUserToken } = require('../tokenStore');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
 
-// ---------- helpers ----------
+/* --------------------------- Helpers --------------------------- */
 function absolutePublicUrl(relativePath) {
   const base = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
@@ -62,30 +62,52 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   const resp = await axios.post(url, form, { headers: form.getHeaders(), params: { access_token: userAccessToken } });
   return resp.data;
 }
-
-// Where server serves /generated from
 function ensureGeneratedDir() {
   const outDir = process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated');
   try { fs.mkdirSync(outDir, { recursive: true }); } catch {}
   return outDir;
 }
 
-// Pick topic keywords tightly tied to user input so clips are on-topic
+/* Make clips match the user’s topic tightly so they’re always relevant */
+const IMAGE_KEYWORD_MAP = [
+  { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
+  { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
+  { match: ['makeup','cosmetic','skincare'], keyword: 'makeup application' },
+  { match: ['hair','shampoo'], keyword: 'hair care' },
+  { match: ['food','pizza','burger','meal','snack'], keyword: 'delicious food' },
+  { match: ['baby','kids','toys'], keyword: 'happy children' },
+  { match: ['pet','dog','cat'], keyword: 'pet dog cat' },
+  { match: ['electronics','phone','laptop','tech'], keyword: 'tech gadgets' },
+  { match: ['home','kitchen','decor'], keyword: 'modern home' },
+  { match: ['art','painting','craft'], keyword: 'painting art' },
+  { match: ['coffee','cafe'], keyword: 'coffee shop' },
+];
+function getImageKeyword(industry = '', url = '') {
+  const input = `${industry} ${url}`.toLowerCase();
+  for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
+  return industry || 'ecommerce';
+}
 function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   const industry = answers.industry || answers.productType || '';
-  const kw = getImageKeyword(industry, url);
+  const base = getImageKeyword(industry, url) || industry || fallback;
   const extra = String(answers.description || answers.product || answers.mainBenefit || '').toLowerCase();
   if (extra.includes('coffee')) return 'coffee shop';
   if (extra.includes('protein') || extra.includes('fitness') || extra.includes('gym')) return 'gym workout';
   if (extra.includes('makeup') || extra.includes('skincare') || extra.includes('cosmetic')) return 'makeup application';
-  if (extra.includes('fashion') || extra.includes('clothes') || extra.includes('apparel')) return 'fashion model';
   if (extra.includes('hair')) return 'hair care';
   if (extra.includes('pet') || extra.includes('dog') || extra.includes('cat')) return 'pet dog cat';
   if (extra.includes('electronics') || extra.includes('phone') || extra.includes('laptop')) return 'tech gadgets';
-  return kw || industry || fallback;
+  return base;
+}
+function overlayTitleFromAnswers(answers = {}, topic = '') {
+  const brand = (answers.businessName || '').trim().toUpperCase();
+  if (brand) return brand.slice(0, 24);
+  // Avoid generic repetition like "FASHION" twice; use neutral title
+  if (/fashion/i.test(topic)) return 'NEW ARRIVALS';
+  return (topic || 'JUST DROPPED').toUpperCase().slice(0, 24);
 }
 
-// ---------- training context ----------
+/* ------------------------ Training context ------------------------ */
 const DATA_DIR = path.join(__dirname, '../data');
 const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
 const MAX_FILE_MB = 1.5;
@@ -116,7 +138,7 @@ function loadTrainingContext() {
 }
 let customContext = loadTrainingContext();
 
-// ---------- scrape & test ----------
+/* ---------------------------- Scrape ---------------------------- */
 router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
 
 async function getWebsiteText(url) {
@@ -139,7 +161,7 @@ async function getWebsiteText(url) {
   }
 }
 
-// ---------- ad copy ----------
+/* --------------------------- Ad Copy --------------------------- */
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = '', businessName = '', url = '' } = req.body;
   if (!description && !businessName && !url) return res.status(400).json({ error: 'Please provide at least a description.' });
@@ -166,7 +188,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
   }
 });
 
-// ---------- generate-campaign-assets ----------
+/* ------------------- Headlines/body for images ------------------- */
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
     const { answers = {}, url = '' } = req.body;
@@ -246,7 +268,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-// ---------- audience ----------
+/* ------------------------------ Audience ------------------------------ */
 const DEFAULT_AUDIENCE = {
   brandName: '', demographic: '', ageRange: '18-65',
   location: 'US', interests: 'Business, Restaurants', fbInterestIds: [], summary: ''
@@ -344,26 +366,8 @@ Website homepage text:
   }
 });
 
-// ---------- image helpers & overlay ----------
+/* ---------------------- Image overlays (readable) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
-const IMAGE_KEYWORD_MAP = [
-  { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
-  { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
-  { match: ['makeup','cosmetic','skincare'], keyword: 'makeup application' },
-  { match: ['hair','shampoo'], keyword: 'hair care' },
-  { match: ['food','pizza','burger','meal','snack'], keyword: 'delicious food' },
-  { match: ['baby','kids','toys'], keyword: 'happy children' },
-  { match: ['pet','dog','cat'], keyword: 'pet dog cat' },
-  { match: ['electronics','phone','laptop','tech'], keyword: 'tech gadgets' },
-  { match: ['home','kitchen','decor'], keyword: 'modern home' },
-  { match: ['art','painting','craft'], keyword: 'painting art' },
-  { match: ['coffee','cafe'], keyword: 'coffee shop' },
-];
-function getImageKeyword(industry = '', url = '') {
-  const input = `${industry} ${url}`.toLowerCase();
-  for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
-  return industry || 'ecommerce';
-}
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
 function fitFont(text, maxW, startFs, minFs=30){let fs=startFs;while(fs>minFs&&estWidth(text,fs)>maxW)fs-=2;return fs}
@@ -394,7 +398,6 @@ function cleanCTA(c){
 const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
 const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
 
-// --- CTA box helper for SVG (white text on dark box) ---
 function ctaBox(xRight, y, text, fs=26, padX=14, padY=10){
   const w=estWidth(text,fs)+padX*2, h=fs+padY*2, x=xRight-w;
   return `
@@ -412,8 +415,11 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
-      <text x="40" y="${H-56}" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${ctaBox(W-40, H-52, cta, 26)}
+      <text x="${W/2}" y="${H-56}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, ${H-52})">
+        <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
+        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
+      </g>
     </svg>`;
   }
   if (tpl === 2) {
@@ -422,8 +428,11 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
       <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="0" width="${W}" height="140" fill="url(#g2)"/>
-      <text x="40" y="92" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${ctaBox(W-40, 98, cta, 26)}
+      <text x="${W/2}" y="92" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, 98)">
+        <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
+        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
+      </g>
     </svg>`;
   }
   if (tpl === 3) {
@@ -435,7 +444,7 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
         <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
       </text>
-      <g transform="translate(${W/2 - estWidth(cta,26)/2 - 18}, ${H/2 + 20})">
+      <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, ${H/2 + 20})">
         <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
         <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
       </g>
@@ -444,16 +453,18 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
   const targetFs = 56;
   const fit = splitTwoLines(headline, W*0.6, targetFs);
   const needed = Math.min(W*0.7, Math.max(360, Math.max(...fit.lines.map(line => estWidth(line, fit.fs))) + 140));
-  const leftPad = 28;
   const topY = H/2 - (fit.lines.length === 2 ? fit.fs*0.6 : fit.fs*0.2);
   return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-    <rect x="0" y="0" width="${needed}" height="${H}" fill="#0b0d10aa"/>
-    <text x="${leftPad+12}" y="${topY}" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
-      <tspan x="${leftPad+12}" dy="0">${escSVG(fit.lines[0])}</tspan>
-      ${fit.lines[1]?`<tspan x="${leftPad+12}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
+    <rect x="${(W-needed)/2}" y="0" width="${needed}" height="${H}" fill="#0b0d10aa"/>
+    <text x="${W/2}" y="${topY}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+      <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
+      ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
     </text>
-    ${ctaBox(leftPad+needed-24, topY + (fit.lines.length===2 ? fit.fs*2.0 : fit.fs*1.4), cta, 26)}
+    <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, ${topY + (fit.lines.length===2 ? fit.fs*2.0 : fit.fs*1.4)})">
+      <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
+      <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
+    </g>
   </svg>`;
 }
 
@@ -477,7 +488,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
-// ---------- music ----------
+/* ------------------------------ Music ------------------------------ */
 function findMusicDir() {
   const candidates = [
     path.join(__dirname, '..', 'Music', 'music'),
@@ -501,7 +512,7 @@ function pickMusicFile(keywords = []) {
   return path.join(base, files[0]);
 }
 
-// ---------- utils ----------
+/* ------------------------------- Utils ------------------------------- */
 function withTimeout(p, ms, msg='Timeout') { return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)), ms))]); }
 async function downloadFileWithTimeout(url, dest, timeoutMs=30000, maxSizeMB=6) {
   return new Promise((resolve, reject) => {
@@ -551,7 +562,15 @@ function simpleCTA(input) {
   return 'SHOP NOW!';
 }
 
-// ---------- VIDEO (3 clips, 15–17s, curtains/bands fade after 1st clip, two variants) ----------
+/* ------------------------------- VIDEO ------------------------------- */
+/**
+ *  - Square 640x640 (vertical-friendly)
+ *  - 3 distinct clips (no repeats)
+ *  - Bands/curtains fade after first clip
+ *  - Two variants (intro top or bottom)
+ *  - 15–17s, script always completes
+ *  - FIX: dynamic audio indices -> no more [2:a] bug when no music
+ */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
@@ -564,15 +583,15 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
-    // Square (vertical-friendly), modest resolution for speed
     const VIDEO = { W: 640, H: 640, FPS: 24 };
     const TO = { PEXELS: 20000, DL: 35000, FPROBE: 8000, OVERMUX: 120000 };
 
     const topic = deriveTopicKeywords(answers, url, 'shopping');
+    const brandTitle = overlayTitleFromAnswers(answers, topic);
     const ctaText = simpleCTA(answers?.cta);
 
-    // ----- fetch MANY, pick 3 short, small-width, >=7s duration -----
-    let clips = [];
+    /* ---- Stock clips (short/small) ---- */
+    let candidates = [];
     try {
       const r = await withTimeout(
         axios.get('https://api.pexels.com/videos/search', {
@@ -587,32 +606,26 @@ router.post('/generate-video-ad', async (req, res) => {
         if ((v.duration || 0) < 7) continue;
         const files = (v.video_files || [])
           .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
-          .sort((a, b) => (a.width || 9999) - (b.width || 9999)); // smallest first
-        if (files[0]?.link) {
-          clips.push({ link: files[0].link, duration: v.duration || 8 });
-        }
+          .sort((a, b) => (a.width || 9999) - (b.width || 9999));
+        if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
       }
     } catch (e) {
       console.error('Pexels fetch failed', e?.response?.data || e.message);
       return res.status(500).json({ error: 'Stock video fetch failed' });
     }
-    if (clips.length < 3) return res.status(404).json({ error: 'Not enough stock clips found' });
+    if (candidates.length < 3) return res.status(404).json({ error: 'Not enough stock clips found' });
+    const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topic || Date.now()).slice(0, 3);
 
-    // deterministic but varied pick
-    const shuffled = getDeterministicShuffle(clips, regenerateToken || answers?.businessName || topic || Date.now());
-    const chosen = shuffled.slice(0, 3);
-
-    // download 3 clips
     const tmp = path.join(__dirname, '../tmp');
     try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
     const inputs = [];
-    for (let i = 0; i < chosen.length; i++) {
+    for (const c of chosen) {
       const out = path.join(tmp, `${uuidv4()}.mp4`);
-      await withTimeout(downloadFileWithTimeout(chosen[i].link, out, TO.DL, 6), TO.DL + 1000, 'download timeout');
+      await withTimeout(downloadFileWithTimeout(c.link, out, TO.DL, 6), TO.DL + 1000, 'download timeout');
       inputs.push(out);
     }
 
-    // ----- script (60–80 words) -----
+    /* ---- Script (60–80 words) ---- */
     let prompt =
       `Write a simple, clear spoken ad script (~60–80 words). Do NOT mention a website. ` +
       `End with this exact CTA: '${ctaText}'. Topic: ${topic}` +
@@ -638,7 +651,7 @@ router.post('/generate-video-ad', async (req, res) => {
         .trim();
     } catch {}
 
-    // ----- TTS -----
+    /* ---- TTS ---- */
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await withTimeout(
@@ -652,7 +665,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed' });
     }
 
-    // ----- VO duration and final duration (15–17s) -----
+    /* ---- Durations (15–17s) ---- */
     async function probeDur(file) {
       try {
         const { stdout } = await withTimeout(
@@ -668,21 +681,19 @@ router.post('/generate-video-ad', async (req, res) => {
     if (voDur <= 0) voDur = 15.0;
     const finalDur = Math.max(15.0, Math.min(voDur, 17.0));
 
-    // Split across 3 clips (first slightly longer so bands/curtains can fade off)
+    // Split across 3 clips (bands/curtains fade after #1)
     const seg1 = Math.min(6.0, finalDur * 0.4);
     const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
     const seg3 = Math.max(4.2, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
-    const segEnd1 = seg1;
-    const segEnd2 = seg1 + seg2;
 
-    // ----- overlays (two variants) -----
+    /* ---- Overlay variant ---- */
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
     const fontParam = chosenFont ? `fontfile='${chosenFont}':` : '';
 
-    const brandLine = safeFFText(answers?.businessName || topic || 'JUST DROPPED');
+    const brandLine = safeFFText(brandTitle);
     const ctaTxt    = safeFFText(ctaText);
 
     let styleVariant = Number(variant);
@@ -691,50 +702,27 @@ router.post('/generate-video-ad', async (req, res) => {
       styleVariant = (h % 2) + 1;
     }
 
-    // Intro/outro timings over the concatenated timeline
+    // Timings (intro/outro)
     const introStart = 0.25;
     const introEnd   = Math.min(seg1 - 0.2, 3.2);
     const outroStart = Math.max(0.0, finalDur - 2.4);
     const outroEnd   = finalDur;
 
-    // Bars that fade away after first segment
+    // Dimensions for bands/curtains
     const TOP_H   = Math.round(VIDEO.H * 0.13);
     const BOT_H   = Math.round(VIDEO.H * 0.18);
     const CUR_W   = Math.round(VIDEO.W * 0.12);
     const fadeDur = 0.6;
 
-    // Text chains (always boxed, with border & shadow for readability)
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
     const introY   = styleVariant === 1 ? (VIDEO.H - BOT_H + Math.round(BOT_H*0.36)) : Math.round(TOP_H*0.32);
-    const introBox = styleVariant === 1
-      ? `color=c=black@0.50:s=${VIDEO.W}x${BOT_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${(seg1 - fadeDur).toFixed(2)}:d=${fadeDur}:alpha=1[bot]`
-      : `color=c=black@0.50:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${(seg1 - fadeDur).toFixed(2)}:d=${fadeDur}:alpha=1[top]`;
 
-    let textChain;
-    if (styleVariant === 1) {
-      const introT1 = `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=32:x=40:y=${introY}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
-      const introT2 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=18:fontsize=26:x=w-tw-40:y=${introY}:enable='between(t,${(introStart+0.45).toFixed(2)},${introEnd.toFixed(2)})'`;
-      const outroT1 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.78:boxborderw=22:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
-      textChain = [introT1, introT2, outroT1].join(',');
-    } else {
-      const introT1 = `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=28:x=40:y=${introY}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
-      const introT2 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=16:fontsize=24:x=w-tw-40:y=${introY}:enable='between(t,${(introStart+0.40).toFixed(2)},${introEnd.toFixed(2)})'`;
-      const outroT1 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
-      textChain = [introT1, introT2, outroT1].join(',');
-    }
+    const introT1 = `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=28:x=40:y=${introY}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+    const introT2 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=16:fontsize=24:x=w-tw-40:y=${introY}:enable='between(t,${(introStart+0.40).toFixed(2)},${introEnd.toFixed(2)})'`;
+    const outroT1 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+    const textChain = [introT1, introT2, outroT1].join(',');
 
-    // Optional BG music (very low)
-    let bgMusicPath = null;
-    try {
-      const keys = [];
-      if (answers?.industry) keys.push(answers.industry);
-      if (answers?.businessName) keys.push(answers.businessName);
-      bgMusicPath = pickMusicFile(keys);
-    } catch {}
-    const musicInput = bgMusicPath ? ` -i "${bgMusicPath}"` : '';
-
-    // --- Build filter_complex ---
-    // Per-input segment processing (compose to square with blur, then trim to segment length)
+    // Base per-clip pipeline (blurred fill + center fit) -> trim to segment
     const look = `format=yuv420p,fps=${VIDEO.FPS}`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -751,8 +739,8 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-    // Curtains (fade out after first segment)
-    const curtainFadeStart = Math.max(0.2, seg1 - 0.55).toFixed(2);
+    // Curtains + top/bottom band that fade after clip #1
+    const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
     const curtain = [
       `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left]`,
       `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right]`,
@@ -760,34 +748,47 @@ router.post('/generate-video-ad', async (req, res) => {
       `[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`
     ].join(';');
 
-    // Top/Bottom band (variant-dependent), also fade out after seg1
-    const bands = styleVariant === 1
-      ? `;${introBox};[b2][bot]overlay=shortest=1:x=0:y=main_h-overlay_h[b3]`
-      : `;${introBox};[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
+    const bandLayer = styleVariant === 1
+      ? `color=c=black@0.50:s=${VIDEO.W}x${BOT_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${(segs[0]-0.60).toFixed(2)}:d=0.6:alpha=1[bot];[b2][bot]overlay=shortest=1:x=0:y=main_h-overlay_h[b3]`
+      : `color=c=black@0.50:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${(segs[0]-0.60).toFixed(2)}:d=0.6:alpha=1[top];[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
 
-    // Text last (always boxed)
     const text = `;[b3]${textChain}[v]`;
 
-    let filterComplex = vidParts.join(';') + ';' + concat + ';' + curtain + bands + text;
+    let filterComplex = vidParts.join(';') + ';' + concat + ';' + curtain + ';' + bandLayer + text;
 
-    // Audio mix (voice + low bg if present)
-    let mapArgs;
+    // Inputs order: videos..., TTS, (optional music)
+    const ttsIdx = inputs.length;                 // <-- dynamic, FIX for no-music path
+    const musicIdx = ttsIdx + 1;
+
+    // Audio graph (use correct indices regardless of music presence)
+    if (pickMusicFile([])) { /* we already queried below; leave structure intact */ }
+    let bgMusicPath = null;
+    try {
+      const keys = [];
+      if (answers?.industry) keys.push(answers.industry);
+      if (answers?.businessName) keys.push(answers.businessName);
+      bgMusicPath = pickMusicFile(keys);
+    } catch {}
+
     if (bgMusicPath) {
-      filterComplex += `;[3:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
-                       `[2:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
+      filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
+                       `[${musicIdx}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
                        `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
-      mapArgs = `-map "[v]" -map "[mix]"`;
     } else {
-      filterComplex += `;[2:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
-      mapArgs = `-map "[v]" -map "[mix]"`;
+      filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
     }
 
     const outDir = ensureGeneratedDir();
     const id = uuidv4();
     const outPath = path.join(outDir, `${id}.mp4`);
 
-    // Build ffmpeg command with inputs: 3 videos + tts (+ music optional)
-    const inputArgs = inputs.map(f => `-i "${f}"`).join(' ') + ` -i "${ttsPath}"` + (bgMusicPath ? ` -i "${bgMusicPath}"` : '');
+    // Build ffmpeg inputs list
+    const inputArgs =
+      inputs.map(f => `-i "${f}"`).join(' ') +
+      ` -i "${ttsPath}"` +
+      (bgMusicPath ? ` -i "${bgMusicPath}"` : '');
+
+    const mapArgs = `-map "[v]" -map "[mix]"`;
 
     await withTimeout(
       exec(
@@ -808,7 +809,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const publicVideoUrl = `/generated/${id}.mp4`;
     const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
-    // optional FB upload
+    // Optional FB upload
     let fbVideoId = null;
     try {
       if (fbAdAccountId && token) {
@@ -839,11 +840,9 @@ router.post('/generate-video-ad', async (req, res) => {
   }
 });
 
-
-// ---------- IMAGE: fetch + overlay ----------
+/* --------------------- IMAGE: search + overlay --------------------- */
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
-    // accept either top-level fields or {answers}
     const { regenerateToken = '' } = req.body;
     const top = req.body || {};
     const answers = top.answers || top;
@@ -873,7 +872,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const img = photos[idx];
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
-    const headlineHint = answers?.businessName ? `${answers.businessName}` : (industry ? 'New Arrivals' : 'Great Picks');
+    const headlineHint = overlayTitleFromAnswers(answers, keyword);
     const ctaHint = answers?.cta || 'Shop Now!';
 
     let finalUrl = baseUrl;
