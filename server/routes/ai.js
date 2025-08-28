@@ -68,7 +68,7 @@ function ensureGeneratedDir() {
   return outDir;
 }
 
-/* Make clips match the user’s topic tightly so they’re always relevant */
+/* ---------- topic mapping so clips are always relevant ---------- */
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
@@ -102,7 +102,6 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
 function overlayTitleFromAnswers(answers = {}, topic = '') {
   const brand = (answers.businessName || '').trim().toUpperCase();
   if (brand) return brand.slice(0, 24);
-  // Avoid generic repetition like "FASHION" twice; use neutral title
   if (/fashion/i.test(topic)) return 'NEW ARRIVALS';
   return (topic || 'JUST DROPPED').toUpperCase().slice(0, 24);
 }
@@ -168,7 +167,7 @@ router.post('/generate-ad-copy', async (req, res) => {
 
   let prompt =
 `You are an expert direct-response ad copywriter.
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is ~15–17 seconds at normal pace. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Do NOT say or hint a URL or domain.`;
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is typically ~15–17 seconds. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Do NOT say or hint a URL or domain.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
@@ -178,7 +177,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
     const r = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 170,
+      max_tokens: 180,
       temperature: 0.35
     });
     res.json({ adCopy: r.choices?.[0]?.message?.content?.trim() || '' });
@@ -398,28 +397,24 @@ function cleanCTA(c){
 const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
 const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
 
-function ctaBox(xRight, y, text, fs=26, padX=14, padY=10){
-  const w=estWidth(text,fs)+padX*2, h=fs+padY*2, x=xRight-w;
-  return `
-    <rect x="${x}" y="${y-h+4}" width="${w}" height="${h}" rx="10" fill="#0b0d10cc"/>
-    <text x="${x+padX}" y="${y-padY}" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" font-weight="800" fill="#ffffff">
-      ${escSVG(text)}
-    </text>`;
-}
-
 function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
   const LIGHT = '#f2f5f6'; const MAX_W = W - 80;
+  const pill = (xCenter, y, text, fs=26) => {
+    const w = estWidth(text, fs) + 36, h = 44;
+    return `
+      <g transform="translate(${xCenter - w/2}, ${y - h + 26})">
+        <rect x="0" y="-18" width="${w}" height="${h}" rx="12" fill="#0b0d10cc"/>
+        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
+      </g>`;
+  };
   if (tpl === 1) {
     let fs = fitFont(headline, MAX_W-80, 56);
     return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
-      <text x="${W/2}" y="${H-56}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, ${H-52})">
-        <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
-        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
-      </g>
+      <text x="${W/2}" y="${H-58}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      ${pill(W/2, H-20, cta, 26)}
     </svg>`;
   }
   if (tpl === 2) {
@@ -429,42 +424,25 @@ function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="0" width="${W}" height="140" fill="url(#g2)"/>
       <text x="${W/2}" y="92" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, 98)">
-        <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
-        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
-      </g>
+      ${pill(W/2, 120, cta, 26)}
     </svg>`;
   }
-  if (tpl === 3) {
-    const boxW = 860; const fit = splitTwoLines(headline, boxW-80, 56); const y0 = (H/2) - (fit.lines.length===2?12:0);
-    return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-      <rect x="${(W-boxW)/2}" y="${(H-160)/2}" width="${boxW}" height="160" rx="20" fill="#00000028"/>
-      <text x="${W/2}" y="${y0}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
-        <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
-        ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
-      </text>
-      <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, ${H/2 + 20})">
-        <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
-        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
-      </g>
-    </svg>`;
-  }
-  const targetFs = 56;
-  const fit = splitTwoLines(headline, W*0.6, targetFs);
-  const needed = Math.min(W*0.7, Math.max(360, Math.max(...fit.lines.map(line => estWidth(line, fit.fs))) + 140));
-  const topY = H/2 - (fit.lines.length === 2 ? fit.fs*0.6 : fit.fs*0.2);
+  // Centered box variant
+  const boxW = 860; const fit = splitTwoLines(headline, boxW-80, 56); const y0 = (H/2) - (fit.lines.length===2?12:0);
   return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-    <rect x="${(W-needed)/2}" y="0" width="${needed}" height="${H}" fill="#0b0d10aa"/>
-    <text x="${W/2}" y="${topY}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+    <rect x="${(W-boxW)/2}" y="${(H-160)/2}" width="${boxW}" height="160" rx="20" fill="#00000028"/>
+    <text x="${W/2}" y="${y0}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
       <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
       ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
     </text>
-    <g transform="translate(${W/2 - (estWidth(cta,26)+36)/2}, ${topY + (fit.lines.length===2 ? fit.fs*2.0 : fit.fs*1.4)})">
-      <rect x="0" y="-28" width="${estWidth(cta,26)+36}" height="44" rx="10" fill="#0b0d10cc"/>
-      <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
-    </g>
+    ${(() => {
+      const w = estWidth(cta,26)+36;
+      return `<g transform="translate(${W/2 - w/2}, ${H/2 + 44})">
+        <rect x="0" y="-28" width="${w}" height="44" rx="10" fill="#0b0d10cc"/>
+        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
+      </g>`;
+    })()}
   </svg>`;
 }
 
@@ -478,7 +456,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   let cta = cleanCTA(ctaHint) || FALLBACK_CTA[0];
 
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  const tpl = (h % 4) + 1;
+  const tpl = (h % 3) + 1;
 
   const svg = renderImageSVG({ W, H, base64, headline, cta, tpl });
 
@@ -514,7 +492,7 @@ function pickMusicFile(keywords = []) {
 
 /* ------------------------------- Utils ------------------------------- */
 function withTimeout(p, ms, msg='Timeout') { return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)), ms))]); }
-async function downloadFileWithTimeout(url, dest, timeoutMs=30000, maxSizeMB=6) {
+async function downloadFileWithTimeout(url, dest, timeoutMs=28000, maxSizeMB=6) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
@@ -564,12 +542,13 @@ function simpleCTA(input) {
 
 /* ------------------------------- VIDEO ------------------------------- */
 /**
- *  - Square 640x640 (vertical-friendly)
- *  - 3 distinct clips (no repeats)
- *  - Bands/curtains fade after first clip
- *  - Two variants (intro top or bottom)
- *  - 15–17s, script always completes
- *  - FIX: dynamic audio indices -> no more [2:a] bug when no music
+ * - Square 640x640 with blurred fill (vertical-friendly), centered fit.
+ * - Curtains fade away after first clip.
+ * - Two variants:
+ *    1) Curtains + top/bottom band intro (centered text).
+ *    2) Clean (no curtains), soft vignette (centered text).
+ * - Duration follows voiceover so script ALWAYS finishes.
+ * - Fast encode; robust audio indexing; centered overlays everywhere.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -584,13 +563,13 @@ router.post('/generate-video-ad', async (req, res) => {
       null;
 
     const VIDEO = { W: 640, H: 640, FPS: 24 };
-    const TO = { PEXELS: 20000, DL: 35000, FPROBE: 8000, OVERMUX: 120000 };
+    const TO = { PEXELS: 20000, DL: 32000, FPROBE: 8000, OVERMUX: 120000 };
 
     const topic = deriveTopicKeywords(answers, url, 'shopping');
     const brandTitle = overlayTitleFromAnswers(answers, topic);
     const ctaText = simpleCTA(answers?.cta);
 
-    /* ---- Stock clips (short/small) ---- */
+    /* ---- Stock clips ---- */
     let candidates = [];
     try {
       const r = await withTimeout(
@@ -603,7 +582,7 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       const videos = r.data?.videos || [];
       for (const v of videos) {
-        if ((v.duration || 0) < 7) continue;
+        if ((v.duration || 0) < 7) continue; // want usable lengths
         const files = (v.video_files || [])
           .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
           .sort((a, b) => (a.width || 9999) - (b.width || 9999));
@@ -625,7 +604,7 @@ router.post('/generate-video-ad', async (req, res) => {
       inputs.push(out);
     }
 
-    /* ---- Script (60–80 words) ---- */
+    /* ---- Script ---- */
     let prompt =
       `Write a simple, clear spoken ad script (~60–80 words). Do NOT mention a website. ` +
       `End with this exact CTA: '${ctaText}'. Topic: ${topic}` +
@@ -665,7 +644,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed' });
     }
 
-    /* ---- Durations (15–17s) ---- */
+    /* ---- Durations (match VO; no hard cap) ---- */
     async function probeDur(file) {
       try {
         const { stdout } = await withTimeout(
@@ -679,15 +658,15 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     let voDur = await probeDur(ttsPath);
     if (voDur <= 0) voDur = 15.0;
-    const finalDur = Math.max(15.0, Math.min(voDur, 17.0));
+    const finalDur = Math.max(14.5, Math.min(voDur + 0.25, 30.0)); // small tail so last word isn’t cut
 
-    // Split across 3 clips (bands/curtains fade after #1)
-    const seg1 = Math.min(6.0, finalDur * 0.4);
+    // Split across 3 clips (curtains fade after #1)
+    const seg1 = Math.min(6.0, Math.max(4.5, finalDur * 0.35));
     const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
-    const seg3 = Math.max(4.2, finalDur - seg1 - seg2);
+    const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
 
-    /* ---- Overlay variant ---- */
+    /* ---- Overlay variant selection ---- */
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
@@ -702,73 +681,79 @@ router.post('/generate-video-ad', async (req, res) => {
       styleVariant = (h % 2) + 1;
     }
 
-    // Timings (intro/outro)
+    // Timings
     const introStart = 0.25;
-    const introEnd   = Math.min(seg1 - 0.2, 3.2);
+    const introEnd   = Math.min(segs[0] - 0.25, 3.0);
     const outroStart = Math.max(0.0, finalDur - 2.4);
     const outroEnd   = finalDur;
 
-    // Dimensions for bands/curtains
-    const TOP_H   = Math.round(VIDEO.H * 0.13);
+    // Dimensions for optional bands/curtains
+    const TOP_H   = Math.round(VIDEO.H * 0.16);
     const BOT_H   = Math.round(VIDEO.H * 0.18);
-    const CUR_W   = Math.round(VIDEO.W * 0.12);
-    const fadeDur = 0.6;
+    const CUR_W   = Math.round(VIDEO.W * 0.13);
 
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
-    const introY   = styleVariant === 1 ? (VIDEO.H - BOT_H + Math.round(BOT_H*0.36)) : Math.round(TOP_H*0.32);
+    const introBrandYTop = Math.round(TOP_H*0.58);
+    const introBrandYBot = VIDEO.H - Math.round(BOT_H*0.58);
 
-    const introT1 = `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=28:x=40:y=${introY}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
-    const introT2 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=16:fontsize=24:x=w-tw-40:y=${introY}:enable='between(t,${(introStart+0.40).toFixed(2)},${introEnd.toFixed(2)})'`;
-    const outroT1 = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.80:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
-    const textChain = [introT1, introT2, outroT1].join(',');
+    // Centered intro (brand + CTA pill under it)
+    const centerIntro = (yBrand) => {
+      const title = `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+      const cta   = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=16:fontsize=24:x=(w-tw)/2:y=${yBrand+36}:enable='between(t,${(introStart+0.35).toFixed(2)},${introEnd.toFixed(2)})'`;
+      return `${title},${cta}`;
+    };
+    const outroCTA = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-    // Base per-clip pipeline (blurred fill + center fit) -> trim to segment
+    // Base per-clip pipeline (blur fill + center fit)
     const look = `format=yuv420p,fps=${VIDEO.FPS}`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
       const dur = segs[i];
       vidParts.push(
         `[${i}:v]split=2[v${i}a][v${i}b];` +
-        `[v${i}a]scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=increase,` +
-          `boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,` +
-          `crop=${VIDEO.W}:${VIDEO.H}[bg${i}];` +
+        `[v${i}a]scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=increase,boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,crop=${VIDEO.W}:${VIDEO.H}[bg${i}];` +
         `[v${i}b]scale='if(gte(iw/ih,1),${VIDEO.W},-2)':'if(gte(iw/ih,1),-2,${VIDEO.H})',setsar=1[fit${i}];` +
-        `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${look},` +
-        `trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+        `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${look},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
       );
     }
     const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-    // Curtains + top/bottom band that fade after clip #1
-    const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
-    const curtain = [
-      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left]`,
-      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right]`,
-      `[vseq][left]overlay=shortest=1:x=0:y=0[b1]`,
-      `[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`
-    ].join(';');
+    // Build visual stack by variant
+    let filterVisual;
+    if (styleVariant === 1) {
+      // Curtains that fade after clip #1 + top OR bottom band (random based on seed)
+      const useTopBand = (seedrandom(String(regenerateToken || answers?.businessName || topic))() > 0.5);
+      const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
+      const curtains =
+        `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
+        `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
+        `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
 
-    const bandLayer = styleVariant === 1
-      ? `color=c=black@0.50:s=${VIDEO.W}x${BOT_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${(segs[0]-0.60).toFixed(2)}:d=0.6:alpha=1[bot];[b2][bot]overlay=shortest=1:x=0:y=main_h-overlay_h[b3]`
-      : `color=c=black@0.50:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${(segs[0]-0.60).toFixed(2)}:d=0.6:alpha=1[top];[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
+      const bandFadeStart = (segs[0]-0.60).toFixed(2);
+      const band = useTopBand
+        ? `color=c=black@0.52:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];[b2][top]overlay=shortest=1:x=0:y=0[b3]`
+        : `color=c=black@0.52:s=${VIDEO.W}x${BOT_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[bot];[b2][bot]overlay=shortest=1:x=0:y=main_h-overlay_h[b3]`;
 
-    const text = `;[b3]${textChain}[v]`;
+      const text = useTopBand ? centerIntro(introBrandYTop) : centerIntro(introBrandYBot);
+      filterVisual = curtains + ';' + band + `;[b3]${text},${outroCTA}[v]`;
+    } else {
+      // Variant 2: clean, no curtains, soft vignette, centered intro/outro
+      const text = centerIntro(Math.round(TOP_H*0.50));
+      filterVisual = `[vseq]format=yuv420p,eq=contrast=1.04:saturation=1.08:brightness=0.00,` +
+                     `vignette=PI/7:0.5[bv];[bv]${text},${outroCTA}[v]`;
+    }
 
-    let filterComplex = vidParts.join(';') + ';' + concat + ';' + curtain + ';' + bandLayer + text;
+    // Combine all parts
+    let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
 
-    // Inputs order: videos..., TTS, (optional music)
-    const ttsIdx = inputs.length;                 // <-- dynamic, FIX for no-music path
-    const musicIdx = ttsIdx + 1;
-
-    // Audio graph (use correct indices regardless of music presence)
-    if (pickMusicFile([])) { /* we already queried below; leave structure intact */ }
+    // Inputs: 3 videos + TTS (+ optional music)
+    const ttsIdx = inputs.length;
+    const keys = [];
+    if (answers?.industry) keys.push(answers.industry);
+    if (answers?.businessName) keys.push(answers.businessName);
     let bgMusicPath = null;
-    try {
-      const keys = [];
-      if (answers?.industry) keys.push(answers.industry);
-      if (answers?.businessName) keys.push(answers.businessName);
-      bgMusicPath = pickMusicFile(keys);
-    } catch {}
+    try { bgMusicPath = pickMusicFile(keys); } catch {}
+    const musicIdx = ttsIdx + 1;
 
     if (bgMusicPath) {
       filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
@@ -782,20 +767,17 @@ router.post('/generate-video-ad', async (req, res) => {
     const id = uuidv4();
     const outPath = path.join(outDir, `${id}.mp4`);
 
-    // Build ffmpeg inputs list
     const inputArgs =
       inputs.map(f => `-i "${f}"`).join(' ') +
       ` -i "${ttsPath}"` +
       (bgMusicPath ? ` -i "${bgMusicPath}"` : '');
 
-    const mapArgs = `-map "[v]" -map "[mix]"`;
-
     await withTimeout(
       exec(
         `ffmpeg -y ${inputArgs} ` +
-        `-filter_complex "${filterComplex}" ${mapArgs} ` +
-        `-t ${finalDur.toFixed(2)} ` +
-        `-c:v libx264 -preset ultrafast -crf 28 -r ${VIDEO.FPS} -pix_fmt yuv420p ` +
+        `-filter_complex "${filterComplex}" -map "[v]" -map "[mix]" ` +
+        `-t ${finalDur.toFixed(2)} -r ${VIDEO.FPS} ` +
+        `-c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p ` +
         `-c:a aac -b:a 128k -ar 44100 -movflags +faststart -shortest "${outPath}"`
       ),
       TO.OVERMUX,
