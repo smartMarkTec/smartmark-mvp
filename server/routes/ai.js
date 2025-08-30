@@ -168,9 +168,9 @@ router.post('/generate-ad-copy', async (req, res) => {
 
   let prompt =
 `You are an expert direct-response ad copywriter.
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (about 38–52 words ≈ 15–17 seconds).
-- Keep it neutral and accurate (no assumptions about shipping, guarantees, or inventory).
-- Hook → value → simple CTA.
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (about 46–72 words ≈ 15–17 seconds).
+- Keep it neutral and accurate; avoid assumptions about shipping, returns, guarantees, or inventory.
+- Hook → value → simple CTA (from common CTAs like “Shop now”, “Buy now”, “Learn more”, “Visit us”, “Check us out”, “Take a look”, “Get started”).
 - Do NOT mention a website or domain.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
@@ -181,7 +181,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
     const r = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 180,
+      max_tokens: 220,
       temperature: 0.35
     });
     res.json({ adCopy: r.choices?.[0]?.message?.content?.trim() || '' });
@@ -217,7 +217,7 @@ Write JSON ONLY:
 {
   "headline": "max 55 characters, plain and neutral (no assumptions)",
   "body": "18-30 words, friendly and value-focused, neutral claims only, no emojis/hashtags",
-  "image_overlay_text": "3-4 words, simple CTA in ALL CAPS"
+  "image_overlay_text": "4 words max, simple CTA in ALL CAPS"
 }
 
 Rules:
@@ -249,17 +249,14 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
     } catch {
       headline = `${brand}: New Styles`;
       body = `Explore easy, everyday pieces with a focus on feel and fit. Browse the latest looks and find what works for you.`;
-      overlay = 'DISCOVER MORE';
+      overlay = 'LEARN MORE';
     }
 
     headline = headline.replace(/["<>]/g, '').slice(0, 55);
     body = body.replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
-    overlay = overlay.toUpperCase()
-      .replace(/['’]/g, '')
-      .replace(/[^A-Z0-9\s!]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!overlay) overlay = 'LEARN MORE';
+
+    // Force CTA to allowed set (no “Browse styles”, “New arrivals”, etc.)
+    overlay = pickFromAllowedCTAs(answers).toUpperCase();
 
     return res.json({ headline, body, image_overlay_text: overlay });
   } catch {
@@ -369,7 +366,7 @@ Website homepage text:
   }
 });
 
-/* ---------------------- Image overlays (unchanged visuals) ---------------------- */
+/* ---------------------- Image overlays ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -391,28 +388,41 @@ function cleanHeadline(h){
   const words=h.split(' '); if(words.length<2||words.length>4) return '';
   return h.toUpperCase();
 }
-function cleanCTA(c){
-  c = String(c||'')
-    .replace(/['’]/g, '')
-    .replace(/[^a-z0-9 &\-!]/gi,' ')
-    .replace(/\s+/g,' ')
-    .trim();
-  if(!c) return 'Learn More!';
-  let w=c.split(' ').slice(0,4).join(' ');
-  if(!/[.!?]$/.test(w)) w+='!';
-  return w.charAt(0).toUpperCase()+w.slice(1);
+
+/* Allowed CTA list (used everywhere) */
+const ALLOWED_CTAS = [
+  'SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!',
+  'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'
+];
+function pickFromAllowedCTAs(answers = {}, seed = '') {
+  const t = String(answers?.cta || '').trim();
+  if (t) {
+    const norm = t.toUpperCase().replace(/['’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
+    const withBang = /!$/.test(norm) ? norm : `${norm}!`;
+    if (ALLOWED_CTAS.includes(withBang)) return withBang;
+  }
+  let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
+  return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
 }
 
-/* ---- 4 overlay templates: Left / Top / Bottom / Center ---- */
-function svgOverlay({ W, H, headline, cta, tpl=1 }) {
+/* CTA text (image/video safe) */
+function cleanCTA(c){
+  const norm = String(c||'').toUpperCase().replace(/['’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
+  const withBang = /!$/.test(norm) ? norm : (norm ? `${norm}!` : '');
+  return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
+}
+
+/* ---- 4 overlay templates: Left / Top / Center / Left gradient ---- */
+/* (Bottom centered template removed per request) */
+function svgOverlay({ W, H, headline, cta, tpl=2 }) {
   const LIGHT = '#f2f5f6';
   const MAX_W = W - 120;
   const EST = estWidth;
 
   const pill = (x, y, text, fs=28, align='center') => {
-    fs = Math.max(20, Math.min(fs, 34));
+    fs = Math.max(22, Math.min(fs, 34));
     const w = Math.min(MAX_W, EST(text, fs) + 44), h = 46;
-    const x0 = align==='left' ? x : (x - w/2);
+    const x0 = align==='left' ? x - w/2 : (x - w/2);
     return `
       <g transform="translate(${x0}, ${y - Math.floor(h*0.6)})">
         <rect x="0" y="-14" width="${w}" height="${h}" rx="14" fill="#0b0d10d0"/>
@@ -420,18 +430,7 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
       </g>`;
   };
 
-  if (tpl === 1) {
-    let fs = fitFont(headline, MAX_W-80, 56);
-    const yTitle = H - 78;
-    const yCTA = yTitle + 58;
-    return `
-      <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000c"/></linearGradient></defs>
-      <rect x="0" y="${H-170}" width="${W}" height="170" rx="18" fill="url(#g1)"/>
-      <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${pill(W/2, yCTA, cta, 28, 'center')}
-    `;
-  }
-
+  // Top band
   if (tpl === 2) {
     let fs = fitFont(headline, MAX_W-80, 56);
     const yTitle = 92;
@@ -444,6 +443,7 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
     `;
   }
 
+  // Center box
   if (tpl === 3) {
     const boxW = 860;
     const fit = splitTwoLines(headline, boxW-100, 56);
@@ -465,6 +465,7 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
     `;
   }
 
+  // Left gradient
   const padX = 64, padY = 110, panelW = 520;
   const fit = splitTwoLines(headline, panelW-2*padX, 54);
   const yBase = padY;
@@ -486,10 +487,11 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
 
   let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
-  let cta = cleanCTA(ctaHint) || 'Learn More!';
+  let cta = cleanCTA(ctaHint) || 'LEARN MORE!';
 
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  const tpl = (h % 4) + 1;
+  // Only use Top (2), Center (3), Left (4) — bottom template removed
+  const tpl = [2,3,4][h % 3];
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
@@ -574,23 +576,9 @@ function safeFFText(t){
     .slice(0, 40);
 }
 
-/* ---- CTA pool (simple, rotates on regenerate) ---- */
+/* ---- CTA pool (strict common list, rotates on regenerate) ---- */
 function chooseCTA(answers={}, seed='') {
-  const pool = [
-    'SHOP NOW!', 'DISCOVER MORE!', 'LEARN MORE!',
-    'GET STARTED!', 'SEE WHATS NEW!', 'EXPLORE NOW!', 'BROWSE STYLES!'
-  ];
-  const prefer = String(answers?.cta||'').trim();
-  if (prefer) {
-    return prefer.toUpperCase()
-      .replace(/['’]/g,'')
-      .replace(/[^A-Z0-9 !?]/g,'')
-      .replace(/\s+/g,' ')
-      .trim()
-      .replace(/!?$/,'!');
-  }
-  let h = 0; for (const c of String(seed||Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  return pool[h % pool.length];
+  return pickFromAllowedCTAs(answers, seed);
 }
 
 /* -------------------------- Spawned processes -------------------------- */
@@ -642,7 +630,7 @@ function pickSerifFontFile() {
 }
 
 /**
- * Single simple design:
+ * Single design (unchanged look):
  * - Square 640x640 with blurred fill + centered fit.
  * - Side curtains fade after clip #1.
  * - Top intro band shows Brand only (with "!"), Times New Roman if available.
@@ -705,7 +693,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const buildPrompt = (targetWordsLow, targetWordsHigh) => {
       const base =
 `Write a simple, neutral spoken ad script about ${topic}.
-- About ${targetWordsLow}-${targetWordsHigh} words.
+- About ${targetWordsLow}-${targetWordsHigh} words (~${Math.round(targetWordsHigh/4)}s).
 - Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
 - No website or domain. End with this exact CTA: "${ctaText}".
 - Structure: brief hook → value/what to expect → CTA.`;
@@ -740,7 +728,7 @@ router.post('/generate-video-ad', async (req, res) => {
         const r = await openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: buildPrompt(low, high) }],
-          max_tokens: 260,
+          max_tokens: 280,
           temperature: 0.35,
           timeout: 14000
         });
@@ -762,13 +750,14 @@ router.post('/generate-video-ad', async (req, res) => {
 
       voDur = await probeDuration(ttsPath);
       if (voDur >= 14.0) break;
-      // If still short on last attempt, append a neutral closer to extend time.
+
+      // On last pass, extend with a neutral closer
       if (attempt === targets.length - 1) {
-        script += ' Take a closer look and find what feels right for you. ' + ctaText;
+        script += ` Take a look and see what feels right for you. ${ctaText}`;
         try {
           if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
           ttsPath = await makeTTS(script);
-        } catch { /* keep previous */ }
+        } catch {}
         voDur = await probeDuration(ttsPath);
       }
     }
@@ -798,6 +787,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const CUR_W   = Math.round(640 * 0.13);
 
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+
     const yBrand = Math.round(TOP_H * 0.56);
 
     const introOverlay =
@@ -806,8 +796,8 @@ router.post('/generate-video-ad', async (req, res) => {
     const outroOverlay =
       `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-    /* ---- Build visuals with consistent fps/pixfmt to avoid sputter ---- */
-    const baseLook = `setsar=1,format=yuv420p,fps=${VIDEO.FPS}`;
+    /* ---- Build visuals (force consistent fps/pixfmt to prevent sputter) ---- */
+    const baseLook = `setsar=1,fps=${VIDEO.FPS},format=yuv420p,settb=AVTB`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
       const dur = segs[i];
@@ -834,7 +824,7 @@ router.post('/generate-video-ad', async (req, res) => {
     let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
     let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
 
-    // Audio: voice + optional bg music
+    // Audio: voice + optional bg music (pad to finalDur so lengths match)
     const ttsIdx = inputs.length;
     const keys = [];
     if (answers?.industry) keys.push(answers.industry);
@@ -846,7 +836,7 @@ router.post('/generate-video-ad', async (req, res) => {
     if (bgMusicPath) {
       filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
                        `[${musicIdx}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
-                       `[voice][bg]amix=inputs=2:duration=first:normalize=1[mix]`;
+                       `[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
     } else {
       filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
     }
@@ -864,10 +854,10 @@ router.post('/generate-video-ad', async (req, res) => {
       '-map', '[v]', '-map', '[mix]',
       '-t', finalDur.toFixed(2),
       '-r', String(VIDEO.FPS),
+      '-vsync', 'vfr',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
       '-movflags', '+faststart',
-      '-shortest',
       '-loglevel', 'error',
       outPath
     );
@@ -940,7 +930,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
     const headlineHint = overlayTitleFromAnswers(answers, keyword);
-    const ctaHint = chooseCTA(answers, seed);
+    const ctaHint = pickFromAllowedCTAs(answers, seed);
 
     let finalUrl = baseUrl;
     try {
