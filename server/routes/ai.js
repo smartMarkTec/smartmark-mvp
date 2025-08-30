@@ -255,7 +255,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
     headline = headline.replace(/["<>]/g, '').slice(0, 55);
     body = body.replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
     overlay = overlay.toUpperCase()
-      .replace(/['’]/g, '')                 // keep WHATS, DONT, etc. tight
+      .replace(/['’]/g, '')
       .replace(/[^A-Z0-9\s!]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -369,7 +369,7 @@ Website homepage text:
   }
 });
 
-/* ---------------------- Image overlays (readable + spaced) ---------------------- */
+/* ---------------------- Image overlays (unchanged visuals) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -393,7 +393,7 @@ function cleanHeadline(h){
 }
 function cleanCTA(c){
   c = String(c||'')
-    .replace(/['’]/g, '')                  // keep WHATS, DONT, etc.
+    .replace(/['’]/g, '')
     .replace(/[^a-z0-9 &\-!]/gi,' ')
     .replace(/\s+/g,' ')
     .trim();
@@ -420,7 +420,6 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
       </g>`;
   };
 
-  // Bottom band (kept for images)
   if (tpl === 1) {
     let fs = fitFont(headline, MAX_W-80, 56);
     const yTitle = H - 78;
@@ -433,7 +432,6 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
     `;
   }
 
-  // Top band
   if (tpl === 2) {
     let fs = fitFont(headline, MAX_W-80, 56);
     const yTitle = 92;
@@ -446,14 +444,13 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
     `;
   }
 
-  // Center box — CTA stays inside the translucent box with spacing
   if (tpl === 3) {
     const boxW = 860;
     const fit = splitTwoLines(headline, boxW-100, 56);
     const lineCount = fit.lines.length;
     const boxPad = 28;
     const gap = 18;
-    const boxH = Math.round(boxPad*2 + fit.fs*(lineCount) + 54 + gap); // room for CTA inside
+    const boxH = Math.round(boxPad*2 + fit.fs*(lineCount) + 54 + gap);
     const yBox = Math.round((H - boxH)/2);
     const yTitle = yBox + boxPad + fit.fs - 6;
     const yCTA = yBox + boxH - boxPad - 12;
@@ -468,7 +465,6 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
     `;
   }
 
-  // Left gradient
   const padX = 64, padY = 110, panelW = 520;
   const fit = splitTwoLines(headline, panelW-2*padX, 54);
   const yBase = padY;
@@ -486,18 +482,15 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
 
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '' }) {
   const W = 1200, H = 627;
-
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
 
   let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
   let cta = cleanCTA(ctaHint) || 'Learn More!';
 
-  // Deterministic template choice
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
   const tpl = (h % 4) + 1;
 
-  // SVG overlay only
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
   );
@@ -568,7 +561,7 @@ function getDeterministicShuffle(arr, seed) {
 
 function safeFFText(t){
   return String(t||'')
-    .replace(/['’]/g,'') // keep WHATS not WHAT S
+    .replace(/['’]/g,'')
     .replace(/[\n\r]/g,' ')
     .replace(/[:]/g,' ')
     .replace(/[\\"]/g,'')
@@ -634,13 +627,27 @@ async function probeDuration(file, timeoutMs=8000) {
 }
 
 /* ------------------------------- VIDEO ------------------------------- */
+function pickSerifFontFile() {
+  const candidates = [
+    '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf',
+    '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman_Bold.ttf',
+    '/usr/share/fonts/truetype/msttcorefonts/times.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSerif.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf'
+  ];
+  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
+  return null;
+}
+
 /**
- * Single simple design (unchanged visually):
+ * Single simple design:
  * - Square 640x640 with blurred fill + centered fit.
- * - Side curtains fade after the first clip.
- * - Top intro band shows Brand only (NO CTA).
+ * - Side curtains fade after clip #1.
+ * - Top intro band shows Brand only (with "!"), Times New Roman if available.
  * - Big centered outro CTA.
- * - Voiceover ends ~1.6s before visuals; total length ≥ 15s.
+ * - Voiceover ≥ 14s, visuals ≥ VO + 2s (total ≥ 16s). VO ends ~2s before end.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -658,9 +665,10 @@ router.post('/generate-video-ad', async (req, res) => {
     const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
 
     const topic = deriveTopicKeywords(answers, url, 'shopping');
-    const brandTitle = overlayTitleFromAnswers(answers, topic);
-    const ctaTextRaw = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
-    const ctaText = ctaTextRaw; // shown in outro only
+    const brandBase = (answers?.businessName && String(answers.businessName).trim()) || overlayTitleFromAnswers(answers, topic);
+    let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g,'').trim();
+    if (!/!$/.test(brandForVideo)) brandForVideo += '!';
+    const ctaText = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
 
     /* ---- Stock clips ---- */
     let candidates = [];
@@ -693,13 +701,13 @@ router.post('/generate-video-ad', async (req, res) => {
       inputs.push(out);
     }
 
-    /* ---- Script generation (neutral + length guard) ---- */
+    /* ---- Script generation (neutral) with length guard ---- */
     const buildPrompt = (targetWordsLow, targetWordsHigh) => {
       const base =
 `Write a simple, neutral spoken ad script about ${topic}.
-- About ${targetWordsLow}-${targetWordsHigh} words (~15–18 seconds).
+- About ${targetWordsLow}-${targetWordsHigh} words.
 - Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
-- Keep it broad and brand-safe. No website or domain. End with this exact CTA: "${ctaText}".
+- No website or domain. End with this exact CTA: "${ctaText}".
 - Structure: brief hook → value/what to expect → CTA.`;
       let p = base;
       if (answers?.industry) p += `\nCategory (for context): ${answers.industry}`;
@@ -720,16 +728,19 @@ router.post('/generate-video-ad', async (req, res) => {
     let ttsPath = '';
     let voDur = 0;
 
-    // Try up to 2 times to hit ≥13.5s VO
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const targetLow = attempt === 0 ? 42 : 50;
-      const targetHigh = attempt === 0 ? 56 : 64;
-
+    // Retry up to 3x targeting longer scripts until VO >= 14s
+    const targets = [
+      [46, 58],
+      [58, 72],
+      [70, 84]
+    ];
+    for (let attempt = 0; attempt < targets.length; attempt++) {
+      const [low, high] = targets[attempt];
       try {
         const r = await openai.chat.completions.create({
           model: 'gpt-4o',
-          messages: [{ role: 'user', content: buildPrompt(targetLow, targetHigh) }],
-          max_tokens: 220,
+          messages: [{ role: 'user', content: buildPrompt(low, high) }],
+          max_tokens: 260,
           temperature: 0.35,
           timeout: 14000
         });
@@ -739,36 +750,43 @@ router.post('/generate-video-ad', async (req, res) => {
           .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
           .trim();
       } catch {
-        script = script || 'Find pieces that fit your day. Explore styles, materials, and details you can feel good about. ' + ctaText;
+        script = script || `Find pieces that fit your day. Explore styles, materials, and details you can feel good about. ${ctaText}`;
       }
 
       try {
+        if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
         ttsPath = await makeTTS(script);
       } catch {
         return res.status(500).json({ error: 'TTS generation failed' });
       }
 
       voDur = await probeDuration(ttsPath);
-      if (voDur >= 13.5) break; // acceptable; visuals will be ≥15 with buffer
+      if (voDur >= 14.0) break;
+      // If still short on last attempt, append a neutral closer to extend time.
+      if (attempt === targets.length - 1) {
+        script += ' Take a closer look and find what feels right for you. ' + ctaText;
+        try {
+          if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
+          ttsPath = await makeTTS(script);
+        } catch { /* keep previous */ }
+        voDur = await probeDuration(ttsPath);
+      }
     }
+    if (voDur <= 0) voDur = 14.0;
 
-    if (voDur <= 0) voDur = 14.0; // safety
-
-    /* ---- Durations (match VO; visuals >= 15s; VO finishes ~1.6s early) ---- */
-    const finalDur = Math.max(15.0, Math.min(voDur + 1.6, 30.0));
+    /* ---- Durations (visuals >= VO + 2s, and >= 16s total) ---- */
+    const finalDur = Math.max(16.0, Math.min(voDur + 2.2, 30.0));
 
     const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
     const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
     const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
 
-    /* ---- Overlay positions (brand-only intro; big outro CTA) ---- */
-    const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
-    const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
-    const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
-    const fontParam = chosenFont ? `fontfile='${chosenFont}':` : '';
+    /* ---- Overlays (Times New Roman if available) ---- */
+    const serifFile = pickSerifFontFile();
+    const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
 
-    const brandLine = safeFFText(brandTitle);
+    const brandLine = safeFFText(brandForVideo);
     const ctaTxt    = safeFFText(ctaText);
 
     const introStart = 0.25;
@@ -782,13 +800,13 @@ router.post('/generate-video-ad', async (req, res) => {
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
     const yBrand = Math.round(TOP_H * 0.56);
 
-    // Brand only in intro (your request)
     const introOverlay =
       `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
 
     const outroOverlay =
       `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
+    /* ---- Build visuals with consistent fps/pixfmt to avoid sputter ---- */
     const baseLook = `setsar=1,format=yuv420p,fps=${VIDEO.FPS}`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -816,7 +834,7 @@ router.post('/generate-video-ad', async (req, res) => {
     let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
     let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
 
-    // Audio: voice (mono to stereo) + optional bg music (low)
+    // Audio: voice + optional bg music
     const ttsIdx = inputs.length;
     const keys = [];
     if (answers?.industry) keys.push(answers.industry);
