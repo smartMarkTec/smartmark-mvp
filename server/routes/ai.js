@@ -84,14 +84,11 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['art','painting','craft'], keyword: 'painting art' },
   { match: ['coffee','cafe'], keyword: 'coffee shop' },
 ];
-
 function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
-
-// Canonical, neutral topic for copywriting (no odd phrases like "fashion model")
 function canonicalizeCopyTopic(topic='') {
   const t = String(topic || '').toLowerCase();
   if (t.includes('fashion')) return 'fashion';
@@ -107,7 +104,6 @@ function canonicalizeCopyTopic(topic='') {
   if (t.includes('art') || t.includes('painting') || t.includes('craft')) return 'art & craft';
   return topic || 'shopping';
 }
-
 function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   const industry = answers.industry || answers.productType || '';
   const base = getImageKeyword(industry, url) || industry || fallback;
@@ -120,7 +116,6 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   if (extra.includes('electronics') || extra.includes('phone') || extra.includes('laptop')) return 'tech gadgets';
   return base;
 }
-
 function overlayTitleFromAnswers(answers = {}, topic = '') {
   const brand = (answers.businessName || '').trim().toUpperCase();
   if (brand) return brand.slice(0, 24);
@@ -188,7 +183,7 @@ router.post('/generate-ad-copy', async (req, res) => {
 
   let prompt =
 `You are an expert direct-response ad copywriter.
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is typically ~15–17 seconds. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Stay neutral—do not invent policies (shipping, returns, guarantees) or specific claims. No URLs or domains.`;
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is typically ~15–17 seconds. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Stay neutral—no policies (shipping, returns, guarantees), no prices, no URLs.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
@@ -270,7 +265,6 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       overlay = 'DISCOVER MORE';
     }
 
-    // sanitize
     const BAN = /(fast\s+shipping|easy\s+returns?|money[- ]?back|guarantee|lowest\s+price)/ig;
     headline = headline.replace(BAN,'').replace(/["<>]/g, '').replace(/\s+/g,' ').trim().slice(0, 55);
     body = body.replace(BAN,'').replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
@@ -421,7 +415,7 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
   const MAX_W = W - 120;
   const EST = estWidth;
 
-  // pill: perfectly centered text, auto-fit width, bolder
+  // pill: perfectly centered text, auto-fit width, Times New Roman
   const pill = (x, y, text, fs=28, align='center') => {
     let size = fs;
     while (EST(text, size) + 44 > MAX_W) size -= 2;
@@ -437,13 +431,13 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
       <g transform="translate(${gx}, ${gy})">
         <rect x="0" y="0" width="${w}" height="${h}" rx="${rx}" fill="#0b0d10cc"/>
         <text x="${w/2}" y="${h/2}" text-anchor="middle" dominant-baseline="central" alignment-baseline="middle"
-              font-family="Inter, Helvetica, Arial, sans-serif" font-size="${size}" font-weight="800" fill="#ffffff">
+              font-family="Times New Roman, Times, serif" font-size="${size}" font-weight="700" fill="#ffffff">
           ${escSVG(text)}
         </text>
       </g>`;
   };
 
-  // Bottom band
+  // Bottom band (kept here for compatibility, but NOT selected in builder)
   if (tpl === 1) {
     let fs = fitFont(headline, MAX_W-80, 56);
     const yTitle = H - 70;
@@ -510,8 +504,10 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
   let cta = cleanCTA(ctaHint) || 'Discover More';
 
+  // Choose ONLY from Top, Center, Left (no Bottom)
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  const tpl = (h % 4) + 1;
+  const tpls = [2,3,4];
+  const tpl = tpls[h % tpls.length];
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
@@ -594,8 +590,6 @@ function safeFFText(t){
     .toUpperCase()
     .slice(0, 36);
 }
-
-// Neutral CTA picker if none provided in input keywords
 function pickNeutralCTA(topic='', seed='') {
   const pool = [
     'Explore the collection',
@@ -608,7 +602,6 @@ function pickNeutralCTA(topic='', seed='') {
   let h = 0; for (const c of String((topic||'') + seed)) h = (h*31 + c.charCodeAt(0))>>>0;
   return pool[h % pool.length].toUpperCase() + '!';
 }
-
 function simpleCTA(input, topic='', seed='') {
   const t = String(input || '').toLowerCase();
   if (t.includes('buy')) return 'BUY NOW!';
@@ -625,7 +618,7 @@ function simpleCTA(input, topic='', seed='') {
 function runSpawn(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
-      stdio: ['ignore', 'ignore', 'inherit'], // don't buffer stdout; show errors
+      stdio: ['ignore', 'ignore', 'inherit'],
       ...opts,
     });
     let killed = false;
@@ -655,7 +648,6 @@ async function probeDuration(file, timeoutMs=7000) {
 }
 
 /* ------------------------------- VIDEO ------------------------------- */
-/* Helpers to create neutral, length-targeted scripts */
 function stripAssumptions(text='') {
   return String(text)
     .replace(/(?:fast|free)\s+shipping/ig,'')
@@ -712,6 +704,7 @@ ${benefit ? `Key benefit: ${benefit}` : ''}`;
 
 /**
  * VIDEO: design unchanged; intro shows Brand! only; outro shows CTA.
+ * Duration now follows VO exactly (no minimum floor), so script never ends early.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -725,12 +718,11 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
-    const VIDEO = { W: 640, H: 640, FPS: 24 };
     const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
 
     const topicSearch = deriveTopicKeywords(answers, url, 'shopping');
 
-    // Pick neutral CTA if not specified, with deterministic variety
+    // Neutral CTA with deterministic variety on regenerate
     const ctaText = simpleCTA(answers?.cta, topicSearch, regenerateToken || answers?.businessName || '');
 
     /* ---- Stock clips ---- */
@@ -784,23 +776,23 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed' });
     }
 
-    /* ---- Durations ---- */
+    /* ---- Durations (match VO) ---- */
     let voDur = await probeDuration(ttsPath);
-    if (voDur <= 0) voDur = 15.0;
-    const finalDur = Math.max(14.5, Math.min(voDur + 0.25, 30.0));
+    if (voDur <= 0) voDur = 12.0; // safe fallback
+    const finalDur = Math.min(Math.max(voDur + 0.25, 9.0), 30.0); // follow VO; small tail
 
+    // three segments with gentle pacing
     const seg1 = Math.min(6.0, Math.max(4.8, finalDur * 0.36));
-    const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
-    const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
+    const seg2 = Math.max(3.6, (finalDur - seg1) / 2);
+    const seg3 = Math.max(3.4, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
 
-    /* ---- Overlays (unchanged design) ---- */
+    /* ---- Overlays (unchanged look) ---- */
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
     const fontParam = chosenFont ? `fontfile='${chosenFont}':` : '';
 
-    // Brand with exclamation mark for the intro
     let brandLine = safeFFText(overlayTitleFromAnswers(answers, topicSearch));
     if (brandLine && !/[!?]$/.test(brandLine)) {
       brandLine = (brandLine + '!').slice(0, 36);
@@ -808,7 +800,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const ctaTxt = safeFFText(ctaText);
 
     const introStart = 0.25;
-    const introEnd   = Math.min(segs[0] - 0.25, 3.2);
+    const introEnd   = Math.max(introStart + 0.6, Math.min(segs[0] - 0.25, 3.2)); // ensure non-zero
     const outroStart = Math.max(0.0, finalDur - 2.4);
     const outroEnd   = finalDur;
 
@@ -822,7 +814,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const introOverlay =
       `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
 
-    // OUTRO: CTA in the middle (unchanged)
+    // OUTRO: CTA centered
     const outroOverlay =
       `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
@@ -839,13 +831,14 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
+    // Curtains & band with fade-out before the first cut to avoid sputter look
     const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
     const curtains =
       `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
       `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
       `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
 
-    const bandFadeStart = (segs[0]-0.60).toFixed(2);
+    const bandFadeStart = (Math.max(0.8, segs[0]-0.60)).toFixed(2);
     const band =
       `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
       `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
