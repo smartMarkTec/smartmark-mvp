@@ -31,11 +31,12 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
+sharp.cache({ files: 0, items: 64, memory: 20 });
+sharp.concurrency(1);
+
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
-const child_process = require('child_process');
-const util = require('util');
-const exec = util.promisify(child_process.exec);
+const { spawn } = require('child_process');
 const seedrandom = require('seedrandom');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
@@ -67,6 +68,7 @@ function ensureGeneratedDir() {
   try { fs.mkdirSync(outDir, { recursive: true }); } catch {}
   return outDir;
 }
+function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
 
 /* ---------- topic mapping (keeps visuals on-topic) ---------- */
 const IMAGE_KEYWORD_MAP = [
@@ -154,8 +156,7 @@ async function getWebsiteText(url) {
       .trim();
     if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
     return body.slice(0, 3500);
-  } catch (e) {
-    console.warn('scrape fail:', url || '(empty)', e.message);
+  } catch {
     return '';
   }
 }
@@ -181,8 +182,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
       temperature: 0.35
     });
     res.json({ adCopy: r.choices?.[0]?.message?.content?.trim() || '' });
-  } catch (e) {
-    console.error('adcopy fail:', e?.response?.data || e.message);
+  } catch {
     res.status(500).json({ error: 'Failed to generate ad copy' });
   }
 });
@@ -257,8 +257,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
     if (!overlay) overlay = 'SHOP NOW';
 
     return res.json({ headline, body, image_overlay_text: overlay });
-  } catch (e) {
-    console.error('generate-campaign-assets error:', e?.message || e);
+  } catch {
     return res.json({
       headline: 'Shop Our Latest Picks',
       body: 'Quality products, fast shipping, and easy returns. Simple, reliable, and ready when you are—see what’s new today.',
@@ -395,111 +394,107 @@ function cleanCTA(c){
   return w.charAt(0).toUpperCase()+w.slice(1);
 }
 
-const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
-const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
-
 /* ---- 4 overlay templates: Left / Top / Bottom / Center ---- */
-function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
+function svgOverlay({ W, H, headline, cta, tpl=1 }) {
   const LIGHT = '#f2f5f6';
   const MAX_W = W - 120;
+  const EST = estWidth;
 
-  const pillCenter = (xc, y, text, fs=26) => {
-    const w = estWidth(text, fs) + 36, h = 44;
+  const pill = (x, y, text, fs=26, align='center') => {
+    const w = EST(text, fs) + 36, h = 44;
+    const x0 = align==='left' ? x : (x - w/2);
     return `
-      <g transform="translate(${xc - w/2}, ${y - h + 26})">
+      <g transform="translate(${x0}, ${y - h + 26})">
         <rect x="0" y="-18" width="${w}" height="${h}" rx="12" fill="#0b0d10cc"/>
         <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
       </g>`;
   };
-  const pillLeft = (x, y, text, fs=24) => {
-    const w = estWidth(text, fs) + 34, h = 42;
-    return `
-      <g transform="translate(${x}, ${y - h + 26})">
-        <rect x="0" y="-18" width="${w}" height="${h}" rx="10" fill="#0b0d10cc"/>
-        <text x="16" y="0" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
-      </g>`;
-  };
 
-  // Bottom band (centered)
+  // Bottom band
   if (tpl === 1) {
     let fs = fitFont(headline, MAX_W-80, 56);
     const yTitle = H - 70;
-    const yCTA   = yTitle + 52; // clear gap
-    return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    const yCTA = yTitle + 54;
+    return `
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000c"/></linearGradient></defs>
-      <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="${H-160}" width="${W}" height="160" fill="url(#g1)"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${pillCenter(W/2, yCTA, cta, 26)}
-    </svg>`;
+      ${pill(W/2, yCTA, cta, 26, 'center')}
+    `;
   }
 
-  // Top band (centered)
+  // Top band
   if (tpl === 2) {
     let fs = fitFont(headline, MAX_W-80, 56);
     const yTitle = 88;
-    const yCTA   = yTitle + 54; // clear gap below title
-    return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    const yCTA = yTitle + 56;
+    return `
       <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000c"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
-      <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
       <rect x="0" y="0" width="${W}" height="160" fill="url(#g2)"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${pillCenter(W/2, yCTA, cta, 26)}
-    </svg>`;
+      ${pill(W/2, yCTA, cta, 26, 'center')}
+    `;
   }
 
-  // Center box (centered)
+  // Center box
   if (tpl === 3) {
     const boxW = 860;
     const fit = splitTwoLines(headline, boxW-80, 56);
     const yTitle = (H/2) - (fit.lines.length===2?20:8);
     const yCTA = yTitle + fit.fs*1.2 + (fit.lines[1]?fit.fs*1.05:0) + 28;
-    return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
+    return `
       <rect x="${(W-boxW)/2}" y="${(H-180)/2}" width="${boxW}" height="180" rx="20" fill="#00000028"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
         <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
       </text>
-      ${pillCenter(W/2, yCTA, cta, 26)}
-    </svg>`;
+      ${pill(W/2, yCTA, cta, 26, 'center')}
+    `;
   }
 
-  // Left gradient (left aligned)
+  // Left gradient
   const padX = 64, padY = 110, panelW = 500;
   const fit = splitTwoLines(headline, panelW-2*padX, 54);
   const yBase = padY;
-  const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 40; // space below title
-  return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+  const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 40;
+  return `
     <defs><linearGradient id="gL" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
-    <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
     <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
     <text x="${padX}" y="${yBase}" text-anchor="start" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
       <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
       ${fit.lines[1]?`<tspan x="${padX}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
     </text>
-    ${pillLeft(padX, yCTA, cta, 24)}
-  </svg>`;
+    ${pill(padX, yCTA, cta, 24, 'left')}
+  `;
 }
 
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '' }) {
   const W = 1200, H = 627;
+
+  // Stream → buffer but keep it small; let sharp do the heavy lifting
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-  const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
-  const base64 = baseBuf.toString('base64');
+  const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
 
-  let headline = cleanHeadline(headlineHint) || (FALLBACK_HEADLINES[Math.floor(Math.random()*FALLBACK_HEADLINES.length)]).toUpperCase();
-  let cta = cleanCTA(ctaHint) || FALLBACK_CTA[0];
+  let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
+  let cta = cleanCTA(ctaHint) || 'Shop Now!';
 
-  // Deterministic choice among 4 templates
+  // Deterministic template choice
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
   const tpl = (h % 4) + 1;
 
-  const svg = renderImageSVG({ W, H, base64, headline, cta, tpl });
+  // SVG overlay only (no base64 image embedding)
+  const overlaySVG = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
+  );
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  fs.writeFileSync(path.join(outDir, file), await sharp(Buffer.from(svg)).jpeg({ quality: 95 }).toBuffer());
+  await base
+    .composite([{ input: overlaySVG, top: 0, left: 0 }])
+    .jpeg({ quality: 92 })
+    .toFile(path.join(outDir, file));
+
+  maybeGC();
   return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
 }
 
@@ -529,16 +524,18 @@ function pickMusicFile(keywords = []) {
 
 /* ------------------------------- Utils ------------------------------- */
 function withTimeout(p, ms, msg='Timeout') { return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)), ms))]); }
-async function downloadFileWithTimeout(url, dest, timeoutMs=28000, maxSizeMB=6) {
+
+async function downloadFileWithTimeout(url, dest, timeoutMs=26000, maxSizeMB=6) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
-    const timeout = setTimeout(()=>{timedOut=true;writer.close();try{fs.unlinkSync(dest);}catch{};reject(new Error('Download timed out'));}, timeoutMs);
+    const timeout = setTimeout(()=>{timedOut=true;writer.destroy();try{fs.unlinkSync(dest);}catch{};reject(new Error('Download timed out'));}, timeoutMs);
     axios({ url, method:'GET', responseType:'stream' })
       .then(resp => {
         let bytes=0;
-        resp.data.on('data', ch => { bytes+=ch.length; if (bytes > maxSizeMB*1024*1024 && !timedOut) { timedOut=true; writer.close(); try{fs.unlinkSync(dest);}catch{}; clearTimeout(timeout); reject(new Error('File too large')); }});
+        resp.data.on('data', ch => { bytes+=ch.length; if (bytes > maxSizeMB*1024*1024 && !timedOut) { timedOut=true; writer.destroy(); try{fs.unlinkSync(dest);}catch{}; clearTimeout(timeout); reject(new Error('File too large')); }});
+        resp.data.on('error', err => { clearTimeout(timeout); if (!timedOut) reject(err); });
         resp.data.pipe(writer);
         writer.on('finish', ()=>{clearTimeout(timeout); if (!timedOut) resolve(dest);});
         writer.on('error', err=>{clearTimeout(timeout); try{fs.unlinkSync(dest);}catch{}; if (!timedOut) reject(err);});
@@ -546,12 +543,14 @@ async function downloadFileWithTimeout(url, dest, timeoutMs=28000, maxSizeMB=6) 
       .catch(err=>{clearTimeout(timeout); try{fs.unlinkSync(dest);}catch{}; reject(err);});
   });
 }
+
 function getDeterministicShuffle(arr, seed) {
   const rng = seedrandom(String(seed || Date.now()));
   const a = [...arr];
   for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a+i];}
   return a;
 }
+
 function safeFFText(t){
   return String(t||'')
     .replace(/[\n\r]/g,' ')
@@ -577,11 +576,44 @@ function simpleCTA(input) {
   return 'SHOP NOW!';
 }
 
+/* -------------------------- Spawned processes -------------------------- */
+function runSpawn(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, {
+      stdio: ['ignore', 'ignore', 'inherit'], // don't buffer stdout; show errors
+      ...opts,
+    });
+    let killed = false;
+    const killTimer = opts.killAfter ? setTimeout(() => {
+      killed = true;
+      try { child.kill('SIGKILL'); } catch {}
+      reject(new Error(opts.killMsg || 'process timeout'));
+    }, opts.killAfter) : null;
+
+    child.on('error', err => { if (killTimer) clearTimeout(killTimer); reject(err); });
+    child.on('close', code => {
+      if (killTimer) clearTimeout(killTimer);
+      if (killed) return;
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`));
+    });
+  });
+}
+async function probeDuration(file, timeoutMs=7000) {
+  return new Promise((resolve) => {
+    const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nokey=1:noprint_wrappers=1', file], { stdio: ['ignore', 'pipe', 'ignore'] });
+    let out = '';
+    const timer = setTimeout(()=>{ try { child.kill('SIGKILL'); } catch {}; resolve(0); }, timeoutMs);
+    child.stdout.on('data', d => { if (out.length < 64) out += d.toString('utf8'); });
+    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s)?0:s); });
+    child.on('error', () => { clearTimeout(timer); resolve(0); });
+  });
+}
+
 /* ------------------------------- VIDEO ------------------------------- */
 /**
- * ONE simple design (the one you liked):
+ * One simple design you liked:
  * - Square 640x640 with blurred fill (vertical-friendly), centered fit.
- * - Side curtains fade away after the first clip.
+ * - Side curtains fade after the first clip.
  * - Top intro band with centered Brand + CTA (spaced so they never touch).
  * - Centered outro CTA.
  * - Duration matches voiceover so the script always finishes.
@@ -599,23 +631,20 @@ router.post('/generate-video-ad', async (req, res) => {
       null;
 
     const VIDEO = { W: 640, H: 640, FPS: 24 };
-    const TO = { PEXELS: 20000, DL: 32000, FPROBE: 8000, OVERMUX: 120000 };
+    const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
 
     const topic = deriveTopicKeywords(answers, url, 'shopping');
     const brandTitle = overlayTitleFromAnswers(answers, topic);
     const ctaText = simpleCTA(answers?.cta);
 
-    /* ---- Stock clips ---- */
+    /* ---- Stock clips (smaller payload) ---- */
     let candidates = [];
     try {
-      const r = await withTimeout(
-        axios.get('https://api.pexels.com/videos/search', {
-          headers: { Authorization: PEXELS_API_KEY },
-          params: { query: topic, per_page: 50, cb: Date.now() + (regenerateToken || '') }
-        }),
-        TO.PEXELS,
-        'Pexels API timed out'
-      );
+      const r = await axios.get('https://api.pexels.com/videos/search', {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: topic, per_page: 36, cb: Date.now() + (regenerateToken || '') },
+        timeout: TO.PEXELS
+      });
       const videos = r.data?.videos || [];
       for (const v of videos) {
         if ((v.duration || 0) < 7) continue;
@@ -625,7 +654,6 @@ router.post('/generate-video-ad', async (req, res) => {
         if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
       }
     } catch (e) {
-      console.error('Pexels fetch failed', e?.response?.data || e.message);
       return res.status(500).json({ error: 'Stock video fetch failed' });
     }
     if (candidates.length < 3) return res.status(404).json({ error: 'Not enough stock clips found' });
@@ -636,7 +664,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const inputs = [];
     for (const c of chosen) {
       const out = path.join(tmp, `${uuidv4()}.mp4`);
-      await withTimeout(downloadFileWithTimeout(c.link, out, TO.DL, 6), TO.DL + 1000, 'download timeout');
+      await downloadFileWithTimeout(c.link, out, TO.DL, 6);
       inputs.push(out);
     }
 
@@ -649,16 +677,13 @@ router.post('/generate-video-ad', async (req, res) => {
       (url ? `\nWebsite (context only): ${url}` : '');
     let script = 'Discover what you love today. Shop now!';
     try {
-      const r = await withTimeout(
-        openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [{ role: 'user', content: prompt }],
-          max_tokens: 180,
-          temperature: 0.35
-        }),
-        14000,
-        'OpenAI timeout'
-      );
+      const r = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 180,
+        temperature: 0.35,
+        timeout: 14000
+      });
       script = (r.choices?.[0]?.message?.content?.trim() || script)
         .replace(/\s+/g, ' ')
         .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi, '')
@@ -669,32 +694,16 @@ router.post('/generate-video-ad', async (req, res) => {
     /* ---- TTS ---- */
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
-      const ttsRes = await withTimeout(
-        openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script }),
-        18000,
-        'TTS timeout'
-      );
+      const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script, timeout: 18000 });
       fs.writeFileSync(ttsPath, Buffer.from(await ttsRes.arrayBuffer()));
-    } catch (e) {
-      console.error('TTS failed', e);
+    } catch {
       return res.status(500).json({ error: 'TTS generation failed' });
     }
 
     /* ---- Durations (match VO) ---- */
-    async function probeDur(file) {
-      try {
-        const { stdout } = await withTimeout(
-          exec(`ffprobe -v error -show_entries format=duration -of default=nokey=1:noprint_wrappers=1 "${file}"`),
-          TO.FPROBE,
-          'ffprobe timeout'
-        );
-        const s = parseFloat(stdout.trim());
-        return isNaN(s) ? 0 : s;
-      } catch { return 0; }
-    }
-    let voDur = await probeDur(ttsPath);
+    let voDur = await probeDuration(ttsPath);
     if (voDur <= 0) voDur = 15.0;
-    const finalDur = Math.max(14.5, Math.min(voDur + 0.25, 30.0)); // small tail after last word
+    const finalDur = Math.max(14.5, Math.min(voDur + 0.25, 30.0)); // little tail after last word
 
     // Three segments; curtains fade after #1
     const seg1 = Math.min(6.0, Math.max(4.8, finalDur * 0.36));
@@ -708,22 +717,20 @@ router.post('/generate-video-ad', async (req, res) => {
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
     const fontParam = chosenFont ? `fontfile='${chosenFont}':` : '';
 
-    const brandLine = safeFFText(brandTitle);
+    const brandLine = safeFFText(overlayTitleFromAnswers(answers, topic));
     const ctaTxt    = safeFFText(ctaText);
 
-    // Timings
     const introStart = 0.25;
     const introEnd   = Math.min(segs[0] - 0.25, 3.2);
     const outroStart = Math.max(0.0, finalDur - 2.4);
     const outroEnd   = finalDur;
 
-    // Dimensions
-    const TOP_H   = Math.round(VIDEO.H * 0.18);  // 115px
-    const CUR_W   = Math.round(VIDEO.W * 0.13);  // side curtains
+    const TOP_H   = Math.round(640 * 0.18);
+    const CUR_W   = Math.round(640 * 0.13);
 
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
     const yBrand = Math.round(TOP_H * 0.56);
-    const CTA_GAP = 64; // spacing between brand and CTA pill (prevents intersection)
+    const CTA_GAP = 64;
     const yCTA   = yBrand + CTA_GAP;
 
     const introOverlay =
@@ -733,39 +740,33 @@ router.post('/generate-video-ad', async (req, res) => {
     const outroOverlay =
       `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-    // Per-clip pipeline (blurred fill + centered fit)
-    const look = `format=yuv420p,fps=${VIDEO.FPS}`;
+    const look = `format=yuv420p,fps=24`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
       const dur = segs[i];
       vidParts.push(
         `[${i}:v]split=2[v${i}a][v${i}b];` +
-        `[v${i}a]scale=${VIDEO.W}:${VIDEO.H}:force_original_aspect_ratio=increase,boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,crop=${VIDEO.W}:${VIDEO.H}[bg${i}];` +
-        `[v${i}b]scale='if(gte(iw/ih,1),${VIDEO.W},-2)':'if(gte(iw/ih,1),-2,${VIDEO.H})',setsar=1[fit${i}];` +
+        `[v${i}a]scale=640:640:force_original_aspect_ratio=increase,boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,crop=640:640[bg${i}];` +
+        `[v${i}b]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',setsar=1[fit${i}];` +
         `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${look},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
       );
     }
     const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-    // Curtains (fade after first clip) + Top band
     const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
     const curtains =
-      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
-      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
+      `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
+      `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
       `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
 
     const bandFadeStart = (segs[0]-0.60).toFixed(2);
     const band =
-      `color=c=black@0.52:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
+      `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
       `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
 
-    // Compose visuals
     let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
-
-    // Build everything
     let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
 
-    // Inputs: 3 videos + TTS (+ optional music)
     const ttsIdx = inputs.length;
     const keys = [];
     if (answers?.industry) keys.push(answers.industry);
@@ -786,31 +787,34 @@ router.post('/generate-video-ad', async (req, res) => {
     const id = uuidv4();
     const outPath = path.join(outDir, `${id}.mp4`);
 
-    const inputArgs =
-      inputs.map(f => `-i "${f}"`).join(' ') +
-      ` -i "${ttsPath}"` +
-      (bgMusicPath ? ` -i "${bgMusicPath}"` : '');
-
-    await withTimeout(
-      exec(
-        `ffmpeg -y ${inputArgs} ` +
-        `-filter_complex "${filterComplex}" -map "[v]" -map "[mix]" ` +
-        `-t ${finalDur.toFixed(2)} -r ${VIDEO.FPS} ` +
-        `-c:v libx264 -preset ultrafast -crf 28 -pix_fmt yuv420p ` +
-        `-c:a aac -b:a 128k -ar 44100 -movflags +faststart -shortest "${outPath}"`
-      ),
-      TO.OVERMUX,
-      'overlay+mux timeout'
+    // Build argument list for spawn (no big buffers)
+    const args = [];
+    for (const f of inputs) { args.push('-i', f); }
+    args.push('-i', ttsPath);
+    if (bgMusicPath) args.push('-i', bgMusicPath);
+    args.push(
+      '-filter_complex', filterComplex,
+      '-map', '[v]', '-map', '[mix]',
+      '-t', finalDur.toFixed(2),
+      '-r', '24',
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+      '-movflags', '+faststart',
+      '-shortest',
+      '-loglevel', 'error',
+      outPath
     );
+
+    await runSpawn('ffmpeg', args, { killAfter: TO.OVERMUX, killMsg: 'overlay+mux timeout' });
 
     // cleanup
     for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
     try { fs.unlinkSync(ttsPath); } catch {}
+    maybeGC();
 
     const publicVideoUrl = `/generated/${id}.mp4`;
     const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
-    // Optional FB upload
     let fbVideoId = null;
     try {
       if (fbAdAccountId && token) {
@@ -820,9 +824,7 @@ router.post('/generate-video-ad', async (req, res) => {
         );
         fbVideoId = up?.id || null;
       }
-    } catch (e) {
-      console.error('FB upload fail:', e?.response?.data || e.message);
-    }
+    } catch {}
 
     return res.json({
       videoUrl: publicVideoUrl,
@@ -834,7 +836,6 @@ router.post('/generate-video-ad', async (req, res) => {
       video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: 1 }
     });
   } catch (err) {
-    console.error('video route error:', err);
     if (!res.headersSent)
       return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
@@ -855,12 +856,11 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 100, cb: Date.now() + (regenerateToken || '') },
-        timeout: 4800
+        params: { query: keyword, per_page: 35, cb: Date.now() + (regenerateToken || '') },
+        timeout: 4500
       });
       photos = r.data.photos || [];
-    } catch (e) {
-      console.error('Pexels img fetch error:', e?.message || e);
+    } catch {
       return res.status(500).json({ error: 'Image search failed' });
     }
     if (!photos.length) return res.status(404).json({ error: 'No images found.' });
@@ -879,13 +879,12 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     try {
       const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint, seed });
       finalUrl = publicUrl;
-    } catch (e) {
-      console.warn('Overlay build fail; using base image:', e.message);
+    } catch {
+      // fallback to raw
     }
 
     res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
   } catch (e) {
-    console.error('image route fail:', e?.message || e);
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
