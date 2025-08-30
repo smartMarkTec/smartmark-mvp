@@ -84,11 +84,30 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['art','painting','craft'], keyword: 'painting art' },
   { match: ['coffee','cafe'], keyword: 'coffee shop' },
 ];
+
 function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
+
+// Canonical, neutral topic for copywriting (no odd phrases like "fashion model")
+function canonicalizeCopyTopic(topic='') {
+  const t = String(topic || '').toLowerCase();
+  if (t.includes('fashion')) return 'fashion';
+  if (t.includes('clothing') || t.includes('apparel')) return 'clothing';
+  if (t.includes('makeup') || t.includes('skincare') || t.includes('cosmetic')) return 'beauty';
+  if (t.includes('hair')) return 'hair care';
+  if (t.includes('gym') || t.includes('fitness')) return 'fitness';
+  if (t.includes('food')) return 'food';
+  if (t.includes('coffee')) return 'coffee';
+  if (t.includes('pet')) return 'pet essentials';
+  if (t.includes('tech') || t.includes('gadget')) return 'tech';
+  if (t.includes('home')) return 'home & decor';
+  if (t.includes('art') || t.includes('painting') || t.includes('craft')) return 'art & craft';
+  return topic || 'shopping';
+}
+
 function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   const industry = answers.industry || answers.productType || '';
   const base = getImageKeyword(industry, url) || industry || fallback;
@@ -101,6 +120,7 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   if (extra.includes('electronics') || extra.includes('phone') || extra.includes('laptop')) return 'tech gadgets';
   return base;
 }
+
 function overlayTitleFromAnswers(answers = {}, topic = '') {
   const brand = (answers.businessName || '').trim().toUpperCase();
   if (brand) return brand.slice(0, 24);
@@ -168,7 +188,7 @@ router.post('/generate-ad-copy', async (req, res) => {
 
   let prompt =
 `You are an expert direct-response ad copywriter.
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is typically ~15–17 seconds. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Do NOT say or hint a URL or domain.`;
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is typically ~15–17 seconds. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Stay neutral—do not invent policies (shipping, returns, guarantees) or specific claims. No URLs or domains.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
@@ -213,15 +233,14 @@ Write JSON ONLY:
 
 {
   "headline": "max 55 characters, plain, natural, no weird jargon",
-  "body": "18-30 words, friendly, value+benefit, no emojis, no hashtags",
+  "body": "18-30 words, friendly, value/benefit, neutral (no policies or guarantees), no emojis, no hashtags",
   "image_overlay_text": "3-4 words, generic CTA or benefit, ALL CAPS"
 }
 
 Rules:
-- Prefer simple phrasing (avoid odd terms like "unisex fashion-forward" or "global finds").
-- If unsure, default to very generic e-commerce phrasing.
+- Prefer simple phrasing; avoid odd terms like "unisex fashion-forward" or "global finds".
+- Stay neutral: no claims about shipping, returns, guarantees, or prices unless provided.
 - Do NOT include the website/domain anywhere.
-- No quotes around fields beyond JSON syntax.
 Context:
 Brand: ${brand}
 Industry: ${industry || '[general ecommerce]'}
@@ -246,22 +265,24 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       body = clean(parsed.body, 220);
       overlay = clean(parsed.image_overlay_text, 28);
     } catch {
-      headline = `${brand}: Shop New Arrivals`;
-      body = `Discover quality picks for everyday life. Fast shipping, easy returns, and friendly support—see what’s new today.`;
-      overlay = 'SHOP NOW';
+      headline = `${brand}: New Collection`;
+      body = `Discover styles that suit your day-to-day. Clean designs, easy choices, and a look you’ll reach for again and again.`;
+      overlay = 'DISCOVER MORE';
     }
 
-    headline = headline.replace(/["<>]/g, '').slice(0, 55);
-    body = body.replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
+    // sanitize
+    const BAN = /(fast\s+shipping|easy\s+returns?|money[- ]?back|guarantee|lowest\s+price)/ig;
+    headline = headline.replace(BAN,'').replace(/["<>]/g, '').replace(/\s+/g,' ').trim().slice(0, 55);
+    body = body.replace(BAN,'').replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
     overlay = overlay.toUpperCase().replace(/[^A-Z0-9\s!]/g, '').replace(/\s+/g, ' ').trim();
-    if (!overlay) overlay = 'SHOP NOW';
+    if (!overlay) overlay = 'DISCOVER MORE';
 
     return res.json({ headline, body, image_overlay_text: overlay });
   } catch {
     return res.json({
-      headline: 'Shop Our Latest Picks',
-      body: 'Quality products, fast shipping, and easy returns. Simple, reliable, and ready when you are—see what’s new today.',
-      image_overlay_text: 'SHOP NOW'
+      headline: 'Find Your Everyday Style',
+      body: 'Simple pieces that work with your routine. Clean silhouettes and easy choices you can wear again and again.',
+      image_overlay_text: 'DISCOVER MORE'
     });
   }
 });
@@ -388,7 +409,7 @@ function cleanHeadline(h){
 }
 function cleanCTA(c){
   c=String(c||'').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
-  if(!c) return 'Shop Now!';
+  if(!c) return 'Discover More';
   let w=c.split(' ').slice(0,3).join(' ');
   if(!/[.!?]$/.test(w)) w+='!';
   return w.charAt(0).toUpperCase()+w.slice(1);
@@ -487,7 +508,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
 
   let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
-  let cta = cleanCTA(ctaHint) || 'Shop Now!';
+  let cta = cleanCTA(ctaHint) || 'Discover More';
 
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
   const tpl = (h % 4) + 1;
@@ -566,13 +587,29 @@ function safeFFText(t){
     .replace(/[:]/g,' ')
     .replace(/[\\'"]/g,'')
     .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'')
+    .replace(/\b(dot|com|net|org|io|co)\b/gi,'')
     .replace(/[^A-Za-z0-9 !?\-]/g,' ')
     .replace(/\s+/g,' ')
     .trim()
     .toUpperCase()
     .slice(0, 36);
 }
-function simpleCTA(input) {
+
+// Neutral CTA picker if none provided in input keywords
+function pickNeutralCTA(topic='', seed='') {
+  const pool = [
+    'Explore the collection',
+    'See what’s new',
+    'Discover more',
+    'Learn more',
+    'Explore now',
+    'Get started'
+  ];
+  let h = 0; for (const c of String((topic||'') + seed)) h = (h*31 + c.charCodeAt(0))>>>0;
+  return pool[h % pool.length].toUpperCase() + '!';
+}
+
+function simpleCTA(input, topic='', seed='') {
   const t = String(input || '').toLowerCase();
   if (t.includes('buy')) return 'BUY NOW!';
   if (t.includes('shop')) return 'SHOP NOW!';
@@ -581,14 +618,14 @@ function simpleCTA(input) {
   if (t.includes('sign')) return 'SIGN UP!';
   if (t.includes('book')) return 'BOOK NOW!';
   if (t.includes('learn')) return 'LEARN MORE!';
-  return 'SHOP NOW!';
+  return pickNeutralCTA(topic, seed);
 }
 
 /* -------------------------- Spawned processes -------------------------- */
 function runSpawn(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
-      stdio: ['ignore', 'ignore', 'inherit'],
+      stdio: ['ignore', 'ignore', 'inherit'], // don't buffer stdout; show errors
       ...opts,
     });
     let killed = false;
@@ -618,25 +655,36 @@ async function probeDuration(file, timeoutMs=7000) {
 }
 
 /* ------------------------------- VIDEO ------------------------------- */
-/* Helper: robust, length-targeted script (aim ~13s for a ~14s video) */
-function buildFallbackScript({ brand, topic, benefit, cta='SHOP NOW!' }) {
-  const name = (brand && brand !== 'JUST DROPPED' ? brand : 'Our brand');
-  const hook = `Looking for ${topic || 'something new'} that actually fits your life?`;
-  const value = benefit
-    ? `Discover ${benefit} with quality you can feel and styles that work every day.`
-    : `Discover quality you can feel, effortless style, and prices that make it easy.`;
-  const proof = `Fast shipping and easy returns mean you try it without the hassle.`;
-  return `${hook} ${value} ${proof} ${cta}`;
+/* Helpers to create neutral, length-targeted scripts */
+function stripAssumptions(text='') {
+  return String(text)
+    .replace(/(?:fast|free)\s+shipping/ig,'')
+    .replace(/easy\s+returns?/ig,'')
+    .replace(/money[- ]?back\s+guarantee/ig,'')
+    .replace(/lowest\s+price/ig,'')
+    .replace(/\s{2,}/g,' ')
+    .trim();
 }
-async function generateTimedScript({ answers={}, url='', topic, ctaText, targetSec=14 }) {
-  const brand = overlayTitleFromAnswers(answers, topic);
+function buildFallbackScript({ brand, topic, benefit, cta='DISCOVER MORE!' }) {
+  const name = (brand && brand !== 'JUST DROPPED' ? brand : 'This brand');
+  const hook = `Looking for ${topic || 'something new'} that fits your everyday style?`;
+  const value = benefit
+    ? `Explore pieces focused on ${benefit.toLowerCase()}.`
+    : `Explore clean, versatile pieces that work from day to day.`;
+  const close = `Find what feels right. ${cta}`;
+  return stripAssumptions(`${hook} ${value} ${close}`);
+}
+async function generateTimedScript({ answers={}, url='', searchTopic, ctaText, targetSec=14, seed='' }) {
+  const brand = overlayTitleFromAnswers(answers, searchTopic);
+  const topic = canonicalizeCopyTopic(searchTopic);
   const benefit = (answers.mainBenefit || answers.description || '').split('.').slice(0,1).join(' ').trim();
   const targetWords = Math.max(32, Math.min(42, Math.round((targetSec-1)*2.5))); // ~2.5 wps
 
   const basePrompt =
 `Write a natural, spoken video ad script of ${targetWords}-${targetWords+4} WORDS.
-Format: one paragraph, everyday language, no website or domain, no hashtags.
-End with this exact CTA as the last sentence: "${simpleCTA(ctaText)}"
+Tone: clear, neutral, helpful; no hype or promises; no policies (shipping, returns, guarantees), no prices.
+One paragraph. No hashtags. No website/domain. Avoid odd phrasing.
+End with this exact CTA as the last sentence: "${ctaText}"
 Context:
 Brand: ${brand}
 Topic: ${topic}
@@ -648,23 +696,22 @@ ${benefit ? `Key benefit: ${benefit}` : ''}`;
       const r = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages,
-        max_tokens: 220,
+        max_tokens: 240,
         temperature: 0.45,
         timeout: 16000
       });
       let script = (r.choices?.[0]?.message?.content || '').replace(/\s+/g,' ').trim();
       script = script.replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'').replace(/\s+/g,' ').trim();
+      script = stripAssumptions(script);
       const wc = script.split(/\s+/).filter(Boolean).length;
       if (wc >= 28) return script;
     } catch {}
   }
-  return buildFallbackScript({ brand, topic, benefit, cta: simpleCTA(ctaText) });
+  return buildFallbackScript({ brand, topic, benefit, cta: ctaText });
 }
 
 /**
- * VIDEO: design unchanged; only change is removing intro CTA.
- * - Intro now shows Brand only (with "!").
- * - Outro still shows CTA.
+ * VIDEO: design unchanged; intro shows Brand! only; outro shows CTA.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -681,15 +728,17 @@ router.post('/generate-video-ad', async (req, res) => {
     const VIDEO = { W: 640, H: 640, FPS: 24 };
     const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
 
-    const topic = deriveTopicKeywords(answers, url, 'shopping');
-    const ctaText = simpleCTA(answers?.cta);
+    const topicSearch = deriveTopicKeywords(answers, url, 'shopping');
+
+    // Pick neutral CTA if not specified, with deterministic variety
+    const ctaText = simpleCTA(answers?.cta, topicSearch, regenerateToken || answers?.businessName || '');
 
     /* ---- Stock clips ---- */
     let candidates = [];
     try {
       const r = await axios.get('https://api.pexels.com/videos/search', {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: topic, per_page: 36, cb: Date.now() + (regenerateToken || '') },
+        params: { query: topicSearch, per_page: 36, cb: Date.now() + (regenerateToken || '') },
         timeout: TO.PEXELS
       });
       const videos = r.data?.videos || [];
@@ -704,7 +753,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'Stock video fetch failed' });
     }
     if (candidates.length < 3) return res.status(404).json({ error: 'Not enough stock clips found' });
-    const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topic || Date.now()).slice(0, 3);
+    const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topicSearch || Date.now()).slice(0, 3);
 
     const tmp = path.join(__dirname, '../tmp');
     try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
@@ -717,7 +766,14 @@ router.post('/generate-video-ad', async (req, res) => {
 
     /* ---- Script (~13s target) ---- */
     const targetSeconds = 14;
-    let script = await generateTimedScript({ answers, url, topic, ctaText, targetSec: targetSeconds });
+    let script = await generateTimedScript({
+      answers,
+      url,
+      searchTopic: topicSearch,
+      ctaText,
+      targetSec: targetSeconds,
+      seed: regenerateToken || answers?.businessName || ''
+    });
 
     /* ---- TTS ---- */
     const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
@@ -738,14 +794,14 @@ router.post('/generate-video-ad', async (req, res) => {
     const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
 
-    /* ---- Overlays ---- */
+    /* ---- Overlays (unchanged design) ---- */
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
     const fontParam = chosenFont ? `fontfile='${chosenFont}':` : '';
 
     // Brand with exclamation mark for the intro
-    let brandLine = safeFFText(overlayTitleFromAnswers(answers, topic));
+    let brandLine = safeFFText(overlayTitleFromAnswers(answers, topicSearch));
     if (brandLine && !/[!?]$/.test(brandLine)) {
       brandLine = (brandLine + '!').slice(0, 36);
     }
@@ -761,8 +817,6 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
     const yBrand = Math.round(TOP_H * 0.56);
-    const CTA_GAP = 64;
-    const yCTA   = yBrand + CTA_GAP; // (kept for layout parity; not used in intro now)
 
     // INTRO: brand ONLY (no CTA at start)
     const introOverlay =
@@ -903,7 +957,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
     const headlineHint = overlayTitleFromAnswers(answers, keyword);
-    const ctaHint = answers?.cta || 'Shop Now!';
+    const ctaHint = answers?.cta || pickNeutralCTA(keyword, seed);
 
     let finalUrl = baseUrl;
     try {
