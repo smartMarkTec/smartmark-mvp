@@ -1,5 +1,10 @@
 // server/server.js
 // --- GLOBAL ERROR HANDLERS (keep these at the very top!) ---
+
+if (!process.env.NODE_OPTIONS) {
+  process.env.NODE_OPTIONS = "--max-old-space-size=1024"; // try 1024 or 2048
+}
+
 process.on('unhandledRejection', (reason) => {
   console.error('Unhandled Rejection:', reason);
 });

@@ -69,6 +69,7 @@ function ensureGeneratedDir() {
   return outDir;
 }
 function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
+function cleanFile(f){ try{ if (f && fs.existsSync(f)) fs.unlinkSync(f); }catch{} }
 
 /* ---------- topic mapping (keeps visuals on-topic) ---------- */
 const IMAGE_KEYWORD_MAP = [
@@ -547,7 +548,11 @@ async function downloadFileWithTimeout(url, dest, timeoutMs=26000, maxSizeMB=6) 
 function getDeterministicShuffle(arr, seed) {
   const rng = seedrandom(String(seed || Date.now()));
   const a = [...arr];
-  for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a+i];}
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    // FIXED: proper swap (previous typo could corrupt memory)
+    [a[i], a[j]] = [a[j], a[i]];
+  }
   return a;
 }
 
@@ -620,6 +625,9 @@ async function probeDuration(file, timeoutMs=7000) {
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
+  let inputs = [];
+  let ttsPath = null;
+
   try {
     const { url = '', answers = {}, regenerateToken = '' } = req.body;
 
@@ -661,7 +669,6 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const tmp = path.join(__dirname, '../tmp');
     try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
-    const inputs = [];
     for (const c of chosen) {
       const out = path.join(tmp, `${uuidv4()}.mp4`);
       await downloadFileWithTimeout(c.link, out, TO.DL, 6);
@@ -692,7 +699,7 @@ router.post('/generate-video-ad', async (req, res) => {
     } catch {}
 
     /* ---- TTS ---- */
-    const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
+    ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
     try {
       const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script, timeout: 18000 });
       fs.writeFileSync(ttsPath, Buffer.from(await ttsRes.arrayBuffer()));
@@ -798,6 +805,7 @@ router.post('/generate-video-ad', async (req, res) => {
       '-t', finalDur.toFixed(2),
       '-r', '24',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+      '-threads', '2', // reduce memory pressure on small instances
       '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
       '-movflags', '+faststart',
       '-shortest',
@@ -808,8 +816,8 @@ router.post('/generate-video-ad', async (req, res) => {
     await runSpawn('ffmpeg', args, { killAfter: TO.OVERMUX, killMsg: 'overlay+mux timeout' });
 
     // cleanup
-    for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
-    try { fs.unlinkSync(ttsPath); } catch {}
+    for (const f of inputs) cleanFile(f);
+    cleanFile(ttsPath);
     maybeGC();
 
     const publicVideoUrl = `/generated/${id}.mp4`;
@@ -836,6 +844,10 @@ router.post('/generate-video-ad', async (req, res) => {
       video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: 1 }
     });
   } catch (err) {
+    // try to clean even on failure
+    try { inputs.forEach(cleanFile); } catch {}
+    try { cleanFile(ttsPath); } catch {}
+    maybeGC();
     if (!res.headersSent)
       return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
