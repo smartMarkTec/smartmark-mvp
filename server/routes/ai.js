@@ -4,7 +4,7 @@
 const express = require('express');
 const router = express.Router();
 
-/* ------------------------ CORS (Vercel/Local) ------------------------ */
+/* ------------------------ CORS ------------------------ */
 const ALLOW_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -68,7 +68,7 @@ function ensureGeneratedDir() {
   return outDir;
 }
 
-/* ---------- topic mapping so clips are always relevant ---------- */
+/* ---------- topic mapping (keeps visuals on-topic) ---------- */
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
@@ -114,7 +114,7 @@ const MAX_TOTAL_CHARS = 45_000;
 function loadTrainingContext() {
   if (!fs.existsSync(DATA_DIR)) return '';
   const files = fs.readdirSync(DATA_DIR)
-    .map(f => path.join(DATA_DIR, f))
+    .map(f => path.join(__dirname, '../data', f))
     .filter(full => {
       const ext = path.extname(full).toLowerCase();
       try {
@@ -365,7 +365,7 @@ Website homepage text:
   }
 });
 
-/* ---------------------- Image overlays (readable) ---------------------- */
+/* ---------------------- Image overlays (readable + spaced) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -394,55 +394,91 @@ function cleanCTA(c){
   if(!/[.!?]$/.test(w)) w+='!';
   return w.charAt(0).toUpperCase()+w.slice(1);
 }
+
 const FALLBACK_HEADLINES = ['New Arrivals','Everyday Style','Modern Looks','Wardrobe Refresh','Great Picks Today','Everyday Essentials'];
 const FALLBACK_CTA = ['Shop Now!','See More!','Learn More!'];
 
+/* ---- 4 overlay templates: Left / Top / Bottom / Center ---- */
 function renderImageSVG({ W, H, base64, headline, cta, tpl=1 }) {
-  const LIGHT = '#f2f5f6'; const MAX_W = W - 80;
-  const pill = (xCenter, y, text, fs=26) => {
+  const LIGHT = '#f2f5f6';
+  const MAX_W = W - 120;
+
+  const pillCenter = (xc, y, text, fs=26) => {
     const w = estWidth(text, fs) + 36, h = 44;
     return `
-      <g transform="translate(${xCenter - w/2}, ${y - h + 26})">
+      <g transform="translate(${xc - w/2}, ${y - h + 26})">
         <rect x="0" y="-18" width="${w}" height="${h}" rx="12" fill="#0b0d10cc"/>
         <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
       </g>`;
   };
+  const pillLeft = (x, y, text, fs=24) => {
+    const w = estWidth(text, fs) + 34, h = 42;
+    return `
+      <g transform="translate(${x}, ${y - h + 26})">
+        <rect x="0" y="-18" width="${w}" height="${h}" rx="10" fill="#0b0d10cc"/>
+        <text x="16" y="0" font-family="Helvetica, Arial, sans-serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
+      </g>`;
+  };
+
+  // Bottom band (centered)
   if (tpl === 1) {
     let fs = fitFont(headline, MAX_W-80, 56);
+    const yTitle = H - 70;
+    const yCTA   = yTitle + 52; // clear gap
     return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000a"/></linearGradient></defs>
+      <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000c"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-      <rect x="0" y="${H-140}" width="${W}" height="140" fill="url(#g1)"/>
-      <text x="${W/2}" y="${H-58}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${pill(W/2, H-20, cta, 26)}
+      <rect x="0" y="${H-160}" width="${W}" height="160" fill="url(#g1)"/>
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      ${pillCenter(W/2, yCTA, cta, 26)}
     </svg>`;
   }
+
+  // Top band (centered)
   if (tpl === 2) {
     let fs = fitFont(headline, MAX_W-80, 56);
+    const yTitle = 88;
+    const yCTA   = yTitle + 54; // clear gap below title
     return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
+      <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000c"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
       <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-      <rect x="0" y="0" width="${W}" height="140" fill="url(#g2)"/>
-      <text x="${W/2}" y="92" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${pill(W/2, 120, cta, 26)}
+      <rect x="0" y="0" width="${W}" height="160" fill="url(#g2)"/>
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
+      ${pillCenter(W/2, yCTA, cta, 26)}
     </svg>`;
   }
-  // Centered box variant
-  const boxW = 860; const fit = splitTwoLines(headline, boxW-80, 56); const y0 = (H/2) - (fit.lines.length===2?12:0);
+
+  // Center box (centered)
+  if (tpl === 3) {
+    const boxW = 860;
+    const fit = splitTwoLines(headline, boxW-80, 56);
+    const yTitle = (H/2) - (fit.lines.length===2?20:8);
+    const yCTA = yTitle + fit.fs*1.2 + (fit.lines[1]?fit.fs*1.05:0) + 28;
+    return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
+      <rect x="${(W-boxW)/2}" y="${(H-180)/2}" width="${boxW}" height="180" rx="20" fill="#00000028"/>
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+        <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
+        ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
+      </text>
+      ${pillCenter(W/2, yCTA, cta, 26)}
+    </svg>`;
+  }
+
+  // Left gradient (left aligned)
+  const padX = 64, padY = 110, panelW = 500;
+  const fit = splitTwoLines(headline, panelW-2*padX, 54);
+  const yBase = padY;
+  const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 40; // space below title
   return `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs><linearGradient id="gL" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
     <image href="data:image/jpeg;base64,${base64}" x="0" y="0" width="${W}" height="${H}"/>
-    <rect x="${(W-boxW)/2}" y="${(H-160)/2}" width="${boxW}" height="160" rx="20" fill="#00000028"/>
-    <text x="${W/2}" y="${y0}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
-      <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
-      ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
+    <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
+    <text x="${padX}" y="${yBase}" text-anchor="start" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+      <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
+      ${fit.lines[1]?`<tspan x="${padX}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
     </text>
-    ${(() => {
-      const w = estWidth(cta,26)+36;
-      return `<g transform="translate(${W/2 - w/2}, ${H/2 + 44})">
-        <rect x="0" y="-28" width="${w}" height="44" rx="10" fill="#0b0d10cc"/>
-        <text x="18" y="0" font-family="Helvetica, Arial, sans-serif" font-size="26" font-weight="800" fill="#ffffff">${escSVG(cta)}</text>
-      </g>`;
-    })()}
+    ${pillLeft(padX, yCTA, cta, 24)}
   </svg>`;
 }
 
@@ -455,8 +491,9 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   let headline = cleanHeadline(headlineHint) || (FALLBACK_HEADLINES[Math.floor(Math.random()*FALLBACK_HEADLINES.length)]).toUpperCase();
   let cta = cleanCTA(ctaHint) || FALLBACK_CTA[0];
 
+  // Deterministic choice among 4 templates
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  const tpl = (h % 3) + 1;
+  const tpl = (h % 4) + 1;
 
   const svg = renderImageSVG({ W, H, base64, headline, cta, tpl });
 
@@ -512,7 +549,7 @@ async function downloadFileWithTimeout(url, dest, timeoutMs=28000, maxSizeMB=6) 
 function getDeterministicShuffle(arr, seed) {
   const rng = seedrandom(String(seed || Date.now()));
   const a = [...arr];
-  for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
+  for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a+i];}
   return a;
 }
 function safeFFText(t){
@@ -542,18 +579,17 @@ function simpleCTA(input) {
 
 /* ------------------------------- VIDEO ------------------------------- */
 /**
+ * ONE simple design (the one you liked):
  * - Square 640x640 with blurred fill (vertical-friendly), centered fit.
- * - Curtains fade away after first clip.
- * - Two variants:
- *    1) Curtains + top/bottom band intro (centered text).
- *    2) Clean (no curtains), soft vignette (centered text).
- * - Duration follows voiceover so script ALWAYS finishes.
- * - Fast encode; robust audio indexing; centered overlays everywhere.
+ * - Side curtains fade away after the first clip.
+ * - Top intro band with centered Brand + CTA (spaced so they never touch).
+ * - Centered outro CTA.
+ * - Duration matches voiceover so the script always finishes.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   try {
-    const { url = '', answers = {}, regenerateToken = '', variant = null } = req.body;
+    const { url = '', answers = {}, regenerateToken = '' } = req.body;
 
     const token = getUserToken(req);
     const fbAdAccountId =
@@ -582,7 +618,7 @@ router.post('/generate-video-ad', async (req, res) => {
       );
       const videos = r.data?.videos || [];
       for (const v of videos) {
-        if ((v.duration || 0) < 7) continue; // want usable lengths
+        if ((v.duration || 0) < 7) continue;
         const files = (v.video_files || [])
           .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
           .sort((a, b) => (a.width || 9999) - (b.width || 9999));
@@ -644,7 +680,7 @@ router.post('/generate-video-ad', async (req, res) => {
       return res.status(500).json({ error: 'TTS generation failed' });
     }
 
-    /* ---- Durations (match VO; no hard cap) ---- */
+    /* ---- Durations (match VO) ---- */
     async function probeDur(file) {
       try {
         const { stdout } = await withTimeout(
@@ -658,15 +694,15 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     let voDur = await probeDur(ttsPath);
     if (voDur <= 0) voDur = 15.0;
-    const finalDur = Math.max(14.5, Math.min(voDur + 0.25, 30.0)); // small tail so last word isn’t cut
+    const finalDur = Math.max(14.5, Math.min(voDur + 0.25, 30.0)); // small tail after last word
 
-    // Split across 3 clips (curtains fade after #1)
-    const seg1 = Math.min(6.0, Math.max(4.5, finalDur * 0.35));
+    // Three segments; curtains fade after #1
+    const seg1 = Math.min(6.0, Math.max(4.8, finalDur * 0.36));
     const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
     const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
 
-    /* ---- Overlay variant selection ---- */
+    /* ---- Overlay positions (never intersect) ---- */
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
@@ -675,36 +711,29 @@ router.post('/generate-video-ad', async (req, res) => {
     const brandLine = safeFFText(brandTitle);
     const ctaTxt    = safeFFText(ctaText);
 
-    let styleVariant = Number(variant);
-    if (![1,2].includes(styleVariant)) {
-      let h = 0; for (const c of String(regenerateToken || answers?.businessName || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-      styleVariant = (h % 2) + 1;
-    }
-
     // Timings
     const introStart = 0.25;
-    const introEnd   = Math.min(segs[0] - 0.25, 3.0);
+    const introEnd   = Math.min(segs[0] - 0.25, 3.2);
     const outroStart = Math.max(0.0, finalDur - 2.4);
     const outroEnd   = finalDur;
 
-    // Dimensions for optional bands/curtains
-    const TOP_H   = Math.round(VIDEO.H * 0.16);
-    const BOT_H   = Math.round(VIDEO.H * 0.18);
-    const CUR_W   = Math.round(VIDEO.W * 0.13);
+    // Dimensions
+    const TOP_H   = Math.round(VIDEO.H * 0.18);  // 115px
+    const CUR_W   = Math.round(VIDEO.W * 0.13);  // side curtains
 
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
-    const introBrandYTop = Math.round(TOP_H*0.58);
-    const introBrandYBot = VIDEO.H - Math.round(BOT_H*0.58);
+    const yBrand = Math.round(TOP_H * 0.56);
+    const CTA_GAP = 64; // spacing between brand and CTA pill (prevents intersection)
+    const yCTA   = yBrand + CTA_GAP;
 
-    // Centered intro (brand + CTA pill under it)
-    const centerIntro = (yBrand) => {
-      const title = `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
-      const cta   = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=16:fontsize=24:x=(w-tw)/2:y=${yBrand+36}:enable='between(t,${(introStart+0.35).toFixed(2)},${introEnd.toFixed(2)})'`;
-      return `${title},${cta}`;
-    };
-    const outroCTA = `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+    const introOverlay =
+      `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})',` +
+      `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=16:fontsize=24:x=(w-tw)/2:y=${yCTA}:enable='between(t,${(introStart+0.35).toFixed(2)},${introEnd.toFixed(2)})'`;
 
-    // Base per-clip pipeline (blur fill + center fit)
+    const outroOverlay =
+      `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+
+    // Per-clip pipeline (blurred fill + centered fit)
     const look = `format=yuv420p,fps=${VIDEO.FPS}`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -718,32 +747,22 @@ router.post('/generate-video-ad', async (req, res) => {
     }
     const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-    // Build visual stack by variant
-    let filterVisual;
-    if (styleVariant === 1) {
-      // Curtains that fade after clip #1 + top OR bottom band (random based on seed)
-      const useTopBand = (seedrandom(String(regenerateToken || answers?.businessName || topic))() > 0.5);
-      const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
-      const curtains =
-        `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
-        `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
-        `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
+    // Curtains (fade after first clip) + Top band
+    const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
+    const curtains =
+      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
+      `color=c=black@0.85:s=${CUR_W}x${VIDEO.H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
+      `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
 
-      const bandFadeStart = (segs[0]-0.60).toFixed(2);
-      const band = useTopBand
-        ? `color=c=black@0.52:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];[b2][top]overlay=shortest=1:x=0:y=0[b3]`
-        : `color=c=black@0.52:s=${VIDEO.W}x${BOT_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[bot];[b2][bot]overlay=shortest=1:x=0:y=main_h-overlay_h[b3]`;
+    const bandFadeStart = (segs[0]-0.60).toFixed(2);
+    const band =
+      `color=c=black@0.52:s=${VIDEO.W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
+      `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
 
-      const text = useTopBand ? centerIntro(introBrandYTop) : centerIntro(introBrandYBot);
-      filterVisual = curtains + ';' + band + `;[b3]${text},${outroCTA}[v]`;
-    } else {
-      // Variant 2: clean, no curtains, soft vignette, centered intro/outro
-      const text = centerIntro(Math.round(TOP_H*0.50));
-      filterVisual = `[vseq]format=yuv420p,eq=contrast=1.04:saturation=1.08:brightness=0.00,` +
-                     `vignette=PI/7:0.5[bv];[bv]${text},${outroCTA}[v]`;
-    }
+    // Compose visuals
+    let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
 
-    // Combine all parts
+    // Build everything
     let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
 
     // Inputs: 3 videos + TTS (+ optional music)
@@ -809,11 +828,10 @@ router.post('/generate-video-ad', async (req, res) => {
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
       fbVideoId,
-      variant: styleVariant,
       script,
       ctaText,
       voice: 'alloy',
-      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: styleVariant }
+      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: 1 }
     });
   } catch (err) {
     console.error('video route error:', err);
