@@ -89,21 +89,6 @@ function getImageKeyword(industry = '', url = '') {
   for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
-function canonicalizeCopyTopic(topic='') {
-  const t = String(topic || '').toLowerCase();
-  if (t.includes('fashion')) return 'fashion';
-  if (t.includes('clothing') || t.includes('apparel')) return 'clothing';
-  if (t.includes('makeup') || t.includes('skincare') || t.includes('cosmetic')) return 'beauty';
-  if (t.includes('hair')) return 'hair care';
-  if (t.includes('gym') || t.includes('fitness')) return 'fitness';
-  if (t.includes('food')) return 'food';
-  if (t.includes('coffee')) return 'coffee';
-  if (t.includes('pet')) return 'pet essentials';
-  if (t.includes('tech') || t.includes('gadget')) return 'tech';
-  if (t.includes('home')) return 'home & decor';
-  if (t.includes('art') || t.includes('painting') || t.includes('craft')) return 'art & craft';
-  return topic || 'shopping';
-}
 function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   const industry = answers.industry || answers.productType || '';
   const base = getImageKeyword(industry, url) || industry || fallback;
@@ -183,7 +168,10 @@ router.post('/generate-ad-copy', async (req, res) => {
 
   let prompt =
 `You are an expert direct-response ad copywriter.
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (60–80 words) which is typically ~15–17 seconds. Hook → benefit → strong CTA. Friendly, simple, conversion-focused. Stay neutral—no policies (shipping, returns, guarantees), no prices, no URLs.`;
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (about 38–52 words ≈ 15–17 seconds).
+- Keep it neutral and accurate (no assumptions about shipping, guarantees, or inventory).
+- Hook → value → simple CTA.
+- Do NOT mention a website or domain.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
@@ -227,15 +215,14 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}You are a senio
 Write JSON ONLY:
 
 {
-  "headline": "max 55 characters, plain, natural, no weird jargon",
-  "body": "18-30 words, friendly, value/benefit, neutral (no policies or guarantees), no emojis, no hashtags",
-  "image_overlay_text": "3-4 words, generic CTA or benefit, ALL CAPS"
+  "headline": "max 55 characters, plain and neutral (no assumptions)",
+  "body": "18-30 words, friendly and value-focused, neutral claims only, no emojis/hashtags",
+  "image_overlay_text": "3-4 words, simple CTA in ALL CAPS"
 }
 
 Rules:
-- Prefer simple phrasing; avoid odd terms like "unisex fashion-forward" or "global finds".
-- Stay neutral: no claims about shipping, returns, guarantees, or prices unless provided.
-- Do NOT include the website/domain anywhere.
+- Prefer simple phrasing; avoid jargon like "global finds" or promises like "fast shipping".
+- Never include a website or domain.
 Context:
 Brand: ${brand}
 Industry: ${industry || '[general ecommerce]'}
@@ -260,23 +247,26 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       body = clean(parsed.body, 220);
       overlay = clean(parsed.image_overlay_text, 28);
     } catch {
-      headline = `${brand}: New Collection`;
-      body = `Discover styles that suit your day-to-day. Clean designs, easy choices, and a look you’ll reach for again and again.`;
+      headline = `${brand}: New Styles`;
+      body = `Explore easy, everyday pieces with a focus on feel and fit. Browse the latest looks and find what works for you.`;
       overlay = 'DISCOVER MORE';
     }
 
-    const BAN = /(fast\s+shipping|easy\s+returns?|money[- ]?back|guarantee|lowest\s+price)/ig;
-    headline = headline.replace(BAN,'').replace(/["<>]/g, '').replace(/\s+/g,' ').trim().slice(0, 55);
-    body = body.replace(BAN,'').replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
-    overlay = overlay.toUpperCase().replace(/[^A-Z0-9\s!]/g, '').replace(/\s+/g, ' ').trim();
-    if (!overlay) overlay = 'DISCOVER MORE';
+    headline = headline.replace(/["<>]/g, '').slice(0, 55);
+    body = body.replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
+    overlay = overlay.toUpperCase()
+      .replace(/['’]/g, '')                 // keep WHATS, DONT, etc. tight
+      .replace(/[^A-Z0-9\s!]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!overlay) overlay = 'LEARN MORE';
 
     return res.json({ headline, body, image_overlay_text: overlay });
   } catch {
     return res.json({
-      headline: 'Find Your Everyday Style',
-      body: 'Simple pieces that work with your routine. Clean silhouettes and easy choices you can wear again and again.',
-      image_overlay_text: 'DISCOVER MORE'
+      headline: 'New Styles Just In',
+      body: 'Explore everyday pieces designed for comfort and ease. See what’s new and find your next go-to.',
+      image_overlay_text: 'LEARN MORE'
     });
   }
 });
@@ -402,9 +392,13 @@ function cleanHeadline(h){
   return h.toUpperCase();
 }
 function cleanCTA(c){
-  c=String(c||'').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
-  if(!c) return 'Discover More';
-  let w=c.split(' ').slice(0,3).join(' ');
+  c = String(c||'')
+    .replace(/['’]/g, '')                  // keep WHATS, DONT, etc.
+    .replace(/[^a-z0-9 &\-!]/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+  if(!c) return 'Learn More!';
+  let w=c.split(' ').slice(0,4).join(' ');
   if(!/[.!?]$/.test(w)) w+='!';
   return w.charAt(0).toUpperCase()+w.slice(1);
 }
@@ -415,36 +409,25 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
   const MAX_W = W - 120;
   const EST = estWidth;
 
-  // pill: perfectly centered text, auto-fit width, Times New Roman
   const pill = (x, y, text, fs=28, align='center') => {
-    let size = fs;
-    while (EST(text, size) + 44 > MAX_W) size -= 2;
-    if (size < 22) size = 22;
-
-    const w = Math.ceil(EST(text, size) + 44);
-    const h = Math.ceil(size * 1.9);
-    const rx = Math.min(14, Math.round(h/2));
-    const gx = align==='left' ? x : (x - w/2);
-    const gy = y - Math.round(h/2);
-
+    fs = Math.max(20, Math.min(fs, 34));
+    const w = Math.min(MAX_W, EST(text, fs) + 44), h = 46;
+    const x0 = align==='left' ? x : (x - w/2);
     return `
-      <g transform="translate(${gx}, ${gy})">
-        <rect x="0" y="0" width="${w}" height="${h}" rx="${rx}" fill="#0b0d10cc"/>
-        <text x="${w/2}" y="${h/2}" text-anchor="middle" dominant-baseline="central" alignment-baseline="middle"
-              font-family="Times New Roman, Times, serif" font-size="${size}" font-weight="700" fill="#ffffff">
-          ${escSVG(text)}
-        </text>
+      <g transform="translate(${x0}, ${y - Math.floor(h*0.6)})">
+        <rect x="0" y="-14" width="${w}" height="${h}" rx="14" fill="#0b0d10d0"/>
+        <text x="${w/2}" y="12" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
       </g>`;
   };
 
-  // Bottom band (kept here for compatibility, but NOT selected in builder)
+  // Bottom band (kept for images)
   if (tpl === 1) {
     let fs = fitFont(headline, MAX_W-80, 56);
-    const yTitle = H - 70;
-    const yCTA = yTitle + 56;
+    const yTitle = H - 78;
+    const yCTA = yTitle + 58;
     return `
       <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000c"/></linearGradient></defs>
-      <rect x="0" y="${H-160}" width="${W}" height="160" fill="url(#g1)"/>
+      <rect x="0" y="${H-170}" width="${W}" height="170" rx="18" fill="url(#g1)"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
       ${pill(W/2, yCTA, cta, 28, 'center')}
     `;
@@ -453,24 +436,30 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
   // Top band
   if (tpl === 2) {
     let fs = fitFont(headline, MAX_W-80, 56);
-    const yTitle = 88;
-    const yCTA = yTitle + 58;
+    const yTitle = 92;
+    const yCTA = yTitle + 60;
     return `
       <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000c"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
-      <rect x="0" y="0" width="${W}" height="160" fill="url(#g2)"/>
+      <rect x="0" y="0" width="${W}" height="170" rx="18" fill="url(#g2)"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
       ${pill(W/2, yCTA, cta, 28, 'center')}
     `;
   }
 
-  // Center box
+  // Center box — CTA stays inside the translucent box with spacing
   if (tpl === 3) {
     const boxW = 860;
-    const fit = splitTwoLines(headline, boxW-80, 56);
-    const yTitle = (H/2) - (fit.lines.length===2?20:8);
-    const yCTA = yTitle + fit.fs*1.2 + (fit.lines[1]?fit.fs*1.05:0) + 32;
+    const fit = splitTwoLines(headline, boxW-100, 56);
+    const lineCount = fit.lines.length;
+    const boxPad = 28;
+    const gap = 18;
+    const boxH = Math.round(boxPad*2 + fit.fs*(lineCount) + 54 + gap); // room for CTA inside
+    const yBox = Math.round((H - boxH)/2);
+    const yTitle = yBox + boxPad + fit.fs - 6;
+    const yCTA = yBox + boxH - boxPad - 12;
+
     return `
-      <rect x="${(W-boxW)/2}" y="${(H-180)/2}" width="${boxW}" height="180" rx="20" fill="#00000028"/>
+      <rect x="${(W-boxW)/2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="22" fill="#00000030"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
         <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
@@ -480,10 +469,10 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
   }
 
   // Left gradient
-  const padX = 64, padY = 110, panelW = 500;
+  const padX = 64, padY = 110, panelW = 520;
   const fit = splitTwoLines(headline, panelW-2*padX, 54);
   const yBase = padY;
-  const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 44;
+  const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 48;
   return `
     <defs><linearGradient id="gL" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
     <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
@@ -491,7 +480,7 @@ function svgOverlay({ W, H, headline, cta, tpl=1 }) {
       <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
       ${fit.lines[1]?`<tspan x="${padX}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
     </text>
-    ${pill(padX, yCTA, cta, 26, 'left')}
+    ${pill(padX + Math.max(90, (panelW-2*padX)/2), yCTA, cta, 26, 'center')}
   `;
 }
 
@@ -502,13 +491,13 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
 
   let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
-  let cta = cleanCTA(ctaHint) || 'Discover More';
+  let cta = cleanCTA(ctaHint) || 'Learn More!';
 
-  // Choose ONLY from Top, Center, Left (no Bottom)
+  // Deterministic template choice
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  const tpls = [2,3,4];
-  const tpl = tpls[h % tpls.length];
+  const tpl = (h % 4) + 1;
 
+  // SVG overlay only
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
   );
@@ -579,39 +568,36 @@ function getDeterministicShuffle(arr, seed) {
 
 function safeFFText(t){
   return String(t||'')
+    .replace(/['’]/g,'') // keep WHATS not WHAT S
     .replace(/[\n\r]/g,' ')
     .replace(/[:]/g,' ')
-    .replace(/[\\'"]/g,'')
+    .replace(/[\\"]/g,'')
     .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'')
     .replace(/\b(dot|com|net|org|io|co)\b/gi,'')
     .replace(/[^A-Za-z0-9 !?\-]/g,' ')
     .replace(/\s+/g,' ')
     .trim()
     .toUpperCase()
-    .slice(0, 36);
+    .slice(0, 40);
 }
-function pickNeutralCTA(topic='', seed='') {
+
+/* ---- CTA pool (simple, rotates on regenerate) ---- */
+function chooseCTA(answers={}, seed='') {
   const pool = [
-    'Explore the collection',
-    'See what’s new',
-    'Discover more',
-    'Learn more',
-    'Explore now',
-    'Get started'
+    'SHOP NOW!', 'DISCOVER MORE!', 'LEARN MORE!',
+    'GET STARTED!', 'SEE WHATS NEW!', 'EXPLORE NOW!', 'BROWSE STYLES!'
   ];
-  let h = 0; for (const c of String((topic||'') + seed)) h = (h*31 + c.charCodeAt(0))>>>0;
-  return pool[h % pool.length].toUpperCase() + '!';
-}
-function simpleCTA(input, topic='', seed='') {
-  const t = String(input || '').toLowerCase();
-  if (t.includes('buy')) return 'BUY NOW!';
-  if (t.includes('shop')) return 'SHOP NOW!';
-  if (t.includes('order')) return 'ORDER NOW!';
-  if (t.includes('join')) return 'JOIN NOW!';
-  if (t.includes('sign')) return 'SIGN UP!';
-  if (t.includes('book')) return 'BOOK NOW!';
-  if (t.includes('learn')) return 'LEARN MORE!';
-  return pickNeutralCTA(topic, seed);
+  const prefer = String(answers?.cta||'').trim();
+  if (prefer) {
+    return prefer.toUpperCase()
+      .replace(/['’]/g,'')
+      .replace(/[^A-Z0-9 !?]/g,'')
+      .replace(/\s+/g,' ')
+      .trim()
+      .replace(/!?$/,'!');
+  }
+  let h = 0; for (const c of String(seed||Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
+  return pool[h % pool.length];
 }
 
 /* -------------------------- Spawned processes -------------------------- */
@@ -636,7 +622,7 @@ function runSpawn(cmd, args, opts = {}) {
     });
   });
 }
-async function probeDuration(file, timeoutMs=7000) {
+async function probeDuration(file, timeoutMs=8000) {
   return new Promise((resolve) => {
     const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nokey=1:noprint_wrappers=1', file], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
@@ -648,63 +634,13 @@ async function probeDuration(file, timeoutMs=7000) {
 }
 
 /* ------------------------------- VIDEO ------------------------------- */
-function stripAssumptions(text='') {
-  return String(text)
-    .replace(/(?:fast|free)\s+shipping/ig,'')
-    .replace(/easy\s+returns?/ig,'')
-    .replace(/money[- ]?back\s+guarantee/ig,'')
-    .replace(/lowest\s+price/ig,'')
-    .replace(/\s{2,}/g,' ')
-    .trim();
-}
-function buildFallbackScript({ brand, topic, benefit, cta='DISCOVER MORE!' }) {
-  const name = (brand && brand !== 'JUST DROPPED' ? brand : 'This brand');
-  const hook = `Looking for ${topic || 'something new'} that fits your everyday style?`;
-  const value = benefit
-    ? `Explore pieces focused on ${benefit.toLowerCase()}.`
-    : `Explore clean, versatile pieces that work from day to day.`;
-  const close = `Find what feels right. ${cta}`;
-  return stripAssumptions(`${hook} ${value} ${close}`);
-}
-async function generateTimedScript({ answers={}, url='', searchTopic, ctaText, targetSec=14, seed='' }) {
-  const brand = overlayTitleFromAnswers(answers, searchTopic);
-  const topic = canonicalizeCopyTopic(searchTopic);
-  const benefit = (answers.mainBenefit || answers.description || '').split('.').slice(0,1).join(' ').trim();
-  const targetWords = Math.max(32, Math.min(42, Math.round((targetSec-1)*2.5))); // ~2.5 wps
-
-  const basePrompt =
-`Write a natural, spoken video ad script of ${targetWords}-${targetWords+4} WORDS.
-Tone: clear, neutral, helpful; no hype or promises; no policies (shipping, returns, guarantees), no prices.
-One paragraph. No hashtags. No website/domain. Avoid odd phrasing.
-End with this exact CTA as the last sentence: "${ctaText}"
-Context:
-Brand: ${brand}
-Topic: ${topic}
-${benefit ? `Key benefit: ${benefit}` : ''}`;
-  const messages = [{ role: 'user', content: basePrompt }];
-
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const r = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages,
-        max_tokens: 240,
-        temperature: 0.45,
-        timeout: 16000
-      });
-      let script = (r.choices?.[0]?.message?.content || '').replace(/\s+/g,' ').trim();
-      script = script.replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'').replace(/\s+/g,' ').trim();
-      script = stripAssumptions(script);
-      const wc = script.split(/\s+/).filter(Boolean).length;
-      if (wc >= 28) return script;
-    } catch {}
-  }
-  return buildFallbackScript({ brand, topic, benefit, cta: ctaText });
-}
-
 /**
- * VIDEO: design unchanged; intro shows Brand! only; outro shows CTA.
- * Duration now follows VO exactly (no minimum floor), so script never ends early.
+ * Single simple design (unchanged visually):
+ * - Square 640x640 with blurred fill + centered fit.
+ * - Side curtains fade after the first clip.
+ * - Top intro band shows Brand only (NO CTA).
+ * - Big centered outro CTA.
+ * - Voiceover ends ~1.6s before visuals; total length ≥ 15s.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -718,19 +654,20 @@ router.post('/generate-video-ad', async (req, res) => {
       req.headers['x-fb-ad-account-id'] ||
       null;
 
+    const VIDEO = { W: 640, H: 640, FPS: 24 };
     const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
 
-    const topicSearch = deriveTopicKeywords(answers, url, 'shopping');
-
-    // Neutral CTA with deterministic variety on regenerate
-    const ctaText = simpleCTA(answers?.cta, topicSearch, regenerateToken || answers?.businessName || '');
+    const topic = deriveTopicKeywords(answers, url, 'shopping');
+    const brandTitle = overlayTitleFromAnswers(answers, topic);
+    const ctaTextRaw = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
+    const ctaText = ctaTextRaw; // shown in outro only
 
     /* ---- Stock clips ---- */
     let candidates = [];
     try {
       const r = await axios.get('https://api.pexels.com/videos/search', {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: topicSearch, per_page: 36, cb: Date.now() + (regenerateToken || '') },
+        params: { query: topic, per_page: 36, cb: Date.now() + (regenerateToken || '') },
         timeout: TO.PEXELS
       });
       const videos = r.data?.videos || [];
@@ -741,11 +678,11 @@ router.post('/generate-video-ad', async (req, res) => {
           .sort((a, b) => (a.width || 9999) - (b.width || 9999));
         if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
       }
-    } catch (e) {
+    } catch {
       return res.status(500).json({ error: 'Stock video fetch failed' });
     }
     if (candidates.length < 3) return res.status(404).json({ error: 'Not enough stock clips found' });
-    const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topicSearch || Date.now()).slice(0, 3);
+    const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topic || Date.now()).slice(0, 3);
 
     const tmp = path.join(__dirname, '../tmp');
     try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
@@ -756,52 +693,87 @@ router.post('/generate-video-ad', async (req, res) => {
       inputs.push(out);
     }
 
-    /* ---- Script (~13s target) ---- */
-    const targetSeconds = 14;
-    let script = await generateTimedScript({
-      answers,
-      url,
-      searchTopic: topicSearch,
-      ctaText,
-      targetSec: targetSeconds,
-      seed: regenerateToken || answers?.businessName || ''
-    });
+    /* ---- Script generation (neutral + length guard) ---- */
+    const buildPrompt = (targetWordsLow, targetWordsHigh) => {
+      const base =
+`Write a simple, neutral spoken ad script about ${topic}.
+- About ${targetWordsLow}-${targetWordsHigh} words (~15–18 seconds).
+- Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
+- Keep it broad and brand-safe. No website or domain. End with this exact CTA: "${ctaText}".
+- Structure: brief hook → value/what to expect → CTA.`;
+      let p = base;
+      if (answers?.industry) p += `\nCategory (for context): ${answers.industry}`;
+      if (answers?.businessName) p += `\nBrand (name only): ${answers.businessName}`;
+      if (url) p += `\nWebsite (for context only): ${url}`;
+      p += `\nOutput ONLY the script text.`;
+      return p;
+    };
 
-    /* ---- TTS ---- */
-    const ttsPath = path.join(tmp, `${uuidv4()}.mp3`);
-    try {
-      const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script, timeout: 18000 });
-      fs.writeFileSync(ttsPath, Buffer.from(await ttsRes.arrayBuffer()));
-    } catch {
-      return res.status(500).json({ error: 'TTS generation failed' });
+    async function makeTTS(scriptText) {
+      const file = path.join(tmp, `${uuidv4()}.mp3`);
+      const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: scriptText, timeout: 18000 });
+      fs.writeFileSync(file, Buffer.from(await ttsRes.arrayBuffer()));
+      return file;
     }
 
-    /* ---- Durations (match VO) ---- */
-    let voDur = await probeDuration(ttsPath);
-    if (voDur <= 0) voDur = 12.0; // safe fallback
-    const finalDur = Math.min(Math.max(voDur + 0.25, 9.0), 30.0); // follow VO; small tail
+    let script = '';
+    let ttsPath = '';
+    let voDur = 0;
 
-    // three segments with gentle pacing
-    const seg1 = Math.min(6.0, Math.max(4.8, finalDur * 0.36));
-    const seg2 = Math.max(3.6, (finalDur - seg1) / 2);
-    const seg3 = Math.max(3.4, finalDur - seg1 - seg2);
+    // Try up to 2 times to hit ≥13.5s VO
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const targetLow = attempt === 0 ? 42 : 50;
+      const targetHigh = attempt === 0 ? 56 : 64;
+
+      try {
+        const r = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: buildPrompt(targetLow, targetHigh) }],
+          max_tokens: 220,
+          temperature: 0.35,
+          timeout: 14000
+        });
+        script = (r.choices?.[0]?.message?.content?.trim() || '')
+          .replace(/\s+/g, ' ')
+          .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi, '')
+          .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
+          .trim();
+      } catch {
+        script = script || 'Find pieces that fit your day. Explore styles, materials, and details you can feel good about. ' + ctaText;
+      }
+
+      try {
+        ttsPath = await makeTTS(script);
+      } catch {
+        return res.status(500).json({ error: 'TTS generation failed' });
+      }
+
+      voDur = await probeDuration(ttsPath);
+      if (voDur >= 13.5) break; // acceptable; visuals will be ≥15 with buffer
+    }
+
+    if (voDur <= 0) voDur = 14.0; // safety
+
+    /* ---- Durations (match VO; visuals >= 15s; VO finishes ~1.6s early) ---- */
+    const finalDur = Math.max(15.0, Math.min(voDur + 1.6, 30.0));
+
+    const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
+    const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
+    const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
     const segs = [seg1, seg2, seg3];
 
-    /* ---- Overlays (unchanged look) ---- */
+    /* ---- Overlay positions (brand-only intro; big outro CTA) ---- */
     const serifFont = '/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf';
     const sansFont  = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
     const chosenFont = fs.existsSync(serifFont) ? serifFont : (fs.existsSync(sansFont) ? sansFont : null);
     const fontParam = chosenFont ? `fontfile='${chosenFont}':` : '';
 
-    let brandLine = safeFFText(overlayTitleFromAnswers(answers, topicSearch));
-    if (brandLine && !/[!?]$/.test(brandLine)) {
-      brandLine = (brandLine + '!').slice(0, 36);
-    }
-    const ctaTxt = safeFFText(ctaText);
+    const brandLine = safeFFText(brandTitle);
+    const ctaTxt    = safeFFText(ctaText);
 
     const introStart = 0.25;
-    const introEnd   = Math.max(introStart + 0.6, Math.min(segs[0] - 0.25, 3.2)); // ensure non-zero
-    const outroStart = Math.max(0.0, finalDur - 2.4);
+    const introEnd   = Math.min(segs[0] - 0.25, 3.2);
+    const outroStart = Math.max(0.0, finalDur - 2.3);
     const outroEnd   = finalDur;
 
     const TOP_H   = Math.round(640 * 0.18);
@@ -810,15 +782,14 @@ router.post('/generate-video-ad', async (req, res) => {
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
     const yBrand = Math.round(TOP_H * 0.56);
 
-    // INTRO: brand ONLY (no CTA at start)
+    // Brand only in intro (your request)
     const introOverlay =
       `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
 
-    // OUTRO: CTA centered
     const outroOverlay =
       `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-    const look = `format=yuv420p,fps=24`;
+    const baseLook = `setsar=1,format=yuv420p,fps=${VIDEO.FPS}`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
       const dur = segs[i];
@@ -826,19 +797,18 @@ router.post('/generate-video-ad', async (req, res) => {
         `[${i}:v]split=2[v${i}a][v${i}b];` +
         `[v${i}a]scale=640:640:force_original_aspect_ratio=increase,boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,crop=640:640[bg${i}];` +
         `[v${i}b]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',setsar=1[fit${i}];` +
-        `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${look},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+        `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${baseLook},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
       );
     }
     const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-    // Curtains & band with fade-out before the first cut to avoid sputter look
     const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
     const curtains =
       `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
       `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
       `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
 
-    const bandFadeStart = (Math.max(0.8, segs[0]-0.60)).toFixed(2);
+    const bandFadeStart = (segs[0]-0.60).toFixed(2);
     const band =
       `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
       `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
@@ -846,6 +816,7 @@ router.post('/generate-video-ad', async (req, res) => {
     let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
     let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
 
+    // Audio: voice (mono to stereo) + optional bg music (low)
     const ttsIdx = inputs.length;
     const keys = [];
     if (answers?.industry) keys.push(answers.industry);
@@ -874,7 +845,7 @@ router.post('/generate-video-ad', async (req, res) => {
       '-filter_complex', filterComplex,
       '-map', '[v]', '-map', '[mix]',
       '-t', finalDur.toFixed(2),
-      '-r', '24',
+      '-r', String(VIDEO.FPS),
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
       '-movflags', '+faststart',
@@ -885,6 +856,7 @@ router.post('/generate-video-ad', async (req, res) => {
 
     await runSpawn('ffmpeg', args, { killAfter: TO.OVERMUX, killMsg: 'overlay+mux timeout' });
 
+    // cleanup
     for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
     try { fs.unlinkSync(ttsPath); } catch {}
     maybeGC();
@@ -950,7 +922,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
     const headlineHint = overlayTitleFromAnswers(answers, keyword);
-    const ctaHint = answers?.cta || pickNeutralCTA(keyword, seed);
+    const ctaHint = chooseCTA(answers, seed);
 
     let finalUrl = baseUrl;
     try {
