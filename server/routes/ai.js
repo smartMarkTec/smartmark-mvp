@@ -515,6 +515,36 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
   return svgOverlay({ W, H, headline, cta, tpl: 4 });
 }
 
+/* -- RESTORED: builds the overlaid JPG using the SVG above -- */
+async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '' }) {
+  const W = 1200, H = 627;
+
+  // download + resize base image
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+  const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
+
+  const headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
+  const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
+
+  // deterministic template: 2 (top), 3 (center), 4 (left)
+  let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  const tpl = [2, 3, 4][h % 3];
+
+  // compose overlay
+  const overlaySVG = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
+  );
+
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.jpg`;
+  await base
+    .composite([{ input: overlaySVG, top: 0, left: 0 }])
+    .jpeg({ quality: 92 })
+    .toFile(path.join(outDir, file));
+
+  maybeGC();
+  return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
+}
 
 /* ------------------------------ Music ------------------------------ */
 function findMusicDir() {
@@ -970,7 +1000,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
       const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint, seed });
       finalUrl = publicUrl;
     } catch {
-      // fallback to raw
+      // fallback to raw if overlay pipeline fails
     }
 
     res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
