@@ -413,6 +413,7 @@ function cleanCTA(c){
 }
 
 /* ---- 3 overlay templates: Top / Center / Left (bottom removed) ---- */
+/* ---- 3 overlay templates: Top / Center / Left (bottom removed) ---- */
 function svgOverlay({ W, H, headline, cta, tpl=2 }) {
   const LIGHT = '#f2f5f6';
   const MAX_W = W - 120;
@@ -464,11 +465,18 @@ function svgOverlay({ W, H, headline, cta, tpl=2 }) {
     `;
   }
 
-  // Left gradient
+  // Left gradient — center the pill under the actual headline width
   const padX = 64, padY = 110, panelW = 520;
   const fit = splitTwoLines(headline, panelW-2*padX, 54);
   const yBase = padY;
   const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 48;
+
+  // Measure the widest line of the headline and center the pill under that block
+  const w1 = EST(fit.lines[0] || '', fit.fs);
+  const w2 = fit.lines[1] ? EST(fit.lines[1], fit.fs) : 0;
+  const textBlockW = Math.min(panelW - 2*padX, Math.max(w1, w2));
+  const cxHeadline = padX + textBlockW / 2;
+
   return `
     <defs><linearGradient id="gL" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
     <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
@@ -476,35 +484,10 @@ function svgOverlay({ W, H, headline, cta, tpl=2 }) {
       <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
       ${fit.lines[1]?`<tspan x="${padX}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
     </text>
-    ${pill(padX + Math.max(90, (panelW-2*padX)/2), yCTA, cta, 26, 'center')}
+    ${pill(cxHeadline, yCTA, cta, 26, 'center')}
   `;
 }
 
-async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '' }) {
-  const W = 1200, H = 627;
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-  const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
-
-  let headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
-  let cta = cleanCTA(ctaHint) || 'LEARN MORE!';
-
-  let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  const tpl = [2,3,4][h % 3]; // top, center, left
-
-  const overlaySVG = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
-  );
-
-  const outDir = ensureGeneratedDir();
-  const file = `${uuidv4()}.jpg`;
-  await base
-    .composite([{ input: overlaySVG, top: 0, left: 0 }])
-    .jpeg({ quality: 92 })
-    .toFile(path.join(outDir, file));
-
-  maybeGC();
-  return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
-}
 
 /* ------------------------------ Music ------------------------------ */
 function findMusicDir() {
