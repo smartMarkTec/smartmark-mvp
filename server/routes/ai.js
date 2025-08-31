@@ -171,7 +171,8 @@ router.post('/generate-ad-copy', async (req, res) => {
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (about 46–72 words ≈ 15–17 seconds).
 - Keep it neutral and accurate; avoid assumptions about shipping, returns, guarantees, or inventory.
 - Hook → value → simple CTA (from common CTAs like “Shop now”, “Buy now”, “Learn more”, “Visit us”, “Check us out”, “Take a look”, “Get started”).
-- Do NOT mention a website or domain.`;
+- Do NOT mention a website or domain.
+- Use the CTA phrase exactly once at the very end.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
@@ -255,7 +256,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
     headline = headline.replace(/["<>]/g, '').slice(0, 55);
     body = body.replace(/["<>]/g, '').replace(/\s+/g, ' ').trim();
 
-    // Force CTA to allowed set (no “Browse styles”, “New arrivals”, etc.)
+    // Force CTA to allowed set
     overlay = pickFromAllowedCTAs(answers).toUpperCase();
 
     return res.json({ headline, body, image_overlay_text: overlay });
@@ -394,6 +395,7 @@ const ALLOWED_CTAS = [
   'SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!',
   'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'
 ];
+const CTA_PLAIN = ALLOWED_CTAS.map(s => s.replace(/!/g,''));
 function pickFromAllowedCTAs(answers = {}, seed = '') {
   const t = String(answers?.cta || '').trim();
   if (t) {
@@ -404,16 +406,13 @@ function pickFromAllowedCTAs(answers = {}, seed = '') {
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
   return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
 }
-
-/* CTA text (image/video safe) */
 function cleanCTA(c){
   const norm = String(c||'').toUpperCase().replace(/['’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
   const withBang = /!$/.test(norm) ? norm : (norm ? `${norm}!` : '');
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
 
-/* ---- 4 overlay templates: Left / Top / Center / Left gradient ---- */
-/* (Bottom centered template removed per request) */
+/* ---- 3 overlay templates: Top / Center / Left (bottom removed) ---- */
 function svgOverlay({ W, H, headline, cta, tpl=2 }) {
   const LIGHT = '#f2f5f6';
   const MAX_W = W - 120;
@@ -422,7 +421,7 @@ function svgOverlay({ W, H, headline, cta, tpl=2 }) {
   const pill = (x, y, text, fs=28, align='center') => {
     fs = Math.max(22, Math.min(fs, 34));
     const w = Math.min(MAX_W, EST(text, fs) + 44), h = 46;
-    const x0 = align==='left' ? x - w/2 : (x - w/2);
+    const x0 = x - w/2;
     return `
       <g transform="translate(${x0}, ${y - Math.floor(h*0.6)})">
         <rect x="0" y="-14" width="${w}" height="${h}" rx="14" fill="#0b0d10d0"/>
@@ -490,8 +489,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   let cta = cleanCTA(ctaHint) || 'LEARN MORE!';
 
   let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  // Only use Top (2), Center (3), Left (4) — bottom template removed
-  const tpl = [2,3,4][h % 3];
+  const tpl = [2,3,4][h % 3]; // top, center, left
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({ W, H, headline, cta, tpl })}</svg>`
@@ -576,18 +574,25 @@ function safeFFText(t){
     .slice(0, 40);
 }
 
-/* ---- CTA pool (strict common list, rotates on regenerate) ---- */
+/* ---- CTA helpers ---- */
 function chooseCTA(answers={}, seed='') {
   return pickFromAllowedCTAs(answers, seed);
+}
+function finalizeScriptWithSingleCTA(text, chosenCTA) {
+  // remove any early CTA occurrences (case-insensitive, optional punctuation)
+  const plain = CTA_PLAIN.map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|');
+  const re = new RegExp(`\\b(?:${plain})\\b[.!?]*`, 'gi');
+  let cleaned = String(text || '').replace(re, '').replace(/\s+/g,' ').trim();
+  // ensure exactly one CTA at the end
+  if (!cleaned.endsWith('.')) cleaned = cleaned.replace(/[.!?]\s*$/,'').trim();
+  if (cleaned) cleaned += ' ';
+  return (cleaned + chosenCTA).replace(/\s+/g,' ').trim();
 }
 
 /* -------------------------- Spawned processes -------------------------- */
 function runSpawn(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, {
-      stdio: ['ignore', 'ignore', 'inherit'],
-      ...opts,
-    });
+    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
     let killed = false;
     const killTimer = opts.killAfter ? setTimeout(() => {
       killed = true;
@@ -630,12 +635,12 @@ function pickSerifFontFile() {
 }
 
 /**
- * Single design (unchanged look):
+ * Single design:
  * - Square 640x640 with blurred fill + centered fit.
  * - Side curtains fade after clip #1.
  * - Top intro band shows Brand only (with "!"), Times New Roman if available.
  * - Big centered outro CTA.
- * - Voiceover ≥ 14s, visuals ≥ VO + 2s (total ≥ 16s). VO ends ~2s before end.
+ * - Voiceover >= 14.4s. Video = VO + 1.5s (min 16s). CTA appears once.
  */
 router.post('/generate-video-ad', async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
@@ -651,6 +656,7 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const VIDEO = { W: 640, H: 640, FPS: 24 };
     const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
+    const GAP = 1.5; // seconds of silence at end
 
     const topic = deriveTopicKeywords(answers, url, 'shopping');
     const brandBase = (answers?.businessName && String(answers.businessName).trim()) || overlayTitleFromAnswers(answers, topic);
@@ -689,13 +695,14 @@ router.post('/generate-video-ad', async (req, res) => {
       inputs.push(out);
     }
 
-    /* ---- Script generation (neutral) with length guard ---- */
+    /* ---- Script generation (neutral), ensure CTA once & length target ---- */
     const buildPrompt = (targetWordsLow, targetWordsHigh) => {
       const base =
 `Write a simple, neutral spoken ad script about ${topic}.
-- About ${targetWordsLow}-${targetWordsHigh} words (~${Math.round(targetWordsHigh/4)}s).
+- About ${targetWordsLow}-${targetWordsHigh} words.
 - Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
-- No website or domain. End with this exact CTA: "${ctaText}".
+- Do not include a website or domain.
+- Use the CTA phrase exactly once at the end: "${ctaText}".
 - Structure: brief hook → value/what to expect → CTA.`;
       let p = base;
       if (answers?.industry) p += `\nCategory (for context): ${answers.industry}`;
@@ -712,13 +719,22 @@ router.post('/generate-video-ad', async (req, res) => {
       return file;
     }
 
+    // Expansion fillers (no CTA)
+    const fillers = [
+      'Take a closer look and explore what stands out to you.',
+      'See different fits, colors, and details as you browse.',
+      'Compare options and choose what matches your day-to-day.',
+      'Find a look that feels right for you.',
+      'When you are ready, pick the pieces that make sense for you.',
+      'Discover options at your own pace.'
+    ];
+
     let script = '';
     let ttsPath = '';
     let voDur = 0;
 
-    // Retry up to 3x targeting longer scripts until VO >= 14s
+    // First pass at reasonable length
     const targets = [
-      [46, 58],
       [58, 72],
       [70, 84]
     ];
@@ -728,7 +744,7 @@ router.post('/generate-video-ad', async (req, res) => {
         const r = await openai.chat.completions.create({
           model: 'gpt-4o',
           messages: [{ role: 'user', content: buildPrompt(low, high) }],
-          max_tokens: 280,
+          max_tokens: 320,
           temperature: 0.35,
           timeout: 14000
         });
@@ -741,6 +757,8 @@ router.post('/generate-video-ad', async (req, res) => {
         script = script || `Find pieces that fit your day. Explore styles, materials, and details you can feel good about. ${ctaText}`;
       }
 
+      script = finalizeScriptWithSingleCTA(script, ctaText);
+
       try {
         if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
         ttsPath = await makeTTS(script);
@@ -749,22 +767,28 @@ router.post('/generate-video-ad', async (req, res) => {
       }
 
       voDur = await probeDuration(ttsPath);
-      if (voDur >= 14.0) break;
-
-      // On last pass, extend with a neutral closer
-      if (attempt === targets.length - 1) {
-        script += ` Take a look and see what feels right for you. ${ctaText}`;
-        try {
-          if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
-          ttsPath = await makeTTS(script);
-        } catch {}
-        voDur = await probeDuration(ttsPath);
-      }
+      if (voDur >= 14.4) break;
     }
-    if (voDur <= 0) voDur = 14.0;
 
-    /* ---- Durations (visuals >= VO + 2s, and >= 16s total) ---- */
-    const finalDur = Math.max(16.0, Math.min(voDur + 2.2, 30.0));
+    // If still short, iteratively extend with fillers until >=14.4s
+    let fi = 0, safety = 0;
+    while (voDur < 14.4 && safety < 8) {
+      safety++;
+      const noCTA = script.replace(/\s*([A-Z ]+)!$/,'').trim(); // strip trailing CTA
+      const add = fillers[fi++ % fillers.length];
+      script = finalizeScriptWithSingleCTA(`${noCTA}. ${add}`, ctaText);
+
+      try {
+        if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
+        ttsPath = await makeTTS(script);
+      } catch {}
+      voDur = await probeDuration(ttsPath);
+    }
+
+    if (voDur <= 0) voDur = 14.4;
+
+    /* ---- Durations (visuals = VO + GAP, min 16s) ---- */
+    const finalDur = Math.max(16.0, Math.min(voDur + GAP, 30.0));
 
     const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
     const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
@@ -780,12 +804,11 @@ router.post('/generate-video-ad', async (req, res) => {
 
     const introStart = 0.25;
     const introEnd   = Math.min(segs[0] - 0.25, 3.2);
-    const outroStart = Math.max(0.0, finalDur - 2.3);
+    const outroStart = Math.max(0.0, finalDur - GAP);
     const outroEnd   = finalDur;
 
     const TOP_H   = Math.round(640 * 0.18);
     const CUR_W   = Math.round(640 * 0.13);
-
     const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
     const yBrand = Math.round(TOP_H * 0.56);
@@ -796,7 +819,7 @@ router.post('/generate-video-ad', async (req, res) => {
     const outroOverlay =
       `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-    /* ---- Build visuals (force consistent fps/pixfmt to prevent sputter) ---- */
+    /* ---- Build visuals (consistent fps/pixfmt to prevent sputter) ---- */
     const baseLook = `setsar=1,fps=${VIDEO.FPS},format=yuv420p,settb=AVTB`;
     const vidParts = [];
     for (let i = 0; i < inputs.length; i++) {
@@ -854,7 +877,7 @@ router.post('/generate-video-ad', async (req, res) => {
       '-map', '[v]', '-map', '[mix]',
       '-t', finalDur.toFixed(2),
       '-r', String(VIDEO.FPS),
-      '-vsync', 'vfr',
+      '-vsync', '2',
       '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
       '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
       '-movflags', '+faststart',
