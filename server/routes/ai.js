@@ -413,79 +413,106 @@ function cleanCTA(c){
 }
 
 /* ---- 3 overlay templates: Top / Center / Left (bottom removed) ---- */
-/* ---- 3 overlay templates: Top / Center / Left (bottom removed) ---- */
-function svgOverlay({ W, H, headline, cta, tpl=2 }) {
+function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
   const LIGHT = '#f2f5f6';
   const MAX_W = W - 120;
   const EST = estWidth;
 
-  const pill = (x, y, text, fs=28, align='center') => {
+  const pill = (x, y, text, fs = 28) => {
     fs = Math.max(22, Math.min(fs, 34));
-    const w = Math.min(MAX_W, EST(text, fs) + 44), h = 46;
-    const x0 = x - w/2;
+    const w = Math.min(MAX_W, EST(text, fs) + 44);
+    const h = 46;
+    const x0 = x - w / 2;
     return `
-      <g transform="translate(${x0}, ${y - Math.floor(h*0.6)})">
+      <g transform="translate(${x0}, ${y - Math.floor(h * 0.6)})">
         <rect x="0" y="-14" width="${w}" height="${h}" rx="14" fill="#0b0d10d0"/>
-        <text x="${w/2}" y="12" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="800" fill="#ffffff">${escSVG(text)}</text>
+        <text x="${w / 2}" y="12" text-anchor="middle"
+              font-family="Times New Roman, Times, serif"
+              font-size="${fs}" font-weight="800" fill="#ffffff">
+          ${escSVG(text)}
+        </text>
       </g>`;
   };
 
-  // Top band
+  /* -- Top band (tpl=2) -- */
   if (tpl === 2) {
-    let fs = fitFont(headline, MAX_W-80, 56);
+    const fs = fitFont(headline, MAX_W - 80, 56);
     const yTitle = 92;
     const yCTA = yTitle + 60;
     return `
-      <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#000c"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
+      <defs>
+        <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#000c"/>
+          <stop offset="100%" stop-color="#0000"/>
+        </linearGradient>
+      </defs>
       <rect x="0" y="0" width="${W}" height="170" rx="18" fill="url(#g2)"/>
-      <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">${escSVG(headline)}</text>
-      ${pill(W/2, yCTA, cta, 28, 'center')}
+      <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
+            font-family="Times New Roman, Times, serif"
+            font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">
+        ${escSVG(headline)}
+      </text>
+      ${pill(W / 2, yCTA, cta, 28)}
     `;
   }
 
-  // Center box
+  /* -- Center box (tpl=3) -- */
   if (tpl === 3) {
     const boxW = 860;
-    const fit = splitTwoLines(headline, boxW-100, 56);
+    const fit = splitTwoLines(headline, boxW - 100, 56);
     const lineCount = fit.lines.length;
     const boxPad = 28;
     const gap = 18;
-    const boxH = Math.round(boxPad*2 + fit.fs*(lineCount) + 54 + gap);
-    const yBox = Math.round((H - boxH)/2);
+    const boxH = Math.round(boxPad * 2 + fit.fs * lineCount + 54 + gap);
+    const yBox = Math.round((H - boxH) / 2);
     const yTitle = yBox + boxPad + fit.fs - 6;
     const yCTA = yBox + boxH - boxPad - 12;
 
     return `
-      <rect x="${(W-boxW)/2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="22" fill="#00000030"/>
-      <text x="${W/2}" y="${yTitle}" text-anchor="middle" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
-        <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
-        ${fit.lines[1]?`<tspan x="${W/2}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="22" fill="#00000030"/>
+      <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
+            font-family="Times New Roman, Times, serif"
+            font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+        <tspan x="${W / 2}" dy="0">${escSVG(fit.lines[0])}</tspan>
+        ${fit.lines[1] ? `<tspan x="${W / 2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
-      ${pill(W/2, yCTA, cta, 28, 'center')}
+      ${pill(W / 2, yCTA, cta, 28)}
     `;
   }
 
-  // Left gradient — center the pill under the actual headline width
-  const padX = 64, padY = 110, panelW = 520;
-  const fit = splitTwoLines(headline, panelW-2*padX, 54);
-  const yBase = padY;
-  const yCTA  = yBase + fit.fs*1.05*(fit.lines.length) + 48;
+  /* -- Left gradient (tpl=4) -- */
+  if (tpl === 4) {
+    const padX = 64, padY = 110, panelW = 520;
+    const fit = splitTwoLines(headline, panelW - 2 * padX, 54);
+    const yBase = padY;
+    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 48;
 
-  // Measure the widest line of the headline and center the pill under that block
-  const w1 = EST(fit.lines[0] || '', fit.fs);
-  const w2 = fit.lines[1] ? EST(fit.lines[1], fit.fs) : 0;
-  const textBlockW = Math.min(panelW - 2*padX, Math.max(w1, w2));
-  const cxHeadline = padX + textBlockW / 2;
+    // measure the widest headline line and center CTA under it
+    const w1 = EST(fit.lines[0] || '', fit.fs);
+    const w2 = fit.lines[1] ? EST(fit.lines[1], fit.fs) : 0;
+    const textBlockW = Math.min(panelW - 2 * padX, Math.max(w1, w2));
+    const cxHeadline = padX + textBlockW / 2;
 
-  return `
-    <defs><linearGradient id="gL" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#000a"/><stop offset="100%" stop-color="#0000"/></linearGradient></defs>
-    <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
-    <text x="${padX}" y="${yBase}" text-anchor="start" font-family="Times New Roman, Times, serif" font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
-      <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
-      ${fit.lines[1]?`<tspan x="${padX}" dy="${fit.fs*1.05}">${escSVG(fit.lines[1])}</tspan>`:''}
-    </text>
-    ${pill(cxHeadline, yCTA, cta, 26, 'center')}
-  `;
+    return `
+      <defs>
+        <linearGradient id="gL" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#000a"/>
+          <stop offset="100%" stop-color="#0000"/>
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
+      <text x="${padX}" y="${yBase}" text-anchor="start"
+            font-family="Times New Roman, Times, serif"
+            font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+        <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
+        ${fit.lines[1] ? `<tspan x="${padX}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+      </text>
+      ${pill(cxHeadline, yCTA, cta, 26)}
+    `;
+  }
+
+  /* Fallback (just in case): render left gradient */
+  return svgOverlay({ W, H, headline, cta, tpl: 4 });
 }
 
 
