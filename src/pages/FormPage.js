@@ -1,8 +1,8 @@
 // src/pages/FormPage.js
 /* eslint-disable */
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { FaEdit, FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
+import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 
 // ===== Constants =====
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -22,16 +22,46 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 
-// Simplified, tighter question set (removed 'mainProblem')
-const CONVO_QUESTIONS = [
-  { key: "url", question: "What's your website URL?" },
-  { key: "industry", question: "What industry is your business in?" },
-  { key: "businessName", question: "What's your business name?" },
-  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
-  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
-  { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
-  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" }
+// ---- Image copy edit store (per image) ----
+const IMAGE_DRAFTS_KEY = "smartmark.imageDrafts.v1";
+const ALLOWED_CTAS = [
+  "Shop now", "Buy now", "Learn more", "Visit us", "Check us out",
+  "Take a look", "Get started"
 ];
+
+// ===== Small helpers for the image draft store =====
+function loadImageDrafts() {
+  try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; }
+}
+function saveImageDrafts(map) {
+  try { localStorage.setItem(IMAGE_DRAFTS_KEY, JSON.stringify(map)); } catch {}
+}
+function getImageDraftById(id) {
+  const all = loadImageDrafts();
+  return all[id] || null;
+}
+function saveImageDraftById(id, patch) {
+  const all = loadImageDrafts();
+  const next = { ...(all[id] || {}), ...patch, _updatedAt: Date.now() };
+  all[id] = next;
+  saveImageDrafts(all);
+  return next;
+}
+function normalizeOverlayCTA(s = "") {
+  // Keep simple and familiar CTAs; title-case for the button label.
+  const raw = String(s).trim();
+  if (!raw) return "Learn more";
+  const plain = raw.replace(/[!?.]+$/g, "").toLowerCase();
+  // Try to map to allowed set
+  const match = ALLOWED_CTAS.find(c => c.toLowerCase() === plain);
+  const chosen = match || plain;
+  // Title-case for the button UI
+  return chosen.replace(/\b\w/g, c => c.toUpperCase());
+}
+function creativeIdFromUrl(url = "") {
+  // Stable key per image URL
+  return `img:${url}`;
+}
 
 // ---------- Small UI helpers ----------
 function Dotty() {
@@ -247,7 +277,7 @@ function isLikelySideChat(s, currentQ) {
   if (currentQ.key === "url") {
     const hasUrl = !!extractFirstUrl(t);
     return !hasUrl && t.split(/\s+/).length > 3;
-  }
+    }
   if (currentQ.key === "hasOffer") {
     return !/^(yes|no|y|n)$/i.test(t);
   }
@@ -294,6 +324,19 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
 
+  // ---- Image copy editing state ----
+  const [imageEditing, setImageEditing] = useState(false);
+  const currentImageId = useMemo(
+    () => creativeIdFromUrl(imageUrls[activeImage] || ""),
+    [imageUrls, activeImage]
+  );
+  const [editHeadline, setEditHeadline] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editCTA, setEditCTA] = useState("");
+
+  // helper for absolute URLs
+  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+
   // Scroll chat to bottom
   useEffect(() => {
     if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -333,6 +376,31 @@ export default function FormPage() {
     // eslint-disable-next-line
   }, []);
 
+  // Hydrate edit fields whenever active image or result changes
+  useEffect(() => {
+    const draft = currentImageId ? getImageDraftById(currentImageId) : null;
+    setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
+    setEditBody(draft?.body ?? result?.body ?? "");
+    setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? "Learn more"));
+  }, [currentImageId, result]);
+
+  // Debounced autosave while typing
+  useEffect(() => {
+    if (!currentImageId) return;
+    const t = setTimeout(() => {
+      saveImageDraftById(currentImageId, {
+        headline: (editHeadline || "").trim(),
+        body: (editBody || "").trim(),
+        overlay: normalizeOverlayCTA(editCTA || "Learn more")
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [currentImageId, editHeadline, editBody, editCTA]);
+
+  const displayHeadline = (editHeadline || result?.headline || "Don't Miss Our Limited-Time Offer").slice(0, 55);
+  const displayBody = (editBody || result?.body || "Ad copy goes here...");
+  const displayCTA = normalizeOverlayCTA(editCTA || result?.image_overlay_text || "Learn more");
+
   // ---- Hard reset chat + draft ----
   function hardResetChat() {
     if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
@@ -340,6 +408,7 @@ export default function FormPage() {
       localStorage.removeItem(FORM_DRAFT_KEY);
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
       sessionStorage.removeItem("draft_form_creatives");
+      localStorage.removeItem(IMAGE_DRAFTS_KEY);
     } catch {}
     setAnswers({});
     setStep(0);
@@ -362,13 +431,27 @@ export default function FormPage() {
     setLoading(false);
     setSideChatCount(0);
     setHasGenerated(false);
+    setImageEditing(false);
+    setEditHeadline("");
+    setEditBody("");
+    setEditCTA("");
   }
 
   // ---- Autosave (throttled) the entire FormPage session + creatives ----
   useEffect(() => {
     const t = setTimeout(() => {
+      // Merge current image draft into what's shown on the card,
+      // so drafts flow to the next page even if the user didn't click Continue yet.
+      const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
+      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+      const mergedBody = activeDraft?.body || result?.body || "";
+
       const payload = {
-        answers, step, chatHistory, mediaType, result,
+        answers, step, chatHistory, mediaType, result: {
+          ...(result || {}),
+          headline: mergedHeadline,
+          body: mergedBody
+        },
         imageUrls, videoItems, activeImage, activeVideo,
         awaitingReady, input, sideChatCount, hasGenerated
       };
@@ -377,7 +460,6 @@ export default function FormPage() {
         JSON.stringify({ savedAt: Date.now(), data: payload })
       );
 
-      const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
       let imgs = imageUrls.slice(0, 2).map(abs);
       let vids = videoItems.map(v => v?.url).filter(Boolean).slice(0, 2).map(abs);
       let fbIds = videoItems.map(v => v?.fbVideoId).filter(Boolean).slice(0, 2);
@@ -389,8 +471,9 @@ export default function FormPage() {
         images: imgs,
         videos: vids,
         fbVideoIds: fbIds,
-        headline: result?.headline || "",
-        body: result?.body || "",
+        headline: mergedHeadline,
+        body: mergedBody,
+        imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || "Learn more"),
         videoScript: (videoItems[activeVideo]?.script || ""),
         answers,
         mediaSelection: mediaType,
@@ -405,7 +488,8 @@ export default function FormPage() {
   }, [
     answers, step, chatHistory, mediaType, result,
     imageUrls, videoItems, activeImage, activeVideo,
-    awaitingReady, input, sideChatCount, hasGenerated
+    awaitingReady, input, sideChatCount, hasGenerated,
+    currentImageId, editHeadline, editBody, editCTA
   ]);
 
   function handleImageClick(url) { setShowModal(true); setModalImg(url); }
@@ -436,7 +520,6 @@ export default function FormPage() {
   // central side-chat handler with cap + optional follow-up prompt
   async function handleSideChat(userText, followUpPrompt) {
     if (sideChatCount >= SIDE_CHAT_LIMIT) {
-      // cap reached: nudge back to flow, no GPT call
       if (followUpPrompt) {
         setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
       }
@@ -561,7 +644,7 @@ export default function FormPage() {
             setVideoScript(vids[0]?.script || "");
 
             setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
-            setHasGenerated(true); // <-- prevent future "Ready to generate?" prompts
+            setHasGenerated(true);
           } catch (err) {
             console.error("generation failed:", err);
             setError("Generation failed. Please try again.");
@@ -573,19 +656,16 @@ export default function FormPage() {
         return;
       }
 
-      // Any other side chat after final stage
       if (hasGenerated) {
-        // Already generated → answer but do NOT re-prompt "ready to generate"
         await handleSideChat(value, null);
       } else {
-        // Not yet generated → answer then re-prompt (unless cap hit inside handler)
         await handleSideChat(value, "Ready to generate your campaign? (yes/no)");
       }
       return;
     }
 
     // =========================
-    // IN-FLOW SIDE-CHAT (questions or wow-type statements)
+    // IN-FLOW SIDE-CHAT
     // =========================
     if (currentQ && isLikelySideChat(value, currentQ)) {
       await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
@@ -593,12 +673,10 @@ export default function FormPage() {
     }
 
     // =========================
-    // Normal Q&A capture (record answer + advance)
+    // Normal Q capture
     // =========================
     if (currentQ) {
       let answerToSave = value;
-
-      // Robust URL capture for the website question (preserves scraping flow)
       if (currentQ.key === "url") {
         const firstUrl = extractFirstUrl(value);
         if (firstUrl) answerToSave = firstUrl;
@@ -692,7 +770,7 @@ export default function FormPage() {
 
       {/* ---- Chat Panel ---- */}
       <div style={{
-        width: "100%", maxWidth: 560, /* slightly wider */ minHeight: 370, marginTop: 34, marginBottom: 26,
+        width: "100%", maxWidth: 560, minHeight: 370, marginTop: 34, marginBottom: 26,
         background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
         padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
       }}>
@@ -905,12 +983,13 @@ export default function FormPage() {
             )}
           </div>
 
+          {/* Copy block (shows edited values) */}
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
-              {result?.headline || "Don't Miss Our Limited-Time Offer"}
+              {displayHeadline}
             </div>
             <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
-              {result?.body || "Ad copy goes here..."}
+              {displayBody}
             </div>
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
@@ -923,8 +1002,10 @@ export default function FormPage() {
               padding: "8px 20px",
               fontSize: 15,
               cursor: "pointer"
-            }}>Learn More</button>
+            }}>{displayCTA}</button>
           </div>
+
+          {/* Image Edit toggle + fields */}
           <button
             style={{
               position: "absolute",
@@ -944,10 +1025,59 @@ export default function FormPage() {
               gap: 5,
               zIndex: 2
             }}
-            onClick={() => {}}
+            onClick={() => setImageEditing(v => !v)}
           >
-            Edit
+            {imageEditing ? "Done" : "Edit"}
           </button>
+
+          {imageEditing && (
+            <div style={{ padding: "10px 18px 4px 18px", display: "grid", gap: 10 }}>
+              <label style={{ display: "block" }}>
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Headline (max 55 chars)</div>
+                <input
+                  value={editHeadline}
+                  onChange={(e) => setEditHeadline(e.target.value.slice(0, 55))}
+                  onBlur={() => saveImageDraftById(currentImageId, { headline: (editHeadline || "").trim() })}
+                  placeholder="Headline"
+                  maxLength={55}
+                  style={{
+                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
+                    padding: "10px 12px", fontWeight: 700
+                  }}
+                />
+                <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>{editHeadline.length}/55</div>
+              </label>
+
+              <label style={{ display: "block" }}>
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Body (18–30 words)</div>
+                <textarea
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  onBlur={() => saveImageDraftById(currentImageId, { body: (editBody || "").trim() })}
+                  rows={3}
+                  placeholder="Body copy"
+                  style={{
+                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
+                    padding: "10px 12px", fontWeight: 600
+                  }}
+                />
+              </label>
+
+              <label style={{ display: "block" }}>
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
+                <input
+                  value={editCTA}
+                  onChange={(e) => setEditCTA(e.target.value)}
+                  onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
+                  placeholder="CTA"
+                  style={{
+                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
+                    padding: "10px 12px", fontWeight: 700
+                  }}
+                />
+              </label>
+            </div>
+          )}
         </div>
 
         {/* VIDEO CARD */}
@@ -1074,29 +1204,8 @@ export default function FormPage() {
               cursor: "pointer"
             }}>Learn More</button>
           </div>
-          <button
-            style={{
-              position: "absolute",
-              bottom: 10,
-              right: 18,
-              background: "#f3f6f7",
-              color: "#12cbb8",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: "1.05rem",
-              padding: "5px 14px",
-              cursor: "pointer",
-              boxShadow: "0 1px 3px #2bcbb828",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              zIndex: 2
-            }}
-            onClick={() => {}}
-          >
-            Edit
-          </button>
+
+          {/* NOTE: Edit button removed for video card per request */}
         </div>
       </div>
 
@@ -1119,7 +1228,11 @@ export default function FormPage() {
             transition: "background 0.18s"
           }}
           onClick={() => {
-            const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+            // Use edited copy if present for the active image
+            const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
+            const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+            const mergedBody = activeDraft?.body || result?.body || "";
+            const mergedCTA = normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || "Learn more");
 
             let imgA = imageUrls.map(abs).slice(0, 2);
             let vidA = videoItems.map(v => abs(v.url)).slice(0, 2);
@@ -1132,8 +1245,9 @@ export default function FormPage() {
               images: imgA,
               videos: vidA,
               fbVideoIds: fbIds,
-              headline: result?.headline || "",
-              body: result?.body || "",
+              headline: mergedHeadline,
+              body: mergedBody,
+              imageOverlayCTA: mergedCTA,
               videoScript: videoItems[0]?.script || videoScript || "",
               answers,
               mediaSelection: mediaType,
@@ -1153,8 +1267,9 @@ export default function FormPage() {
                 imageUrls: imgA,
                 videoUrls: vidA,
                 fbVideoIds: fbIds,
-                headline: result?.headline,
-                body: result?.body,
+                headline: mergedHeadline,
+                body: mergedBody,
+                imageOverlayCTA: mergedCTA,
                 videoScript: videoItems[0]?.script || videoScript,
                 answers,
                 mediaSelection: mediaType
@@ -1170,3 +1285,14 @@ export default function FormPage() {
     </div>
   );
 }
+
+/* ====== Conversation questions (unchanged) ====== */
+const CONVO_QUESTIONS = [
+  { key: "url", question: "What's your website URL?" },
+  { key: "industry", question: "What industry is your business in?" },
+  { key: "businessName", question: "What's your business name?" },
+  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
+  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
+  { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
+  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" }
+];
