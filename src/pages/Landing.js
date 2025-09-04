@@ -1,18 +1,22 @@
 import React, { useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const DARK_GREEN = "#185431";
-const DARK_GREEN_HOVER = "#1e6a3e";
-const LIGHTER_BG = "#232529";
+/** Tech palette */
+const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
+const BG_DARK = "#0b0f14";            // deep navy
+const ACCENT = "#31e1ff";             // electric cyan
+const ACCENT_2 = "#7c4dff";           // violet
+const BTN_BASE = "#0f6fff";           // brand blue
+const BTN_BASE_HOVER = "#2e82ff";
+const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
+/* content */
 const processSteps = [
   { icon: "🎯", title: "Answer a few questions" },
   { icon: "📝", title: "AI generates ad copy and creatives" },
   { icon: "✅", title: "Review and approve" },
   { icon: "🚀", title: "Launch" },
 ];
-
 const faqList = [
   {
     question: "How much does each campaign cost?",
@@ -26,7 +30,7 @@ const faqList = [
   },
 ];
 
-// ----------- Responsive Helper ------------
+/* responsive helper */
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 750);
   React.useEffect(() => {
@@ -36,7 +40,6 @@ const useIsMobile = () => {
   }, []);
   return isMobile;
 };
-// ------------------------------------------
 
 const Landing = () => {
   const navigate = useNavigate();
@@ -48,30 +51,35 @@ const Landing = () => {
     localStorage.removeItem("smartmark_campaign_setup_budget");
   }, []);
 
+  /* navigation */
   const goToForm = () => navigate("/form");
   const goToLogin = () => navigate("/login");
-  const scrollToFaq = () =>
-    faqRef.current && faqRef.current.scrollIntoView({ behavior: "smooth" });
 
-  // ---- Style helpers ----
-  const headerPadding = isMobile ? "18px" : "36px";
-  const heroFontSize = isMobile ? "2.35rem" : "4rem";
-  const heroSubFontSize = isMobile ? "1.2rem" : "2.1rem";
-  const launchBtnSize = isMobile ? "1.05rem" : "1.95rem";
-  const launchBtnPadding = isMobile ? "0.85rem 1.8rem" : "1.25rem 3.4rem";
-  const stepColDirection = isMobile ? "column" : "row";
-  const stepGap = isMobile ? "0.85rem" : "2.6rem";
-  const stepMinWidth = isMobile ? "auto" : 170;
-  const stepMaxWidth = isMobile ? "100vw" : 230;
-  const belowDiagramMargin = isMobile ? "0.8rem" : "1.6rem";
-  const faqPad = isMobile ? "2.4rem 0 4.2rem 0" : "4.6rem 0 6rem 0";
-  const faqFontSize = isMobile ? "1.4rem" : "2.2rem";
-  const faqWidth = isMobile ? "92vw" : "880px";
+  /* FIX: smooth scroll both directions without getting “stuck”.
+     We avoid element .scrollIntoView quirks and use window.scrollTo. */
+  const scrollToFaq = () => {
+    const el = faqRef.current;
+    if (!el) return;
+    const offset = 12; // small top breathing room
+    const top = window.scrollY + el.getBoundingClientRect().top - offset;
+    window.scrollTo({ top, behavior: "smooth" });
+  };
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
 
-  // Reusable surfaces
-  const cardGlass = {
-    background: "linear-gradient(180deg, #2a2e33cc, #23262acc)",
-    border: "1px solid rgba(255,255,255,0.08)",
+  /* sizing */
+  const headerPadding = isMobile ? "16px" : "32px";
+  const heroFont = isMobile ? "2.5rem" : "4.2rem";
+  const heroSub = isMobile ? "1.15rem" : "2rem";
+  const ctaPad = isMobile ? "0.9rem 1.8rem" : "1.1rem 2.6rem";
+  const ctaSize = isMobile ? "1.05rem" : "1.25rem";
+  const stepDir = isMobile ? "column" : "row";
+  const stepGap = isMobile ? "0.9rem" : "2.2rem";
+  const faqPad = isMobile ? "2.2rem 0 4rem" : "4rem 0 6rem";
+  const faqTitle = isMobile ? "1.4rem" : "2.1rem";
+
+  const glass = {
+    background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
+    border: `1px solid ${GLASS_BORDER}`,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
     backdropFilter: "blur(8px)",
   };
@@ -81,272 +89,238 @@ const Landing = () => {
       style={{
         minHeight: "100vh",
         minWidth: "100vw",
-        background: LIGHTER_BG,
-        fontFamily: MODERN_FONT,
+        background: BG_DARK,
+        fontFamily: FONT,
         position: "relative",
-        overflow: "hidden",
+        overflow: "visible", // FIX: allow natural page scroll back up
         color: "#fff",
       }}
     >
-      {/* Decorative gradients */}
+      {/* global smooth scroll */}
+      <style>{`
+        html, body { scroll-behavior: smooth; }
+        @keyframes floatA { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
+        @keyframes floatB { 0%,100% { transform: translateY(0) } 50% { transform: translateY(12px) } }
+      `}</style>
+
+      {/* subtle tech gradients */}
       <div
         aria-hidden
         style={{
           position: "absolute",
-          inset: "-20% -10% auto auto",
-          width: isMobile ? 380 : 680,
-          height: isMobile ? 380 : 680,
-          background:
-            "radial-gradient(35% 35% at 60% 40%, rgba(46,217,147,0.22), rgba(46,217,147,0) 60%)",
-          filter: "blur(10px)",
-          animation: "floatUp 18s ease-in-out infinite",
+          top: "-20vh",
+          right: "-10vw",
+          width: isMobile ? 360 : 720,
+          height: isMobile ? 360 : 720,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}33, transparent 70%)`,
+          filter: "blur(18px)",
+          animation: "floatA 18s ease-in-out infinite",
+          pointerEvents: "none",
         }}
       />
       <div
         aria-hidden
         style={{
           position: "absolute",
-          inset: "auto auto -25% -10%",
-          width: isMobile ? 420 : 760,
-          height: isMobile ? 420 : 760,
-          background:
-            "radial-gradient(40% 40% at 40% 60%, rgba(127,213,255,0.18), rgba(127,213,255,0) 65%)",
-          filter: "blur(12px)",
-          animation: "floatDown 22s ease-in-out infinite",
+          bottom: "-25vh",
+          left: "-12vw",
+          width: isMobile ? 420 : 800,
+          height: isMobile ? 420 : 800,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}2e, transparent 70%)`,
+          filter: "blur(18px)",
+          animation: "floatB 22s ease-in-out infinite",
+          pointerEvents: "none",
         }}
       />
 
-      {/* Header Row */}
+      {/* Header */}
       <div
         style={{
-          position: "relative",
-          width: "100vw",
+          width: "100%",
           display: "flex",
           flexDirection: isMobile ? "column" : "row",
           justifyContent: isMobile ? "center" : "space-between",
           alignItems: "center",
-          paddingLeft: headerPadding,
-          paddingRight: headerPadding,
-          marginTop: isMobile ? 14 : 26,
-          zIndex: 10,
-          gap: isMobile ? "1rem" : 0,
+          padding: `18px ${headerPadding} 0`,
+          gap: isMobile ? "0.9rem" : 0,
+          position: "relative",
+          zIndex: 2,
         }}
       >
         <button
-          style={{
-            fontWeight: 600,
-            fontSize: isMobile ? "0.98rem" : "1rem",
-            color: "rgba(255,255,255,0.75)",
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.04))",
-            border: "1px solid rgba(255,255,255,0.12)",
-            padding: "0.55rem 1.05rem",
-            borderRadius: "999px",
-            cursor: "pointer",
-            transition: "all 0.2s",
-            width: isMobile ? "86vw" : "auto",
-            margin: isMobile ? "0 auto" : 0,
-            letterSpacing: "0.3px",
-            ...cardGlass,
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.transform = "translateY(-1px)";
-            e.currentTarget.style.boxShadow = "0 12px 32px rgba(0,0,0,0.28)";
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
-          }}
           onClick={scrollToFaq}
+          style={{
+            fontWeight: 700,
+            fontSize: isMobile ? "0.98rem" : "1rem",
+            color: "#e6faff",
+            borderRadius: 999,
+            padding: "0.55rem 1.1rem",
+            cursor: "pointer",
+            transition: "transform .15s ease",
+            ...glass,
+            width: isMobile ? "86vw" : "auto",
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
         >
           FAQ
         </button>
-        <div style={{ display: "flex", gap: "0.8rem" }}>
+
+        <div style={{ display: "flex", gap: "10px" }}>
           <button
+            onClick={goToLogin}
             style={{
               padding: isMobile ? "0.65rem 1.3rem" : "0.85rem 1.9rem",
-              fontSize: isMobile ? "0.98rem" : "1.06rem",
-              background:
-                "linear-gradient(180deg, rgba(24,84,49,0.0), rgba(24,84,49,0.0))",
-              color: "#fff",
-              border: `1.5px solid ${DARK_GREEN}`,
-              borderRadius: "999px",
-              fontWeight: 700,
+              fontSize: isMobile ? "0.98rem" : "1.05rem",
+              color: "#eaf5ff",
+              borderRadius: 999,
               cursor: "pointer",
-              letterSpacing: "0.6px",
-              transition: "all 0.18s",
-              ...cardGlass,
+              transition: "transform .15s ease, background .2s ease",
+              ...glass,
+              border: `1px solid ${GLASS_BORDER}`,
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
             }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = DARK_GREEN;
-              e.currentTarget.style.transform = "translateY(-1px)";
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(180deg, rgba(24,84,49,0.0), rgba(24,84,49,0.0))";
-              e.currentTarget.style.transform = "translateY(0)";
-            }}
-            onClick={goToLogin}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
           >
             Login
           </button>
           <button
+            onClick={goToForm}
             style={{
               padding: isMobile ? "0.7rem 1.6rem" : "0.95rem 2.2rem",
               fontSize: isMobile ? "1.02rem" : "1.08rem",
-              background:
-                "linear-gradient(180deg, #1c6a3f, #165434) /* base */",
               color: "#fff",
-              border: "1px solid rgba(255,255,255,0.12)",
-              borderRadius: "999px",
+              background: BTN_BASE,
+              border: "none",
+              borderRadius: 999,
               fontWeight: 800,
-              boxShadow:
-                "0 10px 28px rgba(24,84,49,0.28), 0 2px 10px rgba(0,0,0,0.18)",
+              boxShadow: "0 10px 26px rgba(15,111,255,0.35)",
               cursor: "pointer",
-              transition: "all 0.16s",
-              letterSpacing: "0.9px",
-              outline: "none",
+              transition: "transform .15s ease, background .2s ease, box-shadow .2s ease",
             }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(180deg, #227847, #1b5d39)";
-              e.currentTarget.style.transform = "translateY(-1px)";
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = BTN_BASE_HOVER;
+              e.currentTarget.style.transform = "translateY(-2px)";
+              e.currentTarget.style.boxShadow = "0 14px 36px rgba(15,111,255,0.45)";
             }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.background =
-                "linear-gradient(180deg, #1c6a3f, #165434)";
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = BTN_BASE;
               e.currentTarget.style.transform = "translateY(0)";
+              e.currentTarget.style.boxShadow = "0 10px 26px rgba(15,111,255,0.35)";
             }}
-            onClick={goToForm}
           >
             Start Campaign
           </button>
         </div>
       </div>
 
-      {/* Centered Content */}
+      {/* Hero */}
       <div
         style={{
-          minHeight: isMobile ? "46vh" : "78vh",
+          minHeight: isMobile ? "48vh" : "78vh",
           display: "flex",
           flexDirection: "column",
-          justifyContent: "center",
           alignItems: "center",
-          gap: isMobile ? "1.05rem" : "2.2rem",
-          marginTop: isMobile ? "1.1rem" : 0,
-          padding: "0 18px",
+          justifyContent: "center",
           textAlign: "center",
+          gap: isMobile ? "1rem" : "1.6rem",
+          padding: "0 18px",
+          position: "relative",
+          zIndex: 1,
         }}
       >
         <h1
           style={{
-            fontFamily: MODERN_FONT,
-            fontSize: heroFontSize,
+            fontFamily: FONT,
+            fontSize: heroFont,
             fontWeight: 900,
             margin: 0,
+            letterSpacing: isMobile ? "-0.5px" : "-1px",
             lineHeight: 1.06,
-            letterSpacing: isMobile ? "-0.8px" : "-1.6px",
-            background:
-              "linear-gradient(90deg, #e9fff6 0%, #a7ffe1 40%, #7fd5ff 100%)",
+            background: `linear-gradient(90deg, #ffffff, ${ACCENT} 55%, ${ACCENT_2})`,
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent",
             textShadow: "0 10px 40px rgba(0,0,0,0.25)",
-            animation: "shine 6s ease-in-out infinite",
           }}
         >
           SmartMark
         </h1>
         <h2
           style={{
-            fontFamily: MODERN_FONT,
-            fontSize: heroSubFontSize,
+            fontFamily: FONT,
+            fontSize: heroSub,
             fontWeight: 600,
-            opacity: 0.94,
             margin: 0,
-            lineHeight: 1.18,
-            letterSpacing: isMobile ? "0" : "0.2px",
-            color: "rgba(255,255,255,0.96)",
-            textShadow: "0 6px 28px rgba(0,0,0,0.20)",
+            opacity: 0.96,
+            color: "#eaf5ff",
           }}
         >
           Effortless Ads in 5 Minutes
         </h2>
 
-        {/* Main CTA */}
         <button
-          style={{
-            marginTop: isMobile ? "1.2rem" : "2.2rem",
-            padding: launchBtnPadding,
-            fontSize: launchBtnSize,
-            background:
-              "linear-gradient(180deg, #1d6e41, #165434) /* base */",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.14)",
-            borderRadius: "999px",
-            fontWeight: 900,
-            letterSpacing: "1.2px",
-            boxShadow:
-              "0 16px 60px rgba(24,84,49,0.32), 0 3px 12px rgba(0,0,0,0.22)",
-            cursor: "pointer",
-            transition: "transform 0.15s, box-shadow 0.25s, background 0.2s",
-            textShadow: "0 2px 8px rgba(0,0,0,0.25)",
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.background =
-              "linear-gradient(180deg, #227847, #1b5d39)";
-            e.currentTarget.style.boxShadow =
-              "0 22px 70px rgba(30,106,62,0.38), 0 6px 16px rgba(0,0,0,0.26)";
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.background =
-              "linear-gradient(180deg, #1d6e41, #165434)";
-            e.currentTarget.style.boxShadow =
-              "0 16px 60px rgba(24,84,49,0.32), 0 3px 12px rgba(0,0,0,0.22)";
-          }}
           onClick={goToForm}
+          style={{
+            marginTop: isMobile ? "1.2rem" : "2rem",
+            padding: ctaPad,
+            fontSize: ctaSize,
+            background: BTN_BASE,
+            color: "#fff",
+            border: "none",
+            borderRadius: 999,
+            fontWeight: 900,
+            letterSpacing: "0.8px",
+            boxShadow: "0 16px 56px rgba(15,111,255,0.35)",
+            cursor: "pointer",
+            transition: "transform .15s ease, background .2s ease, box-shadow .2s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = "translateY(-2px)";
+            e.currentTarget.style.background = BTN_BASE_HOVER;
+            e.currentTarget.style.boxShadow = "0 22px 68px rgba(15,111,255,0.45)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.background = BTN_BASE;
+            e.currentTarget.style.boxShadow = "0 16px 56px rgba(15,111,255,0.35)";
+          }}
         >
           Launch Campaign
         </button>
       </div>
 
-      {/* Step-by-step Graph Section */}
+      {/* Process */}
       <div
         style={{
-          width: "100vw",
+          width: "100%",
           display: "flex",
           justifyContent: "center",
-          alignItems: "center",
-          padding: isMobile ? "2rem 0 1.1rem 0" : "3.4rem 0 1.6rem 0",
-          borderTop: "1px solid rgba(255,255,255,0.06)",
+          padding: isMobile ? "1.8rem 0 1.1rem" : "3rem 0 1.4rem",
         }}
       >
         <div
           style={{
             display: "flex",
-            flexDirection: stepColDirection,
+            flexDirection: stepDir,
             alignItems: "center",
             justifyContent: "center",
-            width: isMobile ? "94vw" : "1100px",
-            minHeight: isMobile ? 154 : 210,
-            borderRadius: "20px",
-            padding: isMobile ? "1.2rem 0.9rem" : "2rem 1.6rem",
             gap: stepGap,
-            ...cardGlass,
+            width: isMobile ? "92vw" : 1100,
+            borderRadius: 18,
+            padding: isMobile ? "1.1rem 0.9rem" : "1.6rem 1.4rem",
+            ...glass,
           }}
         >
-          {processSteps.map((step, idx) => (
-            <React.Fragment key={step.title}>
+          {processSteps.map((s, i) => (
+            <React.Fragment key={s.title}>
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
                   alignItems: "center",
-                  minWidth: stepMinWidth,
-                  maxWidth: stepMaxWidth,
-                  padding: isMobile ? "0.2rem 0.4rem" : "0.4rem 0.6rem",
-                  transition: "transform 0.18s",
+                  transition: "transform .15s ease",
                 }}
                 onMouseEnter={(e) =>
                   (e.currentTarget.style.transform = "translateY(-2px)")
@@ -355,34 +329,20 @@ const Landing = () => {
                   (e.currentTarget.style.transform = "translateY(0)")
                 }
               >
-                <div
-                  style={{
-                    fontSize: isMobile ? "2rem" : "2.4rem",
-                    marginBottom: "0.35rem",
-                    textShadow: "0 6px 18px rgba(0,0,0,0.25)",
-                  }}
-                >
-                  {step.icon}
+                <div style={{ fontSize: isMobile ? "2rem" : "2.2rem", marginBottom: 6 }}>
+                  {s.icon}
                 </div>
-                <div
-                  style={{
-                    fontWeight: 800,
-                    fontSize: isMobile ? "1.02rem" : "1.12rem",
-                    letterSpacing: "0.2px",
-                  }}
-                >
-                  {step.title}
+                <div style={{ fontWeight: 800, fontSize: isMobile ? 16 : 17 }}>
+                  {s.title}
                 </div>
               </div>
-              {idx !== processSteps.length - 1 && (
+              {i !== processSteps.length - 1 && (
                 <div
                   style={{
-                    fontSize: isMobile ? "1.3rem" : "2rem",
-                    color: "#32e897",
-                    opacity: 0.9,
+                    fontSize: isMobile ? "1.2rem" : "1.8rem",
+                    color: ACCENT,
                     transform: isMobile ? "rotate(90deg)" : "none",
-                    filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.24))",
-                    margin: isMobile ? "0.1rem 0" : "0 0.25rem",
+                    opacity: 0.9,
                   }}
                 >
                   →
@@ -393,121 +353,99 @@ const Landing = () => {
         </div>
       </div>
 
-      {/* Below diagram: tagline + Get Started */}
+      {/* Sub-CTA */}
       <div
         style={{
-          width: "100vw",
+          width: "100%",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          marginTop: belowDiagramMargin,
-          gap: "0.9rem",
+          gap: "0.8rem",
+          paddingBottom: "1.4rem",
         }}
       >
-        <div
-          style={{
-            color: "#8ff4cf",
-            fontWeight: 700,
-            fontSize: "1.05rem",
-            letterSpacing: "0.4px",
-            opacity: 0.96,
-            textShadow: "0 8px 24px rgba(0,0,0,0.25)",
-          }}
-        >
+        <div style={{ color: "#bfeeff", fontWeight: 700 }}>
           Effortless. No experience needed.
         </div>
         <button
-          style={{
-            padding: isMobile ? "0.75rem 1.8rem" : "1.05rem 2.6rem",
-            fontSize: isMobile ? "1.02rem" : "1.12rem",
-            background: "linear-gradient(180deg, #1e6f42, #155033)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.12)",
-            borderRadius: "999px",
-            fontWeight: 800,
-            letterSpacing: "0.9px",
-            boxShadow:
-              "0 10px 28px rgba(24,84,49,0.28), 0 2px 10px rgba(0,0,0,0.18)",
-            cursor: "pointer",
-            transition: "all 0.18s",
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.transform = "translateY(-1px)";
-            e.currentTarget.style.background =
-              "linear-gradient(180deg, #227847, #1b5d39)";
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.background =
-              "linear-gradient(180deg, #1e6f42, #155033)";
-          }}
           onClick={goToForm}
+          style={{
+            padding: isMobile ? "0.75rem 1.8rem" : "1rem 2.4rem",
+            fontSize: isMobile ? "1rem" : "1.1rem",
+            background: BTN_BASE,
+            color: "#fff",
+            border: "none",
+            borderRadius: 999,
+            fontWeight: 800,
+            boxShadow: "0 10px 26px rgba(15,111,255,0.35)",
+            cursor: "pointer",
+            transition: "transform .15s ease, background .2s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = "translateY(-2px)";
+            e.currentTarget.style.background = BTN_BASE_HOVER;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.background = BTN_BASE;
+          }}
         >
           Get Started
         </button>
       </div>
 
-      {/* FAQ Section */}
+      {/* FAQ */}
       <div
         ref={faqRef}
         style={{
-          width: "100vw",
+          width: "100%",
           padding: faqPad,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          justifyContent: "center",
+          position: "relative",
         }}
       >
         <h2
           style={{
             fontWeight: 900,
-            fontSize: faqFontSize,
-            marginBottom: isMobile ? "1.2rem" : "2.1rem",
-            letterSpacing: "-0.5px",
-            textShadow: "0 10px 30px rgba(0,0,0,0.25)",
-            background:
-              "linear-gradient(90deg, #e9fff6 0%, #a7ffe1 50%, #7fd5ff 100%)",
+            fontSize: faqTitle,
+            margin: 0,
+            marginBottom: isMobile ? "1.1rem" : "1.8rem",
+            background: `linear-gradient(90deg, #ffffff, ${ACCENT})`,
             WebkitBackgroundClip: "text",
             WebkitTextFillColor: "transparent",
           }}
         >
           Frequently Asked Questions
         </h2>
+
         <div
           style={{
-            width: faqWidth,
+            width: isMobile ? "92vw" : 880,
             display: "grid",
             gridTemplateColumns: "1fr",
-            gap: isMobile ? "1rem" : "1.2rem",
+            gap: isMobile ? "0.9rem" : "1.1rem",
           }}
         >
           {faqList.map((item) => (
             <div
               key={item.question}
               style={{
-                borderRadius: "16px",
-                padding: isMobile ? "1rem 1rem" : "1.15rem 1.25rem",
-                transition: "transform 0.18s, box-shadow 0.2s",
-                ...cardGlass,
+                borderRadius: 14,
+                padding: isMobile ? "1rem" : "1.1rem",
+                transition: "transform .15s ease, box-shadow .2s ease",
+                ...glass,
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = "translateY(-1px)";
-                e.currentTarget.style.boxShadow =
-                  "0 14px 36px rgba(0,0,0,0.28)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = "translateY(0)";
-                e.currentTarget.style.boxShadow = "0 10px 30px rgba(0,0,0,0.25)";
-              }}
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
             >
               <div
                 style={{
-                  color: "#7fffd4",
+                  color: ACCENT,
                   fontWeight: 800,
+                  marginBottom: 6,
                   fontSize: isMobile ? "1.02rem" : "1.08rem",
-                  marginBottom: "0.35rem",
-                  letterSpacing: "0.1px",
                 }}
               >
                 {item.question}
@@ -516,8 +454,8 @@ const Landing = () => {
                 style={{
                   color: "rgba(255,255,255,0.96)",
                   fontWeight: 500,
-                  fontSize: isMobile ? "0.98rem" : "1.02rem",
                   lineHeight: 1.6,
+                  fontSize: isMobile ? "0.98rem" : "1.02rem",
                 }}
               >
                 {item.answer}
@@ -525,24 +463,24 @@ const Landing = () => {
             </div>
           ))}
         </div>
-      </div>
 
-      {/* Local keyframes */}
-      <style>{`
-        @keyframes shine {
-          0% { filter: drop-shadow(0 10px 40px rgba(0,0,0,0.25)); }
-          50% { filter: drop-shadow(0 14px 56px rgba(0,0,0,0.32)); }
-          100% { filter: drop-shadow(0 10px 40px rgba(0,0,0,0.25)); }
-        }
-        @keyframes floatUp {
-          0%,100% { transform: translateY(0px); }
-          50% { transform: translateY(-18px); }
-        }
-        @keyframes floatDown {
-          0%,100% { transform: translateY(0px); }
-          50% { transform: translateY(14px); }
-        }
-      `}</style>
+        {/* Back to top — complements smooth scroll & avoids “stuck” feeling */}
+        <button
+          onClick={scrollToTop}
+          style={{
+            marginTop: "1.6rem",
+            padding: "0.7rem 1.3rem",
+            fontSize: "0.95rem",
+            color: "#fff",
+            background: "transparent",
+            borderRadius: 999,
+            cursor: "pointer",
+            ...glass,
+          }}
+        >
+          ↑ Back to top
+        </button>
+      </div>
     </div>
   );
 };
