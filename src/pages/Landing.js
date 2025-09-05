@@ -92,7 +92,7 @@ const Landing = () => {
         color: "#fff",
       }}
     >
-      {/* global tweaks (note: avoid comments that start with 'global' to keep ESLint happy) */}
+      {/* Site-wide tweaks (renamed to avoid ESLint 'global' directive parsing) */}
       <style>{`
         html, body, #root { height: 100%; background: ${BG_DARK}; margin: 0; }
         html, body { scroll-behavior: smooth; }
