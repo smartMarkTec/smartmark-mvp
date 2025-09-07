@@ -19,6 +19,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
+const cookieParser = require('cookie-parser');
 
 const app = express();
 
@@ -58,6 +59,7 @@ app.use((req, res, next) => {
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(cookieParser());
 
 // --- Serve generated assets for AI overlays ---
 let generatedPath;
@@ -84,6 +86,47 @@ app.get('/__fallback/1200.jpg', async (_req, res) => {
   } catch {
     res.status(500).send('fallback image error');
   }
+});
+
+/* =========================
+   BYPASS LOGIN (DEV ONLY)
+   =========================
+   If AUTH_BYPASS=1 is set in env, we short-circuit /auth/login
+   to immediately return success and set a simple session cookie.
+   This lets you test the UI and curls while the real auth handler
+   is hanging. Remove or set AUTH_BYPASS=0 to disable.
+*/
+app.post('/auth/login', (req, res, next) => {
+  if (process.env.AUTH_BYPASS === '1') {
+    const username = (req.body && String(req.body.username || 'guest').trim()) || 'guest';
+    const email = (req.body && String(req.body.password || '').trim()) || '';
+    const sid = `dev-${Buffer.from(username).toString('hex')}`;
+
+    res.cookie('sm_sid', sid, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    return res.json({
+      success: true,
+      user: { username, email },
+      bypass: true
+    });
+  }
+  // fall through to the real /auth router
+  return next();
+});
+
+// OPTIONAL: guard against any handler that “hangs” > 20s
+app.use((req, res, next) => {
+  res.setTimeout(20000, () => {
+    try {
+      res.status(504).json({ error: 'Gateway Timeout', route: req.originalUrl });
+    } catch {}
+  });
+  next();
 });
 
 // --- ROUTES ---
