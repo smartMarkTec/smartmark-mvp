@@ -4,16 +4,16 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 
-/* ===== Visual theme to match Landing ===== */
-const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
+// ===== Constants =====
+const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const BG_DARK = "#0b0f14";       // deep navy (same family as landing)
-const ACCENT = "#31e1ff";        // electric cyan
-const ACCENT_2 = "#7c4dff";      // violet
+const DARK_BG = "#0b0f14";         // match landing vibe (deep navy)
+const CARD_BG = "#202327";
+const PANEL_BG = "#191b22";
 const TEAL = "#14e7b9";
-
-/* ===== Behavior constants ===== */
-const SIDE_CHAT_LIMIT = 5;
+const TEAL_SOFT = "#1ad6b7";
+const TEXT_SOFT = "#cfe8ff";
+const SIDE_CHAT_LIMIT = 5; // cap for side Qs/statements
 
 // If you run a local backend with a CRA proxy, set USE_LOCAL_BACKEND=true
 const USE_LOCAL_BACKEND = false;
@@ -33,7 +33,7 @@ const ALLOWED_CTAS = [
   "Take a look", "Get started"
 ];
 
-/* ===== Small helpers for the image draft store ===== */
+// ===== Small helpers for the image draft store =====
 function loadImageDrafts() {
   try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; }
 }
@@ -52,6 +52,7 @@ function saveImageDraftById(id, patch) {
   return next;
 }
 function normalizeOverlayCTA(s = "") {
+  // Keep simple and familiar CTAs; title-case for the button label.
   const raw = String(s).trim();
   if (!raw) return "Learn more";
   const plain = raw.replace(/[!?.]+$/g, "").toLowerCase();
@@ -60,10 +61,11 @@ function normalizeOverlayCTA(s = "") {
   return chosen.replace(/\b\w/g, c => c.toUpperCase());
 }
 function creativeIdFromUrl(url = "") {
+  // Stable key per image URL
   return `img:${url}`;
 }
 
-/* ===== Decorative micro-component ===== */
+// ---------- Small UI helpers ----------
 function Dotty() {
   return (
     <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
@@ -91,22 +93,20 @@ function Dotty() {
 function dotStyle(n) {
   return { display: "inline-block", margin: "0 3px", fontSize: 36, color: "#29efb9", animationDelay: `${n * 0.13}s` };
 }
-
-/* ===== Modal for full image view ===== */
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
     <div style={{
       position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
-      background: "rgba(8,10,12,0.92)", display: "flex", alignItems: "center",
+      background: "rgba(11,15,20,0.96)", display: "flex", alignItems: "center",
       justifyContent: "center", zIndex: 9999
     }}>
-      <div style={{ position: "relative", background: "#0f1419", borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
+      <div style={{ position: "relative", background: "#181b20", borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
         <button
           onClick={onClose}
           style={{
             position: "absolute", top: 16, right: 16, zIndex: 2,
-            background: "#1a2026", color: "#fff", border: "none",
+            background: "#23262a", color: "#fff", border: "none",
             borderRadius: 20, padding: 8, cursor: "pointer"
           }}
         >
@@ -120,7 +120,7 @@ function ImageModal({ open, imageUrl, onClose }) {
             maxWidth: "90vw",
             maxHeight: "82vh",
             borderRadius: 16,
-            background: "#111",
+            background: "#222",
             margin: "40px 28px 28px 28px",
             boxShadow: "0 8px 38px #000b",
             fontFamily: AD_FONT
@@ -131,7 +131,6 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-/* ===== Small UI helpers (unchanged behavior) ===== */
 function MediaTypeToggle({ mediaType, setMediaType }) {
   const choices = [
     { key: "image", label: "Image" },
@@ -139,24 +138,24 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     { key: "video", label: "Video" }
   ];
   return (
-    <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "18px 0 14px 0" }}>
+    <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "18px 0 8px" }}>
       {choices.map((choice) => (
         <button
           key={choice.key}
           onClick={() => setMediaType(choice.key)}
           style={{
             fontWeight: 800,
-            fontSize: "1.18rem",
-            padding: "10px 28px",
+            fontSize: "1.06rem",
+            padding: "10px 24px",
             borderRadius: 12,
-            border: "none",
-            background: mediaType === choice.key ? "#1ad6b7" : "#23292c",
+            border: "1px solid rgba(255,255,255,0.06)",
+            background: mediaType === choice.key ? TEAL_SOFT : "#23292c",
             color: mediaType === choice.key ? "#0b0f14" : "#bcfff6",
             cursor: "pointer",
             boxShadow: mediaType === choice.key ? "0 2px 18px #1ad6b773" : "none",
-            transform: mediaType === choice.key ? "scale(1.09)" : "scale(1)",
+            transform: mediaType === choice.key ? "scale(1.08)" : "scale(1)",
             transition: "all 0.15s",
-            outline: mediaType === choice.key ? "3px solid #14e7b9" : "none"
+            outline: mediaType === choice.key ? "3px solid #14e7b955" : "none"
           }}
         >
           {choice.label}
@@ -165,6 +164,7 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     </div>
   );
 }
+
 function Arrow({ side = "left", onClick, disabled }) {
   return (
     <button
@@ -201,6 +201,7 @@ function Arrow({ side = "left", onClick, disabled }) {
     </button>
   );
 }
+
 function Dots({ count, active, onClick }) {
   return (
     <div style={{
@@ -221,7 +222,7 @@ function Dots({ count, active, onClick }) {
           style={{
             width: 8, height: 8, borderRadius: "50%",
             border: "none",
-            background: i === active ? TEAL : "rgba(255,255,255,0.55)",
+            background: i === active ? TEAL : "rgba(0,0,0,0.2)",
             cursor: "pointer", opacity: i === active ? 1 : 0.7
           }}
           aria-label={`Go to slide ${i + 1}`}
@@ -232,7 +233,7 @@ function Dots({ count, active, onClick }) {
   );
 }
 
-/* ===== Misc helpers ===== */
+// ---------- helpers ----------
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
@@ -261,16 +262,20 @@ function isLikelyQuestion(s) {
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
+// detect side statements to answer then re-prompt
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
   const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
   const hasBang = t.includes("!");
   return sentimental.test(t) || hasBang;
 }
+// Decide if this input should be treated as side chat (not captured as an answer)
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
+
   const t = (s || "").trim();
   if (!currentQ) return false;
+
   if (currentQ.key === "url") {
     const hasUrl = !!extractFirstUrl(t);
     return !hasUrl && t.split(/\s+/).length > 3;
@@ -284,7 +289,7 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
-/* ============================ Main Component ============================ */
+// =========== Main Component ============
 export default function FormPage() {
   const navigate = useNavigate();
   const chatBoxRef = useRef();
@@ -327,9 +332,9 @@ export default function FormPage() {
     () => creativeIdFromUrl(imageUrls[activeImage] || ""),
     [imageUrls, activeImage]
   );
-const [editHeadline, setEditHeadline] = useState("");
-const [editBody, setEditBody] = useState("");
-const [editCTA, setEditCTA] = useState("");
+  const [editHeadline, setEditHeadline] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editCTA, setEditCTA] = useState("");
 
   // helper for absolute URLs
   const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
@@ -572,9 +577,11 @@ const [editCTA, setEditCTA] = useState("");
     const value = (input || "").trim();
     if (!value) return;
 
+    // Always render the user's message
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
 
+    // Ready gate
     if (awaitingReady) {
       if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
         setAwaitingReady(false);
@@ -590,8 +597,12 @@ const [editCTA, setEditCTA] = useState("");
       }
     }
 
+    // Current question object (if any)
     const currentQ = CONVO_QUESTIONS[step];
 
+    // =========================
+    // FINAL STAGE (after all Qs)
+    // =========================
     if (step >= CONVO_QUESTIONS.length) {
       if (!hasGenerated && isGenerateTrigger(value)) {
         setLoading(true);
@@ -653,11 +664,17 @@ const [editCTA, setEditCTA] = useState("");
       return;
     }
 
+    // =========================
+    // IN-FLOW SIDE-CHAT
+    // =========================
     if (currentQ && isLikelySideChat(value, currentQ)) {
       await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
       return;
     }
 
+    // =========================
+    // Normal Q capture
+    // =========================
     if (currentQ) {
       let answerToSave = value;
       if (currentQ.key === "url") {
@@ -668,6 +685,7 @@ const [editCTA, setEditCTA] = useState("");
       const newAnswers = { ...answers, [currentQ.key]: answerToSave };
       setAnswers(newAnswers);
 
+      // Conditional skip
       let nextStep = step + 1;
       while (
         CONVO_QUESTIONS[nextStep] &&
@@ -709,83 +727,43 @@ const [editCTA, setEditCTA] = useState("");
     setVideoLoading(false);
   }
 
-  /* ============================ Render ============================ */
+  // ---------- Render ----------
   return (
-    <div
-      style={{
-        background: BG_DARK,
-        minHeight: "100vh",
-        fontFamily: MODERN_FONT,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        position: "relative",
-        overflowX: "hidden",
-        color: "#fff"
-      }}
-    >
-      {/* page-wide tweaks; ensures full-height bg and animated orbs */}
-      <style>{`
-        html, body, #root { height: 100%; background: ${BG_DARK}; margin: 0; }
-        @keyframes floatA { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-12px) } }
-        @keyframes floatB { 0%,100% { transform: translateY(0) } 50% { transform: translateY(10px) } }
-      `}</style>
-
-      {/* tech gradient glows */}
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          top: "-15vh",
-          right: "-10vw",
-          width: 720,
-          height: 720,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}33, transparent 70%)`,
-          filter: "blur(18px)",
-          animation: "floatA 18s ease-in-out infinite",
-          pointerEvents: "none"
-        }}
-      />
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          bottom: "-22vh",
-          left: "-14vw",
-          width: 800,
-          height: 800,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}2e, transparent 70%)`,
-          filter: "blur(18px)",
-          animation: "floatB 22s ease-in-out infinite",
-          pointerEvents: "none"
-        }}
-      />
-
+    <div style={{
+      background: DARK_BG,
+      minHeight: "100vh",
+      fontFamily: MODERN_FONT,
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      color: "#fff",
+      overflow: "visible" // keep scrolling smooth, nothing sticky/hidden
+    }}>
       {/* Top Bar with Back */}
       <div
         style={{
           width: "100%",
+          maxWidth: 1200,
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "28px 36px 0 36px",
-          boxSizing: "border-box",
-          maxWidth: 1200,
+          padding: "28px 24px 0",
+          boxSizing: "border-box"
         }}
       >
         <button
           onClick={() => navigate("/")}
           style={{
-            background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
-            color: "#eaf5ff",
-            border: "1px solid rgba(255,255,255,0.08)",
+            background: "rgba(32,40,36,0.88)",
+            color: "#fff",
+            border: "1px solid rgba(255,255,255,0.06)",
             borderRadius: "1.3rem",
             padding: "0.72rem 1.8rem",
             fontWeight: 700,
-            fontSize: "1.05rem",
-            letterSpacing: "0.7px",
+            fontSize: "1.02rem",
+            letterSpacing: "0.6px",
             cursor: "pointer",
-            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.35)",
             display: "flex",
             alignItems: "center",
             gap: 8
@@ -797,61 +775,72 @@ const [editCTA, setEditCTA] = useState("");
         </button>
       </div>
 
-      {/* Page Title */}
-      <div style={{ width: "100%", maxWidth: 1200, padding: "10px 36px 0", boxSizing: "border-box" }}>
-        <h1
-          style={{
-            margin: "18px 0 2px",
-            fontSize: "2.2rem",
-            fontWeight: 900,
-            background: `linear-gradient(90deg, #ffffff, ${ACCENT})`,
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-          }}
-        >
-          Create Your Ad
+      {/* Page Title — centered above GPT box */}
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 12 }}>
+        <h1 style={{
+          margin: "18px 0 10px",
+          fontSize: "2.4rem",
+          fontWeight: 900,
+          letterSpacing: "-0.5px",
+          textAlign: "center",
+          background: "linear-gradient(90deg, #ffffff, #31e1ff)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent"
+        }}>
+          Create your ad
         </h1>
-        <div style={{ color: "#bfeeff", opacity: 0.9, fontWeight: 600 }}>
-          Answer a few prompts, then preview your image or video ads instantly.
-        </div>
       </div>
 
-      {/* ---- Chat Panel (kept same structure & behavior) ---- */}
+      {/* ---- Chat Panel ---- */}
       <div style={{
         width: "100%",
-        maxWidth: 560,
+        maxWidth: 640,
         minHeight: 370,
-        marginTop: 26,
+        marginTop: 8,
         marginBottom: 24,
-        background: "#202327",
-        borderRadius: 18,
-        boxShadow: "0 2px 32px #181b2040",
-        padding: "38px 30px 22px 30px",
+        background: CARD_BG,
+        borderRadius: 20,
+        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
+        padding: "34px 28px 22px",
         display: "flex",
         flexDirection: "column",
         alignItems: "center"
       }}>
-        <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2 }}>
+        <div style={{
+          color: TEAL,
+          fontSize: 16,
+          fontWeight: 900,
+          marginBottom: 10,
+          letterSpacing: 1.1,
+          textTransform: "uppercase"
+        }}>
           AI Ad Manager
         </div>
 
         {/* Scrollable chat history */}
         <div ref={chatBoxRef} style={{
-          width: "100%", height: 160, maxHeight: 180, overflowY: "auto",
-          marginBottom: 16, paddingRight: 4, background: "#191b22", borderRadius: 12
+          width: "100%",
+          height: 168,
+          maxHeight: 188,
+          overflowY: "auto",
+          marginBottom: 16,
+          padding: 10,
+          background: PANEL_BG,
+          borderRadius: 14,
+          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)"
         }}>
           {chatHistory.slice(-24).map((msg, i) => (
             <div key={i}
               style={{
                 textAlign: msg.from === "gpt" ? "left" : "right",
                 margin: "8px 0",
-                color: msg.from === "gpt" ? "#22e3bd" : "#fff",
-                fontWeight: 600,
-                fontSize: 16,
-                background: msg.from === "gpt" ? "#161a1f" : "#14e7b9",
+                color: msg.from === "gpt" ? TEAL : "#0b0f14",
+                fontWeight: 700,
+                fontSize: 15.5,
+                background: msg.from === "gpt" ? "#14181c" : TEAL,
                 borderRadius: msg.from === "gpt" ? "14px 18px 18px 7px" : "16px 12px 7px 17px",
-                padding: "10px 18px",
-                maxWidth: "98%",
+                padding: "10px 14px",
+                maxWidth: "96%",
                 boxSizing: "border-box",
                 display: "inline-block",
                 overflowWrap: "anywhere",
@@ -863,7 +852,7 @@ const [editCTA, setEditCTA] = useState("");
           ))}
         </div>
 
-        {/* Prompt bar with Reset + Send (unchanged) */}
+        {/* Prompt bar with Reset + Send */}
         {!loading && (
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
             <button
@@ -873,13 +862,13 @@ const [editCTA, setEditCTA] = useState("");
               aria-label="Reset chat"
               style={{
                 background: "#23262a",
-                color: "#9cefdc",
+                color: TEXT_SOFT,
                 border: "none",
                 borderRadius: 12,
                 padding: "0 14px",
                 height: 48,
                 cursor: "pointer",
-                boxShadow: "0 1.5px 8px #1acbb932",
+                boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center"
@@ -902,11 +891,11 @@ const [editCTA, setEditCTA] = useState("");
                 borderRadius: 12,
                 border: "none",
                 outline: "none",
-                fontSize: "1.07rem",
+                fontSize: "1.06rem",
                 fontWeight: 600,
                 background: "#23262a",
                 color: "#fff",
-                boxShadow: "0 1.5px 8px #1acbb932"
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)"
               }}
             />
             <button
@@ -916,11 +905,12 @@ const [editCTA, setEditCTA] = useState("");
                 color: "#0b0f14",
                 border: "none",
                 borderRadius: 12,
-                fontWeight: 700,
-                fontSize: "1.35rem",
+                fontWeight: 800,
+                fontSize: "1.2rem",
                 padding: "0 22px",
                 cursor: "pointer",
-                height: 48
+                height: 48,
+                boxShadow: "0 8px 20px rgba(20,231,185,0.28)"
               }}
               disabled={loading}
               tabIndex={0}
@@ -935,42 +925,42 @@ const [editCTA, setEditCTA] = useState("");
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
       </div>
 
-      {/* Selector above previews (unchanged behavior) */}
+      {/* MediaTypeToggle above previews */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* Section header */}
-      <div style={{ width: "100%", maxWidth: 1200, padding: "0 24px 8px", boxSizing: "border-box" }}>
+      {/* Ad Previews label (now sits directly under the selector) */}
+      <div style={{ width: "100%", display: "flex", justifyContent: "center" }}>
         <div style={{
+          maxWidth: 1100,
+          width: "92%",
+          color: "#e8f4ff",
           fontWeight: 900,
-          letterSpacing: 0.2,
-          fontSize: "1.3rem",
-          color: "#eaf5ff",
-          opacity: 0.9
+          letterSpacing: "0.3px",
+          margin: "6px 0 8px",
+          opacity: 0.92
         }}>
           Ad Previews
         </div>
       </div>
 
-      {/* Ad Previews — keep card structure, improve outer layout only */}
+      {/* Ad Previews — two cards (Image + Video) */}
       <div style={{
-        width: "100%",
-        maxWidth: 1200,
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
+        display: "flex",
+        justifyContent: "center",
         gap: 34,
-        padding: "8px 24px 24px",
-        boxSizing: "border-box",
+        flexWrap: "wrap",
+        width: "100%",
+        paddingBottom: 14
       }}>
-        {/* ================= IMAGE CARD (unchanged internals) ================= */}
+        {/* IMAGE CARD */}
         <div style={{
           background: "#fff",
           borderRadius: 13,
           boxShadow: "0 2px 24px #16242714",
           minWidth: 340,
-          maxWidth: 420,
-          justifySelf: "center",
+          maxWidth: 390,
           flex: mediaType === "video" ? 0 : 1,
-          marginBottom: 0,
+          marginBottom: 20,
           padding: "0px 0px 14px 0px",
           border: "1.5px solid #eaeaea",
           fontFamily: AD_FONT,
@@ -994,7 +984,7 @@ const [editCTA, setEditCTA] = useState("");
             <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
             <button
               style={{
-                background: "#1ad6b7",
+                background: TEAL_SOFT,
                 color: "#222",
                 border: "none",
                 borderRadius: 12,
@@ -1056,7 +1046,7 @@ const [editCTA, setEditCTA] = useState("");
             )}
           </div>
 
-          {/* Copy block */}
+          {/* Copy block (shows edited values) */}
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {displayHeadline}
@@ -1067,8 +1057,8 @@ const [editCTA, setEditCTA] = useState("");
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
             <button style={{
-              background: "#14e7b9",
-              color: "#181b20",
+              background: TEAL,
+              color: "#0b0f14",
               fontWeight: 700,
               border: "none",
               borderRadius: 9,
@@ -1078,7 +1068,7 @@ const [editCTA, setEditCTA] = useState("");
             }}>{displayCTA}</button>
           </div>
 
-          {/* Image Edit toggle + fields (unchanged) */}
+          {/* Image Edit toggle + fields */}
           <button
             style={{
               position: "absolute",
@@ -1153,16 +1143,15 @@ const [editCTA, setEditCTA] = useState("");
           )}
         </div>
 
-        {/* ================= VIDEO CARD (unchanged internals) ================= */}
+        {/* VIDEO CARD */}
         <div style={{
           background: "#fff",
           borderRadius: 13,
           boxShadow: "0 2px 24px #16242714",
           minWidth: 340,
-          maxWidth: 420,
-          justifySelf: "center",
+          maxWidth: 390,
           flex: mediaType === "image" ? 0 : 1,
-          marginBottom: 0,
+          marginBottom: 20,
           padding: "0px 0px 14px 0px",
           border: "1.5px solid #eaeaea",
           fontFamily: AD_FONT,
@@ -1186,7 +1175,7 @@ const [editCTA, setEditCTA] = useState("");
             <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
             <button
               style={{
-                background: "#1ad6b7",
+                background: TEAL_SOFT,
                 color: "#222",
                 border: "none",
                 borderRadius: 12,
@@ -1268,8 +1257,8 @@ const [editCTA, setEditCTA] = useState("");
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
             <button style={{
-              background: "#14e7b9",
-              color: "#181b20",
+              background: TEAL,
+              color: "#0b0f14",
               fontWeight: 700,
               border: "none",
               borderRadius: 9,
@@ -1278,27 +1267,31 @@ const [editCTA, setEditCTA] = useState("");
               cursor: "pointer"
             }}>Learn More</button>
           </div>
+
+          {/* NOTE: Edit button removed for video card per request */}
         </div>
       </div>
 
       {/* Continue Button */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, marginBottom: 28 }}>
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 6, paddingBottom: 28 }}>
         <button
           style={{
             background: TEAL,
             color: "#0b0f14",
             border: "none",
             borderRadius: 13,
-            fontWeight: 700,
-            fontSize: "1.19rem",
-            padding: "18px 72px",
+            fontWeight: 800,
+            fontSize: "1.08rem",
+            padding: "16px 64px",
+            marginBottom: 6,
+            marginTop: 2,
             fontFamily: MODERN_FONT,
-            boxShadow: "0 16px 56px rgba(15,111,255,0.25)",
+            boxShadow: "0 10px 26px rgba(20,231,185,0.28)",
             cursor: "pointer",
-            transition: "transform .15s ease, background .2s ease"
+            transition: "transform .15s ease"
           }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+          onMouseEnter={(e)=> e.currentTarget.style.transform = 'translateY(-1px)'}
+          onMouseLeave={(e)=> e.currentTarget.style.transform = 'translateY(0)'}
           onClick={() => {
             const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
             const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
@@ -1353,9 +1346,6 @@ const [editCTA, setEditCTA] = useState("");
       </div>
 
       <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
-
-      {/* tiny spacer to guarantee no bottom bleed */}
-      <div style={{ height: 24 }} />
     </div>
   );
 }
