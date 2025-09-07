@@ -1,11 +1,10 @@
+// src/pages/Login.js
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
-/* ------------------------------------------------
-   Theme (aligned with your other pages)
-------------------------------------------------- */
+/* ---------------- Theme ---------------- */
 const ACCENT = "#14e7b9";
 const CARD_BG = "#34373de6";
 const EDGE = "rgba(255,255,255,0.06)";
@@ -35,7 +34,7 @@ const styles = `
     display:flex; flex-direction:column; gap:18px;
   }
   .sm-login-title {
-    margin:0; font-size:2rem; line-height:1.2; font-weight:900;
+    margin:0; font-size:2.1rem; line-height:1.2; font-weight:900;
     background: linear-gradient(90deg,#ffffff, ${ACCENT});
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     text-align:center;
@@ -56,7 +55,7 @@ const styles = `
   .sm-btn[disabled]{opacity:.7; cursor:not-allowed}
   .sm-btn:hover{transform:translateY(-2px)}
   .sm-topbar {
-    position:fixed; top:18px; left:18px; right:18px; display:flex; justify-content:flex-start; z-index:2;
+    position:fixed; top:18px; left:18px; right:18px; display:flex; justify-content:space-between; z-index:2;
   }
   .sm-topbar button {
     background:#202824e0; color:#fff; border:1px solid ${EDGE};
@@ -69,7 +68,6 @@ const styles = `
   }
 `;
 
-/* ---------------------- per-user namespacing ---------------------- */
 const USER_KEYS = [
   "smartmark_last_campaign_fields",
   "smartmark_last_budget",
@@ -82,7 +80,7 @@ function migrateToUserNamespace(user) {
   try {
     USER_KEYS.forEach((k) => {
       const v = localStorage.getItem(withUser(user, k));
-      if (v !== null && v !== undefined) return; // already migrated
+      if (v !== null && v !== undefined) return;
       const legacy = localStorage.getItem(k);
       if (legacy !== null && legacy !== undefined) {
         localStorage.setItem(withUser(user, k), legacy);
@@ -108,37 +106,64 @@ export default function Login() {
     setPassword(localStorage.getItem("smartmark_login_password") || "");
   }, []);
 
+  async function postJSONWithTimeout(url, body, ms = 15000) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      });
+      let data;
+      const txt = await res.text();
+      try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+      return { ok: res.ok, status: res.status, data };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true); setError("");
+
+    const u = username.trim();
+    const p = password.trim();
+    if (!u || !p) {
+      setError("Please enter both fields.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      const res = await fetch(`${BACKEND_URL}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: username.trim(),
-          password: password.trim()
-        })
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || "Login failed");
+      const { ok, status, data } = await postJSONWithTimeout(
+        `${BACKEND_URL}/auth/login`,
+        { username: u, password: p },
+        15000
+      );
+
+      if (!ok || !data?.success) {
+        const snippet = (data?.error || data?.raw || "").toString().slice(0, 200);
+        throw new Error(snippet || `Login failed (HTTP ${status}).`);
       }
 
-      // Persist current user & autofill
-      const u = username.trim();
+      // Persist user + autofill
       localStorage.setItem("sm_current_user", u);
       localStorage.setItem("smartmark_login_username", u);
-      localStorage.setItem("smartmark_login_password", password.trim());
+      localStorage.setItem("smartmark_login_password", p);
 
-      // Migrate legacy per-user state → namespaced keys
       migrateToUserNamespace(u);
-
-      setLoading(false);
       navigate("/setup");
     } catch (err) {
+      const msg =
+        err.name === "AbortError"
+          ? "Login timed out. Server didn’t respond."
+          : err.message || "Server error. Please try again.";
+      setError(msg);
+    } finally {
       setLoading(false);
-      setError(err.message || "Server error. Please try again.");
     }
   };
 
@@ -149,6 +174,8 @@ export default function Login() {
         <div className="sm-login-glow" />
         <div className="sm-topbar">
           <button onClick={() => navigate("/")}>← Back</button>
+          {/* intentionally no logo → home */}
+          <div />
         </div>
 
         <form className="sm-login-card" onSubmit={handleLogin}>
@@ -187,7 +214,7 @@ export default function Login() {
           {error && <div className="sm-err">{error}</div>}
 
           <button className="sm-btn" type="submit" disabled={loading}>
-            {loading ? "Logging in…" : "Login"}
+            {loading ? "Logging in..." : "Login"}
           </button>
         </form>
       </div>
