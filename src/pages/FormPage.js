@@ -389,7 +389,7 @@ export default function FormPage() {
     setAnswers({});
     setStep(0);
     setChatHistory([
-      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign. Ask me anything at any time.` },
+      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
       { from: "gpt", text: "Are you ready to get started? (yes/no)" }
     ]);
     setInput("");
