@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 /** Tech palette */
@@ -26,7 +26,7 @@ const faqList = [
   {
     question: "Do I need any ad experience or an agency?",
     answer:
-      "Nope! SmartMark automates campaign setup, creative creation, ad writing, and optimization. No marketing experience required. You can launch your first ad in minutes.",
+      "Nope! SmarteMark automates campaign setup, creative creation, ad writing, and optimization. No marketing experience required. You can launch your first ad in minutes.",
   },
 ];
 
@@ -46,21 +46,24 @@ const Landing = () => {
   const faqRef = useRef(null);
   const isMobile = useIsMobile();
 
-  // Start fresh when user explicitly chooses to create a new campaign
+  // Keep drafts unless user intentionally starts a new campaign
+  useEffect(() => {
+    // intentionally left empty: we DO NOT clear drafts on load
+  }, []);
+
+  /* navigation */
   const clearDraftsAndGoToForm = () => {
     try {
+      // clear only the keys related to starting a brand-new campaign
       localStorage.removeItem("sm_form_draft_v2");
+      localStorage.removeItem("draft_form_creatives");
       localStorage.removeItem("draft_form_creatives_v2");
       localStorage.removeItem("smartmark_media_selection");
-      localStorage.removeItem("smartmark_last_image_url");
-      localStorage.removeItem("smartmark_last_video_url");
-      localStorage.removeItem("smartmark_last_fb_video_id");
+      // keep user login autofill and per-user state
     } catch {}
     navigate("/form");
   };
 
-  /* navigation */
-  const goToForm = clearDraftsAndGoToForm;
   const goToLogin = () => navigate("/login");
 
   /* smooth scroll both ways; avoids scrollIntoView quirks */
@@ -100,7 +103,7 @@ const Landing = () => {
         color: "#fff",
       }}
     >
-      {/* Site-wide tweaks */}
+      {/* Site-wide tweaks (renamed to avoid ESLint 'global' directive parsing) */}
       <style>{`
         html, body, #root { height: 100%; background: ${BG_DARK}; margin: 0; }
         html, body { scroll-behavior: smooth; }
@@ -142,6 +145,7 @@ const Landing = () => {
       <div
         style={{
           width: "100%",
+          display: "flex",
           flexDirection: isMobile ? "column" : "row",
           justifyContent: isMobile ? "center" : "space-between",
           alignItems: "center",
@@ -149,7 +153,6 @@ const Landing = () => {
           gap: isMobile ? "0.9rem" : 0,
           position: "relative",
           zIndex: 2,
-          display: "flex",
         }}
       >
         <button
@@ -192,7 +195,7 @@ const Landing = () => {
             Login
           </button>
           <button
-            onClick={goToForm}
+            onClick={clearDraftsAndGoToForm}
             style={{
               padding: isMobile ? "0.7rem 1.6rem" : "0.95rem 2.2rem",
               fontSize: isMobile ? "1.02rem" : "1.08rem",
@@ -250,7 +253,7 @@ const Landing = () => {
             textShadow: "0 10px 40px rgba(0,0,0,0.25)",
           }}
         >
-          SmartMark
+          SmarteMark
         </h1>
         <h2
           style={{
@@ -266,7 +269,7 @@ const Landing = () => {
         </h2>
 
         <button
-          onClick={goToForm}
+          onClick={clearDraftsAndGoToForm}
           style={{
             marginTop: isMobile ? "1.2rem" : "2rem",
             padding: ctaPad,
@@ -296,7 +299,7 @@ const Landing = () => {
         </button>
       </div>
 
-      {/* Process */}
+      {/* Process — grid keeps emojis centered above labels; arrows aligned */}
       <div
         style={{
           width: "100%",
@@ -354,7 +357,15 @@ const Landing = () => {
                   >
                     {s.icon}
                   </span>
-                  <span style={{ marginTop: 8, maxWidth: 220, fontWeight: 800, fontSize: isMobile ? 16 : 17, lineHeight: 1.25 }}>
+                  <span
+                    style={{
+                      marginTop: 8,
+                      maxWidth: 220,
+                      fontWeight: 800,
+                      fontSize: isMobile ? 16 : 17,
+                      lineHeight: 1.25,
+                    }}
+                  >
                     {s.title}
                   </span>
                 </div>
@@ -394,7 +405,7 @@ const Landing = () => {
           Effortless. No experience needed.
         </div>
         <button
-          onClick={goToForm}
+          onClick={clearDraftsAndGoToForm}
           style={{
             padding: isMobile ? "0.75rem 1.8rem" : "1rem 2.4rem",
             fontSize: isMobile ? "1rem" : "1.1rem",
@@ -463,8 +474,12 @@ const Landing = () => {
                 transition: "transform .15s ease, box-shadow .2s ease",
                 ...glass,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
-              onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.transform = "translateY(-1px)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.transform = "translateY(0)")
+              }
             >
               <div
                 style={{
@@ -507,7 +522,7 @@ const Landing = () => {
         </button>
       </div>
 
-      {/* tiny spacer */}
+      {/* tiny spacer so the bottom gradient never reveals page background */}
       <div style={{ height: 24 }} />
     </div>
   );
