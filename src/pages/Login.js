@@ -2,98 +2,124 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-const DARK_GREEN = "#185431";
-const BACKEND_URL = "https://smartmark-mvp.onrender.com"; // Set to your deployed backend
+const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
-// Responsive CSS
-const loginStyles = `
-  .smartmark-login-bg {
+/* ------------------------------------------------
+   Theme (aligned with FormPage/CampaignSetup vibe)
+------------------------------------------------- */
+const ACCENT = "#14e7b9";
+const CARD_BG = "#34373de6";
+const EDGE = "rgba(255,255,255,0.06)";
+const FONT = "'Poppins','Inter','Segoe UI',Arial,sans-serif";
+
+const styles = `
+  .sm-login-wrap {
     min-height: 100vh;
-    background: linear-gradient(135deg, #232529 0%, #34373d 100%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Poppins', 'Times New Roman', Times, serif;
+    background: linear-gradient(135deg,#11161c 0%, #1a2026 100%);
+    display:flex; align-items:center; justify-content:center;
+    font-family:${FONT};
+    position:relative; overflow:hidden; padding:24px;
   }
-  .smartmark-login-form {
-    background: #34373de6;
-    padding: 2.8rem 2.2rem;
-    border-radius: 2.1rem;
-    box-shadow: 0 8px 40px 0 rgba(24,84,49,0.12);
-    display: flex;
-    flex-direction: column;
-    min-width: 340px;
-    gap: 1.7rem;
-    border: none;
+  .sm-login-glow {
+    position:fixed; right:-12vw; top:-18vh; width:720px; height:720px;
+    background: radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%);
+    filter: blur(20px); pointer-events:none; z-index:0;
   }
-  .smartmark-login-logo {
-    position: fixed;
-    top: 30px;
-    right: 36px;
-    z-index: 99;
+  .sm-login-card {
+    position:relative; z-index:1;
+    width: 100%; max-width: 520px;
+    background:${CARD_BG};
+    border: 1px solid ${EDGE};
+    border-radius: 22px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+    padding: 28px 26px;
+    display:flex; flex-direction:column; gap:18px;
   }
-  .smartmark-login-back-btn {
-    position: fixed;
-    top: 32px;
-    left: 72px;
-    background: rgba(52,55,61,0.82);
-    color: #fff;
-    border: none;
-    border-radius: 1.1rem;
-    padding: 0.65rem 1.6rem;
-    font-weight: 700;
-    font-size: 1rem;
-    letter-spacing: 0.8px;
-    cursor: pointer;
-    box-shadow: 0 2px 12px 0 rgba(24,84,49,0.09);
-    z-index: 20;
-    transition: background 0.18s;
-    font-family: 'Poppins', 'Times New Roman', Times, serif;
+  .sm-login-title {
+    margin:0; font-size:2.1rem; line-height:1.2; font-weight:900;
+    background: linear-gradient(90deg,#ffffff, ${ACCENT});
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    text-align:center;
   }
-  @media (max-width: 600px) {
-    .smartmark-login-form {
-      min-width: unset;
-      width: 96vw;
-      padding: 1.2rem 0.4rem;
-      border-radius: 1.1rem;
-    }
-    .smartmark-login-bg {
-      padding: 0 0.5rem;
-    }
-    .smartmark-login-logo {
-      top: 14px;
-      right: 10px;
-    }
-    .smartmark-login-back-btn {
-      top: 18px;
-      left: 10px;
-      font-size: 0.97rem;
-      padding: 0.5rem 1.05rem;
-    }
+  .sm-login-sub {
+    margin-top:-6px; color:#bdfdf0; text-align:center; font-weight:700; opacity:.9;
+  }
+  .sm-input {
+    width:100%; padding:14px 16px;
+    background:#23262a; color:#fff; border-radius:12px;
+    border:1px solid ${EDGE}; outline:none;
+    font-size:1.05rem; font-weight:700;
+    box-shadow: 0 1.5px 8px rgba(20,231,185,.22);
+  }
+  .sm-btn {
+    width:100%; padding:14px 16px; border-radius:14px; border:none;
+    background:${ACCENT}; color:#0e1519; font-weight:900; font-size:1.08rem;
+    cursor:pointer; transition: transform .15s;
+    box-shadow: 0 2px 16px rgba(12,196,190,0.25);
+  }
+  .sm-btn[disabled]{opacity:.7; cursor:not-allowed}
+  .sm-btn:hover{transform:translateY(-2px)}
+  .sm-topbar {
+    position:fixed; top:18px; left:18px; right:18px; display:flex; justify-content:space-between; z-index:2;
+  }
+  .sm-topbar button {
+    background:#202824e0; color:#fff; border:1px solid ${EDGE};
+    border-radius: 1.1rem; padding:10px 18px; font-weight:800; letter-spacing:.6px;
+    cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.25)
+  }
+  .sm-signup {
+    margin-top:-2px; color:#bfc1c4; text-align:right; font-weight:600;
+  }
+  .sm-signup a { color:#1ec885; cursor:pointer; text-decoration:underline; }
+  .sm-err {
+    color:#F87171; background:#232529; border-radius:10px; padding:.8rem;
+    font-weight:700; text-align:center;
   }
 `;
 
-const Login = () => {
-  const navigate = useNavigate();
+/* ---------------------- helpers ---------------------- */
+const USER_KEYS = [
+  "smartmark_last_campaign_fields",
+  "smartmark_last_budget",
+  "smartmark_last_selected_account",
+  "smartmark_last_selected_pageId",
+  "smartmark_media_selection"
+];
+const withUser = (u, key) => `u:${u}:${key}`;
+function migrateToUserNamespace(user) {
+  try {
+    USER_KEYS.forEach((k) => {
+      const v = localStorage.getItem(withUser(user, k));
+      if (v !== null && v !== undefined) return; // already migrated
+      const legacy = localStorage.getItem(k);
+      if (legacy !== null && legacy !== undefined) {
+        localStorage.setItem(withUser(user, k), legacy);
+      }
+    });
+    // also keep login autofill per user
+    const un = localStorage.getItem("smartmark_login_username");
+    const pw = localStorage.getItem("smartmark_login_password");
+    if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
+    if (pw) localStorage.setItem(withUser(user, "smartmark_login_password"), pw);
+  } catch {}
+}
 
-  // Improved: Always use the most up-to-date localStorage on mount, not on first render only
+export default function Login() {
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(""); // email field (demo)
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Prefill from last used values (CampaignSetup writes these)
   useEffect(() => {
-    // Always check fresh values on mount
     setUsername(localStorage.getItem("smartmark_login_username") || "");
     setPassword(localStorage.getItem("smartmark_login_password") || "");
   }, []);
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError("");
-
+    setLoading(true); setError("");
     try {
       const res = await fetch(`${BACKEND_URL}/auth/login`, {
         method: "POST",
@@ -101,162 +127,92 @@ const Login = () => {
         body: JSON.stringify({
           username: username.trim(),
           password: password.trim()
-        }),
+        })
       });
       const data = await res.json();
-      if (data.success) {
-        // Save most recent user login info for autofill
-        localStorage.setItem("smartmark_login_username", username.trim());
-        localStorage.setItem("smartmark_login_password", password.trim());
-        localStorage.setItem("smartmark_last_email", password.trim());
-        localStorage.setItem("smartmark_last_cashapp", username.trim());
-        setError("");
-        setLoading(false);
-        navigate("/setup");
-      } else {
-        setError(data.error || "Login failed. Please check your details.");
-        setLoading(false);
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Login failed");
       }
-    } catch (err) {
-      setError("Server error. Please try again.");
+
+      // Persist current user & autofill
+      const u = username.trim();
+      localStorage.setItem("sm_current_user", u);
+      localStorage.setItem("smartmark_login_username", u);
+      localStorage.setItem("smartmark_login_password", password.trim());
+
+      // Migrate legacy per-user state → namespaced keys
+      migrateToUserNamespace(u);
+
       setLoading(false);
+      navigate("/setup"); // load their existing stuff
+    } catch (err) {
+      setLoading(false);
+      setError(err.message || "Server error. Please try again.");
     }
   };
 
   return (
     <>
-      <style>{loginStyles}</style>
-      <div className="smartmark-login-bg">
-        <div className="smartmark-login-logo">
-          <SmartMarkLogoButton />
+      <style>{styles}</style>
+      <div className="sm-login-wrap">
+        <div className="sm-login-glow" />
+        <div className="sm-topbar">
+          <button onClick={() => navigate("/")}>← Back</button>
+          <div style={{ marginRight: 6 }}>
+            <SmartMarkLogoButton />
+          </div>
         </div>
 
-        {/* Back Button */}
-        <button
-          onClick={() => navigate("/")}
-          className="smartmark-login-back-btn"
-        >
-          ← Back
-        </button>
+        <form className="sm-login-card" onSubmit={handleLogin}>
+          <h1 className="sm-login-title">Welcome back</h1>
+          <div className="sm-login-sub">Log in to manage your campaigns</div>
 
-        <form
-          onSubmit={handleLogin}
-          className="smartmark-login-form"
-        >
-          {/* The only addition: sign up prompt */}
-          <div style={{ marginBottom: "-1.0rem", fontSize: "0.97rem", color: "#bfc1c4", textAlign: "right", fontWeight: 500 }}>
+          <div className="sm-signup">
             Don&apos;t have an account?{" "}
-            <span
-              style={{ color: "#1ec885", cursor: "pointer", textDecoration: "underline" }}
-              onClick={() => navigate("/form")}
-              tabIndex={0}
-              role="button"
-            >
-              Click here
-            </span>
+            <a onClick={() => navigate("/form")}>Create a campaign</a>
           </div>
-          <h2
-            style={{
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: "2.1rem",
-              textAlign: "center",
-              marginBottom: "1.4rem",
-              letterSpacing: "-0.5px",
-              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-            }}
-          >
-            Login
-          </h2>
-          <input
-            type="text"
-            name="username"
-            placeholder="CashApp Username"
-            value={username}
-            onChange={(e) => {
-              setUsername(e.target.value);
-              setError("");
-            }}
-            required
-            style={{
-              padding: "1.1rem",
-              borderRadius: "1.2rem",
-              border: "none",
-              fontSize: "1.15rem",
-              outline: "none",
-              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-            }}
-            autoComplete="username"
-          />
-          <input
-            type="email"
-            name="password"
-            placeholder="Email Address"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              setError("");
-            }}
-            required
-            style={{
-              padding: "1.1rem",
-              borderRadius: "1.2rem",
-              border: "none",
-              fontSize: "1.15rem",
-              outline: "none",
-              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-            }}
-            autoComplete="email"
-          />
-          {error && (
-            <div
-              style={{
-                color: "#F87171",
-                background: "#232529",
-                borderRadius: "0.7rem",
-                padding: "0.8rem 0.8rem",
-                fontWeight: 600,
-                fontSize: "1.01rem",
-                textAlign: "center",
-                marginTop: "-0.8rem",
-                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              }}
-            >
-              {error}
-            </div>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              padding: "1.08rem 0",
-              borderRadius: "2.2rem",
-              border: "none",
-              background: DARK_GREEN,
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: "1.21rem",
-              letterSpacing: "1.2px",
-              cursor: loading ? "not-allowed" : "pointer",
-              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              boxShadow: "0 2px 16px 0 rgba(24,84,49,0.16)",
-              transition: "background 0.18s",
-              marginTop: "0.6rem",
-              opacity: loading ? 0.7 : 1,
-            }}
-            onMouseOver={(e) => {
-              if (!loading) e.target.style.background = "#1e6a3e";
-            }}
-            onMouseOut={(e) => {
-              if (!loading) e.target.style.background = DARK_GREEN;
-            }}
-          >
-            {loading ? "Logging in..." : "Login"}
+
+          <div>
+            <label style={{ color: "#cfe9e2", fontWeight: 800, fontSize: ".95rem" }}>
+              CashApp Username
+            </label>
+            <input
+              className="sm-input"
+              type="text"
+              autoComplete="username"
+              placeholder="CashApp Username"
+              value={username}
+              onChange={e => { setUsername(e.target.value); setError(""); }}
+              required
+            />
+          </div>
+
+          <div>
+            <label style={{ color: "#cfe9e2", fontWeight: 800, fontSize: ".95rem" }}>
+              Email Address
+            </label>
+            <input
+              className="sm-input"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError(""); }}
+              required
+            />
+          </div>
+
+          {error && <div className="sm-err">{error}</div>}
+
+          <button className="sm-btn" type="submit" disabled={loading}>
+            {loading ? "Logging in…" : "Login"}
           </button>
+
+          <div style={{ textAlign:"center", color:"#8cefdc", fontWeight:700 }}>
+            or <a style={{ color:"#bdfdf0", textDecoration:"underline", cursor:"pointer" }} onClick={() => navigate("/form")}>Start a new campaign</a>
+          </div>
         </form>
       </div>
     </>
   );
-};
-
-export default Login;
+}

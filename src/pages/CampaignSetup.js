@@ -5,9 +5,9 @@ import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa"
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
 
-/* ======================= Visual Theme (polish only) ======================= */
+/* ======================= Visual Theme ======================= */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const DARK_BG = "#11161c";           // page background (slightly cooler than landing for variety)
+const DARK_BG = "#11161c";
 const GLOW_TEAL = "rgba(20,231,185,0.22)";
 const CARD_BG = "rgba(27, 32, 37, 0.92)";
 const EDGE_BG = "rgba(35, 39, 42, 0.85)";
@@ -23,27 +23,31 @@ const WHITE = "#ffffff";
 
 const CREATIVE_HEIGHT = 150;
 
-/* ======================= (unchanged business constants) ======================= */
+/* ======================= Business constants ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
-/* Responsive helper (unchanged) */
-const useIsMobile = () => {
-  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
-  React.useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 900);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-  return isMobile;
+/* ----------------------- user-scoped storage ----------------------- */
+const currentUser = () => localStorage.getItem("sm_current_user") || "__anon__";
+const withUser = (key) => `u:${currentUser()}:${key}`;
+const lsGet = (key, def = "") => {
+  try {
+    const v = localStorage.getItem(withUser(key));
+    if (v !== null && v !== undefined) return v;
+    const legacy = localStorage.getItem(key);
+    return legacy !== null && legacy !== undefined ? legacy : def;
+  } catch { return def; }
+};
+const lsSet = (key, val) => {
+  try { localStorage.setItem(withUser(key), val); } catch {}
+  try { localStorage.setItem(key, val); } catch {}
 };
 
-/* FB connection flag (unchanged) */
-const FB_CONN_KEY = "smartmark_fb_connected";
-const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
+const FB_CONN_KEY_BASE = "smartmark_fb_connected";
+const FB_CONN_KEY = () => withUser(FB_CONN_KEY_BASE);
 
-const CREATIVE_MAP_KEY = (actId) => `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
+const CREATIVE_MAP_KEY = (actId) => withUser(`sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`);
 const readCreativeMap = (actId) => {
   try { return JSON.parse(localStorage.getItem(CREATIVE_MAP_KEY(actId)) || "{}"); }
   catch { return {}; }
@@ -105,7 +109,7 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-/* ---- helpers for Image/Video carousels (unchanged logic) ---- */
+/* ---- helpers for Image/Video carousels ---- */
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
@@ -206,7 +210,7 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- Minimal metrics row (unchanged logic, refreshed styles) ---------- */
+/* ---------- Minimal metrics row ---------- */
 function MetricsRow({ metrics }) {
   const cards = useMemo(() => {
     const m = metrics || {};
@@ -267,47 +271,30 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /* ---------------------------- State (unchanged) ---------------------------- */
+  /* ---------------------------- State ---------------------------- */
   const [form, setForm] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {}; }
+    try { return JSON.parse(lsGet("smartmark_last_campaign_fields") || "{}"); }
     catch { return {}; }
   });
-  const [budget, setBudget] = useState(() => localStorage.getItem("smartmark_last_budget") || "");
-  const [cashapp, setCashapp] = useState(() => localStorage.getItem("smartmark_login_username") || "");
-  const [email, setEmail] = useState(() => localStorage.getItem("smartmark_login_password") || "");
-  const [selectedAccount, setSelectedAccount] = useState(() => localStorage.getItem("smartmark_last_selected_account") || "");
-  const [selectedPageId, setSelectedPageId] = useState(() => localStorage.getItem("smartmark_last_selected_pageId") || "");
+  const [budget, setBudget] = useState(() => lsGet("smartmark_last_budget") || "");
+  const [cashapp, setCashapp] = useState(() => lsGet("smartmark_login_username") || "");
+  const [email, setEmail] = useState(() => lsGet("smartmark_login_password") || "");
+  const [selectedAccount, setSelectedAccount] = useState(() => lsGet("smartmark_last_selected_account") || "");
+  const [selectedPageId, setSelectedPageId] = useState(() => lsGet("smartmark_last_selected_pageId") || "");
+
   const [fbConnected, setFbConnected] = useState(() => {
-    const conn = localStorage.getItem(FB_CONN_KEY);
+    const conn = lsGet(FB_CONN_KEY_BASE);
     if (conn) {
       const { connected, time } = JSON.parse(conn);
-      if (connected && Date.now() - time < FB_CONN_MAX_AGE) return true;
-      localStorage.removeItem(FB_CONN_KEY);
+      if (connected && Date.now() - time < 3 * 24 * 60 * 60 * 1000) return true;
+      localStorage.removeItem(FB_CONN_KEY());
       return false;
     }
     return false;
   });
-
   const touchFbConn = () => {
-    try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+    try { localStorage.setItem(FB_CONN_KEY(), JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
   };
-
-  useEffect(() => {
-    const saved = localStorage.getItem(FB_CONN_KEY);
-    if (!saved) return;
-    const { connected, time } = JSON.parse(saved);
-    if (!connected) return;
-    if (Date.now() - time > FB_CONN_MAX_AGE) {
-      localStorage.removeItem(FB_CONN_KEY);
-      setFbConnected(false);
-      return;
-    }
-    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(() => { setFbConnected(true); touchFbConn(); })
-      .catch(() => { localStorage.removeItem(FB_CONN_KEY); setFbConnected(false); });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const [adAccounts, setAdAccounts] = useState([]);
 
@@ -334,7 +321,7 @@ const CampaignSetup = () => {
     images: [],
     videos: [],
     fbVideoIds: [],
-    mediaSelection: (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+    mediaSelection: (location.state?.mediaSelection || lsGet("smartmark_media_selection") || "both").toLowerCase()
   });
 
   const {
@@ -348,14 +335,16 @@ const CampaignSetup = () => {
   } = location.state || {};
 
   const [startDate, setStartDate] = useState(() => {
-    const existing = form.startDate || "";
-    return existing || new Date(defaultStart).toISOString().slice(0, 16);
+    try {
+      const raw = (form.startDate || "");
+      return raw || new Date(defaultStart).toISOString().slice(0,16);
+    } catch { return new Date(defaultStart).toISOString().slice(0,16); }
   });
   const [endDate, setEndDate] = useState(() => {
     const s = startDate ? new Date(startDate) : defaultStart;
     const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
-    e.setSeconds(0, 0);
-    return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
+    e.setSeconds(0,0);
+    return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0,16);
   });
 
   const sd = new Date(startDate || defaultStart);
@@ -404,7 +393,7 @@ const CampaignSetup = () => {
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
   useEffect(() => {
-    const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
+    const lastFields = lsGet("smartmark_last_campaign_fields");
     if (lastFields) {
       const f = JSON.parse(lastFields);
       setForm(f);
@@ -420,7 +409,7 @@ const CampaignSetup = () => {
         mediaSelection: (draftObj.mediaSelection || navMediaSelection || "both").toLowerCase()
       });
       if (draftObj.mediaSelection) {
-        localStorage.setItem("smartmark_media_selection", String(draftObj.mediaSelection).toLowerCase());
+        lsSet("smartmark_media_selection", String(draftObj.mediaSelection).toLowerCase());
       }
     };
 
@@ -458,7 +447,7 @@ const CampaignSetup = () => {
     try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
     try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
     try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
-    try { localStorage.removeItem("smartmark_media_selection"); } catch {}
+    try { lsSet("smartmark_media_selection", "both"); } catch {}
     setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
     if (expandedId === "__DRAFT__") setExpandedId(null);
   };
@@ -467,14 +456,14 @@ const CampaignSetup = () => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
-      try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+      try { localStorage.setItem(FB_CONN_KEY(), JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
       window.history.replaceState({}, document.title, "/setup");
     }
   }, [location.search]);
 
   useEffect(() => {
     if (fbConnected) {
-      try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+      try { localStorage.setItem(FB_CONN_KEY(), JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
     }
   }, [fbConnected]);
 
@@ -489,7 +478,7 @@ const CampaignSetup = () => {
         fbVideoIds: ids.length ? ids : dc.fbVideoIds,
         mediaSelection: (navMediaSelection || dc.mediaSelection || "both").toLowerCase()
       }));
-      localStorage.setItem("smartmark_media_selection", (navMediaSelection || "both").toLowerCase());
+      lsSet("smartmark_media_selection", (navMediaSelection || "both").toLowerCase());
     }
   }, [navImageUrls, navVideoUrls, navFbVideoIds, navMediaSelection]);
 
@@ -516,7 +505,7 @@ const CampaignSetup = () => {
       .then(res => res.json())
       .then(data => {
         const list = Array.isArray(data) ? data : (data?.data || []);
-        const activeCount = list.filter(c => (c.status || c.effective_status) === "ACTIVE" || (c.status || c.effective_status) === "PAUSED").length;
+        const activeCount = (list || []).filter(c => (c.status || c.effective_status) === "ACTIVE" || (c.status || c.effective_status) === "PAUSED").length;
         setCampaignCount(activeCount);
       })
       .catch(() => {});
@@ -556,12 +545,12 @@ const CampaignSetup = () => {
       .catch(() => setMetricsMap(m => ({ ...m, [expandedId]: { impressions:"--", clicks:"--", ctr:"--" } })));
   }, [expandedId, selectedAccount]);
 
-  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
-  useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
-  useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
-  useEffect(() => { localStorage.setItem("smartmark_login_password", email); }, [email]);
-  useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
-  useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
+  useEffect(() => { lsSet("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
+  useEffect(() => { lsSet("smartmark_last_budget", budget); }, [budget]);
+  useEffect(() => { lsSet("smartmark_login_username", cashapp); }, [cashapp]);
+  useEffect(() => { lsSet("smartmark_login_password", email); }, [email]);
+  useEffect(() => { lsSet("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
+  useEffect(() => { lsSet("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
@@ -600,16 +589,16 @@ const CampaignSetup = () => {
         `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
         { method: "POST", credentials: "include" }
       );
-      if (!r.ok) throw new Error("Archive failed");
-      setCampaignStatus("ARCHIVED");
-      setLaunched(false);
-      setLaunchResult(null);
-      setSelectedCampaignId("");
-      setMetricsMap(m => {
-        const { [selectedCampaignId]: _, ...rest } = m;
-        return rest;
-      });
-      alert("Campaign deleted.");
+        if (!r.ok) throw new Error("Archive failed");
+        setCampaignStatus("ARCHIVED");
+        setLaunched(false);
+        setLaunchResult(null);
+        setSelectedCampaignId("");
+        setMetricsMap(m => {
+          const { [selectedCampaignId]: _, ...rest } = m;
+          return rest;
+        });
+        alert("Campaign deleted.");
     } catch {
       alert("Could not delete campaign.");
     }
@@ -805,7 +794,7 @@ const CampaignSetup = () => {
         overflowX: "hidden"
       }}
     >
-      {/* subtle teal glow background like other pages */}
+      {/* subtle teal glow background */}
       <div
         aria-hidden
         style={{
@@ -898,7 +887,7 @@ const CampaignSetup = () => {
           zIndex: 1
         }}
       >
-        {/* LEFT PANE (forms) — visual only */}
+        {/* LEFT PANE */}
         <main style={{
           background: EDGE_BG,
           border: `1px solid ${INPUT_BORDER}`,
@@ -920,7 +909,7 @@ const CampaignSetup = () => {
             onClick={() => {
               window.location.href = `${backendUrl}/auth/facebook`;
               setFbConnected(true);
-              try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+              try { localStorage.setItem(FB_CONN_KEY(), JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
             }}
             style={{
               padding: "14px 22px",
@@ -1056,7 +1045,7 @@ const CampaignSetup = () => {
               />
             </div>
             <div style={{ color: "#b7f5c2", fontWeight: 800 }}>
-              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: WHITE }}>${total.toFixed(2)}</span>
+              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${calculateFees(budget).fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: WHITE }}>${calculateFees(budget).total.toFixed(2)}</span>
             </div>
 
             {parseFloat(budget) >= 3 && (
@@ -1164,7 +1153,7 @@ const CampaignSetup = () => {
           )}
         </main>
 
-        {/* RIGHT PANE (campaigns & previews) — layout preserved */}
+        {/* RIGHT PANE */}
         <aside style={{
           flex: 1,
           display: "flex",
@@ -1378,7 +1367,7 @@ const CampaignSetup = () => {
                             Creatives
                           </div>
 
-                          {/* Images Card (structure preserved) */}
+                          {/* Images Card */}
                           {showImages && (
                             <div style={{
                               background:"#ffffff",
@@ -1408,7 +1397,7 @@ const CampaignSetup = () => {
                             </div>
                           )}
 
-                          {/* Videos Card (structure preserved) */}
+                          {/* Videos Card */}
                           {showVideos && (
                             <div style={{
                               background:"#ffffff",
@@ -1520,7 +1509,18 @@ const CampaignSetup = () => {
   );
 };
 
-/* ---------- tiny UI helpers for compact wheels (unchanged logic) ---------- */
+/* ----------------------- Responsive helper ----------------------- */
+const useIsMobile = () => {
+  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
+  React.useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth <= 900);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return isMobile;
+};
+
+/* ---------- tiny UI helpers ---------- */
 function Picker({ value, options, onChange }) {
   return (
     <select
