@@ -1,39 +1,39 @@
-// src/pages/FormPage.js
 /* eslint-disable */
+// src/pages/FormPage.js
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 
-// ===== Constants =====
+/* --------- Palette / fonts (kept distinct from homepage for light variety) --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "#0b0f14";         // match landing vibe (deep navy)
-const CARD_BG = "#202327";
-const PANEL_BG = "#191b22";
+const DARK_BG = "#11161c";           // slightly cooler than landing
+const SURFACE = "#1b2026";            // card background
 const TEAL = "#14e7b9";
-const TEAL_SOFT = "#1ad6b7";
-const TEXT_SOFT = "#cfe8ff";
-const SIDE_CHAT_LIMIT = 5; // cap for side Qs/statements
+const TEAL_SOFT = "rgba(20,231,185,0.22)";
+const EDGE = "rgba(255,255,255,0.06)";
 
-// If you run a local backend with a CRA proxy, set USE_LOCAL_BACKEND=true
+const SIDE_CHAT_LIMIT = 5;
+
+/* -------- Backend endpoints (unchanged) -------- */
 const USE_LOCAL_BACKEND = false;
 const PROD_BACKEND = "https://smartmark-mvp.onrender.com";
-const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;               // For assets returned like /generated/xxx
-const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;     // <-- absolute API for Vercel
+const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;               // for asset paths
+const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;     // absolute API for Vercel
 
-// ---- Draft persistence (24h TTL) ----
-const DRAFT_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+/* -------- Draft persistence -------- */
+const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 
-// ---- Image copy edit store (per image) ----
+/* -------- Image copy edit store -------- */
 const IMAGE_DRAFTS_KEY = "smartmark.imageDrafts.v1";
 const ALLOWED_CTAS = [
   "Shop now", "Buy now", "Learn more", "Visit us", "Check us out",
   "Take a look", "Get started"
 ];
 
-// ===== Small helpers for the image draft store =====
+/* ===== image draft helpers ===== */
 function loadImageDrafts() {
   try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; }
 }
@@ -52,7 +52,6 @@ function saveImageDraftById(id, patch) {
   return next;
 }
 function normalizeOverlayCTA(s = "") {
-  // Keep simple and familiar CTAs; title-case for the button label.
   const raw = String(s).trim();
   if (!raw) return "Learn more";
   const plain = raw.replace(/[!?.]+$/g, "").toLowerCase();
@@ -61,11 +60,10 @@ function normalizeOverlayCTA(s = "") {
   return chosen.replace(/\b\w/g, c => c.toUpperCase());
 }
 function creativeIdFromUrl(url = "") {
-  // Stable key per image URL
   return `img:${url}`;
 }
 
-// ---------- Small UI helpers ----------
+/* ===== small UI bits ===== */
 function Dotty() {
   return (
     <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
@@ -79,29 +77,27 @@ function Dotty() {
           30% { transform: translateY(-7px);}
           60% { transform: translateY(0);}
         }
-        .dotty-dot {
-          display: inline-block;
-          animation: bounceDot 1.2s infinite;
-        }
-        .dotty-dot:nth-child(2) { animation-delay: 0.15s;}
-        .dotty-dot:nth-child(3) { animation-delay: 0.3s;}
+        .dotty-dot { display:inline-block; animation:bounceDot 1.2s infinite; }
+        .dotty-dot:nth-child(2) { animation-delay: .15s; }
+        .dotty-dot:nth-child(3) { animation-delay: .3s; }
         `}
       </style>
     </span>
   );
 }
 function dotStyle(n) {
-  return { display: "inline-block", margin: "0 3px", fontSize: 36, color: "#29efb9", animationDelay: `${n * 0.13}s` };
+  return { display: "inline-block", margin: "0 3px", fontSize: 36, color: TEAL, animationDelay: `${n * 0.13}s` };
 }
+
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
     <div style={{
-      position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
-      background: "rgba(11,15,20,0.96)", display: "flex", alignItems: "center",
-      justifyContent: "center", zIndex: 9999
+      position: "fixed", inset: 0,
+      background: "rgba(10,12,15,0.92)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999
     }}>
-      <div style={{ position: "relative", background: "#181b20", borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
+      <div style={{ position: "relative", background: SURFACE, borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
         <button
           onClick={onClose}
           style={{
@@ -121,7 +117,7 @@ function ImageModal({ open, imageUrl, onClose }) {
             maxHeight: "82vh",
             borderRadius: 16,
             background: "#222",
-            margin: "40px 28px 28px 28px",
+            margin: "40px 28px 28px",
             boxShadow: "0 8px 38px #000b",
             fontFamily: AD_FONT
           }}
@@ -138,24 +134,28 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     { key: "video", label: "Video" }
   ];
   return (
-    <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "18px 0 8px" }}>
+    <div style={{
+      display: "flex", gap: 16, justifyContent: "center", alignItems: "center",
+      margin: "18px 0 8px 0"
+    }}>
       {choices.map((choice) => (
         <button
           key={choice.key}
           onClick={() => setMediaType(choice.key)}
           style={{
-            fontWeight: 800,
+            fontWeight: 900,
             fontSize: "1.06rem",
             padding: "10px 24px",
             borderRadius: 12,
-            border: "1px solid rgba(255,255,255,0.06)",
-            background: mediaType === choice.key ? TEAL_SOFT : "#23292c",
-            color: mediaType === choice.key ? "#0b0f14" : "#bcfff6",
+            border: `1px solid ${EDGE}`,
+            background: mediaType === choice.key ? TEAL : "#23292c",
+            color: mediaType === choice.key ? "#0e1418" : "#bcfff6",
             cursor: "pointer",
-            boxShadow: mediaType === choice.key ? "0 2px 18px #1ad6b773" : "none",
-            transform: mediaType === choice.key ? "scale(1.08)" : "scale(1)",
+            boxShadow: mediaType === choice.key ? `0 2px 18px ${TEAL_SOFT}` : "none",
+            transform: mediaType === choice.key ? "scale(1.06)" : "scale(1)",
             transition: "all 0.15s",
-            outline: mediaType === choice.key ? "3px solid #14e7b955" : "none"
+            outline: mediaType === choice.key ? `3px solid ${TEAL_SOFT}` : "none",
+            willChange: "transform"
           }}
         >
           {choice.label}
@@ -178,15 +178,10 @@ function Arrow({ side = "left", onClick, disabled }) {
         background: "rgba(0,0,0,0.55)",
         color: "#fff",
         border: "none",
-        width: 34,
-        height: 34,
-        borderRadius: "50%",
+        width: 34, height: 34, borderRadius: "50%",
         cursor: disabled ? "not-allowed" : "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        opacity: disabled ? 0.45 : 0.85,
-        zIndex: 3
+        display: "flex", alignItems: "center", justifyContent: "center",
+        opacity: disabled ? 0.45 : 0.85, zIndex: 3, willChange: "transform"
       }}
       aria-label={side === "left" ? "Previous" : "Next"}
       title={side === "left" ? "Previous" : "Next"}
@@ -205,15 +200,9 @@ function Arrow({ side = "left", onClick, disabled }) {
 function Dots({ count, active, onClick }) {
   return (
     <div style={{
-      position: "absolute",
-      bottom: 8,
-      left: 0,
-      right: 0,
-      display: "flex",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: 8,
-      zIndex: 3
+      position: "absolute", bottom: 8, left: 0, right: 0,
+      display: "flex", justifyContent: "center", alignItems: "center",
+      gap: 8, zIndex: 3
     }}>
       {Array.from({ length: count }).map((_, i) => (
         <button
@@ -222,7 +211,7 @@ function Dots({ count, active, onClick }) {
           style={{
             width: 8, height: 8, borderRadius: "50%",
             border: "none",
-            background: i === active ? TEAL : "rgba(0,0,0,0.2)",
+            background: i === active ? TEAL : "rgba(255,255,255,0.55)",
             cursor: "pointer", opacity: i === active ? 1 : 0.7
           }}
           aria-label={`Go to slide ${i + 1}`}
@@ -233,7 +222,7 @@ function Dots({ count, active, onClick }) {
   );
 }
 
-// ---------- helpers ----------
+/* ===== helpers ===== */
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
@@ -245,15 +234,9 @@ async function safeJson(res) {
   try { return await res.json(); } catch { throw new Error("Bad JSON"); }
 }
 
-// URL helpers to avoid false "question" positives
 const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
-function stripUrls(s = "") {
-  return (s || "").replace(URL_REGEX, "");
-}
-function extractFirstUrl(s = "") {
-  const m = (s || "").match(URL_REGEX);
-  return m ? m[0] : null;
-}
+function stripUrls(s = "") { return (s || "").replace(URL_REGEX, ""); }
+function extractFirstUrl(s = "") { const m = (s || "").match(URL_REGEX); return m ? m[0] : null; }
 function isLikelyQuestion(s) {
   const t = (s || "").trim().toLowerCase();
   if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
@@ -262,17 +245,14 @@ function isLikelyQuestion(s) {
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
-// detect side statements to answer then re-prompt
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
   const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
   const hasBang = t.includes("!");
   return sentimental.test(t) || hasBang;
 }
-// Decide if this input should be treated as side chat (not captured as an answer)
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
-
   const t = (s || "").trim();
   if (!currentQ) return false;
 
@@ -289,7 +269,7 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
-// =========== Main Component ============
+/* ========================= Main Component ========================= */
 export default function FormPage() {
   const navigate = useNavigate();
   const chatBoxRef = useRef();
@@ -301,14 +281,12 @@ export default function FormPage() {
     { from: "gpt", text: "Are you ready to get started? (yes/no)" }
   ]);
 
-  // ---- Chat state
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [sideChatCount, setSideChatCount] = useState(0);
   const [hasGenerated, setHasGenerated] = useState(false);
 
-  // Ad preview state
   const [mediaType, setMediaType] = useState("both");
   const [result, setResult] = useState(null);
   const [imageUrls, setImageUrls] = useState([]);
@@ -326,7 +304,7 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
 
-  // ---- Image copy editing state ----
+  /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
   const currentImageId = useMemo(
     () => creativeIdFromUrl(imageUrls[activeImage] || ""),
@@ -336,15 +314,15 @@ export default function FormPage() {
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
 
-  // helper for absolute URLs
+  /* helper for absolute URLs */
   const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
 
-  // Scroll chat to bottom
+  /* Scroll chat to bottom (no laggy observers/sticky elements) */
   useEffect(() => {
     if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory]);
 
-  // ---- Restore full form draft on mount (24h TTL) ----
+  /* Restore draft */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(FORM_DRAFT_KEY);
@@ -358,11 +336,7 @@ export default function FormPage() {
       if (data) {
         setAnswers(data.answers || {});
         setStep(data.step ?? 0);
-        setChatHistory(
-          Array.isArray(data.chatHistory) && data.chatHistory.length
-            ? data.chatHistory
-            : chatHistory
-        );
+        setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
         setMediaType(data.mediaType || "both");
         setResult(data.result || null);
         setImageUrls(data.imageUrls || []);
@@ -378,7 +352,7 @@ export default function FormPage() {
     // eslint-disable-next-line
   }, []);
 
-  // Hydrate edit fields whenever active image or result changes
+  /* Hydrate edit fields on active image/result change */
   useEffect(() => {
     const draft = currentImageId ? getImageDraftById(currentImageId) : null;
     setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
@@ -386,7 +360,7 @@ export default function FormPage() {
     setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? "Learn more"));
   }, [currentImageId, result]);
 
-  // Debounced autosave while typing
+  /* Debounced autosave of image edits */
   useEffect(() => {
     if (!currentImageId) return;
     const t = setTimeout(() => {
@@ -403,7 +377,7 @@ export default function FormPage() {
   const displayBody = (editBody || result?.body || "Ad copy goes here...");
   const displayCTA = normalizeOverlayCTA(editCTA || result?.image_overlay_text || "Learn more");
 
-  // ---- Hard reset chat + draft ----
+  /* Hard reset chat + draft */
   function hardResetChat() {
     if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
     try {
@@ -439,7 +413,7 @@ export default function FormPage() {
     setEditCTA("");
   }
 
-  // ---- Autosave (throttled) the entire FormPage session + creatives ----
+  /* Autosave whole session + creatives (throttled) */
   useEffect(() => {
     const t = setTimeout(() => {
       const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
@@ -495,7 +469,7 @@ export default function FormPage() {
   function handleImageClick(url) { setShowModal(true); setModalImg(url); }
   function handleModalClose() { setShowModal(false); setModalImg(""); }
 
-  // ---- Ask OpenAI (used for side chat & FAQs) ----
+  /* ---- Ask OpenAI (side chat / FAQs) ---- */
   async function askGPT(userText) {
     try {
       const history = chatHistory.slice(-8).map(m => ({
@@ -517,23 +491,18 @@ export default function FormPage() {
     }
   }
 
-  // central side-chat handler with cap + optional follow-up prompt
   async function handleSideChat(userText, followUpPrompt) {
     if (sideChatCount >= SIDE_CHAT_LIMIT) {
-      if (followUpPrompt) {
-        setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
-      }
+      if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
       return;
     }
     setSideChatCount(c => c + 1);
     const reply = await askGPT(userText);
     if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
-    if (followUpPrompt) {
-      setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
-    }
+    if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
-  // ---- API calls (defensive) ----
+  /* ---- API calls ---- */
   async function fetchImageOnce(token) {
     try {
       const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
@@ -570,18 +539,16 @@ export default function FormPage() {
     }
   }
 
-  // ---- Chat flow handler ----
+  /* ---- Chat flow ---- */
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
     const value = (input || "").trim();
     if (!value) return;
 
-    // Always render the user's message
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
 
-    // Ready gate
     if (awaitingReady) {
       if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
         setAwaitingReady(false);
@@ -597,12 +564,8 @@ export default function FormPage() {
       }
     }
 
-    // Current question object (if any)
     const currentQ = CONVO_QUESTIONS[step];
 
-    // =========================
-    // FINAL STAGE (after all Qs)
-    // =========================
     if (step >= CONVO_QUESTIONS.length) {
       if (!hasGenerated && isGenerateTrigger(value)) {
         setLoading(true);
@@ -664,17 +627,11 @@ export default function FormPage() {
       return;
     }
 
-    // =========================
-    // IN-FLOW SIDE-CHAT
-    // =========================
     if (currentQ && isLikelySideChat(value, currentQ)) {
       await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
       return;
     }
 
-    // =========================
-    // Normal Q capture
-    // =========================
     if (currentQ) {
       let answerToSave = value;
       if (currentQ.key === "url") {
@@ -685,7 +642,6 @@ export default function FormPage() {
       const newAnswers = { ...answers, [currentQ.key]: answerToSave };
       setAnswers(newAnswers);
 
-      // Conditional skip
       let nextStep = step + 1;
       while (
         CONVO_QUESTIONS[nextStep] &&
@@ -706,7 +662,7 @@ export default function FormPage() {
     }
   }
 
-  // Regenerate actions
+  /* Regenerations */
   async function handleRegenerateImage() {
     setImageLoading(true);
     const [a, b] = await Promise.all([fetchImageOnce(getRandomString()), fetchImageOnce(getRandomString())]);
@@ -727,132 +683,144 @@ export default function FormPage() {
     setVideoLoading(false);
   }
 
-  // ---------- Render ----------
+  /* ---------------------- Render ---------------------- */
   return (
-    <div style={{
-      background: DARK_BG,
-      minHeight: "100vh",
-      fontFamily: MODERN_FONT,
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      color: "#fff",
-      overflow: "visible" // keep scrolling smooth, nothing sticky/hidden
-    }}>
-      {/* Top Bar with Back */}
+    <div
+      style={{
+        background: DARK_BG,
+        minHeight: "100vh",
+        fontFamily: MODERN_FONT,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+      }}
+    >
+      {/* global smooth scroll & subtle glow like homepage (but teal) */}
+      <style>{`
+        html, body { scroll-behavior: smooth; }
+      `}</style>
+      <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          top: "-15vh",
+          right: "-10vw",
+          width: 640,
+          height: 640,
+          background: "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
+          filter: "blur(18px)",
+          pointerEvents: "none",
+          zIndex: 0
+        }}
+      />
+
+      {/* Top row with Back (left) and centered Title above GPT box */}
+      <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={() => navigate("/")}
+            style={{
+              background: "#202824e0",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "1.1rem",
+              padding: "10px 18px",
+              fontWeight: 700,
+              fontSize: "1rem",
+              letterSpacing: "0.6px",
+              cursor: "pointer",
+              boxShadow: "0 2px 10px 0 rgba(0,0,0,0.25)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8
+            }}
+            aria-label="Back"
+          >
+            <FaArrowLeft />
+            Back
+          </button>
+        </div>
+
+        {/* Centered page heading directly over GPT box */}
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "2.25rem",
+              lineHeight: 1.2,
+              letterSpacing: "-0.5px",
+              color: "#e9feff",
+              textAlign: "center",
+              fontWeight: 900,
+            }}
+          >
+            Create your ad
+          </h1>
+        </div>
+      </div>
+
+      {/* ---- GPT chat panel (unchanged layout/logic) ---- */}
       <div
         style={{
           width: "100%",
-          maxWidth: 1200,
+          maxWidth: 780,
+          marginTop: 18,
+          marginBottom: 22,
+          background: SURFACE,
+          borderRadius: 18,
+          border: `1px solid ${EDGE}`,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+          padding: "28px 28px 22px 28px",
           display: "flex",
-          justifyContent: "space-between",
+          flexDirection: "column",
           alignItems: "center",
-          padding: "28px 24px 0",
-          boxSizing: "border-box"
+          zIndex: 1
         }}
       >
-        <button
-          onClick={() => navigate("/")}
-          style={{
-            background: "rgba(32,40,36,0.88)",
-            color: "#fff",
-            border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: "1.3rem",
-            padding: "0.72rem 1.8rem",
-            fontWeight: 700,
-            fontSize: "1.02rem",
-            letterSpacing: "0.6px",
-            cursor: "pointer",
-            boxShadow: "0 2px 12px rgba(0,0,0,0.35)",
-            display: "flex",
-            alignItems: "center",
-            gap: 8
-          }}
-          aria-label="Back"
-        >
-          <FaArrowLeft />
-          Back
-        </button>
-      </div>
-
-      {/* Page Title — centered above GPT box */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 12 }}>
-        <h1 style={{
-          margin: "18px 0 10px",
-          fontSize: "2.4rem",
-          fontWeight: 900,
-          letterSpacing: "-0.5px",
-          textAlign: "center",
-          background: "linear-gradient(90deg, #ffffff, #31e1ff)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent"
-        }}>
-          Create your ad
-        </h1>
-      </div>
-
-      {/* ---- Chat Panel ---- */}
-      <div style={{
-        width: "100%",
-        maxWidth: 640,
-        minHeight: 370,
-        marginTop: 8,
-        marginBottom: 24,
-        background: CARD_BG,
-        borderRadius: 20,
-        boxShadow: "0 10px 30px rgba(0,0,0,0.35)",
-        padding: "34px 28px 22px",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center"
-      }}>
-        <div style={{
-          color: TEAL,
-          fontSize: 16,
-          fontWeight: 900,
-          marginBottom: 10,
-          letterSpacing: 1.1,
-          textTransform: "uppercase"
-        }}>
+        <div style={{ color: "#9dffe9", fontSize: 15, fontWeight: 900, marginBottom: 10, letterSpacing: 1.6, textTransform: "uppercase" }}>
           AI Ad Manager
         </div>
 
-        {/* Scrollable chat history */}
-        <div ref={chatBoxRef} style={{
-          width: "100%",
-          height: 168,
-          maxHeight: 188,
-          overflowY: "auto",
-          marginBottom: 16,
-          padding: 10,
-          background: PANEL_BG,
-          borderRadius: 14,
-          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)"
-        }}>
+        {/* history */}
+        <div
+          ref={chatBoxRef}
+          style={{
+            width: "100%",
+            minHeight: 160,
+            maxHeight: 200,
+            overflowY: "auto",
+            marginBottom: 16,
+            padding: 12,
+            background: "#151a1f",
+            borderRadius: 12,
+            border: `1px solid ${EDGE}`
+          }}
+        >
           {chatHistory.slice(-24).map((msg, i) => (
-            <div key={i}
+            <div
+              key={i}
               style={{
                 textAlign: msg.from === "gpt" ? "left" : "right",
                 margin: "8px 0",
-                color: msg.from === "gpt" ? TEAL : "#0b0f14",
+                color: msg.from === "gpt" ? "#22e3bd" : "#0e1519",
                 fontWeight: 700,
-                fontSize: 15.5,
-                background: msg.from === "gpt" ? "#14181c" : TEAL,
+                fontSize: 15,
+                background: msg.from === "gpt" ? "#11161b" : TEAL,
                 borderRadius: msg.from === "gpt" ? "14px 18px 18px 7px" : "16px 12px 7px 17px",
                 padding: "10px 14px",
                 maxWidth: "96%",
-                boxSizing: "border-box",
                 display: "inline-block",
                 overflowWrap: "anywhere",
-                wordBreak: "break-word",
-                whiteSpace: "pre-wrap"
-              }}>
+                whiteSpace: "pre-wrap",
+                border: msg.from === "gpt" ? `1px solid ${EDGE}` : "none",
+              }}
+            >
               {msg.text}
             </div>
           ))}
         </div>
 
-        {/* Prompt bar with Reset + Send */}
+        {/* prompt bar */}
         {!loading && (
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
             <button
@@ -862,13 +830,13 @@ export default function FormPage() {
               aria-label="Reset chat"
               style={{
                 background: "#23262a",
-                color: TEXT_SOFT,
-                border: "none",
+                color: "#9cefdc",
+                border: `1px solid ${EDGE}`,
                 borderRadius: 12,
                 padding: "0 14px",
                 height: 48,
                 cursor: "pointer",
-                boxShadow: "0 2px 10px rgba(0,0,0,0.3)",
+                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center"
@@ -889,28 +857,27 @@ export default function FormPage() {
                 flex: 1,
                 padding: "14px 18px",
                 borderRadius: 12,
-                border: "none",
+                border: `1px solid ${EDGE}`,
                 outline: "none",
-                fontSize: "1.06rem",
-                fontWeight: 600,
+                fontSize: "1.05rem",
+                fontWeight: 700,
                 background: "#23262a",
                 color: "#fff",
-                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)"
+                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`
               }}
             />
             <button
               type="submit"
               style={{
                 background: TEAL,
-                color: "#0b0f14",
+                color: "#0e1519",
                 border: "none",
                 borderRadius: 12,
-                fontWeight: 800,
+                fontWeight: 900,
                 fontSize: "1.2rem",
-                padding: "0 22px",
+                padding: "0 18px",
                 cursor: "pointer",
-                height: 48,
-                boxShadow: "0 8px 20px rgba(20,231,185,0.28)"
+                height: 48
               }}
               disabled={loading}
               tabIndex={0}
@@ -921,37 +888,22 @@ export default function FormPage() {
           </form>
         )}
 
-        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 600 }}>AI generating...</div>}
+        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 700 }}>AI generating...</div>}
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
       </div>
 
-      {/* MediaTypeToggle above previews */}
+      {/* MediaType Toggle */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* Ad Previews label (now sits directly under the selector) */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center" }}>
-        <div style={{
-          maxWidth: 1100,
-          width: "92%",
-          color: "#e8f4ff",
-          fontWeight: 900,
-          letterSpacing: "0.3px",
-          margin: "6px 0 8px",
-          opacity: 0.92
-        }}>
+      {/* Ad Previews label centered directly under the selector (beneath "Both") */}
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
+        <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>
           Ad Previews
         </div>
       </div>
 
-      {/* Ad Previews — two cards (Image + Video) */}
-      <div style={{
-        display: "flex",
-        justifyContent: "center",
-        gap: 34,
-        flexWrap: "wrap",
-        width: "100%",
-        paddingBottom: 14
-      }}>
+      {/* ---- Ad Preview Cards (unchanged structure) ---- */}
+      <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
         {/* IMAGE CARD */}
         <div style={{
           background: "#fff",
@@ -984,7 +936,7 @@ export default function FormPage() {
             <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
             <button
               style={{
-                background: TEAL_SOFT,
+                background: "#1ad6b7",
                 color: "#222",
                 border: "none",
                 borderRadius: 12,
@@ -1046,7 +998,7 @@ export default function FormPage() {
             )}
           </div>
 
-          {/* Copy block (shows edited values) */}
+          {/* Copy block */}
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {displayHeadline}
@@ -1057,8 +1009,8 @@ export default function FormPage() {
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
             <button style={{
-              background: TEAL,
-              color: "#0b0f14",
+              background: "#14e7b9",
+              color: "#181b20",
               fontWeight: 700,
               border: "none",
               borderRadius: 9,
@@ -1175,7 +1127,7 @@ export default function FormPage() {
             <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
             <button
               style={{
-                background: TEAL_SOFT,
+                background: "#1ad6b7",
                 color: "#222",
                 border: "none",
                 borderRadius: 12,
@@ -1257,8 +1209,8 @@ export default function FormPage() {
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
             <button style={{
-              background: TEAL,
-              color: "#0b0f14",
+              background: "#14e7b9",
+              color: "#181b20",
               fontWeight: 700,
               border: "none",
               borderRadius: 9,
@@ -1267,31 +1219,26 @@ export default function FormPage() {
               cursor: "pointer"
             }}>Learn More</button>
           </div>
-
-          {/* NOTE: Edit button removed for video card per request */}
         </div>
       </div>
 
-      {/* Continue Button */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 6, paddingBottom: 28 }}>
+      {/* Continue */}
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, paddingBottom: 28 }}>
         <button
           style={{
             background: TEAL,
-            color: "#0b0f14",
+            color: "#0e1519",
             border: "none",
             borderRadius: 13,
-            fontWeight: 800,
+            fontWeight: 900,
             fontSize: "1.08rem",
-            padding: "16px 64px",
-            marginBottom: 6,
-            marginTop: 2,
+            padding: "16px 56px",
+            marginBottom: 4,
             fontFamily: MODERN_FONT,
-            boxShadow: "0 10px 26px rgba(20,231,185,0.28)",
+            boxShadow: `0 2px 16px ${TEAL_SOFT}`,
             cursor: "pointer",
-            transition: "transform .15s ease"
+            transition: "background 0.18s"
           }}
-          onMouseEnter={(e)=> e.currentTarget.style.transform = 'translateY(-1px)'}
-          onMouseLeave={(e)=> e.currentTarget.style.transform = 'translateY(0)'}
           onClick={() => {
             const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
             const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
@@ -1350,7 +1297,7 @@ export default function FormPage() {
   );
 }
 
-/* ====== Conversation questions (unchanged) ====== */
+/* ===== Conversation questions (unchanged) ===== */
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
