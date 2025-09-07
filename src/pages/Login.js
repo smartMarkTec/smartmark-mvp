@@ -2,101 +2,121 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
-const DARK_GREEN = "#185431";
-const BACKEND_URL = "https://smartmark-mvp.onrender.com"; // Set to your deployed backend
+const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
-// Responsive CSS
-const loginStyles = `
-  .smartmark-login-bg {
+/* ------------------------------------------------
+   Theme (aligned with FormPage/CampaignSetup vibe)
+------------------------------------------------- */
+const ACCENT = "#14e7b9";
+const CARD_BG = "#34373de6";
+const EDGE = "rgba(255,255,255,0.06)";
+const FONT = "'Poppins','Inter','Segoe UI',Arial,sans-serif";
+
+const styles = `
+  .sm-login-wrap {
     min-height: 100vh;
-    background: linear-gradient(135deg, #232529 0%, #34373d 100%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Poppins', 'Times New Roman', Times, serif;
+    background: linear-gradient(135deg,#11161c 0%, #1a2026 100%);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    font-family:${FONT};
+    position:relative; overflow:hidden; padding:24px;
+    gap: 16px;
   }
-  .smartmark-login-form {
-    background: #34373de6;
-    padding: 2.8rem 2.2rem;
-    border-radius: 2.1rem;
-    box-shadow: 0 8px 40px 0 rgba(24,84,49,0.12);
-    display: flex;
-    flex-direction: column;
-    min-width: 340px;
-    gap: 1.4rem;
-    border: none;
+  .sm-login-glow {
+    position:fixed; right:-12vw; top:-18vh; width:720px; height:720px;
+    background: radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%);
+    filter: blur(20px); pointer-events:none; z-index:0;
   }
-  .smartmark-login-logo {
-    position: fixed;
-    top: 30px;
-    right: 36px;
-    z-index: 99;
+  .sm-topbar {
+    position:fixed; top:18px; left:18px; right:18px; display:flex; justify-content:space-between; z-index:2;
   }
-  .smartmark-login-back-btn {
-    position: fixed;
-    top: 32px;
-    left: 72px;
-    background: rgba(52,55,61,0.82);
-    color: #fff;
-    border: none;
-    border-radius: 1.1rem;
-    padding: 0.65rem 1.6rem;
-    font-weight: 700;
-    font-size: 1rem;
-    letter-spacing: 0.8px;
-    cursor: pointer;
-    box-shadow: 0 2px 12px 0 rgba(24,84,49,0.09);
-    z-index: 20;
-    transition: background 0.18s;
-    font-family: 'Poppins', 'Times New Roman', Times, serif;
+  .sm-topbar button {
+    background:#202824e0; color:#fff; border:1px solid ${EDGE};
+    border-radius: 1.1rem; padding:10px 18px; font-weight:800; letter-spacing:.6px;
+    cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.25)
   }
-  .smartmark-create-btn {
-    display: inline-block;
-    margin: 0 auto -0.2rem auto;
-    background: #1ec885;
-    color: #0f1418;
-    border: none;
-    border-radius: 999px;
-    font-weight: 900;
-    font-size: 1rem;
-    padding: 0.6rem 1.2rem;
-    cursor: pointer;
-    box-shadow: 0 6px 18px rgba(30,200,133,0.28);
+  .sm-create-row {
+    position:relative; z-index:1; width:100%; display:flex; justify-content:center;
   }
-  .smartmark-create-btn:focus { outline: 3px solid rgba(30,200,133,0.35); }
-  @media (max-width: 600px) {
-    .smartmark-login-form {
-      min-width: unset;
-      width: 96vw;
-      padding: 1.2rem 0.8rem 1.6rem;
-      border-radius: 1.1rem;
-    }
-    .smartmark-login-bg {
-      padding: 0 0.5rem;
-    }
-    .smartmark-login-logo {
-      top: 14px;
-      right: 10px;
-    }
-    .smartmark-login-back-btn {
-      top: 18px;
-      left: 10px;
-      font-size: 0.97rem;
-      padding: 0.5rem 1.05rem;
-    }
+  .sm-create-btn {
+    display:inline-block; background:${ACCENT}; color:#0e1519; border:none;
+    border-radius:999px; font-weight:900; font-size:1rem; padding:10px 18px;
+    cursor:pointer; box-shadow:0 6px 18px rgba(12,196,190,0.28);
+  }
+  .sm-login-card {
+    position:relative; z-index:1;
+    width: 100%; max-width: 520px;
+    background:${CARD_BG};
+    border: 1px solid ${EDGE};
+    border-radius: 22px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.35);
+    padding: 28px 26px;
+    display:flex; flex-direction:column; gap:18px;
+  }
+  .sm-login-title {
+    margin:0; font-size:2.1rem; line-height:1.2; font-weight:900;
+    background: linear-gradient(90deg,#ffffff, ${ACCENT});
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    text-align:center;
+  }
+  .sm-input {
+    width:100%; padding:14px 16px;
+    background:#23262a; color:#fff; border-radius:12px;
+    border:1px solid ${EDGE}; outline:none;
+    font-size:1.05rem; font-weight:700;
+    box-shadow: 0 1.5px 8px rgba(20,231,185,.22);
+  }
+  .sm-label {
+    color:#cfe9e2; font-weight:800; font-size:.95rem; margin-bottom:6px; display:block;
+  }
+  .sm-btn {
+    width:100%; padding:14px 16px; border-radius:14px; border:none;
+    background:${ACCENT}; color:#0e1519; font-weight:900; font-size:1.08rem;
+    cursor:pointer; transition: transform .15s;
+    box-shadow: 0 2px 16px rgba(12,196,190,0.25);
+  }
+  .sm-btn[disabled]{opacity:.7; cursor:not-allowed}
+  .sm-btn:hover{transform:translateY(-2px)}
+  .sm-err {
+    color:#F87171; background:#232529; border-radius:10px; padding:.8rem;
+    font-weight:700; text-align:center;
   }
 `;
 
-const Login = () => {
-  const navigate = useNavigate();
+/* ---------------------- helpers ---------------------- */
+const USER_KEYS = [
+  "smartmark_last_campaign_fields",
+  "smartmark_last_budget",
+  "smartmark_last_selected_account",
+  "smartmark_last_selected_pageId",
+  "smartmark_media_selection"
+];
+const withUser = (u, key) => `u:${u}:${key}`;
+function migrateToUserNamespace(user) {
+  try {
+    USER_KEYS.forEach((k) => {
+      const v = localStorage.getItem(withUser(user, k));
+      if (v !== null && v !== undefined) return; // already migrated
+      const legacy = localStorage.getItem(k);
+      if (legacy !== null && legacy !== undefined) {
+        localStorage.setItem(withUser(user, k), legacy);
+      }
+    });
+    // also keep login autofill per user
+    const un = localStorage.getItem("smartmark_login_username");
+    const pw = localStorage.getItem("smartmark_login_password");
+    if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
+    if (pw) localStorage.setItem(withUser(user, "smartmark_login_password"), pw);
+  } catch {}
+}
 
-  // Always hydrate from latest localStorage on mount
+export default function Login() {
+  const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState(""); // Email is used server-side; keeping naming to avoid changing your backend contract
+  const [password, setPassword] = useState(""); // Email (field name kept for backend contract)
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Prefill from last used values (CampaignSetup writes these)
   useEffect(() => {
     setUsername(localStorage.getItem("smartmark_login_username") || "");
     setPassword(localStorage.getItem("smartmark_login_password") || "");
@@ -104,178 +124,95 @@ const Login = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    setError("");
-
+    setLoading(true); setError("");
     try {
       const res = await fetch(`${BACKEND_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include", // ensure session cookie is set for multi-user separation
+        credentials: "include",
         body: JSON.stringify({
           username: username.trim(),
-          password: password.trim(),
-        }),
+          password: password.trim()
+        })
       });
       const data = await res.json();
-      if (data.success) {
-        // Persist last-used creds for autofill
-        localStorage.setItem("smartmark_login_username", username.trim());
-        localStorage.setItem("smartmark_login_password", password.trim());
-        localStorage.setItem("smartmark_last_email", password.trim());
-        localStorage.setItem("smartmark_last_cashapp", username.trim());
-        setError("");
-        setLoading(false);
-        navigate("/setup");
-      } else {
-        setError(data.error || "Login failed. Please check your details.");
-        setLoading(false);
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Login failed");
       }
-    } catch (err) {
-      setError("Server error. Please try again.");
+
+      // Persist current user & autofill
+      const u = username.trim();
+      localStorage.setItem("sm_current_user", u);
+      localStorage.setItem("smartmark_login_username", u);
+      localStorage.setItem("smartmark_login_password", password.trim());
+
+      // Migrate legacy per-user state → namespaced keys
+      migrateToUserNamespace(u);
+
       setLoading(false);
+      navigate("/setup"); // load their existing stuff
+    } catch (err) {
+      setLoading(false);
+      setError(err.message || "Server error. Please try again.");
     }
   };
 
   return (
     <>
-      <style>{loginStyles}</style>
-      <div className="smartmark-login-bg">
-        <div className="smartmark-login-logo">
-          <SmartMarkLogoButton />
+      <style>{styles}</style>
+      <div className="sm-login-wrap">
+        <div className="sm-login-glow" />
+        <div className="sm-topbar">
+          <button onClick={() => navigate("/")}>← Back</button>
+          <div style={{ marginRight: 6 }}>
+            <SmartMarkLogoButton />
+          </div>
         </div>
 
-        {/* Back Button */}
-        <button onClick={() => navigate("/")} className="smartmark-login-back-btn">
-          ← Back
-        </button>
+        {/* Centered Create button (outside the login box per your request) */}
+        <div className="sm-create-row">
+          <button className="sm-create-btn" onClick={() => navigate("/form")}>
+            Create a campaign
+          </button>
+        </div>
 
-        <form onSubmit={handleLogin} className="smartmark-login-form">
-          {/* Centered “Create a campaign” */}
-          <div style={{ display: "flex", justifyContent: "center" }}>
-            <button
-              type="button"
-              className="smartmark-create-btn"
-              onClick={() => navigate("/form")}
-            >
-              Create a campaign
-            </button>
-          </div>
+        {/* Login box: title + two fields only */}
+        <form className="sm-login-card" onSubmit={handleLogin}>
+          <h1 className="sm-login-title">Login</h1>
 
-          <h2
-            style={{
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: "2.1rem",
-              textAlign: "center",
-              marginBottom: "0.6rem",
-              letterSpacing: "-0.5px",
-              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-            }}
-          >
-            Login
-          </h2>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.9rem" }}>
-            <label style={{ color: "#dfe5e8", fontWeight: 700, fontSize: "0.95rem" }}>
-              Username
-            </label>
+          <div>
+            <label className="sm-label">Username</label>
             <input
+              className="sm-input"
               type="text"
-              name="username"
+              autoComplete="username"
               placeholder="Username"
               value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setError("");
-              }}
+              onChange={e => { setUsername(e.target.value); setError(""); }}
               required
-              style={{
-                padding: "1.1rem",
-                borderRadius: "1.2rem",
-                border: "none",
-                fontSize: "1.15rem",
-                outline: "none",
-                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              }}
-              autoComplete="username"
-            />
-
-            <label style={{ color: "#dfe5e8", fontWeight: 700, fontSize: "0.95rem" }}>
-              Email
-            </label>
-            <input
-              type="email"
-              name="password"
-              placeholder="Email Address"
-              value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setError("");
-              }}
-              required
-              style={{
-                padding: "1.1rem",
-                borderRadius: "1.2rem",
-                border: "none",
-                fontSize: "1.15rem",
-                outline: "none",
-                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              }}
-              autoComplete="email"
             />
           </div>
 
-          {error && (
-            <div
-              style={{
-                color: "#F87171",
-                background: "#232529",
-                borderRadius: "0.7rem",
-                padding: "0.8rem 0.8rem",
-                fontWeight: 600,
-                fontSize: "1.01rem",
-                textAlign: "center",
-                marginTop: "0.2rem",
-                fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              }}
-            >
-              {error}
-            </div>
-          )}
+          <div>
+            <label className="sm-label">Email</label>
+            <input
+              className="sm-input"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              value={password}
+              onChange={e => { setPassword(e.target.value); setError(""); }}
+              required
+            />
+          </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              padding: "1.08rem 0",
-              borderRadius: "2.2rem",
-              border: "none",
-              background: DARK_GREEN,
-              color: "#fff",
-              fontWeight: 700,
-              fontSize: "1.21rem",
-              letterSpacing: "1.2px",
-              cursor: loading ? "not-allowed" : "pointer",
-              fontFamily: "'Poppins', 'Times New Roman', Times, serif",
-              boxShadow: "0 2px 16px 0 rgba(24,84,49,0.16)",
-              transition: "background 0.18s",
-              marginTop: "0.6rem",
-              opacity: loading ? 0.7 : 1,
-            }}
-            onMouseOver={(e) => {
-              if (!loading) e.target.style.background = "#1e6a3e";
-            }}
-            onMouseOut={(e) => {
-              if (!loading) e.target.style.background = DARK_GREEN;
-            }}
-          >
-            {loading ? "Logging in..." : "Login"}
+          {error && <div className="sm-err">{error}</div>}
+
+          <button className="sm-btn" type="submit" disabled={loading}>
+            {loading ? "Logging in…" : "Login"}
           </button>
         </form>
       </div>
     </>
   );
-};
-
-export default Login;
+}

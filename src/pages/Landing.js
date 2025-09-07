@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef } from "react";
 import { useNavigate } from "react-router-dom";
 
 /** Tech palette */
@@ -28,8 +28,6 @@ const faqList = [
     answer:
       "Nope! SmartMark automates campaign setup, creative creation, ad writing, and optimization. No marketing experience required. You can launch your first ad in minutes.",
   },
-
-  
 ];
 
 /* responsive helper */
@@ -48,13 +46,21 @@ const Landing = () => {
   const faqRef = useRef(null);
   const isMobile = useIsMobile();
 
-  useEffect(() => {
-    localStorage.removeItem("smartmark_form_fields");
-    localStorage.removeItem("smartmark_campaign_setup_budget");
-  }, []);
+  // Start fresh when user explicitly chooses to create a new campaign
+  const clearDraftsAndGoToForm = () => {
+    try {
+      localStorage.removeItem("sm_form_draft_v2");
+      localStorage.removeItem("draft_form_creatives_v2");
+      localStorage.removeItem("smartmark_media_selection");
+      localStorage.removeItem("smartmark_last_image_url");
+      localStorage.removeItem("smartmark_last_video_url");
+      localStorage.removeItem("smartmark_last_fb_video_id");
+    } catch {}
+    navigate("/form");
+  };
 
   /* navigation */
-  const goToForm = () => navigate("/form");
+  const goToForm = clearDraftsAndGoToForm;
   const goToLogin = () => navigate("/login");
 
   /* smooth scroll both ways; avoids scrollIntoView quirks */
@@ -94,7 +100,7 @@ const Landing = () => {
         color: "#fff",
       }}
     >
-      {/* Site-wide tweaks (renamed to avoid ESLint 'global' directive parsing) */}
+      {/* Site-wide tweaks */}
       <style>{`
         html, body, #root { height: 100%; background: ${BG_DARK}; margin: 0; }
         html, body { scroll-behavior: smooth; }
@@ -136,7 +142,6 @@ const Landing = () => {
       <div
         style={{
           width: "100%",
-          display: "flex",
           flexDirection: isMobile ? "column" : "row",
           justifyContent: isMobile ? "center" : "space-between",
           alignItems: "center",
@@ -144,6 +149,7 @@ const Landing = () => {
           gap: isMobile ? "0.9rem" : 0,
           position: "relative",
           zIndex: 2,
+          display: "flex",
         }}
       >
         <button
@@ -244,7 +250,7 @@ const Landing = () => {
             textShadow: "0 10px 40px rgba(0,0,0,0.25)",
           }}
         >
-          SmarteMark
+          SmartMark
         </h1>
         <h2
           style={{
@@ -290,7 +296,7 @@ const Landing = () => {
         </button>
       </div>
 
-      {/* Process — grid keeps emojis centered above labels; arrows aligned */}
+      {/* Process */}
       <div
         style={{
           width: "100%",
@@ -501,7 +507,7 @@ const Landing = () => {
         </button>
       </div>
 
-      {/* tiny spacer so the bottom gradient never reveals page background */}
+      {/* tiny spacer */}
       <div style={{ height: 24 }} />
     </div>
   );
