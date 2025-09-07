@@ -21,13 +21,15 @@ const faqList = [
   {
     question: "How much does each campaign cost?",
     answer:
-      "Each campaign has a simple $45 setup fee plus 10% of your ad spend. No hidden fees. You pay only when you launch a campaign.",
+      "Each campaign has a simple $25 setup fee. No hidden fees. You pay only when you launch a campaign.",
   },
   {
     question: "Do I need any ad experience or an agency?",
     answer:
       "Nope! SmartMark automates campaign setup, creative creation, ad writing, and optimization. No marketing experience required. You can launch your first ad in minutes.",
   },
+
+  
 ];
 
 /* responsive helper */
