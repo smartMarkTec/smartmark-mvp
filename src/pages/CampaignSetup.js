@@ -28,6 +28,11 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
+/* ---------------- DEV NOTE ----------------
+   To ensure NO auto-redirects to /login while you test,
+   there is deliberately NO auth-guard here.
+-------------------------------------------- */
+
 /* Responsive helper (unchanged) */
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
@@ -267,24 +272,6 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /* ---------------------------- Minimal auth guard ---------------------------- */
-  useEffect(() => {
-    let cancelled = false;
-    const hasLocalAuth =
-      !!localStorage.getItem("smartmark_login_username") ||
-      !!localStorage.getItem("smartmark_login_password");
-    // Try session check first (does nothing if endpoint not present)
-    (async () => {
-      try {
-        const r = await fetch(`${backendUrl}/auth/me`, { credentials: "include" });
-        if (!r.ok && !hasLocalAuth && !cancelled) navigate("/login");
-      } catch {
-        if (!hasLocalAuth && !cancelled) navigate("/login");
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [navigate]);
-
   /* ---------------------------- State (unchanged) ---------------------------- */
   const [form, setForm] = useState(() => {
     try { return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {}; }
@@ -305,6 +292,8 @@ const CampaignSetup = () => {
     }
     return false;
   });
+
+  // NO auth-guard useEffect here. You can visit /setup freely.
 
   const touchFbConn = () => {
     try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
@@ -418,7 +407,7 @@ const CampaignSetup = () => {
 
     eISO = clampEndForStart(sISO, eISO);
     setEndDate(eISO);
-    // eslint-disable-next-line
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
   useEffect(() => {
@@ -471,6 +460,15 @@ const CampaignSetup = () => {
       );
     } catch {}
   }, [draftCreatives]);
+
+  const handleClearDraft = () => {
+    try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+    try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
+    try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
+    try { localStorage.removeItem("smartmark_media_selection"); } catch {}
+    setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
+    if (expandedId === "__DRAFT__") setExpandedId(null);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -907,7 +905,7 @@ const CampaignSetup = () => {
           zIndex: 1
         }}
       >
-        {/* LEFT PANE (forms) */}
+        {/* LEFT PANE (forms) — visual only */}
         <main style={{
           background: EDGE_BG,
           border: `1px solid ${INPUT_BORDER}`,
@@ -1173,7 +1171,7 @@ const CampaignSetup = () => {
           )}
         </main>
 
-        {/* RIGHT PANE (campaigns & previews) */}
+        {/* RIGHT PANE (campaigns & previews) — layout preserved */}
         <aside style={{
           flex: 1,
           display: "flex",
