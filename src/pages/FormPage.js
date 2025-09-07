@@ -4,12 +4,16 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 
-// ===== Constants =====
-const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
+/* ===== Visual theme to match Landing ===== */
+const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "#181b20";
+const BG_DARK = "#0b0f14";       // deep navy (same family as landing)
+const ACCENT = "#31e1ff";        // electric cyan
+const ACCENT_2 = "#7c4dff";      // violet
 const TEAL = "#14e7b9";
-const SIDE_CHAT_LIMIT = 5; // cap for side Qs/statements
+
+/* ===== Behavior constants ===== */
+const SIDE_CHAT_LIMIT = 5;
 
 // If you run a local backend with a CRA proxy, set USE_LOCAL_BACKEND=true
 const USE_LOCAL_BACKEND = false;
@@ -29,7 +33,7 @@ const ALLOWED_CTAS = [
   "Take a look", "Get started"
 ];
 
-// ===== Small helpers for the image draft store =====
+/* ===== Small helpers for the image draft store ===== */
 function loadImageDrafts() {
   try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; }
 }
@@ -48,22 +52,18 @@ function saveImageDraftById(id, patch) {
   return next;
 }
 function normalizeOverlayCTA(s = "") {
-  // Keep simple and familiar CTAs; title-case for the button label.
   const raw = String(s).trim();
   if (!raw) return "Learn more";
   const plain = raw.replace(/[!?.]+$/g, "").toLowerCase();
-  // Try to map to allowed set
   const match = ALLOWED_CTAS.find(c => c.toLowerCase() === plain);
   const chosen = match || plain;
-  // Title-case for the button UI
   return chosen.replace(/\b\w/g, c => c.toUpperCase());
 }
 function creativeIdFromUrl(url = "") {
-  // Stable key per image URL
   return `img:${url}`;
 }
 
-// ---------- Small UI helpers ----------
+/* ===== Decorative micro-component ===== */
 function Dotty() {
   return (
     <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
@@ -91,20 +91,22 @@ function Dotty() {
 function dotStyle(n) {
   return { display: "inline-block", margin: "0 3px", fontSize: 36, color: "#29efb9", animationDelay: `${n * 0.13}s` };
 }
+
+/* ===== Modal for full image view ===== */
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
     <div style={{
       position: "fixed", top: 0, left: 0, width: "100vw", height: "100vh",
-      background: "rgba(16,22,25,0.96)", display: "flex", alignItems: "center",
+      background: "rgba(8,10,12,0.92)", display: "flex", alignItems: "center",
       justifyContent: "center", zIndex: 9999
     }}>
-      <div style={{ position: "relative", background: "#181b20", borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
+      <div style={{ position: "relative", background: "#0f1419", borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
         <button
           onClick={onClose}
           style={{
             position: "absolute", top: 16, right: 16, zIndex: 2,
-            background: "#23262a", color: "#fff", border: "none",
+            background: "#1a2026", color: "#fff", border: "none",
             borderRadius: 20, padding: 8, cursor: "pointer"
           }}
         >
@@ -118,7 +120,7 @@ function ImageModal({ open, imageUrl, onClose }) {
             maxWidth: "90vw",
             maxHeight: "82vh",
             borderRadius: 16,
-            background: "#222",
+            background: "#111",
             margin: "40px 28px 28px 28px",
             boxShadow: "0 8px 38px #000b",
             fontFamily: AD_FONT
@@ -129,6 +131,7 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
+/* ===== Small UI helpers (unchanged behavior) ===== */
 function MediaTypeToggle({ mediaType, setMediaType }) {
   const choices = [
     { key: "image", label: "Image" },
@@ -148,7 +151,7 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
             borderRadius: 12,
             border: "none",
             background: mediaType === choice.key ? "#1ad6b7" : "#23292c",
-            color: mediaType === choice.key ? "#181b20" : "#bcfff6",
+            color: mediaType === choice.key ? "#0b0f14" : "#bcfff6",
             cursor: "pointer",
             boxShadow: mediaType === choice.key ? "0 2px 18px #1ad6b773" : "none",
             transform: mediaType === choice.key ? "scale(1.09)" : "scale(1)",
@@ -162,7 +165,6 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
     </div>
   );
 }
-
 function Arrow({ side = "left", onClick, disabled }) {
   return (
     <button
@@ -199,7 +201,6 @@ function Arrow({ side = "left", onClick, disabled }) {
     </button>
   );
 }
-
 function Dots({ count, active, onClick }) {
   return (
     <div style={{
@@ -231,7 +232,7 @@ function Dots({ count, active, onClick }) {
   );
 }
 
-// ---------- helpers ----------
+/* ===== Misc helpers ===== */
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
@@ -260,24 +261,20 @@ function isLikelyQuestion(s) {
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
-// detect side statements to answer then re-prompt
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
   const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
   const hasBang = t.includes("!");
   return sentimental.test(t) || hasBang;
 }
-// Decide if this input should be treated as side chat (not captured as an answer)
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
-
   const t = (s || "").trim();
   if (!currentQ) return false;
-
   if (currentQ.key === "url") {
     const hasUrl = !!extractFirstUrl(t);
     return !hasUrl && t.split(/\s+/).length > 3;
-    }
+  }
   if (currentQ.key === "hasOffer") {
     return !/^(yes|no|y|n)$/i.test(t);
   }
@@ -287,7 +284,7 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
-// =========== Main Component ============
+/* ============================ Main Component ============================ */
 export default function FormPage() {
   const navigate = useNavigate();
   const chatBoxRef = useRef();
@@ -330,9 +327,9 @@ export default function FormPage() {
     () => creativeIdFromUrl(imageUrls[activeImage] || ""),
     [imageUrls, activeImage]
   );
-  const [editHeadline, setEditHeadline] = useState("");
-  const [editBody, setEditBody] = useState("");
-  const [editCTA, setEditCTA] = useState("");
+const [editHeadline, setEditHeadline] = useState("");
+const [editBody, setEditBody] = useState("");
+const [editCTA, setEditCTA] = useState("");
 
   // helper for absolute URLs
   const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
@@ -440,8 +437,6 @@ export default function FormPage() {
   // ---- Autosave (throttled) the entire FormPage session + creatives ----
   useEffect(() => {
     const t = setTimeout(() => {
-      // Merge current image draft into what's shown on the card,
-      // so drafts flow to the next page even if the user didn't click Continue yet.
       const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
       const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
       const mergedBody = activeDraft?.body || result?.body || "";
@@ -577,11 +572,9 @@ export default function FormPage() {
     const value = (input || "").trim();
     if (!value) return;
 
-    // Always render the user's message
     setChatHistory(ch => [...ch, { from: "user", text: value }]);
     setInput("");
 
-    // Ready gate
     if (awaitingReady) {
       if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
         setAwaitingReady(false);
@@ -597,12 +590,8 @@ export default function FormPage() {
       }
     }
 
-    // Current question object (if any)
     const currentQ = CONVO_QUESTIONS[step];
 
-    // =========================
-    // FINAL STAGE (after all Qs)
-    // =========================
     if (step >= CONVO_QUESTIONS.length) {
       if (!hasGenerated && isGenerateTrigger(value)) {
         setLoading(true);
@@ -664,17 +653,11 @@ export default function FormPage() {
       return;
     }
 
-    // =========================
-    // IN-FLOW SIDE-CHAT
-    // =========================
     if (currentQ && isLikelySideChat(value, currentQ)) {
       await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
       return;
     }
 
-    // =========================
-    // Normal Q capture
-    // =========================
     if (currentQ) {
       let answerToSave = value;
       if (currentQ.key === "url") {
@@ -685,7 +668,6 @@ export default function FormPage() {
       const newAnswers = { ...answers, [currentQ.key]: answerToSave };
       setAnswers(newAnswers);
 
-      // Conditional skip
       let nextStep = step + 1;
       while (
         CONVO_QUESTIONS[nextStep] &&
@@ -727,12 +709,58 @@ export default function FormPage() {
     setVideoLoading(false);
   }
 
-  // ---------- Render ----------
+  /* ============================ Render ============================ */
   return (
-    <div style={{
-      background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT,
-      display: "flex", flexDirection: "column", alignItems: "center"
-    }}>
+    <div
+      style={{
+        background: BG_DARK,
+        minHeight: "100vh",
+        fontFamily: MODERN_FONT,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        position: "relative",
+        overflowX: "hidden",
+        color: "#fff"
+      }}
+    >
+      {/* page-wide tweaks; ensures full-height bg and animated orbs */}
+      <style>{`
+        html, body, #root { height: 100%; background: ${BG_DARK}; margin: 0; }
+        @keyframes floatA { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-12px) } }
+        @keyframes floatB { 0%,100% { transform: translateY(0) } 50% { transform: translateY(10px) } }
+      `}</style>
+
+      {/* tech gradient glows */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: "-15vh",
+          right: "-10vw",
+          width: 720,
+          height: 720,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}33, transparent 70%)`,
+          filter: "blur(18px)",
+          animation: "floatA 18s ease-in-out infinite",
+          pointerEvents: "none"
+        }}
+      />
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          bottom: "-22vh",
+          left: "-14vw",
+          width: 800,
+          height: 800,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}2e, transparent 70%)`,
+          filter: "blur(18px)",
+          animation: "floatB 22s ease-in-out infinite",
+          pointerEvents: "none"
+        }}
+      />
+
       {/* Top Bar with Back */}
       <div
         style={{
@@ -740,23 +768,24 @@ export default function FormPage() {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: "32px 36px 0 36px",
-          boxSizing: "border-box"
+          padding: "28px 36px 0 36px",
+          boxSizing: "border-box",
+          maxWidth: 1200,
         }}
       >
         <button
           onClick={() => navigate("/")}
           style={{
-            background: "#202824e0",
-            color: "#fff",
-            border: "none",
+            background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
+            color: "#eaf5ff",
+            border: "1px solid rgba(255,255,255,0.08)",
             borderRadius: "1.3rem",
             padding: "0.72rem 1.8rem",
             fontWeight: 700,
-            fontSize: "1.08rem",
+            fontSize: "1.05rem",
             letterSpacing: "0.7px",
             cursor: "pointer",
-            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
             display: "flex",
             alignItems: "center",
             gap: 8
@@ -768,11 +797,39 @@ export default function FormPage() {
         </button>
       </div>
 
-      {/* ---- Chat Panel ---- */}
+      {/* Page Title */}
+      <div style={{ width: "100%", maxWidth: 1200, padding: "10px 36px 0", boxSizing: "border-box" }}>
+        <h1
+          style={{
+            margin: "18px 0 2px",
+            fontSize: "2.2rem",
+            fontWeight: 900,
+            background: `linear-gradient(90deg, #ffffff, ${ACCENT})`,
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+          }}
+        >
+          Create Your Ad
+        </h1>
+        <div style={{ color: "#bfeeff", opacity: 0.9, fontWeight: 600 }}>
+          Answer a few prompts, then preview your image or video ads instantly.
+        </div>
+      </div>
+
+      {/* ---- Chat Panel (kept same structure & behavior) ---- */}
       <div style={{
-        width: "100%", maxWidth: 560, minHeight: 370, marginTop: 34, marginBottom: 26,
-        background: "#202327", borderRadius: 18, boxShadow: "0 2px 32px #181b2040",
-        padding: "38px 30px 22px 30px", display: "flex", flexDirection: "column", alignItems: "center"
+        width: "100%",
+        maxWidth: 560,
+        minHeight: 370,
+        marginTop: 26,
+        marginBottom: 24,
+        background: "#202327",
+        borderRadius: 18,
+        boxShadow: "0 2px 32px #181b2040",
+        padding: "38px 30px 22px 30px",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center"
       }}>
         <div style={{ color: "#7fffe2", fontSize: 17, fontWeight: 800, marginBottom: 8, letterSpacing: 1.2 }}>
           AI Ad Manager
@@ -806,7 +863,7 @@ export default function FormPage() {
           ))}
         </div>
 
-        {/* Prompt bar with Reset + Send */}
+        {/* Prompt bar with Reset + Send (unchanged) */}
         {!loading && (
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
             <button
@@ -855,8 +912,8 @@ export default function FormPage() {
             <button
               type="submit"
               style={{
-                background: "#14e7b9",
-                color: "#181b20",
+                background: TEAL,
+                color: "#0b0f14",
                 border: "none",
                 borderRadius: 12,
                 fontWeight: 700,
@@ -878,26 +935,42 @@ export default function FormPage() {
         {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
       </div>
 
-      {/* MediaTypeToggle above previews */}
+      {/* Selector above previews (unchanged behavior) */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* Ad Previews — two cards (Image + Video) */}
+      {/* Section header */}
+      <div style={{ width: "100%", maxWidth: 1200, padding: "0 24px 8px", boxSizing: "border-box" }}>
+        <div style={{
+          fontWeight: 900,
+          letterSpacing: 0.2,
+          fontSize: "1.3rem",
+          color: "#eaf5ff",
+          opacity: 0.9
+        }}>
+          Ad Previews
+        </div>
+      </div>
+
+      {/* Ad Previews — keep card structure, improve outer layout only */}
       <div style={{
-        display: "flex",
-        justifyContent: "center",
+        width: "100%",
+        maxWidth: 1200,
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
         gap: 34,
-        flexWrap: "wrap",
-        width: "100%"
+        padding: "8px 24px 24px",
+        boxSizing: "border-box",
       }}>
-        {/* IMAGE CARD */}
+        {/* ================= IMAGE CARD (unchanged internals) ================= */}
         <div style={{
           background: "#fff",
           borderRadius: 13,
           boxShadow: "0 2px 24px #16242714",
           minWidth: 340,
-          maxWidth: 390,
+          maxWidth: 420,
+          justifySelf: "center",
           flex: mediaType === "video" ? 0 : 1,
-          marginBottom: 20,
+          marginBottom: 0,
           padding: "0px 0px 14px 0px",
           border: "1.5px solid #eaeaea",
           fontFamily: AD_FONT,
@@ -983,7 +1056,7 @@ export default function FormPage() {
             )}
           </div>
 
-          {/* Copy block (shows edited values) */}
+          {/* Copy block */}
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {displayHeadline}
@@ -1005,7 +1078,7 @@ export default function FormPage() {
             }}>{displayCTA}</button>
           </div>
 
-          {/* Image Edit toggle + fields */}
+          {/* Image Edit toggle + fields (unchanged) */}
           <button
             style={{
               position: "absolute",
@@ -1080,15 +1153,16 @@ export default function FormPage() {
           )}
         </div>
 
-        {/* VIDEO CARD */}
+        {/* ================= VIDEO CARD (unchanged internals) ================= */}
         <div style={{
           background: "#fff",
           borderRadius: 13,
           boxShadow: "0 2px 24px #16242714",
           minWidth: 340,
-          maxWidth: 390,
+          maxWidth: 420,
+          justifySelf: "center",
           flex: mediaType === "image" ? 0 : 1,
-          marginBottom: 20,
+          marginBottom: 0,
           padding: "0px 0px 14px 0px",
           border: "1.5px solid #eaeaea",
           fontFamily: AD_FONT,
@@ -1204,31 +1278,28 @@ export default function FormPage() {
               cursor: "pointer"
             }}>Learn More</button>
           </div>
-
-          {/* NOTE: Edit button removed for video card per request */}
         </div>
       </div>
 
       {/* Continue Button */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 18 }}>
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, marginBottom: 28 }}>
         <button
           style={{
-            background: "#14e7b9",
-            color: "#181b20",
+            background: TEAL,
+            color: "#0b0f14",
             border: "none",
             borderRadius: 13,
             fontWeight: 700,
             fontSize: "1.19rem",
             padding: "18px 72px",
-            marginBottom: 18,
-            marginTop: 2,
             fontFamily: MODERN_FONT,
-            boxShadow: "0 2px 16px #0cc4be24",
+            boxShadow: "0 16px 56px rgba(15,111,255,0.25)",
             cursor: "pointer",
-            transition: "background 0.18s"
+            transition: "transform .15s ease, background .2s ease"
           }}
+          onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+          onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
           onClick={() => {
-            // Use edited copy if present for the active image
             const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
             const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
             const mergedBody = activeDraft?.body || result?.body || "";
@@ -1282,6 +1353,9 @@ export default function FormPage() {
       </div>
 
       <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
+
+      {/* tiny spacer to guarantee no bottom bleed */}
+      <div style={{ height: 24 }} />
     </div>
   );
 }
