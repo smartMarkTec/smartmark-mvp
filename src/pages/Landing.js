@@ -244,7 +244,7 @@ const Landing = () => {
             textShadow: "0 10px 40px rgba(0,0,0,0.25)",
           }}
         >
-          SmartMark
+          SmartMarke
         </h1>
         <h2
           style={{
