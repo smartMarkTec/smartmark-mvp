@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import SmartMarkLogoButton from "../components/SmartMarkLogoButton";
 
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
 /* ------------------------------------------------
-   Theme (aligned with FormPage/CampaignSetup vibe)
+   Theme (aligned with your other pages)
 ------------------------------------------------- */
 const ACCENT = "#14e7b9";
 const CARD_BG = "#34373de6";
@@ -16,31 +15,14 @@ const styles = `
   .sm-login-wrap {
     min-height: 100vh;
     background: linear-gradient(135deg,#11161c 0%, #1a2026 100%);
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    display:flex; align-items:center; justify-content:center;
     font-family:${FONT};
     position:relative; overflow:hidden; padding:24px;
-    gap: 16px;
   }
   .sm-login-glow {
     position:fixed; right:-12vw; top:-18vh; width:720px; height:720px;
     background: radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%);
     filter: blur(20px); pointer-events:none; z-index:0;
-  }
-  .sm-topbar {
-    position:fixed; top:18px; left:18px; right:18px; display:flex; justify-content:space-between; z-index:2;
-  }
-  .sm-topbar button {
-    background:#202824e0; color:#fff; border:1px solid ${EDGE};
-    border-radius: 1.1rem; padding:10px 18px; font-weight:800; letter-spacing:.6px;
-    cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.25)
-  }
-  .sm-create-row {
-    position:relative; z-index:1; width:100%; display:flex; justify-content:center;
-  }
-  .sm-create-btn {
-    display:inline-block; background:${ACCENT}; color:#0e1519; border:none;
-    border-radius:999px; font-weight:900; font-size:1rem; padding:10px 18px;
-    cursor:pointer; box-shadow:0 6px 18px rgba(12,196,190,0.28);
   }
   .sm-login-card {
     position:relative; z-index:1;
@@ -53,7 +35,7 @@ const styles = `
     display:flex; flex-direction:column; gap:18px;
   }
   .sm-login-title {
-    margin:0; font-size:2.1rem; line-height:1.2; font-weight:900;
+    margin:0; font-size:2rem; line-height:1.2; font-weight:900;
     background: linear-gradient(90deg,#ffffff, ${ACCENT});
     -webkit-background-clip: text; -webkit-text-fill-color: transparent;
     text-align:center;
@@ -65,9 +47,6 @@ const styles = `
     font-size:1.05rem; font-weight:700;
     box-shadow: 0 1.5px 8px rgba(20,231,185,.22);
   }
-  .sm-label {
-    color:#cfe9e2; font-weight:800; font-size:.95rem; margin-bottom:6px; display:block;
-  }
   .sm-btn {
     width:100%; padding:14px 16px; border-radius:14px; border:none;
     background:${ACCENT}; color:#0e1519; font-weight:900; font-size:1.08rem;
@@ -76,13 +55,21 @@ const styles = `
   }
   .sm-btn[disabled]{opacity:.7; cursor:not-allowed}
   .sm-btn:hover{transform:translateY(-2px)}
+  .sm-topbar {
+    position:fixed; top:18px; left:18px; right:18px; display:flex; justify-content:flex-start; z-index:2;
+  }
+  .sm-topbar button {
+    background:#202824e0; color:#fff; border:1px solid ${EDGE};
+    border-radius: 1.1rem; padding:10px 18px; font-weight:800; letter-spacing:.6px;
+    cursor:pointer; box-shadow:0 2px 10px rgba(0,0,0,.25)
+  }
   .sm-err {
     color:#F87171; background:#232529; border-radius:10px; padding:.8rem;
     font-weight:700; text-align:center;
   }
 `;
 
-/* ---------------------- helpers ---------------------- */
+/* ---------------------- per-user namespacing ---------------------- */
 const USER_KEYS = [
   "smartmark_last_campaign_fields",
   "smartmark_last_budget",
@@ -101,7 +88,6 @@ function migrateToUserNamespace(user) {
         localStorage.setItem(withUser(user, k), legacy);
       }
     });
-    // also keep login autofill per user
     const un = localStorage.getItem("smartmark_login_username");
     const pw = localStorage.getItem("smartmark_login_password");
     if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
@@ -112,11 +98,11 @@ function migrateToUserNamespace(user) {
 export default function Login() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState(""); // Email (field name kept for backend contract)
+  const [password, setPassword] = useState(""); // email field
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Prefill from last used values (CampaignSetup writes these)
+  // Prefill from last used values
   useEffect(() => {
     setUsername(localStorage.getItem("smartmark_login_username") || "");
     setPassword(localStorage.getItem("smartmark_login_password") || "");
@@ -129,7 +115,6 @@ export default function Login() {
       const res = await fetch(`${BACKEND_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           username: username.trim(),
           password: password.trim()
@@ -150,7 +135,7 @@ export default function Login() {
       migrateToUserNamespace(u);
 
       setLoading(false);
-      navigate("/setup"); // load their existing stuff
+      navigate("/setup");
     } catch (err) {
       setLoading(false);
       setError(err.message || "Server error. Please try again.");
@@ -164,24 +149,15 @@ export default function Login() {
         <div className="sm-login-glow" />
         <div className="sm-topbar">
           <button onClick={() => navigate("/")}>← Back</button>
-          <div style={{ marginRight: 6 }}>
-            <SmartMarkLogoButton />
-          </div>
         </div>
 
-        {/* Centered Create button (outside the login box per your request) */}
-        <div className="sm-create-row">
-          <button className="sm-create-btn" onClick={() => navigate("/form")}>
-            Create a campaign
-          </button>
-        </div>
-
-        {/* Login box: title + two fields only */}
         <form className="sm-login-card" onSubmit={handleLogin}>
           <h1 className="sm-login-title">Login</h1>
 
           <div>
-            <label className="sm-label">Username</label>
+            <label style={{ color: "#cfe9e2", fontWeight: 800, fontSize: ".95rem" }}>
+              Username
+            </label>
             <input
               className="sm-input"
               type="text"
@@ -194,7 +170,9 @@ export default function Login() {
           </div>
 
           <div>
-            <label className="sm-label">Email</label>
+            <label style={{ color: "#cfe9e2", fontWeight: 800, fontSize: ".95rem" }}>
+              Email / Password
+            </label>
             <input
               className="sm-input"
               type="email"
