@@ -5,26 +5,30 @@ import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa"
 
 const backendUrl = "https://smartmark-mvp.onrender.com";
 
-// Visual theme
-const DARK_BG = "#181b20";
-const PANEL_BG = "#202327";
-const CARD_BG = "#1b1e22f7";
-const EDGE_BG = "#232528e6";
-const INPUT_BG = "#1c2120";
+/* ======================= Visual Theme (polish only) ======================= */
+const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
+const DARK_BG = "#11161c";           // page background (slightly cooler than landing for variety)
+const GLOW_TEAL = "rgba(20,231,185,0.22)";
+const CARD_BG = "rgba(27, 32, 37, 0.92)";
+const EDGE_BG = "rgba(35, 39, 42, 0.85)";
+const PANEL_BG = "#1c2126";
+const INPUT_BG = "#1b1f23";
+const INPUT_BORDER = "rgba(255,255,255,0.06)";
 const TEXT_MAIN = "#ecfff6";
-const TEXT_DIM = "#b3f1d6";
+const TEXT_DIM = "#bdfdf0";
+const TEXT_MUTED = "#9ddfcd";
 const ACCENT = "#14e7b9";
 const ACCENT_ALT = "#1ec885";
-const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
+const WHITE = "#ffffff";
 
 const CREATIVE_HEIGHT = 150;
 
-// ---- Draft persistence (24h TTL) ----
+/* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
-// Responsive helper
+/* Responsive helper (unchanged) */
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
   React.useEffect(() => {
@@ -35,11 +39,10 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-// FB connection flag
+/* FB connection flag (unchanged) */
 const FB_CONN_KEY = "smartmark_fb_connected";
-const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000; // ← 3 days
+const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
 
-// Persisted creatives (keyed by adAccount -> campaignId)
 const CREATIVE_MAP_KEY = (actId) => `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
 const readCreativeMap = (actId) => {
   try { return JSON.parse(localStorage.getItem(CREATIVE_MAP_KEY(actId)) || "{}"); }
@@ -75,23 +78,23 @@ function ImageModal({ open, imageUrl, onClose }) {
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 1005,
-      background: "rgba(16,22,21,0.85)",
+      background: "rgba(10,14,17,0.92)",
       display: "flex", alignItems: "center", justifyContent: "center"
     }}>
       <div style={{
         position: "relative", maxWidth: "88vw", maxHeight: "88vh",
-        borderRadius: 18, background: "#191e20", padding: 0, boxShadow: "0 10px 60px #000c"
+        borderRadius: 18, background: "#12171b", padding: 0, boxShadow: "0 10px 60px #000c"
       }}>
         <img
           src={src || ""}
           alt="Full-screen"
-          style={{ maxWidth: "84vw", maxHeight: "80vh", display: "block", borderRadius: 14, background: "#101312" }}
+          style={{ maxWidth: "84vw", maxHeight: "80vh", display: "block", borderRadius: 14, background: "#0f1215" }}
         />
         <button
           style={{
-            position: "absolute", top: 12, right: 18, background: "#212f29",
-            border: "none", color: "#fff", borderRadius: 11, padding: "9px 17px",
-            fontWeight: 700, fontSize: 15, cursor: "pointer", boxShadow: "0 1px 6px #1ec88530"
+            position: "absolute", top: 12, right: 18, background: "#1b242a",
+            border: "1px solid rgba(255,255,255,0.06)", color: WHITE, borderRadius: 11, padding: "9px 17px",
+            fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: "0 1px 6px #14e7b933"
           }}
           onClick={onClose}
         >
@@ -102,17 +105,17 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-/* ---- helpers for Image/Video carousels ---- */
+/* ---- helpers for Image/Video carousels (unchanged logic) ---- */
 const navBtn = (dir) => ({
   position:"absolute",
   top:"50%",
   transform:"translateY(-50%)",
-  [dir < 0 ? "left" : "right"]: 6,
-  background:"rgba(0,0,0,0.45)",
+  [dir < 0 ? "left" : "right"]: 8,
+  background:"rgba(0,0,0,0.55)",
   color:"#fff",
   border:"none",
-  borderRadius:8,
-  width:26, height:26,
+  borderRadius:10,
+  width:28, height:28,
   fontSize:16, fontWeight:900,
   cursor:"pointer",
   zIndex: 2
@@ -120,7 +123,7 @@ const navBtn = (dir) => ({
 const badge = {
   position:"absolute", bottom:6, right:6,
   background:"rgba(0,0,0,0.55)", color:"#fff",
-  borderRadius:8, padding:"2px 6px", fontSize:11, fontWeight:800,
+  borderRadius:8, padding:"2px 6px", fontSize:11, fontWeight:900,
   zIndex: 2
 };
 
@@ -203,7 +206,7 @@ function VideoCarousel({ items = [], height = 220 }) {
   );
 }
 
-/* ---------- Minimal metrics row ---------- */
+/* ---------- Minimal metrics row (unchanged logic, refreshed styles) ---------- */
 function MetricsRow({ metrics }) {
   const cards = useMemo(() => {
     const m = metrics || {};
@@ -221,8 +224,8 @@ function MetricsRow({ metrics }) {
 
   const cardStyle = {
     minWidth: 160,
-    background: "#242a2e",
-    border: "1px solid #2f5243",
+    background: "#1e252a",
+    border: "1px solid rgba(255,255,255,0.06)",
     color: "#eafff6",
     borderRadius: 14,
     padding: "10px 12px",
@@ -230,7 +233,7 @@ function MetricsRow({ metrics }) {
     flexDirection: "column",
     justifyContent: "center",
     gap: 6,
-    boxShadow: "0 2px 10px #14352a33"
+    boxShadow: "0 2px 10px rgba(0,0,0,0.25)"
   };
 
   return (
@@ -247,7 +250,7 @@ function MetricsRow({ metrics }) {
       >
         {cards.map(c => (
           <div key={c.key} style={{ ...cardStyle, scrollSnapAlign:"start" }}>
-            <div style={{ fontSize:12, color:"#a6d9c5", fontWeight:800, letterSpacing:0.2 }}>{c.label}</div>
+            <div style={{ fontSize:12, color:TEXT_MUTED, fontWeight:900, letterSpacing:0.3 }}>{c.label}</div>
             <div style={{ fontSize:20, fontWeight:900 }}>{c.value}</div>
           </div>
         ))}
@@ -256,15 +259,15 @@ function MetricsRow({ metrics }) {
   );
 }
 
-// =========================================================
-// ===================== MAIN COMPONENT ====================
-// =========================================================
+/* ======================================================================= */
+/* ============================== MAIN =================================== */
+/* ======================================================================= */
 const CampaignSetup = () => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Persisted non-creative fields
+  /* ---------------------------- State (unchanged) ---------------------------- */
   const [form, setForm] = useState(() => {
     try { return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {}; }
     catch { return {}; }
@@ -285,12 +288,10 @@ const CampaignSetup = () => {
     return false;
   });
 
-  // Helper to refresh the 3-day window on successful pings
   const touchFbConn = () => {
     try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
   };
 
-  // Validate stored session on mount; flip to blue if backend session expired
   useEffect(() => {
     const saved = localStorage.getItem(FB_CONN_KEY);
     if (!saved) return;
@@ -308,7 +309,6 @@ const CampaignSetup = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // UI state
   const [adAccounts, setAdAccounts] = useState([]);
 
   const defaultStart = useMemo(() => {
@@ -328,10 +328,8 @@ const CampaignSetup = () => {
   const [campaignCount, setCampaignCount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
-  // Right-pane: which row is expanded
   const [expandedId, setExpandedId] = useState(null);
 
-  // DRAFT creatives (used ONLY for not-yet-launched new campaign)
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
     videos: [],
@@ -339,7 +337,6 @@ const CampaignSetup = () => {
     mediaSelection: (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
   });
 
-  // From navigation state (for new draft creation)
   const {
     imageUrls: navImageUrls,
     videoUrls: navVideoUrls,
@@ -350,7 +347,6 @@ const CampaignSetup = () => {
     mediaSelection: navMediaSelection
   } = location.state || {};
 
-  // --- Campaign Duration (compact wheels) ---
   const [startDate, setStartDate] = useState(() => {
     const existing = form.startDate || "";
     return existing || new Date(defaultStart).toISOString().slice(0, 16);
@@ -362,7 +358,6 @@ const CampaignSetup = () => {
     return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
   });
 
-  // derived date parts for compact pickers (MM | DD | YY)
   const sd = new Date(startDate || defaultStart);
   const ed = new Date(endDate || new Date(sd.getTime() + 3 * 24 * 60 * 60 * 1000));
   const [sMonth, setSMonth] = useState(sd.getMonth() + 1);
@@ -375,7 +370,6 @@ const CampaignSetup = () => {
   const [showImageModal, setShowImageModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
 
-  // helpers for duration
   const clampEndForStart = (startStr, endStr) => {
     try {
       const start = new Date(startStr);
@@ -390,7 +384,6 @@ const CampaignSetup = () => {
     }
   };
 
-  // Sync compact pickers -> ISO strings
   useEffect(() => {
     const clampDay = (m, y2) => {
       const y = 2000 + y2;
@@ -410,7 +403,6 @@ const CampaignSetup = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
-  // Load persisted fields + saved draft (24h TTL)
   useEffect(() => {
     const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
     if (lastFields) {
@@ -448,7 +440,6 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, []);
 
-  // keep draft fresh while editing
   useEffect(() => {
     const hasDraft =
       (draftCreatives.images && draftCreatives.images.length) ||
@@ -464,21 +455,14 @@ const CampaignSetup = () => {
   }, [draftCreatives]);
 
   const handleClearDraft = () => {
-  // clear session draft (older key) + current 24h draft + form-page draft + media selection hint
-  try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
-  try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
-  try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
-  try { localStorage.removeItem("smartmark_media_selection"); } catch {}
+    try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+    try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
+    try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
+    try { localStorage.removeItem("smartmark_media_selection"); } catch {}
+    setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
+    if (expandedId === "__DRAFT__") setExpandedId(null);
+  };
 
-  // reset local draft state so the row disappears
-  setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
-
-  // collapse if it was open
-  if (expandedId === "__DRAFT__") setExpandedId(null);
-};
-
-
-  // Handle Facebook oauth return
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
@@ -494,7 +478,6 @@ const CampaignSetup = () => {
     }
   }, [fbConnected]);
 
-  // Apply nav creatives to draft
   useEffect(() => {
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
@@ -510,7 +493,6 @@ const CampaignSetup = () => {
     }
   }, [navImageUrls, navVideoUrls, navFbVideoIds, navMediaSelection]);
 
-  // Fetch ad accounts / pages (and refresh 3-day window on success)
   useEffect(() => {
     if (!fbConnected) return;
     fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
@@ -527,7 +509,6 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [fbConnected]);
 
-  // Count campaigns
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -541,7 +522,6 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [selectedAccount]);
 
-  // Load campaigns list
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
@@ -558,7 +538,6 @@ const CampaignSetup = () => {
       .catch(() => {});
   }, [fbConnected, selectedAccount, launched]);
 
-  // Fetch metrics for expanded campaign only
   useEffect(() => {
     if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
@@ -577,7 +556,6 @@ const CampaignSetup = () => {
       .catch(() => setMetricsMap(m => ({ ...m, [expandedId]: { impressions:"--", clicks:"--", ctr:"--" } })));
   }, [expandedId, selectedAccount]);
 
-  // Persist basics
   useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
   useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
   useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
@@ -585,7 +563,6 @@ const CampaignSetup = () => {
   useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
   useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
 
-  // Pause/Unpause/Delete
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
@@ -666,7 +643,6 @@ const CampaignSetup = () => {
     } catch { return { startISO: null, endISO: null }; }
   }
 
-  // Launch (uses ONLY the draft creatives; never touches launched campaigns)
   const handleLaunch = async () => {
     setLoading(true);
     try {
@@ -726,7 +702,6 @@ const CampaignSetup = () => {
         writeCreativeMap(acctId, map);
       }
 
-      // Clear the draft after successful launch
       sessionStorage.removeItem("draft_form_creatives");
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
       localStorage.removeItem(FORM_DRAFT_KEY);
@@ -773,7 +748,6 @@ const CampaignSetup = () => {
 
   const { fee, total } = calculateFees(budget);
 
-  // Saved creatives for a launched campaign
   const getSavedCreatives = (campaignId) => {
     if (!selectedAccount) return { images:[], videos:[], fbVideoIds:[], mediaSelection:"both" };
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
@@ -796,8 +770,7 @@ const CampaignSetup = () => {
     };
   };
 
-  // ---------- Render ----------
-  // compact date wheels helpers
+  /* ---------- Render helpers ---------- */
   const yearNow = new Date().getFullYear() % 100;
   const years = [yearNow, yearNow + 1];
   const months = Array.from({ length: 12 }, (_, i) => i + 1);
@@ -807,7 +780,6 @@ const CampaignSetup = () => {
     return Array.from({ length: max }, (_, i) => i + 1);
   };
 
-  // Compose right-pane rows
   const hasDraft =
     (draftCreatives.images && draftCreatives.images.length) ||
     (draftCreatives.videos && draftCreatives.videos.length) ||
@@ -818,6 +790,7 @@ const CampaignSetup = () => {
     ...(hasDraft ? [{ id:"__DRAFT__", name: (form.campaignName || "Untitled"), __isDraft:true }] : [])
   ].slice(0, 2 + (hasDraft ? 1 : 0));
 
+  /* ================================ UI ================================ */
   return (
     <div
       style={{
@@ -829,58 +802,86 @@ const CampaignSetup = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "flex-start",
         overflowX: "hidden"
       }}
     >
-      {/* Top Bar */}
+      {/* subtle teal glow background like other pages */}
       <div
+        aria-hidden
         style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "32px 36px 0 36px",
-          boxSizing: "border-box",
+          position: "fixed",
+          top: "-18vh",
+          right: "-12vw",
+          width: 720,
+          height: 720,
+          background: `radial-gradient(40% 40% at 50% 50%, ${GLOW_TEAL}, transparent 70%)`,
+          filter: "blur(20px)",
+          pointerEvents: "none",
+          zIndex: 0
         }}
-      >
-        <button
-          onClick={() => navigate('/form')}
-          style={{
-            background: "#202824e0",
-            color: "#fff",
-            border: "none",
-            borderRadius: "1.3rem",
-            padding: "0.72rem 1.8rem",
-            fontWeight: 700,
-            fontSize: "1.08rem",
-            letterSpacing: "0.7px",
-            cursor: "pointer",
-            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
-          }}
-        >
-          ← Back
-        </button>
-        <button
-          onClick={() => navigate('/')}
-          style={{
-            background: "#232828",
-            color: "#fff",
-            border: "none",
-            borderRadius: "1.3rem",
-            padding: "0.72rem 1.8rem",
-            fontWeight: 700,
-            fontSize: "1.08rem",
-            letterSpacing: "0.7px",
-            cursor: "pointer",
-            boxShadow: "0 2px 10px 0 rgba(24,84,49,0.13)",
-          }}
-        >
-          Home
-        </button>
+      />
+
+      {/* Top bar + centered title */}
+      <div style={{ width: "100%", maxWidth: 1180, padding: "22px 20px 0", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
+          <button
+            onClick={() => navigate('/form')}
+            style={{
+              background: "#202824e0",
+              color: WHITE,
+              border: `1px solid ${INPUT_BORDER}`,
+              borderRadius: "1.1rem",
+              padding: "10px 18px",
+              fontWeight: 800,
+              fontSize: "1rem",
+              letterSpacing: "0.6px",
+              cursor: "pointer",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.25)"
+            }}
+          >
+            ← Back
+          </button>
+
+          <button
+            onClick={() => navigate('/')}
+            style={{
+              background: "#232828",
+              color: WHITE,
+              border: `1px solid ${INPUT_BORDER}`,
+              borderRadius: "1.1rem",
+              padding: "10px 18px",
+              fontWeight: 800,
+              fontSize: "1rem",
+              letterSpacing: "0.6px",
+              cursor: "pointer",
+              boxShadow: "0 2px 10px rgba(0,0,0,0.25)"
+            }}
+          >
+            Home
+          </button>
+        </div>
+
+        {/* Centered page heading */}
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: "2.15rem",
+              lineHeight: 1.2,
+              letterSpacing: "-0.4px",
+              fontWeight: 900,
+              background: `linear-gradient(90deg, #ffffff, ${ACCENT})`,
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              textAlign: "center"
+            }}
+          >
+            Campaign Setup
+          </h1>
+        </div>
       </div>
 
-      {/* MAIN */}
+      {/* MAIN LAYOUT */}
       <div
         style={{
           width: "100vw",
@@ -889,27 +890,29 @@ const CampaignSetup = () => {
           flexDirection: isMobile ? "column" : "row",
           alignItems: "flex-start",
           justifyContent: "center",
-          marginTop: isMobile ? 80 : 90,
-          gap: isMobile ? 32 : 64,
-          padding: isMobile ? "0 4vw" : "0 36px",
-          minHeight: "92vh"
+          marginTop: isMobile ? 56 : 64,
+          gap: isMobile ? 28 : 52,
+          padding: isMobile ? "0 4vw 40px" : "0 36px 48px",
+          minHeight: "92vh",
+          position: "relative",
+          zIndex: 1
         }}
       >
-        {/* LEFT PANE */}
+        {/* LEFT PANE (forms) — visual only */}
         <main style={{
           background: EDGE_BG,
-          borderRadius: "2.2rem",
-          boxShadow: "0 12px 52px 0 rgba(30,200,133,0.13)",
-          padding: isMobile ? "2.4rem 1.2rem" : "3.7rem 2.6rem",
-          minWidth: isMobile ? "99vw" : 520,
+          border: `1px solid ${INPUT_BORDER}`,
+          borderRadius: "22px",
+          boxShadow: "0 16px 48px rgba(0,0,0,0.35)",
+          padding: isMobile ? "24px 16px" : "32px 26px",
+          minWidth: isMobile ? "98vw" : 520,
           maxWidth: isMobile ? "100vw" : 600,
           flex: "0 1 590px",
           display: "flex",
           flexDirection: "column",
-          gap: "2.2rem",
+          gap: "22px",
           alignItems: "center",
-          marginBottom: isMobile ? 30 : 0,
-          position: "relative",
+          marginBottom: isMobile ? 24 : 0,
           minHeight: "600px",
         }}>
           {/* Facebook Connect */}
@@ -920,22 +923,22 @@ const CampaignSetup = () => {
               try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
             }}
             style={{
-              padding: "1.15rem 2.8rem",
-              borderRadius: "1.5rem",
+              padding: "14px 22px",
+              borderRadius: "14px",
               border: "none",
               background: fbConnected ? ACCENT_ALT : "#1877F2",
-              color: "#fff",
-              fontWeight: 800,
-              fontSize: "1.25rem",
-              boxShadow: "0 2px 12px #1877f233",
-              letterSpacing: "1px",
+              color: WHITE,
+              fontWeight: 900,
+              fontSize: "1.08rem",
+              boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
+              letterSpacing: "0.4px",
               cursor: "pointer",
               width: "100%",
-              maxWidth: 370,
-              margin: "0 auto",
-              display: "block",
-              transition: "background 0.23s"
+              maxWidth: 420,
+              transition: "transform 0.15s",
             }}
+            onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
           >
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
@@ -945,27 +948,30 @@ const CampaignSetup = () => {
             onClick={openFbPaymentPopup}
             style={{
               width: "100%",
-              maxWidth: 370,
-              padding: "0.9rem 1.2rem",
-              borderRadius: "1.5rem",
+              maxWidth: 420,
+              padding: "12px 16px",
+              borderRadius: "14px",
               border: "none",
               background: "#2f7a5d",
-              color: "#fff",
+              color: WHITE,
               fontWeight: 900,
-              fontSize: "1.02rem",
+              fontSize: "1rem",
               cursor: "pointer",
-              boxShadow: "0 2px 10px #0b3f2e55"
+              boxShadow: "0 2px 10px rgba(12,63,46,0.5)",
+              transition: "transform 0.15s",
             }}
+            onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
           >
             Add Payment Method
           </button>
 
           {/* Campaign Name */}
-          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>
+          <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
+            <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
               Campaign Name
             </label>
-            <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px" }}>
+            <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", border: `1px solid ${INPUT_BORDER}` }}>
               <input
                 type="text"
                 value={form.campaignName || ""}
@@ -977,25 +983,24 @@ const CampaignSetup = () => {
                   outline:"none",
                   width:"100%",
                   color: TEXT_DIM,
-                  fontSize:"1.06rem",
-                  fontWeight:700
+                  fontSize:"1.02rem",
+                  fontWeight:800
                 }}
               />
             </div>
           </div>
 
-          {/* Campaign Duration (compact wheels) */}
-          <div style={{ width:"100%", maxWidth:370, margin:"6px auto 0 auto", display:"flex", flexDirection:"column", gap:10 }}>
-            <div style={{ color:"#fff", fontWeight:800, fontSize:"1.10rem" }}>Campaign Duration</div>
+          {/* Campaign Duration */}
+          <div style={{ width:"100%", maxWidth:420, display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={{ color: WHITE, fontWeight: 900, fontSize: "1.02rem" }}>Campaign Duration</div>
 
-            {/* Compact wheels */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
               {/* Start */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Start</label>
+                <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Start</label>
                 <div style={{
                   display:"flex", gap:10, alignItems:"center",
-                  padding:"8px 10px", borderRadius:12, background:"#1b1f22"
+                  padding:"8px 10px", borderRadius:12, background:INPUT_BG, border:`1px solid ${INPUT_BORDER}`
                 }}>
                   <Picker value={sMonth} options={months} onChange={setSMonth} />
                   <Sep />
@@ -1007,10 +1012,10 @@ const CampaignSetup = () => {
 
               {/* End */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>End</label>
+                <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>End</label>
                 <div style={{
                   display:"flex", gap:10, alignItems:"center",
-                  padding:"8px 10px", borderRadius:12, background:"#1b1f22"
+                  padding:"8px 10px", borderRadius:12, background:INPUT_BG, border:`1px solid ${INPUT_BORDER}`
                 }}>
                   <Picker value={eMonth} options={months} onChange={setEMonth} />
                   <Sep />
@@ -1021,17 +1026,17 @@ const CampaignSetup = () => {
               </div>
             </div>
 
-            <div style={{ color:"#9fe9c8", fontWeight:700, fontSize:"0.92rem" }}>
+            <div style={{ color: "#9fe9c8", fontWeight: 700, fontSize: "0.9rem" }}>
               Max duration is 14 days. End will auto-adjust if needed.
             </div>
           </div>
 
-          {/* Budget + Pay & creds */}
-          <div style={{ width: "100%", maxWidth: 370, margin: "0 auto", display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ color: "#fff", fontWeight: 700, fontSize: "1.13rem" }}>
+          {/* Budget + payment + creds */}
+          <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
+            <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
               Campaign Budget ($)
             </label>
-            <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px" }}>
+            <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", border: `1px solid ${INPUT_BORDER}` }}>
               <input
                 type="number"
                 placeholder="Enter budget (minimum $3)"
@@ -1045,13 +1050,13 @@ const CampaignSetup = () => {
                   outline:"none",
                   width:"100%",
                   color: TEXT_DIM,
-                  fontSize:"1.06rem",
-                  fontWeight:700
+                  fontSize:"1.02rem",
+                  fontWeight:800
                 }}
               />
             </div>
-            <div style={{ color: "#afeca3", fontWeight: 700 }}>
-              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: "#fff" }}>${total.toFixed(2)}</span>
+            <div style={{ color: "#b7f5c2", fontWeight: 800 }}>
+              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: WHITE }}>${total.toFixed(2)}</span>
             </div>
 
             {parseFloat(budget) >= 3 && (
@@ -1059,22 +1064,25 @@ const CampaignSetup = () => {
                 <button
                   onClick={() => window.open("https://cash.app", "_blank")}
                   style={{
-                    background: "#14e7b9",
-                    color: "#181b20",
+                    background: ACCENT,
+                    color: "#0f1418",
                     border: "none",
                     borderRadius: 12,
                     fontWeight: 900,
                     padding: "10px 16px",
                     cursor: "pointer",
-                    boxShadow: "0 2px 12px #0cc4be44"
+                    boxShadow: "0 2px 12px rgba(12,196,190,0.35)",
+                    transition: "transform 0.15s",
                   }}
+                  onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-2px)")}
+                  onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
                 >
                   Pay ${calculateFees(budget).fee.toFixed(0)}
                 </button>
 
                 <div>
-                  <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Cashtag (your username)</label>
-                  <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px", marginTop:6 }}>
+                  <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Cashtag (your username)</label>
+                  <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", marginTop: 6, border:`1px solid ${INPUT_BORDER}` }}>
                     <input
                       type="text"
                       value={cashapp}
@@ -1086,16 +1094,16 @@ const CampaignSetup = () => {
                         outline:"none",
                         width:"100%",
                         color: TEXT_DIM,
-                        fontSize:"1.02rem",
-                        fontWeight:700
+                        fontSize:"1rem",
+                        fontWeight:800
                       }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ color:"#c9ffe9", fontWeight:700, fontSize:"0.95rem" }}>Email (used as password)</label>
-                  <div style={{ background:"#1b1f22", borderRadius:12, padding:"10px 12px", marginTop:6 }}>
+                  <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Email (used as password)</label>
+                  <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", marginTop: 6, border:`1px solid ${INPUT_BORDER}` }}>
                     <input
                       type="email"
                       value={email}
@@ -1107,8 +1115,8 @@ const CampaignSetup = () => {
                         outline:"none",
                         width:"100%",
                         color: TEXT_DIM,
-                        fontSize:"1.02rem",
-                        fontWeight:700
+                        fontSize:"1rem",
+                        fontWeight:800
                       }}
                     />
                   </div>
@@ -1123,19 +1131,22 @@ const CampaignSetup = () => {
             disabled={loading || campaignCount >= 2 || !canLaunch}
             style={{
               background: (campaignCount >= 2 || !canLaunch) ? "#8b8d90" : ACCENT,
-              color: "#181b20",
+              color: "#0f1418",
               border: "none",
-              borderRadius: 13,
-              fontWeight: 700,
-              fontSize: "1.19rem",
-              padding: "18px 72px",
-              marginBottom: 18,
-              marginTop: 8,
-              boxShadow: "0 2px 16px #0cc4be24",
+              borderRadius: 14,
+              fontWeight: 900,
+              fontSize: "1.02rem",
+              padding: "14px 36px",
+              marginTop: 6,
+              boxShadow: "0 2px 16px rgba(12,196,190,0.25)",
               cursor: (loading || campaignCount >= 2 || !canLaunch) ? "not-allowed" : "pointer",
-              transition: "background 0.18s",
-              opacity: (loading || campaignCount >= 2 || !canLaunch) ? 0.6 : 1
+              opacity: (loading || campaignCount >= 2 || !canLaunch) ? 0.6 : 1,
+              transition: "transform 0.15s",
             }}
+            onMouseEnter={e => {
+              if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(-2px)";
+            }}
+            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}
           >
             {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
           </button>
@@ -1143,9 +1154,9 @@ const CampaignSetup = () => {
           {launched && launchResult && (
             <div style={{
               color: "#1eea78",
-              fontWeight: 800,
+              fontWeight: 900,
               marginTop: "0.8rem",
-              fontSize: "1.05rem",
+              fontSize: "0.98rem",
               textShadow: "0 2px 8px #0a893622"
             }}>
               Campaign launched! ID: {launchResult.campaignId || "--"}
@@ -1153,56 +1164,56 @@ const CampaignSetup = () => {
           )}
         </main>
 
-        {/* RIGHT PANE */}
+        {/* RIGHT PANE (campaigns & previews) — layout preserved */}
         <aside style={{
           flex: 1,
           display: "flex",
           flexDirection: "column",
           alignItems: isMobile ? "center" : "flex-start",
           width: isMobile ? "100vw" : "100%",
-          marginTop: isMobile ? 36 : 0,
-          gap: "2.0rem",
+          marginTop: isMobile ? 8 : 0,
+          gap: "1.6rem",
           minWidth: isMobile ? "100vw" : 400,
-          maxWidth: 540,
+          maxWidth: 560,
         }}>
           <div
             style={{
               background: CARD_BG,
-              borderRadius: "1.4rem",
-              padding: isMobile ? "2rem 1.2rem" : "2.1rem 2rem 2.3rem 2rem",
+              borderRadius: "18px",
+              padding: isMobile ? "22px 16px" : "24px 22px 26px",
               color: TEXT_MAIN,
-              fontWeight: 700,
               width: isMobile ? "97vw" : "100%",
               maxWidth: "99vw",
-              boxShadow: "0 2px 24px #183a2a13",
+              border: `1px solid ${INPUT_BORDER}`,
+              boxShadow: "0 12px 36px rgba(0,0,0,0.3)",
               display: "flex",
               flexDirection: "column",
-              gap: "1.0rem",
-              alignItems: "flex-start",
+              gap: "0.9rem",
               minHeight: "600px",
             }}
           >
-            {/* Top row: Title + controls */}
+            {/* Header row */}
             <div style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ fontSize:"1.23rem", fontWeight: 900, color: "#fff" }}>
+              <div style={{ fontSize:"1.08rem", fontWeight: 900, color: WHITE, letterSpacing: 0.3 }}>
                 Active Campaigns
               </div>
-              <div style={{ display: "flex", gap: "0.7rem" }}>
+              <div style={{ display: "flex", gap: "0.6rem" }}>
                 <button
                   onClick={handlePauseUnpause}
                   disabled={loading || !selectedCampaignId}
                   style={{
                     background: isPaused ? "#22dd7f" : "#ffd966",
-                    color: "#181b20",
+                    color: "#0f1418",
                     border: "none",
-                    borderRadius: 9,
+                    borderRadius: 10,
                     fontWeight: 900,
-                    fontSize: 22,
+                    fontSize: 20,
                     width: 36, height: 36,
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center"
+                    justifyContent: "center",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
                   }}
                   title={isPaused ? "Play" : "Pause"}
                 >
@@ -1213,16 +1224,17 @@ const CampaignSetup = () => {
                   disabled={loading || !selectedCampaignId}
                   style={{
                     background: "#f44336",
-                    color: "#fff",
+                    color: WHITE,
                     border: "none",
-                    borderRadius: 9,
+                    borderRadius: 10,
                     fontWeight: 900,
-                    fontSize: 19,
+                    fontSize: 18,
                     width: 36, height: 36,
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
-                    justifyContent: "center"
+                    justifyContent: "center",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
                   }}
                   title="Delete"
                 >
@@ -1233,16 +1245,17 @@ const CampaignSetup = () => {
                     onClick={handleNewCampaign}
                     style={{
                       background: ACCENT_ALT,
-                      color: "#fff",
+                      color: WHITE,
                       border: "none",
-                      borderRadius: 9,
+                      borderRadius: 10,
                       fontWeight: 900,
-                      fontSize: 22,
+                      fontSize: 20,
                       width: 36, height: 36,
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
-                      justifyContent: "center"
+                      justifyContent: "center",
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
                     }}
                     title="New Campaign"
                   >
@@ -1252,7 +1265,7 @@ const CampaignSetup = () => {
               </div>
             </div>
 
-            {/* Campaign rows */}
+            {/* Rows */}
             <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:10 }}>
               {rightPaneCampaigns.map(c => {
                 const isDraft = !!c.__isDraft;
@@ -1266,83 +1279,80 @@ const CampaignSetup = () => {
                 return (
                   <div key={id} style={{
                     width:"100%",
-                    background:"#232a28",
-                    borderRadius:"0.9rem",
-                    padding:"0.7rem",
-                    boxShadow: "0 2px 12px #193a2a13"
+                    background:PANEL_BG,
+                    borderRadius:"12px",
+                    padding:"8px",
+                    border:`1px solid ${INPUT_BORDER}`,
+                    boxShadow: "0 2px 12px rgba(0,0,0,0.25)"
                   }}>
-                   {/* Row header */}
-<div
-  onClick={() => {
-    setExpandedId(isOpen ? null : id);
-    if (!isDraft) setSelectedCampaignId(id);
-  }}
-  style={{
-    display:"flex",
-    alignItems:"center",
-    justifyContent:"space-between",
-    cursor:"pointer",
-    padding:"0.5rem 0.6rem",
-    borderRadius:8,
-    background:"#1f2523"
-  }}
->
-  <div style={{ display:"flex", alignItems:"center", gap:10, color:"#fff", fontWeight:800 }}>
-    <FaChevronDown
-      style={{
-        transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-        transition: "transform 0.18s"
-      }}
-    />
-    <span>{name}</span>
-    {isDraft && (
-      <span style={{
-        marginLeft:8,
-        padding:"2px 8px",
-        borderRadius:999,
-        background:"#2d5b45",
-        color:"#aef4da",
-        fontSize:11,
-        fontWeight:900,
-        letterSpacing:0.5
-      }}>
-        IN&nbsp;PROGRESS
-      </span>
-    )}
-  </div>
+                    {/* Row header */}
+                    <div
+                      onClick={() => {
+                        setExpandedId(isOpen ? null : id);
+                        if (!isDraft) setSelectedCampaignId(id);
+                      }}
+                      style={{
+                        display:"flex",
+                        alignItems:"center",
+                        justifyContent:"space-between",
+                        cursor:"pointer",
+                        padding:"8px 10px",
+                        borderRadius:10,
+                        background:"#161c21",
+                        border:`1px solid ${INPUT_BORDER}`
+                      }}
+                    >
+                      <div style={{ display:"flex", alignItems:"center", gap:10, color:WHITE, fontWeight:900 }}>
+                        <FaChevronDown
+                          style={{
+                            transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
+                            transition: "transform 0.18s"
+                          }}
+                        />
+                        <span>{name}</span>
+                        {isDraft && (
+                          <span style={{
+                            marginLeft:8,
+                            padding:"2px 8px",
+                            borderRadius:999,
+                            background:"#2d5b45",
+                            color:"#aef4da",
+                            fontSize:11,
+                            fontWeight:900,
+                            letterSpacing:0.5
+                          }}>
+                            IN&nbsp;PROGRESS
+                          </span>
+                        )}
+                      </div>
 
-  {/* RIGHT SIDE: status for launched OR “×” discard for draft */}
-  {isDraft ? (
-    <button
-      onClick={(e) => {
-        e.stopPropagation(); // don’t toggle row when clicking ×
-        handleClearDraft();
-      }}
-      title="Discard draft"
-      aria-label="Discard draft"
-      style={{
-        background:"#5b2d2d",
-        color:"#ffecec",
-        border:"none",
-        borderRadius:8,
-        fontWeight:900,
-        width:28,
-        height:28,
-        lineHeight:"28px",
-        textAlign:"center",
-        cursor:"pointer",
-        boxShadow:"0 1px 6px rgba(0,0,0,0.25)"
-      }}
-    >
-      ×
-    </button>
-  ) : (
-    <div style={{ color:"#89f0cc", fontSize:12, fontWeight:800 }}>
-      {(c.status || c.effective_status || "ACTIVE")}
-    </div>
-  )}
-</div>
-
+                      {isDraft ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleClearDraft(); }}
+                          title="Discard draft"
+                          aria-label="Discard draft"
+                          style={{
+                            background:"#5b2d2d",
+                            color:"#ffecec",
+                            border:"none",
+                            borderRadius:10,
+                            fontWeight:900,
+                            width:28,
+                            height:28,
+                            lineHeight:"28px",
+                            textAlign:"center",
+                            cursor:"pointer",
+                            boxShadow:"0 1px 6px rgba(0,0,0,0.25)"
+                          }}
+                        >
+                          ×
+                        </button>
+                      ) : (
+                        <div style={{ color:"#89f0cc", fontSize:12, fontWeight:900 }}>
+                          {(c.status || c.effective_status || "ACTIVE")}
+                        </div>
+                      )}
+                    </div>
 
                     {/* Row contents */}
                     {isOpen && (
@@ -1356,27 +1366,37 @@ const CampaignSetup = () => {
                         {/* Creatives */}
                         <div style={{
                           width: "100%",
-                          background: PANEL_BG,
-                          borderRadius: "1.0rem",
-                          padding: "0.9rem",
+                          background: "#14191e",
+                          borderRadius: "12px",
+                          padding: "10px",
                           display: "flex",
                           flexDirection: "column",
                           gap: 12,
-                          marginTop: 6
+                          border:`1px solid ${INPUT_BORDER}`
                         }}>
-                          <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: "1.02rem", marginBottom: 2 }}>
+                          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
                             Creatives
                           </div>
 
-                          {/* Images Card */}
+                          {/* Images Card (structure preserved) */}
                           {showImages && (
                             <div style={{
-                              background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                              overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                              background:"#ffffff",
+                              borderRadius:12,
+                              border:"1.2px solid #eaeaea",
+                              overflow:"hidden",
+                              boxShadow:"0 2px 16px rgba(0,0,0,0.12)"
                             }}>
                               <div style={{
-                                background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                                display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                                background:"#f5f6fa",
+                                padding:"8px 12px",
+                                borderBottom:"1px solid #e0e4eb",
+                                display:"flex",
+                                justifyContent:"space-between",
+                                alignItems:"center",
+                                color:"#495a68",
+                                fontWeight:800,
+                                fontSize: "0.95rem"
                               }}>
                                 <span>Images</span>
                               </div>
@@ -1388,15 +1408,25 @@ const CampaignSetup = () => {
                             </div>
                           )}
 
-                          {/* Videos Card */}
+                          {/* Videos Card (structure preserved) */}
                           {showVideos && (
                             <div style={{
-                              background:"#fff", borderRadius:12, border:"1.2px solid #eaeaea",
-                              overflow:"hidden", boxShadow:"0 2px 16px #16242714"
+                              background:"#ffffff",
+                              borderRadius:12,
+                              border:"1.2px solid #eaeaea",
+                              overflow:"hidden",
+                              boxShadow:"0 2px 16px rgba(0,0,0,0.12)"
                             }}>
                               <div style={{
-                                background:"#f5f6fa", padding:"8px 12px", borderBottom:"1px solid #e0e4eb",
-                                display:"flex", justifyContent:"space-between", alignItems:"center", color:"#495a68", fontWeight:700, fontSize: "0.96rem"
+                                background:"#f5f6fa",
+                                padding:"8px 12px",
+                                borderBottom:"1px solid #e0e4eb",
+                                display:"flex",
+                                justifyContent:"space-between",
+                                alignItems:"center",
+                                color:"#495a68",
+                                fontWeight:800,
+                                fontSize: "0.95rem"
                               }}>
                                 <span>Videos</span>
                                 {(!creatives.videos || creatives.videos.length === 0) ? <DottyMini/> : null}
@@ -1406,7 +1436,7 @@ const CampaignSetup = () => {
                           )}
 
                           {!showImages && !showVideos && (
-                            <div style={{ color:"#c9d7d2", fontWeight:700, padding:"8px 4px" }}>
+                            <div style={{ color:"#c9d7d2", fontWeight:800, padding:"8px 4px" }}>
                               No creatives saved for this campaign yet.
                             </div>
                           )}
@@ -1420,24 +1450,32 @@ const CampaignSetup = () => {
 
             {/* Ad Account & Page Selectors */}
             <div style={{
-              width: "100%", marginTop: 16, background: "#242628", borderRadius: "1.1rem", padding: "1.1rem",
-              display: "flex", flexDirection: "column", gap: 14
+              width: "100%",
+              marginTop: 8,
+              background: "#14191e",
+              borderRadius: "12px",
+              padding: "12px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+              border:`1px solid ${INPUT_BORDER}`
             }}>
               <div>
-                <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Ad Account</div>
+                <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Ad Account</div>
                 <select
                   value={selectedAccount}
                   onChange={e => setSelectedAccount(e.target.value)}
                   style={{
-                    padding: "0.7rem",
-                    borderRadius: "1.1rem",
-                    fontSize: "1.07rem",
+                    padding: "12px",
+                    borderRadius: "12px",
+                    fontSize: "1rem",
                     width: "100%",
                     outline: "none",
-                    border: "1.5px solid #2e5c44",
-                    background: "#2c2f33",
-                    color: "#c7fbe3",
-                    marginTop: 5
+                    border: `1px solid ${INPUT_BORDER}`,
+                    background: "#1a2025",
+                    color: TEXT_DIM,
+                    marginTop: 6,
+                    fontWeight: 800
                   }}>
                   <option value="">Select an ad account</option>
                   {adAccounts.map(ac => (
@@ -1449,20 +1487,21 @@ const CampaignSetup = () => {
               </div>
 
               <div>
-                <div style={{ fontWeight: 700, fontSize: "1.01rem", color: "#fff" }}>Facebook Page</div>
+                <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Facebook Page</div>
                 <select
                   value={selectedPageId}
                   onChange={e => setSelectedPageId(e.target.value)}
                   style={{
-                    padding: "0.7rem",
-                    borderRadius: "1.1rem",
-                    fontSize: "1.07rem",
+                    padding: "12px",
+                    borderRadius: "12px",
+                    fontSize: "1rem",
                     width: "100%",
                     outline: "none",
-                    border: "1.5px solid #2e5c44",
-                    background: "#2c2f33",
-                    color: "#c7fbe3",
-                    marginTop: 5
+                    border: `1px solid ${INPUT_BORDER}`,
+                    background: "#1a2025",
+                    color: TEXT_DIM,
+                    marginTop: 6,
+                    fontWeight: 800
                   }}>
                   <option value="">Select a page</option>
                   {pages.map(p => (
@@ -1481,7 +1520,7 @@ const CampaignSetup = () => {
   );
 };
 
-/* ---------- tiny UI helpers for compact wheels ---------- */
+/* ---------- tiny UI helpers for compact wheels (unchanged logic) ---------- */
 function Picker({ value, options, onChange }) {
   return (
     <select
@@ -1493,9 +1532,9 @@ function Picker({ value, options, onChange }) {
         MozAppearance: "none",
         background: "transparent",
         border: "none",
-        color: "#c7fbe3",
+        color: TEXT_DIM,
         fontWeight: 900,
-        fontSize: "1.05rem",
+        fontSize: "1.02rem",
         padding: "4px 8px",
         outline: "none",
         maxHeight: 120,
@@ -1504,7 +1543,7 @@ function Picker({ value, options, onChange }) {
       }}
     >
       {options.map(v => (
-        <option key={v} value={v} style={{ background:"#1b1f22", color:"#c7fbe3" }}>
+        <option key={v} value={v} style={{ background: "#0f1418", color: TEXT_DIM, fontWeight: 900 }}>
           {String(v).padStart(2,"0")}
         </option>
       ))}
