@@ -9,7 +9,7 @@ const db = require('../db');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
-
+const { nanoid } = require('nanoid'); // for simple session ids
 
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
@@ -222,49 +222,84 @@ router.get('/facebook/pages', async (req, res) => {
 });
 
 /* =========================
-   REAL AUTH (LowDB + bcrypt)
+   SIMPLE SESSIONS (LowDB)
+   ========================= */
+async function ensureUsersAndSessions() {
+  await db.read();
+  db.data = db.data || {};
+  db.data.users = db.data.users || [];
+  db.data.sessions = db.data.sessions || [];
+  await db.write();
+}
+
+/* =========================
+   REAL AUTH (LowDB + bcryptjs)
    ========================= */
 router.post('/register', async (req, res) => {
-  const { username, email, password } = req.body;
-  if (!username || !email || !password) {
-    return res.status(400).json({ error: 'Username, email, and password required' });
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      return res.status(400).json({ error: 'Username, email, and password required' });
+    }
+
+    await ensureUsersAndSessions();
+    if (db.data.users.find(u => u.username === username || u.email === email)) {
+      return res.status(400).json({ error: 'Username or email already exists' });
+    }
+
+    // bcryptjs sync to avoid hanging
+    const passwordHash = bcrypt.hashSync(password, 10);
+    const user = { username, email, passwordHash };
+    db.data.users.push(user);
+    await db.write();
+
+    // Auto-login (create session)
+    const sid = `sm_${nanoid(24)}`;
+    db.data.sessions.push({ sid, username: user.username });
+    await db.write();
+
+    res.cookie('sm_sid', sid, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production' || !!process.env.RENDER,
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ success: true, user: { username, email } });
+  } catch (err) {
+    res.status(500).json({ error: 'Registration failed', detail: err.message });
   }
-  await db.read();
-  db.data.users = db.data.users || [];
-  if (db.data.users.find(u => u.username === username || u.email === email)) {
-    return res.status(400).json({ error: 'Username or email already exists' });
-  }
-  const passwordHash = await bcrypt.hash(password, 10);
-  const user = { username, email, passwordHash };
-  db.data.users.push(user);
-  await db.write();
-  res.json({ success: true, user: { username, email } });
 });
 
 router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
-  await db.read();
-  const user = db.data.users.find(u => u.username === username);
-  if (!user) {
-    return res.status(401).json({ error: 'Invalid username or password' });
+    await ensureUsersAndSessions();
+    const user = db.data.users.find(u => u.username === username);
+    if (!user) return res.status(401).json({ error: 'Invalid username or password' });
+
+    // bcryptjs sync to avoid hanging
+    const match = bcrypt.compareSync(password, user.passwordHash);
+    if (!match) return res.status(401).json({ error: 'Invalid username or password' });
+
+    // New session
+    const sid = `sm_${nanoid(24)}`;
+    db.data.sessions.push({ sid, username: user.username });
+    await db.write();
+
+    res.cookie('sm_sid', sid, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production' || !!process.env.RENDER,
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    res.json({ success: true, user: { username: user.username, email: user.email } });
+  } catch (err) {
+    res.status(500).json({ error: 'Login failed', detail: err.message });
   }
-
-  const match = await bcrypt.compare(password, user.passwordHash);
-  if (!match) {
-    return res.status(401).json({ error: 'Invalid username or password' });
-  }
-
-  // 👇 set cookie (just username for now, later you can use a proper session id)
-  res.cookie('sm_sid', user.username, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-  });
-
-  res.json({ success: true, user: { username: user.username, email: user.email } });
 });
 
 /* =========================
@@ -847,22 +882,21 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
    ========================= */
 router.get('/whoami', async (req, res) => {
   try {
-    await db.read();
-    db.data.users = db.data.users || [];
+    await ensureUsersAndSessions();
 
-    // If you want to use cookie-based session:
     const sid = req.cookies?.sm_sid;
     if (!sid) return res.status(401).json({ error: 'Not logged in' });
 
-    // In a real app you'd map sid -> username. For now, just send back first user (demo).
-    const user = db.data.users[0];
-    if (!user) return res.status(401).json({ error: 'No user found' });
+    const sess = db.data.sessions.find(s => s.sid === sid);
+    if (!sess) return res.status(401).json({ error: 'Session not found' });
+
+    const user = db.data.users.find(u => u.username === sess.username);
+    if (!user) return res.status(401).json({ error: 'User not found for session' });
 
     res.json({ success: true, user: { username: user.username, email: user.email } });
   } catch (err) {
     res.status(500).json({ error: 'Failed to resolve session', detail: err.message });
   }
 });
-
 
 module.exports = router;
