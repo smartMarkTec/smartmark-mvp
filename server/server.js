@@ -89,36 +89,36 @@ app.get('/__fallback/1200.jpg', async (_req, res) => {
 /* =========================
    BYPASS LOGIN (DEV ONLY)
    =========================
-   If AUTH_BYPASS=1 is set in env, we short-circuit /auth/login
-   to immediately return success and set a simple session cookie.
-   This lets you test the UI and curls while the real auth handler
-   is hanging. Remove or set AUTH_BYPASS=0 to disable.
+   Bypasses if:
+   - AUTH_BYPASS=1  (env), OR
+   - query param ?bypass=1  (handy for quick tests)
 */
 app.post('/auth/login', (req, res, next) => {
-  if (process.env.AUTH_BYPASS === '1') {
+  const useBypass = process.env.AUTH_BYPASS === '1' || req.query.bypass === '1';
+  if (useBypass) {
     const username = (req.body && String(req.body.username || 'guest').trim()) || 'guest';
     const email = (req.body && String(req.body.password || '').trim()) || '';
     const sid = `dev-${Buffer.from(username).toString('hex')}`;
 
-    // You don't need cookie-parser to SET cookies
+    // set cookie without cookie-parser
     res.cookie('sm_sid', sid, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: true, // Render is HTTPS; fine to keep secure=true
+      secure: true,       // fine on Render (HTTPS)
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
     return res.json({
       success: true,
       user: { username, email },
-      bypass: true
+      bypass: true,
+      source: process.env.AUTH_BYPASS === '1' ? 'env' : 'query'
     });
   }
-  // fall through to the real /auth router
-  return next();
+  return next(); // fall through to real /auth routes
 });
 
-// OPTIONAL: guard against any handler that “hangs” > 20s
+// OPTIONAL: guard against any handler that “hangs”
 app.use((req, res, next) => {
   res.setTimeout(20000, () => {
     try {
