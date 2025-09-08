@@ -256,8 +256,17 @@ router.post('/login', async (req, res) => {
     return res.status(401).json({ error: 'Invalid username or password' });
   }
 
+  // 👇 set cookie (just username for now, later you can use a proper session id)
+  res.cookie('sm_sid', user.username, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+  });
+
   res.json({ success: true, user: { username: user.username, email: user.email } });
 });
+
 /* =========================
    HELPERS: persist creatives
    ========================= */
@@ -832,5 +841,28 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
   }
 });
+
+/* =========================
+   WHOAMI (session check)
+   ========================= */
+router.get('/whoami', async (req, res) => {
+  try {
+    await db.read();
+    db.data.users = db.data.users || [];
+
+    // If you want to use cookie-based session:
+    const sid = req.cookies?.sm_sid;
+    if (!sid) return res.status(401).json({ error: 'Not logged in' });
+
+    // In a real app you'd map sid -> username. For now, just send back first user (demo).
+    const user = db.data.users[0];
+    if (!user) return res.status(401).json({ error: 'No user found' });
+
+    res.json({ success: true, user: { username: user.username, email: user.email } });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to resolve session', detail: err.message });
+  }
+});
+
 
 module.exports = router;
