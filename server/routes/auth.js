@@ -9,18 +9,11 @@ const db = require('../db');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
-const { nanoid } = require('nanoid'); // for simple session ids
+const { nanoid } = require('nanoid');
 
-/* ------------------------------------------------------------------ */
-/*                    Small in-process defaults cache                  */
-/*  Filled right after OAuth, and used as a fallback during launch     */
-/* ------------------------------------------------------------------ */
-const DEFAULTS = {
-  adAccountId: null, // numeric (without "act_")
-  pageId: null,      // numeric page id
-  adAccounts: [],    // lightweight list for convenience
-  pages: [],         // lightweight list for convenience
-};
+/* ------------------------------- Defaults ------------------------------- */
+const DEFAULTS = { adAccountId: null, pageId: null, adAccounts: [], pages: [] };
+
 async function refreshDefaults(userToken) {
   try {
     const [acctRes, pagesRes] = await Promise.all([
@@ -38,29 +31,40 @@ async function refreshDefaults(userToken) {
     DEFAULTS.adAccounts = accts.map(a => ({ id: String(a.id).replace(/^act_/, ''), name: a.name, account_status: a.account_status }));
     DEFAULTS.pages = pages.map(p => ({ id: p.id, name: p.name }));
 
-    // Keep existing selection if still valid; else pick first available
     const firstAcct = DEFAULTS.adAccounts[0]?.id || null;
     const firstPage = DEFAULTS.pages[0]?.id || null;
-
-    if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find(a => a.id === DEFAULTS.adAccountId)) {
-      DEFAULTS.adAccountId = firstAcct;
-    }
-    if (!DEFAULTS.pageId || !DEFAULTS.pages.find(p => p.id === DEFAULTS.pageId)) {
-      DEFAULTS.pageId = firstPage;
-    }
-  } catch (e) {
-    // leave defaults as-is on failure
-  }
+    if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find(a => a.id === DEFAULTS.adAccountId)) DEFAULTS.adAccountId = firstAcct;
+    if (!DEFAULTS.pageId || !DEFAULTS.pages.find(p => p.id === DEFAULTS.pageId)) DEFAULTS.pageId = firstPage;
+  } catch { /* noop */ }
 }
 
-// ---- env ----
+/* ------------------------------- ENV ------------------------------- */
 const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// Quick sanity route
-router.get('/facebook/ping', (req, res) => {
+const COOKIE_NAME = 'sm_sid';
+const isProd = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+
+/* Helper to set session cookie consistently */
+function setSessionCookie(res, sid) {
+  const opts = {
+    httpOnly: true,
+    secure: isProd,                // required for SameSite=None
+    sameSite: isProd ? 'none' : 'lax',
+    path: '/',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  };
+  if (process.env.COOKIE_DOMAIN) {
+    // e.g. COOKIE_DOMAIN=smartmark-mvp.onrender.com
+    opts.domain = process.env.COOKIE_DOMAIN;
+  }
+  res.cookie(COOKIE_NAME, sid, opts);
+}
+
+/* ----------------------------- Sanity route ----------------------------- */
+router.get('/facebook/ping', (_req, res) => {
   res.json({
     ok: true,
     env: {
@@ -77,34 +81,21 @@ router.get('/facebook/ping', (req, res) => {
   });
 });
 
-// Helper: absolute public URL for generated assets
+/* Public URL helper (for asset fetches) */
 function absolutePublicUrl(relativePath) {
-  const base =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    'https://smartmark-mvp.onrender.com';
+  const base = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
   return /^https?:\/\//i.test(relativePath) ? relativePath : `${base}${relativePath}`;
 }
 
+/* ------------------------------ Facebook OAuth ------------------------------ */
 const FB_SCOPES = [
-  'pages_manage_engagement',
-  'pages_manage_metadata',
-  'pages_manage_posts',
-  'pages_read_engagement',
-  'pages_read_user_content',
-  'pages_show_list',
-  'public_profile',
-  'read_insights',
-  'business_management',
-  'ads_management',
-  'ads_read'
+  'pages_manage_engagement','pages_manage_metadata','pages_manage_posts','pages_read_engagement',
+  'pages_read_user_content','pages_show_list','public_profile','read_insights',
+  'business_management','ads_management','ads_read'
 ];
 
-/* =========================
-   FACEBOOK OAUTH
-   ========================= */
-router.get('/facebook', (req, res) => {
+router.get('/facebook', (_req, res) => {
   const state = 'smartmark_state_1';
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
@@ -120,23 +111,13 @@ router.get('/facebook/callback', async (req, res) => {
   if (!code) return res.status(400).send('No code returned from Facebook.');
   try {
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-      params: {
-        client_id: FACEBOOK_APP_ID,
-        client_secret: FACEBOOK_APP_SECRET,
-        redirect_uri: FACEBOOK_REDIRECT_URI,
-        code
-      }
+      params: { client_id: FACEBOOK_APP_ID, client_secret: FACEBOOK_APP_SECRET, redirect_uri: FACEBOOK_REDIRECT_URI, code }
     });
     const accessToken = tokenRes.data.access_token;
 
     try {
       const x = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
-        params: {
-          grant_type: 'fb_exchange_token',
-          client_id: FACEBOOK_APP_ID,
-          client_secret: FACEBOOK_APP_SECRET,
-          fb_exchange_token: accessToken
-        }
+        params: { grant_type: 'fb_exchange_token', client_id: FACEBOOK_APP_ID, client_secret: FACEBOOK_APP_SECRET, fb_exchange_token: accessToken }
       });
       if (x.data?.access_token) {
         await setFbUserToken(x.data.access_token);
@@ -147,13 +128,12 @@ router.get('/facebook/callback', async (req, res) => {
         await refreshDefaults(accessToken);
         console.log('[auth] stored SHORT-LIVED FB user token + refreshed defaults');
       }
-    } catch (e) {
+    } catch {
       await setFbUserToken(accessToken);
       await refreshDefaults(accessToken);
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
-    // Redirect as before (frontend already expects this)
     res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
@@ -161,26 +141,16 @@ router.get('/facebook/callback', async (req, res) => {
   }
 });
 
-// Debug route
-router.get('/debug/fbtoken', (req, res) => {
+router.get('/debug/fbtoken', (_req, res) => {
   res.json({ fbUserToken: getFbUserToken() ? 'present' : 'missing' });
 });
 
-/* =========================
-   NEW: Defaults helper
-   ========================= */
-router.get('/facebook/defaults', async (req, res) => {
+/* ---------------------------- Defaults helper ---------------------------- */
+router.get('/facebook/defaults', async (_req, res) => {
   const userToken = getFbUserToken();
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  // keep fresh-ish
   await refreshDefaults(userToken);
-  res.json({
-    ok: true,
-    adAccountId: DEFAULTS.adAccountId,
-    pageId: DEFAULTS.pageId,
-    adAccounts: DEFAULTS.adAccounts,
-    pages: DEFAULTS.pages,
-  });
+  res.json({ ok: true, adAccountId: DEFAULTS.adAccountId, pageId: DEFAULTS.pageId, adAccounts: DEFAULTS.adAccounts, pages: DEFAULTS.pages });
 });
 
 router.post('/facebook/defaults/select', (req, res) => {
@@ -190,40 +160,7 @@ router.post('/facebook/defaults/select', (req, res) => {
   return res.json({ ok: true, adAccountId: DEFAULTS.adAccountId, pageId: DEFAULTS.pageId });
 });
 
-/* =========================
-   ACCOUNT / PAGES LIST
-   ========================= */
-router.get('/facebook/adaccounts', async (req, res) => {
-  const userToken = getFbUserToken();
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const me = await axios.get(
-      `https://graph.facebook.com/v18.0/me/adaccounts`,
-      { params: { access_token: userToken, fields: 'id,name,account_status' } }
-    );
-    res.json(me.data);
-  } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch ad accounts.' });
-  }
-});
-
-router.get('/facebook/pages', async (req, res) => {
-  const userToken = getFbUserToken();
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  try {
-    const me = await axios.get(
-      `https://graph.facebook.com/v18.0/me/accounts`,
-      { params: { access_token: userToken, fields: 'id,name,access_token' } }
-    );
-    res.json(me.data);
-  } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch Facebook Pages.' });
-  }
-});
-
-/* =========================
-   SIMPLE SESSIONS (LowDB)
-   ========================= */
+/* ---------------------------- LowDB init helpers ---------------------------- */
 async function ensureUsersAndSessions() {
   await db.read();
   db.data = db.data || {};
@@ -232,39 +169,28 @@ async function ensureUsersAndSessions() {
   await db.write();
 }
 
-/* =========================
-   REAL AUTH (LowDB + bcryptjs)
-   ========================= */
+/* ---------------------------- Auth: register/login ---------------------------- */
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
-    if (!username || !email || !password) {
-      return res.status(400).json({ error: 'Username, email, and password required' });
-    }
+    const { username, email, password } = req.body || {};
+    if (!username || !email || !password) return res.status(400).json({ error: 'Username, email, and password required' });
 
     await ensureUsersAndSessions();
     if (db.data.users.find(u => u.username === username || u.email === email)) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
-    // bcryptjs sync to avoid hanging
+    // use sync to avoid any async worker/thread delays on small hosts
     const passwordHash = bcrypt.hashSync(password, 10);
     const user = { username, email, passwordHash };
     db.data.users.push(user);
     await db.write();
 
-    // Auto-login (create session)
     const sid = `sm_${nanoid(24)}`;
     db.data.sessions.push({ sid, username: user.username });
     await db.write();
 
-    res.cookie('sm_sid', sid, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production' || !!process.env.RENDER,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
+    setSessionCookie(res, sid);
     res.json({ success: true, user: { username, email } });
   } catch (err) {
     res.status(500).json({ error: 'Registration failed', detail: err.message });
@@ -273,75 +199,51 @@ router.post('/register', async (req, res) => {
 
 router.post('/login', async (req, res) => {
   try {
-    const { username, password } = req.body;
+    const { username, password } = req.body || {};
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
 
     await ensureUsersAndSessions();
     const user = db.data.users.find(u => u.username === username);
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
-    // bcryptjs sync to avoid hanging
     const match = bcrypt.compareSync(password, user.passwordHash);
     if (!match) return res.status(401).json({ error: 'Invalid username or password' });
 
-    // New session
     const sid = `sm_${nanoid(24)}`;
     db.data.sessions.push({ sid, username: user.username });
     await db.write();
 
-    res.cookie('sm_sid', sid, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production' || !!process.env.RENDER,
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
+    setSessionCookie(res, sid);
     res.json({ success: true, user: { username: user.username, email: user.email } });
   } catch (err) {
     res.status(500).json({ error: 'Login failed', detail: err.message });
   }
 });
 
-/* =========================
-   HELPERS: persist creatives
-   ========================= */
-async function ensureCampaignCreativesTable() {
-  await db.read();
-  db.data = db.data || {};
-  db.data.campaign_creatives = db.data.campaign_creatives || [];
-  await db.write();
-}
-async function upsertCampaignCreatives({
-  campaignId, accountId, pageId, name, status,
-  mediaSelection, images = [], videos = [], fbVideoIds = []
-}) {
-  await ensureCampaignCreativesTable();
-  await db.read();
-  const list = db.data.campaign_creatives || [];
-  const idx = list.findIndex(c => c.campaignId === campaignId);
-  const now = new Date().toISOString();
-  const record = {
-    campaignId,
-    accountId: String(accountId || ''),
-    pageId: String(pageId || ''),
-    name: name || 'SmartMark Campaign',
-    status: status || 'ACTIVE',
-    mediaSelection: (mediaSelection || 'both').toLowerCase(),
-    images: Array.isArray(images) ? images : [],
-    videos: Array.isArray(videos) ? videos : [],
-    fbVideoIds: Array.isArray(fbVideoIds) ? fbVideoIds : [],
-    updatedAt: now,
-    ...(idx === -1 ? { createdAt: now } : {})
-  };
-  if (idx === -1) list.push(record);
-  else list[idx] = { ...list[idx], ...record };
-  db.data.campaign_creatives = list;
-  await db.write();
-}
+router.post('/logout', async (req, res) => {
+  try {
+    await ensureUsersAndSessions();
+    const sid = req.cookies?.[COOKIE_NAME];
+    if (sid) {
+      db.data.sessions = db.data.sessions.filter(s => s.sid !== sid);
+      await db.write();
+    }
+    res.clearCookie(COOKIE_NAME, { path: '/', secure: isProd, sameSite: isProd ? 'none' : 'lax' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Logout failed', detail: err.message });
+  }
+});
 
-/* =========================
-   LAUNCH CAMPAIGN
-   ========================= */
+/* ---------------------------- Debug cookies (optional) ---------------------------- */
+router.get('/debug/cookies', (req, res) => {
+  res.json({
+    headerCookie: req.headers.cookie || null,
+    parsed: req.cookies || null
+  });
+});
+
+/* ---------------------------- Launch campaign (unchanged core) ---------------------------- */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
@@ -349,7 +251,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
   const NO_SPEND = process.env.NO_SPEND === '1' || req.query.no_spend === '1' || !!req.body.noSpend;
   const VALIDATE_ONLY = req.query.validate_only === '1' || !!req.body.validateOnly;
-
   const mkParams = () => {
     const p = { access_token: userToken };
     if (VALIDATE_ONLY) p.execution_options = ['validate_only'];
@@ -362,18 +263,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     if (!url) throw new Error('No image URL');
     const m = /^data:image\/\w+;base64,(.+)$/i.exec(url);
     if (m) return m[1];
-
     const abs = absolutePublicUrl(url);
     const tries = [0, 400, 900];
     let lastErr;
     for (const d of tries) {
       try {
         if (d) await sleep(d);
-        const imgRes = await axios.get(abs, {
-          responseType: 'arraybuffer',
-          timeout: 15000,
-          headers: { 'Accept': 'image/*' }
-        });
+        const imgRes = await axios.get(abs, { responseType: 'arraybuffer', timeout: 15000, headers: { 'Accept': 'image/*' } });
         const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
         if (!ct.includes('image')) throw new Error(`Non-image content-type: ${ct || 'unknown'}`);
         return Buffer.from(imgRes.data).toString('base64');
@@ -385,11 +281,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   async function uploadImage(imageUrl) {
     try {
       let base64;
-      try {
-        base64 = await fetchImageAsBase64(imageUrl);
-      } catch (e) {
-        base64 = await fetchImageAsBase64('/__fallback/1200.jpg');
-      }
+      try { base64 = await fetchImageAsBase64(imageUrl); }
+      catch { base64 = await fetchImageAsBase64('/__fallback/1200.jpg'); }
       const fbImageRes = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
         new URLSearchParams({ bytes: base64 }),
@@ -424,75 +317,45 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return up?.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
   }
 
-  // Will fetch first page id if none is provided and DEFAULTS has none
   async function resolvePageId(explicitPageId) {
     if (explicitPageId) return String(explicitPageId);
     if (DEFAULTS.pageId) return String(DEFAULTS.pageId);
     try {
-      const pagesRes = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
-        params: { access_token: userToken, fields: 'id,name' }
-      });
+      const pagesRes = await axios.get('https://graph.facebook.com/v18.0/me/accounts', { params: { access_token: userToken, fields: 'id,name' } });
       const first = pagesRes.data?.data?.[0]?.id || null;
-      if (first) {
-        DEFAULTS.pageId = String(first);
-        return String(first);
-      }
+      if (first) { DEFAULTS.pageId = String(first); return String(first); }
     } catch {}
     return null;
   }
 
   try {
     const {
-      form = {},
-      budget,
-      adCopy,
-      pageId, // may be omitted now
-      aiAudience: aiAudienceRaw,
-      mediaSelection = 'both',
-      imageVariants = [],
-      videoVariants = [],
-      fbVideoIds = [],
-      videoThumbnailUrl = null,
-      flightStart = null,
-      flightEnd = null,
-      flightHours = null,
+      form = {}, budget, adCopy, pageId,
+      aiAudience: aiAudienceRaw, mediaSelection = 'both',
+      imageVariants = [], videoVariants = [], fbVideoIds = [],
+      videoThumbnailUrl = null, flightStart = null, flightEnd = null, flightHours = null,
       overrideCountPerType = null
     } = req.body;
 
-    // Resolve page id automatically when not supplied
     const pageIdFinal = await resolvePageId(pageId);
-    if (!pageIdFinal) {
-      return res.status(400).json({ error: 'No Facebook Page available on this account. Connect a Page and try again.' });
-    }
+    if (!pageIdFinal) return res.status(400).json({ error: 'No Facebook Page available on this account. Connect a Page and try again.' });
 
     const campaignName = form.campaignName || form.businessName || 'SmartMark Campaign';
 
     let aiAudience = null;
-    try {
-      if (typeof aiAudienceRaw === 'string') aiAudience = JSON.parse(aiAudienceRaw);
-      else if (aiAudienceRaw && typeof aiAudienceRaw === 'object') aiAudience = aiAudienceRaw;
-    } catch { aiAudience = null; }
+    try { aiAudience = typeof aiAudienceRaw === 'string' ? JSON.parse(aiAudienceRaw) : (aiAudienceRaw && typeof aiAudienceRaw === 'object' ? aiAudienceRaw : null); }
+    catch { aiAudience = null; }
 
     const ms = String(mediaSelection || 'both').toLowerCase();
     const wantImage = ms === 'image' || ms === 'both';
     const wantVideo = ms === 'video' || ms === 'both';
 
-    // Targeting baseline + Advantage+ when user didn't provide interests
-    let targeting = {
-      geo_locations: { countries: ['US'] },
-      age_min: 18,
-      age_max: 65,
-      targeting_automation: { advantage_audience: 0 }
-    };
+    let targeting = { geo_locations: { countries: ['US'] }, age_min: 18, age_max: 65, targeting_automation: { advantage_audience: 0 } };
     if (aiAudience?.location) {
       const loc = String(aiAudience.location).trim();
-      if (/^[A-Za-z]{2}$/.test(loc)) {
-        targeting.geo_locations = { countries: [loc.toUpperCase()] };
-      } else if (/united states|usa/i.test(loc)) {
-        targeting.geo_locations = { countries: ['US'] };
-      } else {
-        targeting.geo_locations = { countries: [loc.toUpperCase()] };
-      }
+      if (/^[A-Za-z]{2}$/.test(loc)) targeting.geo_locations = { countries: [loc.toUpperCase()] };
+      else if (/united states|usa/i.test(loc)) targeting.geo_locations = { countries: ['US'] };
+      else targeting.geo_locations = { countries: [loc.toUpperCase()] };
     }
     if (aiAudience?.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
       const [min, max] = aiAudience.ageRange.split('-').map(Number);
@@ -502,48 +365,32 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map(id => ({ id })) }];
       targeting.targeting_automation.advantage_audience = 0;
     } else {
-      targeting.targeting_automation.advantage_audience = 1; // let FB optimize
+      targeting.targeting_automation.advantage_audience = 1;
     }
 
-    // limit: max 2 active (skip in validate-only)
     if (!VALIDATE_ONLY) {
-      const existing = await axios.get(
-        `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-        { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
-      );
+      const existing = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+        { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } });
       const activeCount = (existing.data?.data || []).filter(
         c => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
       ).length;
-      if (activeCount >= 2) {
-        return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
-      }
+      if (activeCount >= 2) return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
     }
 
-    // Decide variants
     const dailyBudget = Number(budget) || 0;
     const hours = (() => {
       if (flightEnd && flightStart) return Math.max(0, (new Date(flightEnd) - new Date(flightStart)) / 36e5);
       if (flightHours) return Number(flightHours) || 0;
       return 0;
     })();
-    const plan = policy.decideVariantPlan({
-      assetTypes: ms,
-      dailyBudget,
-      flightHours: hours,
-      overrideCountPerType
-    });
+    const plan = policy.decideVariantPlan({ assetTypes: ms, dailyBudget, flightHours: hours, overrideCountPerType });
     const needImg = wantImage ? plan.images : 0;
     const needVid = wantVideo ? plan.videos : 0;
 
-    if (wantImage && imageVariants.length < needImg) {
-      return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
-    }
+    if (wantImage && imageVariants.length < needImg) return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     const providedVideoCount = Math.max(videoVariants.length, fbVideoIds.length);
-    if (wantVideo && providedVideoCount < needVid) {
-      return res.status(400).json({ error: `Need ${needVid} video(s) but received ${providedVideoCount}.` });
-    }
+    if (wantVideo && providedVideoCount < needVid) return res.status(400).json({ error: `Need ${needVid} video(s) but received ${providedVideoCount}.` });
 
-    // Timeframe normalization + 14-day cap (what the UI enforces)
     const now = new Date();
     let startISO = flightStart ? new Date(flightStart).toISOString()
       : (NO_SPEND ? new Date(now.getTime() + 7*24*60*60*1000).toISOString() : new Date(now.getTime() + 60*1000).toISOString());
@@ -554,24 +401,16 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       if (new Date(endISO) <= new Date(startISO)) endISO = new Date(new Date(startISO).getTime() + 24*60*60*1000).toISOString();
     }
 
-    // 1) Campaign
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-      {
-        name: campaignName,
-        objective: 'OUTCOME_TRAFFIC',
-        status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-        special_ad_categories: []
-      },
+      { name: campaignName, objective: 'OUTCOME_TRAFFIC', status: NO_SPEND ? 'PAUSED' : 'ACTIVE', special_ad_categories: [] },
       { params: mkParams() }
     );
     const campaignId = campaignRes.data?.id || 'VALIDATION_ONLY';
 
-    // Per-adset budget split
     const typesUsed = (wantImage ? 1 : 0) + (wantVideo ? 1 : 0);
     const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100 / Math.max(1, typesUsed)));
 
-    // 2) Ad Sets
     let imageAdSetId = null, videoAdSetId = null;
     if (wantImage) {
       const { data } = await axios.post(
@@ -628,11 +467,31 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       videoAdSetId = data?.id || null;
     }
 
-    // 3) Ads
     const adIds = [];
     const usedImages = [];
     const usedVideos = [];
     const usedFbIds  = [];
+
+    async function uploadImage(imageUrl) {
+      try {
+        let base64;
+        try { base64 = await fetchImageAsBase64(imageUrl); }
+        catch { base64 = await fetchImageAsBase64('/__fallback/1200.jpg'); }
+        const fbImageRes = await axios.post(
+          `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
+          new URLSearchParams({ bytes: base64 }),
+          { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: mkParams() }
+        );
+        const imgData = fbImageRes.data?.images || {};
+        const hash = Object.values(imgData)[0]?.hash || null;
+        if (hash) return hash;
+        if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
+        throw new Error('Image upload failed');
+      } catch (e) {
+        if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
+        throw e;
+      }
+    }
 
     if (wantImage && imageAdSetId) {
       for (let i = 0; i < needImg; i++) {
@@ -712,18 +571,20 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     const campaignStatus = NO_SPEND ? 'PAUSED' : 'ACTIVE';
 
-    // Persist creatives + selection for this campaign
-    await upsertCampaignCreatives({
-      campaignId,
-      accountId,
-      pageId: pageIdFinal,
-      name: campaignName,
-      status: campaignStatus,
-      mediaSelection: ms,
-      images: usedImages,
-      videos: usedVideos,
-      fbVideoIds: usedFbIds.length ? usedFbIds : fbVideoIds
-    });
+    await ensureUsersAndSessions(); // reuse lowdb init
+    await db.read();
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+    const list = db.data.campaign_creatives;
+    const idx = list.findIndex(c => c.campaignId === campaignId);
+    const nowIso = new Date().toISOString();
+    const record = {
+      campaignId, accountId: String(accountId || ''), pageId: String(pageIdFinal || ''),
+      name: campaignName, status: campaignStatus, mediaSelection: ms,
+      images: usedImages, videos: usedVideos, fbVideoIds: usedFbIds.length ? usedFbIds : fbVideoIds,
+      updatedAt: nowIso, ...(idx === -1 ? { createdAt: nowIso } : {})
+    };
+    if (idx === -1) list.push(record); else list[idx] = { ...list[idx], ...record };
+    await db.write();
 
     res.json({
       success: true,
@@ -745,9 +606,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 });
 
-/* =========================
-   TEST/UTILITY ROUTES
-   ========================= */
+/* ---------------------------- Insights/controls ---------------------------- */
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
@@ -782,17 +641,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   const userToken = getFbUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-
   try {
     const response = await axios.get(
       `https://graph.facebook.com/v18.0/${campaignId}/insights`,
-      {
-        params: {
-          access_token: userToken,
-          fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
-          date_preset: 'maximum'
-        }
-      }
+      { params: { access_token: userToken, fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks', date_preset: 'maximum' } }
     );
     res.json(response.data);
   } catch (err) {
@@ -800,13 +652,11 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 
-/* NEW: Fetch stored creatives + selection for a campaign */
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', async (req, res) => {
   const userToken = getFbUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    await ensureCampaignCreativesTable();
     await db.read();
     const rec = (db.data.campaign_creatives || []).find(r => r.campaignId === campaignId) || null;
     if (!rec) return res.status(404).json({ error: 'No creatives stored for this campaign.' });
@@ -828,17 +678,12 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
   }
 });
 
-/* Pause / Unpause / Cancel */
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = getFbUserToken();
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
-      { status: 'PAUSED' },
-      { params: { access_token: userToken } }
-    );
+    await axios.post(`https://graph.facebook.com/v18.0/${campaignId}`, { status: 'PAUSED' }, { params: { access_token: userToken } });
     res.json({ success: true, message: `Campaign ${campaignId} paused.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to pause campaign.' });
@@ -850,11 +695,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
-      { status: 'ACTIVE' },
-      { params: { access_token: userToken } }
-    );
+    await axios.post(`https://graph.facebook.com/v18.0/${campaignId}`, { status: 'ACTIVE' }, { params: { access_token: userToken } });
     res.json({ success: true, message: `Campaign ${campaignId} unpaused.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to unpause campaign.' });
@@ -866,25 +707,18 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
-      { status: 'ARCHIVED' },
-      { params: { access_token: userToken } }
-    );
+    await axios.post(`https://graph.facebook.com/v18.0/${campaignId}`, { status: 'ARCHIVED' }, { params: { access_token: userToken } });
     res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
   }
 });
 
-/* =========================
-   WHOAMI (session check)
-   ========================= */
+/* ---------------------------- whoami ---------------------------- */
 router.get('/whoami', async (req, res) => {
   try {
     await ensureUsersAndSessions();
-
-    const sid = req.cookies?.sm_sid;
+    const sid = req.cookies?.[COOKIE_NAME];
     if (!sid) return res.status(401).json({ error: 'Not logged in' });
 
     const sess = db.data.sessions.find(s => s.sid === sid);
