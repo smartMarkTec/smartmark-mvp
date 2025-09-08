@@ -86,37 +86,6 @@ app.get('/__fallback/1200.jpg', async (_req, res) => {
   }
 });
 
-/* =========================
-   BYPASS LOGIN (DEV ONLY)
-   =========================
-   Bypasses if:
-   - AUTH_BYPASS=1  (env), OR
-   - query param ?bypass=1  (handy for quick tests)
-*/
-app.post('/auth/login', (req, res, next) => {
-  const useBypass = process.env.AUTH_BYPASS === '1' || req.query.bypass === '1';
-  if (useBypass) {
-    const username = (req.body && String(req.body.username || 'guest').trim()) || 'guest';
-    const email = (req.body && String(req.body.password || '').trim()) || '';
-    const sid = `dev-${Buffer.from(username).toString('hex')}`;
-
-    // set cookie without cookie-parser
-    res.cookie('sm_sid', sid, {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: true,       // fine on Render (HTTPS)
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
-
-    return res.json({
-      success: true,
-      user: { username, email },
-      bypass: true,
-      source: process.env.AUTH_BYPASS === '1' ? 'env' : 'query'
-    });
-  }
-  return next(); // fall through to real /auth routes
-});
 
 // OPTIONAL: guard against any handler that “hangs”
 app.use((req, res, next) => {
