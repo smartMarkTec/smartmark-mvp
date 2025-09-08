@@ -8,6 +8,7 @@ const { Buffer } = require('buffer');
 const db = require('../db');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
 const { policy } = require('../smartCampaignEngine');
+const bcrypt = require('bcrypt');
 
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
@@ -220,36 +221,42 @@ router.get('/facebook/pages', async (req, res) => {
 });
 
 /* =========================
-   DEMO AUTH (lowdb)
+   REAL AUTH (LowDB + bcrypt)
    ========================= */
-router.post('/signup', async (req, res) => {
-  const { username, email, cashtag, password } = req.body;
-  if (!username || !email || !cashtag || !password) {
-    return res.status(400).json({ error: 'All fields required' });
+router.post('/register', async (req, res) => {
+  const { username, email, password } = req.body;
+  if (!username || !email || !password) {
+    return res.status(400).json({ error: 'Username, email, and password required' });
   }
   await db.read();
   db.data.users = db.data.users || [];
-  if (db.data.users.find(u => u.username === username || u.email === email || u.cashtag === cashtag)) {
-    return res.status(400).json({ error: 'Username, email, or cashtag already exists' });
+  if (db.data.users.find(u => u.username === username || u.email === email)) {
+    return res.status(400).json({ error: 'Username or email already exists' });
   }
-  db.data.users.push({ username, email, cashtag, password });
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = { username, email, passwordHash };
+  db.data.users.push(user);
   await db.write();
-  res.json({ success: true, user: { username, email, cashtag } });
+  res.json({ success: true, user: { username, email } });
 });
 
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-  await db.read();
-  let user = db.data.users.find(u => u.username === username && u.password === password);
-  if (!user) {
-    user = { username, email: password, cashtag: username, password };
-    db.data.users.push(user);
-    await db.write();
-  }
-  res.json({ success: true, user: { username: user.username, email: user.email, cashtag: user.cashtag } });
-});
 
+  await db.read();
+  const user = db.data.users.find(u => u.username === username);
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  const match = await bcrypt.compare(password, user.passwordHash);
+  if (!match) {
+    return res.status(401).json({ error: 'Invalid username or password' });
+  }
+
+  res.json({ success: true, user: { username: user.username, email: user.email } });
+});
 /* =========================
    HELPERS: persist creatives
    ========================= */
