@@ -8,7 +8,8 @@ const { Buffer } = require('buffer');
 const db = require('../db');
 const { getFbUserToken, setFbUserToken } = require('../tokenStore');
 const { policy } = require('../smartCampaignEngine');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
+
 
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
