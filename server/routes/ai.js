@@ -693,7 +693,13 @@ function pickSerifFontFile() {
  * - Voiceover >= 14.4s. Video = VO + 1.5s (min 16s). CTA appears once.
  */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
+  // --- OVERRIDE SERVER-WIDE 20s TIMEOUT FOR HEAVY GENERATION ---
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(180000); // 3 minutes
+    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
+  } catch {}
   res.setHeader('Content-Type', 'application/json');
+
   try {
     const { url = '', answers = {}, regenerateToken = '' } = req.body;
 
@@ -973,6 +979,11 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
 
 /* --------------------- IMAGE: search + overlay --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
+  // Images are faster but still may exceed 20s under load; extend a bit.
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(60000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(60000);
+  } catch {}
   try {
     const { regenerateToken = '' } = req.body;
     const top = req.body || {};
