@@ -304,23 +304,26 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
 
-  /* ---- Image copy editing state ---- */
-  const [imageEditing, setImageEditing] = useState(false);
-  const currentImageId = useMemo(
-    () => creativeIdFromUrl(imageUrls[activeImage] || ""),
-    [imageUrls, activeImage]
-  );
-  const [editHeadline, setEditHeadline] = useState("");
-  const [editBody, setEditBody] = useState("");
-  const [editCTA, setEditCTA] = useState("");
+/* ---- Image copy editing state ---- */
+const [imageEditing, setImageEditing] = useState(false);
 
-  /* helper for absolute URLs */
-  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+const currentImageId = useMemo(() => {
+  const url = imageUrls[activeImage] || "";
+  return creativeIdFromUrl(url);
+}, [imageUrls, activeImage]);
 
-  /* Scroll chat to bottom (no laggy observers/sticky elements) */
-  useEffect(() => {
-    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-  }, [chatHistory]);
+const [editHeadline, setEditHeadline] = useState("");
+const [editBody, setEditBody] = useState("");
+const [editCTA, setEditCTA] = useState("");
+
+// helper for absolute URLs
+const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+
+/* Scroll chat to bottom (no laggy observers/sticky elements) */
+useEffect(() => {
+  if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+}, [chatHistory]);
+
 
   /* Restore draft */
   useEffect(() => {
@@ -698,6 +701,10 @@ export default function FormPage() {
       {/* global smooth scroll & subtle glow like homepage (but teal) */}
       <style>{`
         html, body { scroll-behavior: smooth; }
+        /* Slim, subtle scrollbar inside chat like ChatGPT */
+        .chat-scroll::-webkit-scrollbar { width: 8px; }
+        .chat-scroll::-webkit-scrollbar-thumb { background: #2a3138; border-radius: 8px; }
+        .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
       <div
         aria-hidden
@@ -759,7 +766,7 @@ export default function FormPage() {
         </div>
       </div>
 
-      {/* ---- GPT chat panel (unchanged layout/logic) ---- */}
+      {/* ---- GPT chat panel (now strictly vertical like ChatGPT) ---- */}
       <div
         style={{
           width: "100%",
@@ -773,51 +780,55 @@ export default function FormPage() {
           padding: "28px 28px 22px 28px",
           display: "flex",
           flexDirection: "column",
-          alignItems: "center",
+          alignItems: "stretch",
           zIndex: 1
         }}
       >
-        <div style={{ color: "#9dffe9", fontSize: 15, fontWeight: 900, marginBottom: 10, letterSpacing: 1.6, textTransform: "uppercase" }}>
+        <div style={{ color: "#9dffe9", fontSize: 15, fontWeight: 900, marginBottom: 10, letterSpacing: 1.6, textTransform: "uppercase", textAlign: "center" }}>
           AI Ad Manager
         </div>
 
         {/* history */}
         <div
           ref={chatBoxRef}
+          className="chat-scroll"
           style={{
             width: "100%",
-            minHeight: 160,
-            maxHeight: 200,
+            minHeight: 240,
+            maxHeight: 480,
             overflowY: "auto",
             marginBottom: 16,
-            padding: 12,
+            padding: 16,
             background: "#151a1f",
             borderRadius: 12,
-            border: `1px solid ${EDGE}`
+            border: `1px solid ${EDGE}`,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10
           }}
         >
-          {chatHistory.slice(-24).map((msg, i) => (
-            <div
-              key={i}
-              style={{
-                textAlign: msg.from === "gpt" ? "left" : "right",
-                margin: "8px 0",
-                color: msg.from === "gpt" ? "#22e3bd" : "#0e1519",
-                fontWeight: 700,
-                fontSize: 15,
-                background: msg.from === "gpt" ? "#11161b" : TEAL,
-                borderRadius: msg.from === "gpt" ? "14px 18px 18px 7px" : "16px 12px 7px 17px",
-                padding: "10px 14px",
-                maxWidth: "96%",
-                display: "inline-block",
-                overflowWrap: "anywhere",
-                whiteSpace: "pre-wrap",
-                border: msg.from === "gpt" ? `1px solid ${EDGE}` : "none",
-              }}
-            >
-              {msg.text}
-            </div>
-          ))}
+          {chatHistory.slice(-40).map((msg, i) => {
+            const isGPT = msg.from === "gpt";
+            return (
+              <div
+                key={i}
+                style={{
+                  alignSelf: isGPT ? "flex-start" : "flex-end",
+                  color: isGPT ? "#d6fff8" : "#0e1519",
+                  background: isGPT ? "#0f151a" : TEAL,
+                  border: isGPT ? `1px solid ${EDGE}` : "none",
+                  borderRadius: isGPT ? "14px 16px 16px 8px" : "16px 12px 8px 16px",
+                  padding: "10px 14px",
+                  maxWidth: "85%",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  boxShadow: isGPT ? "none" : `0 2px 12px ${TEAL_SOFT}`
+                }}
+              >
+                {msg.text}
+              </div>
+            );
+          })}
         </div>
 
         {/* prompt bar */}
@@ -888,8 +899,8 @@ export default function FormPage() {
           </form>
         )}
 
-        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 700 }}>AI generating...</div>}
-        {error && <div style={{ color: "#f35e68", marginTop: 18 }}>{error}</div>}
+        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 700, textAlign: "center" }}>AI generating...</div>}
+        {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
       {/* MediaType Toggle */}
