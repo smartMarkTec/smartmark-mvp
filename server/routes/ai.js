@@ -19,7 +19,7 @@ router.use((req, res, next) => {
   }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID');
   res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -45,6 +45,7 @@ const { spawn } = require('child_process');
 const seedrandom = require('seedrandom');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
+const db = require('../db'); // <— used to persist generated assets for ~24h
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
@@ -80,6 +81,61 @@ function ensureGeneratedDir() {
   return outDir;
 }
 function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
+
+/* ---------- Persist generated assets (24h TTL) ---------- */
+const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
+
+function ownerKeyFromReq(req) {
+  const cookieSid = req?.cookies?.sm_sid;
+  const headerSid = req?.headers?.['x-sm-sid'];
+  const auth = req?.headers?.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+  return cookieSid || headerSid || bearer || `ip:${req.ip}`;
+}
+
+async function ensureAssetsTable() {
+  await db.read();
+  db.data = db.data || {};
+  db.data.generated_assets = db.data.generated_assets || [];
+  await db.write();
+}
+
+async function purgeExpiredAssets() {
+  await ensureAssetsTable();
+  const now = Date.now();
+  const before = db.data.generated_assets.length;
+  db.data.generated_assets = db.data.generated_assets.filter(a => (a.expiresAt || 0) > now);
+  if (db.data.generated_assets.length !== before) await db.write();
+}
+
+async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
+  await ensureAssetsTable();
+  await purgeExpiredAssets();
+
+  const owner = ownerKeyFromReq(req);
+  const now = Date.now();
+  const rec = {
+    id: uuidv4(),
+    owner,
+    kind, // 'image' | 'video'
+    url,
+    absoluteUrl,
+    meta, // e.g., { script, ctaText, voice, fbVideoId, keyword, overlayText }
+    createdAt: now,
+    expiresAt: now + ASSET_TTL_MS
+  };
+
+  db.data.generated_assets.push(rec);
+
+  // keep last 50 per owner to avoid unbounded growth
+  const mine = db.data.generated_assets.filter(a => a.owner === owner).sort((a, b) => b.createdAt - a.createdAt);
+  if (mine.length > 50) {
+    const keepIds = new Set(mine.slice(0, 50).map(a => a.id));
+    db.data.generated_assets = db.data.generated_assets.filter(a => a.owner !== owner || keepIds.has(a.id));
+  }
+  await db.write();
+  return rec;
+}
 
 /* ---------- topic mapping (keeps visuals on-topic) ---------- */
 const IMAGE_KEYWORD_MAP = [
@@ -496,11 +552,11 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
     const padX = 64, padY = 110, panelW = 520;
     const fit = splitTwoLines(headline, panelW - 2 * padX, 54);
     const yBase = padY;
-    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 48;
+       const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 48;
 
     // measure the widest headline line and center CTA under it
-    const w1 = EST(fit.lines[0] || '', fit.fs);
-    const w2 = fit.lines[1] ? EST(fit.lines[1], fit.fs) : 0;
+    const w1 = estWidth(fit.lines[0] || '', fit.fs);
+    const w2 = fit.lines[1] ? estWidth(fit.lines[1], fit.fs) : 0;
     const textBlockW = Math.min(panelW - 2 * padX, Math.max(w1, w2));
     const cxHeadline = padX + textBlockW / 2;
 
@@ -693,9 +749,9 @@ function pickSerifFontFile() {
  * - Voiceover >= 14.4s. Video = VO + 1.5s (min 16s). CTA appears once.
  */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  // --- OVERRIDE SERVER-WIDE 20s TIMEOUT FOR HEAVY GENERATION ---
+  // --- extend timeout for heavy generation to prevent 504s ---
   try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(180000); // 3 minutes
+    if (typeof res.setTimeout === 'function') res.setTimeout(180000);
     if (typeof req.setTimeout === 'function') req.setTimeout(180000);
   } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -962,6 +1018,22 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       }
     } catch {}
 
+    // SAVE (24h TTL)
+    await saveAsset({
+      req,
+      kind: 'video',
+      url: publicVideoUrl,
+      absoluteUrl,
+      meta: {
+        script,
+        ctaText,
+        voice: 'alloy',
+        variant: 1,
+        fbVideoId: fbVideoId || null,
+        topic
+      }
+    });
+
     return res.json({
       videoUrl: publicVideoUrl,
       absoluteVideoUrl: absoluteUrl,
@@ -1018,15 +1090,67 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
     let finalUrl = baseUrl;
     try {
-      const { publicUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint, seed });
+      const { publicUrl, absoluteUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint, seed });
       finalUrl = publicUrl;
+
+      // SAVE (24h TTL)
+      await saveAsset({
+        req,
+        kind: 'image',
+        url: publicUrl,
+        absoluteUrl,
+        meta: {
+          keyword,
+          overlayText: ctaHint,
+          headlineHint
+        }
+      });
     } catch {
-      // fallback to raw if overlay pipeline fails
+      // fallback to raw if overlay pipeline fails (still save raw)
+      await saveAsset({
+        req,
+        kind: 'image',
+        url: baseUrl,
+        absoluteUrl: baseUrl,
+        meta: { keyword, overlayText: ctaHint, headlineHint, raw: true }
+      });
     }
 
     res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
   } catch (e) {
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+  }
+});
+
+/* ------------------------- RECENT (24h window) ------------------------- */
+// Returns the caller's last generated assets (video & image) within TTL.
+// Frontend can call any of these paths.
+router.get('/recent', async (req, res) => {
+  try {
+    await purgeExpiredAssets();
+    const owner = ownerKeyFromReq(req);
+    const items = (db.data.generated_assets || [])
+      .filter(a => a.owner === owner)
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 50);
+    res.json({ items, ttlMs: ASSET_TTL_MS });
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to load recent assets' });
+  }
+});
+router.get('/assets/recent', (req, res) => router.handle({ ...req, url: '/recent' }, res));
+router.get('/recent-assets', (req, res) => router.handle({ ...req, url: '/recent' }, res));
+
+/* optional: clear recent (for testing/UX reset) */
+router.post('/assets/clear', async (req, res) => {
+  try {
+    await ensureAssetsTable();
+    const owner = ownerKeyFromReq(req);
+    db.data.generated_assets = (db.data.generated_assets || []).filter(a => a.owner !== owner);
+    await db.write();
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to clear assets' });
   }
 });
 
