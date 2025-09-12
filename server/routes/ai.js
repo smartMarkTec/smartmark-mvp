@@ -45,7 +45,7 @@ const { spawn } = require('child_process');
 const seedrandom = require('seedrandom');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
-const db = require('../db'); // persist generated assets for ~24h
+const db = require('../db');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
@@ -98,7 +98,6 @@ async function ensureAssetsTable() {
   db.data.generated_assets = db.data.generated_assets || [];
   await db.write();
 }
-
 async function purgeExpiredAssets() {
   await ensureAssetsTable();
   const now = Date.now();
@@ -106,7 +105,6 @@ async function purgeExpiredAssets() {
   db.data.generated_assets = db.data.generated_assets.filter(a => (a.expiresAt || 0) > now);
   if (db.data.generated_assets.length !== before) await db.write();
 }
-
 async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   await ensureAssetsTable();
   await purgeExpiredAssets();
@@ -116,10 +114,10 @@ async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   const rec = {
     id: uuidv4(),
     owner,
-    kind, // 'image' | 'video'
+    kind,
     url,
     absoluteUrl,
-    meta, // e.g., { script, ctaText, voice, fbVideoId, keyword, overlayText }
+    meta,
     createdAt: now,
     expiresAt: now + ASSET_TTL_MS
   };
@@ -166,21 +164,15 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   if (extra.includes('electronics') || extra.includes('phone') || extra.includes('laptop')) return 'tech gadgets';
   return base;
 }
-function overlayTitleFromAnswers(answers = {}, topic = '') {
-  const brand = (answers.businessName || '').trim().toUpperCase();
-  if (brand) return brand.slice(0, 24);
-  if (/fashion/i.test(topic)) return 'NEW ARRIVALS';
-  return (topic || 'JUST DROPPED').toUpperCase().slice(0, 24);
-}
 
-/* ---- Category detection & guardrails (keeps copy accurate) ---- */
+/* ---- Category detection & guardrails ---- */
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
   if (/fashion|apparel|clothing|athleisure|outfit|wardrobe/.test(txt)) return 'fashion';
   if (/fitness|gym|workout|trainer|supplement|protein|yoga|crossfit|wellness/.test(txt)) return 'fitness';
   if (/makeup|cosmetic|skincare|beauty|serum|lipstick|foundation/.test(txt)) return 'cosmetics';
   if (/hair|shampoo|conditioner|styling/.test(txt)) return 'hair';
-  if (/food|snack|meal|restaurant|pizza|burger|drink|beverage|coffee|cafe/.test(txt)) return 'food';
+  if (/food|snack|meal|restaurant|pizza|burger|drink|beverage|kitchen/.test(txt)) return 'food';
   if (/pet|dog|cat|petcare|treats/.test(txt)) return 'pets';
   if (/electronics|phone|laptop|tech|gadget|device|camera/.test(txt)) return 'electronics';
   if (/home|decor|kitchen|furniture|bedroom|bath/.test(txt)) return 'home';
@@ -239,6 +231,38 @@ function cleanFinalText(text) {
     .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi, '')
     .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
     .trim();
+}
+
+/* ---------- Overlay headline helpers ---------- */
+function categoryLabelForOverlay(category) {
+  return {
+    fashion: 'NEW ARRIVALS',
+    fitness: 'TRAINING',
+    cosmetics: 'BEAUTY',
+    hair: 'HAIR CARE',
+    food: 'KITCHEN',
+    pets: 'PET CARE',
+    electronics: 'TECH',
+    home: 'HOME',
+    coffee: 'COFFEE',
+    generic: 'SHOP'
+  }[category || 'generic'];
+}
+function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
+  const category = categoryOrTopic && /^(fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
+    ? categoryOrTopic.toLowerCase()
+    : null;
+
+  const brand = (answers.businessName || '').trim().toUpperCase();
+  if (brand) {
+    // If brand is a single word, append a category word so we get 2–3 words (avoids fallback)
+    const label = category ? categoryLabelForOverlay(category) : 'SHOP';
+    const words = brand.split(/\s+/);
+    return (words.length === 1 ? `${brand} ${label}` : brand).slice(0, 30);
+  }
+  // If no brand, show a compact category/topic label
+  if (category) return categoryLabelForOverlay(category);
+  return (String(categoryOrTopic || 'SHOP')).toUpperCase().slice(0, 24);
 }
 
 /* ------------------------ Training context ------------------------ */
@@ -338,7 +362,7 @@ ${forbidFashionLine}
   }
 });
 
-/* ------------------- Headlines/body for images ------------------- */
+/* ------------------- Campaign assets (headline/body/cta) ------------------- */
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
     const { answers = {}, url = '' } = req.body;
@@ -408,7 +432,6 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 
     headline = headline.replace(/["<>]/g, '').slice(0, 55);
     body = body.replace(/["<>]/g, '').trim();
-
     overlay = pickFromAllowedCTAs(answers).toUpperCase();
 
     return res.json({ headline, body, image_overlay_text: overlay });
@@ -450,7 +473,6 @@ TEXT:
       .filter(Boolean);
   } catch { return []; }
 }
-
 async function getFbInterestIds(keywords, fbToken) {
   const out = [];
   for (const k of keywords) {
@@ -523,7 +545,7 @@ Website homepage text:
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
-function fitFont(text, maxW, startFs, minFs=30){let fs=startFs;while(fs>minFs&&estWidth(text,fs)>maxW)fs-=2;return fs}
+function fitFont(text, maxW, startFs, minFs=26){let fs=startFs;while(fs>minFs&&estWidth(text,fs)>maxW)fs-=2;return fs}
 function splitTwoLines(text,maxW,startFs){
   const words=String(text||'').split(/\s+/).filter(Boolean);
   if(words.length<=2)return{lines:[text],fs:fitFont(text,maxW,startFs)};
@@ -538,7 +560,8 @@ const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|
 function cleanHeadline(h){
   h=String(h||'').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
   if(!h || BANNED_TERMS.test(h)) return '';
-  const words=h.split(' '); if(words.length<2||words.length>4) return '';
+  const words=h.split(' ');
+  if(words.length>6) h = words.slice(0,6).join(' ');
   return h.toUpperCase();
 }
 
@@ -547,7 +570,6 @@ const ALLOWED_CTAS = [
   'SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!',
   'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'
 ];
-const CTA_PLAIN = ALLOWED_CTAS.map(s => s.replace(/!/g,''));
 function pickFromAllowedCTAs(answers = {}, seed = '') {
   const t = String(answers?.cta || '').trim();
   if (t) {
@@ -586,7 +608,6 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
       </g>`;
   };
 
-  /* Top band (tpl=2) */
   if (tpl === 2) {
     const fs = fitFont(headline, MAX_W - 80, 56);
     const yTitle = 92;
@@ -608,7 +629,6 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
     `;
   }
 
-  /* Center box (tpl=3) */
   if (tpl === 3) {
     const boxW = 860;
     const fit = splitTwoLines(headline, boxW - 100, 56);
@@ -632,7 +652,6 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
     `;
   }
 
-  /* Left gradient (tpl=4) */
   if (tpl === 4) {
     const padX = 64, padY = 110, panelW = 520;
     const fit = splitTwoLines(headline, panelW - 2 * padX, 54);
@@ -666,13 +685,13 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
 }
 
 /* Build the overlaid JPG */
-async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '' }) {
+async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 627;
 
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
 
-  const headline = cleanHeadline(headlineHint) || 'NEW ARRIVALS';
+  const headline = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
 
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
@@ -718,8 +737,6 @@ function pickMusicFile(keywords = []) {
 }
 
 /* ------------------------------- Utils ------------------------------- */
-function withTimeout(p, ms, msg='Timeout') { return Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(msg)), ms))]); }
-
 async function downloadFileWithTimeout(url, dest, timeoutMs=26000, maxSizeMB=6) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
@@ -738,14 +755,12 @@ async function downloadFileWithTimeout(url, dest, timeoutMs=26000, maxSizeMB=6) 
       .catch(err=>{clearTimeout(timeout); try{fs.unlinkSync(dest);}catch{}; reject(err);});
   });
 }
-
 function getDeterministicShuffle(arr, seed) {
   const rng = seedrandom(String(seed || Date.now()));
   const a = [...arr];
   for (let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}
   return a;
 }
-
 function safeFFText(t){
   return String(t||'')
     .replace(/['’]/g,'')
@@ -753,7 +768,7 @@ function safeFFText(t){
     .replace(/[:]/g,' ')
     .replace(/[\\"]/g,'')
     .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'')
-    .replace(/\b(dot|com|net|org|io|co)\b/gi,'')
+    .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
     .replace(/[^A-Za-z0-9 !?\-]/g,' ')
     .replace(/\s+/g,' ')
     .trim()
@@ -762,9 +777,7 @@ function safeFFText(t){
 }
 
 /* ---- CTA helpers ---- */
-function chooseCTA(answers={}, seed='') {
-  return pickFromAllowedCTAs(answers, seed);
-}
+function chooseCTA(answers={}, seed='') { return pickFromAllowedCTAs(answers, seed); }
 function finalizeScriptWithSingleCTA(text, chosenCTA) {
   const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
   const plain = plainList.map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|');
@@ -805,8 +818,6 @@ async function probeDuration(file, timeoutMs=8000) {
     child.on('error', () => { clearTimeout(timer); resolve(0); });
   });
 }
-
-/* ------------------------------- VIDEO ------------------------------- */
 function pickSerifFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf',
@@ -821,140 +832,96 @@ function pickSerifFontFile() {
   return null;
 }
 
-/**
- * Single design:
- * - Square 640x640 with blurred fill + centered fit.
- * - Side curtains fade after clip #1.
- * - Top intro band shows Brand only (with "!"), Times New Roman if available.
- * - Big centered outro CTA.
- * - Voiceover >= 14.4s. Video = VO + 1.5s (min 16s). CTA appears once.
- */
+/* -------------------- Fallback still-video (always succeeds) -------------------- */
+async function composeStillVideo({ imageUrl, duration, ttsPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
+  const outDir = ensureGeneratedDir();
+  const id = uuidv4();
+  const outPath = path.join(outDir, `${id}.mp4`);
+
+  // Download image locally
+  const imgFile = path.join(outDir, `${id}.jpg`);
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+  fs.writeFileSync(imgFile, imgRes.data);
+
+  const serifFile = pickSerifFontFile();
+  const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+  const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+
+  const brand = safeFFText(brandLine);
+  const cta   = safeFFText(ctaText);
+
+  // Simple zoom-in + intro brand + outro CTA
+  const filter =
+    `[0:v]scale=640:640,format=yuv420p,zoompan=z='min(zoom+0.0009,1.12)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',` +
+    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
+    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-1.5).toFixed(2)})'[v]`;
+
+  const args = ['-loop', '1', '-t', duration.toFixed(2), '-i', imgFile];
+
+  if (ttsPath) {
+    args.push('-i', ttsPath);
+    // pad/trim audio to duration
+    args.push(
+      '-filter_complex', `${filter};[1:a]aresample=44100,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[a]`,
+      '-map', '[v]', '-map', '[a]'
+    );
+  } else {
+    // silent track to avoid “video has no audio” issues
+    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+    args.push('-filter_complex', filter, '-map', '[v]', '-map', '1:a');
+  }
+
+  args.push(
+    '-r', '24',
+    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+    '-movflags', '+faststart',
+    '-shortest',
+    '-loglevel', 'error',
+    outPath
+  );
+
+  await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'still-video timeout' });
+  try { fs.unlinkSync(imgFile); } catch {}
+  return { publicUrl: `/generated/${id}.mp4`, absoluteUrl: absolutePublicUrl(`/generated/${id}.mp4`) };
+}
+
+/* ------------------------------- VIDEO ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(180000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
-  } catch {}
+  try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
 
   try {
     const { url = '', answers = {}, regenerateToken = '' } = req.body;
 
     const token = getUserToken(req);
-    const fbAdAccountId =
-      req.body.fbAdAccountId ||
-      req.query.adAccountId ||
-      req.headers['x-fb-ad-account-id'] ||
-      null;
+    const fbAdAccountId = req.body.fbAdAccountId || req.query.adAccountId || req.headers['x-fb-ad-account-id'] || null;
 
     const category = resolveCategory(answers || {});
     const VIDEO = { W: 640, H: 640, FPS: 24 };
-    const TO = { PEXELS: 16000, DL: 28000, OVERMUX: 120000 };
     const GAP = 1.5;
 
     const topic = deriveTopicKeywords(answers, url, 'ecommerce');
-    const brandBase = (answers?.businessName && String(answers.businessName).trim()) || overlayTitleFromAnswers(answers, topic);
+    const brandBase = (answers?.businessName && String(answers.businessName).trim()) || overlayTitleFromAnswers(answers, category);
     let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g,'').trim();
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
 
-    /* ---- Stock clips ---- */
-    let candidates = [];
-    try {
-      const r = await axios.get('https://api.pexels.com/videos/search', {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: topic, per_page: 36, cb: Date.now() + (regenerateToken || '') },
-        timeout: TO.PEXELS
-      });
-      const videos = r.data?.videos || [];
-      for (const v of videos) {
-        if ((v.duration || 0) < 7) continue;
-        const files = (v.video_files || [])
-          .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
-          .sort((a, b) => (a.width || 9999) - (b.width || 9999));
-        if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
-      }
-    } catch {
-      return res.status(500).json({ error: 'Stock video fetch failed' });
-    }
-    if (candidates.length < 3) return res.status(404).json({ error: 'Not enough stock clips found' });
-    const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topic || Date.now()).slice(0, 3);
-
-    const tmp = path.join(__dirname, '../tmp');
-    try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
-    const inputs = [];
-    for (const c of chosen) {
-      const out = path.join(tmp, `${uuidv4()}.mp4`);
-      await downloadFileWithTimeout(c.link, out, TO.DL, 6);
-      inputs.push(out);
-    }
-
-    /* ---- Script generation with guardrails ---- */
-    const forbidFashionLine = category === 'fashion'
-      ? ''
-      : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
-
-    const buildPrompt = (targetWordsLow, targetWordsHigh) => {
-      const base =
+    /* ---- Script + TTS ---- */
+    const forbidFashionLine = category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
+    const buildPrompt = (lo, hi) =>
 `Write a simple, neutral spoken ad script for an e-commerce/online business in the "${category}" category, about ${topic}.
-- About ${targetWordsLow}-${targetWordsHigh} words.
+- About ${lo}-${hi} words.
 - Keep it specific to the category, and accurate. ${forbidFashionLine}
 - Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
 - Do not include a website or domain.
 - Use the CTA phrase exactly once at the end: "${ctaText}".
-- Structure: brief hook → value/what to expect → CTA.`;
-      let p = base;
-      if (answers?.industry) p += `\nIndustry (for context): ${answers.industry}`;
-      if (answers?.businessName) p += `\nBrand (name only): ${answers.businessName}`;
-      if (url) p += `\nWebsite (for context only): ${url}`;
-      p += `\nOutput ONLY the script text.`;
-      return p;
-    };
-
-    const categoryFillers = {
-      fashion: [
-        'See different looks that work for your day.',
-        'Compare options and pick what fits your style.',
-      ],
-      fitness: [
-        'Build momentum with simple routines you can stick with.',
-        'Focus on form, progress, and staying consistent.',
-      ],
-      cosmetics: [
-        'Blend it into your routine and see what feels right.',
-        'Choose the shades and textures that match your look.',
-      ],
-      hair: [
-        'Care for your hair with steps that are easy to follow.',
-        'Find a routine that keeps your hair feeling healthy.',
-      ],
-      food: [
-        'Pick what sounds good and enjoy the flavor.',
-        'See simple options you can enjoy any time.',
-      ],
-      pets: [
-        'Make daily care easier for you and your pet.',
-        'Choose the treats or supplies that make life simple.',
-      ],
-      electronics: [
-        'Look for features that match how you actually use it.',
-        'Setup is straightforward—get going quickly.',
-      ],
-      home: [
-        'Find pieces that make your space work better.',
-        'Choose simple upgrades you’ll actually use.',
-      ],
-      coffee: [
-        'Dial in your brew and enjoy the taste.',
-        'Pick the roast that matches your morning.',
-      ],
-      generic: [
-        'Explore what works best for you.',
-        'Choose the option that fits your day.',
-      ],
-    };
+- Structure: brief hook → value/what to expect → CTA.
+Output ONLY the script text.`;
 
     async function makeTTS(scriptText) {
-      const file = path.join(tmp, `${uuidv4()}.mp3`);
+      const tmpDir = ensureGeneratedDir();
+      const file = path.join(tmpDir, `${uuidv4()}.mp3`);
       const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: scriptText });
       const buf = Buffer.from(await ttsRes.arrayBuffer());
       fs.writeFileSync(file, buf);
@@ -964,11 +931,8 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     let script = '';
     let ttsPath = '';
     let voDur = 0;
+    const targets = [[58,72],[70,84]];
 
-    const targets = [
-      [58, 72],
-      [70, 84]
-    ];
     for (let attempt = 0; attempt < targets.length; attempt++) {
       try {
         const [low, high] = targets[attempt];
@@ -980,9 +944,8 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
         });
         script = r.choices?.[0]?.message?.content?.trim() || '';
       } catch {
-        script = script || `Get an easy, reliable option that helps you focus on what matters. ${ctaText}`;
+        script = script || `Get a simple option that supports your goals without the hassle. ${ctaText}`;
       }
-
       script = stripFashionIfNotApplicable(script, category);
       script = enforceCategoryPresence(script, category);
       script = cleanFinalText(script);
@@ -991,139 +954,174 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       try {
         if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
         ttsPath = await makeTTS(script);
-      } catch {
-        return res.status(500).json({ error: 'TTS generation failed' });
-      }
+      } catch { ttsPath = null; }
 
-      voDur = await probeDuration(ttsPath);
+      voDur = ttsPath ? await probeDuration(ttsPath) : 0;
       if (voDur >= 14.4) break;
     }
+    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + GAP, 30.0));
 
-    const fillers = categoryFillers[category] || categoryFillers.generic;
-    let fi = 0, safety = 0;
-    while (voDur < 14.4 && safety < 8) {
-      safety++;
-      const noCTA = script.replace(/\s*([A-Z ]+)!$/,'').trim();
-      const add = stripFashionIfNotApplicable(fillers[fi++ % fillers.length], category);
-      script = finalizeScriptWithSingleCTA(`${noCTA}. ${add}`, ctaText);
-      try {
-        if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
-        ttsPath = await makeTTS(script);
-      } catch {}
-      voDur = await probeDuration(ttsPath);
-    }
+    /* ---- Try stock video pipeline; if it fails, fall back to still video ---- */
+    let publicVideoUrl = '';
+    let absoluteUrl = '';
+    let usedFallback = false;
 
-    if (voDur <= 0) voDur = 14.4;
+    try {
+      // Stock clips
+      let candidates = [];
+      const r = await axios.get('https://api.pexels.com/videos/search', {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: topic, per_page: 36, cb: Date.now() + (regenerateToken || '') },
+      });
+      const videos = r.data?.videos || [];
+      for (const v of videos) {
+        if ((v.duration || 0) < 7) continue;
+        const files = (v.video_files || [])
+          .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
+          .sort((a, b) => (a.width || 9999) - (b.width || 9999));
+        if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
+      }
+      if (candidates.length < 3) throw new Error('not_enough_clips');
 
-    /* ---- Durations ---- */
-    const finalDur = Math.max(16.0, Math.min(voDur + GAP, 30.0));
-    const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
-    const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
-    const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
-    const segs = [seg1, seg2, seg3];
+      const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topic || Date.now()).slice(0, 3);
 
-    /* ---- Overlays ---- */
-    const serifFile = pickSerifFontFile();
-    const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+      const tmp = path.join(__dirname, '../tmp');
+      try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
+      const inputs = [];
+      for (const c of chosen) {
+        const out = path.join(tmp, `${uuidv4()}.mp4`);
+        await downloadFileWithTimeout(c.link, out, 26000, 6);
+        inputs.push(out);
+      }
 
-    const brandLine = safeFFText(brandForVideo);
-    const ctaTxt    = safeFFText(ctaText);
+      // Build visual chain with curtains/bands + VO
+      const serifFile = pickSerifFontFile();
+      const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+      const brandLine = safeFFText(brandForVideo);
+      const ctaTxt    = safeFFText(ctaText);
+      const TOP_H   = Math.round(640 * 0.18);
+      const CUR_W   = Math.round(640 * 0.13);
+      const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
-    const introStart = 0.25;
-    const introEnd   = Math.min(segs[0] - 0.25, 3.2);
-    const outroStart = Math.max(0.0, finalDur - GAP);
-    const outroEnd   = finalDur;
+      const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
+      const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
+      const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
+      const segs = [seg1, seg2, seg3];
 
-    const TOP_H   = Math.round(640 * 0.18);
-    const CUR_W   = Math.round(640 * 0.13);
-    const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+      const introStart = 0.25;
+      const introEnd   = Math.min(segs[0] - 0.25, 3.2);
+      const outroStart = Math.max(0.0, finalDur - 1.5);
+      const outroEnd   = finalDur;
 
-    const yBrand = Math.round(TOP_H * 0.56);
+      const baseLook = `setsar=1,fps=${VIDEO.FPS},format=yuv420p,settb=AVTB`;
+      const vidParts = [];
+      for (let i = 0; i < inputs.length; i++) {
+        const dur = segs[i];
+        vidParts.push(
+          `[${i}:v]split=2[v${i}a][v${i}b];` +
+          `[v${i}a]scale=640:640:force_original_aspect_ratio=increase,boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,crop=640:640[bg${i}];` +
+          `[v${i}b]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',setsar=1[fit${i}];` +
+          `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${baseLook},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+        );
+      }
+      const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-    const introOverlay =
-      `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${yBrand}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+      const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
+      const curtains =
+        `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
+        `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
+        `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
 
-    const outroOverlay =
-      `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+      const bandFadeStart = (segs[0]-0.60).toFixed(2);
+      const band =
+        `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
+        `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
 
-    /* ---- Build visuals ---- */
-    const baseLook = `setsar=1,fps=${VIDEO.FPS},format=yuv420p,settb=AVTB`;
-    const vidParts = [];
-    for (let i = 0; i < inputs.length; i++) {
-      const dur = segs[i];
-      vidParts.push(
-        `[${i}:v]split=2[v${i}a][v${i}b];` +
-        `[v${i}a]scale=640:640:force_original_aspect_ratio=increase,boxblur=luma_radius=18:luma_power=1:chroma_radius=18:chroma_power=1,crop=640:640[bg${i}];` +
-        `[v${i}b]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',setsar=1[fit${i}];` +
-        `[bg${i}][fit${i}]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2,${baseLook},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+      const introOverlay =
+        `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+      const outroOverlay =
+        `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+
+      let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
+      let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
+
+      const outDir = ensureGeneratedDir();
+      const id = uuidv4();
+      const outPath = path.join(outDir, `${id}.mp4`);
+
+      const args = [];
+      for (const f of inputs) { args.push('-i', f); }
+      if (ttsPath) args.push('-i', ttsPath);
+
+      if (ttsPath) {
+        filterComplex += `;[${inputs.length}:a]aresample=44100,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
+        args.push(
+          '-filter_complex', filterComplex,
+          '-map', '[v]', '-map', '[mix]'
+        );
+      } else {
+        // Use a silent audio track
+        args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', `${inputs.length}:a`);
+      }
+
+      args.push(
+        '-t', finalDur.toFixed(2),
+        '-r', String(VIDEO.FPS),
+        '-vsync', '2',
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+        '-movflags', '+faststart',
+        '-loglevel', 'error',
+        outPath
       );
+
+      await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'overlay+mux timeout' });
+      for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
+
+      publicVideoUrl = `/generated/${id}.mp4`;
+      absoluteUrl = absolutePublicUrl(publicVideoUrl);
+    } catch (e) {
+      // FALLBACK: still-video from an image (never 500s)
+      usedFallback = true;
+      const keyword = getImageKeyword(answers.industry || '', url);
+      const p = await axios.get(PEXELS_IMG_BASE, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: keyword, per_page: 20 }
+      });
+      const photos = p.data?.photos || [];
+      if (!photos.length) throw new Error('no_images_for_fallback');
+
+      const idx = (seedrandom(String(regenerateToken || Date.now()))() * photos.length) | 0;
+      const baseUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large;
+
+      const { publicUrl: imgUrl } = await buildOverlayImage({
+        imageUrl: baseUrl,
+        headlineHint: overlayTitleFromAnswers(answers, category),
+        ctaHint: ctaText,
+        seed: regenerateToken || answers?.businessName || keyword,
+        fallbackHeadline: overlayTitleFromAnswers(answers, category)
+      });
+
+      const still = await composeStillVideo({
+        imageUrl: absolutePublicUrl(imgUrl),
+        duration: finalDur,
+        ttsPath,
+        brandLine: brandForVideo,
+        ctaText
+      });
+
+      publicVideoUrl = still.publicUrl;
+      absoluteUrl = still.absoluteUrl;
+    } finally {
+      try { if (ttsPath) fs.unlinkSync(ttsPath); } catch {}
+      maybeGC();
     }
-    const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
-
-    const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
-    const curtains =
-      `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
-      `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
-      `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
-
-    const bandFadeStart = (segs[0]-0.60).toFixed(2);
-    const band =
-      `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
-      `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
-
-    let filterVisual = curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
-    let filterComplex = vidParts.join(';') + ';' + concat + ';' + filterVisual;
-
-    /* ---- Audio ---- */
-    const ttsIdx = inputs.length;
-    const keys = [];
-    if (answers?.industry) keys.push(answers.industry);
-    if (answers?.businessName) keys.push(answers.businessName);
-    let bgMusicPath = null;
-    try { bgMusicPath = pickMusicFile(keys); } catch {}
-    const musicIdx = ttsIdx + 1;
-
-    if (bgMusicPath) {
-      filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice];` +
-                       `[${musicIdx}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg];` +
-                       `[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
-    } else {
-      filterComplex += `;[${ttsIdx}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
-    }
-
-    const outDir = ensureGeneratedDir();
-    const id = uuidv4();
-    const outPath = path.join(outDir, `${id}.mp4`);
-
-    const args = [];
-    for (const f of inputs) { args.push('-i', f); }
-    args.push('-i', ttsPath);
-    if (bgMusicPath) args.push('-i', bgMusicPath);
-    args.push(
-      '-filter_complex', filterComplex,
-      '-map', '[v]', '-map', '[mix]',
-      '-t', finalDur.toFixed(2),
-      '-r', String(VIDEO.FPS),
-      '-vsync', '2',
-      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
-      '-movflags', '+faststart',
-      '-loglevel', 'error',
-      outPath
-    );
-
-    await runSpawn('ffmpeg', args, { killAfter: TO.OVERMUX, killMsg: 'overlay+mux timeout' });
-
-    for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
-    try { fs.unlinkSync(ttsPath); } catch {}
-    maybeGC();
-
-    const publicVideoUrl = `/generated/${id}.mp4`;
-    const absoluteUrl = absolutePublicUrl(publicVideoUrl);
 
     let fbVideoId = null;
     try {
-      if (fbAdAccountId && token) {
+      const shouldUpload = !usedFallback; // optional: only push stock-based videos to FB, keep stills local
+      if (shouldUpload && fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(
           fbAdAccountId, token, absoluteUrl,
           'SmartMark Generated Video', 'Generated by SmartMark'
@@ -1137,14 +1135,7 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       kind: 'video',
       url: publicVideoUrl,
       absoluteUrl,
-      meta: {
-        script,
-        ctaText,
-        voice: 'alloy',
-        variant: 1,
-        fbVideoId: fbVideoId || null,
-        topic
-      }
+      meta: { script, ctaText, voice: 'alloy', variant: usedFallback ? 'still' : 'stock', fbVideoId, topic, category }
     });
 
     return res.json({
@@ -1154,7 +1145,7 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       script,
       ctaText,
       voice: 'alloy',
-      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: 1 }
+      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: usedFallback ? 'still' : 'stock' }
     });
   } catch (err) {
     if (!res.headersSent)
@@ -1164,16 +1155,14 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
 
 /* --------------------- IMAGE: search + overlay --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
-  try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(60000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(60000);
-  } catch {}
+  try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
   try {
     const { regenerateToken = '' } = req.body;
     const top = req.body || {};
     const answers = top.answers || top;
     const url = answers.url || top.url || '';
     const industry = answers.industry || top.industry || '';
+    const category = resolveCategory(answers || {});
 
     const keyword = getImageKeyword(industry, url);
 
@@ -1182,7 +1171,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
         params: { query: keyword, per_page: 35, cb: Date.now() + (regenerateToken || '') },
-        timeout: 4500
       });
       photos = r.data.photos || [];
     } catch {
@@ -1197,12 +1185,18 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const img = photos[idx];
     const baseUrl = img.src.large2x || img.src.original || img.src.large;
 
-    const headlineHint = overlayTitleFromAnswers(answers, keyword);
+    const headlineHint = overlayTitleFromAnswers(answers, category);
     const ctaHint = pickFromAllowedCTAs(answers, seed);
 
     let finalUrl = baseUrl;
     try {
-      const { publicUrl, absoluteUrl } = await buildOverlayImage({ imageUrl: baseUrl, headlineHint, ctaHint, seed });
+      const { publicUrl, absoluteUrl } = await buildOverlayImage({
+        imageUrl: baseUrl,
+        headlineHint,
+        ctaHint,
+        seed,
+        fallbackHeadline: headlineHint
+      });
       finalUrl = publicUrl;
 
       await saveAsset({
@@ -1210,11 +1204,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         kind: 'image',
         url: publicUrl,
         absoluteUrl,
-        meta: {
-          keyword,
-          overlayText: ctaHint,
-          headlineHint
-        }
+        meta: { keyword, overlayText: ctaHint, headlineHint, category }
       });
     } catch {
       await saveAsset({
@@ -1222,11 +1212,18 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         kind: 'image',
         url: baseUrl,
         absoluteUrl: baseUrl,
-        meta: { keyword, overlayText: ctaHint, headlineHint, raw: true }
+        meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category }
       });
     }
 
-    res.json({ imageUrl: finalUrl, photographer: img.photographer, pexelsUrl: img.url, keyword, totalResults: photos.length, usedIndex: idx });
+    res.json({
+      imageUrl: finalUrl,
+      photographer: img.photographer,
+      pexelsUrl: img.url,
+      keyword,
+      totalResults: photos.length,
+      usedIndex: idx
+    });
   } catch (e) {
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
@@ -1242,28 +1239,16 @@ async function listRecentForOwner(req) {
     .slice(0, 50);
 }
 router.get('/recent', async (req, res) => {
-  try {
-    const items = await listRecentForOwner(req);
-    res.json({ items, ttlMs: ASSET_TTL_MS });
-  } catch {
-    res.status(500).json({ error: 'Failed to load recent assets' });
-  }
+  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
+  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 router.get('/assets/recent', async (req, res) => {
-  try {
-    const items = await listRecentForOwner(req);
-    res.json({ items, ttlMs: ASSET_TTL_MS });
-  } catch {
-    res.status(500).json({ error: 'Failed to load recent assets' });
-  }
+  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
+  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 router.get('/recent-assets', async (req, res) => {
-  try {
-    const items = await listRecentForOwner(req);
-    res.json({ items, ttlMs: ASSET_TTL_MS });
-  } catch {
-    res.status(500).json({ error: 'Failed to load recent assets' });
-  }
+  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
+  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 
 /* optional: clear recent (for testing/UX reset) */
