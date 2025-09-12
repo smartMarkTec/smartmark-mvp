@@ -918,7 +918,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     inputs.push('silence');
   }
 
-  // ↓↓↓ reduced Ken Burns zoom (1.02 max) and full-frame contain
+  // contain + pad, tiny Ken Burns (max 1.02)
   const baseVideo = imgFile
     ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,` +
       `zoompan=z='min(zoom+0.0003,1.02)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
@@ -949,6 +949,8 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
     '-movflags', '+faststart',
     '-shortest',
+    '-avoid_negative_ts', 'make_zero',
+    '-g', '48', '-keyint_min', '24',
     '-loglevel', 'error',
     outPath
   );
@@ -1009,6 +1011,8 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
     '-movflags', '+faststart',
     '-shortest',
+    '-avoid_negative_ts', 'make_zero',
+    '-g', '48', '-keyint_min', '24',
     '-loglevel', 'error',
     outPath
   );
@@ -1143,14 +1147,18 @@ Output ONLY the script text.`;
 
       const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
 
-      // >>> FULL-FRAME CONTAIN (no crop), centered with padding
+      // *** FIX BEGINNING GLITCH ***
+      // Trim first ~60ms from each clip before concat (avoids black/garbled first frame from some stock MP4s)
+      const LEAD = 0.06;
+
+      // Full-frame contain + pad (no crop)
       const vidParts = [];
       for (let i = 0; i < inputs.length; i++) {
         const dur = segs[i];
         vidParts.push(
           `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
           `pad=640:640:(640-iw)/2:(640-ih)/2,` +
-          `${baseLook},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+          `${baseLook},trim=${LEAD}:${(LEAD + dur).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
         );
       }
       const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
@@ -1165,7 +1173,6 @@ Output ONLY the script text.`;
       const outroOverlay =
         `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-      // No side curtains — keeps full width feeling
       let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
 
       const outDir = ensureGeneratedDir();
@@ -1197,9 +1204,10 @@ Output ONLY the script text.`;
         '-r', '24',
         '-vsync', '2',
         '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+        '-g', '48', '-keyint_min', '24',
         '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
         '-movflags', '+faststart',
-        '-shortest',
+        '-avoid_negative_ts', 'make_zero',
         '-loglevel', 'error',
         outPath
       );
