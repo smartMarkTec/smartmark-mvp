@@ -51,11 +51,13 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
 /* --------------------------- Helpers --------------------------- */
+function publicBase() {
+  return process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
+}
 function absolutePublicUrl(relativePath) {
-  const base = process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
-  return `${base}${relativePath}`;
+  return `${publicBase()}${relativePath}`;
 }
 function getUserToken(req) {
   const auth = req?.headers?.authorization || '';
@@ -74,12 +76,58 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   const resp = await axios.post(url, form, { headers: form.getHeaders(), params: { access_token: userAccessToken } });
   return resp.data;
 }
+
+/* --------------------- Writable media dir & streamer --------------------- */
 function ensureGeneratedDir() {
-  // Use public/generated so files are always served by Express static.
-  const outDir = path.join(__dirname, '../public/generated');
+  // Always write to a runtime-safe dir (works on Render/Docker/heroku)
+  const outDir = '/tmp/generated';
   try { fs.mkdirSync(outDir, { recursive: true }); } catch {}
   return outDir;
 }
+
+// Serve generated media with Range support to guarantee video playback
+router.get('/media/:file', async (req, res) => {
+  try {
+    const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
+    const full = path.join(ensureGeneratedDir(), file);
+    if (!fs.existsSync(full)) return res.status(404).end();
+
+    const stat = fs.statSync(full);
+    const ext = path.extname(full).toLowerCase();
+    const type = ext === '.mp4' ? 'video/mp4'
+               : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
+               : ext === '.png' ? 'image/png'
+               : 'application/octet-stream';
+
+    res.setHeader('Content-Type', type);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range');
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+
+    const range = req.headers.range;
+    if (range) {
+      const m = /bytes=(\d+)-(\d*)/.exec(range);
+      const start = m ? parseInt(m[1], 10) : 0;
+      const end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
+      if (start >= stat.size) return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+      res.setHeader('Content-Length', end - start + 1);
+      fs.createReadStream(full, { start, end }).pipe(res);
+    } else {
+      res.setHeader('Content-Length', stat.size);
+      fs.createReadStream(full).pipe(res);
+    }
+  } catch {
+    res.status(500).end();
+  }
+});
+
+function mediaPath(relativeFilename) {
+  return `/api/media/${relativeFilename}`;
+}
+
 function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
@@ -238,11 +286,11 @@ function cleanFinalText(text) {
 /* ---------- Overlay headline helpers ---------- */
 function categoryLabelForOverlay(category) {
   return {
-    fashion: 'NEW ARRIVALS',
+    fashion: 'FASHION',
     fitness: 'TRAINING',
     cosmetics: 'BEAUTY',
     hair: 'HAIR CARE',
-    food: 'KITCHEN',
+    food: 'FOOD',
     pets: 'PET CARE',
     electronics: 'TECH',
     home: 'HOME',
@@ -686,7 +734,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
   return svgOverlay({ W, H, headline, cta, tpl: 4 });
 }
 
-/* Build the overlaid JPG */
+/* Build the overlaid JPG (saved in /tmp, served via /api/media) */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -704,13 +752,10 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  await base
-    .composite([{ input: overlaySVG, top: 0, left: 0 }])
-    .jpeg({ quality: 92 })
-    .toFile(path.join(outDir, file));
-
+  await base.composite([{ input: overlaySVG, top: 0, left: 0 }]).jpeg({ quality: 92 }).toFile(path.join(outDir, file));
   maybeGC();
-  return { publicUrl: `/generated/${file}`, absoluteUrl: absolutePublicUrl(`/generated/${file}`) };
+
+  return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
 
 /* ------------------------------ Music ------------------------------ */
@@ -837,7 +882,8 @@ function pickSerifFontFile() {
 async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
-  const outPath = path.join(outDir, `${id}.mp4`);
+  const outFile = `${id}.mp4`;
+  const outPath = path.join(outDir, outFile);
 
   let imgFile = null;
   if (imageUrl) {
@@ -874,11 +920,11 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     ? `[0:v]scale=640:640,format=yuv420p,zoompan=z='min(zoom+0.0008,1.10)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
     : `[0:v]fps=24,format=yuv420p[cv]`;
 
-  const filterText =
+  const textFx =
     `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
     `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-1.5).toFixed(2)})'`;
 
-  let fc = `${baseVideo};[cv]${filterText}[v]`;
+  let fc = `${baseVideo};[cv]${textFx}[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[voice]` +
@@ -905,14 +951,16 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
 
   await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'still-video timeout' });
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
-  return { publicUrl: `/generated/${id}.mp4`, absoluteUrl: absolutePublicUrl(`/generated/${id}.mp4`) };
+
+  return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
 /* -------------------- Ultimate fallback: title-card video -------------------- */
 async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
-  const outPath = path.join(outDir, `${id}.mp4`);
+  const outFile = `${id}.mp4`;
+  const outPath = path.join(outDir, outFile);
 
   const serifFile = pickSerifFontFile();
   const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
@@ -921,9 +969,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   const brand = safeFFText(brandLine);
   const cta   = safeFFText(ctaText);
 
-  const args = ['-y',
-    '-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640'
-  ];
+  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640'];
 
   const inputs = [];
   if (ttsPath) { args.push('-i', ttsPath); inputs.push('tts'); }
@@ -963,7 +1009,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   );
 
   await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'title-card timeout' });
-  return { publicUrl: `/generated/${id}.mp4`, absoluteUrl: absolutePublicUrl(`/generated/${id}.mp4`) };
+  return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
 /* ------------------------------- VIDEO ------------------------------- */
@@ -1120,8 +1166,8 @@ Output ONLY the script text.`;
                curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
 
       const outDir = ensureGeneratedDir();
-      const id = uuidv4();
-      const outPath = path.join(outDir, `${id}.mp4`);
+      const outFile = `${uuidv4()}.mp4`;
+      const outPath = path.join(outDir, outFile);
 
       const args = ['-y'];
       for (const f of inputs) { args.push('-i', f); }
@@ -1158,7 +1204,7 @@ Output ONLY the script text.`;
       await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'montage timeout' });
       for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
 
-      return { publicUrl: `/generated/${id}.mp4`, absoluteUrl: absolutePublicUrl(`/generated/${id}.mp4`) };
+      return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
     };
 
     let videoUrl = '';
@@ -1262,14 +1308,14 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
     if (!PEXELS_API_KEY) {
       const colorBlock = 'https://singlecolorimage.com/get/232a2e/1200x627';
-      const { publicUrl } = await buildOverlayImage({
+      const { publicUrl, absoluteUrl } = await buildOverlayImage({
         imageUrl: colorBlock,
         headlineHint: overlayTitleFromAnswers(answers, category),
         ctaHint: pickFromAllowedCTAs(answers, regenerateToken || Date.now()),
         seed: regenerateToken || answers?.businessName || keyword,
         fallbackHeadline: overlayTitleFromAnswers(answers, category)
       });
-      await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl: absolutePublicUrl(publicUrl), meta: { category, keyword, placeholder: true } });
+      await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true } });
       return res.json({ imageUrl: publicUrl, keyword, totalResults: 1, usedIndex: 0 });
     }
 
