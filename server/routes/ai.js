@@ -85,7 +85,7 @@ function ensureGeneratedDir() {
   return outDir;
 }
 
-// Range-enabled streamer (fixes black/0:00 players & under-load issues)
+// Range-enabled streamer
 router.get('/media/:file', async (req, res) => {
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
@@ -918,8 +918,10 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     inputs.push('silence');
   }
 
+  // ↓↓↓ reduced Ken Burns zoom (1.02 max) and full-frame contain
   const baseVideo = imgFile
-    ? `[0:v]scale=640:640,format=yuv420p,zoompan=z='min(zoom+0.0008,1.10)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
+    ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,` +
+      `zoompan=z='min(zoom+0.0003,1.02)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
     : `[0:v]fps=24,format=yuv420p[cv]`;
 
   const textFx =
@@ -946,7 +948,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
     '-movflags', '+faststart',
-    '-shortest', // cut to audio if ever shorter—prevents end freeze
+    '-shortest',
     '-loglevel', 'error',
     outPath
   );
@@ -1084,7 +1086,6 @@ Output ONLY the script text.`;
       } catch { ttsPath = null; voDur = 0; break; }
     }
 
-    // Tie visuals tightly to VO; small outro tail prevents “freeze” feeling
     const TAIL = 0.8; // seconds
     const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
 
@@ -1128,7 +1129,6 @@ Output ONLY the script text.`;
       const brandLine = safeFFText(brandForVideo);
       const ctaTxt    = safeFFText(ctaText);
       const TOP_H   = Math.round(640 * 0.18);
-      const CUR_W   = Math.round(640 * 0.13);
       const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
       const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
@@ -1142,33 +1142,31 @@ Output ONLY the script text.`;
       const outroEnd   = finalDur;
 
       const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
+
+      // >>> FULL-FRAME CONTAIN (no crop), centered with padding
       const vidParts = [];
       for (let i = 0; i < inputs.length; i++) {
         const dur = segs[i];
         vidParts.push(
-          `[${i}:v]scale=640:640:force_original_aspect_ratio=increase,crop=640:640,${baseLook},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+          `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
+          `pad=640:640:(640-iw)/2:(640-ih)/2,` +
+          `${baseLook},trim=0:${dur.toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
         );
       }
       const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-      const curtainFadeStart = Math.max(0.2, segs[0] - 0.55).toFixed(2);
-      const curtains =
-        `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[left];` +
-        `color=c=black@0.85:s=${CUR_W}x640:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${curtainFadeStart}:d=0.55:alpha=1[right];` +
-        `[vseq][left]overlay=shortest=1:x=0:y=0[b1];[b1][right]overlay=shortest=1:x=main_w-overlay_w:y=0[b2]`;
-
       const bandFadeStart = (segs[0]-0.60).toFixed(2);
       const band =
         `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
-        `[b2][top]overlay=shortest=1:x=0:y=0[b3]`;
+        `[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
 
       const introOverlay =
         `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
       const outroOverlay =
         `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
-      let fc = vidParts.join(';') + ';' + concat + ';' +
-               curtains + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
+      // No side curtains — keeps full width feeling
+      let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
 
       const outDir = ensureGeneratedDir();
       const outFile = `${uuidv4()}.mp4`;
@@ -1179,7 +1177,6 @@ Output ONLY the script text.`;
       if (ttsPath) args.push('-i', ttsPath);
       if (musicPath) args.push('-i', musicPath);
 
-      // Trim audio to VO length + small tail, no long apad; -shortest cuts any slack
       if (ttsPath && musicPath) {
         fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
               `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${(voDur>0?voDur+TAIL:finalDur).toFixed(2)}[bg]` +
@@ -1202,7 +1199,7 @@ Output ONLY the script text.`;
         '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
         '-movflags', '+faststart',
-        '-shortest',    // <- ensures we never hang past audio
+        '-shortest',
         '-loglevel', 'error',
         outPath
       );
