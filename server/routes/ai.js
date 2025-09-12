@@ -25,7 +25,7 @@ router.use((req, res, next) => {
   next();
 });
 
-/* ------------- Security & rate-limiting ------------- */
+/* ------------- Security & Rate-Limiting ------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
 router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
@@ -48,7 +48,7 @@ const { getFbUserToken } = require('../tokenStore');
 const db = require('../db');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const PEXELS_API_KEY = process.env.PEXELS_API_KEY;
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
 /* --------------------------- Helpers --------------------------- */
 function absolutePublicUrl(relativePath) {
@@ -88,8 +88,13 @@ function ownerKeyFromReq(req) {
   const cookieSid = req?.cookies?.sm_sid;
   const headerSid = req?.headers?.['x-sm-sid'];
   const auth = req?.headers?.authorization || '';
-  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
-  return cookieSid || headerSid || bearer || `ip:${req.ip}`;
+  theOwner:
+  {
+    const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+    const k = cookieSid || headerSid || bearer;
+    if (k) return k;
+  }
+  return `ip:${req.ip}`;
 }
 
 async function ensureAssetsTable() {
@@ -114,14 +119,13 @@ async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   const rec = {
     id: uuidv4(),
     owner,
-    kind,
+    kind, // 'image' | 'video'
     url,
     absoluteUrl,
     meta,
     createdAt: now,
     expiresAt: now + ASSET_TTL_MS
   };
-
   db.data.generated_assets.push(rec);
 
   const mine = db.data.generated_assets.filter(a => a.owner === owner).sort((a, b) => b.createdAt - a.createdAt);
@@ -132,20 +136,28 @@ async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   await db.write();
   return rec;
 }
+async function getRecentImageForOwner(req) {
+  await purgeExpiredAssets();
+  const owner = ownerKeyFromReq(req);
+  const img = (db.data.generated_assets || [])
+    .filter(a => a.owner === owner && a.kind === 'image')
+    .sort((a,b)=>b.createdAt-a.createdAt)[0];
+  return img ? (img.absoluteUrl || absolutePublicUrl(img.url)) : null;
+}
 
 /* ---------- Topic/category helpers ---------- */
 const IMAGE_KEYWORD_MAP = [
-  { match: ['protein powder','protein','supplement','muscle','fitness','gym'], keyword: 'gym workout' },
-  { match: ['clothing','fashion','apparel','accessory'], keyword: 'fashion model' },
+  { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
+  { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
   { match: ['makeup','cosmetic','skincare'], keyword: 'makeup application' },
-  { match: ['hair','shampoo'], keyword: 'hair care' },
-  { match: ['food','pizza','burger','meal','snack'], keyword: 'delicious food' },
+  { match: ['hair','shampoo','conditioner','styling'], keyword: 'hair care' },
+  { match: ['food','pizza','burger','meal','snack','kitchen'], keyword: 'delicious food' },
   { match: ['baby','kids','toys'], keyword: 'happy children' },
   { match: ['pet','dog','cat'], keyword: 'pet dog cat' },
-  { match: ['electronics','phone','laptop','tech'], keyword: 'tech gadgets' },
-  { match: ['home','kitchen','decor'], keyword: 'modern home' },
+  { match: ['electronics','phone','laptop','tech','gadget'], keyword: 'tech gadgets' },
+  { match: ['home','decor','furniture','bedroom','bath'], keyword: 'modern home' },
   { match: ['art','painting','craft'], keyword: 'painting art' },
-  { match: ['coffee','cafe'], keyword: 'coffee shop' },
+  { match: ['coffee','cafe','espresso'], keyword: 'coffee shop' },
 ];
 function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
@@ -157,12 +169,12 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   const base = getImageKeyword(industry, url) || industry || fallback;
   const extra = String(answers.description || answers.product || answers.mainBenefit || '').toLowerCase();
   if (extra.includes('coffee')) return 'coffee shop';
-  if (extra.includes('protein') || extra.includes('fitness') || extra.includes('gym')) return 'gym workout';
-  if (extra.includes('makeup') || extra.includes('skincare') || extra.includes('cosmetic')) return 'makeup application';
-  if (extra.includes('hair')) return 'hair care';
-  if (extra.includes('pet') || extra.includes('dog') || extra.includes('cat')) return 'pet dog cat';
-  if (extra.includes('electronics') || extra.includes('phone') || extra.includes('laptop')) return 'tech gadgets';
-  return base;
+  if (/(protein|fitness|gym|workout|trainer)/.test(extra)) return 'gym workout';
+  if (/(makeup|skincare|cosmetic)/.test(extra)) return 'makeup application';
+  if (/hair/.test(extra)) return 'hair care';
+  if (/(pet|dog|cat)/.test(extra)) return 'pet dog cat';
+  if (/(electronics|phone|laptop)/.test(extra)) return 'tech gadgets';
+  return base || fallback;
 }
 
 /* ---- Category detection & guardrails ---- */
@@ -190,32 +202,31 @@ function enforceCategoryPresence(text, category) {
   const APPEND = (line) => (t.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
 
   const req = {
-    fitness: ['workout', 'training', 'gym', 'strength', 'wellness'],
-    cosmetics: ['skin', 'makeup', 'beauty', 'serum', 'routine'],
-    hair: ['hair', 'shampoo', 'conditioner', 'styling'],
-    food: ['fresh', 'flavor', 'taste', 'meal', 'snack'],
-    pets: ['pet', 'dog', 'cat', 'treat'],
-    electronics: ['tech', 'device', 'gadget', 'performance'],
-    home: ['home', 'kitchen', 'decor', 'space'],
-    coffee: ['coffee', 'brew', 'roast', 'espresso'],
-    fashion: ['style', 'outfit', 'fabric', 'fit'],
+    fitness: ['workout','training','gym','strength','wellness'],
+    cosmetics: ['skin','makeup','beauty','serum','routine'],
+    hair: ['hair','shampoo','conditioner','styling'],
+    food: ['fresh','flavor','taste','meal','snack'],
+    pets: ['pet','dog','cat','treat'],
+    electronics: ['tech','device','gadget','performance'],
+    home: ['home','kitchen','decor','space'],
+    coffee: ['coffee','brew','roast','espresso'],
+    fashion: ['style','outfit','fabric','fit'],
     generic: []
   }[category] || [];
 
   if (!req.length || hasAny(req)) return t;
   const injection = {
     fitness: 'Designed for your workout and training.',
-    cosmetics: 'Made to fit seamlessly into your beauty routine.',
-    hair: 'Helps you care for and style your hair with ease.',
+    cosmetics: 'Made to fit into your beauty routine.',
+    hair: 'Helps you care for and style your hair.',
     food: 'Made for great taste and an easy experience.',
     pets: 'Made for everyday pet care with less hassle.',
-    electronics: 'Built for reliable performance you can count on.',
+    electronics: 'Built for reliable performance.',
     home: 'A simple way to upgrade your space.',
     coffee: 'Balanced flavor for a better coffee break.',
     fashion: 'Find a look that works for you.',
     generic: 'Easy to use and simple to get started.'
   }[category];
-
   return APPEND(injection);
 }
 function cleanFinalText(text) {
@@ -331,12 +342,13 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
 ${forbidFashionLine}
 - Hook → value → simple CTA (from: “Shop now”, “Buy now”, “Learn more”, “Visit us”, “Check us out”, “Take a look”, “Get started”).
 - Do NOT mention a website or domain.
-- Use the CTA phrase exactly once at the very end.`;
+- Use the CTA phrase exactly once at the very end.
+Output ONLY the script text.`;
+
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (answers?.industry) prompt += `\nIndustry: ${answers.industry}`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
-  prompt += `\nOutput ONLY the script text.`;
 
   try {
     const r = await openai.chat.completions.create({
@@ -425,6 +437,8 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 
     headline = headline.replace(/["<>]/g, '').slice(0, 55);
     body = body.replace(/["<>]/g, '').trim();
+
+    // Force CTA to allowed set
     overlay = pickFromAllowedCTAs(answers).toUpperCase();
 
     return res.json({ headline, body, image_overlay_text: overlay });
@@ -651,8 +665,8 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
     const yBase = padY;
     const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 48;
 
-    const w1 = EST(fit.lines[0] || '', fit.fs);
-    const w2 = fit.lines[1] ? EST(fit.lines[1], fit.fs) : 0;
+    const w1 = estWidth(fit.lines[0] || '', fit.fs);
+    const w2 = fit.lines[1] ? estWidth(fit.lines[1], fit.fs) : 0;
     const textBlockW = Math.min(panelW - 2 * padX, Math.max(w1, w2));
     const cxHeadline = padX + textBlockW / 2;
 
@@ -831,10 +845,17 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const id = uuidv4();
   const outPath = path.join(outDir, `${id}.mp4`);
 
-  // Download image locally
-  const imgFile = path.join(outDir, `${id}.jpg`);
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-  fs.writeFileSync(imgFile, imgRes.data);
+  // If no imageUrl, create a colored background.
+  let imgFile = null;
+  if (imageUrl) {
+    try {
+      imgFile = path.join(outDir, `${id}.jpg`);
+      const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+      fs.writeFileSync(imgFile, imgRes.data);
+    } catch {
+      imgFile = null;
+    }
+  }
 
   const serifFile = pickSerifFontFile();
   const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
@@ -843,24 +864,33 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const brand = safeFFText(brandLine);
   const cta   = safeFFText(ctaText);
 
-  const filterV =
-    `[0:v]scale=640:640,format=yuv420p,zoompan=z='min(zoom+0.0009,1.12)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',` +
-    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
-    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-1.5).toFixed(2)})'[v]`;
-
-  const args = ['-loop', '1', '-t', duration.toFixed(2), '-i', imgFile];
+  const args = [];
+  if (imgFile) {
+    args.push('-loop', '1', '-t', duration.toFixed(2), '-i', imgFile);
+  } else {
+    // 640x640 solid background
+    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640');
+  }
 
   const inputs = [];
   if (ttsPath) { args.push('-i', ttsPath); inputs.push('tts'); }
   if (musicPath) { args.push('-i', musicPath); inputs.push('music'); }
   if (!ttsPath && !musicPath) {
-    // silent
+    // silent track to satisfy MP4 mux
     args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
     inputs.push('silence');
   }
 
-  // Build audio graph
-  let fc = filterV;
+  const baseVideo = imgFile
+    ? `[0:v]scale=640:640,format=yuv420p,zoompan=z='min(zoom+0.0009,1.12)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2'[cv]`
+    : `[0:v]fps=24,format=yuv420p[cv]`;
+
+  const filterText =
+    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
+    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-1.5).toFixed(2)})'`;
+
+  let fc = `${baseVideo};[cv]${filterText}[v]`;
+
   if (inputs.includes('tts') && inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[voice]` +
           `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[bg]` +
@@ -870,7 +900,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   } else if (inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
   } else {
-    fc += ''; // silent already provided
+    // silence already present
   }
 
   args.push(
@@ -887,7 +917,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   );
 
   await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'still-video timeout' });
-  try { fs.unlinkSync(imgFile); } catch {}
+  try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   return { publicUrl: `/generated/${id}.mp4`, absoluteUrl: absolutePublicUrl(`/generated/${id}.mp4`) };
 }
 
@@ -949,7 +979,7 @@ Output ONLY the script text.`;
         });
         script = r.choices?.[0]?.message?.content?.trim() || '';
       } catch {
-        script = script || `Get a simple option that supports your goals without the hassle. ${ctaText}`;
+        script = script || `Get a straightforward option that supports your goals without extra hassle. ${ctaText}`;
       }
       script = stripFashionIfNotApplicable(script, category);
       script = enforceCategoryPresence(script, category);
@@ -973,13 +1003,15 @@ Output ONLY the script text.`;
       musicPath = pickMusicFile(keys);
     } catch { musicPath = null; }
 
-    /* ---- Try stock video pipeline; if it fails, fall back to still video ---- */
+    /* ---- Try stock video pipeline; otherwise still-video with local/solid background ---- */
     let publicVideoUrl = '';
     let absoluteUrl = '';
     let usedFallback = false;
 
     try {
-      // Stock clips
+      if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
+
+      // Stock clips from Pexels
       let candidates = [];
       const r = await axios.get('https://api.pexels.com/videos/search', {
         headers: { Authorization: PEXELS_API_KEY },
@@ -1006,7 +1038,7 @@ Output ONLY the script text.`;
         inputs.push(out);
       }
 
-      // Build visual chain with curtains/bands + VO + MUSIC
+      // Visual chain with curtains/bands + VO + MUSIC
       const serifFile = pickSerifFontFile();
       const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
       const brandLine = safeFFText(brandForVideo);
@@ -1063,30 +1095,29 @@ Output ONLY the script text.`;
 
       const args = [];
       for (const f of inputs) { args.push('-i', f); }
-      let inputCount = inputs.length;
-
-      if (ttsPath) { args.push('-i', ttsPath); inputCount++; }
-      if (musicPath) { args.push('-i', musicPath); inputCount++; }
+      if (ttsPath) args.push('-i', ttsPath);
+      if (musicPath) args.push('-i', musicPath);
 
       // Build audio chain
       if (ttsPath && musicPath) {
         filterComplex += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice]` +
                          `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg]` +
                          `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
-        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', '[mix]');
       } else if (ttsPath) {
         filterComplex += `;[${inputs.length}:a]aresample=44100,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
-        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', '[mix]');
       } else if (musicPath) {
         filterComplex += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
-        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', '[mix]');
       } else {
-        // silent audio
+        // silent track
         args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
-        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', `${inputCount}:a`);
       }
 
+      const mapAudio = (ttsPath || musicPath) ? '[mix]' : String(ttsPath ? inputs.length : (musicPath ? inputs.length : inputs.length));
+
       args.push(
+        '-filter_complex', filterComplex,
+        '-map', '[v]',
+        '-map', (ttsPath || musicPath) ? '[mix]' : `${inputs.length}:a`,
         '-t', finalDur.toFixed(2),
         '-r', String(VIDEO.FPS),
         '-vsync', '2',
@@ -1103,30 +1134,35 @@ Output ONLY the script text.`;
       publicVideoUrl = `/generated/${id}.mp4`;
       absoluteUrl = absolutePublicUrl(publicVideoUrl);
     } catch {
-      // FALLBACK: still-video with optional music
+      // FALLBACK: still-video with (image || recent-image || solid color)
       usedFallback = true;
 
-      const keyword = getImageKeyword(answers.industry || '', url);
-      const p = await axios.get(PEXELS_IMG_BASE, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 20 }
-      });
-      const photos = p.data?.photos || [];
-      if (!photos.length) throw new Error('no_images_for_fallback');
+      let imageUrl = null;
 
-      const idx = (seedrandom(String(regenerateToken || Date.now()))() * photos.length) | 0;
-      const baseUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large;
+      // 1) Try Pexels image if key present
+      if (PEXELS_API_KEY) {
+        try {
+          const keyword = getImageKeyword(answers.industry || '', url);
+          const p = await axios.get(PEXELS_IMG_BASE, {
+            headers: { Authorization: PEXELS_API_KEY },
+            params: { query: keyword || topic, per_page: 20 }
+          });
+          const photos = p.data?.photos || [];
+          if (photos.length) {
+            const idx = (seedrandom(String(regenerateToken || Date.now()))() * photos.length) | 0;
+            imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
+          }
+        } catch {}
+      }
 
-      const { publicUrl: imgUrl } = await buildOverlayImage({
-        imageUrl: baseUrl,
-        headlineHint: overlayTitleFromAnswers(answers, category),
-        ctaHint: ctaText,
-        seed: regenerateToken || answers?.businessName || keyword,
-        fallbackHeadline: overlayTitleFromAnswers(answers, category)
-      });
+      // 2) Try last generated image for this owner
+      if (!imageUrl) {
+        try { imageUrl = await getRecentImageForOwner(req); } catch {}
+      }
 
+      // 3) If still nothing, pass null to composeStillVideo -> solid color bg
       const still = await composeStillVideo({
-        imageUrl: absolutePublicUrl(imgUrl),
+        imageUrl,
         duration: finalDur,
         ttsPath,
         musicPath,
@@ -1143,8 +1179,7 @@ Output ONLY the script text.`;
 
     let fbVideoId = null;
     try {
-      // optional: upload only stock-based videos; stills can stay local
-      const shouldUpload = true;
+      const shouldUpload = true; // keep behavior consistent
       if (shouldUpload && fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(
           fbAdAccountId, token, absoluteUrl,
@@ -1188,8 +1223,21 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const url = answers.url || top.url || '';
     const industry = answers.industry || top.industry || '';
     const category = resolveCategory(answers || {});
-
     const keyword = getImageKeyword(industry, url);
+
+    if (!PEXELS_API_KEY) {
+      // No key → return a plain placeholder image with overlay text
+      const colorBlock = 'https://singlecolorimage.com/get/232a2e/1200x627';
+      const { publicUrl } = await buildOverlayImage({
+        imageUrl: colorBlock,
+        headlineHint: overlayTitleFromAnswers(answers, category),
+        ctaHint: pickFromAllowedCTAs(answers, regenerateToken || Date.now()),
+        seed: regenerateToken || answers?.businessName || keyword,
+        fallbackHeadline: overlayTitleFromAnswers(answers, category)
+      });
+      await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl: absolutePublicUrl(publicUrl), meta: { category, keyword, placeholder: true } });
+      return res.json({ imageUrl: publicUrl, keyword, totalResults: 1, usedIndex: 0 });
+    }
 
     let photos = [];
     try {
