@@ -182,12 +182,7 @@ function resolveCategory(answers = {}) {
 const FASHION_TERMS = /\b(style|styles|outfit|outfits|wardrobe|pieces|fits?|colors?|sizes?)\b/gi;
 function stripFashionIfNotApplicable(text, category) {
   if (category === 'fashion') return String(text || '');
-  return String(text || '').replace(FASHION_TERMS, (m) => {
-    if (/sizes?/.test(m)) return 'options';
-    if (/colors?/.test(m)) return 'options';
-    if (/fits?/.test(m)) return 'options';
-    return 'options';
-  });
+  return String(text || '').replace(FASHION_TERMS, () => 'options');
 }
 function enforceCategoryPresence(text, category) {
   const t = String(text || '');
@@ -255,12 +250,10 @@ function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
 
   const brand = (answers.businessName || '').trim().toUpperCase();
   if (brand) {
-    // If brand is a single word, append a category word so we get 2–3 words (avoids fallback)
     const label = category ? categoryLabelForOverlay(category) : 'SHOP';
     const words = brand.split(/\s+/);
     return (words.length === 1 ? `${brand} ${label}` : brand).slice(0, 30);
   }
-  // If no brand, show a compact category/topic label
   if (category) return categoryLabelForOverlay(category);
   return (String(categoryOrTopic || 'SHOP')).toUpperCase().slice(0, 24);
 }
@@ -832,8 +825,8 @@ function pickSerifFontFile() {
   return null;
 }
 
-/* -------------------- Fallback still-video (always succeeds) -------------------- */
-async function composeStillVideo({ imageUrl, duration, ttsPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
+/* -------------------- Fallback still-video (with optional music) -------------------- */
+async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
   const outPath = path.join(outDir, `${id}.mp4`);
@@ -850,28 +843,40 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, brandLine
   const brand = safeFFText(brandLine);
   const cta   = safeFFText(ctaText);
 
-  // Simple zoom-in + intro brand + outro CTA
-  const filter =
+  const filterV =
     `[0:v]scale=640:640,format=yuv420p,zoompan=z='min(zoom+0.0009,1.12)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',` +
     `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
     `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-1.5).toFixed(2)})'[v]`;
 
   const args = ['-loop', '1', '-t', duration.toFixed(2), '-i', imgFile];
 
-  if (ttsPath) {
-    args.push('-i', ttsPath);
-    // pad/trim audio to duration
-    args.push(
-      '-filter_complex', `${filter};[1:a]aresample=44100,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[a]`,
-      '-map', '[v]', '-map', '[a]'
-    );
-  } else {
-    // silent track to avoid “video has no audio” issues
+  const inputs = [];
+  if (ttsPath) { args.push('-i', ttsPath); inputs.push('tts'); }
+  if (musicPath) { args.push('-i', musicPath); inputs.push('music'); }
+  if (!ttsPath && !musicPath) {
+    // silent
     args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
-    args.push('-filter_complex', filter, '-map', '[v]', '-map', '1:a');
+    inputs.push('silence');
+  }
+
+  // Build audio graph
+  let fc = filterV;
+  if (inputs.includes('tts') && inputs.includes('music')) {
+    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[voice]` +
+          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[bg]` +
+          `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
+  } else if (inputs.includes('tts')) {
+    fc += `;[1:a]aresample=44100,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
+  } else if (inputs.includes('music')) {
+    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
+  } else {
+    fc += ''; // silent already provided
   }
 
   args.push(
+    '-filter_complex', fc,
+    '-map', '[v]',
+    '-map', inputs.length ? '[mix]' : '1:a',
     '-r', '24',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
@@ -961,6 +966,13 @@ Output ONLY the script text.`;
     }
     const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + GAP, 30.0));
 
+    /* ---- Background music selection ---- */
+    let musicPath = null;
+    try {
+      const keys = [category, answers?.industry, answers?.businessName].filter(Boolean);
+      musicPath = pickMusicFile(keys);
+    } catch { musicPath = null; }
+
     /* ---- Try stock video pipeline; if it fails, fall back to still video ---- */
     let publicVideoUrl = '';
     let absoluteUrl = '';
@@ -994,7 +1006,7 @@ Output ONLY the script text.`;
         inputs.push(out);
       }
 
-      // Build visual chain with curtains/bands + VO
+      // Build visual chain with curtains/bands + VO + MUSIC
       const serifFile = pickSerifFontFile();
       const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
       const brandLine = safeFFText(brandForVideo);
@@ -1051,18 +1063,27 @@ Output ONLY the script text.`;
 
       const args = [];
       for (const f of inputs) { args.push('-i', f); }
-      if (ttsPath) args.push('-i', ttsPath);
+      let inputCount = inputs.length;
 
-      if (ttsPath) {
+      if (ttsPath) { args.push('-i', ttsPath); inputCount++; }
+      if (musicPath) { args.push('-i', musicPath); inputCount++; }
+
+      // Build audio chain
+      if (ttsPath && musicPath) {
+        filterComplex += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice]` +
+                         `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg]` +
+                         `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
+        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', '[mix]');
+      } else if (ttsPath) {
         filterComplex += `;[${inputs.length}:a]aresample=44100,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
-        args.push(
-          '-filter_complex', filterComplex,
-          '-map', '[v]', '-map', '[mix]'
-        );
+        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', '[mix]');
+      } else if (musicPath) {
+        filterComplex += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
+        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', '[mix]');
       } else {
-        // Use a silent audio track
+        // silent audio
         args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
-        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', `${inputs.length}:a`);
+        args.push('-filter_complex', filterComplex, '-map', '[v]', '-map', `${inputCount}:a`);
       }
 
       args.push(
@@ -1081,9 +1102,10 @@ Output ONLY the script text.`;
 
       publicVideoUrl = `/generated/${id}.mp4`;
       absoluteUrl = absolutePublicUrl(publicVideoUrl);
-    } catch (e) {
-      // FALLBACK: still-video from an image (never 500s)
+    } catch {
+      // FALLBACK: still-video with optional music
       usedFallback = true;
+
       const keyword = getImageKeyword(answers.industry || '', url);
       const p = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
@@ -1107,6 +1129,7 @@ Output ONLY the script text.`;
         imageUrl: absolutePublicUrl(imgUrl),
         duration: finalDur,
         ttsPath,
+        musicPath,
         brandLine: brandForVideo,
         ctaText
       });
@@ -1120,7 +1143,8 @@ Output ONLY the script text.`;
 
     let fbVideoId = null;
     try {
-      const shouldUpload = !usedFallback; // optional: only push stock-based videos to FB, keep stills local
+      // optional: upload only stock-based videos; stills can stay local
+      const shouldUpload = true;
       if (shouldUpload && fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(
           fbAdAccountId, token, absoluteUrl,
@@ -1135,7 +1159,7 @@ Output ONLY the script text.`;
       kind: 'video',
       url: publicVideoUrl,
       absoluteUrl,
-      meta: { script, ctaText, voice: 'alloy', variant: usedFallback ? 'still' : 'stock', fbVideoId, topic, category }
+      meta: { script, ctaText, voice: 'alloy', hasMusic: !!musicPath, variant: usedFallback ? 'still' : 'stock', fbVideoId, topic, category }
     });
 
     return res.json({
@@ -1145,7 +1169,8 @@ Output ONLY the script text.`;
       script,
       ctaText,
       voice: 'alloy',
-      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', variant: usedFallback ? 'still' : 'stock' }
+      hasMusic: !!musicPath,
+      video: { url: publicVideoUrl, script, overlayText: ctaText, voice: 'alloy', hasMusic: !!musicPath, variant: usedFallback ? 'still' : 'stock' }
     });
   } catch (err) {
     if (!res.headersSent)
