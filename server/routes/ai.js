@@ -1,3 +1,4 @@
+// [server/routes/ai.js]
 'use strict';
 
 const express = require('express');
@@ -79,13 +80,12 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
 
 /* --------------------- Writable media dir & streamer --------------------- */
 function ensureGeneratedDir() {
-  // Always write to a runtime-safe dir (works on Render/Docker/heroku)
   const outDir = '/tmp/generated';
   try { fs.mkdirSync(outDir, { recursive: true }); } catch {}
   return outDir;
 }
 
-// Serve generated media with Range support to guarantee video playback
+// Range-enabled streamer (fixes black/0:00 players & under-load issues)
 router.get('/media/:file', async (req, res) => {
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
@@ -734,7 +734,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
   return svgOverlay({ W, H, headline, cta, tpl: 4 });
 }
 
-/* Build the overlaid JPG (saved in /tmp, served via /api/media) */
+/* Build overlaid JPG */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
@@ -901,6 +901,8 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const brand = safeFFText(brandLine);
   const cta   = safeFFText(ctaText);
 
+  const TAIL = 0.8; // seconds of visible outro
+
   const args = ['-y'];
   if (imgFile) {
     args.push('-loop', '1', '-t', duration.toFixed(2), '-i', imgFile);
@@ -922,18 +924,18 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
 
   const textFx =
     `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
-    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-1.5).toFixed(2)})'`;
+    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
   let fc = `${baseVideo};[cv]${textFx}[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[voice]` +
-          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[bg]` +
+    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
+          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[bg]` +
           `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
   } else if (inputs.includes('tts')) {
-    fc += `;[1:a]aresample=44100,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
+    fc += `;[1:a]aresample=44100,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
   } else if (inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
+    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[mix]`;
   }
 
   args.push(
@@ -944,7 +946,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
     '-movflags', '+faststart',
-    '-shortest',
+    '-shortest', // cut to audio if ever shorter—prevents end freeze
     '-loglevel', 'error',
     outPath
   );
@@ -968,6 +970,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
 
   const brand = safeFFText(brandLine);
   const cta   = safeFFText(ctaText);
+  const TAIL = 0.8;
 
   const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640'];
 
@@ -980,19 +983,19 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   }
 
   const textFx =
-    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-80)':enable='between(t,0.3,${(duration-2).toFixed(2)})',` +
-    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-1.5).toFixed(2)})'`;
+    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-80)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})',` +
+    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
   let fc = `[0:v]fps=24,format=yuv420p,${textFx}[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[voice]` +
-          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[bg]` +
+    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
+          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[bg]` +
           `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
   } else if (inputs.includes('tts')) {
-    fc += `;[1:a]aresample=44100,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
+    fc += `;[1:a]aresample=44100,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
   } else if (inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)},apad=pad_dur=${duration.toFixed(2)}[mix]`;
+    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[mix]`;
   }
 
   args.push(
@@ -1030,7 +1033,7 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
 
-    /* ---- Script + TTS (soft requirement) ---- */
+    /* ---- Script + TTS ---- */
     const forbidFashionLine = category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
     const buildPrompt = (lo, hi) =>
 `Write a simple, neutral spoken ad script for an e-commerce/online business in the "${category}" category, about ${topic}.
@@ -1081,7 +1084,9 @@ Output ONLY the script text.`;
       } catch { ttsPath = null; voDur = 0; break; }
     }
 
-    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + 1.5, 30.0));
+    // Tie visuals tightly to VO; small outro tail prevents “freeze” feeling
+    const TAIL = 0.8; // seconds
+    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
 
     /* ---- Background music (optional) ---- */
     let musicPath = null;
@@ -1133,7 +1138,7 @@ Output ONLY the script text.`;
 
       const introStart = 0.25;
       const introEnd   = Math.min(segs[0] - 0.25, 3.2);
-      const outroStart = Math.max(0.0, finalDur - 1.5);
+      const outroStart = Math.max(0.0, finalDur - TAIL);
       const outroEnd   = finalDur;
 
       const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
@@ -1174,14 +1179,15 @@ Output ONLY the script text.`;
       if (ttsPath) args.push('-i', ttsPath);
       if (musicPath) args.push('-i', musicPath);
 
+      // Trim audio to VO length + small tail, no long apad; -shortest cuts any slack
       if (ttsPath && musicPath) {
-        fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[voice]` +
-              `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[bg]` +
+        fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
+              `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${(voDur>0?voDur+TAIL:finalDur).toFixed(2)}[bg]` +
               `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
       } else if (ttsPath) {
-        fc += `;[${inputs.length}:a]aresample=44100,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
+        fc += `;[${inputs.length}:a]aresample=44100,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
       } else if (musicPath) {
-        fc += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)},apad=pad_dur=${finalDur.toFixed(2)}[mix]`;
+        fc += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)}[mix]`;
       } else {
         args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
       }
@@ -1196,7 +1202,7 @@ Output ONLY the script text.`;
         '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
         '-movflags', '+faststart',
-        '-shortest',
+        '-shortest',    // <- ensures we never hang past audio
         '-loglevel', 'error',
         outPath
       );
@@ -1210,12 +1216,10 @@ Output ONLY the script text.`;
     let videoUrl = '';
     let absoluteUrl = '';
     try {
-      // Tier 1
       const stock = await tryStockVideo();
       videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl;
     } catch {
       try {
-        // Tier 2
         let imageUrl = null;
         if (PEXELS_API_KEY) {
           try {
@@ -1243,7 +1247,6 @@ Output ONLY the script text.`;
         });
         videoUrl = still.publicUrl; absoluteUrl = still.absoluteUrl;
       } catch {
-        // Tier 3 (ultimate fallback)
         const title = await composeTitleCardVideo({
           duration: finalDur,
           ttsPath,
