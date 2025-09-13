@@ -591,7 +591,7 @@ Website homepage text:
   }
 });
 
-/* ---------------------- Image overlays ---------------------- */
+/* ---------------------- Image overlays (modern) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -636,23 +636,34 @@ function cleanCTA(c){
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
 
-/* ---- Overlay templates ---- */
-function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
-  const LIGHT = '#f2f5f6';
-  const MAX_W = W - 120;
-  const EST = estWidth;
+/* ---- Modern font helpers ---- */
+function pickSansFontFile() {
+  const candidates = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+  ];
+  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
+  return null;
+}
 
+/* ---- Overlay templates (modernized) ---- */
+function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
+  const LIGHT = '#f5f7f9';
+  const MAX_W = W - 120;
   const pill = (x, y, text, fs = 28) => {
     fs = Math.max(22, Math.min(fs, 34));
-    const w = Math.min(MAX_W, EST(text, fs) + 44);
-    const h = 46;
+    const w = Math.min(MAX_W, estWidth(text, fs) + 50);
+    const h = 50;
     const x0 = x - w / 2;
     return `
       <g transform="translate(${x0}, ${y - Math.floor(h * 0.6)})">
-        <rect x="0" y="-14" width="${w}" height="${h}" rx="14" fill="#0b0d10d0"/>
+        <rect x="0" y="-14" width="${w}" height="${h}" rx="24" fill="#0b0d10d0"/>
         <text x="${w / 2}" y="12" text-anchor="middle"
-              font-family="Times New Roman, Times, serif"
-              font-size="${fs}" font-weight="800" fill="#ffffff">
+              font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+              font-size="${fs}" font-weight="800" fill="#ffffff" letter-spacing="0.8">
           ${escSVG(text)}
         </text>
       </g>`;
@@ -660,19 +671,19 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
 
   if (tpl === 2) {
     const fs = fitFont(headline, MAX_W - 80, 56);
-    const yTitle = 92;
-    const yCTA = yTitle + 60;
+    const yTitle = 96;
+    const yCTA = yTitle + 68;
     return `
       <defs>
         <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#000c"/>
+          <stop offset="0%" stop-color="#000C"/>
           <stop offset="100%" stop-color="#0000"/>
         </linearGradient>
       </defs>
-      <rect x="0" y="0" width="${W}" height="170" rx="18" fill="url(#g2)"/>
+      <rect x="0" y="0" width="${W}" height="180" rx="18" fill="url(#g2)"/>
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
-            font-family="Times New Roman, Times, serif"
-            font-size="${fs}" font-weight="700" fill="${LIGHT}" letter-spacing="2">
+            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+            font-size="${fs}" font-weight="800" fill="${LIGHT}" letter-spacing="1.6">
         ${escSVG(headline)}
       </text>
       ${pill(W / 2, yCTA, cta, 28)}
@@ -691,10 +702,10 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
     const yCTA = yBox + boxH - boxPad - 12;
 
     return `
-      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="22" fill="#00000030"/>
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="26" fill="#00000040" />
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
-            font-family="Times New Roman, Times, serif"
-            font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.4">
         <tspan x="${W / 2}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${W / 2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
@@ -706,12 +717,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
     const padX = 64, padY = 110, panelW = 520;
     const fit = splitTwoLines(headline, panelW - 2 * padX, 54);
     const yBase = padY;
-    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 48;
-
-    const w1 = estWidth(fit.lines[0] || '', fit.fs);
-    const w2 = fit.lines[1] ? estWidth(fit.lines[1], fit.fs) : 0;
-    const textBlockW = Math.min(panelW - 2 * padX, Math.max(w1, w2));
-    const cxHeadline = padX + textBlockW / 2;
+    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 52;
 
     return `
       <defs>
@@ -722,12 +728,12 @@ function svgOverlay({ W, H, headline, cta, tpl = 2 }) {
       </defs>
       <rect x="0" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
       <text x="${padX}" y="${yBase}" text-anchor="start"
-            font-family="Times New Roman, Times, serif"
-            font-size="${fit.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="2">
+            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.4">
         <tspan x="${padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${padX}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
-      ${pill(cxHeadline, yCTA, cta, 26)}
+      ${pill(padX + 140, yCTA, cta, 26)}
     `;
   }
 
@@ -835,6 +841,58 @@ function finalizeScriptWithSingleCTA(text, chosenCTA) {
   return cleaned.replace(/\s+/g,' ').trim();
 }
 
+/* ---- Subtitle helpers (modern captions) ---- */
+function escDrawText(s){
+  return String(s||'')
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, "\\'")
+    .replace(/\r?\n/g,' ')
+    .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'');
+}
+function splitForCaptions(text) {
+  let parts = String(text||'').trim().replace(/\s+/g,' ')
+    .split(/(?<=[.?!])\s+/).filter(Boolean);
+  if (parts.length < 3) {
+    const more = text.split(/,\s+/).filter(s=>s.length>12);
+    parts = parts.concat(more).slice(0,5);
+  }
+  if (parts.length > 5) {
+    // merge extras
+    const merged = [];
+    for (const p of parts){
+      if (!merged.length) merged.push(p);
+      else if (merged[merged.length-1].length < 40) merged[merged.length-1] += ' ' + p;
+      else merged.push(p);
+      if (merged.length === 5) break;
+    }
+    parts = merged;
+  }
+  return parts.map(p => p.trim().replace(/\s+/g,' ')).filter(Boolean);
+}
+function buildCaptionDrawtexts(script, duration, fontParam) {
+  const WINDOW_START = 0.35;
+  const TAIL = 0.80;
+  const endWindow = Math.max(WINDOW_START + 1.2, duration - TAIL);
+  const total = Math.max(1.2, endWindow - WINDOW_START);
+  const segs = splitForCaptions(script);
+  if (!segs.length) return '';
+  const lens = segs.map(s=>Math.max(12, Math.min(90, s.length)));
+  const sum = lens.reduce((a,b)=>a+b,0);
+  let t = WINDOW_START;
+  const pieces = [];
+  const baseStyle = `fontcolor=white@0.98:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=24:x='(w-tw)/2':y='h*0.83'`;
+  for (let i=0;i<segs.length;i++){
+    const dur = Math.max(1.2, (lens[i]/sum)*total);
+    const start = t;
+    const stop = Math.min(endWindow, t + dur);
+    t = stop + 0.05;
+    pieces.push(`drawtext=${fontParam}text='${escDrawText(segs[i])}':${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
+    if (t >= endWindow) break;
+  }
+  return pieces.join(',');
+}
+
 /* -------------------------- Spawned processes -------------------------- */
 function runSpawn(cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
@@ -878,8 +936,8 @@ function pickSerifFontFile() {
   return null;
 }
 
-/* -------------------- Fallback still-video -------------------- */
-async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
+/* -------------------- Fallback still-video (modern + captions) -------------------- */
+async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
   const outFile = `${id}.mp4`;
@@ -894,8 +952,10 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     } catch { imgFile = null; }
   }
 
+  const sansFile = pickSansFontFile();
   const serifFile = pickSerifFontFile();
-  const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
   const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
   const brand = safeFFText(brandLine);
@@ -918,17 +978,20 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     inputs.push('silence');
   }
 
-  // contain + pad, tiny Ken Burns (max 1.02)
+  // contain + pad, tiny Ken Burns
   const baseVideo = imgFile
     ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,` +
       `zoompan=z='min(zoom+0.0003,1.02)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
     : `[0:v]fps=24,format=yuv420p[cv]`;
 
-  const textFx =
-    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)',` +
-    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const brandIntro =
+    `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)'`;
+  const ctaOutro =
+    `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
-  let fc = `${baseVideo};[cv]${textFx}[v]`;
+  const subs = buildCaptionDrawtexts(scriptText, duration, fontParamSerif);
+
+  let fc = `${baseVideo};[cv]${brandIntro}${subs?','+subs:''},${ctaOutro}[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
@@ -961,15 +1024,17 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* -------------------- Ultimate fallback: title-card video -------------------- */
-async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!' }) {
+/* -------------------- Ultimate fallback: title-card video (modern + captions) -------------------- */
+async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText='' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
   const outFile = `${id}.mp4`;
   const outPath = path.join(outDir, outFile);
 
+  const sansFile = pickSansFontFile();
   const serifFile = pickSerifFontFile();
-  const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
   const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
   const brand = safeFFText(brandLine);
@@ -986,11 +1051,13 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     inputs.push('silence');
   }
 
-  const textFx =
-    `drawtext=${fontParam}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-80)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})',` +
-    `drawtext=${fontParam}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const textFxIntro =
+    `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
+  const textFxCTA =
+    `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const subs = buildCaptionDrawtexts(scriptText, duration, fontParamSerif);
 
-  let fc = `[0:v]fps=24,format=yuv420p,${textFx}[v]`;
+  let fc = `[0:v]fps=24,format=yuv420p,${textFxIntro}${subs?','+subs:''},${textFxCTA}[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
@@ -1021,7 +1088,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* ------------------------------- VIDEO ------------------------------- */
+/* ------------------------------- VIDEO (modern transitions + captions + 3 variations) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1100,201 +1167,228 @@ Output ONLY the script text.`;
       musicPath = pickMusicFile(keys);
     } catch { musicPath = null; }
 
-    /* ---- Tier 1: stock montage ---- */
-    const tryStockVideo = async () => {
-      if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
-      let candidates = [];
-      const r = await axios.get('https://api.pexels.com/videos/search', {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: topic, per_page: 30, cb: Date.now() + (regenerateToken || '') },
-      });
-      const videos = r.data?.videos || [];
-      for (const v of videos) {
-        if ((v.duration || 0) < 7) continue;
-        const files = (v.video_files || [])
-          .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
-          .sort((a, b) => (a.width || 9999) - (b.width || 9999));
-        if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
-      }
-      if (candidates.length < 3) throw new Error('not_enough_clips');
+    const generateOneVariant = async (seedBump = '') => {
+      /* ---- Tier 1: stock montage with smooth crossfades + captions ---- */
+      const tryStockVideo = async () => {
+        if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
+        let candidates = [];
+        const r = await axios.get('https://api.pexels.com/videos/search', {
+          headers: { Authorization: PEXELS_API_KEY },
+          params: { query: topic, per_page: 30, cb: Date.now() + (regenerateToken || '') + seedBump },
+        });
+        const videos = r.data?.videos || [];
+        for (const v of videos) {
+          if ((v.duration || 0) < 7) continue;
+          const files = (v.video_files || [])
+            .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
+            .sort((a, b) => (a.width || 9999) - (b.width || 9999));
+          if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
+        }
+        if (candidates.length < 3) throw new Error('not_enough_clips');
 
-      const chosen = getDeterministicShuffle(candidates, regenerateToken || answers?.businessName || topic || Date.now()).slice(0, 3);
-      const tmp = path.join(__dirname, '../tmp');
-      try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
-      const inputs = [];
-      for (const c of chosen) {
-        const out = path.join(tmp, `${uuidv4()}.mp4`);
-        await downloadFileWithTimeout(c.link, out, 25000, 6);
-        inputs.push(out);
-      }
+        const chosen = getDeterministicShuffle(candidates, (regenerateToken || answers?.businessName || topic || Date.now()) + '_' + seedBump).slice(0, 3);
+        const tmp = path.join(__dirname, '../tmp');
+        try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
+        const inputs = [];
+        for (const c of chosen) {
+          const out = path.join(tmp, `${uuidv4()}.mp4`);
+          await downloadFileWithTimeout(c.link, out, 25000, 6);
+          inputs.push(out);
+        }
 
-      const serifFile = pickSerifFontFile();
-      const fontParam = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
-      const brandLine = safeFFText(brandForVideo);
-      const ctaTxt    = safeFFText(ctaText);
-      const TOP_H   = Math.round(640 * 0.18);
-      const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+        const sansFile = pickSansFontFile();
+        const serifFile = pickSerifFontFile();
+        const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+        const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+        const brandLine = safeFFText(brandForVideo);
+        const ctaTxt    = safeFFText(ctaText);
+        const TOP_H   = Math.round(640 * 0.18);
+        const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
-      const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
-      const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
-      const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
-      const segs = [seg1, seg2, seg3];
+        const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
+        const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
+        const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
+        const segs = [seg1, seg2, seg3];
 
-      const introStart = 0.25;
-      const introEnd   = Math.min(segs[0] - 0.25, 3.2);
-      const outroStart = Math.max(0.0, finalDur - TAIL);
-      const outroEnd   = finalDur;
+        const introStart = 0.25;
+        const introEnd   = Math.min(segs[0] - 0.25, 3.2);
+        const outroStart = Math.max(0.0, finalDur - TAIL);
+        const outroEnd   = finalDur;
 
-      const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
+        const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
 
-      // *** FIX BEGINNING GLITCH ***
-      // Trim first ~60ms from each clip before concat (avoids black/garbled first frame from some stock MP4s)
-      const LEAD = 0.06;
+        // Trim first ~60ms from each clip to avoid first-frame glitch
+        const LEAD = 0.06;
 
-      // Full-frame contain + pad (no crop)
-      const vidParts = [];
-      for (let i = 0; i < inputs.length; i++) {
-        const dur = segs[i];
-        vidParts.push(
-          `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
-          `pad=640:640:(640-iw)/2:(640-ih)/2,` +
-          `${baseLook},trim=${LEAD}:${(LEAD + dur).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+        // contain + pad (no crop), prepare segments
+        const vidParts = [];
+        for (let i = 0; i < inputs.length; i++) {
+          const dur = segs[i] + 0.35; // allow for xfade overlap head
+          vidParts.push(
+            `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
+            `pad=640:640:(640-iw)/2:(640-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + dur).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+          );
+        }
+
+        // Crossfades
+        const fadeDur = 0.35;
+        const off01 = (segs[0]).toFixed(2);
+        const off12 = (segs[0] + segs[1]).toFixed(2);
+        const concat =
+          `[s0][s1]xfade=transition=fade:duration=${fadeDur}:offset=${(segs[0]-fadeDur).toFixed(2)}[v01];` +
+          `[v01][s2]xfade=transition=fade:duration=${fadeDur}:offset=${(segs[0]+segs[1]-fadeDur).toFixed(2)}[vseq]`;
+
+        const bandFadeStart = (segs[0]-0.60).toFixed(2);
+        const band =
+          `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
+          `[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
+
+        const introOverlay =
+          `drawtext=${fontParamSans}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+        const outroOverlay =
+          `drawtext=${fontParamSans}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+
+        const subs = buildCaptionDrawtexts(script, finalDur, fontParamSerif);
+
+        let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay}${subs?','+subs:''},${outroOverlay}[v]`;
+
+        const outDir = ensureGeneratedDir();
+        const outFile = `${uuidv4()}.mp4`;
+        const outPath = path.join(outDir, outFile);
+
+        const args = ['-y'];
+        for (const f of inputs) { args.push('-i', f); }
+        if (ttsPath) args.push('-i', ttsPath);
+        if (musicPath) args.push('-i', musicPath);
+
+        if (ttsPath && musicPath) {
+          fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
+                `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${(voDur>0?voDur+TAIL:finalDur).toFixed(2)}[bg]` +
+                `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
+        } else if (ttsPath) {
+          fc += `;[${inputs.length}:a]aresample=44100,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
+        } else if (musicPath) {
+          fc += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)}[mix]`;
+        } else {
+          args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+        }
+
+        args.push(
+          '-filter_complex', fc,
+          '-map', '[v]',
+          '-map', (ttsPath || musicPath) ? '[mix]' : `${inputs.length}:a`,
+          '-t', finalDur.toFixed(2),
+          '-r', '24',
+          '-vsync', '2',
+          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
+          '-g', '48', '-keyint_min', '24',
+          '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+          '-movflags', '+faststart',
+          '-avoid_negative_ts', 'make_zero',
+          '-loglevel', 'error',
+          outPath
         );
+
+        await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'montage timeout' });
+        for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
+
+        return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
+      };
+
+      let videoUrl = '';
+      let absoluteUrl = '';
+      try {
+        const stock = await tryStockVideo();
+        videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl;
+      } catch {
+        try {
+          let imageUrl = null;
+          if (PEXELS_API_KEY) {
+            try {
+              const keyword = getImageKeyword(answers.industry || '', url) || topic;
+              const p = await axios.get(PEXELS_IMG_BASE, {
+                headers: { Authorization: PEXELS_API_KEY },
+                params: { query: keyword, per_page: 20 }
+              });
+              const photos = p.data?.photos || [];
+              if (photos.length) {
+                const idx = (seedrandom(String(regenerateToken + '_' + seedBump || Date.now()))() * photos.length) | 0;
+                imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
+              }
+            } catch {}
+          }
+          if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
+
+          const still = await composeStillVideo({
+            imageUrl,
+            duration: finalDur,
+            ttsPath,
+            musicPath,
+            brandLine: brandForVideo,
+            ctaText,
+            scriptText: script
+          });
+          videoUrl = still.publicUrl; absoluteUrl = still.absoluteUrl;
+        } catch {
+          const title = await composeTitleCardVideo({
+            duration: finalDur,
+            ttsPath,
+            musicPath,
+            brandLine: brandForVideo,
+            ctaText,
+            scriptText: script
+          });
+          videoUrl = title.publicUrl; absoluteUrl = title.absoluteUrl;
+        }
       }
-      const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
-      const bandFadeStart = (segs[0]-0.60).toFixed(2);
-      const band =
-        `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
-        `[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
+      /* ---- Optional: upload to FB (first variant only will be uploaded later) ---- */
+      await saveAsset({
+        req,
+        kind: 'video',
+        url: videoUrl,
+        absoluteUrl,
+        meta: { script, ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, topic, category }
+      });
 
-      const introOverlay =
-        `drawtext=${fontParam}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
-      const outroOverlay =
-        `drawtext=${fontParam}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
-
-      let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay},${outroOverlay}[v]`;
-
-      const outDir = ensureGeneratedDir();
-      const outFile = `${uuidv4()}.mp4`;
-      const outPath = path.join(outDir, outFile);
-
-      const args = ['-y'];
-      for (const f of inputs) { args.push('-i', f); }
-      if (ttsPath) args.push('-i', ttsPath);
-      if (musicPath) args.push('-i', musicPath);
-
-      if (ttsPath && musicPath) {
-        fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
-              `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${(voDur>0?voDur+TAIL:finalDur).toFixed(2)}[bg]` +
-              `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
-      } else if (ttsPath) {
-        fc += `;[${inputs.length}:a]aresample=44100,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
-      } else if (musicPath) {
-        fc += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)}[mix]`;
-      } else {
-        args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
-      }
-
-      args.push(
-        '-filter_complex', fc,
-        '-map', '[v]',
-        '-map', (ttsPath || musicPath) ? '[mix]' : `${inputs.length}:a`,
-        '-t', finalDur.toFixed(2),
-        '-r', '24',
-        '-vsync', '2',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-        '-g', '48', '-keyint_min', '24',
-        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
-        '-movflags', '+faststart',
-        '-avoid_negative_ts', 'make_zero',
-        '-loglevel', 'error',
-        outPath
-      );
-
-      await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'montage timeout' });
-      for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
-
-      return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
+      return { url: videoUrl, absoluteUrl };
     };
 
-    let videoUrl = '';
-    let absoluteUrl = '';
-    try {
-      const stock = await tryStockVideo();
-      videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl;
-    } catch {
+    const variations = [];
+    for (let i = 0; i < 3; i++) {
       try {
-        let imageUrl = null;
-        if (PEXELS_API_KEY) {
-          try {
-            const keyword = getImageKeyword(answers.industry || '', url) || topic;
-            const p = await axios.get(PEXELS_IMG_BASE, {
-              headers: { Authorization: PEXELS_API_KEY },
-              params: { query: keyword, per_page: 20 }
-            });
-            const photos = p.data?.photos || [];
-            if (photos.length) {
-              const idx = (seedrandom(String(regenerateToken || Date.now()))() * photos.length) | 0;
-              imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
-            }
-          } catch {}
-        }
-        if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
-
-        const still = await composeStillVideo({
-          imageUrl,
-          duration: finalDur,
-          ttsPath,
-          musicPath,
-          brandLine: brandForVideo,
-          ctaText
-        });
-        videoUrl = still.publicUrl; absoluteUrl = still.absoluteUrl;
-      } catch {
-        const title = await composeTitleCardVideo({
-          duration: finalDur,
-          ttsPath,
-          musicPath,
-          brandLine: brandForVideo,
-          ctaText
-        });
-        videoUrl = title.publicUrl; absoluteUrl = title.absoluteUrl;
-      }
-    } finally {
-      try { if (ttsPath) fs.unlinkSync(ttsPath); } catch {}
-      maybeGC();
+        const one = await generateOneVariant(String(i));
+        variations.push(one);
+      } catch {}
     }
 
-    /* ---- Optional: upload to FB ---- */
+    // upload first to FB if requested
     let fbVideoId = null;
     try {
-      if (fbAdAccountId && token) {
+      if (variations[0] && fbAdAccountId && token) {
         const up = await uploadVideoToAdAccount(
-          fbAdAccountId, token, absoluteUrl,
+          fbAdAccountId, token, variations[0].absoluteUrl,
           'SmartMark Generated Video', 'Generated by SmartMark'
         );
         fbVideoId = up?.id || null;
       }
     } catch {}
 
-    await saveAsset({
-      req,
-      kind: 'video',
-      url: videoUrl,
-      absoluteUrl,
-      meta: { script, ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, topic, category }
-    });
+    try { if (ttsPath) fs.unlinkSync(ttsPath); } catch {}
+    maybeGC();
+
+    const first = variations[0] || { url: '', absoluteUrl: '' };
 
     return res.json({
-      videoUrl,
-      absoluteVideoUrl: absoluteUrl,
+      videoUrl: first.url,
+      absoluteVideoUrl: first.absoluteUrl,
       fbVideoId,
       script,
       ctaText,
       voice: ttsPath ? 'alloy' : null,
       hasMusic: !!musicPath,
-      video: { url: videoUrl, script, overlayText: ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath }
+      video: { url: first.url, script, overlayText: ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath },
+      videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl }))
     });
   } catch (err) {
     if (!res.headersSent)
@@ -1302,7 +1396,7 @@ Output ONLY the script text.`;
   }
 });
 
-/* --------------------- IMAGE: search + overlay --------------------- */
+/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
   try {
@@ -1314,17 +1408,52 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category = resolveCategory(answers || {});
     const keyword = getImageKeyword(industry, url);
 
+    const makeOne = async (baseUrl, seed) => {
+      const headlineHint = overlayTitleFromAnswers(answers, category);
+      const ctaHint = pickFromAllowedCTAs(answers, seed);
+      try {
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: baseUrl,
+          headlineHint,
+          ctaHint,
+          seed,
+          fallbackHeadline: headlineHint
+        });
+        await saveAsset({
+          req,
+          kind: 'image',
+          url: publicUrl,
+          absoluteUrl,
+          meta: { keyword, overlayText: ctaHint, headlineHint, category }
+        });
+        return publicUrl;
+      } catch {
+        await saveAsset({
+          req,
+          kind: 'image',
+          url: baseUrl,
+          absoluteUrl: baseUrl,
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category }
+        });
+        return baseUrl;
+      }
+    };
+
     if (!PEXELS_API_KEY) {
       const colorBlock = 'https://singlecolorimage.com/get/232a2e/1200x627';
-      const { publicUrl, absoluteUrl } = await buildOverlayImage({
-        imageUrl: colorBlock,
-        headlineHint: overlayTitleFromAnswers(answers, category),
-        ctaHint: pickFromAllowedCTAs(answers, regenerateToken || Date.now()),
-        seed: regenerateToken || answers?.businessName || keyword,
-        fallbackHeadline: overlayTitleFromAnswers(answers, category)
-      });
-      await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true } });
-      return res.json({ imageUrl: publicUrl, keyword, totalResults: 1, usedIndex: 0 });
+      const urls = [];
+      for (let i=0;i<3;i++){
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: colorBlock,
+          headlineHint: overlayTitleFromAnswers(answers, category),
+          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          seed: regenerateToken + '_' + i,
+          fallbackHeadline: overlayTitleFromAnswers(answers, category)
+        });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i } });
+        urls.push(publicUrl);
+      }
+      return res.json({ imageUrl: urls[0], keyword, totalResults: 3, usedIndex: 0, imageVariations: urls.map(u => ({ url: u })) });
     }
 
     let photos = [];
@@ -1341,49 +1470,31 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash*31 + c.charCodeAt(0))>>>0;
-    const idx = (idxHash % photos.length);
 
-    const img = photos[idx];
-    const baseUrl = img.src.large2x || img.src.original || img.src.large;
-
-    const headlineHint = overlayTitleFromAnswers(answers, category);
-    const ctaHint = pickFromAllowedCTAs(answers, seed);
-
-    let finalUrl = baseUrl;
-    try {
-      const { publicUrl, absoluteUrl } = await buildOverlayImage({
-        imageUrl: baseUrl,
-        headlineHint,
-        ctaHint,
-        seed,
-        fallbackHeadline: headlineHint
-      });
-      finalUrl = publicUrl;
-
-      await saveAsset({
-        req,
-        kind: 'image',
-        url: publicUrl,
-        absoluteUrl,
-        meta: { keyword, overlayText: ctaHint, headlineHint, category }
-      });
-    } catch {
-      await saveAsset({
-        req,
-        kind: 'image',
-        url: baseUrl,
-        absoluteUrl: baseUrl,
-        meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category }
-      });
+    // pick 3 distinct indices
+    const picks = [];
+    for (let i=0;i<photos.length && picks.length<3;i++){
+      const idx = (idxHash + i*7) % photos.length;
+      if (!picks.includes(idx)) picks.push(idx);
     }
 
+    const urls = [];
+    for (let pi=0; pi<picks.length; pi++){
+      const img = photos[picks[pi]];
+      const baseUrl = img.src.large2x || img.src.original || img.src.large;
+      const u = await makeOne(baseUrl, seed + '_' + pi);
+      urls.push(u);
+    }
+
+    const img0 = photos[picks[0]];
     res.json({
-      imageUrl: finalUrl,
-      photographer: img.photographer,
-      pexelsUrl: img.url,
+      imageUrl: urls[0],
+      photographer: img0?.photographer,
+      pexelsUrl: img0?.url,
       keyword,
       totalResults: photos.length,
-      usedIndex: idx
+      usedIndex: picks[0],
+      imageVariations: urls.map(u => ({ url: u }))
     });
   } catch (e) {
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
