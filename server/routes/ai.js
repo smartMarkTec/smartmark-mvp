@@ -789,13 +789,13 @@ function pickMusicFile(keywords = []) {
 }
 
 /* ------------------------------- Utils ------------------------------- */
-async function downloadFileWithTimeout(url, dest, timeoutMs=26000, maxSizeMB=6) {
+async function downloadFileWithTimeout(url, dest, timeoutMs=15000, maxSizeMB=6) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
     const timeout = setTimeout(()=>{timedOut=true;writer.destroy();try{fs.unlinkSync(dest);}catch{};reject(new Error('Download timed out'));}, timeoutMs);
-    axios({ url, method:'GET', responseType:'stream' })
+    axios({ url, method:'GET', responseType:'stream', timeout: timeoutMs })
       .then(resp => {
         let bytes=0;
         resp.data.on('data', ch => { bytes+=ch.length; if (bytes > maxSizeMB*1024*1024 && !timedOut) { timedOut=true; writer.destroy(); try{fs.unlinkSync(dest);}catch{}; clearTimeout(timeout); reject(new Error('File too large')); }});
@@ -841,14 +841,21 @@ function finalizeScriptWithSingleCTA(text, chosenCTA) {
   return cleaned.replace(/\s+/g,' ').trim();
 }
 
-/* ---- Subtitle helpers (modern captions) ---- */
+/* ---- Subtitle helpers (FIXED escaping) ---- */
 function escDrawText(s){
-  return String(s||'')
-    .replace(/\\/g, '\\\\')
-    .replace(/:/g, '\\:')
-    .replace(/'/g, "\\'")
-    .replace(/\r?\n/g,' ')
-    .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi,'');
+  return String(s ?? '')
+    .normalize('NFKC')
+    .replace(/[\u2018\u2019]/g, "'")     // smart → straight
+    .replace(/\\/g, '\\\\')              // backslash
+    .replace(/'/g, "\\'")                // single quote
+    .replace(/:/g, '\\:')                // colon
+    .replace(/,/g, '\\,')                // comma
+    .replace(/\[/g, '\\[').replace(/\]/g, '\\]') // brackets
+    .replace(/;/g, '\\;')                // semicolon
+    .replace(/=/g, '\\=')                // equals
+    .replace(/\r?\n/g, ' ')              // newlines
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
@@ -858,7 +865,6 @@ function splitForCaptions(text) {
     parts = parts.concat(more).slice(0,5);
   }
   if (parts.length > 5) {
-    // merge extras
     const merged = [];
     for (const p of parts){
       if (!merged.length) merged.push(p);
@@ -881,7 +887,7 @@ function buildCaptionDrawtexts(script, duration, fontParam) {
   const sum = lens.reduce((a,b)=>a+b,0);
   let t = WINDOW_START;
   const pieces = [];
-  const baseStyle = `fontcolor=white@0.98:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=24:x='(w-tw)/2':y='h*0.83'`;
+  const baseStyle = "fontcolor=white@0.98:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=24:x='(w-tw)/2':y='h*0.83'";
   for (let i=0;i<segs.length;i++){
     const dur = Math.max(1.2, (lens[i]/sum)*total);
     const start = t;
@@ -947,7 +953,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   if (imageUrl) {
     try {
       imgFile = path.join(outDir, `${id}.jpg`);
-      const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+      const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 7000 });
       fs.writeFileSync(imgFile, imgRes.data);
     } catch { imgFile = null; }
   }
@@ -1088,7 +1094,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* ------------------------------- VIDEO (modern transitions + captions + 3 variations) ------------------------------- */
+/* ------------------------------- VIDEO (modern transitions + captions + 3 variations + 60s budget) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1105,6 +1111,11 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g,'').trim();
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
+
+    // Hard runtime budget (aim ≤ 60s wall time). If we get close, we fall back to still/title quickly.
+    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 60000);
+    const startTs = Date.now();
+    const timeLeft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
 
     /* ---- Script + TTS ---- */
     const forbidFashionLine = category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
@@ -1171,10 +1182,13 @@ Output ONLY the script text.`;
       /* ---- Tier 1: stock montage with smooth crossfades + captions ---- */
       const tryStockVideo = async () => {
         if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
+        if (timeLeft() < 15000) throw new Error('time_budget_low');
+
         let candidates = [];
         const r = await axios.get('https://api.pexels.com/videos/search', {
           headers: { Authorization: PEXELS_API_KEY },
           params: { query: topic, per_page: 30, cb: Date.now() + (regenerateToken || '') + seedBump },
+          timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
         });
         const videos = r.data?.videos || [];
         for (const v of videos) {
@@ -1191,10 +1205,13 @@ Output ONLY the script text.`;
         try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
         const inputs = [];
         for (const c of chosen) {
+          if (timeLeft() < 6000) break;
           const out = path.join(tmp, `${uuidv4()}.mp4`);
-          await downloadFileWithTimeout(c.link, out, 25000, 6);
+          const dlTimeout = Math.max(6000, Math.min(15000, timeLeft() - 3000));
+          await downloadFileWithTimeout(c.link, out, dlTimeout, 6);
           inputs.push(out);
         }
+        if (inputs.length < 3) throw new Error('downloads_incomplete');
 
         const sansFile = pickSansFontFile();
         const serifFile = pickSerifFontFile();
@@ -1232,8 +1249,6 @@ Output ONLY the script text.`;
 
         // Crossfades
         const fadeDur = 0.35;
-        const off01 = (segs[0]).toFixed(2);
-        const off12 = (segs[0] + segs[1]).toFixed(2);
         const concat =
           `[s0][s1]xfade=transition=fade:duration=${fadeDur}:offset=${(segs[0]-fadeDur).toFixed(2)}[v01];` +
           `[v01][s2]xfade=transition=fade:duration=${fadeDur}:offset=${(segs[0]+segs[1]-fadeDur).toFixed(2)}[vseq]`;
@@ -1289,7 +1304,7 @@ Output ONLY the script text.`;
           outPath
         );
 
-        await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'montage timeout' });
+        await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'montage timeout' });
         for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
 
         return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
@@ -1303,12 +1318,13 @@ Output ONLY the script text.`;
       } catch {
         try {
           let imageUrl = null;
-          if (PEXELS_API_KEY) {
+          if (PEXELS_API_KEY && timeLeft() > 8000) {
             try {
               const keyword = getImageKeyword(answers.industry || '', url) || topic;
               const p = await axios.get(PEXELS_IMG_BASE, {
                 headers: { Authorization: PEXELS_API_KEY },
-                params: { query: keyword, per_page: 20 }
+                params: { query: keyword, per_page: 20 },
+                timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
               });
               const photos = p.data?.photos || [];
               if (photos.length) {
@@ -1342,7 +1358,6 @@ Output ONLY the script text.`;
         }
       }
 
-      /* ---- Optional: upload to FB (first variant only will be uploaded later) ---- */
       await saveAsset({
         req,
         kind: 'video',
@@ -1360,6 +1375,7 @@ Output ONLY the script text.`;
         const one = await generateOneVariant(String(i));
         variations.push(one);
       } catch {}
+      if (timeLeft() < 3000) break;
     }
 
     // upload first to FB if requested
@@ -1461,6 +1477,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
         params: { query: keyword, per_page: 35, cb: Date.now() + (regenerateToken || '') },
+        timeout: 7000
       });
       photos = r.data.photos || [];
     } catch {
