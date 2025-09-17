@@ -551,18 +551,17 @@ function pickSansFontFile() {
   return null;
 }
 
-/* --- simple "AI" auto-layout: find darker side/half for text band --- */
+/* --- auto-layout: image luminance to choose side/band + accent color --- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
-    const W = 60, H = 60;
-    const { data, info } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let left=0,right=0,top=0,bottom=0;
-    let rSum=0,gSum=0,bSum=0;
+    const W = 72, H = 72;
+    const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let left=0,right=0,top=0,bottom=0, rSum=0,gSum=0,bSum=0;
     for (let y=0;y<H;y++){
       for (let x=0;x<W;x++){
         const i = (y*W + x)*3;
         const r = data[i], g = data[i+1], b = data[i+2];
-        const l = 0.2126*r + 0.7152*g + 0.0722*b; // luminance
+        const l = 0.2126*r + 0.7152*g + 0.0722*b;
         if (x < W/2) left += l; else right += l;
         if (y < H/2) top += l; else bottom += l;
         rSum += r; gSum += g; bSum += b;
@@ -570,13 +569,14 @@ async function analyzeImageForPlacement(imgBuf) {
     }
     const darkerSide = (left<right) ? 'left' : 'right';
     const darkerBand = (top<bottom) ? 'top' : 'bottom';
-    const avgR = Math.round(rSum/(W*H)), avgG = Math.round(gSum/(W*H)), avgB = Math.round(bSum/(W*H));
-    const avg = { r:avgR,g:avgG,b:avgB };
-    return { darkerSide, darkerBand, avg };
-  } catch { return { darkerSide:'left', darkerBand:'top', avg:{r:80,g:80,b:80} }; }
+    const avg = { r:Math.round(rSum/(W*H)), g:Math.round(gSum/(W*H)), b:Math.round(bSum/(W*H)) };
+    // choose accent (red if image is cool, blue if image is warm)
+    const brandColor = (avg.b > avg.r+20) ? '#D9413A' : '#2B6CB0';
+    return { darkerSide, darkerBand, brandColor };
+  } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#D9413A' }; }
 }
 
-/* ---- Overlay templates (modernized; adds bold color block like red example) ---- */
+/* ---- Overlay templates (modern; bold color panel, shapes, dots) ---- */
 function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='top', brandColor='#D9413A' }) {
   const LIGHT = '#f5f7f9';
   const MAX_W = W - 120;
@@ -596,25 +596,32 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
       </g>`;
   };
 
-  // bold color panel like the red ad; follows "prefer" side
+  // New bold color panel (like the red example) with subtle pattern and accent circle
   if (tpl === 5) {
-    const panelW = 520;
-    const pad = 36;
+    const panelW = 560;
+    const pad = 40;
     const x0 = prefer === 'left' ? 0 : W - panelW;
-    const cx = prefer === 'left' ? pad : x0 + pad;
+    const cx = x0 + pad;
     const textW = panelW - pad*2;
     const fit = splitTwoLines(headline, textW, 56);
-    const yTitle = 120;
-    const yCTA = yTitle + fit.fs * (fit.lines.length) + 52;
+    const yTitle = 128;
+    const yCTA = yTitle + fit.fs * (fit.lines.length) + 64;
     return `
+      <defs>
+        <pattern id="dots" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.6" fill="#ffffff22"/>
+        </pattern>
+      </defs>
       <rect x="${x0}" y="0" width="${panelW}" height="${H}" fill="${brandColor}" />
+      <rect x="${x0}" y="0" width="${panelW}" height="${H}" fill="url(#dots)"/>
+      <circle cx="${x0 + panelW - 80}" cy="${H - 80}" r="56" fill="#ffffff22"/>
       <text x="${cx}" y="${yTitle}" text-anchor="start"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
             font-size="${fit.fs}" font-weight="900" fill="#ffffff" letter-spacing="1.2">
         <tspan x="${cx}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${cx}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
-      ${pill(cx + 140, yCTA, cta, 28)}
+      ${pill(cx + 150, yCTA, cta, 28)}
     `;
   }
 
@@ -629,7 +636,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
           <stop offset="100%" stop-color="#0000"/>
         </linearGradient>
       </defs>
-      <rect x="0" y="0" width="${W}" height="180" rx="18" fill="url(#g2)"/>
+      <rect x="0" y="0" width="${W}" height="190" rx="18" fill="url(#g2)"/>
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
             font-size="${fs}" font-weight="800" fill="${LIGHT}" letter-spacing="1.6">
@@ -651,7 +658,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
     const yCTA = yBox + boxH - boxPad - 12;
 
     return `
-      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="26" fill="#00000040" />
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="26" fill="#00000045" />
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
             font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.4">
@@ -666,7 +673,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
     const padX = 64, padY = 110, panelW = 520;
     const fit = splitTwoLines(headline, panelW - 2 * padX, 54);
     const yBase = preferBand === 'top' ? padY : H - padY - fit.fs * (fit.lines.length);
-    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 52;
+    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 60;
 
     return `
       <defs>
@@ -682,17 +689,17 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
         <tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
-      ${pill((prefer==='left'?padX:W-panelW+padX) + 140, yCTA, cta, 26)}
+      ${pill((prefer==='left'?padX:W-panelW+padX) + 150, yCTA, cta, 26)}
     `;
   }
 
   return svgOverlay({ W, H, headline, cta, tpl: 4, prefer, preferBand, brandColor });
 }
 
-/* Build overlaid JPG (auto-picks layout & adds bold color option) */
+/* Build overlaid JPG with auto layout + accents */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 627;
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 8000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
 
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
@@ -702,14 +709,13 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const tplPool = [2, 3, 4, 5];
   const tpl = tplPool[h % tplPool.length];
-  const brandColor = '#D9413A'; // red hero like example
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({
       W, H, headline, cta, tpl,
       prefer: analysis.darkerSide,
       preferBand: analysis.darkerBand,
-      brandColor
+      brandColor: analysis.brandColor
     })}</svg>`
   );
 
@@ -772,7 +778,7 @@ function getDeterministicShuffle(arr, seed) {
 }
 function safeFFText(t){
   return String(t||'')
-    .replace(/['’]/g,'')                 // remove apostrophes to keep filters simple
+    .replace(/['’]/g,'')                 // strip apostrophes to simplify FFmpeg arg parsing
     .replace(/[\n\r]/g,' ')
     .replace(/[:]/g,' ')
     .replace(/[\\"]/g,'')
@@ -798,7 +804,7 @@ function finalizeScriptWithSingleCTA(text, chosenCTA) {
   return cleaned.replace(/\s+/g,' ').trim();
 }
 
-/* ---- Subtitles via textfiles (bulletproof; fixes your error) ---- */
+/* ---- Subtitles via textfiles (bulletproof) ---- */
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -818,10 +824,7 @@ function splitForCaptions(text) {
   }
   return parts.map(p => p.trim().replace(/\s+/g,' ')).filter(Boolean);
 }
-/**
- * Build drawtext filters using textfile=... to avoid any quoting problems.
- * Returns { filter, files } so caller can delete temp files after ffmpeg finishes.
- */
+/** Returns { filter, files } for drawtext captions using textfile= to avoid quoting bugs */
 function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
   const outDir = ensureGeneratedDir();
   const files = [];
@@ -903,14 +906,21 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const outFile = `${id}.mp4`;
   const outPath = path.join(outDir, outFile);
 
-  let imgFile = null;
-  if (imageUrl) {
-    try {
-      imgFile = path.join(outDir, `${id}.jpg`);
-      const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 7000 });
-      fs.writeFileSync(imgFile, imgRes.data);
-    } catch { imgFile = null; }
+  // robust image fallback (prevents "blue screen")
+  let finalImageUrl = imageUrl || 'https://picsum.photos/seed/smartmark/1200/1200';
+  try {
+    // quick HEAD-style fetch to ensure reachable
+    await axios.get(finalImageUrl, { timeout: 5000 });
+  } catch {
+    finalImageUrl = 'https://singlecolorimage.com/get/2b2f33/1200x1200';
   }
+
+  let imgFile = null;
+  try {
+    imgFile = path.join(outDir, `${id}.jpg`);
+    const imgRes = await axios.get(finalImageUrl, { responseType: 'arraybuffer', timeout: 7000 });
+    fs.writeFileSync(imgFile, imgRes.data);
+  } catch { imgFile = null; }
 
   const sansFile = pickSansFontFile();
   const serifFile = pickSerifFontFile();
@@ -938,20 +948,18 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     inputs.push('silence');
   }
 
-  // contain + pad, tiny Ken Burns
+  // contain + pad + slow zoom
   const baseVideo = imgFile
-    ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,` +
-      `zoompan=z='min(zoom+0.0003,1.02)':d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
+    ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
+      `pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,zoompan=z='min(zoom+0.00035,1.03)':` +
+      `d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
     : `[0:v]fps=24,format=yuv420p[cv]`;
 
-  const brandIntro =
-    `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)'`;
-  const ctaOutro =
-    `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)'`;
+  const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-
-  let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro}[v]`;
+  let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro},format=yuv420p[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
@@ -978,16 +986,15 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 120000, killMsg: 'still-video timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
 
-  // cleanup
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* -------------------- Ultimate fallback: title-card video (modern + captions) -------------------- */
+/* -------------------- Title-card video (modern + captions) -------------------- */
 async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText='' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
@@ -1014,13 +1021,10 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     inputs.push('silence');
   }
 
-  const textFxIntro =
-    `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
-  const textFxCTA =
-    `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
-
+  const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
+  const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-  let fc = `[0:v]fps=24,format=yuv420p,${textFxIntro}${subsBuild.filter?','+subsBuild.filter:''},${textFxCTA}[v]`;
+  let fc = `[0:v]fps=24,format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
 
   if (inputs.includes('tts') && inputs.includes('music')) {
     fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
@@ -1047,14 +1051,13 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'title-card timeout' });
-
+  await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'title-card timeout' });
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* ------------------------------- VIDEO (modern transitions + captions + 3 variations + 60s budget) ------------------------------- */
+/* ------------------------------- VIDEO (smooth xfade, robust image fallback, captions, 3 variations, 60s budget) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1072,7 +1075,6 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
 
-    // Hard runtime budget (~60s). If low, fall back faster.
     const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 60000);
     const startTs = Date.now();
     const timeLeft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
@@ -1138,8 +1140,30 @@ Output ONLY the script text.`;
       musicPath = pickMusicFile(keys);
     } catch { musicPath = null; }
 
+    const ensureImageForStill = async () => {
+      let imageUrl = null;
+      if (PEXELS_API_KEY && timeLeft() > 8000) {
+        try {
+          const keyword = getImageKeyword(answers.industry || '', url) || topic;
+          const p = await axios.get(PEXELS_IMG_BASE, {
+            headers: { Authorization: PEXELS_API_KEY },
+            params: { query: keyword, per_page: 20 },
+            timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
+          });
+          const photos = p.data?.photos || [];
+          if (photos.length) {
+            const idx = (seedrandom(String(regenerateToken || Date.now()))() * photos.length) | 0;
+            imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
+          }
+        } catch {}
+      }
+      if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
+      if (!imageUrl) imageUrl = 'https://picsum.photos/seed/smartmark/1200/1200';
+      return imageUrl;
+    };
+
     const generateOneVariant = async (seedBump = '') => {
-      /* ---- Tier 1: stock montage with smooth crossfades + captions ---- */
+      /* ---- Tier 1: stock montage with safe xfade + captions ---- */
       const tryStockVideo = async () => {
         if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
         if (timeLeft() < 15000) throw new Error('time_budget_low');
@@ -1182,38 +1206,42 @@ Output ONLY the script text.`;
         const TOP_H   = Math.round(640 * 0.18);
         const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
-        const seg1 = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
-        const seg2 = Math.max(4.2, (finalDur - seg1) / 2);
-        const seg3 = Math.max(4.0, finalDur - seg1 - seg2);
-        const segs = [seg1, seg2, seg3];
+        // segment lengths
+        const segA = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
+        const segB = Math.max(4.2, (finalDur - segA) / 2);
+        const segC = Math.max(4.0, finalDur - segA - segB);
+        const segs = [segA, segB, segC];
 
         const introStart = 0.25;
-        const introEnd   = Math.min(segs[0] - 0.25, 3.2);
+        const introEnd   = Math.min(segA - 0.25, 3.2);
         const outroStart = Math.max(0.0, finalDur - TAIL);
         const outroEnd   = finalDur;
 
         const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
-
-        // Trim first ~60ms from each clip to avoid first-frame glitch
         const LEAD = 0.06;
+        const fadeDur = 0.35;
 
-        // contain + pad (no crop), prepare segments
+        // Prep segments exactly segX long (no overlap), xfade handles overlap via offsets
         const vidParts = [];
         for (let i = 0; i < inputs.length; i++) {
-          const dur = segs[i] + 0.35; // allow for xfade overlap head
+          const seg = segs[i];
           vidParts.push(
             `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
-            `pad=640:640:(640-iw)/2:(640-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + dur).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+            `pad=640:640:(640-iw)/2:(640-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
           );
         }
 
-        // Crossfades
-        const fadeDur = 0.35;
-        const concat =
-          `[s0][s1]xfade=transition=fade:duration=${fadeDur}:offset=${(segs[0]-fadeDur).toFixed(2)}[v01];` +
-          `[v01][s2]xfade=transition=fade:duration=${fadeDur}:offset=${(segs[0]+segs[1]-fadeDur).toFixed(2)}[vseq]`;
+        // xfade offsets MUST be relative to first input timeline of each stage
+        // stage1 offset = segA - fadeDur
+        // stage2 offset = (segA + segB - fadeDur) - fadeDur = segA + segB - 2*fadeDur
+        const off1 = (segA - fadeDur).toFixed(2);
+        const off2 = (segA + segB - 2*fadeDur).toFixed(2);
 
-        const bandFadeStart = (segs[0]-0.60).toFixed(2);
+        const xf =
+          `[s0][s1]xfade=transition=fade:duration=${fadeDur}:offset=${off1}[v01];` +
+          `[v01][s2]xfade=transition=fade:duration=${fadeDur}:offset=${off2}[vseq]`;
+
+        const bandFadeStart = (segA-0.60).toFixed(2);
         const band =
           `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
           `[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
@@ -1225,7 +1253,7 @@ Output ONLY the script text.`;
 
         const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSerif, `v${seedBump}`);
 
-        let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay}${subsBuild.filter?','+subsBuild.filter:''},${outroOverlay}[v]`;
+        let fc = vidParts.join(';') + ';' + xf + ';' + band + `;[b3]${introOverlay}${subsBuild.filter?','+subsBuild.filter:''},${outroOverlay},format=yuv420p[v]`;
 
         const outDir = ensureGeneratedDir();
         const outFile = `${uuidv4()}.mp4`;
@@ -1278,24 +1306,7 @@ Output ONLY the script text.`;
         videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl;
       } catch {
         try {
-          let imageUrl = null;
-          if (PEXELS_API_KEY && timeLeft() > 8000) {
-            try {
-              const keyword = getImageKeyword(answers.industry || '', url) || topic;
-              const p = await axios.get(PEXELS_IMG_BASE, {
-                headers: { Authorization: PEXELS_API_KEY },
-                params: { query: keyword, per_page: 20 },
-                timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
-              });
-              const photos = p.data?.photos || [];
-              if (photos.length) {
-                const idx = (seedrandom(String(regenerateToken + '_' + seedBump || Date.now()))() * photos.length) | 0;
-                imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
-              }
-            } catch {}
-          }
-          if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
-
+          const imageUrl = await ensureImageForStill();
           const still = await composeStillVideo({
             imageUrl,
             duration: finalDur,
@@ -1339,7 +1350,7 @@ Output ONLY the script text.`;
       if (timeLeft() < 3000) break;
     }
 
-    // upload first to FB if requested
+    // optional upload to FB
     let fbVideoId = null;
     try {
       if (variations[0] && fbAdAccountId && token) {
@@ -1417,11 +1428,10 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     };
 
     if (!PEXELS_API_KEY) {
-      const colorBlock = 'https://singlecolorimage.com/get/232a2e/1200x627';
       const urls = [];
       for (let i=0;i<3;i++){
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: colorBlock,
+          imageUrl: 'https://picsum.photos/seed/smartmark'+i+'/1200/627',
           headlineHint: overlayTitleFromAnswers(answers, category),
           ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
           seed: regenerateToken + '_' + i,
