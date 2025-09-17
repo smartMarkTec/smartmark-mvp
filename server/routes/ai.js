@@ -493,7 +493,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Image overlays (modern/auto-layout) ---------------------- */
+/* ---------------------- Image overlays (modern, tasteful) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -538,7 +538,7 @@ function cleanCTA(c){
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
 
-/* ---- Modern font helpers ---- */
+/* Modern fonts */
 function pickSansFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -551,7 +551,7 @@ function pickSansFontFile() {
   return null;
 }
 
-/* --- auto-layout: image luminance to choose side/band + accent color --- */
+/* Auto-placement analysis */
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 72, H = 72;
@@ -570,14 +570,16 @@ async function analyzeImageForPlacement(imgBuf) {
     const darkerSide = (left<right) ? 'left' : 'right';
     const darkerBand = (top<bottom) ? 'top' : 'bottom';
     const avg = { r:Math.round(rSum/(W*H)), g:Math.round(gSum/(W*H)), b:Math.round(bSum/(W*H)) };
-    // choose accent (red if image is cool, blue if image is warm)
-    const brandColor = (avg.b > avg.r+20) ? '#D9413A' : '#2B6CB0';
-    return { darkerSide, darkerBand, brandColor };
-  } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#D9413A' }; }
+    // choose accent from palette
+    const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1'];
+    const brandColor = palette[(avg.b>avg.r?1:0) + (avg.g>avg.b?2:0)] || '#E63946';
+    const diffLR = Math.abs(left-right) / (W*H);
+    return { darkerSide, darkerBand, brandColor, diffLR };
+  } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
 
-/* ---- Overlay templates (modern; bold color panel, shapes, dots) ---- */
-function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='top', brandColor='#D9413A' }) {
+/* SVG overlays (semi-transparent, tasteful) */
+function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='top', brandColor='#E63946', strength=0.88 }) {
   const LIGHT = '#f5f7f9';
   const MAX_W = W - 120;
   const pill = (x, y, text, fs = 28) => {
@@ -596,32 +598,35 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
       </g>`;
   };
 
-  // New bold color panel (like the red example) with subtle pattern and accent circle
+  // Semi-transparent side panel (like pro ads) — smaller width to avoid “half split”
   if (tpl === 5) {
-    const panelW = 560;
-    const pad = 40;
-    const x0 = prefer === 'left' ? 0 : W - panelW;
+    const panelW = 440;
+    const pad = 34;
+    const x0 = prefer === 'left' ? 24 : W - panelW - 24;
     const cx = x0 + pad;
     const textW = panelW - pad*2;
     const fit = splitTwoLines(headline, textW, 56);
     const yTitle = 128;
-    const yCTA = yTitle + fit.fs * (fit.lines.length) + 64;
+    const yCTA = yTitle + fit.fs * (fit.lines.length) + 60;
     return `
       <defs>
-        <pattern id="dots" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="2" r="1.6" fill="#ffffff22"/>
+        <linearGradient id="panelShade" x1="0" y1="0" x2="${prefer==='left'?1:0}" y2="0">
+          <stop offset="0%" stop-color="${brandColor}" stop-opacity="${strength}"/>
+          <stop offset="100%" stop-color="${brandColor}" stop-opacity="${Math.max(0,strength-0.28)}"/>
+        </linearGradient>
+        <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+          <circle cx="2.5" cy="2.5" r="1.7" fill="#ffffff22"/>
         </pattern>
       </defs>
-      <rect x="${x0}" y="0" width="${panelW}" height="${H}" fill="${brandColor}" />
-      <rect x="${x0}" y="0" width="${panelW}" height="${H}" fill="url(#dots)"/>
-      <circle cx="${x0 + panelW - 80}" cy="${H - 80}" r="56" fill="#ffffff22"/>
+      <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#panelShade)" />
+      <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#dots)"/>
       <text x="${cx}" y="${yTitle}" text-anchor="start"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fit.fs}" font-weight="900" fill="#ffffff" letter-spacing="1.2">
+            font-size="${fit.fs}" font-weight="900" fill="#ffffff" letter-spacing="1.1">
         <tspan x="${cx}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${cx}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
-      ${pill(cx + 150, yCTA, cta, 28)}
+      ${pill(cx + 130, yCTA, cta, 28)}
     `;
   }
 
@@ -639,7 +644,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
       <rect x="0" y="0" width="${W}" height="190" rx="18" fill="url(#g2)"/>
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fs}" font-weight="800" fill="${LIGHT}" letter-spacing="1.6">
+            font-size="${fs}" font-weight="800" fill="${LIGHT}" letter-spacing="1.4">
         ${escSVG(headline)}
       </text>
       ${pill(W / 2, yCTA, cta, 28)}
@@ -647,11 +652,11 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
   }
 
   if (tpl === 3) {
-    const boxW = 860;
-    const fit = splitTwoLines(headline, boxW - 100, 56);
+    const boxW = 820;
+    const fit = splitTwoLines(headline, boxW - 100, 54);
     const lineCount = fit.lines.length;
-    const boxPad = 28;
-    const gap = 18;
+    const boxPad = 26;
+    const gap = 16;
     const boxH = Math.round(boxPad * 2 + fit.fs * lineCount + 54 + gap);
     const yBox = Math.round((H - boxH) / 2);
     const yTitle = yBox + boxPad + fit.fs - 6;
@@ -661,7 +666,7 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
       <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="26" fill="#00000045" />
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.4">
+            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.2">
         <tspan x="${W / 2}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${W / 2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
@@ -671,9 +676,9 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
 
   if (tpl === 4) {
     const padX = 64, padY = 110, panelW = 520;
-    const fit = splitTwoLines(headline, panelW - 2 * padX, 54);
+    const fit = splitTwoLines(headline, panelW - 2 * padX, 52);
     const yBase = preferBand === 'top' ? padY : H - padY - fit.fs * (fit.lines.length);
-    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 60;
+    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 58;
 
     return `
       <defs>
@@ -685,18 +690,18 @@ function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='t
       <rect x="${prefer==='left'?0:W-panelW}" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
       <text x="${prefer==='left'?padX:W-panelW+padX}" y="${yBase}" text-anchor="start"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.4">
+            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.2">
         <tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
-      ${pill((prefer==='left'?padX:W-panelW+padX) + 150, yCTA, cta, 26)}
+      ${pill((prefer==='left'?padX:W-panelW+padX) + 140, yCTA, cta, 26)}
     `;
   }
 
   return svgOverlay({ W, H, headline, cta, tpl: 4, prefer, preferBand, brandColor });
 }
 
-/* Build overlaid JPG with auto layout + accents */
+/* Build overlaid JPG */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 627;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 8000 });
@@ -707,7 +712,8 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
 
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const tplPool = [2, 3, 4, 5];
+  // If left/right luminance is very similar, prefer a top band layout (tpl 2/3)
+  const tplPool = analysis.diffLR > 40 ? [5, 4, 2] : [2, 3, 5, 4];
   const tpl = tplPool[h % tplPool.length];
 
   const overlaySVG = Buffer.from(
@@ -715,7 +721,8 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
       W, H, headline, cta, tpl,
       prefer: analysis.darkerSide,
       preferBand: analysis.darkerBand,
-      brandColor: analysis.brandColor
+      brandColor: analysis.brandColor,
+      strength: 0.86
     })}</svg>`
   );
 
@@ -752,7 +759,7 @@ function pickMusicFile(keywords = []) {
 }
 
 /* ------------------------------- Utils ------------------------------- */
-async function downloadFileWithTimeout(url, dest, timeoutMs=15000, maxSizeMB=6) {
+async function downloadFileWithTimeout(url, dest, timeoutMs=14000, maxSizeMB=6) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
@@ -778,7 +785,7 @@ function getDeterministicShuffle(arr, seed) {
 }
 function safeFFText(t){
   return String(t||'')
-    .replace(/['’]/g,'')                 // strip apostrophes to simplify FFmpeg arg parsing
+    .replace(/['’]/g,'')                 // kill apostrophes to avoid drawtext parse issues
     .replace(/[\n\r]/g,' ')
     .replace(/[:]/g,' ')
     .replace(/[\\"]/g,'')
@@ -804,7 +811,7 @@ function finalizeScriptWithSingleCTA(text, chosenCTA) {
   return cleaned.replace(/\s+/g,' ').trim();
 }
 
-/* ---- Subtitles via textfiles (bulletproof) ---- */
+/* ---- Subtitles via textfiles (robust) ---- */
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -824,7 +831,6 @@ function splitForCaptions(text) {
   }
   return parts.map(p => p.trim().replace(/\s+/g,' ')).filter(Boolean);
 }
-/** Returns { filter, files } for drawtext captions using textfile= to avoid quoting bugs */
 function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
   const outDir = ensureGeneratedDir();
   const files = [];
@@ -849,7 +855,6 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
 
     const tf = path.join(outDir, `cap_${workId}_${i}.txt`);
     try { fs.writeFileSync(tf, segs[i]); files.push(tf); } catch {}
-
     pieces.push(`drawtext=${fontParam}textfile='${tf}':${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
     if (t >= endWindow) break;
   }
@@ -899,21 +904,16 @@ function pickSerifFontFile() {
   return null;
 }
 
-/* -------------------- Fallback still-video (modern + captions) -------------------- */
+/* -------------------- Still video (modern + captions) -------------------- */
 async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
   const outFile = `${id}.mp4`;
   const outPath = path.join(outDir, outFile);
 
-  // robust image fallback (prevents "blue screen")
+  // robust fallback image
   let finalImageUrl = imageUrl || 'https://picsum.photos/seed/smartmark/1200/1200';
-  try {
-    // quick HEAD-style fetch to ensure reachable
-    await axios.get(finalImageUrl, { timeout: 5000 });
-  } catch {
-    finalImageUrl = 'https://singlecolorimage.com/get/2b2f33/1200x1200';
-  }
+  try { await axios.get(finalImageUrl, { timeout: 5000 }); } catch { finalImageUrl = 'https://singlecolorimage.com/get/2b2f33/1200x1200'; }
 
   let imgFile = null;
   try {
@@ -931,7 +931,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const brand = safeFFText(brandLine);
   const cta   = safeFFText(ctaText);
 
-  const TAIL = 0.8; // seconds of visible outro
+  const TAIL = 0.8;
 
   const args = ['-y'];
   if (imgFile) {
@@ -948,7 +948,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     inputs.push('silence');
   }
 
-  // contain + pad + slow zoom
+  // contain + pad + gentle zoom
   const baseVideo = imgFile
     ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
       `pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,zoompan=z='min(zoom+0.00035,1.03)':` +
@@ -986,7 +986,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'still-video timeout' });
 
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
@@ -994,7 +994,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* -------------------- Title-card video (modern + captions) -------------------- */
+/* -------------------- Title card (modern + captions) -------------------- */
 async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText='' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
@@ -1051,13 +1051,13 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'title-card timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 60000, killMsg: 'title-card timeout' });
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* ------------------------------- VIDEO (smooth xfade, robust image fallback, captions, 3 variations, 60s budget) ------------------------------- */
+/* ------------------------------- VIDEO (concat + fades; solid; 3 variations) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1163,7 +1163,7 @@ Output ONLY the script text.`;
     };
 
     const generateOneVariant = async (seedBump = '') => {
-      /* ---- Tier 1: stock montage with safe xfade + captions ---- */
+      /* ---- Tier 1: stock montage with simple fades (rock-solid) ---- */
       const tryStockVideo = async () => {
         if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
         if (timeLeft() < 15000) throw new Error('time_budget_low');
@@ -1191,7 +1191,7 @@ Output ONLY the script text.`;
         for (const c of chosen) {
           if (timeLeft() < 6000) break;
           const out = path.join(tmp, `${uuidv4()}.mp4`);
-          const dlTimeout = Math.max(6000, Math.min(15000, timeLeft() - 3000));
+          const dlTimeout = Math.max(6000, Math.min(14000, timeLeft() - 3000));
           await downloadFileWithTimeout(c.link, out, dlTimeout, 6);
           inputs.push(out);
         }
@@ -1221,25 +1221,19 @@ Output ONLY the script text.`;
         const LEAD = 0.06;
         const fadeDur = 0.35;
 
-        // Prep segments exactly segX long (no overlap), xfade handles overlap via offsets
         const vidParts = [];
         for (let i = 0; i < inputs.length; i++) {
           const seg = segs[i];
+          // Trim to seg then fade in/out inside each segment
+          const fadeIn = i===0 ? `,fade=t=in:st=0:d=${fadeDur}` : `,fade=t=in:st=0:d=${fadeDur}`;
+          const fadeOut = `,fade=t=out:st=${(seg - fadeDur).toFixed(2)}:d=${fadeDur}`;
           vidParts.push(
             `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
-            `pad=640:640:(640-iw)/2:(640-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`
+            `pad=640:640:(640-iw)/2:(640-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
           );
         }
 
-        // xfade offsets MUST be relative to first input timeline of each stage
-        // stage1 offset = segA - fadeDur
-        // stage2 offset = (segA + segB - fadeDur) - fadeDur = segA + segB - 2*fadeDur
-        const off1 = (segA - fadeDur).toFixed(2);
-        const off2 = (segA + segB - 2*fadeDur).toFixed(2);
-
-        const xf =
-          `[s0][s1]xfade=transition=fade:duration=${fadeDur}:offset=${off1}[v01];` +
-          `[v01][s2]xfade=transition=fade:duration=${fadeDur}:offset=${off2}[vseq]`;
+        const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
 
         const bandFadeStart = (segA-0.60).toFixed(2);
         const band =
@@ -1253,7 +1247,7 @@ Output ONLY the script text.`;
 
         const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSerif, `v${seedBump}`);
 
-        let fc = vidParts.join(';') + ';' + xf + ';' + band + `;[b3]${introOverlay}${subsBuild.filter?','+subsBuild.filter:''},${outroOverlay},format=yuv420p[v]`;
+        let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay}${subsBuild.filter?','+subsBuild.filter:''},${outroOverlay},format=yuv420p[v]`;
 
         const outDir = ensureGeneratedDir();
         const outFile = `${uuidv4()}.mp4`;
@@ -1263,6 +1257,7 @@ Output ONLY the script text.`;
         for (const f of inputs) { args.push('-i', f); }
         if (ttsPath) args.push('-i', ttsPath);
         if (musicPath) args.push('-i', musicPath);
+        else args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
 
         if (ttsPath && musicPath) {
           fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
@@ -1273,7 +1268,7 @@ Output ONLY the script text.`;
         } else if (musicPath) {
           fc += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)}[mix]`;
         } else {
-          args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+          fc += `;[${inputs.length}:a]anull[aud]`; // silence input
         }
 
         args.push(
@@ -1292,7 +1287,7 @@ Output ONLY the script text.`;
           outPath
         );
 
-        await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'montage timeout' });
+        await runSpawn('ffmpeg', args, { killAfter: 65000, killMsg: 'montage timeout' });
         for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
         try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
@@ -1343,11 +1338,8 @@ Output ONLY the script text.`;
 
     const variations = [];
     for (let i = 0; i < 3; i++) {
-      try {
-        const one = await generateOneVariant(String(i));
-        variations.push(one);
-      } catch {}
-      if (timeLeft() < 3000) break;
+      try { variations.push(await generateOneVariant(String(i))); } catch {}
+      if (timeLeft() < 2500) break;
     }
 
     // optional upload to FB
@@ -1384,7 +1376,7 @@ Output ONLY the script text.`;
   }
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations, auto-layout) --------------------- */
+/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
   try {
