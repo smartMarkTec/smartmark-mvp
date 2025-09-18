@@ -903,10 +903,11 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
 
   const baseVideo = imgFile
-    ? `[0:v]scale='if(gte(iw/ih,1),${V_W}:-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
-      `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
-      `zoompan=z='min(zoom+0.00025,1.025)':d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
-    : `[0:v]fps=${FPS},format=yuv420p[cv]`;
+  ? `[0:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
+    `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
+    `zoompan=z='min(zoom+0.00025,1.025)':d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
+  : `[0:v]fps=${FPS},format=yuv420p[cv]`;
+
 
   const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=44:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
   const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
@@ -1165,10 +1166,12 @@ Output ONLY the script text.`;
           const seg = segs[i];
           const fadeIn = `,fade=t=in:st=0:d=${fadeDur}`;
           const fadeOut = `,fade=t=out:st=${(seg - fadeDur).toFixed(2)}:d=${fadeDur}`;
-          vidParts.push(
-            `[${i}:v]scale='if(gte(iw/ih,1),${V_W}:-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
-            `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
-          );
+         vidParts.push(
+  `[${i}:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
+  `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},` +
+  `trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
+);
+
         }
 
         const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
