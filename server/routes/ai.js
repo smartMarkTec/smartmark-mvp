@@ -493,7 +493,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Image overlays (modern, tasteful) ---------------------- */
+/* ---------------------- Image overlays (more creative) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -570,165 +570,230 @@ async function analyzeImageForPlacement(imgBuf) {
     const darkerSide = (left<right) ? 'left' : 'right';
     const darkerBand = (top<bottom) ? 'top' : 'bottom';
     const avg = { r:Math.round(rSum/(W*H)), g:Math.round(gSum/(W*H)), b:Math.round(bSum/(W*H)) };
-    // choose accent from palette
-    const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1'];
-    const brandColor = palette[(avg.b>avg.r?1:0) + (avg.g>avg.b?2:0)] || '#E63946';
+    const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1','#E98A15','#D61C4E'];
+    const idx = ((avg.r>avg.g)+(avg.g>avg.b)*2+(avg.r>avg.b)*3) % palette.length;
+    const brandColor = palette[idx];
     const diffLR = Math.abs(left-right) / (W*H);
     return { darkerSide, darkerBand, brandColor, diffLR };
   } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
 
-/* SVG overlays (semi-transparent, tasteful) */
-function svgOverlay({ W, H, headline, cta, tpl = 2, prefer='left', preferBand='top', brandColor='#E63946', strength=0.88 }) {
-  const LIGHT = '#f5f7f9';
-  const MAX_W = W - 120;
-  const pill = (x, y, text, fs = 28) => {
-    fs = Math.max(22, Math.min(fs, 34));
-    const w = Math.min(MAX_W, estWidth(text, fs) + 50);
-    const h = 50;
-    const x0 = x - w / 2;
-    return `
-      <g transform="translate(${x0}, ${y - Math.floor(h * 0.6)})">
-        <rect x="0" y="-14" width="${w}" height="${h}" rx="24" fill="#0b0d10d0"/>
-        <text x="${w / 2}" y="12" text-anchor="middle"
-              font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-              font-size="${fs}" font-weight="800" fill="#ffffff" letter-spacing="0.8">
-          ${escSVG(text)}
-        </text>
-      </g>`;
-  };
+/* --------- CREATIVE SVG templates (ad-like, flexible) --------- */
+function svgDefs(brandColor) {
+  return `
+    <defs>
+      <linearGradient id="gShadeV" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#000A"/>
+        <stop offset="100%" stop-color="#0000"/>
+      </linearGradient>
+      <linearGradient id="gShadeHLeft" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="#000B"/>
+        <stop offset="100%" stop-color="#0000"/>
+      </linearGradient>
+      <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
+        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.64"/>
+      </linearGradient>
+      <pattern id="dots" x="0" y="0" width="18" height="18" patternUnits="userSpaceOnUse">
+        <circle cx="2.5" cy="2.5" r="1.6" fill="#ffffff22"/>
+      </pattern>
+      <filter id="softVignette">
+        <feGaussianBlur stdDeviation="40" result="blur"/>
+        <feMerge>
+          <feMergeNode in="SourceGraphic"/>
+          <feMergeNode in="blur"/>
+        </feMerge>
+      </filter>
+    </defs>
+  `;
+}
+const LIGHT = '#f5f7f9';
+const MAX_W_TEXT = (W) => W - 140;
+const pillBtn = (x, y, text, fs = 28) => {
+  fs = Math.max(22, Math.min(fs, 34));
+  const w = Math.min(860, estWidth(text, fs) + 50);
+  const h = 52;
+  const x0 = x - w / 2;
+  return `
+    <g transform="translate(${x0}, ${y - Math.floor(h * 0.6)})">
+      <rect x="0" y="-14" width="${w}" height="${h}" rx="26" fill="#0b0d10d0"/>
+      <text x="${w / 2}" y="12" text-anchor="middle"
+            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+            font-size="${fs}" font-weight="800" fill="#ffffff" letter-spacing="0.8">
+        ${escSVG(text)}
+      </text>
+    </g>`;
+};
 
-  // Semi-transparent side panel (like pro ads) — smaller width to avoid “half split”
-  if (tpl === 5) {
+/** Templates:
+ * 1) Top gradient banner + CTA center (clean)
+ * 2) Center glass card
+ * 3) Side panel + pattern (ad-like)
+ * 4) Diagonal ribbon banner (retro)
+ * 5) Sticker badge + bottom headline
+ * 6) Left gradient band + top label (magazine)
+ */
+function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3 }) {
+  const defs = svgDefs(brandColor);
+
+  // normalize headline into up to 2 lines
+  const fit = splitTwoLines(headline, MAX_W_TEXT(W), 56);
+
+  if (choose === 1) {
+    const yTitle = 96;
+    const yCTA = yTitle + (fit.fs * (fit.lines.length)) + 56;
+    return `
+      ${defs}
+      <rect x="0" y="0" width="${W}" height="200" fill="url(#gShadeV)" />
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${fit.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="1.2">
+        <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
+        ${fit.lines[1] ? `<tspan x="${W/2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+      </text>
+      ${pillBtn(W/2, yCTA, cta, 28)}
+    `;
+  }
+
+  if (choose === 2) {
+    const boxW = 860;
+    const boxPad = 26;
+    const gap = 16;
+    const fit2 = splitTwoLines(headline, boxW - 2*boxPad - 60, 54);
+    const boxH = Math.round(boxPad*2 + fit2.fs*fit2.lines.length + 60 + gap);
+    const yBox = Math.round((H - boxH) / 2);
+    const yTitle = yBox + boxPad + fit2.fs - 6;
+    const yCTA = yBox + boxH - boxPad - 12;
+    return `
+      ${defs}
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#00000055" />
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#ffffff10" />
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${fit2.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="1.1">
+        <tspan x="${W/2}" dy="0">${escSVG(fit2.lines[0])}</tspan>
+        ${fit2.lines[1] ? `<tspan x="${W/2}" dy="${fit2.fs * 1.05}">${escSVG(fit2.lines[1])}</tspan>` : ''}
+      </text>
+      ${pillBtn(W/2, yCTA, cta, 28)}
+    `;
+  }
+
+  if (choose === 3) {
     const panelW = 440;
     const pad = 34;
     const x0 = prefer === 'left' ? 24 : W - panelW - 24;
     const cx = x0 + pad;
     const textW = panelW - pad*2;
-    const fit = splitTwoLines(headline, textW, 56);
+    const fit3 = splitTwoLines(headline, textW, 56);
     const yTitle = 128;
-    const yCTA = yTitle + fit.fs * (fit.lines.length) + 60;
+    const yCTA = yTitle + fit3.fs * (fit3.lines.length) + 60;
     return `
-      <defs>
-        <linearGradient id="panelShade" x1="0" y1="0" x2="${prefer==='left'?1:0}" y2="0">
-          <stop offset="0%" stop-color="${brandColor}" stop-opacity="${strength}"/>
-          <stop offset="100%" stop-color="${brandColor}" stop-opacity="${Math.max(0,strength-0.28)}"/>
-        </linearGradient>
-        <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
-          <circle cx="2.5" cy="2.5" r="1.7" fill="#ffffff22"/>
-        </pattern>
-      </defs>
-      <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#panelShade)" />
+      ${defs}
+      <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#panelGrad)"/>
       <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#dots)"/>
       <text x="${cx}" y="${yTitle}" text-anchor="start"
-            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fit.fs}" font-weight="900" fill="#ffffff" letter-spacing="1.1">
-        <tspan x="${cx}" dy="0">${escSVG(fit.lines[0])}</tspan>
-        ${fit.lines[1] ? `<tspan x="${cx}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${fit3.fs}" font-weight="900" fill="#ffffff" letter-spacing="1.1">
+        <tspan x="${cx}" dy="0">${escSVG(fit3.lines[0])}</tspan>
+        ${fit3.lines[1] ? `<tspan x="${cx}" dy="${fit3.fs * 1.05}">${escSVG(fit3.lines[1])}</tspan>` : ''}
       </text>
-      ${pill(cx + 130, yCTA, cta, 28)}
+      ${pillBtn(cx + 130, yCTA, cta, 28)}
     `;
   }
 
-  if (tpl === 2) {
-    const fs = fitFont(headline, MAX_W - 80, 56);
-    const yTitle = 96;
-    const yCTA = yTitle + 68;
+  if (choose === 4) {
+    const ribbonH = 160;
+    const angle = prefer === 'left' ? -10 : 10;
+    const xMid = W/2;
+    const yMid = H*0.26;
+    const fit4 = splitTwoLines(headline, W-220, 58);
     return `
-      <defs>
-        <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#000C"/>
-          <stop offset="100%" stop-color="#0000"/>
-        </linearGradient>
-      </defs>
-      <rect x="0" y="0" width="${W}" height="190" rx="18" fill="url(#g2)"/>
-      <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
-            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fs}" font-weight="800" fill="${LIGHT}" letter-spacing="1.4">
-        ${escSVG(headline)}
-      </text>
-      ${pill(W / 2, yCTA, cta, 28)}
+      ${defs}
+      <g transform="translate(${xMid},${yMid}) rotate(${angle})">
+        <rect x="${-W/2}" y="${-ribbonH/2}" width="${W}" height="${ribbonH}" fill="${brandColor}" opacity="0.92" />
+        <rect x="${-W/2}" y="${-ribbonH/2}" width="${W}" height="${ribbonH}" fill="url(#dots)" />
+        <text x="0" y="-10" text-anchor="middle"
+          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+          font-size="${fit4.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.4">
+          <tspan x="0" dy="0">${escSVG(fit4.lines[0])}</tspan>
+          ${fit4.lines[1] ? `<tspan x="0" dy="${fit4.fs * 1.05}">${escSVG(fit4.lines[1])}</tspan>` : ''}
+        </text>
+      </g>
+      ${pillBtn(W/2, H*0.72, cta, 30)}
     `;
   }
 
-  if (tpl === 3) {
-    const boxW = 820;
-    const fit = splitTwoLines(headline, boxW - 100, 54);
-    const lineCount = fit.lines.length;
-    const boxPad = 26;
-    const gap = 16;
-    const boxH = Math.round(boxPad * 2 + fit.fs * lineCount + 54 + gap);
-    const yBox = Math.round((H - boxH) / 2);
-    const yTitle = yBox + boxPad + fit.fs - 6;
-    const yCTA = yBox + boxH - boxPad - 12;
-
+  if (choose === 5) {
+    const fit5 = splitTwoLines(headline, W-160, 52);
+    const yTitle = H*0.78;
     return `
-      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="26" fill="#00000045" />
-      <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
-            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.2">
-        <tspan x="${W / 2}" dy="0">${escSVG(fit.lines[0])}</tspan>
-        ${fit.lines[1] ? `<tspan x="${W / 2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+      ${defs}
+      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gShadeHLeft)"/>
+      <g transform="translate(${prefer==='left'?120:W-120}, ${H*0.18})">
+        <circle r="74" fill="${brandColor}" opacity="0.95"></circle>
+        <circle r="74" fill="url(#dots)"></circle>
+        <text x="0" y="10" text-anchor="middle"
+          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+          font-size="28" font-weight="900" fill="#fff">SALE</text>
+      </g>
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${fit5.fs}" font-weight="900" fill="${LIGHT}">
+        <tspan x="${W/2}" dy="0">${escSVG(fit5.lines[0])}</tspan>
+        ${fit5.lines[1] ? `<tspan x="${W/2}" dy="${fit5.fs * 1.05}">${escSVG(fit5.lines[1])}</tspan>` : ''}
       </text>
-      ${pill(W / 2, yCTA, cta, 28)}
+      ${pillBtn(W/2, yTitle + fit5.fs * (fit5.lines.length) + 48, cta, 28)}
     `;
   }
 
-  if (tpl === 4) {
-    const padX = 64, padY = 110, panelW = 520;
-    const fit = splitTwoLines(headline, panelW - 2 * padX, 52);
-    const yBase = preferBand === 'top' ? padY : H - padY - fit.fs * (fit.lines.length);
-    const yCTA = yBase + fit.fs * 1.05 * (fit.lines.length) + 58;
-
-    return `
-      <defs>
-        <linearGradient id="gL" x1="${prefer==='left'?0:1}" y1="0" x2="${prefer==='left'?1:0}" y2="0">
-          <stop offset="0%" stop-color="#000a"/>
-          <stop offset="100%" stop-color="#0000"/>
-        </linearGradient>
-      </defs>
-      <rect x="${prefer==='left'?0:W-panelW}" y="0" width="${panelW}" height="${H}" fill="url(#gL)"/>
-      <text x="${prefer==='left'?padX:W-panelW+padX}" y="${yBase}" text-anchor="start"
-            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fit.fs}" font-weight="800" fill="#f2f5f6" letter-spacing="1.2">
-        <tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="0">${escSVG(fit.lines[0])}</tspan>
-        ${fit.lines[1] ? `<tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
-      </text>
-      ${pill((prefer==='left'?padX:W-panelW+padX) + 140, yCTA, cta, 26)}
-    `;
-  }
-
-  return svgOverlay({ W, H, headline, cta, tpl: 4, prefer, preferBand, brandColor });
+  // 6
+  const padX = 64, panelW = 520;
+  const fit6 = splitTwoLines(headline, panelW - 2 * padX, 52);
+  const yBase = preferBand === 'top' ? 110 : H - 110 - fit6.fs * (fit6.lines.length);
+  return `
+    ${defs}
+    <rect x="${prefer==='left'?0:W-panelW}" y="0" width="${panelW}" height="${H}" fill="url(#gShadeHLeft)"/>
+    <text x="${prefer==='left'?padX:W-panelW+padX}" y="${yBase}" text-anchor="start"
+      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+      font-size="${fit6.fs}" font-weight="900" fill="#f2f5f6" letter-spacing="1.1">
+      <tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="0">${escSVG(fit6.lines[0])}</tspan>
+      ${fit6.lines[1] ? `<tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="${fit6.fs * 1.05}">${escSVG(fit6.lines[1])}</tspan>` : ''}
+    </text>
+    ${pillBtn((prefer==='left'?padX:W-panelW+padX) + 140, yBase + fit6.fs * 1.05 * (fit6.lines.length) + 58, cta, 26)}
+  `;
 }
 
-/* Build overlaid JPG */
+/* Build overlaid JPG (creative) */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 627;
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 8000 });
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
 
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
   const headline = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
 
+  // template choice (weighted)
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  // If left/right luminance is very similar, prefer a top band layout (tpl 2/3)
-  const tplPool = analysis.diffLR > 40 ? [5, 4, 2] : [2, 3, 5, 4];
-  const tpl = tplPool[h % tplPool.length];
+  const choices = analysis.diffLR > 40 ? [3,1,6,4,5,2] : [1,2,3,4,5,6];
+  const tpl = choices[h % choices.length];
 
   const overlaySVG = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlay({
-      W, H, headline, cta, tpl,
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
+      W, H, headline, cta,
       prefer: analysis.darkerSide,
       preferBand: analysis.darkerBand,
       brandColor: analysis.brandColor,
-      strength: 0.86
+      choose: tpl
     })}</svg>`
   );
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  await base.composite([{ input: overlaySVG, top: 0, left: 0 }]).jpeg({ quality: 92 }).toFile(path.join(outDir, file));
+  await base
+    .composite([{ input: overlaySVG, top: 0, left: 0 }])
+    .jpeg({ quality: 92 })
+    .toFile(path.join(outDir, file));
   maybeGC();
 
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
@@ -759,7 +824,7 @@ function pickMusicFile(keywords = []) {
 }
 
 /* ------------------------------- Utils ------------------------------- */
-async function downloadFileWithTimeout(url, dest, timeoutMs=14000, maxSizeMB=6) {
+async function downloadFileWithTimeout(url, dest, timeoutMs=16000, maxSizeMB=15) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
@@ -785,7 +850,7 @@ function getDeterministicShuffle(arr, seed) {
 }
 function safeFFText(t){
   return String(t||'')
-    .replace(/['’]/g,'')                 // kill apostrophes to avoid drawtext parse issues
+    .replace(/['’]/g,'')
     .replace(/[\n\r]/g,' ')
     .replace(/[:]/g,' ')
     .replace(/[\\"]/g,'')
@@ -855,7 +920,7 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
 
     const tf = path.join(outDir, `cap_${workId}_${i}.txt`);
     try { fs.writeFileSync(tf, segs[i]); files.push(tf); } catch {}
-    pieces.push(`drawtext=${fontParam}textfile='${tf}':${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
+    pieces.push(`drawtext=${fontParam}textfile='${tf}':reload=0:${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
     if (t >= endWindow) break;
   }
   return { filter: pieces.join(','), files };
@@ -918,7 +983,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   let imgFile = null;
   try {
     imgFile = path.join(outDir, `${id}.jpg`);
-    const imgRes = await axios.get(finalImageUrl, { responseType: 'arraybuffer', timeout: 7000 });
+    const imgRes = await axios.get(finalImageUrl, { responseType: 'arraybuffer', timeout: 9000 });
     fs.writeFileSync(imgFile, imgRes.data);
   } catch { imgFile = null; }
 
@@ -940,13 +1005,13 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640');
   }
 
-  const inputs = [];
-  if (ttsPath) { args.push('-i', ttsPath); inputs.push('tts'); }
-  if (musicPath) { args.push('-i', musicPath); inputs.push('music'); }
-  if (!ttsPath && !musicPath) {
-    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
-    inputs.push('silence');
-  }
+  // Guaranteed audio chain (prevents blue screens / freeze)
+  // Always provide at least one audio input and mix consistently.
+  if (ttsPath) args.push('-i', ttsPath);
+  if (musicPath) args.push('-i', musicPath);
+  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+
+  const inputsCount = 1 + (ttsPath?1:0) + (musicPath?1:0) + 1;
 
   // contain + pad + gentle zoom
   const baseVideo = imgFile
@@ -961,20 +1026,22 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
   let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro},format=yuv420p[v]`;
 
-  if (inputs.includes('tts') && inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
-          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[bg]` +
-          `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
-  } else if (inputs.includes('tts')) {
-    fc += `;[1:a]aresample=44100,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
-  } else if (inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[mix]`;
-  }
+  // Audio: tts(1) + music(2) + anullsrc(last); mix what we have, fallback to silence
+  const mapOrder = [];
+  let mixInputs = [];
+  let aIdx = 1; // start after video input
+  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  mixInputs.push(`${aIdx}:a`); // anullsrc always present
+
+  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=44100${i===1?`,volume=0.18`:''}[a${i}]`).join(';')};` +
+        `${mixInputs.map((_,i)=>`[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
   args.push(
     '-filter_complex', fc,
     '-map', '[v]',
-    '-map', (inputs.includes('tts') || inputs.includes('music')) ? '[mix]' : '1:a',
+    '-map', '[mix]',
+    '-t', duration.toFixed(2),
     '-r', '24',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
@@ -986,7 +1053,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'still-video timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 75000, killMsg: 'still-video timeout' });
 
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
@@ -1013,33 +1080,29 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
 
   const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640'];
 
-  const inputs = [];
-  if (ttsPath) { args.push('-i', ttsPath); inputs.push('tts'); }
-  if (musicPath) { args.push('-i', musicPath); inputs.push('music'); }
-  if (!ttsPath && !musicPath) {
-    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
-    inputs.push('silence');
-  }
+  if (ttsPath) args.push('-i', ttsPath);
+  if (musicPath) args.push('-i', musicPath);
+  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
 
   const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
   const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
   let fc = `[0:v]fps=24,format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
 
-  if (inputs.includes('tts') && inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
-          `;[2:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[bg]` +
-          `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
-  } else if (inputs.includes('tts')) {
-    fc += `;[1:a]aresample=44100,atrim=0:${(duration-0.2).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
-  } else if (inputs.includes('music')) {
-    fc += `;[1:a]aresample=44100,volume=0.18,atrim=0:${duration.toFixed(2)}[mix]`;
-  }
+  const mixInputs = [];
+  let aIdx = 1;
+  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  mixInputs.push(`${aIdx}:a`);
+
+  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=44100${i===1?`,volume=0.18`:''}[b${i}]`).join(';')};` +
+        `${mixInputs.map((_,i)=>`[b${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
   args.push(
     '-filter_complex', fc,
     '-map', '[v]',
-    '-map', (inputs.includes('tts') || inputs.includes('music')) ? '[mix]' : '1:a',
+    '-map', '[mix]',
+    '-t', duration.toFixed(2),
     '-r', '24',
     '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
@@ -1051,13 +1114,13 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 60000, killMsg: 'title-card timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 65000, killMsg: 'title-card timeout' });
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
   return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
 }
 
-/* ------------------------------- VIDEO (concat + fades; solid; 3 variations) ------------------------------- */
+/* ------------------------------- VIDEO (concat + fades; resilient) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1163,7 +1226,6 @@ Output ONLY the script text.`;
     };
 
     const generateOneVariant = async (seedBump = '') => {
-      /* ---- Tier 1: stock montage with simple fades (rock-solid) ---- */
       const tryStockVideo = async () => {
         if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
         if (timeLeft() < 15000) throw new Error('time_budget_low');
@@ -1171,12 +1233,12 @@ Output ONLY the script text.`;
         let candidates = [];
         const r = await axios.get('https://api.pexels.com/videos/search', {
           headers: { Authorization: PEXELS_API_KEY },
-          params: { query: topic, per_page: 30, cb: Date.now() + (regenerateToken || '') + seedBump },
+          params: { query: topic, per_page: 40, orientation: 'square', cb: Date.now() + (regenerateToken || '') + seedBump },
           timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
         });
         const videos = r.data?.videos || [];
         for (const v of videos) {
-          if ((v.duration || 0) < 7) continue;
+          if ((v.duration || 0) < 6) continue;
           const files = (v.video_files || [])
             .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
             .sort((a, b) => (a.width || 9999) - (b.width || 9999));
@@ -1191,8 +1253,8 @@ Output ONLY the script text.`;
         for (const c of chosen) {
           if (timeLeft() < 6000) break;
           const out = path.join(tmp, `${uuidv4()}.mp4`);
-          const dlTimeout = Math.max(6000, Math.min(14000, timeLeft() - 3000));
-          await downloadFileWithTimeout(c.link, out, dlTimeout, 6);
+          const dlTimeout = Math.max(6000, Math.min(16000, timeLeft() - 3000));
+          await downloadFileWithTimeout(c.link, out, dlTimeout, 15);
           inputs.push(out);
         }
         if (inputs.length < 3) throw new Error('downloads_incomplete');
@@ -1224,8 +1286,7 @@ Output ONLY the script text.`;
         const vidParts = [];
         for (let i = 0; i < inputs.length; i++) {
           const seg = segs[i];
-          // Trim to seg then fade in/out inside each segment
-          const fadeIn = i===0 ? `,fade=t=in:st=0:d=${fadeDur}` : `,fade=t=in:st=0:d=${fadeDur}`;
+          const fadeIn = `,fade=t=in:st=0:d=${fadeDur}`;
           const fadeOut = `,fade=t=out:st=${(seg - fadeDur).toFixed(2)}:d=${fadeDur}`;
           vidParts.push(
             `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
@@ -1257,24 +1318,23 @@ Output ONLY the script text.`;
         for (const f of inputs) { args.push('-i', f); }
         if (ttsPath) args.push('-i', ttsPath);
         if (musicPath) args.push('-i', musicPath);
-        else args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+        // always add anullsrc as safety
+        args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
 
-        if (ttsPath && musicPath) {
-          fc += `;[${inputs.length}:a]aresample=44100,pan=stereo|c0=c0|c1=c0,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[voice]` +
-                `;[${inputs.length+1}:a]aresample=44100,volume=0.18,atrim=0:${(voDur>0?voDur+TAIL:finalDur).toFixed(2)}[bg]` +
-                `;[voice][bg]amix=inputs=2:duration=longest:normalize=1[mix]`;
-        } else if (ttsPath) {
-          fc += `;[${inputs.length}:a]aresample=44100,atrim=0:${(voDur>0?voDur:finalDur).toFixed(2)},apad=pad_dur=${TAIL.toFixed(2)}[mix]`;
-        } else if (musicPath) {
-          fc += `;[${inputs.length}:a]aresample=44100,volume=0.18,atrim=0:${finalDur.toFixed(2)}[mix]`;
-        } else {
-          fc += `;[${inputs.length}:a]anull[aud]`; // silence input
-        }
+        // build audio mix consistently
+        const mixInputs = [];
+        let aIdx = inputs.length; // next after video inputs
+        if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+        if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+        mixInputs.push(`${aIdx}:a`);
+
+        fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=44100${i===1?`,volume=0.18`:''}[m${i}]`).join(';')};` +
+              `${mixInputs.map((_,i)=>`[m${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
         args.push(
           '-filter_complex', fc,
           '-map', '[v]',
-          '-map', (ttsPath || musicPath) ? '[mix]' : `${inputs.length}:a`,
+          '-map', '[mix]',
           '-t', finalDur.toFixed(2),
           '-r', '24',
           '-vsync', '2',
@@ -1283,11 +1343,12 @@ Output ONLY the script text.`;
           '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
+          '-shortest',
           '-loglevel', 'error',
           outPath
         );
 
-        await runSpawn('ffmpeg', args, { killAfter: 65000, killMsg: 'montage timeout' });
+        await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'montage timeout' });
         for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
         try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
