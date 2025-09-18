@@ -1,4 +1,4 @@
-// [server/routes/ai.js]
+// [server/routes/ai.js] — SmartMark (FB-style creatives, crisp video, robust subtitles)
 'use strict';
 
 const express = require('express');
@@ -78,14 +78,13 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data;
 }
 
-/* --------------------- Writable media dir & streamer --------------------- */
+/* --------------------- Media dir & streamer --------------------- */
 function ensureGeneratedDir() {
   const outDir = '/tmp/generated';
   try { fs.mkdirSync(outDir, { recursive: true }); } catch {}
   return outDir;
 }
 
-// Range-enabled streamer
 router.get('/media/:file', async (req, res) => {
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
@@ -97,6 +96,7 @@ router.get('/media/:file', async (req, res) => {
     const type = ext === '.mp4' ? 'video/mp4'
                : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
                : ext === '.png' ? 'image/png'
+               : ext === '.srt' ? 'text/plain; charset=utf-8'
                : 'application/octet-stream';
 
     res.setHeader('Content-Type', type);
@@ -106,7 +106,7 @@ router.get('/media/:file', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
 
     const range = req.headers.range;
-    if (range) {
+    if (range && ext === '.mp4') {
       const m = /bytes=(\d+)-(\d*)/.exec(range);
       const start = m ? parseInt(m[1], 10) : 0;
       const end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
@@ -188,7 +188,7 @@ async function getRecentImageForOwner(req) {
   return img ? (img.absoluteUrl || absolutePublicUrl(img.url)) : null;
 }
 
-/* ---------- Topic/category helpers ---------- */
+/* ---------- Category helpers ---------- */
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
@@ -199,7 +199,6 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['pet','dog','cat'], keyword: 'pet dog cat' },
   { match: ['electronics','phone','laptop','tech','gadget'], keyword: 'tech gadgets' },
   { match: ['home','decor','furniture','bedroom','bath'], keyword: 'modern home' },
-  { match: ['art','painting','craft'], keyword: 'painting art' },
   { match: ['coffee','cafe','espresso'], keyword: 'coffee shop' },
 ];
 function getImageKeyword(industry = '', url = '') {
@@ -220,7 +219,6 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   return base || fallback;
 }
 
-/* ---- Category detection & guardrails ---- */
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
   if (/fashion|apparel|clothing|athleisure|outfit|wardrobe/.test(txt)) return 'fashion';
@@ -234,6 +232,7 @@ function resolveCategory(answers = {}) {
   if (/coffee|café|espresso|latte|roast/.test(txt)) return 'coffee';
   return 'generic';
 }
+
 const FASHION_TERMS = /\b(style|styles|outfit|outfits|wardrobe|pieces|fits?|colors?|sizes?)\b/gi;
 function stripFashionIfNotApplicable(text, category) {
   if (category === 'fashion') return String(text || '');
@@ -243,7 +242,6 @@ function enforceCategoryPresence(text, category) {
   const t = String(text || '');
   const hasAny = (arr) => arr.some(w => new RegExp(`\\b${w}\\b`, 'i').test(t));
   const APPEND = (line) => (t.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
-
   const req = {
     fitness: ['workout','training','gym','strength','wellness'],
     cosmetics: ['skin','makeup','beauty','serum','routine'],
@@ -282,7 +280,6 @@ function cleanFinalText(text) {
     .trim();
 }
 
-/* ---------- Overlay headline helpers ---------- */
 function categoryLabelForOverlay(category) {
   return {
     fashion: 'FASHION',
@@ -410,7 +407,7 @@ Output ONLY the script text.`;
   }
 });
 
-/* ------------------- Campaign assets (headline/body/cta) ------------------- */
+/* ------------------- Campaign assets ------------------- */
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
     const { answers = {}, url = '' } = req.body;
@@ -493,7 +490,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Image overlays (more creative) ---------------------- */
+/* ---------------------- Creative Image Overlays ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
@@ -538,7 +535,7 @@ function cleanCTA(c){
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
 
-/* Modern fonts */
+/* Fonts */
 function pickSansFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -578,17 +575,15 @@ async function analyzeImageForPlacement(imgBuf) {
   } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
 
-/* --------- CREATIVE SVG templates (ad-like, flexible) --------- */
+/* SVG defs & templates (FB-style) */
 function svgDefs(brandColor) {
   return `
     <defs>
       <linearGradient id="gShadeV" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000A"/>
-        <stop offset="100%" stop-color="#0000"/>
+        <stop offset="0%" stop-color="#000A"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="gShadeHLeft" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#000B"/>
-        <stop offset="100%" stop-color="#0000"/>
+        <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
@@ -597,13 +592,6 @@ function svgDefs(brandColor) {
       <pattern id="dots" x="0" y="0" width="18" height="18" patternUnits="userSpaceOnUse">
         <circle cx="2.5" cy="2.5" r="1.6" fill="#ffffff22"/>
       </pattern>
-      <filter id="softVignette">
-        <feGaussianBlur stdDeviation="40" result="blur"/>
-        <feMerge>
-          <feMergeNode in="SourceGraphic"/>
-          <feMergeNode in="blur"/>
-        </feMerge>
-      </filter>
     </defs>
   `;
 }
@@ -625,26 +613,16 @@ const pillBtn = (x, y, text, fs = 28) => {
     </g>`;
 };
 
-/** Templates:
- * 1) Top gradient banner + CTA center (clean)
- * 2) Center glass card
- * 3) Side panel + pattern (ad-like)
- * 4) Diagonal ribbon banner (retro)
- * 5) Sticker badge + bottom headline
- * 6) Left gradient band + top label (magazine)
- */
 function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3 }) {
   const defs = svgDefs(brandColor);
-
-  // normalize headline into up to 2 lines
   const fit = splitTwoLines(headline, MAX_W_TEXT(W), 56);
 
   if (choose === 1) {
-    const yTitle = 96;
+    const yTitle = 110;
     const yCTA = yTitle + (fit.fs * (fit.lines.length)) + 56;
     return `
       ${defs}
-      <rect x="0" y="0" width="${W}" height="200" fill="url(#gShadeV)" />
+      <rect x="0" y="0" width="${W}" height="220" fill="url(#gShadeV)" />
       <text x="${W/2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
         font-size="${fit.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="1.2">
@@ -656,8 +634,8 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
   }
 
   if (choose === 2) {
-    const boxW = 860;
-    const boxPad = 26;
+    const boxW = 880;
+    const boxPad = 28;
     const gap = 16;
     const fit2 = splitTwoLines(headline, boxW - 2*boxPad - 60, 54);
     const boxH = Math.round(boxPad*2 + fit2.fs*fit2.lines.length + 60 + gap);
@@ -679,13 +657,13 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
   }
 
   if (choose === 3) {
-    const panelW = 440;
+    const panelW = 460;
     const pad = 34;
     const x0 = prefer === 'left' ? 24 : W - panelW - 24;
     const cx = x0 + pad;
     const textW = panelW - pad*2;
     const fit3 = splitTwoLines(headline, textW, 56);
-    const yTitle = 128;
+    const yTitle = 140;
     const yCTA = yTitle + fit3.fs * (fit3.lines.length) + 60;
     return `
       ${defs}
@@ -697,16 +675,16 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
         <tspan x="${cx}" dy="0">${escSVG(fit3.lines[0])}</tspan>
         ${fit3.lines[1] ? `<tspan x="${cx}" dy="${fit3.fs * 1.05}">${escSVG(fit3.lines[1])}</tspan>` : ''}
       </text>
-      ${pillBtn(cx + 130, yCTA, cta, 28)}
+      ${pillBtn(cx + 140, yCTA, cta, 28)}
     `;
   }
 
   if (choose === 4) {
-    const ribbonH = 160;
+    const ribbonH = 170;
     const angle = prefer === 'left' ? -10 : 10;
     const xMid = W/2;
-    const yMid = H*0.26;
-    const fit4 = splitTwoLines(headline, W-220, 58);
+    const yMid = H*0.28;
+    const fit4 = splitTwoLines(headline, W-240, 58);
     return `
       ${defs}
       <g transform="translate(${xMid},${yMid}) rotate(${angle})">
@@ -719,17 +697,18 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
           ${fit4.lines[1] ? `<tspan x="0" dy="${fit4.fs * 1.05}">${escSVG(fit4.lines[1])}</tspan>` : ''}
         </text>
       </g>
-      ${pillBtn(W/2, H*0.72, cta, 30)}
+      ${pillBtn(W/2, H*0.74, cta, 30)}
     `;
   }
 
   if (choose === 5) {
     const fit5 = splitTwoLines(headline, W-160, 52);
-    const yTitle = H*0.78;
+    const yTitle = H*0.80;
     return `
       ${defs}
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gShadeHLeft)"/>
       <g transform="translate(${prefer==='left'?120:W-120}, ${H*0.18})">
+        <circle r="78" fill="#00000055"></circle>
         <circle r="74" fill="${brandColor}" opacity="0.95"></circle>
         <circle r="74" fill="url(#dots)"></circle>
         <text x="0" y="10" text-anchor="middle"
@@ -746,10 +725,10 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
     `;
   }
 
-  // 6
-  const padX = 64, panelW = 520;
+  // 6) Left band label
+  const padX = 64, panelW = 540;
   const fit6 = splitTwoLines(headline, panelW - 2 * padX, 52);
-  const yBase = preferBand === 'top' ? 110 : H - 110 - fit6.fs * (fit6.lines.length);
+  const yBase = preferBand === 'top' ? 120 : H - 120 - fit6.fs * (fit6.lines.length);
   return `
     ${defs}
     <rect x="${prefer==='left'?0:W-panelW}" y="0" width="${panelW}" height="${H}" fill="url(#gShadeHLeft)"/>
@@ -759,21 +738,20 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
       <tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="0">${escSVG(fit6.lines[0])}</tspan>
       ${fit6.lines[1] ? `<tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="${fit6.fs * 1.05}">${escSVG(fit6.lines[1])}</tspan>` : ''}
     </text>
-    ${pillBtn((prefer==='left'?padX:W-panelW+padX) + 140, yBase + fit6.fs * 1.05 * (fit6.lines.length) + 58, cta, 26)}
+    ${pillBtn((prefer==='left'?padX:W-panelW+padX) + 160, yBase + fit6.fs * 1.05 * (fit6.lines.length) + 58, cta, 26)}
   `;
 }
 
-/* Build overlaid JPG (creative) */
+/* Build overlaid JPG (1200×628 for link ads) */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
-  const W = 1200, H = 627;
+  const W = 1200, H = 628; // FB link ad
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
 
-  const base = sharp(imgRes.data).resize(W, H, { fit: 'cover' });
+  const base = sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
   const headline = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
 
-  // template choice (weighted)
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const choices = analysis.diffLR > 40 ? [3,1,6,4,5,2] : [1,2,3,4,5,6];
   const tpl = choices[h % choices.length];
@@ -790,10 +768,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  await base
-    .composite([{ input: overlaySVG, top: 0, left: 0 }])
-    .jpeg({ quality: 92 })
-    .toFile(path.join(outDir, file));
+  await base.composite([{ input: overlaySVG, top: 0, left: 0 }]).jpeg({ quality: 92 }).toFile(path.join(outDir, file));
   maybeGC();
 
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
@@ -863,20 +838,7 @@ function safeFFText(t){
     .slice(0, 40);
 }
 
-/* ---- CTA helpers ---- */
-function chooseCTA(answers={}, seed='') { return pickFromAllowedCTAs(answers, seed); }
-function finalizeScriptWithSingleCTA(text, chosenCTA) {
-  const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
-  const plain = plainList.map(s => s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|');
-  const re = new RegExp(`\\b(?:${plain})\\b[.!?]*`, 'gi');
-  let cleaned = String(text || '').replace(re, '').replace(/\s+/g,' ').trim();
-  cleaned = cleaned.replace(/\.{2,}/g, '.');
-  if (!/[.!?]$/.test(cleaned)) cleaned += '.';
-  cleaned += ' ' + chosenCTA;
-  return cleaned.replace(/\s+/g,' ').trim();
-}
-
-/* ---- Subtitles via textfiles (robust) ---- */
+/* ---- Captions: build drawtext & export SRT ---- */
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -896,6 +858,15 @@ function splitForCaptions(text) {
   }
   return parts.map(p => p.trim().replace(/\s+/g,' ')).filter(Boolean);
 }
+function secsToSrt(ts) {
+  const h = Math.floor(ts/3600);
+  const m = Math.floor((ts%3600)/60);
+  const s = Math.floor(ts%60);
+  const ms = Math.floor((ts - Math.floor(ts))*1000);
+  const pad = (n, l=2) => `${n}`.padStart(l,'0');
+  const pad3 = (n) => `${n}`.padStart(3,'0');
+  return `${pad(h)}:${pad(m)}:${pad(s)},${pad3(ms)}`;
+}
 function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
   const outDir = ensureGeneratedDir();
   const files = [];
@@ -904,13 +875,14 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
   const endWindow = Math.max(WINDOW_START + 1.2, duration - TAIL);
   const total = Math.max(1.2, endWindow - WINDOW_START);
   const segs = splitForCaptions(script);
-  if (!segs.length) return { filter:'', files:[] };
+  if (!segs.length) return { filter:'', files:[], srtPath:'' };
 
   const lens = segs.map(s=>Math.max(12, Math.min(90, s.length)));
   const sum = lens.reduce((a,b)=>a+b,0);
   let t = WINDOW_START;
   const pieces = [];
-  const baseStyle = "fontcolor=white@0.98:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=24:x='(w-tw)/2':y='h*0.83'";
+  const baseStyle = "fontcolor=white@0.98:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=28:x='(w-tw)/2':y='h*0.84'";
+  const srtLines = [];
 
   for (let i=0;i<segs.length;i++){
     const dur = Math.max(1.2, (lens[i]/sum)*total);
@@ -921,9 +893,14 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
     const tf = path.join(outDir, `cap_${workId}_${i}.txt`);
     try { fs.writeFileSync(tf, segs[i]); files.push(tf); } catch {}
     pieces.push(`drawtext=${fontParam}textfile='${tf}':reload=0:${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
+
+    srtLines.push(`${i+1}\n${secsToSrt(start)} --> ${secsToSrt(stop)}\n${segs[i]}\n`);
     if (t >= endWindow) break;
   }
-  return { filter: pieces.join(','), files };
+
+  const srtPath = path.join(outDir, `sub_${workId}.srt`);
+  try { fs.writeFileSync(srtPath, srtLines.join('\n')); } catch {}
+  return { filter: pieces.join(','), files, srtPath };
 }
 
 /* -------------------------- Spawned processes -------------------------- */
@@ -969,14 +946,18 @@ function pickSerifFontFile() {
   return null;
 }
 
-/* -------------------- Still video (modern + captions) -------------------- */
+/* -------------------- Video constants (FB square) -------------------- */
+const V_W = 1080;  // square for FB/IG feed
+const V_H = 1080;
+const FPS = 30;
+
+/* -------------------- Still video (crisp + captions) -------------------- */
 async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
   const outFile = `${id}.mp4`;
   const outPath = path.join(outDir, outFile);
 
-  // robust fallback image
   let finalImageUrl = imageUrl || 'https://picsum.photos/seed/smartmark/1200/1200';
   try { await axios.get(finalImageUrl, { timeout: 5000 }); } catch { finalImageUrl = 'https://singlecolorimage.com/get/2b2f33/1200x1200'; }
 
@@ -1002,39 +983,34 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   if (imgFile) {
     args.push('-loop', '1', '-t', duration.toFixed(2), '-i', imgFile);
   } else {
-    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640');
+    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`);
   }
 
-  // Guaranteed audio chain (prevents blue screens / freeze)
-  // Always provide at least one audio input and mix consistently.
   if (ttsPath) args.push('-i', ttsPath);
   if (musicPath) args.push('-i', musicPath);
-  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+  // safety audio
+  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
 
-  const inputsCount = 1 + (ttsPath?1:0) + (musicPath?1:0) + 1;
-
-  // contain + pad + gentle zoom
   const baseVideo = imgFile
-    ? `[0:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
-      `pad=640:640:(640-iw)/2:(640-ih)/2,setsar=1,format=yuv420p,zoompan=z='min(zoom+0.00035,1.03)':` +
-      `d=${Math.floor(24*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=24[cv]`
-    : `[0:v]fps=24,format=yuv420p[cv]`;
+    ? `[0:v]scale='if(gte(iw/ih,1),${V_W}:-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
+      `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
+      `zoompan=z='min(zoom+0.00025,1.025)':` +
+      `d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
+    : `[0:v]fps=${FPS},format=yuv420p[cv]`;
 
-  const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=30:x='(w-tw)/2':y='h*0.12':enable='between(t,0.2,3.1)'`;
-  const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2-16)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=44:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
+  const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
   let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro},format=yuv420p[v]`;
 
-  // Audio: tts(1) + music(2) + anullsrc(last); mix what we have, fallback to silence
-  const mapOrder = [];
-  let mixInputs = [];
-  let aIdx = 1; // start after video input
+  // Audio mix: tts + music + anullsrc
+  const mixInputs = [];
+  let aIdx = 1;
   if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
   if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  mixInputs.push(`${aIdx}:a`); // anullsrc always present
-
-  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=44100${i===1?`,volume=0.18`:''}[a${i}]`).join(';')};` +
+  mixInputs.push(`${aIdx}:a`);
+  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[a${i}]`).join(';')};` +
         `${mixInputs.map((_,i)=>`[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
   args.push(
@@ -1042,26 +1018,29 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     '-map', '[v]',
     '-map', '[mix]',
     '-t', duration.toFixed(2),
-    '-r', '24',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+    '-r', String(FPS),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p',
+    '-b:v', '5000k', '-maxrate', '6500k', '-bufsize', '13000k',
+    '-g', String(FPS*2), '-keyint_min', String(FPS),
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
     '-movflags', '+faststart',
     '-shortest',
     '-avoid_negative_ts', 'make_zero',
-    '-g', '48', '-keyint_min', '24',
+    '-max_muxing_queue_size', '1024',
     '-loglevel', 'error',
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 75000, killMsg: 'still-video timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
 
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
-  return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
+  // return SRT too
+  return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)), subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '' };
 }
 
-/* -------------------- Title card (modern + captions) -------------------- */
+/* -------------------- Title card (fallback) -------------------- */
 async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText='' }) {
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
@@ -1078,24 +1057,23 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   const cta   = safeFFText(ctaText);
   const TAIL = 0.8;
 
-  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'color=c=0x101318:s=640x640'];
+  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
 
   if (ttsPath) args.push('-i', ttsPath);
   if (musicPath) args.push('-i', musicPath);
-  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
 
-  const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=36:x='(w-tw)/2':y='(h/2-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
-  const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x='(w-tw)/2':y='(h/2)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=56:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
+  const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-  let fc = `[0:v]fps=24,format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
+  let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
 
   const mixInputs = [];
   let aIdx = 1;
   if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
   if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
   mixInputs.push(`${aIdx}:a`);
-
-  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=44100${i===1?`,volume=0.18`:''}[b${i}]`).join(';')};` +
+  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[b${i}]`).join(';')};` +
         `${mixInputs.map((_,i)=>`[b${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
   args.push(
@@ -1103,24 +1081,26 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
     '-map', '[v]',
     '-map', '[mix]',
     '-t', duration.toFixed(2),
-    '-r', '24',
-    '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+    '-r', String(FPS),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p',
+    '-b:v', '5000k', '-maxrate', '6500k', '-bufsize', '13000k',
+    '-g', String(FPS*2), '-keyint_min', String(FPS),
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
     '-movflags', '+faststart',
     '-shortest',
     '-avoid_negative_ts', 'make_zero',
-    '-g', '48', '-keyint_min', '24',
+    '-max_muxing_queue_size', '1024',
     '-loglevel', 'error',
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 65000, killMsg: 'title-card timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
   try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
-  return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
+  return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)), subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '' };
 }
 
-/* ------------------------------- VIDEO (concat + fades; resilient) ------------------------------- */
+/* ------------------------------- VIDEO (concat; crisp; robust) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1136,13 +1116,12 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     const brandBase = (answers?.businessName && String(answers.businessName).trim()) || overlayTitleFromAnswers(answers, category);
     let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g,'').trim();
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
-    const ctaText = chooseCTA(answers, regenerateToken || answers?.businessName || topic);
+    const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
 
-    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 60000);
+    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 65000);
     const startTs = Date.now();
     const timeLeft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
 
-    /* ---- Script + TTS ---- */
     const forbidFashionLine = category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
     const buildPrompt = (lo, hi) =>
 `Write a simple, neutral spoken ad script for an e-commerce/online business in the "${category}" category, about ${topic}.
@@ -1183,7 +1162,12 @@ Output ONLY the script text.`;
       script = stripFashionIfNotApplicable(script, category);
       script = enforceCategoryPresence(script, category);
       script = cleanFinalText(script);
-      script = finalizeScriptWithSingleCTA(script, ctaText);
+      // ensure only one CTA at end
+      const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
+      const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
+      script = script.replace(re,'').trim();
+      if (!/[.!?]$/.test(script)) script += '.';
+      script += ' ' + ctaText;
 
       try {
         if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
@@ -1196,7 +1180,6 @@ Output ONLY the script text.`;
     const TAIL = 0.8;
     const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
 
-    /* ---- Background music (optional) ---- */
     let musicPath = null;
     try {
       const keys = [category, answers?.industry, answers?.businessName].filter(Boolean);
@@ -1265,10 +1248,9 @@ Output ONLY the script text.`;
         const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
         const brandLine = safeFFText(brandForVideo);
         const ctaTxt    = safeFFText(ctaText);
-        const TOP_H   = Math.round(640 * 0.18);
+        const TOP_H   = Math.round(V_H * 0.20);
         const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
-        // segment lengths
         const segA = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
         const segB = Math.max(4.2, (finalDur - segA) / 2);
         const segC = Math.max(4.0, finalDur - segA - segB);
@@ -1279,7 +1261,7 @@ Output ONLY the script text.`;
         const outroStart = Math.max(0.0, finalDur - TAIL);
         const outroEnd   = finalDur;
 
-        const baseLook = `setsar=1,fps=24,format=yuv420p,settb=AVTB`;
+        const baseLook = `setsar=1,fps=${FPS},format=yuv420p,settb=AVTB`;
         const LEAD = 0.06;
         const fadeDur = 0.35;
 
@@ -1289,8 +1271,8 @@ Output ONLY the script text.`;
           const fadeIn = `,fade=t=in:st=0:d=${fadeDur}`;
           const fadeOut = `,fade=t=out:st=${(seg - fadeDur).toFixed(2)}:d=${fadeDur}`;
           vidParts.push(
-            `[${i}:v]scale='if(gte(iw/ih,1),640,-2)':'if(gte(iw/ih,1),-2,640)',` +
-            `pad=640:640:(640-iw)/2:(640-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
+            `[${i}:v]scale='if(gte(iw/ih,1),${V_W}:-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
+            `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
           );
         }
 
@@ -1298,13 +1280,13 @@ Output ONLY the script text.`;
 
         const bandFadeStart = (segA-0.60).toFixed(2);
         const band =
-          `color=c=black@0.52:s=640x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
+          `color=c=black@0.52:s=${V_W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];` +
           `[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
 
         const introOverlay =
-          `drawtext=${fontParamSans}text='${brandLine}':${txtCommon}:fontsize=30:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+          `drawtext=${fontParamSans}text='${brandLine}':${txtCommon}:fontsize=44:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
         const outroOverlay =
-          `drawtext=${fontParamSans}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=20:fontsize=44:x=(w-tw)/2:y=(h/2-16):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+          `drawtext=${fontParamSans}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x=(w-tw)/2:y=(h*0.50-20):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
 
         const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSerif, `v${seedBump}`);
 
@@ -1318,17 +1300,15 @@ Output ONLY the script text.`;
         for (const f of inputs) { args.push('-i', f); }
         if (ttsPath) args.push('-i', ttsPath);
         if (musicPath) args.push('-i', musicPath);
-        // always add anullsrc as safety
-        args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+        args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
 
-        // build audio mix consistently
         const mixInputs = [];
-        let aIdx = inputs.length; // next after video inputs
+        let aIdx = inputs.length;
         if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
         if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
         mixInputs.push(`${aIdx}:a`);
 
-        fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=44100${i===1?`,volume=0.18`:''}[m${i}]`).join(';')};` +
+        fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[m${i}]`).join(';')};` +
               `${mixInputs.map((_,i)=>`[m${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
         args.push(
@@ -1336,30 +1316,33 @@ Output ONLY the script text.`;
           '-map', '[v]',
           '-map', '[mix]',
           '-t', finalDur.toFixed(2),
-          '-r', '24',
+          '-r', String(FPS),
           '-vsync', '2',
-          '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '28', '-pix_fmt', 'yuv420p',
-          '-g', '48', '-keyint_min', '24',
-          '-c:a', 'aac', '-b:a', '128k', '-ar', '44100',
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p',
+          '-b:v', '5000k', '-maxrate', '6500k', '-bufsize', '13000k',
+          '-g', String(FPS*2), '-keyint_min', String(FPS),
+          '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
           '-movflags', '+faststart',
           '-avoid_negative_ts', 'make_zero',
           '-shortest',
+          '-max_muxing_queue_size', '1024',
           '-loglevel', 'error',
           outPath
         );
 
-        await runSpawn('ffmpeg', args, { killAfter: 70000, killMsg: 'montage timeout' });
+        await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'montage timeout' });
         for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
         try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
 
-        return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)) };
+        return { publicUrl: mediaPath(outFile), absoluteUrl: absolutePublicUrl(mediaPath(outFile)), subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '' };
       };
 
       let videoUrl = '';
       let absoluteUrl = '';
+      let subtitlesUrl = '';
       try {
         const stock = await tryStockVideo();
-        videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl;
+        videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl; subtitlesUrl = stock.subtitlesUrl || '';
       } catch {
         try {
           const imageUrl = await ensureImageForStill();
@@ -1372,7 +1355,7 @@ Output ONLY the script text.`;
             ctaText,
             scriptText: script
           });
-          videoUrl = still.publicUrl; absoluteUrl = still.absoluteUrl;
+          videoUrl = still.publicUrl; absoluteUrl = still.absoluteUrl; subtitlesUrl = still.subtitlesUrl || '';
         } catch {
           const title = await composeTitleCardVideo({
             duration: finalDur,
@@ -1382,7 +1365,7 @@ Output ONLY the script text.`;
             ctaText,
             scriptText: script
           });
-          videoUrl = title.publicUrl; absoluteUrl = title.absoluteUrl;
+          videoUrl = title.publicUrl; absoluteUrl = title.absoluteUrl; subtitlesUrl = title.subtitlesUrl || '';
         }
       }
 
@@ -1391,10 +1374,10 @@ Output ONLY the script text.`;
         kind: 'video',
         url: videoUrl,
         absoluteUrl,
-        meta: { script, ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, topic, category }
+        meta: { script, ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, topic, category, subtitlesUrl }
       });
 
-      return { url: videoUrl, absoluteUrl };
+      return { url: videoUrl, absoluteUrl, subtitlesUrl };
     };
 
     const variations = [];
@@ -1403,7 +1386,6 @@ Output ONLY the script text.`;
       if (timeLeft() < 2500) break;
     }
 
-    // optional upload to FB
     let fbVideoId = null;
     try {
       if (variations[0] && fbAdAccountId && token) {
@@ -1418,18 +1400,19 @@ Output ONLY the script text.`;
     try { if (ttsPath) fs.unlinkSync(ttsPath); } catch {}
     maybeGC();
 
-    const first = variations[0] || { url: '', absoluteUrl: '' };
+    const first = variations[0] || { url: '', absoluteUrl: '', subtitlesUrl: '' };
 
     return res.json({
       videoUrl: first.url,
       absoluteVideoUrl: first.absoluteUrl,
+      subtitlesUrl: first.subtitlesUrl,
       fbVideoId,
       script,
       ctaText,
       voice: ttsPath ? 'alloy' : null,
       hasMusic: !!musicPath,
-      video: { url: first.url, script, overlayText: ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath },
-      videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl }))
+      video: { url: first.url, script, overlayText: ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, subtitlesUrl: first.subtitlesUrl },
+      videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl }))
     });
   } catch (err) {
     if (!res.headersSent)
@@ -1484,7 +1467,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       const urls = [];
       for (let i=0;i<3;i++){
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark'+i+'/1200/627',
+          imageUrl: 'https://picsum.photos/seed/smartmark'+i+'/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
           ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
           seed: regenerateToken + '_' + i,
@@ -1512,7 +1495,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash*31 + c.charCodeAt(0))>>>0;
 
-    // pick 3 distinct indices
     const picks = [];
     for (let i=0;i<photos.length && picks.length<3;i++){
       const idx = (idxHash + i*7) % photos.length;
@@ -1564,7 +1546,7 @@ router.get('/recent-assets', async (req, res) => {
   catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 
-/* optional: clear recent (for testing/UX reset) */
+/* optional: clear recent */
 router.post('/assets/clear', async (req, res) => {
   try {
     await ensureAssetsTable();
@@ -1578,3 +1560,13 @@ router.post('/assets/clear', async (req, res) => {
 });
 
 module.exports = router;
+
+/* ----------------------------------------------------------------------
+Notes:
+- Subtitles: Every video response now includes an SRT URL (subtitlesUrl)
+  you can download/attach to FB if needed. We also burn captions into the video.
+- If you ever want ASS-styled subs instead of drawtext:
+  install ffmpeg with libass and replace drawtext with:
+    subtitles=sub_${id}.srt:force_style='Fontsize=40,Outline=2,Shadow=1'
+  (Not required with this build.)
+---------------------------------------------------------------------- */
