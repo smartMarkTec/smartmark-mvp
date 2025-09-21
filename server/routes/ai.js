@@ -1,4 +1,4 @@
-// [server/routes/ai.js] — SmartMark (FB-style static creatives improved, robust media, CORS hardened)
+// [server/routes/ai.js] — SmartMark (FB-quality static creatives v2, robust media, CORS hardened)
 'use strict';
 
 const express = require('express');
@@ -103,7 +103,7 @@ function sweepTmpByAge(ttlMs) {
 }
 function housekeeping() {
   try {
-    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000)); // 6h default to avoid racey purges
+    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000)); // 6h default
     sweepTmpDirHardCap();
   } catch {}
 }
@@ -173,6 +173,7 @@ router.get('/media/:file', async (req, res) => {
                : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
                : ext === '.png' ? 'image/png'
                : ext === '.webp' ? 'image/webp'
+               : ext === '.svg' ? 'image/svg+xml'
                : ext === '.srt' ? 'text/plain; charset=utf-8'
                : 'application/octet-stream';
 
@@ -530,7 +531,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Static Image overlays (FB look) ---------------------- */
+/* ---------------------- Static Image overlays (FB look, v2) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 
 /* --- SVG helpers --- */
@@ -632,12 +633,31 @@ async function analyzeImageForPlacement(imgBuf) {
   } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
 
+/* --- tagline & badges --- */
 function overlaySublineFromAnswers(answers = {}) {
   const a = answers || {};
   const pieces = [a.mainBenefit, a.offer, a.description].map(s => String(s||'').trim()).filter(Boolean);
   const raw = (pieces[0] || pieces[1] || '').replace(/[\r\n]+/g,' ').trim();
   const clean = raw.length > 90 ? raw.slice(0, 87) + '…' : raw;
   return clean;
+}
+function extractBadges(answers = {}) {
+  const src = `${answers.offer||''} ${answers.mainBenefit||''} ${answers.description||''}`.toLowerCase();
+  const got = [];
+  const numBadge = (re, label) => { const m = src.match(re); if (m && got.length<3) got.push(`${m[1].toUpperCase()} ${label}`); };
+  numBadge(/(\d+\s?g)\s+protein/, 'PROTEIN');
+  numBadge(/(\d+\s?g)\s+sugar/, 'SUGAR');
+  numBadge(/(\d+\s?g)\s+fiber/, 'FIBER');
+  if (/vegan/.test(src)) got.push('VEGAN');
+  if (/cruelty[-\s]?free/.test(src)) got.push('CRUELTY FREE');
+  if (/paraben[-\s]?free/.test(src)) got.push('PARABEN-FREE');
+  if (/spf\s?(\d+)/.test(src) && got.length<3) got.push(`SPF ${RegExp.$1}`);
+  while (got.length<2) {
+    if (/hydrating|hydrate|moistur/i.test(src) && !got.includes('HYDRATING')) got.push('HYDRATING');
+    else if (/gentle|sensitive/i.test(src) && !got.includes('GENTLE')) got.push('GENTLE');
+    else break;
+  }
+  return got.slice(0,3);
 }
 
 function svgDefs(brandColor) {
@@ -650,8 +670,8 @@ function svgDefs(brandColor) {
         <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
-        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.64"/>
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.94"/>
+        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.74"/>
       </linearGradient>
       <linearGradient id="bottomBand" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#0000"/><stop offset="100%" stop-color="#000C"/>
@@ -679,14 +699,28 @@ const pillBtn = (x, y, text, fs = 28) => {
     </g>`;
 };
 
-/* --- FB-like templates: headline + optional subline, strong bottom band --- */
-function svgOverlayCreative({ W, H, headline, tagline = '', cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3 }) {
+function badgeCircle(x,y,text){
+  const fs = Math.max(16, Math.min(22, 22 - Math.max(0, text.length - 7)));
+  return `
+    <g transform="translate(${x},${y})">
+      <circle r="52" fill="#ffffffee"></circle>
+      <circle r="50" fill="#ffffff" stroke="#00000022" stroke-width="2"></circle>
+      <text x="0" y="6" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${fs}" font-weight="900" fill="#0b0d10" letter-spacing="0.6">
+        ${escSVG(text)}
+      </text>
+    </g>`;
+}
+
+/* --- FB-like templates (A, B, C) + new D “poster with badges” --- */
+function svgOverlayCreative({ W, H, headline, tagline = '', cta, prefer='left', brandColor='#2B6CB0', choose=3, badges=[] }) {
   const defs = svgDefs(brandColor);
   const safeBottom = Math.round(H * 0.16);
   const fit = splitTwoLines(headline, MAX_W_TEXT(W) - 80, 56);
   const subFs = tagline ? Math.max(18, Math.min(28, 28 - Math.max(0, tagline.length - 64) / 6)) : 0;
 
-  // Template A: bottom band (best for FB static)
+  // A: bottom band
   if (choose === 1) {
     const yTitle = H - safeBottom + 48;
     const yCTA = H - 28;
@@ -694,19 +728,19 @@ function svgOverlayCreative({ W, H, headline, tagline = '', cta, prefer='left', 
       <rect x="0" y="${H-safeBottom}" width="${W}" height="${safeBottom}" fill="url(#bottomBand)"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="1.2">
+        font-size="${fit.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.4">
         <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
         ${fit.lines[1] ? `<tspan x="${W/2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
       </text>
       ${tagline ? `<text x="${W/2}" y="${yTitle + fit.fs * (fit.lines.length) + 30}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${subFs}" font-weight="600" fill="#eaeef3" letter-spacing="0.4">
+        font-size="${subFs}" font-weight="700" fill="#eaeef3" letter-spacing="0.6">
         ${escSVG(tagline)}
       </text>` : ''}
       ${pillBtn(W/2, yCTA, cta, 28)}`;
   }
 
-  // Template B: vertical color panel (left/right) with dots
+  // B: side color panel with dots
   if (choose === 2) {
     const panelW = 460, pad = 34, x0 = prefer === 'left' ? 24 : W - panelW - 24;
     const cx = x0 + pad, textW = panelW - pad*2;
@@ -717,40 +751,64 @@ function svgOverlayCreative({ W, H, headline, tagline = '', cta, prefer='left', 
       <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#dots)"/>
       <text x="${cx}" y="${yTitle}" text-anchor="start"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit3.fs}" font-weight="900" fill="#ffffff" letter-spacing="1.1">
+        font-size="${fit3.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.2">
         <tspan x="${cx}" dy="0">${escSVG(fit3.lines[0])}</tspan>
         ${fit3.lines[1] ? `<tspan x="${cx}" dy="${fit3.fs * 1.05}">${escSVG(fit3.lines[1])}</tspan>` : ''}
       </text>
       ${tagline ? `<text x="${cx}" y="${yTitle + fit3.fs * (fit3.lines.length) + 28}" text-anchor="start"
          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-         font-size="${subFs}" font-weight="600" fill="#f5f7f9" letter-spacing="0.4">${escSVG(tagline)}</text>` : ''}
+         font-size="${subFs}" font-weight="700" fill="#f5f7f9" letter-spacing="0.5">${escSVG(tagline)}</text>` : ''}
       ${pillBtn(cx + 160, yCTA, cta, 28)}`;
   }
 
-  // Template C: center box glass
-  const boxW = 880, boxPad = 28, gap = tagline ? 16 : 0;
-  const fit2 = splitTwoLines(headline, boxW - 2*boxPad - 60, 54);
-  const boxH = Math.round(boxPad*2 + fit2.fs*fit2.lines.length + (tagline?subFs+26:0) + 60 + gap);
-  const yBox = Math.round((H - boxH) / 2);
-  const yTitle = yBox + boxPad + fit2.fs - 6;
-  const ySub = yTitle + fit2.fs * (fit2.lines.length) + 26;
-  const yCTA = yBox + boxH - boxPad - 12;
+  // C: glass center box
+  if (choose === 3) {
+    const boxW = 880, boxPad = 28, gap = tagline ? 16 : 0;
+    const fit2 = splitTwoLines(headline, boxW - 2*boxPad - 60, 54);
+    const boxH = Math.round(boxPad*2 + fit2.fs*fit2.lines.length + (tagline?subFs+26:0) + 60 + gap);
+    const yBox = Math.round((H - boxH) / 2);
+    const yTitle = yBox + boxPad + fit2.fs - 6;
+    const ySub = yTitle + fit2.fs * (fit2.lines.length) + 26;
+    const yCTA = yBox + boxH - boxPad - 12;
+    return `${defs}
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#00000048" />
+      <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#ffffff12" />
+      <text x="${W/2}" y="${yTitle}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${fit2.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.2">
+        <tspan x="${W/2}" dy="0">${escSVG(fit2.lines[0])}</tspan>
+        ${fit2.lines[1] ? `<tspan x="${W/2}" dy="${fit2.fs * 1.05}">${escSVG(fit2.lines[1])}</tspan>` : ''}
+      </text>
+      ${tagline ? `<text x="${W/2}" y="${ySub}" text-anchor="middle"
+         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+         font-size="${subFs}" font-weight="700" fill="#eaeef3" letter-spacing="0.5">${escSVG(tagline)}</text>` : ''}
+      ${pillBtn(W/2, yCTA, cta, 28)}`;
+  }
+
+  // D: poster look — full color wash on left third with badges (Harry’s style)
+  const leftW = Math.round(W*0.42);
+  const pad = 36;
+  const fit4 = splitTwoLines(headline, leftW - pad*2, 60);
+  const yTitle = 130;
+  const yCTA = H - 46;
+  const badgesG = badges.slice(0,3).map((b,i)=>badgeCircle(W - 90, 110 + i*120, b)).join('');
   return `${defs}
-    <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#00000048" />
-    <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#ffffff12" />
-    <text x="${W/2}" y="${yTitle}" text-anchor="middle"
+    <rect x="0" y="0" width="${leftW}" height="${H}" rx="30" fill="url(#panelGrad)"/>
+    <rect x="0" y="0" width="${leftW}" height="${H}" rx="30" fill="url(#dots)"/>
+    <text x="${pad}" y="${yTitle}" text-anchor="start"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${fit2.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="1.1">
-      <tspan x="${W/2}" dy="0">${escSVG(fit2.lines[0])}</tspan>
-      ${fit2.lines[1] ? `<tspan x="${W/2}" dy="${fit2.fs * 1.05}">${escSVG(fit2.lines[1])}</tspan>` : ''}
+      font-size="${fit4.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.4">
+      <tspan x="${pad}" dy="0">${escSVG(fit4.lines[0])}</tspan>
+      ${fit4.lines[1] ? `<tspan x="${pad}" dy="${fit4.fs * 1.05}">${escSVG(fit4.lines[1])}</tspan>` : ''}
     </text>
-    ${tagline ? `<text x="${W/2}" y="${ySub}" text-anchor="middle"
+    ${tagline ? `<text x="${pad}" y="${yTitle + fit4.fs * (fit4.lines.length) + 28}" text-anchor="start"
        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-       font-size="${subFs}" font-weight="600" fill="#eaeef3" letter-spacing="0.4">${escSVG(tagline)}</text>` : ''}
-    ${pillBtn(W/2, yCTA, cta, 28)}`;
+       font-size="${Math.max(18, Math.min(26, subFs))}" font-weight="700" fill="#f7fafc" letter-spacing="0.6">${escSVG(tagline)}</text>` : ''}
+    ${pillBtn(pad + 160, yCTA, cta, 28)}
+    ${badgesG}`;
 }
 
-async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', tagline = '', seed = '', fallbackHeadline = 'SHOP' }) {
+async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', tagline = '', seed = '', fallbackHeadline = 'SHOP', badges = [] }) {
   const W = 1200, H = 628; // FB link ad
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
@@ -758,14 +816,15 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', ta
   const headline = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const choices = analysis.diffLR > 40 ? [1,2,3] : [1,3,2];
+  const choices = [4,1,2,3]; // prefer poster style
   const tpl = choices[h % choices.length];
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
-      W, H, headline, tagline, cta, prefer: analysis.darkerSide, preferBand: analysis.darkerBand, brandColor: analysis.brandColor, choose: tpl
+      W, H, headline, tagline, cta, prefer: analysis.darkerSide, brandColor: analysis.brandColor, choose: tpl, badges
     })}</svg>`
   );
+
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await base.composite([{ input: overlaySVG, top: 0, left: 0 }]).jpeg({ quality: 92 }).toFile(path.join(outDir, file));
@@ -834,9 +893,7 @@ function safeFFText(t){
     .replace(/\s+/g,' ').trim().toUpperCase().slice(0, 40);
 }
 
-/* ---- Captions helpers omitted here for brevity in static images path ---- */
-/* (Video functions remain intact below) */
-
+/* ---- Captions helpers ---- */
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -900,7 +957,7 @@ const V_W = 1080;
 const V_H = 1080;
 const FPS = 30;
 
-/* -------------------- Still video / Title card (unchanged) -------------------- */
+/* -------------------- Still video / Title card -------------------- */
 function pickSerifFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf',
@@ -1048,7 +1105,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   };
 }
 
-/* ------------------------------- VIDEO (unchanged core; with image-only escape) ------------------------------- */
+/* ------------------------------- VIDEO endpoint (kept, but optional-image-only fast path) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
   setCors(res, req.headers.origin);
@@ -1083,7 +1140,8 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       const headline = overlayTitleFromAnswers(answers, category);
       const cta = pickFromAllowedCTAs(answers, seedBase);
       const tagline = overlaySublineFromAnswers(answers);
-      const built = await buildOverlayImage({ imageUrl, headlineHint: headline, ctaHint: cta, tagline, seed: seedBase });
+      const badges = extractBadges(answers);
+      const built = await buildOverlayImage({ imageUrl, headlineHint: headline, ctaHint: cta, tagline, seed: seedBase, badges });
 
       await saveAsset({ req, kind: 'image', url: built.publicUrl, absoluteUrl: built.absoluteUrl, meta: { topic, category, mode: 'video_stub_image' } });
 
@@ -1106,11 +1164,10 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     }
   }
 
-  /* full video path unchanged from your previous version (omitted for brevity to keep focus on static) */
   return res.status(503).json({ error: 'Video temporarily disabled. Set IMAGE_ONLY_MODE=0 to enable.' });
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations, more robust) --------------------- */
+/* --------------------- IMAGE: search + overlay (3 variations, robust) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
   setCors(res, req.headers.origin);
@@ -1125,14 +1182,15 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const keyword = getImageKeyword(industry, url);
     const tagline = overlaySublineFromAnswers(answers);
     const headlineHint = overlayTitleFromAnswers(answers, category);
+    const badges = extractBadges(answers);
 
     const makeOne = async (baseUrl, seed) => {
       const ctaHint = pickFromAllowedCTAs(answers, seed);
       try {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: baseUrl, headlineHint, ctaHint, tagline, seed, fallbackHeadline: headlineHint
+          imageUrl: baseUrl, headlineHint, ctaHint, tagline, seed, fallbackHeadline: headlineHint, badges
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { keyword, overlayText: ctaHint, headlineHint, tagline, category } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { keyword, overlayText: ctaHint, headlineHint, tagline, badges, category } });
         return publicUrl;
       } catch {
         await saveAsset({ req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl, meta: { keyword, overlayText: ctaHint, headlineHint, tagline, raw: true, category } });
@@ -1149,9 +1207,10 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
           tagline,
           seed: regenerateToken + '_' + i,
-          fallbackHeadline: headlineHint
+          fallbackHeadline: headlineHint,
+          badges
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, badges } });
         urls.push(publicUrl);
       }
       return res.json({ imageUrl: urls[0], keyword, totalResults: 3, usedIndex: 0, imageVariations: urls.map(u => ({ url: u })) });
@@ -1251,5 +1310,5 @@ Recommended env (no new files created):
   ASSET_TTL_MS=21600000
   MAX_TMP_BYTES=314572800
   FRONTEND_ORIGIN=https://smartmark-mvp.vercel.app
-  IMAGE_ONLY_MODE=1         # keep while video path is disabled
+  IMAGE_ONLY_MODE=1
 ---------------------------------------------------------------------- */
