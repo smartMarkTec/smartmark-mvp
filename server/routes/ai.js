@@ -5,23 +5,30 @@ const express = require('express');
 const router = express.Router();
 
 /* ------------------------ CORS ------------------------ */
+const FRONTEND_DEFAULT = 'https://smartmark-mvp.vercel.app';
+const FRONTEND_ORIGIN = (process.env.FRONTEND_ORIGIN || FRONTEND_DEFAULT).replace(/\/+$/,'');
 const ALLOW_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  'https://smartmark-mvp.vercel.app',
-  process.env.FRONTEND_ORIGIN,
+  FRONTEND_ORIGIN,
 ].filter(Boolean));
 
-router.use((req, res, next) => {
-  const origin = req.headers.origin;
+function setCors(res, origin) {
   if (origin && ALLOW_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+  } else {
+    // Fallback: allow the public frontend to read responses even if upstream edge short-circuits
+    res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
   }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID');
   res.setHeader('Access-Control-Max-Age', '86400');
+}
+
+router.use((req, res, next) => {
+  setCors(res, req.headers.origin);
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -51,11 +58,12 @@ const db = require('../db');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
-/* ---------- NEW: toggle to force image-only without deleting video code ---------- */
-const IMAGE_ONLY_MODE = String(process.env.IMAGE_ONLY_MODE || '').trim() === '1' ||
-                        /^true$/i.test(String(process.env.IMAGE_ONLY_MODE || ''));
+/* ---------- Toggle for image-only fast path (avoid long video jobs on Render) ---------- */
+const IMAGE_ONLY_MODE =
+  String(process.env.IMAGE_ONLY_MODE || '').trim() === '1' ||
+  /^true$/i.test(String(process.env.IMAGE_ONLY_MODE || ''));
 
-/* -------- Disk guard: keep /tmp under ~300MB on Render (512MB cap) -------- */
+/* -------- Disk guard -------- */
 const GEN_DIR = '/tmp/generated';
 function ensureGeneratedDir() { try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {} return GEN_DIR; }
 function dirStats(p) {
@@ -63,12 +71,12 @@ function dirStats(p) {
     const files = fs.readdirSync(p).map(f => ({ f, full: path.join(p, f) }))
       .filter(x => fs.existsSync(x.full) && fs.statSync(x.full).isFile())
       .map(x => ({ ...x, st: fs.statSync(x.full) }))
-      .sort((a,b) => a.st.mtimeMs - b.st.mtimeMs); // oldest first
+      .sort((a,b) => a.st.mtimeMs - b.st.mtimeMs);
     const bytes = files.reduce((n, x) => n + x.st.size, 0);
     return { files, bytes };
   } catch { return { files: [], bytes: 0 }; }
 }
-const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024); // ~300MB
+const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024);
 function sweepTmpDirHardCap() {
   ensureGeneratedDir();
   const { files, bytes } = dirStats(GEN_DIR);
@@ -92,7 +100,7 @@ function sweepTmpByAge(ttlMs) {
 }
 function housekeeping() {
   try {
-    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 2 * 60 * 60 * 1000)); // default 2h
+    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000)); // ↑ keep assets longer (6h) to reduce 404/503 races
     sweepTmpDirHardCap();
   } catch {}
 }
@@ -124,25 +132,44 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data;
 }
 
-/* --------------------- Range-enabled streamer --------------------- */
+/* --------------------- Health --------------------- */
+router.get('/healthz', (req, res) => {
+  setCors(res, req.headers.origin);
+  res.json({ ok: true, ts: Date.now() });
+});
+
+/* --------------------- Range-enabled streamer (more resilient) --------------------- */
 router.get('/media/:file', async (req, res) => {
   housekeeping();
+  setCors(res, req.headers.origin); // ensure CORS even if stream errors
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
     const full = path.join(ensureGeneratedDir(), file);
-    if (!fs.existsSync(full)) return res.status(404).end();
+
+    // Retry-on-race: file might be written milliseconds earlier; wait up to 750ms
+    let exists = fs.existsSync(full);
+    if (!exists) {
+      await new Promise(r => setTimeout(r, 250));
+      exists = fs.existsSync(full);
+      if (!exists) {
+        await new Promise(r => setTimeout(r, 500));
+        exists = fs.existsSync(full);
+      }
+    }
+    if (!exists) return res.status(404).json({ error: 'Not found' });
 
     const stat = fs.statSync(full);
     const ext = path.extname(full).toLowerCase();
     const type = ext === '.mp4' ? 'video/mp4'
                : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
                : ext === '.png' ? 'image/png'
+               : ext === '.webp' ? 'image/webp'
                : ext === '.srt' ? 'text/plain; charset=utf-8'
                : 'application/octet-stream';
 
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length'); // <— expose for CORS
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
 
@@ -155,21 +182,25 @@ router.get('/media/:file', async (req, res) => {
       res.status(206);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
       res.setHeader('Content-Length', end - start + 1);
-      fs.createReadStream(full, { start, end }).pipe(res);
+      fs.createReadStream(full, { start, end })
+        .on('error', () => res.status(500).end())
+        .pipe(res);
     } else {
       res.setHeader('Content-Length', stat.size);
-      fs.createReadStream(full).pipe(res);
+      fs.createReadStream(full)
+        .on('error', () => res.status(500).end())
+        .pipe(res);
     }
   } catch {
-    // still let CORS middleware add headers on error
-    res.status(500).end();
+    // keep CORS, respond gracefully
+    res.status(500).json({ error: 'stream_error' });
   }
 });
 function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
 function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
-/* ---------- Persist generated assets (24h TTL) ---------- */
-const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
+/* ---------- Persist generated assets ---------- */
+const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000); // ↑ default 6h
 function ownerKeyFromReq(req) {
   const cookieSid = req?.cookies?.sm_sid;
   const headerSid = req?.headers?.['x-sm-sid'];
@@ -363,7 +394,7 @@ async function getWebsiteText(url) {
     if (!headers['content-type']?.includes('text/html')) throw new Error('Not HTML');
     const body = String(data)
       .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s	S]*?<\/style>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -542,7 +573,7 @@ function pickSansFontFile() {
   return null;
 }
 
-/* ---------- UPDATED: better placement analysis to avoid faces/subjects ---------- */
+/* ---------- Better placement analysis (avoid faces/subjects) ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 160, H = 88;
@@ -590,7 +621,6 @@ async function analyzeImageForPlacement(imgBuf) {
     return { darkerSide, darkerBand, brandColor, diffLR };
   } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
-
 function svgDefs(brandColor) {
   return `
     <defs>
@@ -626,7 +656,6 @@ const pillBtn = (x, y, text, fs = 28) => {
       </text>
     </g>`;
 };
-/* ---------- NEW small addition: variant 7 (bottom band) ---------- */
 function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3 }) {
   const defs = svgDefs(brandColor);
   const fit = splitTwoLines(headline, MAX_W_TEXT(W), 56);
@@ -708,19 +737,7 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
         ${fit5.lines[1] ? `<tspan x="${W/2}" dy="${fit5.fs * 1.05}">${escSVG(fit5.lines[1])}</tspan>` : ''}
       </text>${pillBtn(W/2, yTitle + fit5.fs * (fit5.lines.length) + 48, cta, 28)}`;
   }
-  if (choose === 7) {
-    const bandH = 132;
-    const fit7 = splitTwoLines(headline, W-220, 50);
-    const yTitle = H - bandH + 60;
-    return `${defs}
-      <rect x="0" y="${H-bandH}" width="${W}" height="${bandH}" fill="#0b0d10d0"/>
-      <text x="${W/2}" y="${yTitle}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit7.fs}" font-weight="900" fill="${LIGHT}">
-        <tspan x="${W/2}" dy="0">${escSVG(fit7.lines[0])}</tspan>
-        ${fit7.lines[1] ? `<tspan x="${W/2}" dy="${fit7.fs * 1.05}">${escSVG(fit7.lines[1])}</tspan>` : ''}
-      </text>${pillBtn(W/2, H-40, cta, 26)}`;
-  }
+  // Variant 6 (side shade)
   const padX = 64, panelW = 540;
   const fit6 = splitTwoLines(headline, panelW - 2 * padX, 52);
   const yBase = preferBand === 'top' ? 120 : H - 120 - fit6.fs * (fit6.lines.length);
@@ -741,7 +758,7 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   const headline = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const choices = analysis.diffLR > 40 ? [3,1,6,4,5,2,7] : [1,2,3,4,5,6,7];
+  const choices = analysis.diffLR > 40 ? [3,1,6,4,5,2] : [1,2,3,4,5,6];
   const tpl = choices[h % choices.length];
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
@@ -812,7 +829,7 @@ function safeFFText(t){
     .replace(/\s+/g,' ').trim().toUpperCase().slice(0, 40);
 }
 
-/* ---- Captions: drawtext + exported SRT ---- */
+/* ---- Captions ---- */
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -904,12 +921,12 @@ function pickSerifFontFile() {
   return null;
 }
 
-/* -------------------- Video constants (FB square) -------------------- */
-const V_W = 1080;  // square for FB/IG feed
+/* -------------------- Video constants -------------------- */
+const V_W = 1080;
 const V_H = 1080;
 const FPS = 30;
 
-/* -------------------- Still video (crisp + captions) -------------------- */
+/* -------------------- Still video -------------------- */
 async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
   housekeeping();
   const outDir = ensureGeneratedDir();
@@ -951,7 +968,6 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
     `zoompan=z='min(zoom+0.00025,1.025)':d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
   : `[0:v]fps=${FPS},format=yuv420p[cv]`;
-
 
   const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=44:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
   const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
@@ -1048,10 +1064,12 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
 /* ------------------------------- VIDEO (concat + fades; crisp) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
+  // Ensure CORS on this route specifically, even if upstream returns early
+  setCors(res, req.headers.origin);
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
 
-  /* ---------- NEW: image-only short-circuit when env flag is set ---------- */
+  // Fast-path to avoid long jobs/timeouts => prevents CORS-less 502 from edge
   if (IMAGE_ONLY_MODE) {
     try {
       const { url = '', answers = {}, regenerateToken = '' } = req.body;
@@ -1059,7 +1077,6 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       const topic = deriveTopicKeywords(answers, url, 'ecommerce');
       const seedBase = regenerateToken || answers?.businessName || topic || Date.now();
 
-      // pick a stock image fast
       let imageUrl = null;
       if (PEXELS_API_KEY) {
         try {
@@ -1262,12 +1279,11 @@ Output ONLY the script text.`;
           const seg = segs[i];
           const fadeIn = `,fade=t=in:st=0:d=${fadeDur}`;
           const fadeOut = `,fade=t=out:st=${(seg - fadeDur).toFixed(2)}:d=${fadeDur}`;
-         vidParts.push(
-  `[${i}:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
-  `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},` +
-  `trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
-);
-
+          vidParts.push(
+            `[${i}:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
+            `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},` +
+            `trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
+          );
         }
 
         const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
@@ -1367,6 +1383,8 @@ Output ONLY the script text.`;
       videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl }))
     });
   } catch (err) {
+    // IMPORTANT: include CORS even in error
+    setCors(res, req.headers.origin);
     if (!res.headersSent) return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
 });
@@ -1374,6 +1392,7 @@ Output ONLY the script text.`;
 /* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
+  setCors(res, req.headers.origin);
   try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
   try {
     const { regenerateToken = '' } = req.body;
@@ -1456,6 +1475,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       imageVariations: urls.map(u => ({ url: u }))
     });
   } catch (e) {
+    setCors(res, req.headers.origin);
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
@@ -1498,14 +1518,7 @@ router.post('/assets/clear', async (req, res) => {
 
 /* -------- Ensure CORS even on errors -------- */
 router.use((err, req, res, _next) => {
-  try {
-    const origin = req.headers.origin;
-    if (origin && ALLOW_ORIGINS.has(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    res.setHeader('Vary', 'Origin');
-  } catch {}
+  try { setCors(res, req.headers.origin); } catch {}
   const code = err?.status || 500;
   res.status(code).json({ error: err?.message || 'Server error' });
 });
@@ -1514,9 +1527,10 @@ module.exports = router;
 
 /* ----------------------------------------------------------------------
 Env suggestions on Render:
-  ASSET_TTL_MS=3600000
+  ASSET_TTL_MS=21600000        # 6h, reduces 404/503 races
   MAX_TMP_BYTES=314572800
   AD_GEN_BUDGET_MS=60000
-  # To make /generate-video-ad return image-only (avoid 502/CORS during heavy work):
+  FRONTEND_ORIGIN=https://smartmark-mvp.vercel.app
+  # During stabilization to avoid CORS-less 502s on long jobs:
   IMAGE_ONLY_MODE=1
 ---------------------------------------------------------------------- */
