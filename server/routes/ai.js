@@ -1,30 +1,27 @@
-// [server/routes/ai.js] — SmartMark (FB-style creatives v2: face-aware panels + hardened CORS)
+// [server/routes/ai.js] — SmartMark (FB-style creatives, crisp video, robust subtitles, disk guard)
 'use strict';
 
 const express = require('express');
 const router = express.Router();
 
-/* ------------------------ CORS (hardened) ------------------------ */
-const DEFAULT_ORIGIN = 'https://smartmark-mvp.vercel.app';
+/* ------------------------ CORS ------------------------ */
 const ALLOW_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
-  DEFAULT_ORIGIN,
+  'https://smartmark-mvp.vercel.app',
   process.env.FRONTEND_ORIGIN,
 ].filter(Boolean));
 
-function setCors(res, origin) {
-  const o = (origin && ALLOW_ORIGINS.has(origin)) ? origin : DEFAULT_ORIGIN;
-  res.setHeader('Access-Control-Allow-Origin', o);
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+router.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOW_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID');
   res.setHeader('Access-Control-Max-Age', '86400');
-}
-
-router.use((req, res, next) => {
-  try { setCors(res, req.headers.origin); } catch {}
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -54,11 +51,11 @@ const db = require('../db');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
-/* -------------------- Health -------------------- */
-router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
-router.get('/health', (req, res) => { try { setCors(res, req.headers.origin); } catch {} res.json({ ok: true, t: Date.now() }); });
+/* ---------- NEW: toggle to force image-only without deleting video code ---------- */
+const IMAGE_ONLY_MODE = String(process.env.IMAGE_ONLY_MODE || '').trim() === '1' ||
+                        /^true$/i.test(String(process.env.IMAGE_ONLY_MODE || ''));
 
-/* -------- Disk guard -------- */
+/* -------- Disk guard: keep /tmp under ~300MB on Render (512MB cap) -------- */
 const GEN_DIR = '/tmp/generated';
 function ensureGeneratedDir() { try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {} return GEN_DIR; }
 function dirStats(p) {
@@ -66,12 +63,12 @@ function dirStats(p) {
     const files = fs.readdirSync(p).map(f => ({ f, full: path.join(p, f) }))
       .filter(x => fs.existsSync(x.full) && fs.statSync(x.full).isFile())
       .map(x => ({ ...x, st: fs.statSync(x.full) }))
-      .sort((a,b) => a.st.mtimeMs - b.st.mtimeMs);
+      .sort((a,b) => a.st.mtimeMs - b.st.mtimeMs); // oldest first
     const bytes = files.reduce((n, x) => n + x.st.size, 0);
     return { files, bytes };
   } catch { return { files: [], bytes: 0 }; }
 }
-const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024);
+const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024); // ~300MB
 function sweepTmpDirHardCap() {
   ensureGeneratedDir();
   const { files, bytes } = dirStats(GEN_DIR);
@@ -95,7 +92,7 @@ function sweepTmpByAge(ttlMs) {
 }
 function housekeeping() {
   try {
-    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 2 * 60 * 60 * 1000));
+    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 2 * 60 * 60 * 1000)); // default 2h
     sweepTmpDirHardCap();
   } catch {}
 }
@@ -127,11 +124,10 @@ async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, nam
   return resp.data;
 }
 
-/* --------------------- Range-enabled streamer (now CORS-aware) --------------------- */
+/* --------------------- Range-enabled streamer --------------------- */
 router.get('/media/:file', async (req, res) => {
   housekeeping();
   try {
-    setCors(res, req.headers.origin);
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
     const full = path.join(ensureGeneratedDir(), file);
     if (!fs.existsSync(full)) return res.status(404).end();
@@ -146,7 +142,7 @@ router.get('/media/:file', async (req, res) => {
 
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length'); // <— expose for CORS
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
 
@@ -165,7 +161,7 @@ router.get('/media/:file', async (req, res) => {
       fs.createReadStream(full).pipe(res);
     }
   } catch {
-    try { setCors(res, req.headers.origin); } catch {}
+    // still let CORS middleware add headers on error
     res.status(500).end();
   }
 });
@@ -357,7 +353,8 @@ function loadTrainingContext() {
 }
 let customContext = loadTrainingContext();
 
-/* --------------------------- Scrape --------------------------- */
+/* ---------------------------- Scrape ---------------------------- */
+router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
 async function getWebsiteText(url) {
   try {
     const clean = String(url || '').trim();
@@ -366,7 +363,7 @@ async function getWebsiteText(url) {
     if (!headers['content-type']?.includes('text/html')) throw new Error('Not HTML');
     const body = String(data)
       .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<style[\s	S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
@@ -391,6 +388,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the 
 ${forbidFashionLine}
 - Hook → value → simple CTA (from: “Shop now”, “Buy now”, “Learn more”, “Visit us”, “Check us out”, “Take a look”, “Get started”).
 - Do NOT mention a website or domain.
+- Use the CTA phrase exactly once at the very end.
 Output ONLY the script text.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
@@ -415,17 +413,6 @@ Output ONLY the script text.`;
 });
 
 /* ------------------- Campaign assets (headline/body/cta) ------------------- */
-const ALLOWED_CTAS = ['SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'];
-function pickFromAllowedCTAs(answers = {}, seed = '') {
-  const t = String(answers?.cta || '').trim();
-  if (t) {
-    const norm = t.toUpperCase().replace(/['’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
-    const withBang = /!$/.test(norm) ? norm : `${norm}!`;
-    if (ALLOWED_CTAS.includes(withBang)) return withBang;
-  }
-  let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
-}
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
     const { answers = {}, url = '' } = req.body;
@@ -504,7 +491,8 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Image overlays (face-aware) ---------------------- */
+/* ---------------------- Image overlays (modern, tasteful) ---------------------- */
+const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function estWidth(text, fs){return (String(text||'').length||1)*fs*0.56}
 function fitFont(text, maxW, startFs, minFs=26){let fs=startFs;while(fs>minFs&&estWidth(text,fs)>maxW)fs-=2;return fs}
@@ -526,30 +514,43 @@ function cleanHeadline(h){
   if(words.length>6) h = words.slice(0,6).join(' ');
   return h.toUpperCase();
 }
+const ALLOWED_CTAS = ['SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'];
+function pickFromAllowedCTAs(answers = {}, seed = '') {
+  const t = String(answers?.cta || '').trim();
+  if (t) {
+    const norm = t.toUpperCase().replace(/['’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
+    const withBang = /!$/.test(norm) ? norm : `${norm}!`;
+    if (ALLOWED_CTAS.includes(withBang)) return withBang;
+  }
+  let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
+  return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
+}
 function cleanCTA(c){
   const norm = String(c||'').toUpperCase().replace(/['’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
   const withBang = /!$/.test(norm) ? norm : (norm ? `${norm}!` : '');
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
+function pickSansFontFile() {
+  const candidates = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+  ];
+  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
+  return null;
+}
 
-/* ---------- Saliency + skin-tone heatmap (no OpenCV) ---------- */
+/* ---------- UPDATED: better placement analysis to avoid faces/subjects ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
-    const W = 160, H = 88; // small grid for speed
+    const W = 160, H = 88;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    const cellX = 8, cellY = 4; // 8x4 grid => 32 cells
-    const cw = Math.floor(W / cellX), ch = Math.floor(H / cellY);
+    const cellX = 8, cellY = 4; const cw = Math.floor(W / cellX), ch = Math.floor(H / cellY);
     const cells = [];
-    const lumAt = (x,y) => {
-      const i=(y*W+x)*3, r=data[i], g=data[i+1], b=data[i+2];
-      return 0.2126*r + 0.7152*g + 0.0722*b;
-    };
-    const isSkinish = (r,g,b) => {
-      const max = Math.max(r,g,b), min = Math.min(r,g,b);
-      const diff = max-min;
-      return r>95 && g>40 && b>20 && (r>g) && (r>b) && diff>15 && (Math.abs(r-g)>15);
-    };
-    // gradient-based saliency + skin likelihood
+    const lumAt = (x,y) => { const i=(y*W+x)*3, r=data[i], g=data[i+1], b=data[i+2]; return 0.2126*r + 0.7152*g + 0.0722*b; };
+    const isSkinish = (r,g,b) => { const max = Math.max(r,g,b), min = Math.min(r,g,b); const diff = max-min; return r>95 && g>40 && b>20 && (r>g) && (r>b) && diff>15 && (Math.abs(r-g)>15); };
     for (let gy=0; gy<cellY; gy++){
       for (let gx=0; gx<cellX; gx++){
         let gradSum=0, skinCount=0, lumSum=0, count=0;
@@ -558,7 +559,6 @@ async function analyzeImageForPlacement(imgBuf) {
             const i=(y*W+x)*3, r=data[i], g=data[i+1], b=data[i+2];
             const l = 0.2126*r + 0.7152*g + 0.0722*b;
             lumSum+=l; count++;
-            // simple gradient magnitude
             const lR = x+1<W ? lumAt(x+1,y) : l;
             const lD = y+1<H ? lumAt(x,y+1) : l;
             gradSum += Math.abs(l - lR) + Math.abs(l - lD);
@@ -571,40 +571,24 @@ async function analyzeImageForPlacement(imgBuf) {
         cells.push({ gx, gy, sal, skin: skinRatio, lum });
       }
     }
-    // Normalize + compute "avoid" score (high saliency OR likely face area)
     const salMax = Math.max(...cells.map(c=>c.sal)) || 1;
-    const avoidCells = cells.map(c => {
-      const salN = c.sal/salMax;
-      const avoid = (salN*0.6) + (c.skin*0.4);
-      return { ...c, avoid };
-    });
-    // Quadrant scoring for left/right, top/bottom
-    function sumWhere(pred){ return avoidCells.filter(pred).reduce((s,c)=>s+c.avoid,0); }
+    const avoidCells = cells.map(c => ({ ...c, avoid: (c.sal/salMax)*0.6 + c.skin*0.4 }));
+    const sumWhere = (pred)=>avoidCells.filter(pred).reduce((s,c)=>s+c.avoid,0);
     const leftScore  = sumWhere(c=>c.gx < cellX/2);
     const rightScore = sumWhere(c=>c.gx >= cellX/2);
     const topScore   = sumWhere(c=>c.gy < cellY/2);
     const bottomScore= sumWhere(c=>c.gy >= cellY/2);
     const darkerSide = (leftScore < rightScore) ? 'left' : 'right';
     const darkerBand = (topScore < bottomScore) ? 'top' : 'bottom';
-
-    // Brand color by average hue-ish pick
     let rSum=0,gSum=0,bSum=0, tot=W*H;
-    for (let i=0;i<tot;i++){
-      const j=i*3; rSum+=data[j]; gSum+=data[j+1]; bSum+=data[j+2];
-    }
+    for (let i=0;i<tot;i++){ const j=i*3; rSum+=data[j]; gSum+=data[j+1]; bSum+=data[j+2]; }
     const avg = { r:Math.round(rSum/tot), g:Math.round(gSum/tot), b:Math.round(bSum/tot) };
     const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1','#E98A15','#D61C4E'];
     const idx = ((avg.r>avg.g)+(avg.g>avg.b)*2+(avg.r>avg.b)*3) % palette.length;
     const brandColor = palette[idx];
-
-    // How strongly imbalanced the safe area is (for template selection)
     const diffLR = Math.abs(leftScore-rightScore);
-    const diffTB = Math.abs(topScore-bottomScore);
-
-    return { darkerSide, darkerBand, brandColor, diffLR, diffTB, grid: { cellX, cellY, avoidCells } };
-  } catch {
-    return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0, diffTB: 0.0, grid:null };
-  }
+    return { darkerSide, darkerBand, brandColor, diffLR };
+  } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
 
 function svgDefs(brandColor) {
@@ -617,8 +601,8 @@ function svgDefs(brandColor) {
         <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.96"/>
-        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.68"/>
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
+        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.64"/>
       </linearGradient>
       <pattern id="dots" x="0" y="0" width="18" height="18" patternUnits="userSpaceOnUse">
         <circle cx="2.5" cy="2.5" r="1.6" fill="#ffffff22"/>
@@ -642,17 +626,14 @@ const pillBtn = (x, y, text, fs = 28) => {
       </text>
     </g>`;
 };
-
-/* ---- Templates tuned to avoid centers/faces; add slim bottom band (7) ---- */
+/* ---------- NEW small addition: variant 7 (bottom band) ---------- */
 function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3 }) {
   const defs = svgDefs(brandColor);
-  const safePad = 24; // keep off extreme edges
   const fit = splitTwoLines(headline, MAX_W_TEXT(W), 56);
-
   if (choose === 1) {
-    const yTitle = 100 + safePad, yCTA = yTitle + (fit.fs * (fit.lines.length)) + 56;
+    const yTitle = 110, yCTA = yTitle + (fit.fs * (fit.lines.length)) + 56;
     return `${defs}
-      <rect x="0" y="0" width="${W}" height="210" fill="url(#gShadeV)" />
+      <rect x="0" y="0" width="${W}" height="220" fill="url(#gShadeV)" />
       <text x="${W/2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
         font-size="${fit.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="1.2">
@@ -661,7 +642,7 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
       </text>${pillBtn(W/2, yCTA, cta, 28)}`;
   }
   if (choose === 2) {
-    const boxW = 860, boxPad = 28, gap = 16;
+    const boxW = 880, boxPad = 28, gap = 16;
     const fit2 = splitTwoLines(headline, boxW - 2*boxPad - 60, 54);
     const boxH = Math.round(boxPad*2 + fit2.fs*fit2.lines.length + 60 + gap);
     const yBox = Math.round((H - boxH) / 2);
@@ -678,10 +659,10 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
       </text>${pillBtn(W/2, yCTA, cta, 28)}`;
   }
   if (choose === 3) {
-    const panelW = 470, pad = 34, x0 = prefer === 'left' ? 24 : W - panelW - 24;
+    const panelW = 460, pad = 34, x0 = prefer === 'left' ? 24 : W - panelW - 24;
     const cx = x0 + pad, textW = panelW - pad*2;
     const fit3 = splitTwoLines(headline, textW, 56);
-    const yTitle = 130, yCTA = yTitle + fit3.fs * (fit3.lines.length) + 60;
+    const yTitle = 140, yCTA = yTitle + fit3.fs * (fit3.lines.length) + 60;
     return `${defs}
       <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#panelGrad)"/>
       <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#dots)"/>
@@ -693,7 +674,7 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
       </text>${pillBtn(cx + 140, yCTA, cta, 28)}`;
   }
   if (choose === 4) {
-    const ribbonH = 160, angle = prefer === 'left' ? -10 : 10, xMid = W/2, yMid = H*0.28;
+    const ribbonH = 170, angle = prefer === 'left' ? -10 : 10, xMid = W/2, yMid = H*0.28;
     const fit4 = splitTwoLines(headline, W-240, 58);
     return `${defs}
       <g transform="translate(${xMid},${yMid}) rotate(${angle})">
@@ -709,7 +690,7 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
   }
   if (choose === 5) {
     const fit5 = splitTwoLines(headline, W-160, 52);
-    const yTitle = H*0.78;
+    const yTitle = H*0.80;
     return `${defs}
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gShadeHLeft)"/>
       <g transform="translate(${prefer==='left'?120:W-120}, ${H*0.18})">
@@ -727,12 +708,12 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
         ${fit5.lines[1] ? `<tspan x="${W/2}" dy="${fit5.fs * 1.05}">${escSVG(fit5.lines[1])}</tspan>` : ''}
       </text>${pillBtn(W/2, yTitle + fit5.fs * (fit5.lines.length) + 48, cta, 28)}`;
   }
-  if (choose === 7) { // new: slim bottom band, keeps faces clear
-    const bandH = 128;
-    const fit7 = splitTwoLines(headline, W-200, 50);
-    const yTitle = H - bandH + 58;
+  if (choose === 7) {
+    const bandH = 132;
+    const fit7 = splitTwoLines(headline, W-220, 50);
+    const yTitle = H - bandH + 60;
     return `${defs}
-      <rect x="0" y="${H-bandH}" width="${W}" height="${bandH}" fill="#0b0d10cc"/>
+      <rect x="0" y="${H-bandH}" width="${W}" height="${bandH}" fill="#0b0d10d0"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
         font-size="${fit7.fs}" font-weight="900" fill="${LIGHT}">
@@ -740,7 +721,6 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
         ${fit7.lines[1] ? `<tspan x="${W/2}" dy="${fit7.fs * 1.05}">${escSVG(fit7.lines[1])}</tspan>` : ''}
       </text>${pillBtn(W/2, H-40, cta, 26)}`;
   }
-  // default 6: side dim panel
   const padX = 64, panelW = 540;
   const fit6 = splitTwoLines(headline, panelW - 2 * padX, 52);
   const yBase = preferBand === 'top' ? 120 : H - 120 - fit6.fs * (fit6.lines.length);
@@ -753,44 +733,29 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
       ${fit6.lines[1] ? `<tspan x="${prefer==='left'?padX:W-panelW+padX}" dy="${fit6.fs * 1.05}">${escSVG(fit6.lines[1])}</tspan>` : ''}
     </text>${pillBtn((prefer==='left'?padX:W-panelW+padX) + 160, yBase + fit6.fs * 1.05 * (fit6.lines.length) + 58, cta, 26)}`;
 }
-
-/* ---- Builder picks template to avoid faces/subjects ---- */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP' }) {
   const W = 1200, H = 628; // FB link ad
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
-
   const headline = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
-
-  // Template decision: if center is busy/face-y, avoid center-heavy templates; prefer side/bottom band
-  let templates = [3,6,7,1,5,2,4]; // preference: side panel, dim side, bottom band, top strip, badge, box, ribbon
-  const imbalance = (analysis.diffLR + analysis.diffTB);
-  if (imbalance < 0.15) templates = [7,1,6,3,2,5,4]; // fairly even: prefer bottom band or top strip to not block center
-
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const tpl = templates[h % templates.length];
-
+  const choices = analysis.diffLR > 40 ? [3,1,6,4,5,2,7] : [1,2,3,4,5,6,7];
+  const tpl = choices[h % choices.length];
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
-      W, H, headline, cta,
-      prefer: analysis.darkerSide, preferBand: analysis.darkerBand,
-      brandColor: analysis.brandColor, choose: tpl
+      W, H, headline, cta, prefer: analysis.darkerSide, preferBand: analysis.darkerBand, brandColor: analysis.brandColor, choose: tpl
     })}</svg>`
   );
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  await base
-    .composite([{ input: overlaySVG, top: 0, left: 0 }])
-    .jpeg({ quality: 92, mozjpeg: true })
-    .toFile(path.join(outDir, file));
-
+  await base.composite([{ input: overlaySVG, top: 0, left: 0 }]).jpeg({ quality: 92 }).toFile(path.join(outDir, file));
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
 
-/* ------------------------------ Music helpers (video) ------------------------------ */
+/* ------------------------------ Music ------------------------------ */
 function findMusicDir() {
   const candidates = [
     path.join(__dirname, '..', 'Music', 'music'),
@@ -847,7 +812,7 @@ function safeFFText(t){
     .replace(/\s+/g,' ').trim().toUpperCase().slice(0, 40);
 }
 
-/* ---- Captions helpers (video) ---- */
+/* ---- Captions: drawtext + exported SRT ---- */
 function splitForCaptions(text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -939,12 +904,12 @@ function pickSerifFontFile() {
   return null;
 }
 
-/* -------------------- Video constants (kept) -------------------- */
-const V_W = 1080;
+/* -------------------- Video constants (FB square) -------------------- */
+const V_W = 1080;  // square for FB/IG feed
 const V_H = 1080;
 const FPS = 30;
 
-/* -------------------- Still video (unchanged logic) -------------------- */
+/* -------------------- Still video (crisp + captions) -------------------- */
 async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
   housekeeping();
   const outDir = ensureGeneratedDir();
@@ -987,6 +952,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     `zoompan=z='min(zoom+0.00025,1.025)':d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
   : `[0:v]fps=${FPS},format=yuv420p[cv]`;
 
+
   const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=44:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
   const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
@@ -1023,24 +989,119 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   };
 }
 
-function pickSansFontFile() {
-  const candidates = [
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
-    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
-  ];
-  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
-  return null;
+/* -------------------- Title card (fallback) -------------------- */
+async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText='' }) {
+  housekeeping();
+  const outDir = ensureGeneratedDir();
+  const id = uuidv4();
+  const outFile = `${id}.mp4`;
+  const outPath = path.join(outDir, outFile);
+
+  const sansFile = pickSansFontFile();
+  const serifFile = pickSerifFontFile();
+  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+  const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+
+  const brand = safeFFText(brandLine);
+  const cta   = safeFFText(ctaText);
+  const TAIL = 0.8;
+
+  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
+  if (ttsPath) args.push('-i', ttsPath);
+  if (musicPath) args.push('-i', musicPath);
+  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+
+  const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=56:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
+  const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
+  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
+  let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
+
+  const mixInputs = [];
+  let aIdx = 1;
+  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  mixInputs.push(`${aIdx}:a`);
+  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[b${i}]`).join(';')};` +
+        `${mixInputs.map((_,i)=>`[b${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
+
+  args.push(
+    '-filter_complex', fc, '-map', '[v]', '-map', '[mix]',
+    '-t', duration.toFixed(2), '-r', String(FPS),
+    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p',
+    '-b:v', '5000k', '-maxrate', '6500k', '-bufsize', '13000k',
+    '-g', String(FPS*2), '-keyint_min', String(FPS),
+    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
+    '-movflags', '+faststart', '-shortest', '-avoid_negative_ts', 'make_zero',
+    '-max_muxing_queue_size', '1024', '-loglevel', 'error', outPath
+  );
+
+  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
+  try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
+  return {
+    publicUrl: mediaPath(outFile),
+    absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
+    subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : ''
+  };
 }
 
-/* ------------------------------- VIDEO (existing endpoint kept) ------------------------------- */
+/* ------------------------------- VIDEO (concat + fades; crisp) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  // NOTE: CORS header already set by top middleware; retain original logic
   housekeeping();
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
+
+  /* ---------- NEW: image-only short-circuit when env flag is set ---------- */
+  if (IMAGE_ONLY_MODE) {
+    try {
+      const { url = '', answers = {}, regenerateToken = '' } = req.body;
+      const category = resolveCategory(answers || {});
+      const topic = deriveTopicKeywords(answers, url, 'ecommerce');
+      const seedBase = regenerateToken || answers?.businessName || topic || Date.now();
+
+      // pick a stock image fast
+      let imageUrl = null;
+      if (PEXELS_API_KEY) {
+        try {
+          const r = await axios.get('https://api.pexels.com/v1/search', {
+            headers: { Authorization: PEXELS_API_KEY },
+            params: { query: topic, per_page: 10, orientation: 'landscape', size: 'large', cb: Date.now() + (regenerateToken || '') },
+            timeout: 6000
+          });
+          const photos = r.data?.photos || [];
+          if (photos.length) {
+            const idx = (seedrandom(String(seedBase))()*photos.length)|0;
+            imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
+          }
+        } catch {}
+      }
+      if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
+      if (!imageUrl) imageUrl = 'https://picsum.photos/seed/smartmark/1200/628';
+
+      const headline = overlayTitleFromAnswers(answers, category);
+      const cta = pickFromAllowedCTAs(answers, seedBase);
+      const built = await buildOverlayImage({ imageUrl, headlineHint: headline, ctaHint: cta, seed: seedBase });
+
+      await saveAsset({ req, kind: 'image', url: built.publicUrl, absoluteUrl: built.absoluteUrl, meta: { topic, category, mode: 'video_stub_image' } });
+
+      return res.json({
+        videoUrl: '',
+        absoluteVideoUrl: '',
+        subtitlesUrl: '',
+        script: '',
+        ctaText: cta,
+        voice: null,
+        hasMusic: false,
+        video: { url: '', script: '', overlayText: cta, voice: null, hasMusic: false, subtitlesUrl: '' },
+        videoVariations: [],
+        imageUrl: built.publicUrl,
+        imageAbsoluteUrl: built.absoluteUrl,
+        mode: 'image_only'
+      });
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to generate (image-only mode)', detail: err?.message || 'Unknown error' });
+    }
+  }
 
   try {
     const { url = '', answers = {}, regenerateToken = '' } = req.body;
@@ -1123,7 +1184,7 @@ Output ONLY the script text.`;
       if (PEXELS_API_KEY && timeLeft() > 8000) {
         try {
           const keyword = getImageKeyword(answers.industry || '', url) || topic;
-          const p = await axios.get('https://api.pexels.com/v1/search', {
+          const p = await axios.get(PEXELS_IMG_BASE, {
             headers: { Authorization: PEXELS_API_KEY },
             params: { query: keyword, per_page: 20 },
             timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
@@ -1141,23 +1202,149 @@ Output ONLY the script text.`;
     };
 
     const generateOneVariant = async (seedBump = '') => {
-      // keep video logic (omitted for brevity): falls back to still/title card if needed
-      const imageUrl = await ensureImageForStill();
-      const still = await composeStillVideo({ imageUrl, duration: finalDur, ttsPath, musicPath, brandLine: brandForVideo, ctaText, scriptText: script });
-      await saveAsset({ req, kind: 'video', url: still.publicUrl, absoluteUrl: still.absoluteUrl, meta: { script, ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, topic, category, subtitlesUrl: still.subtitlesUrl || '' } });
-      return { url: still.publicUrl, absoluteUrl: still.absoluteUrl, subtitlesUrl: still.subtitlesUrl || '' };
+      const tryStockVideo = async () => {
+        if (!PEXELS_API_KEY) throw new Error('no_pexels_key');
+        if (timeLeft() < 15000) throw new Error('time_budget_low');
+
+        let candidates = [];
+        const r = await axios.get('https://api.pexels.com/videos/search', {
+          headers: { Authorization: PEXELS_API_KEY },
+          params: { query: topic, per_page: 40, orientation: 'square', cb: Date.now() + (regenerateToken || '') + seedBump },
+          timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
+        });
+        const videos = r.data?.videos || [];
+        for (const v of videos) {
+          if ((v.duration || 0) < 6) continue;
+          const files = (v.video_files || [])
+            .filter(f => f?.link && /\.mp4(\?|$)/i.test(f.link))
+            .sort((a, b) => (a.width || 9999) - (b.width || 9999));
+          if (files[0]?.link) candidates.push({ link: files[0].link, duration: v.duration || 8 });
+        }
+        if (candidates.length < 3) throw new Error('not_enough_clips');
+
+        const chosen = getDeterministicShuffle(candidates, (regenerateToken || answers?.businessName || topic || Date.now()) + '_' + seedBump).slice(0, 3);
+        const tmp = path.join(__dirname, '../tmp');
+        try { fs.mkdirSync(tmp, { recursive: true }); } catch {}
+        const inputs = [];
+        for (const c of chosen) {
+          if (timeLeft() < 6000) break;
+          const out = path.join(tmp, `${uuidv4()}.mp4`);
+          const dlTimeout = Math.max(6000, Math.min(16000, timeLeft() - 3000));
+          await downloadFileWithTimeout(c.link, out, dlTimeout, 15);
+          inputs.push(out);
+        }
+        if (inputs.length < 3) throw new Error('downloads_incomplete');
+
+        const sansFile = pickSansFontFile();
+        const serifFile = pickSerifFontFile();
+        const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+        const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
+        const brandLine = safeFFText(brandForVideo);
+        const ctaTxt    = safeFFText(ctaText);
+        const TOP_H   = Math.round(V_H * 0.20);
+        const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+
+        const segA = Math.min(6.2, Math.max(4.8, finalDur * 0.36));
+        const segB = Math.max(4.2, (finalDur - segA) / 2);
+        const segC = Math.max(4.0, finalDur - segA - segB);
+        const segs = [segA, segB, segC];
+
+        const introStart = 0.25;
+        const introEnd   = Math.min(segA - 0.25, 3.2);
+        const outroStart = Math.max(0.0, finalDur - TAIL);
+        const outroEnd   = finalDur;
+
+        const baseLook = `setsar=1,fps=${FPS},format=yuv420p,settb=AVTB`;
+        const LEAD = 0.06; const fadeDur = 0.35;
+
+        const vidParts = [];
+        for (let i = 0; i < inputs.length; i++) {
+          const seg = segs[i];
+          const fadeIn = `,fade=t=in:st=0:d=${fadeDur}`;
+          const fadeOut = `,fade=t=out:st=${(seg - fadeDur).toFixed(2)}:d=${fadeDur}`;
+         vidParts.push(
+  `[${i}:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
+  `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},` +
+  `trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
+);
+
+        }
+
+        const concat = `[s0][s1][s2]concat=n=3:v=1:a=0[vseq]`;
+        const bandFadeStart = (segA-0.60).toFixed(2);
+        const band = `color=c=black@0.52:s=${V_W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
+        const introOverlay = `drawtext=${fontParamSans}text='${brandLine}':${txtCommon}:fontsize=44:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
+        const outroOverlay = `drawtext=${fontParamSans}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x=(w-tw)/2:y=(h*0.50-20):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
+        const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSerif, `v${seedBump}`);
+
+        let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay}${subsBuild.filter?','+subsBuild.filter:''},${outroOverlay},format=yuv420p[v]`;
+
+        const outDir = ensureGeneratedDir();
+        const outFile = `${uuidv4()}.mp4`;
+        const outPath = path.join(outDir, outFile);
+
+        const args = ['-y'];
+        for (const f of inputs) { args.push('-i', f); }
+        if (ttsPath) args.push('-i', ttsPath);
+        if (musicPath) args.push('-i', musicPath);
+        args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+
+        const mixInputs = [];
+        let aIdx = inputs.length;
+        if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+        if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+        mixInputs.push(`${aIdx}:a`);
+        fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[m${i}]`).join(';')};` +
+              `${mixInputs.map((_,i)=>`[m${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
+
+        args.push(
+          '-filter_complex', fc, '-map', '[v]', '-map', '[mix]',
+          '-t', finalDur.toFixed(2), '-r', String(FPS), '-vsync', '2',
+          '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '22', '-pix_fmt', 'yuv420p',
+          '-b:v', '5000k', '-maxrate', '6500k', '-bufsize', '13000k',
+          '-g', String(FPS*2), '-keyint_min', String(FPS),
+          '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
+          '-movflags', '+faststart', '-avoid_negative_ts', 'make_zero',
+          '-shortest', '-max_muxing_queue_size', '1024', '-loglevel', 'error', outPath
+        );
+
+        await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'montage timeout' });
+        for (const f of inputs) { try { fs.unlinkSync(f); } catch {} }
+        try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
+
+        return {
+          publicUrl: mediaPath(outFile),
+          absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
+          subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : ''
+        };
+      };
+
+      let videoUrl = '', absoluteUrl = '', subtitlesUrl = '';
+      try {
+        const stock = await tryStockVideo();
+        videoUrl = stock.publicUrl; absoluteUrl = stock.absoluteUrl; subtitlesUrl = stock.subtitlesUrl || '';
+      } catch {
+        try {
+          const imageUrl = await ensureImageForStill();
+          const still = await composeStillVideo({ imageUrl, duration: finalDur, ttsPath, musicPath, brandLine: brandForVideo, ctaText, scriptText: script });
+          videoUrl = still.publicUrl; absoluteUrl = still.absoluteUrl; subtitlesUrl = still.subtitlesUrl || '';
+        } catch {
+          const title = await composeTitleCardVideo({ duration: finalDur, ttsPath, musicPath, brandLine: brandForVideo, ctaText, scriptText: script });
+          videoUrl = title.publicUrl; absoluteUrl = title.absoluteUrl; subtitlesUrl = title.subtitlesUrl || '';
+        }
+      }
+
+      await saveAsset({ req, kind: 'video', url: videoUrl, absoluteUrl, meta: { script, ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, topic, category, subtitlesUrl } });
+      return { url: videoUrl, absoluteUrl, subtitlesUrl };
     };
 
     const variations = [];
-    for (let i = 0; i < 1; i++) { // generate at least one reliably
-      try { variations.push(await generateOneVariant(String(i))); } catch {}
-    }
+    for (let i = 0; i < 3; i++) { try { variations.push(await generateOneVariant(String(i))); } catch {} if (timeLeft() < 2500) break; }
 
     let fbVideoId = null;
     try {
-      const first = variations[0];
-      if (first && req.body.fbAdAccountId && getUserToken(req)) {
-        const up = await uploadVideoToAdAccount(req.body.fbAdAccountId, getUserToken(req), first.absoluteUrl, 'SmartMark Generated Video', 'Generated by SmartMark');
+      if (variations[0] && fbAdAccountId && token) {
+        const up = await uploadVideoToAdAccount(fbAdAccountId, token, variations[0].absoluteUrl, 'SmartMark Generated Video', 'Generated by SmartMark');
         fbVideoId = up?.id || null;
       }
     } catch {}
@@ -1166,6 +1353,7 @@ Output ONLY the script text.`;
     maybeGC();
 
     const first = variations[0] || { url: '', absoluteUrl: '', subtitlesUrl: '' };
+
     return res.json({
       videoUrl: first.url,
       absoluteVideoUrl: first.absoluteUrl,
@@ -1174,19 +1362,16 @@ Output ONLY the script text.`;
       script,
       ctaText,
       voice: ttsPath ? 'alloy' : null,
-      hasMusic: false,
-      video: { url: first.url, script, overlayText: ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: false, subtitlesUrl: first.subtitlesUrl },
+      hasMusic: !!musicPath,
+      video: { url: first.url, script, overlayText: ctaText, voice: ttsPath ? 'alloy' : null, hasMusic: !!musicPath, subtitlesUrl: first.subtitlesUrl },
       videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl }))
     });
   } catch (err) {
-    try { setCors(res, req.headers.origin); } catch {}
     if (!res.headersSent) return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations, improved) --------------------- */
-const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
-
+/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
   try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
@@ -1234,7 +1419,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 40, orientation: 'landscape', size: 'large', cb: Date.now() + (regenerateToken || '') },
+        params: { query: keyword, per_page: 35, cb: Date.now() + (regenerateToken || '') },
         timeout: 7000
       });
       photos = r.data.photos || [];
@@ -1271,7 +1456,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       imageVariations: urls.map(u => ({ url: u }))
     });
   } catch (e) {
-    try { setCors(res, req.headers.origin); } catch {}
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
@@ -1298,9 +1482,30 @@ router.get('/recent-assets', async (req, res) => {
   catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 
+/* optional: clear recent (for testing/UX reset) */
+router.post('/assets/clear', async (req, res) => {
+  try {
+    await ensureAssetsTable();
+    const owner = ownerKeyFromReq(req);
+    db.data.generated_assets = (db.data.generated_assets || []).filter(a => a.owner !== owner);
+    await db.write();
+    housekeeping();
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: 'Failed to clear assets' });
+  }
+});
+
 /* -------- Ensure CORS even on errors -------- */
 router.use((err, req, res, _next) => {
-  try { setCors(res, req.headers.origin); } catch {}
+  try {
+    const origin = req.headers.origin;
+    if (origin && ALLOW_ORIGINS.has(origin)) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.setHeader('Vary', 'Origin');
+  } catch {}
   const code = err?.status || 500;
   res.status(code).json({ error: err?.message || 'Server error' });
 });
@@ -1312,4 +1517,6 @@ Env suggestions on Render:
   ASSET_TTL_MS=3600000
   MAX_TMP_BYTES=314572800
   AD_GEN_BUDGET_MS=60000
+  # To make /generate-video-ad return image-only (avoid 502/CORS during heavy work):
+  IMAGE_ONLY_MODE=1
 ---------------------------------------------------------------------- */
