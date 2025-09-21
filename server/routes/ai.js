@@ -1,4 +1,4 @@
-// [server/routes/ai.js] — SmartMark (FB-quality static creatives v2, robust media, CORS hardened)
+// [server/routes/ai.js] — SmartMark (FB-quality static creatives v3, robust media, CORS hardened)
 'use strict';
 
 const express = require('express');
@@ -531,7 +531,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Static Image overlays (FB look, v2) ---------------------- */
+/* ---------------------- Static Image overlays (FB look, v3) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 
 /* --- SVG helpers --- */
@@ -660,6 +660,18 @@ function extractBadges(answers = {}) {
   return got.slice(0,3);
 }
 
+/* ---- NEW: layout helper to ensure text NEVER overlaps CTA (fix for “words combined”) ---- */
+function fitStackForHeight({ titleLines, titleFs, subline, subFs, btnH, availH }) {
+  let fs = titleFs;
+  let sfs = subFs;
+  const marginTop = 8;
+  const gapTitle = 6;
+  const gapSub = subline ? 14 : 0;
+  const calcHeight = () => marginTop + fs * titleLines + gapTitle + (subline ? sfs : 0) + gapSub + btnH + 6;
+  while (calcHeight() > availH && fs > 26) { fs -= 2; sfs = Math.max(16, sfs - 1); }
+  return { fs, sfs, height: calcHeight() };
+}
+
 function svgDefs(brandColor) {
   return `
     <defs>
@@ -713,97 +725,135 @@ function badgeCircle(x,y,text){
     </g>`;
 }
 
-/* --- FB-like templates (A, B, C) + new D “poster with badges” --- */
+/* --- FB-like templates (A, B, C) + D poster; ALL use height-fitting to avoid overlaps --- */
 function svgOverlayCreative({ W, H, headline, tagline = '', cta, prefer='left', brandColor='#2B6CB0', choose=3, badges=[] }) {
   const defs = svgDefs(brandColor);
-  const safeBottom = Math.round(H * 0.16);
-  const fit = splitTwoLines(headline, MAX_W_TEXT(W) - 80, 56);
-  const subFs = tagline ? Math.max(18, Math.min(28, 28 - Math.max(0, tagline.length - 64) / 6)) : 0;
+  const safeBottom = Math.round(H * 0.20);
+  const btnH = 52;
+  const baseFit = splitTwoLines(headline, MAX_W_TEXT(W) - 80, 56);
+  const subFsInit = tagline ? 26 : 0;
 
-  // A: bottom band
+  // A: bottom band (fixed with layout fitting)
   if (choose === 1) {
-    const yTitle = H - safeBottom + 48;
-    const yCTA = H - 28;
+    const fitHeights = fitStackForHeight({
+      titleLines: baseFit.lines.length,
+      titleFs: baseFit.fs,
+      subline: tagline,
+      subFs: subFsInit,
+      btnH,
+      availH: safeBottom - 18
+    });
+    const yBandTop = H - safeBottom;
+    const yTitle = yBandTop + 24 + fitHeights.fs;
+    const ySub = yTitle + (baseFit.lines.length-1)*fitHeights.fs + 20;
+    const yCTA = H - 18;
     return `${defs}
-      <rect x="0" y="${H-safeBottom}" width="${W}" height="${safeBottom}" fill="url(#bottomBand)"/>
+      <rect x="0" y="${yBandTop}" width="${W}" height="${safeBottom}" fill="url(#bottomBand)"/>
       <text x="${W/2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.4">
-        <tspan x="${W/2}" dy="0">${escSVG(fit.lines[0])}</tspan>
-        ${fit.lines[1] ? `<tspan x="${W/2}" dy="${fit.fs * 1.05}">${escSVG(fit.lines[1])}</tspan>` : ''}
+        font-size="${fitHeights.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.4">
+        <tspan x="${W/2}" dy="0">${escSVG(baseFit.lines[0])}</tspan>
+        ${baseFit.lines[1] ? `<tspan x="${W/2}" dy="${fitHeights.fs * 1.08}">${escSVG(baseFit.lines[1])}</tspan>` : ''}
       </text>
-      ${tagline ? `<text x="${W/2}" y="${yTitle + fit.fs * (fit.lines.length) + 30}" text-anchor="middle"
+      ${tagline ? `<text x="${W/2}" y="${ySub}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${subFs}" font-weight="700" fill="#eaeef3" letter-spacing="0.6">
+        font-size="${fitHeights.sfs}" font-weight="700" fill="#eaeef3" letter-spacing="0.8">
         ${escSVG(tagline)}
       </text>` : ''}
       ${pillBtn(W/2, yCTA, cta, 28)}`;
   }
 
-  // B: side color panel with dots
+  // B: side color panel
   if (choose === 2) {
     const panelW = 460, pad = 34, x0 = prefer === 'left' ? 24 : W - panelW - 24;
     const cx = x0 + pad, textW = panelW - pad*2;
     const fit3 = splitTwoLines(headline, textW, 56);
-    const yTitle = 140, yCTA = H - 40;
+    const layout = fitStackForHeight({
+      titleLines: fit3.lines.length,
+      titleFs: fit3.fs,
+      subline: tagline,
+      subFs: subFsInit,
+      btnH,
+      availH: H - 48 - 60
+    });
+    const yTitle = 24 + 24 + layout.fs;
+    const ySub = yTitle + (fit3.lines.length-1)*layout.fs + 22;
+    const yCTA = H - 24 - 10;
     return `${defs}
       <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#panelGrad)"/>
       <rect x="${x0}" y="24" width="${panelW}" height="${H-48}" rx="28" fill="url(#dots)"/>
       <text x="${cx}" y="${yTitle}" text-anchor="start"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit3.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.2">
+        font-size="${layout.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.3">
         <tspan x="${cx}" dy="0">${escSVG(fit3.lines[0])}</tspan>
-        ${fit3.lines[1] ? `<tspan x="${cx}" dy="${fit3.fs * 1.05}">${escSVG(fit3.lines[1])}</tspan>` : ''}
+        ${fit3.lines[1] ? `<tspan x="${cx}" dy="${layout.fs * 1.08}">${escSVG(fit3.lines[1])}</tspan>` : ''}
       </text>
-      ${tagline ? `<text x="${cx}" y="${yTitle + fit3.fs * (fit3.lines.length) + 28}" text-anchor="start"
+      ${tagline ? `<text x="${cx}" y="${ySub}" text-anchor="start"
          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-         font-size="${subFs}" font-weight="700" fill="#f5f7f9" letter-spacing="0.5">${escSVG(tagline)}</text>` : ''}
+         font-size="${layout.sfs}" font-weight="700" fill="#f5f7f9" letter-spacing="0.7">${escSVG(tagline)}</text>` : ''}
       ${pillBtn(cx + 160, yCTA, cta, 28)}`;
   }
 
   // C: glass center box
   if (choose === 3) {
-    const boxW = 880, boxPad = 28, gap = tagline ? 16 : 0;
+    const boxW = 880, boxPad = 28;
     const fit2 = splitTwoLines(headline, boxW - 2*boxPad - 60, 54);
-    const boxH = Math.round(boxPad*2 + fit2.fs*fit2.lines.length + (tagline?subFs+26:0) + 60 + gap);
+    const layout = fitStackForHeight({
+      titleLines: fit2.lines.length,
+      titleFs: fit2.fs,
+      subline: tagline,
+      subFs: subFsInit,
+      btnH,
+      availH: Math.round(H*0.58)
+    });
+    const boxH = Math.round(layout.height + boxPad*2 + 20);
     const yBox = Math.round((H - boxH) / 2);
-    const yTitle = yBox + boxPad + fit2.fs - 6;
-    const ySub = yTitle + fit2.fs * (fit2.lines.length) + 26;
+    const yTitle = yBox + boxPad + layout.fs;
+    const ySub = yTitle + (fit2.lines.length-1)*layout.fs + 22;
     const yCTA = yBox + boxH - boxPad - 12;
     return `${defs}
       <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#00000048" />
       <rect x="${(W - boxW) / 2}" y="${yBox}" width="${boxW}" height="${boxH}" rx="28" fill="#ffffff12" />
       <text x="${W/2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit2.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.2">
+        font-size="${layout.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.3">
         <tspan x="${W/2}" dy="0">${escSVG(fit2.lines[0])}</tspan>
-        ${fit2.lines[1] ? `<tspan x="${W/2}" dy="${fit2.fs * 1.05}">${escSVG(fit2.lines[1])}</tspan>` : ''}
+        ${fit2.lines[1] ? `<tspan x="${W/2}" dy="${layout.fs * 1.08}">${escSVG(fit2.lines[1])}</tspan>` : ''}
       </text>
       ${tagline ? `<text x="${W/2}" y="${ySub}" text-anchor="middle"
          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-         font-size="${subFs}" font-weight="700" fill="#eaeef3" letter-spacing="0.5">${escSVG(tagline)}</text>` : ''}
+         font-size="${layout.sfs}" font-weight="700" fill="#eaeef3" letter-spacing="0.8">${escSVG(tagline)}</text>` : ''}
       ${pillBtn(W/2, yCTA, cta, 28)}`;
   }
 
   // D: poster look — full color wash on left third with badges (Harry’s style)
-  const leftW = Math.round(W*0.42);
+  const leftW = Math.round(W*0.44);
   const pad = 36;
   const fit4 = splitTwoLines(headline, leftW - pad*2, 60);
-  const yTitle = 130;
-  const yCTA = H - 46;
+  const layout = fitStackForHeight({
+    titleLines: fit4.lines.length,
+    titleFs: fit4.fs,
+    subline: tagline,
+    subFs: subFsInit,
+    btnH,
+    availH: H - 60
+  });
+  const yTitle = 30 + layout.fs;
+  const ySub = yTitle + (fit4.lines.length-1)*layout.fs + 22;
+  const yCTA = H - 18;
   const badgesG = badges.slice(0,3).map((b,i)=>badgeCircle(W - 90, 110 + i*120, b)).join('');
   return `${defs}
     <rect x="0" y="0" width="${leftW}" height="${H}" rx="30" fill="url(#panelGrad)"/>
     <rect x="0" y="0" width="${leftW}" height="${H}" rx="30" fill="url(#dots)"/>
     <text x="${pad}" y="${yTitle}" text-anchor="start"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${fit4.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.4">
+      font-size="${layout.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.5">
       <tspan x="${pad}" dy="0">${escSVG(fit4.lines[0])}</tspan>
-      ${fit4.lines[1] ? `<tspan x="${pad}" dy="${fit4.fs * 1.05}">${escSVG(fit4.lines[1])}</tspan>` : ''}
+      ${fit4.lines[1] ? `<tspan x="${pad}" dy="${layout.fs * 1.10}">${escSVG(fit4.lines[1])}</tspan>` : ''}
     </text>
-    ${tagline ? `<text x="${pad}" y="${yTitle + fit4.fs * (fit4.lines.length) + 28}" text-anchor="start"
+    ${tagline ? `<text x="${pad}" y="${ySub}" text-anchor="start"
        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-       font-size="${Math.max(18, Math.min(26, subFs))}" font-weight="700" fill="#f7fafc" letter-spacing="0.6">${escSVG(tagline)}</text>` : ''}
+       font-size="${layout.sfs}" font-weight="700" fill="#f7fafc" letter-spacing="0.9">${escSVG(tagline)}</text>` : ''}
     ${pillBtn(pad + 160, yCTA, cta, 28)}
     ${badgesG}`;
 }
@@ -957,7 +1007,6 @@ const V_W = 1080;
 const V_H = 1080;
 const FPS = 30;
 
-/* -------------------- Still video / Title card -------------------- */
 function pickSerifFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/msttcorefonts/Times_New_Roman.ttf',
@@ -972,6 +1021,7 @@ function pickSerifFontFile() {
   return null;
 }
 
+/* -------------------- Still video / Title card -------------------- */
 async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
   housekeeping();
   const outDir = ensureGeneratedDir();
@@ -1105,7 +1155,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   };
 }
 
-/* ------------------------------- VIDEO endpoint (kept, but optional-image-only fast path) ------------------------------- */
+/* ------------------------------- VIDEO endpoint (image-only fast path available) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
   setCors(res, req.headers.origin);
