@@ -18,7 +18,7 @@ function setCors(res, origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   } else {
-    // Fallback: allow the public frontend to read responses even if upstream edge short-circuits
+    // fallback so browsers still see ACAO even if upstream intermediates strip it
     res.setHeader('Access-Control-Allow-Origin', FRONTEND_ORIGIN);
   }
   res.setHeader('Vary', 'Origin');
@@ -58,10 +58,14 @@ const db = require('../db');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
-/* ---------- Toggle for image-only fast path (avoid long video jobs on Render) ---------- */
+/* ---------- Feature toggles (no new files; control via env) ---------- */
 const IMAGE_ONLY_MODE =
   String(process.env.IMAGE_ONLY_MODE || '').trim() === '1' ||
   /^true$/i.test(String(process.env.IMAGE_ONLY_MODE || ''));
+
+const DISABLE_VIDEO =
+  String(process.env.DISABLE_VIDEO || '').trim() === '1' ||
+  /^true$/i.test(String(process.env.DISABLE_VIDEO || ''));
 
 /* -------- Disk guard -------- */
 const GEN_DIR = '/tmp/generated';
@@ -100,7 +104,8 @@ function sweepTmpByAge(ttlMs) {
 }
 function housekeeping() {
   try {
-    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000)); // ↑ keep assets longer (6h) to reduce 404/503 races
+    // keep assets longer to avoid 404/502 races right after creation
+    sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000));
     sweepTmpDirHardCap();
   } catch {}
 }
@@ -138,10 +143,10 @@ router.get('/healthz', (req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
 
-/* --------------------- Range-enabled streamer (more resilient) --------------------- */
+/* --------------------- Range-enabled streamer (resilient) --------------------- */
 router.get('/media/:file', async (req, res) => {
   housekeeping();
-  setCors(res, req.headers.origin); // ensure CORS even if stream errors
+  setCors(res, req.headers.origin);
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
     const full = path.join(ensureGeneratedDir(), file);
@@ -192,7 +197,6 @@ router.get('/media/:file', async (req, res) => {
         .pipe(res);
     }
   } catch {
-    // keep CORS, respond gracefully
     res.status(500).json({ error: 'stream_error' });
   }
 });
@@ -200,7 +204,7 @@ function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; 
 function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
 /* ---------- Persist generated assets ---------- */
-const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000); // ↑ default 6h
+const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 6 * 60 * 60 * 1000);
 function ownerKeyFromReq(req) {
   const cookieSid = req?.cookies?.sm_sid;
   const headerSid = req?.headers?.['x-sm-sid'];
@@ -573,7 +577,7 @@ function pickSansFontFile() {
   return null;
 }
 
-/* ---------- Better placement analysis (avoid faces/subjects) ---------- */
+/* ---------- Better placement analysis (reduce covering faces/subjects) ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 160, H = 88;
@@ -737,7 +741,6 @@ function svgOverlayCreative({ W, H, headline, cta, prefer='left', preferBand='to
         ${fit5.lines[1] ? `<tspan x="${W/2}" dy="${fit5.fs * 1.05}">${escSVG(fit5.lines[1])}</tspan>` : ''}
       </text>${pillBtn(W/2, yTitle + fit5.fs * (fit5.lines.length) + 48, cta, 28)}`;
   }
-  // Variant 6 (side shade)
   const padX = 64, panelW = 540;
   const fit6 = splitTwoLines(headline, panelW - 2 * padX, 52);
   const yBase = preferBand === 'top' ? 120 : H - 120 - fit6.fs * (fit6.lines.length);
@@ -1064,13 +1067,12 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
 /* ------------------------------- VIDEO (concat + fades; crisp) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
-  // Ensure CORS on this route specifically, even if upstream returns early
   setCors(res, req.headers.origin);
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
 
-  // Fast-path to avoid long jobs/timeouts => prevents CORS-less 502 from edge
-  if (IMAGE_ONLY_MODE) {
+  // If videos are causing Render 502 before headers, let frontend keep working: image-first mode.
+  if (IMAGE_ONLY_MODE || DISABLE_VIDEO) {
     try {
       const { url = '', answers = {}, regenerateToken = '' } = req.body;
       const category = resolveCategory(answers || {});
@@ -1383,7 +1385,6 @@ Output ONLY the script text.`;
       videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl }))
     });
   } catch (err) {
-    // IMPORTANT: include CORS even in error
     setCors(res, req.headers.origin);
     if (!res.headersSent) return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
@@ -1526,11 +1527,10 @@ router.use((err, req, res, _next) => {
 module.exports = router;
 
 /* ----------------------------------------------------------------------
-Env suggestions on Render:
-  ASSET_TTL_MS=21600000        # 6h, reduces 404/503 races
+Recommended env on Render (no new files):
+  ASSET_TTL_MS=21600000
   MAX_TMP_BYTES=314572800
   AD_GEN_BUDGET_MS=60000
   FRONTEND_ORIGIN=https://smartmark-mvp.vercel.app
-  # During stabilization to avoid CORS-less 502s on long jobs:
-  IMAGE_ONLY_MODE=1
+  IMAGE_ONLY_MODE=1         # or DISABLE_VIDEO=1 while stabilizing
 ---------------------------------------------------------------------- */
