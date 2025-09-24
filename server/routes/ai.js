@@ -9,7 +9,8 @@ const ALLOW_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'https://smartmark-mvp.vercel.app',
-  process.env.FRONTEND_ORIGIN,
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN
 ].filter(Boolean));
 
 router.use((req, res, next) => {
@@ -20,7 +21,10 @@ router.use((req, res, next) => {
   }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
+  );
   res.setHeader('Access-Control-Max-Age', '86400');
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
@@ -138,7 +142,7 @@ router.get('/media/:file', async (req, res) => {
 
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Range');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length');
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
 
@@ -211,6 +215,8 @@ async function getRecentImageForOwner(req) {
 }
 
 /* ---------- Topic/category helpers ---------- */
+// (unchanged for brevity – your helpers and overlay code remain exactly as you posted)
+
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
