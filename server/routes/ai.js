@@ -215,8 +215,6 @@ async function getRecentImageForOwner(req) {
 }
 
 /* ---------- Topic/category helpers ---------- */
-// (unchanged for brevity – your helpers and overlay code remain exactly as you posted)
-
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
@@ -495,7 +493,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 /* ---------------------- Image overlays (modern, tasteful) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function estWidth(text, fs){return (String(text||'').length||1)*fs*0.60} // slightly wider estimate for safer wrapping
+function estWidth(text, fs){return (String(text||'').length||1)*fs*0.60}
 function fitFont(text, maxW, startFs, minFs=26){let fs=startFs;while(fs>minFs&&estWidth(text,fs)>maxW)fs-=2;return fs}
 function splitTwoLines(text,maxW,startFs){
   const words=String(text||'').split(/\s+/).filter(Boolean);
@@ -634,11 +632,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
   const defs = svgDefs(brandColor);
 
   // Shared measurements
-  const SAFE_PAD = 24;              // general image edges
-  const PANEL_W = 520;              // left/right card width (if used)
+  const SAFE_PAD = 24;
+  const PANEL_W = 520;
   const PANEL_PAD = 34;
   const TITLE_MAX_W = (W) => W - 2 * (SAFE_PAD + PANEL_PAD);
-  const SUB_FS_BASE = 30;           // consistent subline size before fitting
+  const SUB_FS_BASE = 30;
   const TITLE_FS_CAP = 64;
 
   const fitTitle = (maxW) => {
@@ -650,14 +648,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
     return { fs };
   };
 
-  // Central/top templates (1 & 2) — overlay band with safe CTA lane
+  // Central/top templates (1 & 2)
   if (choose === 1) {
     const bandH = 240;
     const maxW = TITLE_MAX_W(W);
     const t = fitTitle(maxW);
     const s = fitSub(maxW);
     const yTitle = 120;
-    const ySub = yTitle + t.fs * (t.lines.length) + 30; // guaranteed spacing
+    const ySub = yTitle + t.fs * (t.lines.length) + 30;
     const yCTA = ySub + s.fs + 44;
 
     return `${defs}
@@ -706,7 +704,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
     `;
   }
 
-  // Side panel templates (3 & 6) — title, subline, then CTA, inside card
+  // Side panel templates (3 & 6)
   const x0 = prefer === 'left' ? SAFE_PAD : W - PANEL_W - SAFE_PAD;
   const cx = x0 + PANEL_PAD;
   const textW = PANEL_W - 2 * PANEL_PAD;
@@ -758,7 +756,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
     `;
   }
 
-  // Ribbon (4) — big diagonal title + bottom CTA, no overlap
+  // Ribbon (4)
   if (choose === 4) {
     const ribbonH = 170, angle = prefer === 'left' ? -10 : 10, xMid = W/2, yMid = H*0.28;
     const t = fitTitle(W - 240);
@@ -779,7 +777,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
     `;
   }
 
-  // Badge (5) — SALE badge + centered title/subline + CTA below, all separated
+  // Badge (5)
   if (choose === 5) {
     const fit5 = fitTitle(W - 160);
     const sub = fitSub(W - 160);
@@ -1036,7 +1034,6 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
     `zoompan=z='min(zoom+0.00025,1.025)':d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
   : `[0:v]fps=${FPS},format=yuv420p[cv]`;
-
 
   const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=44:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
   const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;

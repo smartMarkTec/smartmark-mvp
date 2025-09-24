@@ -20,8 +20,16 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
-const compression = require('compression');
-const morgan = require('morgan');
+
+// Make optional deps safe: don't crash if not installed
+let compression = null;
+try { compression = require('compression'); } catch (e) {
+  console.warn('[server] compression not installed; continuing without it');
+}
+let morgan = null;
+try { morgan = require('morgan'); } catch (e) {
+  console.warn('[server] morgan not installed; continuing without request logging');
+}
 
 const app = express();
 
@@ -81,11 +89,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(compression());
+if (compression) app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+if (morgan) app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
 // --- Serve generated assets for AI overlays ---
 let generatedPath;
