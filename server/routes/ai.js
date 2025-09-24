@@ -106,6 +106,9 @@ function absolutePublicUrl(relativePath) {
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
   return `${publicBase()}${relativePath}`;
 }
+function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
+function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
+
 function getUserToken(req) {
   const auth = req?.headers?.authorization || '';
   if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
@@ -164,8 +167,6 @@ router.get('/media/:file', async (req, res) => {
     res.status(500).end();
   }
 });
-function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
-function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
@@ -215,6 +216,7 @@ async function getRecentImageForOwner(req) {
 }
 
 /* ---------- Topic/category helpers ---------- */
+
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
@@ -257,6 +259,7 @@ function resolveCategory(answers = {}) {
   if (/coffee|café|espresso|latte|roast/.test(txt)) return 'coffee';
   return 'generic';
 }
+
 const FASHION_TERMS = /\b(style|styles|outfit|outfits|wardrobe|pieces|fits?|colors?|sizes?)\b/gi;
 function stripFashionIfNotApplicable(text, category) {
   if (category === 'fashion') return String(text || '');
@@ -593,15 +596,27 @@ function craftSubline(answers = {}, category = 'generic') {
   const candidates = [
     pick(answers.mainBenefit),
     pick(answers.description),
-    pick(answers.productType),
-    { fashion: 'your quality of fashion', cosmetics: 'your quality of beauty', hair: 'better hair care',
-      food: 'great taste, less hassle', pets: 'care for your pet', electronics: 'reliable everyday tech',
-      home: 'upgrade your space', coffee: 'better coffee breaks', fitness: 'made for your workouts',
-      generic: 'made for everyday use' }[category] || 'made for everyday use'
+    pick(answers.productType)
   ].filter(Boolean);
 
-  let line = candidates[0] || candidates[candidates.length - 1];
+  let line = candidates[0] || '';
   line = line.toLowerCase();
+
+  if (!line) {
+    line = {
+      fashion: 'everyday pieces that fit',
+      cosmetics: 'simple steps for better skin',
+      hair: 'better hair care made easy',
+      food: 'great taste with less hassle',
+      pets: 'care made easy for pets',
+      electronics: 'reliable everyday tech',
+      home: 'upgrade your space easily',
+      coffee: 'better coffee breaks',
+      fitness: 'made for your workouts',
+      generic: 'made for everyday use'
+    }[category] || 'made for everyday use';
+  }
+
   // keep 4–7 words
   const words = line.split(/\s+/).filter(Boolean).slice(0, 7);
   if (words.length < 4 && candidates[1]) {
@@ -612,9 +627,9 @@ function craftSubline(answers = {}, category = 'generic') {
 }
 
 /* ---------- CTA pill ---------- */
-const pillBtn = (x, y, text, fs = 28) => {
-  fs = Math.max(22, Math.min(fs, 34));
-  const w = Math.min(860, estWidth(text, fs) + 60);
+const pillBtn = (x, y, text, fs = 30) => {
+  fs = Math.max(24, Math.min(fs, 34));
+  const w = Math.min(860, estWidth(text, fs) + 64);
   const h = 56; const x0 = x - w / 2;
   return `
     <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})">
@@ -627,8 +642,14 @@ const pillBtn = (x, y, text, fs = 28) => {
     </g>`;
 };
 
+/* ---------- Gating for SALE visual ---------- */
+function hasSaleBadge(answers = {}) {
+  const offer = String(answers.offer || '').toLowerCase();
+  return /(sale|discount|% off|off\b|\bdeal|markdown)/i.test(offer);
+}
+
 /* ---------- Templated SVG with guaranteed spacing ---------- */
-function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3 }) {
+function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3, showSale=false }) {
   const defs = svgDefs(brandColor);
 
   // Shared measurements
@@ -777,8 +798,8 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
     `;
   }
 
-  // Badge (5)
-  if (choose === 5) {
+  // Badge (5) — ONLY if showSale
+  if (choose === 5 && showSale) {
     const fit5 = fitTitle(W - 160);
     const sub = fitSub(W - 160);
     const yTitle = H*0.76;
@@ -811,24 +832,28 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer='left', preferBa
   }
 
   // default fallback to side panel look
-  return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3 });
+  return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, showSale });
 }
 
 /* ---------- Updated builder to pass subtitle ---------- */
 async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP', answers = {}, category = 'generic' }) {
-  const W = 1200, H = 628; // FB link ad
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
+  const W = 1200, H = 628;
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 9000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
   const base = sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const subline = craftSubline(answers, category);
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const choices = analysis.diffLR > 40 ? [3,1,6,4,5,2] : [1,2,3,4,5,6];
+
+  const sale = hasSaleBadge(answers);
+  const allTemplates = sale ? [1,2,3,4,5,6] : [1,2,3,4,6];
+  const choices = analysis.diffLR > 40 ? allTemplates : allTemplates;
   const tpl = choices[h % choices.length];
+
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
-      W, H, title, subline, cta, prefer: analysis.darkerSide, preferBand: analysis.darkerBand, brandColor: analysis.brandColor, choose: tpl
+      W, H, title, subline, cta, prefer: analysis.darkerSide, preferBand: analysis.darkerBand, brandColor: analysis.brandColor, choose: tpl, showSale: sale
     })}</svg>`
   );
   const outDir = ensureGeneratedDir();
@@ -836,30 +861,6 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   await base.composite([{ input: overlaySVG, top: 0, left: 0 }]).jpeg({ quality: 92 }).toFile(path.join(outDir, file));
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
-}
-
-/* ------------------------------ Music ------------------------------ */
-function findMusicDir() {
-  const candidates = [
-    path.join(__dirname, '..', 'Music', 'music'),
-    path.join(__dirname, '..', 'music', 'music'),
-    path.join(__dirname, '..', 'Music'),
-    path.join(__dirname, '..', 'music')
-  ];
-  for (const p of candidates) { try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) return p; } catch {} }
-  return null;
-}
-function pickMusicFile(keywords = []) {
-  const base = findMusicDir();
-  if (!base) return null;
-  const files = fs.readdirSync(base).filter(f => /\.mp3$/i.test(f));
-  if (!files.length) return null;
-  const lower = files.map(f => f.toLowerCase());
-  for (const kw of keywords.map(x => String(x).toLowerCase())) {
-    let i = lower.findIndex(f => f === `${kw}.mp3`); if (i !== -1) return path.join(base, files[i]);
-    i = lower.findIndex(f => f.includes(kw)); if (i !== -1) return path.join(base, files[i]);
-  }
-  return path.join(base, files[0]);
 }
 
 /* ------------------------------- Utils ------------------------------- */
@@ -937,7 +938,8 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
   const sum = lens.reduce((a,b)=>a+b,0);
   let t = WINDOW_START;
   const pieces = [];
-  const baseStyle = "fontcolor=white@0.98:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=28:x='(w-tw)/2':y='h*0.84'";
+  // Typography: bigger, sans, a bit higher on screen
+  const txtCommon = "fontcolor=white@0.99:borderw=2:bordercolor=black@0.82:shadowx=1:shadowy=1:shadowcolor=black@0.68:box=1:boxcolor=0x000000@0.44:boxborderw=24:fontsize=36:x='(w-tw)/2':y='h*0.82'";
   const srtLines = [];
 
   for (let i=0;i<segs.length;i++){
@@ -945,33 +947,13 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId='w') {
     const start = t; const stop = Math.min(endWindow, t + dur); t = stop + 0.05;
     const tf = path.join(outDir, `cap_${workId}_${i}.txt`);
     try { fs.writeFileSync(tf, segs[i]); files.push(tf); } catch {}
-    pieces.push(`drawtext=${fontParam}textfile='${tf}':reload=0:${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
+    pieces.push(`drawtext=${fontParam}textfile='${tf}':reload=0:${txtCommon}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
     srtLines.push(`${i+1}\n${secsToSrt(start)} --> ${secsToSrt(stop)}\n${segs[i]}\n`);
     if (t >= endWindow) break;
   }
   const srtPath = path.join(outDir, `sub_${workId}.srt`);
   try { fs.writeFileSync(srtPath, srtLines.join('\n')); } catch {}
   return { filter: pieces.join(','), files, srtPath };
-}
-
-/* -------------------------- Spawned processes -------------------------- */
-function runSpawn(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
-    let killed = false;
-    const killTimer = opts.killAfter ? setTimeout(() => { killed = true; try { child.kill('SIGKILL'); } catch {} reject(new Error(opts.killMsg || 'process timeout')); }, opts.killAfter) : null;
-    child.on('error', err => { if (killTimer) clearTimeout(killTimer); reject(err); });
-    child.on('close', code => { if (killTimer) clearTimeout(killTimer); if (killed) return; code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`)); });
-  });
-}
-async function probeDuration(file, timeoutMs=8000) {
-  return new Promise((resolve) => {
-    const child = spawn('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nokey=1:noprint_wrappers=1', file], { stdio: ['ignore', 'pipe', 'ignore'] });
-    let out = ''; const timer = setTimeout(()=>{ try { child.kill('SIGKILL'); } catch {}; resolve(0); }, timeoutMs);
-    child.stdout.on('data', d => { if (out.length < 64) out += d.toString('utf8'); });
-    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s)?0:s); });
-    child.on('error', () => { clearTimeout(timer); resolve(0); });
-  });
 }
 function pickSerifFontFile() {
   const candidates = [
@@ -988,7 +970,7 @@ function pickSerifFontFile() {
 }
 
 /* -------------------- Video constants (FB square) -------------------- */
-const V_W = 1080;  // square for FB/IG feed
+const V_W = 1080;  // square
 const V_H = 1080;
 const FPS = 30;
 
@@ -1038,7 +1020,7 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=44:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
   const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
 
-  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
+  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSans, id); // now sans
   let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro},format=yuv420p[v]`;
 
   const mixInputs = [];
@@ -1080,9 +1062,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
   const outPath = path.join(outDir, outFile);
 
   const sansFile = pickSansFontFile();
-  const serifFile = pickSerifFontFile();
   const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
-  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
   const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
 
   const brand = safeFFText(brandLine);
@@ -1096,7 +1076,7 @@ async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = nul
 
   const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=56:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
   const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
-  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
+  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSans, id);
   let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
 
   const mixInputs = [];
@@ -1211,18 +1191,18 @@ Output ONLY the script text.`;
 
     const ensureImageForStill = async () => {
       let imageUrl = null;
-      if (PEXELS_API_KEY && timeLeft() > 8000) {
+      if (PEXELS_API_KEY && timeLeft() > 6000) {
         try {
           const keyword = getImageKeyword(answers.industry || '', url) || topic;
           const p = await axios.get(PEXELS_IMG_BASE, {
             headers: { Authorization: PEXELS_API_KEY },
             params: { query: keyword, per_page: 20 },
-            timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
+            timeout: Math.max(2500, Math.min(6000, timeLeft() - 1500))
           });
           const photos = p.data?.photos || [];
           if (photos.length) {
             const idx = (seedrandom(String(regenerateToken || Date.now()))() * photos.length) | 0;
-            imageUrl = photos[idx].src.large2x || photos[idx].src.original || photos[idx].src.large || null;
+            imageUrl = photos[idx].src.large || photos[idx].src.medium || photos[idx].src.original || null; // prefer smaller (faster)
           }
         } catch {}
       }
@@ -1239,8 +1219,8 @@ Output ONLY the script text.`;
         let candidates = [];
         const r = await axios.get('https://api.pexels.com/videos/search', {
           headers: { Authorization: PEXELS_API_KEY },
-          params: { query: topic, per_page: 40, orientation: 'square', cb: Date.now() + (regenerateToken || '') + seedBump },
-          timeout: Math.max(3000, Math.min(7000, timeLeft() - 2000))
+          params: { query: topic, per_page: 28, orientation: 'square', cb: Date.now() + (regenerateToken || '') + seedBump },
+          timeout: Math.max(2500, Math.min(6000, timeLeft() - 1500))
         });
         const videos = r.data?.videos || [];
         for (const v of videos) {
@@ -1259,16 +1239,14 @@ Output ONLY the script text.`;
         for (const c of chosen) {
           if (timeLeft() < 6000) break;
           const out = path.join(tmp, `${uuidv4()}.mp4`);
-          const dlTimeout = Math.max(6000, Math.min(16000, timeLeft() - 3000));
+          const dlTimeout = Math.max(6000, Math.min(14000, timeLeft() - 2500));
           await downloadFileWithTimeout(c.link, out, dlTimeout, 15);
           inputs.push(out);
         }
         if (inputs.length < 3) throw new Error('downloads_incomplete');
 
         const sansFile = pickSansFontFile();
-        const serifFile = pickSerifFontFile();
         const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
-        const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
         const brandLine = safeFFText(brandForVideo);
         const ctaTxt    = safeFFText(ctaText);
         const TOP_H   = Math.round(V_H * 0.20);
@@ -1285,7 +1263,7 @@ Output ONLY the script text.`;
         const outroEnd   = finalDur;
 
         const baseLook = `setsar=1,fps=${FPS},format=yuv420p,settb=AVTB`;
-        const LEAD = 0.06; const fadeDur = 0.35;
+        const fadeDur = 0.35;
 
         const vidParts = [];
         for (let i = 0; i < inputs.length; i++) {
@@ -1295,7 +1273,7 @@ Output ONLY the script text.`;
           vidParts.push(
             `[${i}:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
             `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,${baseLook},` +
-            `trim=${LEAD}:${(LEAD + seg).toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
+            `trim=0:${seg.toFixed(2)},setpts=PTS-STARTPTS${fadeIn}${fadeOut}[s${i}]`
           );
         }
 
@@ -1304,7 +1282,7 @@ Output ONLY the script text.`;
         const band = `color=c=black@0.52:s=${V_W}x${TOP_H}:d=${finalDur.toFixed(2)},format=rgba,fade=t=out:st=${bandFadeStart}:d=0.6:alpha=1[top];[vseq][top]overlay=shortest=1:x=0:y=0[b3]`;
         const introOverlay = `drawtext=${fontParamSans}text='${brandLine}':${txtCommon}:fontsize=44:x=(w-tw)/2:y=${Math.round(TOP_H*0.56)}:enable='between(t,${(introStart+0.10).toFixed(2)},${introEnd.toFixed(2)})'`;
         const outroOverlay = `drawtext=${fontParamSans}text='${ctaTxt}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=56:x=(w-tw)/2:y=(h*0.50-20):enable='between(t,${outroStart.toFixed(2)},${outroEnd.toFixed(2)})'`;
-        const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSerif, `v${seedBump}`);
+        const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSans, `v${seedBump}`);
 
         let fc = vidParts.join(';') + ';' + concat + ';' + band + `;[b3]${introOverlay}${subsBuild.filter?','+subsBuild.filter:''},${outroOverlay},format=yuv420p[v]`;
 
@@ -1400,7 +1378,7 @@ Output ONLY the script text.`;
   }
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
+/* --------------------- IMAGE: search + overlay (3 variations, faster) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
   try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
@@ -1434,34 +1412,53 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       }
     };
 
+    // No Pexels key ⇒ generate three placeholders quickly
     if (!PEXELS_API_KEY) {
-      const urls = [];
-      for (let i=0;i<3;i++){
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark'+i+'/1200/628',
-          headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
-          seed: regenerateToken + '_' + i,
-          fallbackHeadline: overlayTitleFromAnswers(answers, category),
-          answers,
-          category
-        });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i } });
-        urls.push(publicUrl);
+      const seeds = [0,1,2].map(i => regenerateToken + '_' + i);
+      const tasks = seeds.map((s,i)=>buildOverlayImage({
+        imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
+        headlineHint: overlayTitleFromAnswers(answers, category),
+        ctaHint: pickFromAllowedCTAs(answers, s),
+        seed: s,
+        fallbackHeadline: overlayTitleFromAnswers(answers, category),
+        answers,
+        category
+      }));
+      const results = await Promise.all(tasks);
+      for (let i=0;i<results.length;i++){
+        await saveAsset({ req, kind: 'image', url: results[i].publicUrl, absoluteUrl: results[i].absoluteUrl, meta: { category, keyword, placeholder: true, i } });
       }
-      return res.json({ imageUrl: urls[0], keyword, totalResults: 3, usedIndex: 0, imageVariations: urls.map(u => ({ url: u })) });
+      return res.json({
+        imageUrl: results[0].publicUrl,
+        keyword,
+        totalResults: results.length,
+        usedIndex: 0,
+        imageVariations: results.map(r => ({ url: r.publicUrl }))
+      });
     }
 
+    // Fetch stock images (smaller size, faster) and build 3 overlays in parallel
     let photos = [];
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 35, cb: Date.now() + (regenerateToken || '') },
-        timeout: 7000
+        params: { query: keyword, per_page: 30, cb: Date.now() + (regenerateToken || '') },
+        timeout: 6000
       });
       photos = r.data.photos || [];
     } catch {
-      return res.status(500).json({ error: 'Image search failed' });
+      // Fast fallback to placeholder if Pexels is slow/unavailable
+      const quick = await buildOverlayImage({
+        imageUrl: 'https://picsum.photos/seed/smartmark/1200/628',
+        headlineHint: overlayTitleFromAnswers(answers, category),
+        ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_0'),
+        seed: regenerateToken + '_0',
+        fallbackHeadline: overlayTitleFromAnswers(answers, category),
+        answers,
+        category
+      });
+      await saveAsset({ req, kind: 'image', url: quick.publicUrl, absoluteUrl: quick.absoluteUrl, meta: { category, keyword, placeholder: true } });
+      return res.json({ imageUrl: quick.publicUrl, keyword, totalResults: 1, usedIndex: 0, imageVariations: [{ url: quick.publicUrl }] });
     }
     if (!photos.length) return res.status(404).json({ error: 'No images found.' });
 
@@ -1474,14 +1471,13 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       if (!picks.includes(idx)) picks.push(idx);
     }
 
-    const urls = [];
-    for (let pi=0; pi<picks.length; pi++){
-      const img = photos[picks[pi]];
-      const baseUrl = img.src.large2x || img.src.original || img.src.large;
-      const u = await makeOne(baseUrl, seed + '_' + pi);
-      urls.push(u);
-    }
+    const tasks = picks.map((pi, i) => {
+      const img = photos[pi];
+      const baseUrl = img.src.large || img.src.medium || img.src.original;
+      return makeOne(baseUrl, seed + '_' + i);
+    });
 
+    const urls = await Promise.all(tasks);
     const img0 = photos[picks[0]];
     res.json({
       imageUrl: urls[0],
