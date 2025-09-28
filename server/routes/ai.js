@@ -14,15 +14,14 @@ const express = require('express');
 const router = express.Router();
 
 /* ------------------------ CORS ------------------------ */
-const ALLOW_ORIGINS = new Set(
-  [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'https://smartmark-mvp.vercel.app',
-    process.env.FRONTEND_URL,
-    process.env.FRONTEND_ORIGIN,
-  ].filter(Boolean)
-);
+// CORS shim at router level (defensive)
+const ALLOW_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'https://smartmark-mvp.vercel.app',
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN
+].filter(Boolean));
 
 router.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -32,8 +31,7 @@ router.use((req, res, next) => {
   }
   res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
+  res.setHeader('Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
@@ -1806,79 +1804,92 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     };
 
     if (!PEXELS_API_KEY) {
-      const urls = [];
-      for (let i = 0; i < 3; i++) {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
-          headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
-          seed: regenerateToken + '_' + i,
-          fallbackHeadline: overlayTitleFromAnswers(answers, category),
-          answers,
-          category,
-        });
-        await saveAsset({
-          req,
-          kind: 'image',
-          url: publicUrl,
-          absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, sale },
-        });
-        urls.push(publicUrl);
-      }
-      return res.json({
-        imageUrl: urls[0],
-        keyword,
-        totalResults: 3,
-        usedIndex: 0,
-        imageVariations: urls.map((u) => ({ url: u })),
-      });
-    }
-
-    let photos = [];
-    try {
-      const r = await axios.get(PEXELS_IMG_BASE, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 18 },
-        timeout: 5000,
-      });
-      photos = r.data.photos || [];
-    } catch {
-      return res.status(500).json({ error: 'Image search failed' });
-    }
-    if (!photos.length) return res.status(404).json({ error: 'No images found.' });
-
-    const seed = regenerateToken || answers?.businessName || keyword || Date.now();
-    let idxHash = 0;
-    for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
-
-    const picks = [];
-    for (let i = 0; i < photos.length && picks.length < 3; i++) {
-      const idx = (idxHash + i * 7) % photos.length;
-      if (!picks.includes(idx)) picks.push(idx);
-    }
-
-    const urls = [];
-    for (let pi = 0; pi < picks.length; pi++) {
-      const img = photos[picks[pi]];
-      const baseUrl = img.src.original || img.src.large2x || img.src.large;
-      const u = await makeOne(baseUrl, seed + '_' + pi);
-      urls.push(u);
-    }
-
-    const img0 = photos[picks[0]];
-    res.json({
-      imageUrl: urls[0],
-      photographer: img0?.photographer,
-      pexelsUrl: img0?.url,
-      keyword,
-      totalResults: photos.length,
-      usedIndex: picks[0],
-      imageVariations: urls.map((u) => ({ url: u })),
+  const urls = [];
+  const absUrls = [];
+  for (let i = 0; i < 3; i++) {
+    const { publicUrl, absoluteUrl } = await buildOverlayImage({
+      imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+      headlineHint: overlayTitleFromAnswers(answers, category),
+      ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+      seed: regenerateToken + '_' + i,
+      fallbackHeadline: overlayTitleFromAnswers(answers, category),
+      answers,
+      category,
     });
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+    await saveAsset({
+      req,
+      kind: 'image',
+      url: publicUrl,
+      absoluteUrl,
+      meta: { category, keyword, placeholder: true, i, sale },
+    });
+    urls.push(publicUrl);
+    absUrls.push(absoluteUrl);
   }
+  return res.json({
+    imageUrl: urls[0],
+    absoluteImageUrl: absUrls[0],
+    keyword,
+    totalResults: 3,
+    usedIndex: 0,
+    imageVariations: urls.map((u, idx) => ({
+      url: u,
+      absoluteUrl: absUrls[idx] || absolutePublicUrl(u),
+    })),
+  });
+}
+
+let photos = [];
+try {
+  const r = await axios.get(PEXELS_IMG_BASE, {
+    headers: { Authorization: PEXELS_API_KEY },
+    params: { query: keyword, per_page: 18 },
+    timeout: 5000,
+  });
+  photos = r.data.photos || [];
+} catch {
+  return res.status(500).json({ error: 'Image search failed' });
+}
+if (!photos.length) return res.status(404).json({ error: 'No images found.' });
+
+const seed = regenerateToken || answers?.businessName || keyword || Date.now();
+let idxHash = 0;
+for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
+
+const picks = [];
+for (let i = 0; i < photos.length && picks.length < 3; i++) {
+  const idx = (idxHash + i * 7) % photos.length;
+  if (!picks.includes(idx)) picks.push(idx);
+}
+
+const urls = [];
+const absUrls = [];
+for (let pi = 0; pi < picks.length; pi++) {
+  const img = photos[picks[pi]];
+  const baseUrl = img.src.original || img.src.large2x || img.src.large;
+  const u = await makeOne(baseUrl, seed + '_' + pi); // returns public URL
+  urls.push(u);
+  absUrls.push(absolutePublicUrl(u));
+}
+
+const img0 = photos[picks[0]];
+return res.json({
+  imageUrl: urls[0],
+  absoluteImageUrl: absUrls[0],
+  photographer: img0?.photographer,
+  pexelsUrl: img0?.url,
+  keyword,
+  totalResults: photos.length,
+  usedIndex: picks[0],
+  imageVariations: urls.map((u, idx) => ({
+    url: u,
+    absoluteUrl: absUrls[idx] || absolutePublicUrl(u),
+  })),
+});
+
+} catch (e) {
+  res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+}
 });
 
 /* ------------------------- RECENT (24h window) ------------------------- */

@@ -1,16 +1,10 @@
 // server/server.js
 // --- GLOBAL ERROR HANDLERS (keep these at the very top!) ---
-
 if (!process.env.NODE_OPTIONS) {
   process.env.NODE_OPTIONS = '--max-old-space-size=1024'; // try 1024 or 2048
 }
-
-process.on('unhandledRejection', (reason) => {
-  console.error('Unhandled Rejection:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
+process.on('unhandledRejection', (reason) => console.error('Unhandled Rejection:', reason));
+process.on('uncaughtException', (err) => console.error('Uncaught Exception:', err));
 
 require('dotenv').config({ path: './.env' });
 
@@ -20,15 +14,11 @@ const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
 
-// Make optional deps safe: don't crash if not installed
+// Optional deps
 let compression = null;
-try { compression = require('compression'); } catch (e) {
-  console.warn('[server] compression not installed; continuing without it');
-}
+try { compression = require('compression'); } catch { console.warn('[server] compression not installed; continuing without it'); }
 let morgan = null;
-try { morgan = require('morgan'); } catch (e) {
-  console.warn('[server] morgan not installed; continuing without request logging');
-}
+try { morgan = require('morgan'); } catch { console.warn('[server] morgan not installed; continuing without request logging'); }
 
 const app = express();
 
@@ -47,19 +37,17 @@ const ALLOW = new Set([
 
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin) {
-    // reflect the caller's origin (frontend must be configured to call us)
+  if (origin && ALLOW.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Vary', 'Origin');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
-  // allow embedding/downloading generated assets cross-origin
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
@@ -121,9 +109,7 @@ app.get('/__fallback/1200.jpg', async (_req, res) => {
 // OPTIONAL: guard against handlers that “hang” (but give them real time)
 app.use((req, res, next) => {
   res.setTimeout(180000, () => {
-    try {
-      res.status(504).json({ error: 'Gateway Timeout', route: req.originalUrl });
-    } catch {}
+    try { res.status(504).json({ error: 'Gateway Timeout', route: req.originalUrl }); } catch {}
   });
   next();
 });
@@ -132,7 +118,7 @@ app.use((req, res, next) => {
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
-const aiRoutes = require('./routes/ai');
+const aiRoutes = require('./routes/ai');          // contains its own router-level CORS shim
 app.use('/api', aiRoutes);
 
 const campaignRoutes = require('./routes/campaigns');
@@ -141,14 +127,9 @@ app.use('/api', campaignRoutes);
 const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
 
-// Simple ping that echoes headers (debug CORS quickly)
+// Debug CORS quickly
 app.all('/api/ping', (req, res) => {
-  res.json({
-    ok: true,
-    method: req.method,
-    headers: req.headers,
-    time: Date.now()
-  });
+  res.json({ ok: true, method: req.method, time: Date.now() });
 });
 
 // Mount MOCK routes FIRST
@@ -175,11 +156,10 @@ app.use((req, res) => {
 });
 
 /* -------------------------- GLOBAL ERROR HANDLER -------------------------- */
-// Re-applies CORS headers even on errors so the browser doesn't show a CORS failure
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err?.stack || err);
   const origin = req.headers.origin;
-  if (origin) {
+  if (origin && ALLOW.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Vary', 'Origin');
