@@ -7,8 +7,8 @@ import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 /* --------- Palette / fonts (kept distinct from homepage for light variety) --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "#11161c";           // slightly cooler than landing
-const SURFACE = "#1b2026";            // card background
+const DARK_BG = "#11161c";
+const SURFACE = "#1b2026";
 const TEAL = "#14e7b9";
 const TEAL_SOFT = "rgba(20,231,185,0.22)";
 const EDGE = "rgba(255,255,255,0.06)";
@@ -18,14 +18,8 @@ const SIDE_CHAT_LIMIT = 5;
 /* -------- Backend endpoints -------- */
 const USE_LOCAL_BACKEND = false;
 const PROD_BACKEND = "https://smartmark-mvp.onrender.com";
-
-// Single source of truth:
-const BACKEND_URL = USE_LOCAL_BACKEND
-  ? (process.env.REACT_APP_API_BASE || "")
-  : (process.env.REACT_APP_API_BASE || PROD_BACKEND);
-
-// Always call the absolute API (important on Vercel):
-const API_BASE = `${BACKEND_URL.replace(/\/+$/,'')}/api`;
+const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;               // for asset paths
+const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;     // absolute API for Vercel
 
 /* -------- Draft persistence -------- */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -115,7 +109,7 @@ function ImageModal({ open, imageUrl, onClose }) {
           <FaTimes size={20} />
         </button>
         <img
-          src={imageUrl}
+          src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
           alt="Full Ad"
           style={{
             display: "block",
@@ -239,6 +233,7 @@ async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   try { return await res.json(); } catch { throw new Error("Bad JSON"); }
 }
+
 const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
 function stripUrls(s = "") { return (s || "").replace(URL_REGEX, ""); }
 function extractFirstUrl(s = "") { const m = (s || "").match(URL_REGEX); return m ? m[0] : null; }
@@ -309,29 +304,25 @@ export default function FormPage() {
   const [modalImg, setModalImg] = useState("");
   const [awaitingReady, setAwaitingReady] = useState(true);
 
-/* ---- Image copy editing state ---- */
-const [imageEditing, setImageEditing] = useState(false);
+  /* ---- Image copy editing state ---- */
+  const [imageEditing, setImageEditing] = useState(false);
 
-const currentImageId = useMemo(() => {
-  const url = imageUrls[activeImage] || "";
-  return creativeIdFromUrl(url);
-}, [imageUrls, activeImage]);
+  const currentImageId = useMemo(() => {
+    const url = imageUrls[activeImage] || "";
+    return creativeIdFromUrl(url);
+  }, [imageUrls, activeImage]);
 
-const [editHeadline, setEditHeadline] = useState("");
-const [editBody, setEditBody] = useState("");
-const [editCTA, setEditCTA] = useState("");
+  const [editHeadline, setEditHeadline] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editCTA, setEditCTA] = useState("");
 
-// helper to ensure absolute URLs to the backend
-const abs = (u) => {
-  if (!u) return "";
-  return /^https?:\/\//i.test(u) ? u : `${BACKEND_URL}${u.startsWith('/') ? '' : '/'}${u}`;
-};
+  // helper for absolute URLs
+  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
 
-/* Scroll chat to bottom */
-useEffect(() => {
-  if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-}, [chatHistory]);
-
+  /* Scroll chat to bottom */
+  useEffect(() => {
+    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+  }, [chatHistory]);
 
   /* Restore draft */
   useEffect(() => {
@@ -477,7 +468,7 @@ useEffect(() => {
     currentImageId, editHeadline, editBody, editCTA
   ]);
 
-  function handleImageClick(url) { setShowModal(true); setModalImg(abs(url)); }
+  function handleImageClick(url) { setShowModal(true); setModalImg(url); }
   function handleModalClose() { setShowModal(false); setModalImg(""); }
 
   /* ---- Ask OpenAI (side chat / FAQs) ---- */
@@ -491,6 +482,8 @@ useEffect(() => {
 
       const resp = await fetch(`${API_BASE}/gpt-chat`, {
         method: "POST",
+        mode: "cors",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userText, history })
       });
@@ -514,45 +507,29 @@ useEffect(() => {
   }
 
   /* ---- API calls ---- */
-  // Build a normalized response from /generate-image-from-prompt (absolute URLs only)
-  function normalizeImagesResponse(data) {
-    const main = data?.absoluteImageUrl || data?.absoluteUrl || data?.imageUrl || "";
-    const base = abs(main);
-    const vars = (data?.imageVariations || []).map(v => abs(v.absoluteUrl || v.url)).filter(Boolean);
-    const all = [base, ...vars].filter(Boolean).slice(0, 3);
-    return all.length ? all : (base ? [base] : []);
-  }
+  const pickBestImageUrl = (data) => {
+    // Prefer absoluteImageUrl; fallback to absoluteUrl of first variation; finally fallback to relative -> abs()
+    if (data?.absoluteImageUrl) return data.absoluteImageUrl;
+    const v0 = Array.isArray(data?.imageVariations) ? data.imageVariations[0] : null;
+    if (v0?.absoluteUrl) return v0.absoluteUrl;
+    if (data?.imageUrl) return abs(data.imageUrl);
+    return "";
+  };
 
   async function fetchImageOnce(token) {
     try {
       const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
+        mode: "cors",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
-        // send shape {answers, regenerateToken} explicitly
         body: JSON.stringify({ answers, regenerateToken: token })
       });
       const data = await safeJson(resp);
-      const list = normalizeImagesResponse(data);
-      // return the FIRST absolute image; caller can combine multiples
-      return list[0] || "";
+      return pickBestImageUrl(data);
     } catch (e) {
       console.warn("image fetch failed:", e.message);
       return "";
-    }
-  }
-
-  async function fetchImageSet(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      return normalizeImagesResponse(data);
-    } catch (e) {
-      console.warn("image fetch failed:", e.message);
-      return [];
     }
   }
 
@@ -560,13 +537,17 @@ useEffect(() => {
     try {
       const resp = await fetch(`${API_BASE}/generate-video-ad`, {
         method: "POST",
+        mode: "cors",
+        credentials: "omit",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
       });
       const data = await safeJson(resp);
-      const vUrl = data?.absoluteVideoUrl || data?.video?.absoluteUrl || data?.videoUrl || data?.video?.url || "";
+      const vAbs = data?.absoluteVideoUrl || (data?.video?.absoluteUrl) || null;
+      const vRel = data?.videoUrl || data?.video?.url || "";
+      const vUrl = vAbs || (vRel ? (vRel.startsWith("http") ? vRel : BACKEND_URL + vRel) : "");
       return {
-        url: abs(vUrl),
+        url: vUrl,
         script: data?.script || data?.video?.script || "",
         fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
       };
@@ -614,14 +595,16 @@ useEffect(() => {
           const tokenB = getRandomString();
 
           try {
-            const [data, imgsA, imgsB, vid1, vid2] = await Promise.all([
+            const [data, img1, img2, vid1, vid2] = await Promise.all([
               fetch(`${API_BASE}/generate-campaign-assets`, {
                 method: "POST",
+                mode: "cors",
+                credentials: "omit",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ answers })
               }).then(safeJson).catch(() => ({})),
-              fetchImageSet(tokenA),
-              fetchImageSet(tokenB),
+              fetchImageOnce(tokenA),
+              fetchImageOnce(tokenB),
               fetchVideoOnce(tokenA),
               fetchVideoOnce(tokenB)
             ]);
@@ -632,8 +615,7 @@ useEffect(() => {
               image_overlay_text: data?.image_overlay_text || ""
             });
 
-            // Prefer three total images if available
-            const imgs = [...imgsA, ...imgsB].filter(Boolean).slice(0, 3);
+            const imgs = [img1, img2].filter(Boolean).slice(0, 2);
             setImageUrls(imgs);
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
@@ -703,11 +685,11 @@ useEffect(() => {
   /* Regenerations */
   async function handleRegenerateImage() {
     setImageLoading(true);
-    const imgs = await fetchImageSet(getRandomString());
-    const picked = imgs.filter(Boolean).slice(0, 3);
-    setImageUrls(picked);
+    const [a, b] = await Promise.all([fetchImageOnce(getRandomString()), fetchImageOnce(getRandomString())]);
+    const imgs = [a, b].filter(Boolean).slice(0, 2);
+    setImageUrls(imgs);
     setActiveImage(0);
-    setImageUrl(picked[0] || "");
+    setImageUrl(imgs[0] || "");
     setImageLoading(false);
   }
   async function handleRegenerateVideo() {
@@ -733,10 +715,9 @@ useEffect(() => {
         alignItems: "center",
       }}
     >
-      {/* global smooth scroll & subtle glow like homepage (but teal) */}
+      {/* global smooth scroll & subtle glow */}
       <style>{`
         html, body { scroll-behavior: smooth; }
-        /* Slim, subtle scrollbar inside chat like ChatGPT */
         .chat-scroll::-webkit-scrollbar { width: 8px; }
         .chat-scroll::-webkit-scrollbar-thumb { background: #2a3138; border-radius: 8px; }
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
@@ -756,7 +737,7 @@ useEffect(() => {
         }}
       />
 
-      {/* Top row with Back (left) and centered Title above GPT box */}
+      {/* Top row */}
       <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -783,7 +764,7 @@ useEffect(() => {
           </button>
         </div>
 
-        {/* Centered page heading directly over GPT box */}
+        {/* Centered title */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
           <h1
             style={{
@@ -801,7 +782,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* ---- GPT chat panel ---- */}
+      {/* Chat panel */}
       <div
         style={{
           width: "100%",
@@ -1014,7 +995,7 @@ useEffect(() => {
             ) : imageUrls.length > 0 ? (
               <>
                 <img
-                  src={abs(imageUrls[activeImage] || "")}
+                  src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
                   alt="Ad Preview"
                   style={{
                     width: "100%",
@@ -1206,7 +1187,7 @@ useEffect(() => {
               <>
                 <video
                   key={videoItems[activeVideo]?.url || "video"}
-                  src={abs(videoItems[activeVideo]?.url)}
+                  src={videoItems[activeVideo]?.url}
                   controls
                   style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
                 />
@@ -1338,7 +1319,7 @@ useEffect(() => {
         </button>
       </div>
 
-      <ImageModal open={showModal} imageUrl={abs(modalImg)} onClose={handleModalClose} />
+      <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
     </div>
   );
 }
