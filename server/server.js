@@ -16,7 +16,7 @@ require('dotenv').config({ path: './.env' });
 
 const cookieParser = require('cookie-parser');
 const express = require('express');
-const cors = require('cors');
+// cors package is not required with the shim below, but keeping it is harmless
 const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
@@ -33,36 +33,40 @@ try { morgan = require('morgan'); } catch (e) {
 
 const app = express();
 
-// --- Allowed origins ---
-const allowedOrigins = [
-  process.env.FRONTEND_URL,
-  process.env.FRONTEND_ORIGIN, // allow either name
+/* ----------------------------- BULLETPROOF CORS ----------------------------- */
+/**
+ * Apply CORS headers to EVERY response (incl. preflights, static, 404s, and errors)
+ * so the browser never reports “No 'Access-Control-Allow-Origin' header”.
+ */
+const ALLOW = new Set([
   'https://smartmark-mvp.vercel.app',
   'http://localhost:3000',
-  'http://127.0.0.1:3000'
-].filter(Boolean);
+  'http://127.0.0.1:3000',
+  process.env.FRONTEND_URL,
+  process.env.FRONTEND_ORIGIN,
+].filter(Boolean));
 
-// --- CORS ---
-const corsOptions = {
-  origin(origin, cb) {
-    // Allow non-browser clients (no Origin) and whitelisted web origins
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    return cb(new Error(`CORS not allowed from ${origin}`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'X-Requested-With',
-    'X-FB-AD-ACCOUNT-ID',
-    'X-SM-SID'
-  ],
-  optionsSuccessStatus: 204,
-  maxAge: 86400
-};
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    // reflect the caller's origin (frontend must be configured to call us)
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
+  );
+  res.setHeader('Access-Control-Max-Age', '86400');
+  // allow embedding/downloading generated assets cross-origin
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  next();
+});
 
+/* ----------------------------- SERVER SETTINGS ----------------------------- */
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
@@ -75,27 +79,13 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // fast OPTIONS path
-
-// Also reapply basic CORS headers on all responses
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-  }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  next();
-});
-
 if (compression) app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 if (morgan) app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-// --- Serve generated assets for AI overlays ---
+/* ----------------------- STATIC: GENERATED ASSETS ----------------------- */
 let generatedPath;
 if (process.env.RENDER) {
   generatedPath = '/tmp/generated';
@@ -115,21 +105,21 @@ app.use('/generated', express.static(generatedPath, {
   }
 }));
 
-/** ===== Local fallback image ===== */
+/** Local fallback image for testing */
 app.get('/__fallback/1200.jpg', async (_req, res) => {
   try {
     const buf = await sharp({
       create: { width: 1200, height: 1200, channels: 3, background: { r: 30, g: 200, b: 133 } }
     }).jpeg({ quality: 82 }).toBuffer();
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.setHeader('Cache-Control', 'public, max-age: 31536000, immutable');
     res.end(buf);
   } catch {
     res.status(500).send('fallback image error');
   }
 });
 
-// OPTIONAL: guard against any handler that “hangs” (but give it real time)
+// OPTIONAL: guard against handlers that “hang” (but give them real time)
 app.use((req, res, next) => {
   res.setTimeout(180000, () => {
     try {
@@ -139,7 +129,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// --- ROUTES ---
+/* --------------------------------- ROUTES --------------------------------- */
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
@@ -159,33 +149,32 @@ app.use(smartMockRoutes);
 const smartRoutes = require('./routes/smart');
 app.use('/smart', smartRoutes);
 
-// --- Health check ---
+/* --------------------------------- HEALTH -------------------------------- */
 app.get(['/healthz', '/api/health', '/health'], (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ status: 'OK', uptime: process.uptime(), ts: Date.now() });
 });
 
-// --- Root ---
+/* ---------------------------------- ROOT --------------------------------- */
 app.get('/', (_req, res) => {
   res.json({ status: 'SmartMark backend running', time: new Date().toISOString() });
 });
 
-// --- 404 handler ---
+/* ---------------------------------- 404 ---------------------------------- */
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-// --- Global error handler ---
+/* -------------------------- GLOBAL ERROR HANDLER -------------------------- */
 // Re-applies CORS headers even on errors so the browser doesn't show a CORS failure
 app.use((err, req, res, next) => {
   console.error('Unhandled server error:', err?.stack || err);
   const origin = req.headers.origin;
-  if (origin && allowedOrigins.includes(origin)) {
+  if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Vary', 'Origin');
-
   if (res.headersSent) return next(err);
   res.setHeader('Content-Type', 'application/json');
   res.status(500).json({
@@ -195,8 +184,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// ---- Background scheduler intentionally disabled ----
-
+/* --------------------------------- START --------------------------------- */
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Server started on http://localhost:${PORT}`);
