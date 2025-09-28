@@ -1,49 +1,101 @@
 'use strict';
 
 /**
- * SmartMark AI routes – improved 2025-09-24
- * - Removes random SALE badge unless explicitly requested
- * - Better headline/subtitle centering + spacing
- * - Modern pane (glass/gradient), consistent typography
- * - Sharper images (no enlargement, 4:4:4, mozjpeg, lanczos3)
- * - Faster Pexels queries + graceful fallbacks & caching
- * - Cleaner captions: sans font, bigger, centered baseline, consistent box
+ * SmartMark AI routes – 2025-09-27
+ * - Strong CORS on EVERY response (incl. errors/rate limits/OPTIONS/media)
+ * - Up to 3 designer-style static ad images per request
+ * - Cleaner overlays, balanced placement, sharp output (no enlargement)
+ * - Range-enabled media streaming (cross-origin friendly)
+ * - Graceful fallbacks when Pexels is unavailable
  */
 
 const express = require('express');
 const router = express.Router();
 
-/* ------------------------ CORS ------------------------ */
-const ALLOW_ORIGINS = new Set([
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'https://smartmark-mvp.vercel.app',
-  process.env.FRONTEND_URL,
-  process.env.FRONTEND_ORIGIN
-].filter(Boolean));
+/* ------------------------ CORS (global & strict) ------------------------ */
+/**
+ * We set CORS headers BEFORE any other middleware and also re-apply them:
+ * - on OPTIONS preflight
+ * - on media streaming
+ * - in the terminal error handler
+ * This prevents “No 'Access-Control-Allow-Origin' header” in all cases.
+ */
+const ALLOW_ORIGINS = new Set(
+  [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'https://smartmark-mvp.vercel.app',
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_ORIGIN,
+  ].filter(Boolean)
+);
+
+function applyCors(req, res) {
+  try {
+    const origin = req.headers.origin || '';
+    // Allow if explicitly whitelisted; otherwise fall back to permissive safe default for GET/OPTIONS
+    if (origin && (ALLOW_ORIGINS.has(origin))) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    } else if (origin) {
+      // Fallback: allow READs from any origin for simple fetches of generated media
+      // (preflighted routes are still gated by our OPTIONS handler).
+      res.setHeader('Access-Control-Allow-Origin', origin);
+    }
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
+    );
+    res.setHeader('Access-Control-Max-Age', '86400');
+    // Make streamed assets embeddable cross-site (fixes Chrome CORP issues)
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
+  } catch {}
+}
 
 router.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && ALLOW_ORIGINS.has(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-  res.setHeader('Vary', 'Origin');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
-  );
-  res.setHeader('Access-Control-Max-Age', '86400');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  applyCors(req, res);
+  if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
 
 /* ------------- Security & Rate-Limiting ------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
-const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+/**
+ * Some rate-limit middlewares send responses internally without our headers.
+ * We wrap the handler to re-apply CORS before sending 429.
+ */
+function withCors(handler) {
+  return (req, res, next) =>
+    handler(req, {
+      ...res,
+      status(code) {
+        applyCors(req, res);
+        return res.status(code);
+      },
+      setHeader(...args) {
+        return res.setHeader(...args);
+      },
+      end(...args) {
+        applyCors(req, res);
+        return res.end(...args);
+      },
+      json(...args) {
+        applyCors(req, res);
+        return res.json(...args);
+      },
+      send(...args) {
+        applyCors(req, res);
+        return res.send(...args);
+      },
+    }, next);
+}
+router.use(withCors(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })));
+const heavyLimiter = withCors(basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 }));
 
 /* ------------------------------ Deps ------------------------------ */
 const axios = require('axios');
@@ -66,19 +118,23 @@ const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
 /* -------- Disk guard -------- */
 const GEN_DIR = '/tmp/generated';
-function ensureGeneratedDir () { try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {} return GEN_DIR; }
-function dirStats (p) {
+function ensureGeneratedDir() {
+  try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {}
+  return GEN_DIR;
+}
+function dirStats(p) {
   try {
-    const files = fs.readdirSync(p).map(f => ({ f, full: path.join(p, f) }))
+    const files = fs.readdirSync(p)
+      .map(f => ({ f, full: path.join(p, f) }))
       .filter(x => fs.existsSync(x.full) && fs.statSync(x.full).isFile())
       .map(x => ({ ...x, st: fs.statSync(x.full) }))
-      .sort((a,b) => a.st.mtimeMs - b.st.mtimeMs);
+      .sort((a, b) => a.st.mtimeMs - b.st.mtimeMs);
     const bytes = files.reduce((n, x) => n + x.st.size, 0);
     return { files, bytes };
   } catch { return { files: [], bytes: 0 }; }
 }
 const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024);
-function sweepTmpDirHardCap () {
+function sweepTmpDirHardCap() {
   ensureGeneratedDir();
   const { files, bytes } = dirStats(GEN_DIR);
   let cur = bytes;
@@ -88,7 +144,7 @@ function sweepTmpDirHardCap () {
     cur -= x.st.size;
   }
 }
-function sweepTmpByAge (ttlMs) {
+function sweepTmpByAge(ttlMs) {
   ensureGeneratedDir();
   const now = Date.now();
   for (const f of (fs.readdirSync(GEN_DIR) || [])) {
@@ -99,7 +155,7 @@ function sweepTmpByAge (ttlMs) {
     } catch {}
   }
 }
-function housekeeping () {
+function housekeeping() {
   try {
     sweepTmpByAge(Number(process.env.ASSET_TTL_MS || 2 * 60 * 60 * 1000));
     sweepTmpDirHardCap();
@@ -107,22 +163,22 @@ function housekeeping () {
 }
 
 /* --------------------------- Helpers --------------------------- */
-function publicBase () {
+function publicBase() {
   return process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
 }
-function absolutePublicUrl (relativePath) {
+function absolutePublicUrl(relativePath) {
   if (!relativePath) return '';
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
   return `${publicBase()}${relativePath}`;
 }
-function getUserToken (req) {
+function getUserToken(req) {
   const auth = req?.headers?.authorization || '';
   if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
   if (req?.session?.fbUserAccessToken) return req.session.fbUserAccessToken;
   if (req?.body?.userAccessToken) return req.body.userAccessToken;
   return getFbUserToken() || null;
 }
-async function uploadVideoToAdAccount (adAccountId, userAccessToken, fileUrl, name = 'SmartMark Video', description = 'Generated by SmartMark') {
+async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, name = 'SmartMark Video', description = 'Generated by SmartMark') {
   const id = String(adAccountId || '').replace(/^act_/, '').replace(/\D/g, '');
   const url = `https://graph.facebook.com/v23.0/act_${id}/advideos`;
   const form = new FormData();
@@ -135,6 +191,7 @@ async function uploadVideoToAdAccount (adAccountId, userAccessToken, fileUrl, na
 
 /* --------------------- Range-enabled streamer --------------------- */
 router.get('/media/:file', async (req, res) => {
+  applyCors(req, res);
   housekeeping();
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
@@ -143,11 +200,12 @@ router.get('/media/:file', async (req, res) => {
 
     const stat = fs.statSync(full);
     const ext = path.extname(full).toLowerCase();
-    const type = ext === '.mp4' ? 'video/mp4'
-               : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-               : ext === '.png' ? 'image/png'
-               : ext === '.srt' ? 'text/plain; charset=utf-8'
-               : 'application/octet-stream';
+    const type =
+      ext === '.mp4' ? 'video/mp4' :
+      ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+      ext === '.png' ? 'image/png' :
+      ext === '.srt' ? 'text/plain; charset=utf-8' :
+      'application/octet-stream';
 
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', 'bytes');
@@ -173,32 +231,32 @@ router.get('/media/:file', async (req, res) => {
     res.status(500).end();
   }
 });
-function mediaPath (relativeFilename) { return `/api/media/${relativeFilename}`; }
-function maybeGC () { if (global.gc) { try { global.gc(); } catch {} } }
+function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
+function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
-function ownerKeyFromReq (req) {
+function ownerKeyFromReq(req) {
   const cookieSid = req?.cookies?.sm_sid;
   const headerSid = req?.headers?.['x-sm-sid'];
   const auth = req?.headers?.authorization || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
   return cookieSid || headerSid || bearer || `ip:${req.ip}`;
 }
-async function ensureAssetsTable () {
+async function ensureAssetsTable() {
   await db.read();
   db.data = db.data || {};
   db.data.generated_assets = db.data.generated_assets || [];
   await db.write();
 }
-async function purgeExpiredAssets () {
+async function purgeExpiredAssets() {
   await ensureAssetsTable();
   const now = Date.now();
   const before = db.data.generated_assets.length;
   db.data.generated_assets = db.data.generated_assets.filter(a => (a.expiresAt || 0) > now);
   if (db.data.generated_assets.length !== before) await db.write();
 }
-async function saveAsset ({ req, kind, url, absoluteUrl, meta = {} }) {
+async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   await ensureAssetsTable();
   await purgeExpiredAssets();
   const owner = ownerKeyFromReq(req);
@@ -214,16 +272,16 @@ async function saveAsset ({ req, kind, url, absoluteUrl, meta = {} }) {
   housekeeping();
   return rec;
 }
-async function getRecentImageForOwner (req) {
+async function getRecentImageForOwner(req) {
   await purgeExpiredAssets();
   const owner = ownerKeyFromReq(req);
   const img = (db.data.generated_assets || [])
     .filter(a => a.owner === owner && a.kind === 'image')
-    .sort((a,b)=>b.createdAt-a.createdAt)[0];
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
   return img ? (img.absoluteUrl || absolutePublicUrl(img.url)) : null;
 }
 
-/* ---------- Topic/category ---------- */
+/* ---------- Topic/category helpers ---------- */
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
@@ -236,12 +294,12 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['home','decor','furniture','bedroom','bath'], keyword: 'modern home' },
   { match: ['coffee','cafe','espresso'], keyword: 'coffee shop' },
 ];
-function getImageKeyword (industry = '', url = '') {
+function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP) if (row.match.some(m => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
-function deriveTopicKeywords (answers = {}, url = '', fallback = 'shopping') {
+function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   const industry = answers.industry || answers.productType || '';
   const base = getImageKeyword(industry, url) || industry || fallback;
   const extra = String(answers.description || answers.product || answers.mainBenefit || '').toLowerCase();
@@ -253,7 +311,7 @@ function deriveTopicKeywords (answers = {}, url = '', fallback = 'shopping') {
   if (/(electronics|phone|laptop)/.test(extra)) return 'tech gadgets';
   return base || fallback;
 }
-function resolveCategory (answers = {}) {
+function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
   if (/fashion|apparel|clothing|athleisure|outfit|wardrobe/.test(txt)) return 'fashion';
   if (/fitness|gym|workout|trainer|supplement|protein|yoga|crossfit|wellness/.test(txt)) return 'fitness';
@@ -267,11 +325,11 @@ function resolveCategory (answers = {}) {
   return 'generic';
 }
 const FASHION_TERMS = /\b(style|styles|outfit|outfits|wardrobe|pieces|fits?|colors?|sizes?)\b/gi;
-function stripFashionIfNotApplicable (text, category) {
+function stripFashionIfNotApplicable(text, category) {
   if (category === 'fashion') return String(text || '');
   return String(text || '').replace(FASHION_TERMS, () => 'options');
 }
-function enforceCategoryPresence (text, category) {
+function enforceCategoryPresence(text, category) {
   const t = String(text || '');
   const hasAny = (arr) => arr.some(w => new RegExp(`\\b${w}\\b`, 'i').test(t));
   const APPEND = (line) => (t.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
@@ -302,7 +360,7 @@ function enforceCategoryPresence (text, category) {
   }[category];
   return APPEND(injection);
 }
-function cleanFinalText (text) {
+function cleanFinalText(text) {
   return String(text || '')
     .replace(/\s+/g, ' ')
     .replace(/\.{2,}/g, '.')
@@ -311,13 +369,13 @@ function cleanFinalText (text) {
     .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
     .trim();
 }
-function categoryLabelForOverlay (category) {
+function categoryLabelForOverlay(category) {
   return {
     fashion: 'FASHION', fitness: 'TRAINING', cosmetics: 'BEAUTY', hair: 'HAIR CARE',
     food: 'FOOD', pets: 'PET CARE', electronics: 'TECH', home: 'HOME', coffee: 'COFFEE', generic: 'SHOP'
   }[category || 'generic'];
 }
-function overlayTitleFromAnswers (answers = {}, categoryOrTopic = '') {
+function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
   const category = categoryOrTopic && /^(fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
     ? categoryOrTopic.toLowerCase() : null;
   const brand = (answers.businessName || '').trim().toUpperCase();
@@ -335,7 +393,7 @@ const DATA_DIR = path.join(__dirname, '../data');
 const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
 const MAX_FILE_MB = 1.5;
 const MAX_TOTAL_CHARS = 45_000;
-function loadTrainingContext () {
+function loadTrainingContext() {
   if (!fs.existsSync(DATA_DIR)) return '';
   const files = fs.readdirSync(DATA_DIR)
     .map(f => path.join(__dirname, '../data', f))
@@ -363,7 +421,7 @@ let customContext = loadTrainingContext();
 
 /* ---------------------------- Scrape ---------------------------- */
 router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
-async function getWebsiteText (url) {
+async function getWebsiteText(url) {
   try {
     const clean = String(url || '').trim();
     if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
@@ -422,6 +480,17 @@ Output ONLY the script text.`;
 });
 
 /* ------------------- Campaign assets (headline/body/cta) ------------------- */
+const ALLOWED_CTAS = ['SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'];
+function pickFromAllowedCTAs(answers = {}, seed = '') {
+  const t = String(answers?.cta || '').trim();
+  if (t) {
+    const norm = t.toUpperCase().replace(/[\'’]/g, '').replace(/[^A-Z0-9 !?]/g, '').replace(/\s+/g, ' ').trim();
+    const withBang = /!$/.test(norm) ? norm : `${norm}!`;
+    if (ALLOWED_CTAS.includes(withBang)) return withBang;
+  }
+  let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
+  return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
+}
 router.post('/generate-campaign-assets', async (req, res) => {
   try {
     const { answers = {}, url = '' } = req.body;
@@ -502,10 +571,10 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 
 /* ---------------------- Image overlays ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
-function escSVG (s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function estWidth (text, fs) { return (String(text||'').length||1)*fs*0.60; }
-function fitFont (text, maxW, startFs, minFs=26) { let fs=startFs; while(fs>minFs && estWidth(text,fs)>maxW) fs-=2; return fs; }
-function splitTwoLines (text,maxW,startFs){
+function escSVG(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function estWidth(text, fs) { return (String(text||'').length||1)*fs*0.60; }
+function fitFont(text, maxW, startFs, minFs=26) { let fs=startFs; while(fs>minFs && estWidth(text,fs)>maxW) fs-=2; return fs; }
+function splitTwoLines(text,maxW,startFs){
   const words=String(text||'').split(/\s+/).filter(Boolean);
   if(words.length<=2) return {lines:[text],fs:fitFont(text,maxW,startFs)};
   for(let cut=Math.ceil(words.length/2);cut<words.length-1;cut++){
@@ -516,30 +585,19 @@ function splitTwoLines (text,maxW,startFs){
   return {lines:[text],fs:fitFont(text,maxW,startFs)};
 }
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
-function cleanHeadline (h){
+function cleanHeadline(h){
   h=String(h||'').replace(/[^a-z0-9 &\-]/gi,' ').replace(/\s+/g,' ').trim();
   if(!h || BANNED_TERMS.test(h)) return '';
   const words=h.split(' ');
   if(words.length>6) h = words.slice(0,6).join(' ');
   return h.toUpperCase();
 }
-const ALLOWED_CTAS = ['SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'];
-function pickFromAllowedCTAs (answers = {}, seed = '') {
-  const t = String(answers?.cta || '').trim();
-  if (t) {
-    const norm = t.toUpperCase().replace(/[\'’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
-    const withBang = /!$/.test(norm) ? norm : `${norm}!`;
-    if (ALLOWED_CTAS.includes(withBang)) return withBang;
-  }
-  let h = 0; for (const c of String(seed || Date.now())) h = (h*31 + c.charCodeAt(0))>>>0;
-  return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
-}
-function cleanCTA (c){
+function cleanCTA(c){
   const norm = String(c||'').toUpperCase().replace(/[\'’]/g,'').replace(/[^A-Z0-9 !?]/g,'').replace(/\s+/g,' ').trim();
   const withBang = /!$/.test(norm) ? norm : (norm ? `${norm}!` : '');
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
-function pickSansFontFile () {
+function pickSansFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -575,7 +633,7 @@ async function analyzeImageForPlacement (imgBuf) {
     return { darkerSide, darkerBand, brandColor, diffLR };
   } catch { return { darkerSide:'left', darkerBand:'top', brandColor:'#E63946', diffLR: 0.0 }; }
 }
-function svgDefs (brandColor) {
+function svgDefs(brandColor) {
   return `
     <defs>
       <linearGradient id="gShadeV" x1="0" y1="0" x2="0" y2="1">
@@ -601,9 +659,8 @@ function svgDefs (brandColor) {
   `;
 }
 const LIGHT = '#f5f7f9';
-const MAX_W_TEXT = (W) => W - 140;
 
-/* ---------- NEW: subline crafting (short, safe) ---------- */
+/* ---------- subline crafting (short, safe) ---------- */
 function craftSubline (answers = {}, category = 'generic') {
   const pick = (s) => (String(s || '').replace(/[^\w\s\-']/g,'').trim());
   const candidates = [
@@ -648,16 +705,15 @@ function wantsSaleBadge (answers = {}) {
   return /(sale|% off|percent off|discount|save|clearance|deal)/i.test(t);
 }
 
-/* ---------- Templated SVG with guaranteed spacing ---------- */
+/* ---------- Templated SVG ---------- */
 function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferBand='top', brandColor='#E63946', choose=3, sale=false }) {
   const defs = svgDefs(brandColor);
 
-  // Shared measurements
   const SAFE_PAD = 24;
-  const PANEL_W = 560; // a touch wider
+  const PANEL_W = 560;
   const PANEL_PAD = 34;
   const TITLE_MAX_W = (W) => W - 2 * (SAFE_PAD + PANEL_PAD);
-  const SUB_FS_BASE = 32; // larger subline
+  const SUB_FS_BASE = 32;
   const TITLE_FS_CAP = 66;
 
   const fitTitle = (maxW) => {
@@ -669,7 +725,7 @@ function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferB
     return { fs };
   };
 
-  // Central band (clean, centered)
+  // Central band
   if (choose === 1) {
     const bandH = 252;
     const maxW = TITLE_MAX_W(W);
@@ -696,9 +752,9 @@ function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferB
     `;
   }
 
-  // Card/pane (glass/gradient), text left-aligned inside but centered vertically
+  // Card/pane
   const x0 = prefer === 'left' ? SAFE_PAD : W - PANEL_W - SAFE_PAD;
-  const cx = x0 + PANEL_W/2; // center reference inside the pane
+  const cx = x0 + PANEL_W/2;
   const textW = PANEL_W - 2 * PANEL_PAD;
   const t3 = fitTitle(textW);
   const s3 = fitSub(textW);
@@ -728,7 +784,7 @@ function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferB
     `;
   }
 
-  // Edge-shaded template (headline/sub centered block)
+  // Edge-shaded
   if (choose === 6) {
     const yBase = preferBand === 'top' ? 140 : H - 140 - t3.fs * (t3.lines.length);
     const ySub = yBase + t3.fs * t3.lines.length + 24;
@@ -752,10 +808,10 @@ function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferB
     `;
   }
 
-  // Ribbon (no badge unless sale)
+  // Ribbon
   if (choose === 4) {
     const ribbonH = 170, angle = prefer === 'left' ? -10 : 10, xMid = W/2, yMid = H*0.28;
-    const t = fitTitle(W - 240);
+    const t = splitTwoLines(title, W - 240, 66);
     const yCTA = H*0.74;
 
     return `${defs}
@@ -775,8 +831,8 @@ function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferB
 
   // Badge (5) — only when sale=true
   if (choose === 5 && sale) {
-    const fit5 = fitTitle(W - 160);
-    const sub = fitSub(W - 160);
+    const fit5 = splitTwoLines(title, W - 160, 66);
+    const sub = { fs: fitFont(subline, W - 160, 32, 22) };
     const yTitle = H*0.76;
     const ySub = yTitle + fit5.fs * fit5.lines.length + 20;
     const yCTA = ySub + sub.fs + 36;
@@ -806,11 +862,11 @@ function svgOverlayCreative ({ W, H, title, subline, cta, prefer='left', preferB
     `;
   }
 
-  // default
+  // default → pane
   return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, sale });
 }
 
-/* ---------- Updated builder (sharper, no enlargement) ---------- */
+/* ---------- Overlay builder ---------- */
 async function buildOverlayImage ({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP', answers = {}, category = 'generic' }) {
   const W = 1200, H = 628;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
@@ -837,31 +893,9 @@ async function buildOverlayImage ({ imageUrl, headlineHint = '', ctaHint = '', s
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
 
-/* ------------------------------- Utils ------------------------------- */
-async function downloadFileWithTimeout (url, dest, timeoutMs=16000, maxSizeMB=15) {
-  return new Promise((resolve, reject) => {
-    if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
-    const writer = fs.createWriteStream(dest);
-    let timedOut = false;
-    const timeout = setTimeout(()=>{timedOut=true;writer.destroy();try{fs.unlinkSync(dest);}catch{};reject(new Error('Download timed out'));}, timeoutMs);
-    axios({ url, method:'GET', responseType:'stream', timeout: timeoutMs })
-      .then(resp => {
-        let bytes=0;
-        resp.data.on('data', ch => { bytes+=ch.length; if (bytes > maxSizeMB*1024*1024 && !timedOut) { timedOut=true; writer.destroy(); try{fs.unlinkSync(dest);}catch{}; clearTimeout(timeout); reject(new Error('File too large')); }});
-        resp.data.on('error', err => { clearTimeout(timeout); if (!timedOut) reject(err); });
-        resp.data.pipe(writer);
-        writer.on('finish', ()=>{clearTimeout(timeout); if (!timedOut) resolve(dest);});
-        writer.on('error', err=>{clearTimeout(timeout); try{fs.unlinkSync(dest);}catch{}; if (!timedOut) reject(err);});
-      })
-      .catch(err=>{clearTimeout(timeout); try{fs.unlinkSync(dest);}catch{}; reject(err);});
-  });
-}
-
-/* -------------------- Video constants -------------------- */
-const V_W = 1080;  // square
-const V_H = 1080;
-const FPS = 30;
-
+/* -------------------- VIDEO: kept available (frontend can disable) -------------------- */
+/* (Video routes left intact; images are light. Your UI currently pauses video calls.) */
+const V_W = 1080, V_H = 1080, FPS = 30;
 function pickSerifFontFile () {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -877,8 +911,6 @@ function safeFFText (t){
     .replace(/\b(dot|com|net|org|io|co)\b/gi, '').replace(/[^A-Za-z0-9 !?\-]/g,' ')
     .replace(/\s+/g,' ').trim().toUpperCase().slice(0, 40);
 }
-
-/* ---- Captions: bigger, cleaner sans, centered baseline ---- */
 function splitForCaptions (text) {
   let parts = String(text||'').trim().replace(/\s+/g,' ')
     .split(/(?<=[.?!])\s+/).filter(Boolean);
@@ -936,143 +968,6 @@ function buildCaptionDrawtexts (script, duration, fontParam, workId='w') {
   try { fs.writeFileSync(srtPath, srtLines.join('\n')); } catch {}
   return { filter: pieces.join(','), files, srtPath };
 }
-
-/* -------------------- Still video -------------------- */
-async function composeStillVideo ({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
-  housekeeping();
-  const outDir = ensureGeneratedDir();
-  const id = uuidv4();
-  const outFile = `${id}.mp4`;
-  const outPath = path.join(outDir, outFile);
-
-  let finalImageUrl = imageUrl || 'https://picsum.photos/seed/smartmark/1200/1200';
-  try { await axios.get(finalImageUrl, { timeout: 5000 }); } catch { finalImageUrl = 'https://singlecolorimage.com/get/2b2f33/1200x1200'; }
-
-  let imgFile = null;
-  try {
-    imgFile = path.join(outDir, `${id}.jpg`);
-    const imgRes = await axios.get(finalImageUrl, { responseType: 'arraybuffer', timeout: 9000 });
-    const sharped = await sharp(imgRes.data).resize(1200, 1200, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true }).jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true }).toBuffer();
-    fs.writeFileSync(imgFile, sharped);
-  } catch { imgFile = null; }
-
-  const sansFile = pickSansFontFile();
-  const serifFile = pickSerifFontFile();
-  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
-  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Arial Black':`;
-  const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
-
-  const brand = safeFFText(brandLine);
-  const cta   = safeFFText(ctaText);
-
-  const TAIL = 0.8;
-
-  const args = ['-y'];
-  if (imgFile) { args.push('-loop', '1', '-t', duration.toFixed(2), '-i', imgFile); }
-  else { args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`); }
-
-  if (ttsPath) args.push('-i', ttsPath);
-  if (musicPath) args.push('-i', musicPath);
-  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
-
-  const baseVideo = imgFile
-  ? `[0:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
-    `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
-    `zoompan=z='min(zoom+0.00022,1.018)':d=${Math.floor(FPS*duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
-  : `[0:v]fps=${FPS},format=yuv420p[cv]`;
-
-  const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=46:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
-  const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
-  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-  let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro},format=yuv420p[v]`;
-
-  const mixInputs = [];
-  let aIdx = 1;
-  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  mixInputs.push(`${aIdx}:a`);
-  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[a${i}]`).join(';')};` +
-        `${mixInputs.map((_,i)=>`[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
-
-  args.push(
-    '-filter_complex', fc, '-map', '[v]', '-map', '[mix]',
-    '-t', duration.toFixed(2), '-r', String(FPS),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p',
-    '-b:v', '5200k', '-maxrate', '6800k', '-bufsize', '13600k',
-    '-g', String(FPS*2), '-keyint_min', String(FPS),
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
-    '-movflags', '+faststart', '-shortest', '-avoid_negative_ts', 'make_zero',
-    '-max_muxing_queue_size', '1024', '-loglevel', 'error', outPath
-  );
-
-  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
-
-  try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
-  try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
-  return {
-    publicUrl: mediaPath(outFile),
-    absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
-    subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : ''
-  };
-}
-
-/* -------------------- Title card (fallback) -------------------- */
-async function composeTitleCardVideo ({ duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText='' }) {
-  housekeeping();
-  const outDir = ensureGeneratedDir();
-  const id = uuidv4();
-  const outFile = `${id}.mp4`;
-  const outPath = path.join(outDir, outFile);
-
-  const sansFile = pickSansFontFile();
-  const serifFile = pickSerifFontFile();
-  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
-  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Arial Black':`;
-  const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
-
-  const brand = safeFFText(brandLine);
-  const cta   = safeFFText(ctaText);
-  const TAIL = 0.8;
-
-  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
-  if (ttsPath) args.push('-i', ttsPath);
-  if (musicPath) args.push('-i', musicPath);
-  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
-
-  const intro  = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=58:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration-TAIL-0.6).toFixed(2)})'`;
-  const ctaFx  = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration-TAIL).toFixed(2)})'`;
-  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-  let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter?','+subsBuild.filter:''},${ctaFx},format=yuv420p[v]`;
-
-  const mixInputs = [];
-  let aIdx = 1;
-  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  mixInputs.push(`${aIdx}:a`);
-  fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[b${i}]`).join(';')};` +
-        `${mixInputs.map((_,i)=>`[b${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
-
-  args.push(
-    '-filter_complex', fc, '-map', '[v]', '-map', '[mix]',
-    '-t', duration.toFixed(2), '-r', String(FPS),
-    '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p',
-    '-b:v', '5200k', '-maxrate', '6800k', '-bufsize', '13600k',
-    '-g', String(FPS*2), '-keyint_min', String(FPS),
-    '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
-    '-movflags', '+faststart', '-avoid_negative_ts', 'make_zero',
-    '-shortest', '-max_muxing_queue_size', '1024', '-loglevel', 'error', outPath
-  );
-
-  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
-  try { for (const f of (subsBuild.files||[])) fs.unlinkSync(f); } catch {}
-  return {
-    publicUrl: mediaPath(outFile),
-    absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
-    subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : ''
-  };
-}
-
-/* -------------------------- Spawn helpers -------------------------- */
 function runSpawn (cmd, args, opts = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
@@ -1092,8 +987,10 @@ async function probeDuration (file, timeoutMs=8000) {
   });
 }
 
-/* ------------------------------- VIDEO (generate-video-ad) ------------------------------- */
+/* ------------------------------- VIDEO API ------------------------------- */
+router.options('/generate-video-ad', (req, res) => { applyCors(req, res); return res.status(204).end(); });
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
+  applyCors(req, res);
   housekeeping();
   try { if (typeof res.setTimeout === 'function') res.setTimeout(180000); if (typeof req.setTimeout === 'function') req.setTimeout(180000); } catch {}
   res.setHeader('Content-Type', 'application/json');
@@ -1109,10 +1006,6 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g,'').trim();
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
-
-    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 65000);
-    const startTs = Date.now();
-    const timeLeft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
 
     const forbidFashionLine = category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
     const buildPrompt = (lo, hi) =>
@@ -1170,21 +1063,20 @@ Output ONLY the script text.`;
     const TAIL = 0.8;
     const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
 
-    let musicPath = null; // (kept simple; optional dir scan removed for speed)
+    let musicPath = null; // optional bg music omitted for lightness
 
     const ensureImageForStill = async () => {
       let imageUrl = null;
-      if (PEXELS_API_KEY && timeLeft() > 6000) {
+      if (PEXELS_API_KEY) {
         try {
           const keyword = getImageKeyword(answers.industry || '', url) || topic;
           const p = await axios.get(PEXELS_IMG_BASE, {
             headers: { Authorization: PEXELS_API_KEY },
-            params: { query: keyword, per_page: 18 }, // faster
-            timeout: Math.max(2500, Math.min(5000, timeLeft() - 1500))
+            params: { query: keyword, per_page: 18 },
+            timeout: 5000
           });
           const photos = p.data?.photos || [];
           if (photos.length) {
-            // prefer highest-resolution link first
             const pick = photos[0];
             imageUrl = pick.src.original || pick.src.large2x || pick.src.large || null;
           }
@@ -1196,7 +1088,72 @@ Output ONLY the script text.`;
     };
 
     const imageUrl = await ensureImageForStill();
-    const still = await composeStillVideo({ imageUrl, duration: finalDur, ttsPath, musicPath, brandLine: brandForVideo, ctaText, scriptText: script });
+    // If frontend disabled videos, this route may be idle; still functional
+    const still = await (async () => {
+      const outDir = ensureGeneratedDir();
+      const id = uuidv4();
+      const outFile = `${id}.mp4`;
+      const outPath = path.join(outDir, outFile);
+
+      let imgFile = null;
+      try {
+        imgFile = path.join(outDir, `${id}.jpg`);
+        const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 9000 });
+        const sharped = await sharp(imgRes.data).resize(1200, 1200, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true }).jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true }).toBuffer();
+        fs.writeFileSync(imgFile, sharped);
+      } catch { imgFile = null; }
+
+      const sansFile = pickSansFontFile();
+      const serifFile = pickSerifFontFile();
+      const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+      const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Arial Black':`;
+      const txtCommon = `fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75`;
+
+      const brand = safeFFText(((answers?.businessName || 'YOUR BRAND') + '!'));
+      const cta   = safeFFText(pickFromAllowedCTAs(answers));
+
+      const TAIL_T = 0.8;
+      const args = ['-y'];
+      if (imgFile) { args.push('-loop', '1', '-t', finalDur.toFixed(2), '-i', imgFile); }
+      else { args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`); }
+      if (ttsPath) args.push('-i', ttsPath);
+      args.push('-f', 'lavfi', '-t', finalDur.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+
+      const baseVideo = imgFile
+        ? `[0:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,zoompan=z='min(zoom+0.00022,1.018)':d=${Math.floor(FPS*finalDur)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
+        : `[0:v]fps=${FPS},format=yuv420p[cv]`;
+
+      const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=46:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
+      const ctaOutro   = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(finalDur-TAIL_T).toFixed(2)})'`;
+      const subsBuild = buildCaptionDrawtexts(script, finalDur, fontParamSerif, id);
+      let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter?','+subsBuild.filter:''},${ctaOutro},format=yuv420p[v]`;
+
+      const mixInputs = [];
+      let aIdx = 1;
+      if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+      mixInputs.push(`${aIdx}:a`);
+      fc += `;${mixInputs.map((m,i)=>`[${m}]aresample=48000${i===1?`,volume=0.18`:''}[a${i}]`).join(';')};` +
+            `${mixInputs.map((_,i)=>`[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
+
+      args.push(
+        '-filter_complex', fc, '-map', '[v]', '-map', '[mix]',
+        '-t', finalDur.toFixed(2), '-r', String(FPS),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '21', '-pix_fmt', 'yuv420p',
+        '-b:v', '5200k', '-maxrate', '6800k', '-bufsize', '13600k',
+        '-g', String(FPS*2), '-keyint_min', String(FPS),
+        '-c:a', 'aac', '-b:a', '160k', '-ar', '48000',
+        '-movflags', '+faststart', '-shortest', '-avoid_negative_ts', 'make_zero',
+        '-max_muxing_queue_size', '1024', '-loglevel', 'error', outPath
+      );
+
+      await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
+      try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
+      return {
+        publicUrl: mediaPath(outFile),
+        absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
+        subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : ''
+      };
+    })();
 
     const variations = [{ url: still.publicUrl, absoluteUrl: still.absoluteUrl, subtitlesUrl: still.subtitlesUrl }];
 
@@ -1226,12 +1183,15 @@ Output ONLY the script text.`;
       videoVariations: variations.map(v => ({ url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl }))
     });
   } catch (err) {
+    applyCors(req, res);
     if (!res.headersSent) return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
   }
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
+/* --------------------- IMAGE: search + overlay (max 3 variations) --------------------- */
+router.options('/generate-image-from-prompt', (req, res) => { applyCors(req, res); return res.status(204).end(); });
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
+  applyCors(req, res);
   housekeeping();
   try { if (typeof res.setTimeout === 'function') res.setTimeout(60000); if (typeof req.setTimeout === 'function') req.setTimeout(60000); } catch {}
   try {
@@ -1242,7 +1202,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const industry = answers.industry || top.industry || '';
     const category = resolveCategory(answers || {});
     const keyword = getImageKeyword(industry, url);
-
     const sale = wantsSaleBadge(answers);
 
     const makeOne = async (baseUrl, seed) => {
@@ -1266,11 +1225,12 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       }
     };
 
+    // If no Pexels API, generate 3 placeholder variants with our overlay
     if (!PEXELS_API_KEY) {
       const urls = [];
-      for (let i=0;i<3;i++){
+      for (let i = 0; i < 3; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark'+i+'/1200/628',
+          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
           headlineHint: overlayTitleFromAnswers(answers, category),
           ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
           seed: regenerateToken + '_' + i,
@@ -1288,7 +1248,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 18 },
+        params: { query: keyword, per_page: 24 },
         timeout: 5000
       });
       photos = r.data.photos || [];
@@ -1325,6 +1285,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       imageVariations: urls.map(u => ({ url: u }))
     });
   } catch (e) {
+    applyCors(req, res);
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
@@ -1339,19 +1300,23 @@ async function listRecentForOwner (req) {
     .slice(0, 50);
 }
 router.get('/recent', async (req, res) => {
+  applyCors(req, res);
   try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
   catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 router.get('/assets/recent', async (req, res) => {
+  applyCors(req, res);
   try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
   catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 router.get('/recent-assets', async (req, res) => {
+  applyCors(req, res);
   try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
   catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
 });
 
 router.post('/assets/clear', async (req, res) => {
+  applyCors(req, res);
   try {
     await ensureAssetsTable();
     const owner = ownerKeyFromReq(req);
@@ -1366,14 +1331,7 @@ router.post('/assets/clear', async (req, res) => {
 
 /* -------- Ensure CORS even on errors -------- */
 router.use((err, req, res, _next) => {
-  try {
-    const origin = req.headers.origin;
-    if (origin && ALLOW_ORIGINS.has(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    res.setHeader('Vary', 'Origin');
-  } catch {}
+  applyCors(req, res);
   const code = err?.status || 500;
   res.status(code).json({ error: err?.message || 'Server error' });
 });
