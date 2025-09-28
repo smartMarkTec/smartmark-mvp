@@ -1,14 +1,12 @@
 'use strict';
 
 /**
- * SmartMark AI routes – hardened 2025-09-28
- * - Bulletproof CORS at router level (preflights + errors)
- * - Low-memory Sharp config (tiny cache, single thread)
- * - Concurrency gate for heavy routes (prevents OOM on Render 512MB)
- * - Range-enabled media streamer (/api/media/:file) with CORP + cache
- * - Image generator: Pexels → overlay SVG → /api/media/xxx.jpg
- * - Video generator: still-video compose with captions + optional TTS
- * - Recent assets + clear endpoints
+ * SmartMark AI routes – resilient build
+ * - Unconditional CORS (even on errors) to avoid red-herring CORS failures
+ * - Sharp memory discipline + concurrency gate (prevents OOM on Render 512MB)
+ * - Hard time budgets with graceful fallbacks to avoid 504s
+ * - Pexels fast path + placeholder overlays when rate-limited/offline
+ * - Range media streamer for mp4/jpg/png + asset persistence (24h TTL)
  */
 
 const express = require('express');
@@ -16,21 +14,24 @@ const router = express.Router();
 
 /* ---------------- Memory discipline for Sharp + concurrency gate ---------------- */
 const sharp = require('sharp');
+
+// Keep Sharp tiny and predictable
 try {
-  // Keep process memory low; disallow file cache; single worker in libvips
-  sharp.cache({ memory: 16, files: 0, items: 0 });
+  sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16 MB process cache
   sharp.concurrency(1);
 } catch {}
 
-// Allow only N heavy jobs at once (default 1)
+// Simple semaphore: allow only N heavy jobs at once (default 1)
 const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
 let active = 0;
 const waiters = [];
+
 function acquire() {
   return new Promise((resolve) => {
     const tryGo = () => {
       if (active < GEN_LIMIT) {
-        active += 1; resolve();
+        active += 1;
+        resolve();
       } else {
         waiters.push(tryGo);
       }
@@ -43,7 +44,8 @@ function release() {
   const next = waiters.shift();
   if (next) setImmediate(next);
 }
-// Serialize only the generator routes
+
+// Serialize only the generator routes (expensive ones)
 const heavyRoute = (req, res, next) => {
   if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
     return next();
@@ -56,22 +58,15 @@ const heavyRoute = (req, res, next) => {
 };
 router.use(heavyRoute);
 
-/* ------------------------ CORS (router-level, defensive) ------------------------ */
-const ALLOW_ORIGINS = new Set([
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'https://smartmark-mvp.vercel.app',
-  process.env.FRONTEND_URL,
-  process.env.FRONTEND_ORIGIN
-].filter(Boolean));
-
+/* ------------------------ CORS (router-level, unconditional) ------------------------ */
+// Reflect caller origin so even 50x carry the ACAO header (prevents CORS red-herring)
 router.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && ALLOW_ORIGINS.has(origin)) {
+  if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Vary', 'Origin');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
@@ -82,27 +77,11 @@ router.use((req, res, next) => {
   next();
 });
 
-/* ------------- Security & Rate-Limiting (with safe fallbacks) ------------- */
-let secureHeaders, basicRateLimit;
-try {
-  ({ secureHeaders, basicRateLimit } = require('../middleware/security'));
-} catch {
-  // Safe no-ops if middleware module is absent
-  secureHeaders = () => (_req, res, next) => {
-    try {
-      res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
-      res.setHeader('X-Frame-Options', 'DENY');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-      res.setHeader('X-DNS-Prefetch-Control', 'off');
-    } catch {}
-    next();
-  };
-  basicRateLimit = () => (_req, _res, next) => next();
-}
+/* ------------- Security & Rate-Limiting ------------- */
+const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
-const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })); // general routes
+const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 }); // per heavy route
 
 /* ------------------------------ Deps ------------------------------ */
 const axios = require('axios');
@@ -118,7 +97,7 @@ const db = require('../db');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
-/* --------------------------- Disk guard --------------------------- */
+/* -------- Disk guard -------- */
 const GEN_DIR = '/tmp/generated';
 function ensureGeneratedDir() {
   try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {}
@@ -126,16 +105,15 @@ function ensureGeneratedDir() {
 }
 function dirStats(p) {
   try {
-    const files = fs.readdirSync(p)
-      .map(f => ({ f, full: path.join(p, f) }))
-      .filter(x => fs.existsSync(x.full) && fs.statSync(x.full).isFile())
-      .map(x => ({ ...x, st: fs.statSync(x.full) }))
+    const files = fs
+      .readdirSync(p)
+      .map((f) => ({ f, full: path.join(p, f) }))
+      .filter((x) => fs.existsSync(x.full) && fs.statSync(x.full).isFile())
+      .map((x) => ({ ...x, st: fs.statSync(x.full) }))
       .sort((a, b) => a.st.mtimeMs - b.st.mtimeMs);
     const bytes = files.reduce((n, x) => n + x.st.size, 0);
     return { files, bytes };
-  } catch {
-    return { files: [], bytes: 0 };
-  }
+  } catch { return { files: [], bytes: 0 }; }
 }
 const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024);
 function sweepTmpDirHardCap() {
@@ -168,18 +146,16 @@ function housekeeping() {
 
 /* --------------------------- Helpers --------------------------- */
 function publicBase() {
-  return process.env.PUBLIC_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'https://smartmark-mvp.onrender.com';
+  return (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://smartmark-mvp.onrender.com'
+  );
 }
 function absolutePublicUrl(relativePath) {
   if (!relativePath) return '';
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
   return `${publicBase()}${relativePath}`;
-}
-function mediaPath(fname) {
-  return `/api/media/${fname}`;
-}
-function maybeGC() {
-  if (global.gc) { try { global.gc(); } catch {} }
 }
 function getUserToken(req) {
   const auth = req?.headers?.authorization || '';
@@ -188,56 +164,21 @@ function getUserToken(req) {
   if (req?.body?.userAccessToken) return req.body.userAccessToken;
   return getFbUserToken() || null;
 }
-
-/* ---------- Persist generated assets (24h TTL) ---------- */
-const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
-function ownerKeyFromReq(req) {
-  const cookieSid = req?.cookies?.sm_sid;
-  const headerSid = req?.headers?.['x-sm-sid'];
-  const auth = req?.headers?.authorization || '';
-  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
-  return cookieSid || headerSid || bearer || `ip:${req.ip}`;
-}
-async function ensureAssetsTable() {
-  await db.read();
-  db.data = db.data || {};
-  db.data.generated_assets = db.data.generated_assets || [];
-  await db.write();
-}
-async function purgeExpiredAssets() {
-  await ensureAssetsTable();
-  const now = Date.now();
-  const before = db.data.generated_assets.length;
-  db.data.generated_assets = db.data.generated_assets.filter(a => (a.expiresAt || 0) > now);
-  if (db.data.generated_assets.length !== before) await db.write();
-}
-async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
-  await ensureAssetsTable();
-  await purgeExpiredAssets();
-  const owner = ownerKeyFromReq(req);
-  const now = Date.now();
-  const rec = {
-    id: uuidv4(),
-    owner, kind, url, absoluteUrl, meta,
-    createdAt: now, expiresAt: now + ASSET_TTL_MS
-  };
-  db.data.generated_assets.push(rec);
-  const mine = db.data.generated_assets.filter(a => a.owner === owner).sort((a, b) => b.createdAt - a.createdAt);
-  if (mine.length > 50) {
-    const keepIds = new Set(mine.slice(0, 50).map(a => a.id));
-    db.data.generated_assets = db.data.generated_assets.filter(a => a.owner !== owner || keepIds.has(a.id));
-  }
-  await db.write();
-  housekeeping();
-  return rec;
-}
-async function getRecentImageForOwner(req) {
-  await purgeExpiredAssets();
-  const owner = ownerKeyFromReq(req);
-  const img = (db.data.generated_assets || [])
-    .filter(a => a.owner === owner && a.kind === 'image')
-    .sort((a, b) => b.createdAt - a.createdAt)[0];
-  return img ? img.absoluteUrl || absolutePublicUrl(img.url) : null;
+async function uploadVideoToAdAccount(
+  adAccountId, userAccessToken, fileUrl,
+  name = 'SmartMark Video', description = 'Generated by SmartMark'
+) {
+  const id = String(adAccountId || '').replace(/^act_/, '').replace(/\D/g, '');
+  const url = `https://graph.facebook.com/v23.0/act_${id}/advideos`;
+  const form = new FormData();
+  form.append('file_url', fileUrl);
+  form.append('name', name);
+  form.append('description', description);
+  const resp = await axios.post(url, form, {
+    headers: form.getHeaders(),
+    params: { access_token: userAccessToken },
+  });
+  return resp.data;
 }
 
 /* --------------------- Range-enabled media streamer --------------------- */
@@ -251,11 +192,11 @@ router.get('/media/:file', async (req, res) => {
     const stat = fs.statSync(full);
     const ext = path.extname(full).toLowerCase();
     const type =
-      ext === '.mp4' ? 'video/mp4'
-      : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg'
-      : ext === '.png' ? 'image/png'
-      : ext === '.srt' ? 'text/plain; charset=utf-8'
-      : 'application/octet-stream';
+      ext === '.mp4' ? 'video/mp4' :
+      ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+      ext === '.png' ? 'image/png' :
+      ext === '.srt' ? 'text/plain; charset=utf-8' :
+      'application/octet-stream';
 
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', 'bytes');
@@ -282,60 +223,64 @@ router.get('/media/:file', async (req, res) => {
     res.status(500).end();
   }
 });
+function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
+function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
-/* ------------------------ Training context ------------------------ */
-const DATA_DIR = path.join(__dirname, '../data');
-const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
-const MAX_FILE_MB = 1.5;
-const MAX_TOTAL_CHARS = 45000;
-function loadTrainingContext() {
-  if (!fs.existsSync(DATA_DIR)) return '';
-  const files = fs.readdirSync(DATA_DIR)
-    .map(f => path.join(__dirname, '../data', f))
-    .filter(full => {
-      const ext = path.extname(full).toLowerCase();
-      try {
-        const st = fs.statSync(full);
-        return st.isFile() && ALLOWED_EXT.has(ext) && st.size <= MAX_FILE_MB * 1024 * 1024;
-      } catch { return false; }
-    });
-  let ctx = '';
-  for (const f of files) {
-    try {
-      const ext = path.extname(f).toLowerCase();
-      let text = fs.readFileSync(f, 'utf8');
-      if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text)); } catch {} }
-      if (!text.trim()) continue;
-      const block = `\n\n### SOURCE: ${path.basename(f)}\n${text}\n`;
-      if (ctx.length + block.length <= MAX_TOTAL_CHARS) ctx += block;
-    } catch {}
+/* ---------- Persist generated assets (24h TTL) ---------- */
+const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
+function ownerKeyFromReq(req) {
+  const cookieSid = req?.cookies?.sm_sid;
+  const headerSid = req?.headers?.['x-sm-sid'];
+  const auth = req?.headers?.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+  return cookieSid || headerSid || bearer || `ip:${req.ip}`;
+}
+async function ensureAssetsTable() {
+  await db.read();
+  db.data = db.data || {};
+  db.data.generated_assets = db.data.generated_assets || [];
+  await db.write();
+}
+async function purgeExpiredAssets() {
+  await ensureAssetsTable();
+  const now = Date.now();
+  const before = db.data.generated_assets.length;
+  db.data.generated_assets = db.data.generated_assets.filter((a) => (a.expiresAt || 0) > now);
+  if (db.data.generated_assets.length !== before) await db.write();
+}
+async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
+  await ensureAssetsTable();
+  await purgeExpiredAssets();
+  const owner = ownerKeyFromReq(req);
+  const now = Date.now();
+  const rec = {
+    id: uuidv4(), owner, kind, url, absoluteUrl, meta,
+    createdAt: now, expiresAt: now + ASSET_TTL_MS,
+  };
+  db.data.generated_assets.push(rec);
+  const mine = db.data.generated_assets
+    .filter((a) => a.owner === owner)
+    .sort((a, b) => b.createdAt - a.createdAt);
+  if (mine.length > 50) {
+    const keepIds = new Set(mine.slice(0, 50).map((a) => a.id));
+    db.data.generated_assets = db.data.generated_assets.filter(
+      (a) => a.owner !== owner || keepIds.has(a.id)
+    );
   }
-  return ctx.trim();
+  await db.write();
+  housekeeping();
+  return rec;
 }
-let customContext = loadTrainingContext();
-
-/* ---------------------------- Scrape ---------------------------- */
-router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
-async function getWebsiteText(url) {
-  try {
-    const clean = String(url || '').trim();
-    if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
-    const { data, headers } = await axios.get(clean, {
-      timeout: 7000, maxRedirects: 3, validateStatus: s => s < 400
-    });
-    if (!headers['content-type']?.includes('text/html')) throw new Error('Not HTML');
-    const body = String(data)
-      .replace(/<script[\s\S]*?<\/script>/gi, '')
-      .replace(/<style[\s\S]*?<\/style>/gi, '')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
-    return body.slice(0, 3500);
-  } catch { return ''; }
+async function getRecentImageForOwner(req) {
+  await purgeExpiredAssets();
+  const owner = ownerKeyFromReq(req);
+  const img = (db.data.generated_assets || [])
+    .filter((a) => a.owner === owner && a.kind === 'image')
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  return img ? img.absoluteUrl || absolutePublicUrl(img.url) : null;
 }
 
-/* --------------------------- Copy helpers --------------------------- */
+/* ---------- Topic/category ---------- */
 const IMAGE_KEYWORD_MAP = [
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
@@ -351,7 +296,7 @@ const IMAGE_KEYWORD_MAP = [
 function getImageKeyword(industry = '', url = '') {
   const input = `${industry} ${url}`.toLowerCase();
   for (const row of IMAGE_KEYWORD_MAP)
-    if (row.match.some(m => input.includes(m))) return row.keyword;
+    if (row.match.some((m) => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
 }
 function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
@@ -386,7 +331,7 @@ function stripFashionIfNotApplicable(text, category) {
 }
 function enforceCategoryPresence(text, category) {
   const t = String(text || '');
-  const hasAny = (arr) => arr.some(w => new RegExp(`\\b${w}\\b`, 'i').test(t));
+  const hasAny = (arr) => arr.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(t));
   const APPEND = (line) => (t.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
   const req = {
     fitness: ['workout','training','gym','strength','wellness'],
@@ -398,7 +343,7 @@ function enforceCategoryPresence(text, category) {
     home: ['home','kitchen','decor','space'],
     coffee: ['coffee','brew','roast','espresso'],
     fashion: ['style','outfit','fabric','fit'],
-    generic: []
+    generic: [],
   }[category] || [];
   if (!req.length || hasAny(req)) return t;
   const injection = {
@@ -411,7 +356,7 @@ function enforceCategoryPresence(text, category) {
     home: 'A simple way to upgrade your space.',
     coffee: 'Balanced flavor for a better coffee break.',
     fashion: 'Find a look that works for you.',
-    generic: 'Easy to use and simple to get started.'
+    generic: 'Easy to use and simple to get started.',
   }[category];
   return APPEND(injection);
 }
@@ -427,12 +372,14 @@ function cleanFinalText(text) {
 function categoryLabelForOverlay(category) {
   return {
     fashion: 'FASHION', fitness: 'TRAINING', cosmetics: 'BEAUTY', hair: 'HAIR CARE',
-    food: 'FOOD', pets: 'PET CARE', electronics: 'TECH', home: 'HOME', coffee: 'COFFEE', generic: 'SHOP'
+    food: 'FOOD', pets: 'PET CARE', electronics: 'TECH', home: 'HOME',
+    coffee: 'COFFEE', generic: 'SHOP',
   }[category || 'generic'];
 }
 function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
   const category =
-    categoryOrTopic && /^(fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
+    categoryOrTopic &&
+    /^(fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
       ? String(categoryOrTopic).toLowerCase()
       : null;
   const brand = (answers.businessName || '').trim().toUpperCase();
@@ -445,6 +392,59 @@ function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
   return String(categoryOrTopic || 'SHOP').toUpperCase().slice(0, 24);
 }
 
+/* ------------------------ Training context ------------------------ */
+const DATA_DIR = path.join(__dirname, '../data');
+const ALLOWED_EXT = new Set(['.txt', '.md', '.markdown', '.json']);
+const MAX_FILE_MB = 1.5;
+const MAX_TOTAL_CHARS = 45000;
+function loadTrainingContext() {
+  if (!fs.existsSync(DATA_DIR)) return '';
+  const files = fs
+    .readdirSync(DATA_DIR)
+    .map((f) => path.join(__dirname, '../data', f))
+    .filter((full) => {
+      const ext = path.extname(full).toLowerCase();
+      try {
+        const st = fs.statSync(full);
+        return st.isFile() && ALLOWED_EXT.has(ext) && st.size <= MAX_FILE_MB * 1024 * 1024;
+      } catch { return false; }
+    });
+  let ctx = '';
+  for (const f of files) {
+    try {
+      const ext = path.extname(f).toLowerCase();
+      let text = fs.readFileSync(f, 'utf8');
+      if (ext === '.json') { try { text = JSON.stringify(JSON.parse(text)); } catch {} }
+      if (!text.trim()) continue;
+      const block = `\n\n### SOURCE: ${path.basename(f)}\n${text}\n`;
+      if (ctx.length + block.length <= MAX_TOTAL_CHARS) ctx += block;
+    } catch {}
+  }
+  return ctx.trim();
+}
+let customContext = loadTrainingContext();
+
+/* ---------------------------- Scrape ---------------------------- */
+router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
+async function getWebsiteText(url) {
+  try {
+    const clean = String(url || '').trim();
+    if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
+    const { data, headers } = await axios.get(clean, {
+      timeout: 7000, maxRedirects: 3, validateStatus: (s) => s < 400,
+    });
+    if (!headers['content-type']?.includes('text/html')) throw new Error('Not HTML');
+    const body = String(data)
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
+    return body.slice(0, 3500);
+  } catch { return ''; }
+}
+
 /* --------------------------- Ad Copy --------------------------- */
 router.post('/generate-ad-copy', async (req, res) => {
   const { description = '', businessName = '', url = '', answers = {} } = req.body;
@@ -452,8 +452,9 @@ router.post('/generate-ad-copy', async (req, res) => {
     return res.status(400).json({ error: 'Please provide at least a description.' });
   }
   const category = resolveCategory(answers || {});
-  const forbidFashionLine = category === 'fashion' ? '' :
-    `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
+  const forbidFashionLine =
+    category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
+
   let prompt = `You are an expert direct-response ad copywriter for e-commerce/online businesses.
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (about 46–72 words ≈ 15–17 seconds).
 - Keep it neutral and accurate; avoid assumptions about shipping, returns, guarantees, or inventory.
@@ -468,12 +469,20 @@ Output ONLY the script text.`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
 
   try {
-    const r = await openai.chat.completions.create({
-      model: 'gpt-4o',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 220,
-      temperature: 0.35,
-    });
+    // short timeout wrapper
+    const TIMEOUT_MS = 5000;
+    const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('assets-timeout')), ms))]);
+
+    const r = await withTimeout(
+      openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: prompt }],
+        max_tokens: 220,
+        temperature: 0.35,
+      }),
+      TIMEOUT_MS
+    );
+
     let script = r.choices?.[0]?.message?.content?.trim() || '';
     const categoryFixed = resolveCategory(answers || {});
     script = stripFashionIfNotApplicable(script, categoryFixed);
@@ -481,7 +490,7 @@ Output ONLY the script text.`;
     script = cleanFinalText(script);
     res.json({ adCopy: script });
   } catch {
-    res.status(500).json({ error: 'Failed to generate ad copy' });
+    res.json({ adCopy: 'A simple way to get started with less hassle and more value. Learn more.' });
   }
 });
 
@@ -494,7 +503,7 @@ router.post('/generate-campaign-assets', async (req, res) => {
       try {
         const h = new URL(u).hostname.replace(/^www\./, '');
         const base = h.split('.')[0] || 'Your Brand';
-        return base.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return base.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
       } catch { return 'Your Brand'; }
     };
     const brand = (answers.businessName && String(answers.businessName).trim()) || brandFromUrl(url);
@@ -505,8 +514,8 @@ router.post('/generate-campaign-assets', async (req, res) => {
     let websiteText = '';
     try { if (url && /^https?:\/\//i.test(url)) websiteText = await getWebsiteText(url); } catch {}
 
-    const forbidFashionLine = category === 'fashion' ? '' :
-      `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
+    const forbidFashionLine =
+      category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
 
     const prompt = `
 ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}You are a senior direct-response copywriter for e-commerce.
@@ -529,18 +538,27 @@ Main benefit: ${mainBenefit || '[unspecified]'}
 Offer: ${offer || '[none]'}
 Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim();
 
+    const TIMEOUT_MS = 5000;
+    const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('assets-timeout')), ms))]);
+
+    let r = null;
+    try {
+      r = await withTimeout(
+        openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 220,
+          temperature: 0.35,
+        }),
+        TIMEOUT_MS
+      );
+    } catch {}
+
     let headline = '', body = '', overlay = '';
     try {
-      const r = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 220,
-        temperature: 0.35,
-      });
-      const raw = r.choices?.[0]?.message?.content?.trim() || '{}';
+      const raw = r?.choices?.[0]?.message?.content?.trim() || '{}';
       const jsonStr = (raw.match(/\{[\s\S]*\}/) || [raw])[0];
       const parsed = JSON.parse(jsonStr);
-
       const clean = (s, max = 200) => cleanFinalText(String(s || '')).slice(0, max);
       headline = clean(parsed.headline, 55);
       body = stripFashionIfNotApplicable(clean(parsed.body, 220), category);
@@ -565,10 +583,12 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Overlay & image helpers ---------------------- */
+/* ---------------------- Image overlays ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) {
-  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
 function fitFont(text, maxW, startFs, minFs = 26) {
@@ -578,10 +598,8 @@ function splitTwoLines(text, maxW, startFs) {
   const words = String(text || '').split(/\s+/).filter(Boolean);
   if (words.length <= 2) return { lines: [text], fs: fitFont(text, maxW, startFs) };
   for (let cut = Math.ceil(words.length / 2); cut < words.length - 1; cut++) {
-    const a = words.slice(0, cut).join(' ');
-    const b = words.slice(cut).join(' ');
-    let fs = startFs;
-    fs = Math.min(fitFont(a, maxW, fs), fitFont(b, maxW, fs));
+    const a = words.slice(0, cut).join(' '), b = words.slice(cut).join(' ');
+    let fs = startFs; fs = Math.min(fitFont(a, maxW, fs), fitFont(b, maxW, fs));
     if (estWidth(a, fs) <= maxW && estWidth(b, fs) <= maxW) return { lines: [a, b], fs };
   }
   return { lines: [text], fs: fitFont(text, maxW, startFs) };
@@ -590,8 +608,7 @@ const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|
 function cleanHeadline(h) {
   h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
   if (!h || BANNED_TERMS.test(h)) return '';
-  const words = h.split(' ');
-  if (words.length > 6) h = words.slice(0, 6).join(' ');
+  const words = h.split(' '); if (words.length > 6) h = words.slice(0, 6).join(' ');
   return h.toUpperCase();
 }
 const ALLOWED_CTAS = [
@@ -630,22 +647,20 @@ async function analyzeImageForPlacement(imgBuf) {
     let left = 0, right = 0, top = 0, bottom = 0, rSum = 0, gSum = 0, bSum = 0;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 3; const r = data[i], g = data[i + 1], b = data[i + 2];
-      const l = 0.2126*r + 0.7152*g + 0.0722*b;
-      if (x < W/2) left += l; else right += l;
-      if (y < H/2) top += l; else bottom += l;
+      const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      if (x < W / 2) left += l; else right += l;
+      if (y < H / 2) top += l; else bottom += l;
       rSum += r; gSum += g; bSum += b;
     }
     const darkerSide = left < right ? 'left' : 'right';
     const darkerBand = top < bottom ? 'top' : 'bottom';
-    const avg = { r: Math.round(rSum/(W*H)), g: Math.round(gSum/(W*H)), b: Math.round(bSum/(W*H)) };
+    const avg = { r: Math.round(rSum / (W * H)), g: Math.round(gSum / (W * H)), b: Math.round(bSum / (W * H)) };
     const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1','#E98A15','#D61C4E'];
-    const idx = ((avg.r > avg.g) + (avg.g > avg.b)*2 + (avg.r > avg.b)*3) % palette.length;
+    const idx = ((avg.r > avg.g) + (avg.g > avg.b) * 2 + (avg.r > avg.b) * 3) % palette.length;
     const brandColor = palette[idx];
-    const diffLR = Math.abs(left - right)/(W*H);
+    const diffLR = Math.abs(left - right) / (W * H);
     return { darkerSide, darkerBand, brandColor, diffLR };
-  } catch {
-    return { darkerSide: 'left', darkerBand: 'top', brandColor: '#E63946', diffLR: 0.0 };
-  }
+  } catch { return { darkerSide: 'left', darkerBand: 'top', brandColor: '#E63946', diffLR: 0.0 }; }
 }
 function svgDefs(brandColor) {
   return `
@@ -671,10 +686,14 @@ function svgDefs(brandColor) {
   `;
 }
 const LIGHT = '#f5f7f9';
+
+/* ---------- NEW: subline crafting (short, safe) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
-  const pick = s => String(s || '').replace(/[^\w\s\-']/g, '').trim();
+  const pick = (s) => String(s || '').replace(/[^\w\s\-']/g, '').trim();
   const candidates = [
-    pick(answers.mainBenefit), pick(answers.description), pick(answers.productType),
+    pick(answers.mainBenefit),
+    pick(answers.description),
+    pick(answers.productType),
     {
       fashion: 'your quality of fashion',
       cosmetics: 'your quality of beauty',
@@ -685,9 +704,10 @@ function craftSubline(answers = {}, category = 'generic') {
       home: 'upgrade your space',
       coffee: 'better coffee breaks',
       fitness: 'made for your workouts',
-      generic: 'made for everyday use'
+      generic: 'made for everyday use',
     }[category] || 'made for everyday use',
   ].filter(Boolean);
+
   let line = candidates[0] || candidates[candidates.length - 1];
   line = line.toLowerCase();
   const words = line.split(/\s+/).filter(Boolean).slice(0, 7);
@@ -697,10 +717,13 @@ function craftSubline(answers = {}, category = 'generic') {
   }
   return words.join(' ');
 }
+
+/* ---------- CTA pill ---------- */
 const pillBtn = (x, y, text, fs = 28) => {
   fs = Math.max(22, Math.min(fs, 34));
   const w = Math.min(860, estWidth(text, fs) + 60);
-  const h = 56; const x0 = x - w / 2;
+  const h = 56;
+  const x0 = x - w / 2;
   return `
     <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})">
       <rect x="0" y="-16" width="${w}" height="${h}" rx="28" fill="#0b0d10dd"/>
@@ -711,23 +734,46 @@ const pillBtn = (x, y, text, fs = 28) => {
       </text>
     </g>`;
 };
+
+/* ---- flag: only show SALE badge when user mentions an offer ---- */
 function wantsSaleBadge(answers = {}) {
   const t = `${answers.offer || ''} ${answers.description || ''}`.toLowerCase();
-  return /(sale|% off|percent off|discount|save|clearance|deal)/.test(t);
+  return /(sale|% off|percent off|discount|save|clearance|deal)/i.test(t);
 }
-function svgOverlayCreative({ W, H, title, subline, cta, prefer = 'left', preferBand = 'top', brandColor = '#E63946', choose = 3, sale = false }) {
-  const defs = svgDefs(brandColor);
-  const SAFE_PAD = 24, PANEL_W = 560, PANEL_PAD = 34;
-  const TITLE_MAX_W = (W) => W - 2 * (SAFE_PAD + PANEL_PAD);
-  const SUB_FS_BASE = 32, TITLE_FS_CAP = 66;
-  const fitTitle = (maxW) => { const first = splitTwoLines(title, maxW, TITLE_FS_CAP); return { lines: first.lines, fs: first.fs }; };
-  const fitSub = (maxW) => ({ fs: fitFont(subline, maxW, SUB_FS_BASE, 22) });
 
-  // Top band
+/* ---------- Templated SVG with guaranteed spacing ---------- */
+function svgOverlayCreative({
+  W, H, title, subline, cta, prefer = 'left', preferBand = 'top',
+  brandColor = '#E63946', choose = 3, sale = false,
+}) {
+  const defs = svgDefs(brandColor);
+
+  const SAFE_PAD = 24;
+  const PANEL_W = 560;
+  const PANEL_PAD = 34;
+  const TITLE_MAX_W = (W) => W - 2 * (SAFE_PAD + PANEL_PAD);
+  const SUB_FS_BASE = 32;
+  const TITLE_FS_CAP = 66;
+
+  const fitTitle = (maxW) => {
+    const first = splitTwoLines(title, maxW, TITLE_FS_CAP);
+    return { lines: first.lines, fs: first.fs };
+  };
+  const fitSub = (maxW) => {
+    const fs = fitFont(subline, maxW, SUB_FS_BASE, 22);
+    return { fs };
+  };
+
+  // Layout 1: top band, centered
   if (choose === 1) {
-    const bandH = 252, maxW = TITLE_MAX_W(W);
-    const t = fitTitle(maxW); const s = fitSub(maxW);
-    const yTitle = 128; const ySub = yTitle + t.fs * t.lines.length + 30; const yCTA = ySub + s.fs + 44;
+    const bandH = 252;
+    const maxW = TITLE_MAX_W(W);
+    const t = fitTitle(maxW);
+    const s = fitSub(maxW);
+    const yTitle = 128;
+    const ySub = yTitle + t.fs * t.lines.length + 30;
+    const yCTA = ySub + s.fs + 44;
+
     return `${defs}
       <rect x="0" y="0" width="${W}" height="${bandH}" fill="url(#gShadeV)" />
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
@@ -745,14 +791,18 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer = 'left', prefer
     `;
   }
 
-  // Side panel
   const x0 = prefer === 'left' ? SAFE_PAD : W - PANEL_W - SAFE_PAD;
   const cx = x0 + PANEL_W / 2;
   const textW = PANEL_W - 2 * PANEL_PAD;
-  const t3 = fitTitle(textW); const s3 = fitSub(textW);
+  const t3 = fitTitle(textW);
+  const s3 = fitSub(textW);
 
+  // Layout 3: glass panel column
   if (choose === 3) {
-    const yTitle = 180; const ySub = yTitle + t3.fs * t3.lines.length + 22; const yCTA = ySub + s3.fs + 44;
+    const yTitle = 180;
+    const ySub = yTitle + t3.fs * t3.lines.length + 22;
+    const yCTA = ySub + s3.fs + 44;
+
     return `${defs}
       <g filter="url(#glass)">
         <rect x="${x0}" y="${SAFE_PAD}" width="${PANEL_W}" height="${H - 2 * SAFE_PAD}" rx="28" fill="url(#panelGrad)"/>
@@ -773,11 +823,16 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer = 'left', prefer
     `;
   }
 
-  // Side gradient band
+  // Layout 6: side gradient band
   if (choose === 6) {
     const yBase = preferBand === 'top' ? 140 : H - 140 - t3.fs * t3.lines.length;
-    const ySub = yBase + t3.fs * t3.lines.length + 24; const yCTA = ySub + s3.fs + 40;
-    const anchorX = prefer === 'left' ? SAFE_PAD + PANEL_PAD + textW / 2 : W - SAFE_PAD - PANEL_PAD - textW / 2;
+    const ySub = yBase + t3.fs * t3.lines.length + 24;
+    const yCTA = ySub + s3.fs + 40;
+    const anchorX =
+      prefer === 'left'
+        ? SAFE_PAD + PANEL_PAD + (textW / 2)
+        : W - SAFE_PAD - PANEL_PAD - (textW / 2);
+
     return `${defs}
       <rect x="${prefer === 'left' ? 0 : W - PANEL_W}" y="0" width="${PANEL_W}" height="${H}" fill="url(#gShadeHLeft)"/>
       <text x="${anchorX}" y="${yBase}" text-anchor="middle"
@@ -795,11 +850,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer = 'left', prefer
     `;
   }
 
-  // Ribbon
+  // Layout 4: diagonal ribbon
   if (choose === 4) {
-    const ribbonH = 170; const angle = prefer === 'left' ? -10 : 10;
-    const xMid = W / 2; const yMid = H * 0.28;
-    const t = fitTitle(W - 240); const yCTA = H * 0.74;
+    const ribbonH = 170;
+    const angle = prefer === 'left' ? -10 : 10;
+    const xMid = W / 2;
+    const yMid = H * 0.28;
+    const t = fitTitle(W - 240);
+    const yCTA = H * 0.74;
+
     return `${defs}
       <g transform="translate(${xMid},${yMid}) rotate(${angle})">
         <rect x="${-W / 2}" y="${-ribbonH / 2}" width="${W}" height="${ribbonH}" fill="${brandColor}" opacity="0.92" />
@@ -815,10 +874,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer = 'left', prefer
     `;
   }
 
-  // Sale badge (only when requested)
+  // Layout 5: SALE badge (only when requested)
   if (choose === 5 && sale) {
-    const fit5 = fitTitle(W - 160); const sub = fitSub(W - 160);
-    const yTitle = H * 0.76; const ySub = yTitle + fit5.fs * fit5.lines.length + 20; const yCTA = ySub + sub.fs + 36;
+    const fit5 = fitTitle(W - 160);
+    const sub = fitSub(W - 160);
+    const yTitle = H * 0.76;
+    const ySub = yTitle + fit5.fs * fit5.lines.length + 20;
+    const yCTA = ySub + sub.fs + 36;
+
     return `${defs}
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gShadeHLeft)"/>
       <g transform="translate(${prefer === 'left' ? 120 : W - 120}, ${H * 0.18})">
@@ -844,36 +907,35 @@ function svgOverlayCreative({ W, H, title, subline, cta, prefer = 'left', prefer
     `;
   }
 
-  // Default to (3)
+  // default to layout 3
   return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, sale });
 }
 
-/* ---------- Build overlay image (sharp, no enlargement) ---------- */
-async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', seed = '', fallbackHeadline = 'SHOP', answers = {}, category = 'generic' }) {
+/* ---------- Updated builder (sharper, no enlargement) ---------- */
+async function buildOverlayImage({
+  imageUrl, headlineHint = '', ctaHint = '', seed = '',
+  fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
+}) {
   const W = 1200, H = 628;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
-
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const subline = craftSubline(answers, category);
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
-
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const sale = wantsSaleBadge(answers);
   const choices = analysis.diffLR > 40 ? [3, 1, 6, 4, sale ? 5 : 1] : [1, 3, 6, 4, sale ? 5 : 3];
   const tpl = choices[h % choices.length];
-
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
       W, H, title, subline, cta,
-      prefer: analysis.darkerSide, preferBand: analysis.darkerBand, brandColor: analysis.brandColor,
-      choose: tpl, sale
+      prefer: analysis.darkerSide, preferBand: analysis.darkerBand,
+      brandColor: analysis.brandColor, choose: tpl, sale,
     })}</svg>`
   );
-
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await base
@@ -881,7 +943,6 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
     .jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
   maybeGC();
-
   return {
     publicUrl: mediaPath(file),
     absoluteUrl: absolutePublicUrl(mediaPath(file)),
@@ -889,14 +950,15 @@ async function buildOverlayImage({ imageUrl, headlineHint = '', ctaHint = '', se
   };
 }
 
-/* -------------------------- Video helpers -------------------------- */
+/* ------------------------------- Utils ------------------------------- */
 async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB = 15) {
   return new Promise((resolve, reject) => {
     if (!url || !/^https?:\/\//i.test(String(url))) return reject(new Error('Invalid clip URL'));
     const writer = fs.createWriteStream(dest);
     let timedOut = false;
     const timeout = setTimeout(() => {
-      timedOut = true; writer.destroy(); try { fs.unlinkSync(dest); } catch {}
+      timedOut = true; writer.destroy();
+      try { fs.unlinkSync(dest); } catch {}
       reject(new Error('Download timed out'));
     }, timeoutMs);
     axios({ url, method: 'GET', responseType: 'stream', timeout: timeoutMs })
@@ -918,7 +980,11 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB =
   });
 }
 
-const V_W = 1080, V_H = 1080, FPS = 30;
+/* -------------------- Video constants -------------------- */
+const V_W = 1080;
+const V_H = 1080;
+const FPS = 30;
+
 function pickSerifFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
@@ -941,10 +1007,12 @@ function safeFFText(t) {
     .toUpperCase()
     .slice(0, 40);
 }
+
+/* ---- Captions ---- */
 function splitForCaptions(text) {
   let parts = String(text || '').trim().replace(/\s+/g, ' ').split(/(?<=[.?!])\s+/).filter(Boolean);
   if (parts.length < 3) {
-    const more = String(text).split(/,\s+/).filter(s => s.length > 12);
+    const more = String(text).split(/,\s+/).filter((s) => s.length > 12);
     parts = parts.concat(more).slice(0, 5);
   }
   if (parts.length > 5) {
@@ -957,7 +1025,7 @@ function splitForCaptions(text) {
     }
     parts = merged;
   }
-  return parts.map(p => p.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  return parts.map((p) => p.trim().replace(/\s+/g, ' ')).filter(Boolean);
 }
 function secsToSrt(ts) {
   const h = Math.floor(ts / 3600);
@@ -977,21 +1045,24 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId = 'w') {
   const segs = splitForCaptions(script);
   if (!segs.length) return { filter: '', files: [], srtPath: '' };
 
-  const lens = segs.map(s => Math.max(12, Math.min(90, s.length)));
+  const lens = segs.map((s) => Math.max(12, Math.min(90, s.length)));
   const sum = lens.reduce((a, b) => a + b, 0);
   let t = WINDOW_START;
   const pieces = [];
-  const baseStyle = "fontcolor=white@0.99:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=34:x='(w-tw)/2':y='h*0.82'";
+  const baseStyle =
+    "fontcolor=white@0.99:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=34:x='(w-tw)/2':y='h*0.82'";
   const srtLines = [];
 
   for (let i = 0; i < segs.length; i++) {
     const dur = Math.max(1.2, (lens[i] / sum) * total);
-    const start = t; const stop = Math.min(endWindow, t + dur);
+    const start = t;
+    const stop = Math.min(endWindow, t + dur);
     t = stop + 0.05;
     const tf = path.join(outDir, `cap_${workId}_${i}.txt`);
-    try { fs.writeFileSync(tf, segs[i]); } catch {}
-    files.push(tf);
-    pieces.push(`drawtext=${fontParam}textfile='${tf}':reload=0:${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`);
+    try { fs.writeFileSync(tf, segs[i]); files.push(tf); } catch {}
+    pieces.push(
+      `drawtext=${fontParam}textfile='${tf}':reload=0:${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`
+    );
     srtLines.push(`${i + 1}\n${secsToSrt(start)} --> ${secsToSrt(stop)}\n${segs[i]}\n`);
     if (t >= endWindow) break;
   }
@@ -999,399 +1070,12 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId = 'w') {
   try { fs.writeFileSync(srtPath, srtLines.join('\n')); } catch {}
   return { filter: pieces.join(','), files, srtPath };
 }
-function runSpawn(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
-    let killed = false;
-    const killTimer = opts.killAfter ? setTimeout(() => {
-      killed = true; try { child.kill('SIGKILL'); } catch {}
-      reject(new Error(opts.killMsg || 'process timeout'));
-    }, opts.killAfter) : null;
-    child.on('error', (err) => { if (killTimer) clearTimeout(killTimer); reject(err); });
-    child.on('close', (code) => { if (killTimer) clearTimeout(killTimer); if (killed) return; code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`)); });
-  });
-}
-async function probeDuration(file, timeoutMs = 8000) {
-  return new Promise((resolve) => {
-    const child = spawn('ffprobe',
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=nokey=1:noprint_wrappers=1', file],
-      { stdio: ['ignore', 'pipe', 'ignore'] }
-    );
-    let out = '';
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(0); }, timeoutMs);
-    child.stdout.on('data', (d) => { if (out.length < 64) out += d.toString('utf8'); });
-    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s) ? 0 : s); });
-    child.on('error', () => { clearTimeout(timer); resolve(0); });
-  });
-}
 
-/* ------------------------------- VIDEO ------------------------------- */
-async function uploadVideoToAdAccount(adAccountId, userAccessToken, fileUrl, name = 'SmartMark Video', description = 'Generated by SmartMark') {
-  const id = String(adAccountId || '').replace(/^act_/, '').replace(/\D/g, '');
-  const url = `https://graph.facebook.com/v23.0/act_${id}/advideos`;
-  const form = new FormData();
-  form.append('file_url', fileUrl);
-  form.append('name', name);
-  form.append('description', description);
-  const resp = await axios.post(url, form, { headers: form.getHeaders(), params: { access_token: userAccessToken } });
-  return resp.data;
-}
-
-router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  housekeeping();
-  try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(180000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
-  } catch {}
-  res.setHeader('Content-Type', 'application/json');
-
-  try {
-    const { url = '', answers = {}, regenerateToken = '' } = req.body;
-    const token = getUserToken(req);
-
-    const category = resolveCategory(answers || {});
-    const topic = deriveTopicKeywords(answers, url, 'ecommerce');
-    const brandBase =
-      (answers?.businessName && String(answers.businessName).trim()) ||
-      overlayTitleFromAnswers(answers, category);
-    let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g, '').trim();
-    if (!/!$/.test(brandForVideo)) brandForVideo += '!';
-    const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
-
-    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 65000);
-    const startTs = Date.now();
-    const timeLeft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
-
-    const forbidFashionLine = category === 'fashion' ? '' :
-      `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
-    const buildPrompt = (lo, hi) =>
-      `Write a simple, neutral spoken ad script for an e-commerce/online business in the "${category}" category, about ${topic}.
-- About ${lo}-${hi} words.
-- Keep it specific to the category, and accurate. ${forbidFashionLine}
-- Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
-- Do not include a website or domain.
-- Use the CTA phrase exactly once at the end: "${ctaText}".
-- Structure: brief hook → value/what to expect → CTA.
-Output ONLY the script text.`;
-
-    async function makeTTS(scriptText) {
-      const tmpDir = ensureGeneratedDir();
-      const file = path.join(tmpDir, `${uuidv4()}.mp3`);
-      const ttsRes = await openai.audio.speech.create({
-        model: 'tts-1',
-        voice: 'alloy',
-        input: scriptText,
-      });
-      const buf = Buffer.from(await ttsRes.arrayBuffer());
-      fs.writeFileSync(file, buf);
-      return file;
-    }
-
-    let script = '';
-    let ttsPath = '';
-    let voDur = 0;
-    const targets = [[58, 72], [70, 84]];
-    for (let attempt = 0; attempt < targets.length; attempt++) {
-      try {
-        const [low, high] = targets[attempt];
-        const r = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [{ role: 'user', content: buildPrompt(low, high) }],
-          max_tokens: 320,
-          temperature: 0.35,
-        });
-        script = r.choices?.[0]?.message?.content?.trim() || '';
-      } catch {
-        script = script || `A simple way to support your goals with less hassle. ${ctaText}`;
-      }
-      script = stripFashionIfNotApplicable(script, category);
-      script = enforceCategoryPresence(script, category);
-      script = cleanFinalText(script);
-
-      // Remove any built-in CTA variation; we add our own once
-      const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
-      const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
-      script = script.replace(re, '').trim();
-      if (!/[.!?]$/.test(script)) script += '.';
-      script += ' ' + ctaText;
-
-      try {
-        if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
-        ttsPath = await makeTTS(script);
-        voDur = await probeDuration(ttsPath);
-        if (voDur >= 14.4) break;
-      } catch {
-        ttsPath = null; voDur = 0; break;
-      }
-    }
-
-    const TAIL = 0.8;
-    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
-
-    // Ensure we have an image for the still-video
-    const ensureImageForStill = async () => {
-      let imageUrl = null;
-      if (PEXELS_API_KEY && timeLeft() > 6000) {
-        try {
-          const keyword = getImageKeyword(answers.industry || '', url) || topic;
-          const p = await axios.get(PEXELS_IMG_BASE, {
-            headers: { Authorization: PEXELS_API_KEY },
-            params: { query: keyword, per_page: 18 },
-            timeout: Math.max(2500, Math.min(5000, timeLeft() - 1500)),
-          });
-          const photos = p.data?.photos || [];
-          if (photos.length) {
-            const pick = photos[0];
-            imageUrl = pick.src.original || pick.src.large2x || pick.src.large || null;
-          }
-        } catch {}
-      }
-      if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
-      if (!imageUrl) imageUrl = 'https://picsum.photos/seed/smartmark/1200/1200';
-      return imageUrl;
-    };
-
-    // Compose still video (Ken Burns + captions + CTA)
-    const imageUrl = await ensureImageForStill();
-    const still = await composeStillVideo({
-      imageUrl,
-      duration: finalDur,
-      ttsPath,
-      musicPath: null,
-      brandLine: brandForVideo,
-      ctaText,
-      scriptText: script,
-    });
-
-    const variations = [{ url: still.publicUrl, absoluteUrl: still.absoluteUrl, subtitlesUrl: still.subtitlesUrl }];
-    let fbVideoId = null;
-    try {
-      if (variations[0] && req.body.fbAdAccountId && token) {
-        const up = await uploadVideoToAdAccount(
-          req.body.fbAdAccountId, token, variations[0].absoluteUrl,
-          'SmartMark Generated Video', 'Generated by SmartMark'
-        );
-        fbVideoId = up?.id || null;
-      }
-    } catch {}
-
-    try { if (ttsPath) fs.unlinkSync(ttsPath); } catch {}
-    maybeGC();
-
-    const first = variations[0];
-    return res.json({
-      videoUrl: first.url,
-      absoluteVideoUrl: first.absoluteUrl,
-      subtitlesUrl: first.subtitlesUrl,
-      fbVideoId,
-      script,
-      ctaText,
-      voice: ttsPath ? 'alloy' : null,
-      hasMusic: false,
-      video: {
-        url: first.url,
-        script,
-        overlayText: ctaText,
-        voice: ttsPath ? 'alloy' : null,
-        hasMusic: false,
-        subtitlesUrl: first.subtitlesUrl,
-      },
-      videoVariations: variations.map(v => ({
-        url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl
-      })),
-    });
-  } catch (err) {
-    if (!res.headersSent) {
-      return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
-    }
-  }
-});
-
-/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
-router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
-  housekeeping();
-  try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(60000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(60000);
-  } catch {}
-  try {
-    const { regenerateToken = '' } = req.body;
-    const top = req.body || {};
-    const answers = top.answers || top;
-    const url = answers.url || top.url || '';
-    const industry = answers.industry || top.industry || '';
-    const category = resolveCategory(answers || {});
-    const keyword = getImageKeyword(industry, url);
-    const sale = wantsSaleBadge(answers);
-
-    const makeOne = async (baseUrl, seed) => {
-      const headlineHint = overlayTitleFromAnswers(answers, category);
-      const ctaHint = pickFromAllowedCTAs(answers, seed);
-      try {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: baseUrl,
-          headlineHint,
-          ctaHint,
-          seed,
-          fallbackHeadline: headlineHint,
-          answers,
-          category,
-        });
-        await saveAsset({
-          req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, sale },
-        });
-        return publicUrl;
-      } catch {
-        await saveAsset({
-          req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale },
-        });
-        return baseUrl;
-      }
-    };
-
-    // No Pexels key? Build 3 overlays from placeholder seeds
-    if (!PEXELS_API_KEY) {
-      const urls = [], absUrls = [];
-      for (let i = 0; i < 3; i++) {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
-          headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
-          seed: regenerateToken + '_' + i,
-          fallbackHeadline: overlayTitleFromAnswers(answers, category),
-          answers, category,
-        });
-        await saveAsset({
-          req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, sale },
-        });
-        urls.push(publicUrl); absUrls.push(absoluteUrl);
-      }
-      return res.json({
-        imageUrl: urls[0],
-        absoluteImageUrl: absUrls[0],
-        keyword,
-        totalResults: 3,
-        usedIndex: 0,
-        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
-      });
-    }
-
-    // Pexels search
-    let photos = [];
-    try {
-      const r = await axios.get(PEXELS_IMG_BASE, {
-        headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 18 },
-        timeout: 5000,
-      });
-      photos = r.data.photos || [];
-    } catch {
-      return res.status(500).json({ error: 'Image search failed' });
-    }
-    if (!photos.length) return res.status(404).json({ error: 'No images found.' });
-
-    // Deterministic pick of 3 variants
-    const seed = regenerateToken || answers?.businessName || keyword || Date.now();
-    let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
-    const picks = [];
-    for (let i = 0; i < photos.length && picks.length < 3; i++) {
-      const idx = (idxHash + i * 7) % photos.length;
-      if (!picks.includes(idx)) picks.push(idx);
-    }
-
-    const urls = [], absUrls = [];
-    for (let pi = 0; pi < picks.length; pi++) {
-      const img = photos[picks[pi]];
-      const baseUrl = img.src.original || img.src.large2x || img.src.large;
-      const u = await makeOne(baseUrl, seed + '_' + pi); // returns public URL
-      urls.push(u); absUrls.push(absolutePublicUrl(u));
-    }
-
-    const img0 = photos[picks[0]];
-    return res.json({
-      imageUrl: urls[0],
-      absoluteImageUrl: absUrls[0],
-      photographer: img0?.photographer,
-      pexelsUrl: img0?.url,
-      keyword,
-      totalResults: photos.length,
-      usedIndex: picks[0],
-      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
-    });
-
-  } catch (e) {
-    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
-  }
-});
-
-/* ------------------------- RECENT (24h window) ------------------------- */
-async function listRecentForOwner(req) {
-  await purgeExpiredAssets();
-  const owner = ownerKeyFromReq(req);
-  return (db.data.generated_assets || [])
-    .filter(a => a.owner === owner)
-    .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 50);
-}
-router.get('/recent', async (req, res) => {
-  try {
-    const items = await listRecentForOwner(req);
-    res.json({ items, ttlMs: ASSET_TTL_MS });
-  } catch {
-    res.status(500).json({ error: 'Failed to load recent assets' });
-  }
-});
-router.get('/assets/recent', async (req, res) => {
-  try {
-    const items = await listRecentForOwner(req);
-    res.json({ items, ttlMs: ASSET_TTL_MS });
-  } catch {
-    res.status(500).json({ error: 'Failed to load recent assets' });
-  }
-});
-router.get('/recent-assets', async (req, res) => {
-  try {
-    const items = await listRecentForOwner(req);
-    res.json({ items, ttlMs: ASSET_TTL_MS });
-  } catch {
-    res.status(500).json({ error: 'Failed to load recent assets' });
-  }
-});
-
-router.post('/assets/clear', async (req, res) => {
-  try {
-    await ensureAssetsTable();
-    const owner = ownerKeyFromReq(req);
-    db.data.generated_assets = (db.data.generated_assets || []).filter(a => a.owner !== owner);
-    await db.write();
-    housekeeping();
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: 'Failed to clear assets' });
-  }
-});
-
-/* -------- Ensure CORS even on errors -------- */
-router.use((err, req, res, _next) => {
-  try {
-    const origin = req.headers.origin;
-    if (origin && ALLOW_ORIGINS.has(origin)) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
-    res.setHeader('Vary', 'Origin');
-  } catch {}
-  const code = err?.status || 500;
-  res.status(code).json({ error: err?.message || 'Server error' });
-});
-
-module.exports = router;
-
-/* -------------------- Still-video composer -------------------- */
-async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null, brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '' }) {
+/* -------------------- Still video -------------------- */
+async function composeStillVideo({
+  imageUrl, duration, ttsPath = null, musicPath = null,
+  brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '',
+}) {
   housekeeping();
   const outDir = ensureGeneratedDir();
   const id = uuidv4();
@@ -1450,11 +1134,13 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
   if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
   if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
   mixInputs.push(`${aIdx}:a`);
-  fc += `;${mixInputs.map((m, i) => `[${m}]aresample=48000${i === 1 ? ',volume=0.18' : ''}[a${i}]`).join(';')};${mixInputs.map((_, i) => `[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
+  fc += `;${mixInputs.map((m, i) => `[${m}]aresample=48000${i === 1 ? ',volume=0.18' : ''}[a${i}]`).join(';')};` +
+        `${mixInputs.map((_, i) => `[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
 
   args.push(
     '-filter_complex', fc,
-    '-map', '[v]', '-map', '[mix]',
+    '-map', '[v]',
+    '-map', '[mix]',
     '-t', duration.toFixed(2),
     '-r', String(FPS),
     '-c:v', 'libx264',
@@ -1487,3 +1173,508 @@ async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath
     subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '',
   };
 }
+
+/* -------------------- Title card (fallback) -------------------- */
+async function composeTitleCardVideo({
+  duration, ttsPath = null, musicPath = null,
+  brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '',
+}) {
+  housekeeping();
+  const outDir = ensureGeneratedDir();
+  const id = uuidv4();
+  const outFile = `${id}.mp4`;
+  const outPath = path.join(outDir, outFile);
+
+  const sansFile = pickSansFontFile();
+  const serifFile = pickSerifFontFile();
+  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
+  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Arial Black':`;
+  const txtCommon = 'fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75';
+
+  const brand = safeFFText(brandLine);
+  const cta = safeFFText(ctaText);
+  const TAIL = 0.8;
+
+  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
+  if (ttsPath) args.push('-i', ttsPath);
+  if (musicPath) args.push('-i', musicPath);
+  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
+
+  const intro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=58:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration - TAIL - 0.6).toFixed(2)})'`;
+  const ctaFx = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration - TAIL).toFixed(2)})'`;
+  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
+  let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter ? ',' + subsBuild.filter : ''},${ctaFx},format=yuv420p[v]`;
+
+  const mixInputs = [];
+  let aIdx = 1;
+  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
+  mixInputs.push(`${aIdx}:a`);
+  fc += `;${mixInputs.map((m, i) => `[${m}]aresample=48000${i === 1 ? ',volume=0.18' : ''}[b${i}]`).join(';')};` +
+        `${mixInputs.map((_, i) => `[b${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
+
+  args.push(
+    '-filter_complex', fc,
+    '-map', '[v]',
+    '-map', '[mix]',
+    '-t', duration.toFixed(2),
+    '-r', String(FPS),
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '21',
+    '-pix_fmt', 'yuv420p',
+    '-b:v', '5200k',
+    '-maxrate', '6800k',
+    '-bufsize', '13600k',
+    '-g', String(FPS * 2),
+    '-keyint_min', String(FPS),
+    '-c:a', 'aac',
+    '-b:a', '160k',
+    '-ar', '48000',
+    '-movflags', '+faststart',
+    '-avoid_negative_ts', 'make_zero',
+    '-shortest',
+    '-max_muxing_queue_size', '1024',
+    '-loglevel', 'error',
+    outPath
+  );
+
+  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
+  try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
+  return {
+    publicUrl: mediaPath(outFile),
+    absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
+    subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '',
+  };
+}
+
+/* -------------------------- Spawn helpers -------------------------- */
+function runSpawn(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
+    let killed = false;
+    const killTimer = opts.killAfter
+      ? setTimeout(() => {
+          killed = true;
+          try { child.kill('SIGKILL'); } catch {}
+          reject(new Error(opts.killMsg || 'process timeout'));
+        }, opts.killAfter)
+      : null;
+    child.on('error', (err) => { if (killTimer) clearTimeout(killTimer); reject(err); });
+    child.on('close', (code) => {
+      if (killTimer) clearTimeout(killTimer);
+      if (killed) return;
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`));
+    });
+  });
+}
+async function probeDuration(file, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const child = spawn('ffprobe',
+      ['-v','error','-show_entries','format=duration','-of','default=nokey=1:noprint_wrappers=1', file],
+      { stdio: ['ignore', 'pipe,', 'ignore'] }
+    );
+    let out = '';
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(0); }, timeoutMs);
+    child.stdout.on('data', (d) => { if (out.length < 64) out += d.toString('utf8'); });
+    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s) ? 0 : s); });
+    child.on('error', () => { clearTimeout(timer); resolve(0); });
+  });
+}
+
+/* ------------------------------- VIDEO ------------------------------- */
+router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
+  housekeeping();
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(180000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
+  } catch {}
+  res.setHeader('Content-Type', 'application/json');
+
+  try {
+    const { url = '', answers = {}, regenerateToken = '' } = req.body;
+    const token = getUserToken(req);
+
+    const category = resolveCategory(answers || {});
+    const topic = deriveTopicKeywords(answers, url, 'ecommerce');
+    const brandBase =
+      (answers?.businessName && String(answers.businessName).trim()) ||
+      overlayTitleFromAnswers(answers, category);
+    let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g, '').trim();
+    if (!/!$/.test(brandForVideo)) brandForVideo += '!';
+    const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
+
+    // Hard overall route deadline to avoid 504s at the edge (Render)
+    const HARD_ROUTE_TIMEOUT_MS = 55000;
+    const deadline = Date.now() + HARD_ROUTE_TIMEOUT_MS;
+    const timeLeftHard = () => Math.max(0, deadline - Date.now());
+
+    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 65000);
+    const startTs = Date.now();
+    const timeLeftSoft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
+
+    const forbidFashionLine =
+      category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
+
+    const buildPrompt = (lo, hi) =>
+      `Write a simple, neutral spoken ad script for an e-commerce/online business in the "${category}" category, about ${topic}.
+- About ${lo}-${hi} words.
+- Keep it specific to the category, and accurate. ${forbidFashionLine}
+- Avoid assumptions (no promises about shipping, returns, guarantees, or inventory).
+- Do not include a website or domain.
+- Use the CTA phrase exactly once at the end: "${ctaText}".
+- Structure: brief hook → value/what to expect → CTA.
+Output ONLY the script text.`;
+
+    async function makeTTS(scriptText) {
+      const tmpDir = ensureGeneratedDir();
+      const file = path.join(tmpDir, `${uuidv4()}.mp3`);
+      const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: scriptText });
+      const buf = Buffer.from(await ttsRes.arrayBuffer());
+      fs.writeFileSync(file, buf);
+      return file;
+    }
+
+    let script = '';
+    let ttsPath = '';
+    let voDur = 0;
+    const targets = [[58, 72], [70, 84]];
+
+    for (let attempt = 0; attempt < targets.length; attempt++) {
+      if (timeLeftHard() < 9000) break; // not enough time to keep trying
+      try {
+        const [low, high] = targets[attempt];
+        const r = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: buildPrompt(low, high) }],
+          max_tokens: 320,
+          temperature: 0.35,
+        });
+        script = r.choices?.[0]?.message?.content?.trim() || '';
+      } catch {
+        script = script || `A simple way to support your goals with less hassle. ${ctaText}`;
+      }
+      script = stripFashionIfNotApplicable(script, category);
+      script = enforceCategoryPresence(script, category);
+      script = cleanFinalText(script);
+      // Remove duplicate CTA phrases inside script; we'll ensure one at end
+      const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
+      const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
+      script = script.replace(re, '').trim();
+      if (!/[.!?]$/.test(script)) script += '.';
+      script += ' ' + ctaText;
+
+      // TTS unless we are too close to the deadline
+      try {
+        if (timeLeftHard() > 9000) {
+          if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
+          ttsPath = await makeTTS(script);
+          voDur = await probeDuration(ttsPath);
+          if (voDur >= 14.4) break;
+        } else { ttsPath = null; voDur = 0; break; }
+      } catch { ttsPath = null; voDur = 0; break; }
+    }
+
+    const TAIL = 0.8;
+    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
+
+    let imageUrl = null;
+    const ensureImageForStill = async () => {
+      if (PEXELS_API_KEY && timeLeftSoft() > 6000 && timeLeftHard() > 7000) {
+        try {
+          const keyword = getImageKeyword(answers.industry || '', url) || topic;
+          const p = await axios.get(PEXELS_IMG_BASE, {
+            headers: { Authorization: PEXELS_API_KEY },
+            params: { query: keyword, per_page: 12 },
+            timeout: Math.max(2500, Math.min(4000, timeLeftHard() - 2500)),
+          });
+          const photos = p.data?.photos || [];
+          if (photos.length) {
+            const pick = photos[0];
+            imageUrl = pick.src.original || pick.src.large2x || pick.src.large || null;
+          }
+        } catch {}
+      }
+      if (!imageUrl) imageUrl = await getRecentImageForOwner(req);
+      if (!imageUrl) imageUrl = 'https://picsum.photos/seed/smartmark/1200/1200';
+      return imageUrl;
+    };
+
+    imageUrl = await ensureImageForStill();
+
+    // If we’re low on time, switch to title card (cheaper than still)
+    const makeTitleCard = timeLeftHard() < 7000;
+    const videoBuilder = makeTitleCard ? composeTitleCardVideo : composeStillVideo;
+
+    const still = await videoBuilder({
+      imageUrl,
+      duration: finalDur,
+      ttsPath: makeTitleCard ? null : ttsPath,
+      musicPath: null,
+      brandLine: brandForVideo,
+      ctaText,
+      scriptText: script,
+    });
+
+    const variations = [{ url: still.publicUrl, absoluteUrl: still.absoluteUrl, subtitlesUrl: still.subtitlesUrl }];
+
+    let fbVideoId = null;
+    try {
+      if (variations[0] && req.body.fbAdAccountId && token) {
+        const up = await uploadVideoToAdAccount(
+          req.body.fbAdAccountId,
+          token,
+          variations[0].absoluteUrl,
+          'SmartMark Generated Video',
+          'Generated by SmartMark'
+        );
+        fbVideoId = up?.id || null;
+      }
+    } catch {}
+
+    try { if (ttsPath) fs.unlinkSync(ttsPath); } catch {}
+    maybeGC();
+
+    const first = variations[0];
+    return res.json({
+      videoUrl: first.url,
+      absoluteVideoUrl: first.absoluteUrl,
+      subtitlesUrl: first.subtitlesUrl,
+      fbVideoId,
+      script,
+      ctaText,
+      voice: ttsPath ? 'alloy' : null,
+      hasMusic: false,
+      video: {
+        url: first.url,
+        script,
+        overlayText: ctaText,
+        voice: ttsPath ? 'alloy' : null,
+        hasMusic: false,
+        subtitlesUrl: first.subtitlesUrl,
+      },
+      videoVariations: variations.map((v) => ({
+        url: v.url, absoluteUrl: v.absoluteUrl, subtitlesUrl: v.subtitlesUrl,
+      })),
+    });
+  } catch (err) {
+    if (!res.headersSent)
+      return res.status(500).json({ error: 'Failed to generate video ad', detail: err?.message || 'Unknown error' });
+  }
+});
+
+/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
+router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
+  housekeeping();
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(60000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(60000);
+  } catch {}
+
+  try {
+    const { regenerateToken = '' } = req.body;
+    const top = req.body || {};
+    const answers = top.answers || top;
+    const url = answers.url || top.url || '';
+    const industry = answers.industry || top.industry || '';
+    const category = resolveCategory(answers || {});
+    const keyword = getImageKeyword(industry, url);
+    const sale = wantsSaleBadge(answers);
+
+    const makeOne = async (baseUrl, seed) => {
+      const headlineHint = overlayTitleFromAnswers(answers, category);
+      const ctaHint = pickFromAllowedCTAs(answers, seed);
+      try {
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: baseUrl,
+          headlineHint,
+          ctaHint,
+          seed,
+          fallbackHeadline: headlineHint,
+          answers,
+          category,
+        });
+        await saveAsset({
+          req, kind: 'image', url: publicUrl, absoluteUrl,
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, sale },
+        });
+        return publicUrl;
+      } catch {
+        // Save raw, in case overlay fails
+        await saveAsset({
+          req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale },
+        });
+        return baseUrl;
+      }
+    };
+
+    // If no Pexels key, return 3 crisp placeholder overlays
+    if (!PEXELS_API_KEY) {
+      const urls = [], absUrls = [];
+      for (let i = 0; i < 3; i++) {
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+          headlineHint: overlayTitleFromAnswers(answers, category),
+          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          seed: regenerateToken + '_' + i,
+          fallbackHeadline: overlayTitleFromAnswers(answers, category),
+          answers, category,
+        });
+        await saveAsset({
+          req, kind: 'image', url: publicUrl, absoluteUrl,
+          meta: { category, keyword, placeholder: true, i, sale },
+        });
+        urls.push(publicUrl); absUrls.push(absoluteUrl);
+      }
+      return res.json({
+        imageUrl: urls[0],
+        absoluteImageUrl: absUrls[0],
+        keyword,
+        totalResults: 3,
+        usedIndex: 0,
+        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
+      });
+    }
+
+    // Use Pexels, but keep it short and sweet
+    let photos = [];
+    try {
+      const r = await axios.get(PEXELS_IMG_BASE, {
+        headers: { Authorization: PEXELS_API_KEY },
+        params: { query: keyword, per_page: 12 },
+        timeout: 3000,
+      });
+      photos = r.data.photos || [];
+    } catch {
+      // graceful fallback: placeholders instead of 500
+      const urls = [], absUrls = [];
+      for (let i = 0; i < 3; i++) {
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+          headlineHint: overlayTitleFromAnswers(answers, category),
+          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          seed: regenerateToken + '_' + i,
+          fallbackHeadline: overlayTitleFromAnswers(answers, category),
+          answers, category,
+        });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale } });
+        urls.push(publicUrl); absUrls.push(absoluteUrl);
+      }
+      return res.json({
+        imageUrl: urls[0],
+        absoluteImageUrl: absUrls[0],
+        keyword,
+        totalResults: 3,
+        usedIndex: 0,
+        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
+      });
+    }
+
+    if (!photos.length) {
+      // same graceful fallback if Pexels returned nothing
+      const urls = [], absUrls = [];
+      for (let i = 0; i < 3; i++) {
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+          headlineHint: overlayTitleFromAnswers(answers, category),
+          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          seed: regenerateToken + '_' + i,
+          fallbackHeadline: overlayTitleFromAnswers(answers, category),
+          answers, category,
+        });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale } });
+        urls.push(publicUrl); absUrls.push(absoluteUrl);
+      }
+      return res.json({
+        imageUrl: urls[0],
+        absoluteImageUrl: absUrls[0],
+        keyword,
+        totalResults: 3,
+        usedIndex: 0,
+        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
+      });
+    }
+
+    const seed = regenerateToken || answers?.businessName || keyword || Date.now();
+    let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
+
+    const picks = [];
+    for (let i = 0; i < photos.length && picks.length < 3; i++) {
+      const idx = (idxHash + i * 7) % photos.length;
+      if (!picks.includes(idx)) picks.push(idx);
+    }
+
+    const urls = [], absUrls = [];
+    for (let pi = 0; pi < picks.length; pi++) {
+      const img = photos[picks[pi]];
+      const baseUrl = img.src.original || img.src.large2x || img.src.large;
+      const u = await makeOne(baseUrl, seed + '_' + pi);
+      urls.push(u); absUrls.push(absolutePublicUrl(u));
+    }
+
+    const img0 = photos[picks[0]];
+    return res.json({
+      imageUrl: urls[0],
+      absoluteImageUrl: absUrls[0],
+      photographer: img0?.photographer,
+      pexelsUrl: img0?.url,
+      keyword,
+      totalResults: photos.length,
+      usedIndex: picks[0],
+      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
+    });
+
+  } catch (e) {
+    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+  }
+});
+
+/* ------------------------- RECENT (24h window) ------------------------- */
+async function listRecentForOwner(req) {
+  await purgeExpiredAssets();
+  const owner = ownerKeyFromReq(req);
+  return (db.data.generated_assets || [])
+    .filter((a) => a.owner === owner)
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 50);
+}
+router.get('/recent', async (req, res) => {
+  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
+  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
+});
+router.get('/assets/recent', async (req, res) => {
+  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
+  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
+});
+router.get('/recent-assets', async (req, res) => {
+  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
+  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
+});
+
+router.post('/assets/clear', async (req, res) => {
+  try {
+    await ensureAssetsTable();
+    const owner = ownerKeyFromReq(req);
+    db.data.generated_assets = (db.data.generated_assets || []).filter((a) => a.owner !== owner);
+    await db.write();
+    housekeeping();
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'Failed to clear assets' }); }
+});
+
+/* -------- Ensure CORS even on errors -------- */
+router.use((err, req, res, _next) => {
+  try {
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Vary', 'Origin');
+    }
+  } catch {}
+  const code = err?.status || 500;
+  res.status(code).json({ error: err?.message || 'Server error' });
+});
+
+module.exports = router;
