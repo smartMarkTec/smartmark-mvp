@@ -16,7 +16,6 @@ require('dotenv').config({ path: './.env' });
 
 const cookieParser = require('cookie-parser');
 const express = require('express');
-// cors package is not required with the shim below, but keeping it is harmless
 const path = require('path');
 const fs = require('fs');
 const sharp = require('sharp');
@@ -112,7 +111,7 @@ app.get('/__fallback/1200.jpg', async (_req, res) => {
       create: { width: 1200, height: 1200, channels: 3, background: { r: 30, g: 200, b: 133 } }
     }).jpeg({ quality: 82 }).toBuffer();
     res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age: 31536000, immutable');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     res.end(buf);
   } catch {
     res.status(500).send('fallback image error');
@@ -141,6 +140,16 @@ app.use('/api', campaignRoutes);
 
 const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
+
+// Simple ping that echoes headers (debug CORS quickly)
+app.all('/api/ping', (req, res) => {
+  res.json({
+    ok: true,
+    method: req.method,
+    headers: req.headers,
+    time: Date.now()
+  });
+});
 
 // Mount MOCK routes FIRST
 const smartMockRoutes = require('./routes/smartMock');
@@ -186,8 +195,8 @@ app.use((err, req, res, next) => {
 
 /* --------------------------------- START --------------------------------- */
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server started on http://localhost:${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server started on http://0.0.0.0:${PORT}`);
 });
 
 module.exports = app;
