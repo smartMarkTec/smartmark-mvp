@@ -13,8 +13,53 @@
 const express = require('express');
 const router = express.Router();
 
-/* ------------------------ CORS ------------------------ */
-// CORS shim at router level (defensive)
+/* ---------------- Memory discipline for Sharp + concurrency gate ---------------- */
+const sharp = require('sharp');
+
+// Keep Sharp tiny: small cache and single-threaded work inside libvips
+try {
+  sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16MB process cache, no file cache
+  sharp.concurrency(1);
+} catch {}
+
+// Simple semaphore: allow only N heavy jobs at once (default 1)
+const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
+let active = 0;
+const waiters = [];
+
+function acquire() {
+  return new Promise((resolve) => {
+    const tryGo = () => {
+      if (active < GEN_LIMIT) {
+        active += 1;
+        resolve();
+      } else {
+        waiters.push(tryGo);
+      }
+    };
+    tryGo();
+  });
+}
+function release() {
+  active = Math.max(0, active - 1);
+  const next = waiters.shift();
+  if (next) setImmediate(next);
+}
+
+// Middleware: serialize only the generator routes
+const heavyRoute = (req, res, next) => {
+  if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
+    return next();
+  }
+  acquire().then(() => {
+    res.on('finish', release);
+    res.on('close', release);
+    next();
+  });
+};
+router.use(heavyRoute);
+
+/* ------------------------ CORS (router-level, defensive) ------------------------ */
 const ALLOW_ORIGINS = new Set([
   'http://localhost:3000',
   'http://127.0.0.1:3000',
@@ -42,17 +87,14 @@ router.use((req, res, next) => {
 /* ------------- Security & Rate-Limiting ------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
-const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })); // general routes
+const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 }); // use per heavy route
 
 /* ------------------------------ Deps ------------------------------ */
+// NOTE: do NOT re-require 'sharp' here; it’s already configured above.
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const sharp = require('sharp');
-sharp.cache({ files: 0, items: 64, memory: 20 });
-sharp.concurrency(1);
-
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
 const { spawn } = require('child_process');
