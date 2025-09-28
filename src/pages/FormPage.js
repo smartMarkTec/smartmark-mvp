@@ -15,11 +15,17 @@ const EDGE = "rgba(255,255,255,0.06)";
 
 const SIDE_CHAT_LIMIT = 5;
 
-/* -------- Backend endpoints (unchanged) -------- */
+/* -------- Backend endpoints -------- */
 const USE_LOCAL_BACKEND = false;
 const PROD_BACKEND = "https://smartmark-mvp.onrender.com";
-const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;               // for asset paths
-const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;     // absolute API for Vercel
+
+// Single source of truth:
+const BACKEND_URL = USE_LOCAL_BACKEND
+  ? (process.env.REACT_APP_API_BASE || "")
+  : (process.env.REACT_APP_API_BASE || PROD_BACKEND);
+
+// Always call the absolute API (important on Vercel):
+const API_BASE = `${BACKEND_URL.replace(/\/+$/,'')}/api`;
 
 /* -------- Draft persistence -------- */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -109,7 +115,7 @@ function ImageModal({ open, imageUrl, onClose }) {
           <FaTimes size={20} />
         </button>
         <img
-          src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
+          src={imageUrl}
           alt="Full Ad"
           style={{
             display: "block",
@@ -233,7 +239,6 @@ async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   try { return await res.json(); } catch { throw new Error("Bad JSON"); }
 }
-
 const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
 function stripUrls(s = "") { return (s || "").replace(URL_REGEX, ""); }
 function extractFirstUrl(s = "") { const m = (s || "").match(URL_REGEX); return m ? m[0] : null; }
@@ -316,10 +321,13 @@ const [editHeadline, setEditHeadline] = useState("");
 const [editBody, setEditBody] = useState("");
 const [editCTA, setEditCTA] = useState("");
 
-// helper for absolute URLs
-const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+// helper to ensure absolute URLs to the backend
+const abs = (u) => {
+  if (!u) return "";
+  return /^https?:\/\//i.test(u) ? u : `${BACKEND_URL}${u.startsWith('/') ? '' : '/'}${u}`;
+};
 
-/* Scroll chat to bottom (no laggy observers/sticky elements) */
+/* Scroll chat to bottom */
 useEffect(() => {
   if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
 }, [chatHistory]);
@@ -469,7 +477,7 @@ useEffect(() => {
     currentImageId, editHeadline, editBody, editCTA
   ]);
 
-  function handleImageClick(url) { setShowModal(true); setModalImg(url); }
+  function handleImageClick(url) { setShowModal(true); setModalImg(abs(url)); }
   function handleModalClose() { setShowModal(false); setModalImg(""); }
 
   /* ---- Ask OpenAI (side chat / FAQs) ---- */
@@ -506,20 +514,48 @@ useEffect(() => {
   }
 
   /* ---- API calls ---- */
+  // Build a normalized response from /generate-image-from-prompt (absolute URLs only)
+  function normalizeImagesResponse(data) {
+    const main = data?.absoluteImageUrl || data?.absoluteUrl || data?.imageUrl || "";
+    const base = abs(main);
+    const vars = (data?.imageVariations || []).map(v => abs(v.absoluteUrl || v.url)).filter(Boolean);
+    const all = [base, ...vars].filter(Boolean).slice(0, 3);
+    return all.length ? all : (base ? [base] : []);
+  }
+
   async function fetchImageOnce(token) {
     try {
       const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...answers, regenerateToken: token })
+        // send shape {answers, regenerateToken} explicitly
+        body: JSON.stringify({ answers, regenerateToken: token })
       });
       const data = await safeJson(resp);
-      return data?.imageUrl || "";
+      const list = normalizeImagesResponse(data);
+      // return the FIRST absolute image; caller can combine multiples
+      return list[0] || "";
     } catch (e) {
       console.warn("image fetch failed:", e.message);
       return "";
     }
   }
+
+  async function fetchImageSet(token) {
+    try {
+      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, regenerateToken: token })
+      });
+      const data = await safeJson(resp);
+      return normalizeImagesResponse(data);
+    } catch (e) {
+      console.warn("image fetch failed:", e.message);
+      return [];
+    }
+  }
+
   async function fetchVideoOnce(token) {
     try {
       const resp = await fetch(`${API_BASE}/generate-video-ad`, {
@@ -528,11 +564,9 @@ useEffect(() => {
         body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
       });
       const data = await safeJson(resp);
-      const vUrl = data?.videoUrl
-        ? (data.videoUrl.startsWith("http") ? data.videoUrl : BACKEND_URL + data.videoUrl)
-        : "";
+      const vUrl = data?.absoluteVideoUrl || data?.video?.absoluteUrl || data?.videoUrl || data?.video?.url || "";
       return {
-        url: vUrl,
+        url: abs(vUrl),
         script: data?.script || data?.video?.script || "",
         fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
       };
@@ -580,14 +614,14 @@ useEffect(() => {
           const tokenB = getRandomString();
 
           try {
-            const [data, img1, img2, vid1, vid2] = await Promise.all([
+            const [data, imgsA, imgsB, vid1, vid2] = await Promise.all([
               fetch(`${API_BASE}/generate-campaign-assets`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ answers })
               }).then(safeJson).catch(() => ({})),
-              fetchImageOnce(tokenA),
-              fetchImageOnce(tokenB),
+              fetchImageSet(tokenA),
+              fetchImageSet(tokenB),
               fetchVideoOnce(tokenA),
               fetchVideoOnce(tokenB)
             ]);
@@ -598,7 +632,8 @@ useEffect(() => {
               image_overlay_text: data?.image_overlay_text || ""
             });
 
-            const imgs = [img1, img2].filter(Boolean).slice(0, 2);
+            // Prefer three total images if available
+            const imgs = [...imgsA, ...imgsB].filter(Boolean).slice(0, 3);
             setImageUrls(imgs);
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
@@ -668,11 +703,11 @@ useEffect(() => {
   /* Regenerations */
   async function handleRegenerateImage() {
     setImageLoading(true);
-    const [a, b] = await Promise.all([fetchImageOnce(getRandomString()), fetchImageOnce(getRandomString())]);
-    const imgs = [a, b].filter(Boolean).slice(0, 2);
-    setImageUrls(imgs);
+    const imgs = await fetchImageSet(getRandomString());
+    const picked = imgs.filter(Boolean).slice(0, 3);
+    setImageUrls(picked);
     setActiveImage(0);
-    setImageUrl(imgs[0] || "");
+    setImageUrl(picked[0] || "");
     setImageLoading(false);
   }
   async function handleRegenerateVideo() {
@@ -766,7 +801,7 @@ useEffect(() => {
         </div>
       </div>
 
-      {/* ---- GPT chat panel (now strictly vertical like ChatGPT) ---- */}
+      {/* ---- GPT chat panel ---- */}
       <div
         style={{
           width: "100%",
@@ -906,14 +941,14 @@ useEffect(() => {
       {/* MediaType Toggle */}
       <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
 
-      {/* Ad Previews label centered directly under the selector (beneath "Both") */}
+      {/* Ad Previews label */}
       <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
         <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>
           Ad Previews
         </div>
       </div>
 
-      {/* ---- Ad Preview Cards (unchanged structure) ---- */}
+      {/* ---- Ad Preview Cards ---- */}
       <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
         {/* IMAGE CARD */}
         <div style={{
@@ -979,7 +1014,7 @@ useEffect(() => {
             ) : imageUrls.length > 0 ? (
               <>
                 <img
-                  src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
+                  src={abs(imageUrls[activeImage] || "")}
                   alt="Ad Preview"
                   style={{
                     width: "100%",
@@ -1171,7 +1206,7 @@ useEffect(() => {
               <>
                 <video
                   key={videoItems[activeVideo]?.url || "video"}
-                  src={videoItems[activeVideo]?.url}
+                  src={abs(videoItems[activeVideo]?.url)}
                   controls
                   style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
                 />
@@ -1303,12 +1338,12 @@ useEffect(() => {
         </button>
       </div>
 
-      <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
+      <ImageModal open={showModal} imageUrl={abs(modalImg)} onClose={handleModalClose} />
     </div>
   );
 }
 
-/* ===== Conversation questions (unchanged) ===== */
+/* ===== Conversation questions ===== */
 const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
