@@ -12,50 +12,9 @@
 const express = require('express');
 const router = express.Router();
 
-/* ---------------- Memory discipline for Sharp + concurrency gate ---------------- */
-const sharp = require('sharp');
-
-try {
-  sharp.cache({ memory: 16, files: 0, items: 0 });
-  sharp.concurrency(1);
-} catch {}
-
-const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
-let active = 0;
-const waiters = [];
-
-function acquire() {
-  return new Promise((resolve) => {
-    const tryGo = () => {
-      if (active < GEN_LIMIT) {
-        active += 1;
-        resolve();
-      } else {
-        waiters.push(tryGo);
-      }
-    };
-    tryGo();
-  });
-}
-function release() {
-  active = Math.max(0, active - 1);
-  const next = waiters.shift();
-  if (next) setImmediate(next);
-}
-
-const heavyRoute = (req, res, next) => {
-  if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
-    return next();
-  }
-  acquire().then(() => {
-    res.on('finish', release);
-    res.on('close', release);
-    next();
-  });
-};
-router.use(heavyRoute);
-
-/* ------------------------ CORS (router-level, unconditional) ------------------------ */
+/* ------------------------ CORS (ALWAYS first, unconditional) ------------------------ */
+// Must run before any queue/limit middleware so *all* responses (even errors)
+// carry ACAO headers. This fixes “No Access-Control-Allow-Origin” browser errors.
 router.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -69,15 +28,70 @@ router.use((req, res, next) => {
     'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  if (req.method === 'OPTIONS') return res.sendStatus(204); // fast preflight
   next();
 });
+
+/* ---------------- Memory discipline for Sharp + concurrency gate ---------------- */
+const sharp = require('sharp');
+
+try {
+  sharp.cache({ memory: 16, files: 0, items: 0 });
+  sharp.concurrency(1);
+} catch {}
+
+const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
+let active = 0;
+const waiters = [];
+
+// Queue with timeout — prevents long hangs that become 502/503 under load
+function acquireWithTimeout(ms = Number(process.env.GEN_QUEUE_TIMEOUT_MS || 12000)) {
+  return new Promise((resolve) => {
+    const tryGo = () => {
+      if (active < GEN_LIMIT) {
+        active += 1;
+        clearTimeout(timer);
+        resolve(true);
+      } else {
+        waiters.push(tryGo);
+      }
+    };
+    const timer = setTimeout(() => resolve(false), ms);
+    tryGo();
+  });
+}
+function release() {
+  active = Math.max(0, active - 1);
+  const next = waiters.shift();
+  if (next) setImmediate(next);
+}
+
+// Only serialize expensive generator routes; fail fast (429) if queued too long
+const heavyRoute = async (req, res, next) => {
+  if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
+    return next();
+  }
+  // OPTIONS should have been handled by CORS block already, but guard anyway
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+
+  const ok = await acquireWithTimeout();
+  if (!ok) {
+    return res.status(429).json({
+      error: 'Too many concurrent generations. Please retry shortly.',
+      hint: 'Queue timeout while waiting for a free generation slot.',
+    });
+  }
+  res.on('finish', release);
+  res.on('close', release);
+  next();
+};
+router.use(heavyRoute);
 
 /* ------------- Security & Rate-Limiting ------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
-const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
+router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })); // general routes
+const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 }); // per heavy route
 
 /* ------------------------------ Deps ------------------------------ */
 const axios = require('axios');
@@ -136,6 +150,7 @@ function housekeeping() {
     sweepTmpDirHardCap();
   } catch {}
 }
+
 
 /* --------------------------- Helpers --------------------------- */
 function publicBase() {
