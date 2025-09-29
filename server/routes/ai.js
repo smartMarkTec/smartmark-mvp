@@ -1,13 +1,12 @@
 'use strict';
 
 /**
- * SmartMark AI routes – resilient build (STATIC + VIDEO)
- * - Unconditional CORS (even on errors) to avoid red-herring CORS failures
- * - Sharp memory discipline + concurrency gate (prevents OOM on Render 512MB)
- * - Hard time budgets with graceful fallbacks to avoid 504s
- * - Pexels fast path + placeholder overlays when rate-limited/offline
- * - Range media streamer for mp4/jpg/png + asset persistence (24h TTL)
- * - HIGH-QUALITY STATIC ADS: 3 designer-grade variations (no “SALE” unless user types it)
+ * SmartMark AI routes – designer static + video ads
+ * - High-quality static ads: 3 modern variations guaranteed
+ * - Colorful shaped blocks / wave panels that can cover half the photo
+ * - No “SALE” unless the user explicitly types an offer
+ * - Title Case defaults (first letter of each word capitalized by English rules)
+ * - Resilient build: CORS-on-errors, memory discipline, time budgets, graceful fallbacks
  */
 
 const express = require('express');
@@ -17,7 +16,7 @@ const router = express.Router();
 const sharp = require('sharp');
 
 try {
-  sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16 MB process cache
+  sharp.cache({ memory: 16, files: 0, items: 0 });
   sharp.concurrency(1);
 } catch {}
 
@@ -365,25 +364,46 @@ function cleanFinalText(text) {
 }
 function categoryLabelForOverlay(category) {
   return {
-    fashion: 'FASHION', fitness: 'TRAINING', cosmetics: 'BEAUTY', hair: 'HAIR CARE',
-    food: 'FOOD', pets: 'PET CARE', electronics: 'TECH', home: 'HOME',
-    coffee: 'COFFEE', generic: 'SHOP',
+    fashion: 'Fashion', fitness: 'Training', cosmetics: 'Beauty', hair: 'Hair Care',
+    food: 'Food', pets: 'Pet Care', electronics: 'Tech', home: 'Home',
+    coffee: 'Coffee', generic: 'Shop',
   }[category || 'generic'];
 }
+
+/* ---------- Title Case util (English rules) ---------- */
+function titleCaseEN(input = '') {
+  const small = new Set(['a','an','the','and','but','or','nor','for','so','yet','as','at','by','in','into','near','of','on','onto','to','with','over','per','vs','via','from']);
+  const words = String(input || '')
+    .replace(/[^\w\s\-']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .split(' ')
+    .filter(Boolean);
+
+  return words.map((w, i) => {
+    const cap = (seg) => seg ? seg[0].toUpperCase() + seg.slice(1) : seg;
+    if (w.includes('-')) return w.split('-').map(cap).join('-');
+    if (i !== 0 && i !== words.length - 1 && small.has(w)) return w;
+    if (/^[A-Z0-9]+$/.test(w)) return w;
+    return cap(w);
+  }).join(' ');
+}
+
 function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
   const category =
     categoryOrTopic &&
     /^(fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
       ? String(categoryOrTopic).toLowerCase()
       : null;
-  const brand = (answers.businessName || '').trim().toUpperCase();
+  const brand = titleCaseEN((answers.businessName || '').trim());
   if (brand) {
-    const label = category ? categoryLabelForOverlay(category) : 'SHOP';
+    const label = category ? categoryLabelForOverlay(category) : 'Shop';
     const words = brand.split(/\s+/);
-    return (words.length === 1 ? `${brand} ${label}` : brand).slice(0, 30);
+    return (words.length === 1 ? `${brand} ${label}` : brand).slice(0, 34);
   }
   if (category) return categoryLabelForOverlay(category);
-  return String(categoryOrTopic || 'SHOP').toUpperCase().slice(0, 24);
+  return String(categoryOrTopic || 'Shop').slice(0, 24);
 }
 
 /* ------------------------ Training context ------------------------ */
@@ -496,10 +516,10 @@ router.post('/generate-campaign-assets', async (req, res) => {
       try {
         const h = new URL(u).hostname.replace(/^www\./, '');
         const base = h.split('.')[0] || 'Your Brand';
-        return base.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        return titleCaseEN(base.replace(/[-_]/g, ' '));
       } catch { return 'Your Brand'; }
     };
-    const brand = (answers.businessName && String(answers.businessName).trim()) || brandFromUrl(url);
+    const brand = (answers.businessName && titleCaseEN(String(answers.businessName).trim())) || brandFromUrl(url);
     const industry = (answers.industry && String(answers.industry).trim()) || '';
     const mainBenefit = (answers.mainBenefit && String(answers.mainBenefit).trim()) || '';
     const offer = (answers.offer && String(answers.offer).trim()) || '';
@@ -515,7 +535,7 @@ ${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}You are a senio
 Write JSON ONLY:
 
 {
-  "headline": "max 55 characters, plain and neutral (no assumptions)",
+  "headline": "max 55 characters, Title Case (no assumptions)",
   "body": "18-30 words, friendly and value-focused, neutral claims only, no emojis/hashtags",
   "image_overlay_text": "4 words max, simple CTA in ALL CAPS"
 }
@@ -553,7 +573,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       const jsonStr = (raw.match(/\{[\s\S]*\}/) || [raw])[0];
       const parsed = JSON.parse(jsonStr);
       const clean = (s, max = 200) => cleanFinalText(String(s || '')).slice(0, max);
-      headline = clean(parsed.headline, 55);
+      headline = titleCaseEN(clean(parsed.headline, 55));
       body = stripFashionIfNotApplicable(clean(parsed.body, 220), category);
       overlay = clean(parsed.image_overlay_text, 28);
     } catch {
@@ -598,11 +618,11 @@ function splitTwoLines(text, maxW, startFs) {
   return { lines: [text], fs: fitFont(text, maxW, startFs) };
 }
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
-function cleanHeadline(h) {
-  h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
+function cleanHeadlineTitleCase(h) {
+  h = String(h || '').replace(/[^a-z0-9 &\-']/gi, ' ').replace(/\s+/g, ' ').trim();
   if (!h || BANNED_TERMS.test(h)) return '';
-  const words = h.split(' '); if (words.length > 6) h = words.slice(0, 6).join(' ');
-  return h.toUpperCase();
+  const words = h.split(' '); if (words.length > 10) h = words.slice(0, 10).join(' ');
+  return titleCaseEN(h);
 }
 const ALLOWED_CTAS = [
   'SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!',
@@ -648,25 +668,29 @@ async function analyzeImageForPlacement(imgBuf) {
     const darkerSide = left < right ? 'left' : 'right';
     const darkerBand = top < bottom ? 'top' : 'bottom';
     const avg = { r: Math.round(rSum / (W * H)), g: Math.round(gSum / (W * H)), b: Math.round(bSum / (W * H)) };
-    const palette = ['#D35400','#2B6CB0','#2F855A','#6B46C1','#E63946','#D61C4E'];
+    const palette = ['#6B46C1','#2B6CB0','#2F855A','#D61C4E','#E98A15','#0EA5E9'];
     const idx = ((avg.r > avg.g) + (avg.g > avg.b) * 2 + (avg.r > avg.b) * 3) % palette.length;
     const brandColor = palette[idx];
     const diffLR = Math.abs(left - right) / (W * H);
     return { darkerSide, darkerBand, brandColor, diffLR };
-  } catch { return { darkerSide: 'left', darkerBand: 'top', brandColor: '#E63946', diffLR: 0.0 }; }
+  } catch { return { darkerSide: 'left', darkerBand: 'top', brandColor: '#2B6CB0', diffLR: 0.0 }; }
 }
 function svgDefs(brandColor) {
   return `
     <defs>
       <linearGradient id="gShadeV" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
+        <stop offset="0%" stop-color="#000A"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="gShadeHLeft" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.94"/>
         <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.70"/>
+      </linearGradient>
+      <linearGradient id="panelGradSoft" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.88"/>
+        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.62"/>
       </linearGradient>
       <filter id="glass" x="-10%" y="-10%" width="120%" height="120%">
         <feGaussianBlur in="SourceGraphic" stdDeviation="0.6" result="blur"/>
@@ -680,7 +704,7 @@ function svgDefs(brandColor) {
 }
 const LIGHT = '#f5f7f9';
 
-/* ---------- NEW: subline crafting (short, safe) ---------- */
+/* ---------- Subline (Title Case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const pick = (s) => String(s || '').replace(/[^\w\s\-']/g, '').trim();
   const candidates = [
@@ -701,14 +725,13 @@ function craftSubline(answers = {}, category = 'generic') {
     }[category] || 'made for everyday use',
   ].filter(Boolean);
 
-  let line = candidates[0] || candidates[candidates.length - 1];
-  line = line.toLowerCase();
+  let line = (candidates[0] || candidates[candidates.length - 1]).toLowerCase();
   const words = line.split(/\s+/).filter(Boolean).slice(0, 7);
   if (words.length < 4 && candidates[1]) {
     const more = String(candidates[1]).toLowerCase().split(/\s+/).filter(Boolean);
     while (words.length < 5 && more.length) words.push(more.shift());
   }
-  return words.join(' ');
+  return titleCaseEN(words.join(' '));
 }
 
 /* ---------- CTA pill ---------- */
@@ -728,25 +751,25 @@ const pillBtn = (x, y, text, fs = 28) => {
     </g>`;
 };
 
-/* ---- flag: only show SALE badge when user mentions an offer ---- */
+/* ---- Sale badge flag (ONLY when user mentions) ---- */
 function wantsSaleBadge(answers = {}) {
   const t = `${answers.offer || ''} ${answers.description || ''}`.toLowerCase();
   return /(sale|% off|percent off|discount|save|clearance|deal)/i.test(t);
 }
 
-/* ---------- Templated SVG (3 designer variations + optional SALE) ---------- */
+/* ---------- Templated SVG (designer variations) ---------- */
 /**
  * choose:
- * 1 = Top headline band (centered) – modern, minimal (inspired by 360Learning example)
- * 2 = Rounded “arch” card band – soft Mailchimp-like shape
- * 3 = Side glass panel column – premium card on left/right
- * 4 = Diagonal ribbon across image – energetic promo (used when requested)
- * 5 = SALE badge layout – ONLY if wantsSaleBadge(...) === true
- * 6 = Side gradient band with centered text
+ * 1 = Top band (clean, centered)
+ * 2 = Soft “arch card” (Mailchimp-inspired)
+ * 3 = Side glass panel column (premium)
+ * 6 = Side gradient band (minimal)
+ * 7 = Half-cover wave color block with copy inside (bold, modern)
+ * 5 = SALE badge (only if wantsSaleBadge)
  */
 function svgOverlayCreative({
   W, H, title, subline, cta, prefer = 'left', preferBand = 'top',
-  brandColor = '#E63946', choose = 3, sale = false,
+  brandColor = '#2B6CB0', choose = 3, sale = false,
 }) {
   const defs = svgDefs(brandColor);
 
@@ -754,73 +777,73 @@ function svgOverlayCreative({
   const PANEL_W = 560;
   const PANEL_PAD = 34;
   const TITLE_MAX_W = (W) => W - 2 * (SAFE_PAD + PANEL_PAD);
-  const SUB_FS_BASE = 32;
-  const TITLE_FS_CAP = 66;
+  const SUB_FS_BASE = 30;
+  const TITLE_FS_CAP = 62;
 
   const fitTitle = (maxW) => {
     const first = splitTwoLines(title, maxW, TITLE_FS_CAP);
-    return { lines: first.lines, fs: first.fs };
+    return { lines: first.lines, fs: Math.max(34, first.fs) };
   };
   const fitSub = (maxW) => {
     const fs = fitFont(subline, maxW, SUB_FS_BASE, 22);
-    return { fs };
+    return { fs: Math.max(22, fs) };
   };
 
-  // Layout 1: top band, centered (clean + bold)
+  // Layout 1: top band
   if (choose === 1) {
-    const bandH = 252;
+    const bandH = 240;
     const maxW = TITLE_MAX_W(W);
     const t = fitTitle(maxW);
     const s = fitSub(maxW);
-    const yTitle = 128;
-    const ySub = yTitle + t.fs * t.lines.length + 30;
+    const yTitle = 124;
+    const ySub = yTitle + t.fs * t.lines.length + 26;
     const yCTA = ySub + s.fs + 44;
 
     return `${defs}
       <rect x="0" y="0" width="${W}" height="${bandH}" fill="url(#gShadeV)" />
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.4">
+        font-size="${t.fs}" font-weight="900" fill="${LIGHT}" letter-spacing="0.5">
         <tspan x="${W / 2}" dy="0">${escSVG(t.lines[0])}</tspan>
         ${t.lines[1] ? `<tspan x="${W / 2}" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
       </text>
       <text x="${W / 2}" y="${ySub}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${s.fs}" font-weight="700" fill="${LIGHT}" letter-spacing="0.6">
+        font-size="${s.fs}" font-weight="600" fill="${LIGHT}">
         ${escSVG(subline)}
       </text>
       ${pillBtn(W / 2, yCTA, cta, 30)}
     `;
   }
 
-  // Layout 2: rounded arch card (Mailchimp-like soft card)
+  // Layout 2: rounded arch card
   if (choose === 2) {
-    const cardW = Math.min(720, W - SAFE_PAD * 2);
-    const cardH = 340;
+    const cardW = Math.min(750, W - SAFE_PAD * 2);
+    const cardH = 360;
     const x = (W - cardW) / 2;
-    const y = 60;
-    const t = fitTitle(cardW - 80);
-    const s = fitSub(cardW - 80);
-    const yTitle = y + 120;
+    const y = 56;
+    const t = fitTitle(cardW - 90);
+    const s = fitSub(cardW - 90);
+    const yTitle = y + 128;
     const ySub = yTitle + t.fs * t.lines.length + 22;
     const yCTA = ySub + s.fs + 42;
 
     return `${defs}
       <g>
         <path d="
-          M ${x} ${y + 88}
-          Q ${x} ${y} ${x + 88} ${y}
-          L ${x + cardW - 88} ${y}
-          Q ${x + cardW} ${y} ${x + cardW} ${y + 88}
+          M ${x} ${y + 96}
+          Q ${x} ${y} ${x + 96} ${y}
+          L ${x + cardW - 96} ${y}
+          Q ${x + cardW} ${y} ${x + cardW} ${y + 96}
           L ${x + cardW} ${y + cardH}
           L ${x} ${y + cardH}
           Z
-        " fill="url(#panelGrad)" opacity="0.92"/>
+        " fill="url(#panelGradSoft)" opacity="0.96"/>
         <path d="
-          M ${x} ${y + 88}
-          Q ${x} ${y} ${x + 88} ${y}
-          L ${x + cardW - 88} ${y}
-          Q ${x + cardW} ${y} ${x + cardW} ${y + 88}
+          M ${x} ${y + 96}
+          Q ${x} ${y} ${x + 96} ${y}
+          L ${x + cardW - 96} ${y}
+          Q ${x + cardW} ${y} ${x + cardW} ${y + 96}
           L ${x + cardW} ${y + cardH}
           L ${x} ${y + cardH}
           Z
@@ -829,13 +852,13 @@ function svgOverlayCreative({
 
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t.fs}" font-weight="1000" fill="#111" letter-spacing="1.2">
+        font-size="${t.fs}" font-weight="900" fill="#111">
         <tspan x="${W / 2}" dy="0">${escSVG(t.lines[0])}</tspan>
         ${t.lines[1] ? `<tspan x="${W / 2}" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
       </text>
       <text x="${W / 2}" y="${ySub}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${s.fs}" font-weight="700" fill="#111" letter-spacing="0.4">
+        font-size="${s.fs}" font-weight="600" fill="#111">
         ${escSVG(subline)}
       </text>
       ${pillBtn(W / 2, yCTA, cta, 28)}
@@ -850,7 +873,7 @@ function svgOverlayCreative({
 
   // Layout 3: glass panel column
   if (choose === 3) {
-    const yTitle = 180;
+    const yTitle = 176;
     const ySub = yTitle + t3.fs * t3.lines.length + 22;
     const yCTA = ySub + s3.fs + 44;
 
@@ -861,13 +884,13 @@ function svgOverlayCreative({
       <rect x="${x0}" y="${SAFE_PAD}" width="${PANEL_W}" height="${H - 2 * SAFE_PAD}" rx="28" fill="url(#dots)"/>
       <text x="${cx}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t3.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.2">
+        font-size="${t3.fs}" font-weight="900" fill="#ffffff">
         <tspan x="${cx}" dy="0">${escSVG(t3.lines[0])}</tspan>
         ${t3.lines[1] ? `<tspan x="${cx}" dy="${t3.fs * 1.05}">${escSVG(t3.lines[1])}</tspan>` : ''}
       </text>
       <text x="${cx}" y="${ySub}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${s3.fs}" font-weight="700" fill="#ffffff" letter-spacing="0.6">
+        font-size="${s3.fs}" font-weight="600" fill="#ffffff">
         ${escSVG(subline)}
       </text>
       ${pillBtn(cx, yCTA, cta, 28)}
@@ -888,40 +911,68 @@ function svgOverlayCreative({
       <rect x="${prefer === 'left' ? 0 : W - PANEL_W}" y="0" width="${PANEL_W}" height="${H}" fill="url(#gShadeHLeft)"/>
       <text x="${anchorX}" y="${yBase}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t3.fs}" font-weight="1000" fill="#f2f5f6" letter-spacing="1.2">
+        font-size="${t3.fs}" font-weight="900" fill="#f3f6f7">
         <tspan x="${anchorX}" dy="0">${escSVG(t3.lines[0])}</tspan>
         ${t3.lines[1] ? `<tspan x="${anchorX}" dy="${t3.fs * 1.05}">${escSVG(t3.lines[1])}</tspan>` : ''}
       </text>
       <text x="${anchorX}" y="${ySub}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${s3.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="0.6">
+        font-size="${s3.fs}" font-weight="600" fill="#f3f6f7">
         ${escSVG(subline)}
       </text>
       ${pillBtn(anchorX, yCTA, cta, 26)}
     `;
   }
 
-  // Layout 4: diagonal ribbon (kept for variety)
-  if (choose === 4) {
-    const ribbonH = 170;
-    const angle = prefer === 'left' ? -10 : 10;
-    const xMid = W / 2;
-    const yMid = H * 0.28;
-    const t = fitTitle(W - 240);
-    const yCTA = H * 0.74;
+  // Layout 7: Half-cover wave color block (bold)
+  if (choose === 7) {
+    const coverLeft = prefer === 'right';
+    const xStart = coverLeft ? 0 : W * 0.5;
+    const xEnd = coverLeft ? W * 0.5 : W;
+    const midX = (xStart + xEnd) / 2;
+    const t = fitTitle(W * 0.45 - 64);
+    const s = fitSub(W * 0.45 - 64);
+    const textCenterX = coverLeft ? midX - 12 : midX + 12;
+    const yTitle = 220;
+    const ySub = yTitle + t.fs * t.lines.length + 24;
+    const yCTA = ySub + s.fs + 42;
 
     return `${defs}
-      <g transform="translate(${xMid},${yMid}) rotate(${angle})">
-        <rect x="${-W / 2}" y="${-ribbonH / 2}" width="${W}" height="${ribbonH}" fill="${brandColor}" opacity="0.92" />
-        <rect x="${-W / 2}" y="${-ribbonH / 2}" width="${W}" height="${ribbonH}" fill="url(#dots)" />
-        <text x="0" y="-10" text-anchor="middle"
-          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-          font-size="${t.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.4">
-          <tspan x="0" dy="0">${escSVG(t.lines[0])}</tspan>
-          ${t.lines[1] ? `<tspan x="0" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
-        </text>
-      </g>
-      ${pillBtn(W / 2, yCTA, cta, 30)}
+      <path d="
+        M ${xStart} 0
+        L ${xEnd} 0
+        L ${xEnd} ${H}
+        L ${xStart} ${H}
+        C ${xStart + (coverLeft ? 120 : -120)} ${H * 0.70},
+          ${xStart + (coverLeft ? 100 : -100)} ${H * 0.30},
+          ${xStart} 0
+        Z
+      " fill="url(#panelGrad)" opacity="0.95"/>
+      <path d="
+        M ${xStart} 0
+        L ${xEnd} 0
+        L ${xEnd} ${H}
+        L ${xStart} ${H}
+        C ${xStart + (coverLeft ? 120 : -120)} ${H * 0.70},
+          ${xStart + (coverLeft ? 100 : -100)} ${H * 0.30},
+          ${xStart} 0
+        Z
+      " fill="url(#dots)"/>
+
+      <text x="${textCenterX}" y="${yTitle}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${t.fs}" font-weight="900" fill="#ffffff">
+        <tspan x="${textCenterX}" dy="0">${escSVG(t.lines[0])}</tspan>
+        ${t.lines[1] ? `<tspan x="${textCenterX}" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
+      </text>
+
+      <text x="${textCenterX}" y="${ySub}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${s.fs}" font-weight="600" fill="#ffffff">
+        ${escSVG(subline)}
+      </text>
+
+      ${pillBtn(textCenterX, yCTA, cta, 28)}
     `;
   }
 
@@ -945,27 +996,27 @@ function svgOverlayCreative({
       </g>
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit5.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.2">
+        font-size="${fit5.fs}" font-weight="900" fill="${LIGHT}">
         <tspan x="${W / 2}" dy="0">${escSVG(fit5.lines[0])}</tspan>
         ${fit5.lines[1] ? `<tspan x="${W / 2}" dy="${fit5.fs * 1.05}">${escSVG(fit5.lines[1])}</tspan>` : ''}
       </text>
       <text x="${W / 2}" y="${ySub}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${sub.fs}" font-weight="700" fill="${LIGHT}" letter-spacing="0.6">
+        font-size="${sub.fs}" font-weight="600" fill="${LIGHT}">
         ${escSVG(subline)}
       </text>
       ${pillBtn(W / 2, yCTA, cta, 28)}
     `;
   }
 
-  // default to layout 3
+  // Default to layout 3
   return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, sale });
 }
 
-/* ---------- Builder (supports forced layout for guaranteed 3 variations) ---------- */
+/* ---------- Builder (supports forcing specific layout) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
-  fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
+  fallbackHeadline = 'Shop', answers = {}, category = 'generic',
   layoutChoice = null,
 }) {
   const W = 1200, H = 628;
@@ -974,13 +1025,13 @@ async function buildOverlayImage({
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
-  const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
+  const title = cleanHeadlineTitleCase(headlineHint) || cleanHeadlineTitleCase(fallbackHeadline) || 'Shop';
   const subline = craftSubline(answers, category);
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const sale = wantsSaleBadge(answers);
 
-  const autoChoices = analysis.diffLR > 40 ? [3, 1, 6, 4, sale ? 5 : 1] : [1, 3, 6, 4, sale ? 5 : 3];
+  const autoChoices = analysis.diffLR > 40 ? [3, 1, 6, 7, sale ? 5 : 2] : [7, 2, 3, 1, sale ? 5 : 6];
   const tpl = layoutChoice != null ? layoutChoice : autoChoices[h % autoChoices.length];
 
   const overlaySVG = Buffer.from(
@@ -1352,7 +1403,7 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     const category = resolveCategory(answers || {});
     const topic = deriveTopicKeywords(answers, url, 'ecommerce');
     const brandBase =
-      (answers?.businessName && String(answers.businessName).trim()) ||
+      (answers?.businessName && titleCaseEN(String(answers.businessName).trim())) ||
       overlayTitleFromAnswers(answers, category);
     let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g, '').trim();
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
@@ -1530,7 +1581,10 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category = resolveCategory(answers || {});
     const keyword = getImageKeyword(industry, url);
     const sale = wantsSaleBadge(answers);
-    const layouts = sale ? [1, 3, 5] : [1, 2, 3]; // guarantee 3 modern, distinct designer looks
+
+    // Hard guarantee of 3 distinct, designer layouts:
+    // 7 = half-cover wave, 2 = arch card, 3 = side glass panel
+    const layouts = sale ? [7, 2, 5] : [7, 2, 3];
 
     const makeOne = async (baseUrl, seed, layoutChoice) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
@@ -1560,7 +1614,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       }
     };
 
-    // ---- No Pexels key: generate 3 overlays from placeholders
+    // ---- No Pexels key: 3 overlays from placeholders
     if (!PEXELS_API_KEY) {
       const urls = [], absUrls = [];
       for (let i = 0; i < 3; i++) {
