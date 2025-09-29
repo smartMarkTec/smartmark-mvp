@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * SmartMark AI routes – resilient build
+ * SmartMark AI routes – resilient build (STATIC + VIDEO)
  * - Unconditional CORS (even on errors) to avoid red-herring CORS failures
  * - Sharp memory discipline + concurrency gate (prevents OOM on Render 512MB)
  * - Hard time budgets with graceful fallbacks to avoid 504s
  * - Pexels fast path + placeholder overlays when rate-limited/offline
  * - Range media streamer for mp4/jpg/png + asset persistence (24h TTL)
+ * - HIGH-QUALITY STATIC ADS: 3 designer-grade variations (no “SALE” unless user types it)
  */
 
 const express = require('express');
@@ -15,13 +16,11 @@ const router = express.Router();
 /* ---------------- Memory discipline for Sharp + concurrency gate ---------------- */
 const sharp = require('sharp');
 
-// Keep Sharp tiny and predictable
 try {
   sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16 MB process cache
   sharp.concurrency(1);
 } catch {}
 
-// Simple semaphore: allow only N heavy jobs at once (default 1)
 const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
 let active = 0;
 const waiters = [];
@@ -45,7 +44,6 @@ function release() {
   if (next) setImmediate(next);
 }
 
-// Serialize only the generator routes (expensive ones)
 const heavyRoute = (req, res, next) => {
   if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
     return next();
@@ -59,7 +57,6 @@ const heavyRoute = (req, res, next) => {
 router.use(heavyRoute);
 
 /* ------------------------ CORS (router-level, unconditional) ------------------------ */
-// Reflect caller origin so even 50x carry the ACAO header (prevents CORS red-herring)
 router.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -80,8 +77,8 @@ router.use((req, res, next) => {
 /* ------------- Security & Rate-Limiting ------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })); // general routes
-const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 }); // per heavy route
+router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
+const heavyLimiter = basicRateLimit({ windowMs: 60 * 60 * 1000, max: 20 });
 
 /* ------------------------------ Deps ------------------------------ */
 const axios = require('axios');
@@ -99,10 +96,7 @@ const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
 /* -------- Disk guard -------- */
 const GEN_DIR = '/tmp/generated';
-function ensureGeneratedDir() {
-  try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {}
-  return GEN_DIR;
-}
+function ensureGeneratedDir() { try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {} return GEN_DIR; }
 function dirStats(p) {
   try {
     const files = fs
@@ -469,7 +463,6 @@ Output ONLY the script text.`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
 
   try {
-    // short timeout wrapper
     const TIMEOUT_MS = 5000;
     const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('assets-timeout')), ms))]);
 
@@ -583,7 +576,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Image overlays ---------------------- */
+/* ---------------------- Image overlays (Designer-grade) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) {
   return String(s || '')
@@ -655,7 +648,7 @@ async function analyzeImageForPlacement(imgBuf) {
     const darkerSide = left < right ? 'left' : 'right';
     const darkerBand = top < bottom ? 'top' : 'bottom';
     const avg = { r: Math.round(rSum / (W * H)), g: Math.round(gSum / (W * H)), b: Math.round(bSum / (W * H)) };
-    const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1','#E98A15','#D61C4E'];
+    const palette = ['#D35400','#2B6CB0','#2F855A','#6B46C1','#E63946','#D61C4E'];
     const idx = ((avg.r > avg.g) + (avg.g > avg.b) * 2 + (avg.r > avg.b) * 3) % palette.length;
     const brandColor = palette[idx];
     const diffLR = Math.abs(left - right) / (W * H);
@@ -666,14 +659,14 @@ function svgDefs(brandColor) {
   return `
     <defs>
       <linearGradient id="gShadeV" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000A"/><stop offset="100%" stop-color="#0000"/>
+        <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="gShadeHLeft" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
       <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.90"/>
-        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.65"/>
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
+        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.70"/>
       </linearGradient>
       <filter id="glass" x="-10%" y="-10%" width="120%" height="120%">
         <feGaussianBlur in="SourceGraphic" stdDeviation="0.6" result="blur"/>
@@ -741,7 +734,16 @@ function wantsSaleBadge(answers = {}) {
   return /(sale|% off|percent off|discount|save|clearance|deal)/i.test(t);
 }
 
-/* ---------- Templated SVG with guaranteed spacing ---------- */
+/* ---------- Templated SVG (3 designer variations + optional SALE) ---------- */
+/**
+ * choose:
+ * 1 = Top headline band (centered) – modern, minimal (inspired by 360Learning example)
+ * 2 = Rounded “arch” card band – soft Mailchimp-like shape
+ * 3 = Side glass panel column – premium card on left/right
+ * 4 = Diagonal ribbon across image – energetic promo (used when requested)
+ * 5 = SALE badge layout – ONLY if wantsSaleBadge(...) === true
+ * 6 = Side gradient band with centered text
+ */
 function svgOverlayCreative({
   W, H, title, subline, cta, prefer = 'left', preferBand = 'top',
   brandColor = '#E63946', choose = 3, sale = false,
@@ -764,7 +766,7 @@ function svgOverlayCreative({
     return { fs };
   };
 
-  // Layout 1: top band, centered
+  // Layout 1: top band, centered (clean + bold)
   if (choose === 1) {
     const bandH = 252;
     const maxW = TITLE_MAX_W(W);
@@ -788,6 +790,55 @@ function svgOverlayCreative({
         ${escSVG(subline)}
       </text>
       ${pillBtn(W / 2, yCTA, cta, 30)}
+    `;
+  }
+
+  // Layout 2: rounded arch card (Mailchimp-like soft card)
+  if (choose === 2) {
+    const cardW = Math.min(720, W - SAFE_PAD * 2);
+    const cardH = 340;
+    const x = (W - cardW) / 2;
+    const y = 60;
+    const t = fitTitle(cardW - 80);
+    const s = fitSub(cardW - 80);
+    const yTitle = y + 120;
+    const ySub = yTitle + t.fs * t.lines.length + 22;
+    const yCTA = ySub + s.fs + 42;
+
+    return `${defs}
+      <g>
+        <path d="
+          M ${x} ${y + 88}
+          Q ${x} ${y} ${x + 88} ${y}
+          L ${x + cardW - 88} ${y}
+          Q ${x + cardW} ${y} ${x + cardW} ${y + 88}
+          L ${x + cardW} ${y + cardH}
+          L ${x} ${y + cardH}
+          Z
+        " fill="url(#panelGrad)" opacity="0.92"/>
+        <path d="
+          M ${x} ${y + 88}
+          Q ${x} ${y} ${x + 88} ${y}
+          L ${x + cardW - 88} ${y}
+          Q ${x + cardW} ${y} ${x + cardW} ${y + 88}
+          L ${x + cardW} ${y + cardH}
+          L ${x} ${y + cardH}
+          Z
+        " fill="url(#dots)"/>
+      </g>
+
+      <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${t.fs}" font-weight="1000" fill="#111" letter-spacing="1.2">
+        <tspan x="${W / 2}" dy="0">${escSVG(t.lines[0])}</tspan>
+        ${t.lines[1] ? `<tspan x="${W / 2}" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
+      </text>
+      <text x="${W / 2}" y="${ySub}" text-anchor="middle"
+        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+        font-size="${s.fs}" font-weight="700" fill="#111" letter-spacing="0.4">
+        ${escSVG(subline)}
+      </text>
+      ${pillBtn(W / 2, yCTA, cta, 28)}
     `;
   }
 
@@ -850,7 +901,7 @@ function svgOverlayCreative({
     `;
   }
 
-  // Layout 4: diagonal ribbon
+  // Layout 4: diagonal ribbon (kept for variety)
   if (choose === 4) {
     const ribbonH = 170;
     const angle = prefer === 'left' ? -10 : 10;
@@ -911,10 +962,11 @@ function svgOverlayCreative({
   return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, sale });
 }
 
-/* ---------- Updated builder (sharper, no enlargement) ---------- */
+/* ---------- Builder (supports forced layout for guaranteed 3 variations) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
+  layoutChoice = null,
 }) {
   const W = 1200, H = 628;
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
@@ -927,8 +979,10 @@ async function buildOverlayImage({
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   const sale = wantsSaleBadge(answers);
-  const choices = analysis.diffLR > 40 ? [3, 1, 6, 4, sale ? 5 : 1] : [1, 3, 6, 4, sale ? 5 : 3];
-  const tpl = choices[h % choices.length];
+
+  const autoChoices = analysis.diffLR > 40 ? [3, 1, 6, 4, sale ? 5 : 1] : [1, 3, 6, 4, sale ? 5 : 3];
+  const tpl = layoutChoice != null ? layoutChoice : autoChoices[h % autoChoices.length];
+
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
       W, H, title, subline, cta,
@@ -940,7 +994,7 @@ async function buildOverlayImage({
   const file = `${uuidv4()}.jpg`;
   await base
     .composite([{ input: overlaySVG, top: 0, left: 0 }])
-    .jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .jpeg({ quality: 95, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
   maybeGC();
   return {
@@ -1304,7 +1358,6 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
 
-    // Hard overall route deadline to avoid 504s at the edge (Render)
     const HARD_ROUTE_TIMEOUT_MS = 55000;
     const deadline = Date.now() + HARD_ROUTE_TIMEOUT_MS;
     const timeLeftHard = () => Math.max(0, deadline - Date.now());
@@ -1341,7 +1394,7 @@ Output ONLY the script text.`;
     const targets = [[58, 72], [70, 84]];
 
     for (let attempt = 0; attempt < targets.length; attempt++) {
-      if (timeLeftHard() < 9000) break; // not enough time to keep trying
+      if (timeLeftHard() < 9000) break;
       try {
         const [low, high] = targets[attempt];
         const r = await openai.chat.completions.create({
@@ -1357,14 +1410,12 @@ Output ONLY the script text.`;
       script = stripFashionIfNotApplicable(script, category);
       script = enforceCategoryPresence(script, category);
       script = cleanFinalText(script);
-      // Remove duplicate CTA phrases inside script; we'll ensure one at end
       const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
       const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
       script = script.replace(re, '').trim();
       if (!/[.!?]$/.test(script)) script += '.';
       script += ' ' + ctaText;
 
-      // TTS unless we are too close to the deadline
       try {
         if (timeLeftHard() > 9000) {
           if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
@@ -1402,7 +1453,6 @@ Output ONLY the script text.`;
 
     imageUrl = await ensureImageForStill();
 
-    // If we’re low on time, switch to title card (cheaper than still)
     const makeTitleCard = timeLeftHard() < 7000;
     const videoBuilder = makeTitleCard ? composeTitleCardVideo : composeStillVideo;
 
@@ -1463,7 +1513,7 @@ Output ONLY the script text.`;
   }
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
+/* --------------------- IMAGE: search + overlay (FORCE 3 VARIATIONS) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
   try {
@@ -1480,8 +1530,9 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category = resolveCategory(answers || {});
     const keyword = getImageKeyword(industry, url);
     const sale = wantsSaleBadge(answers);
+    const layouts = sale ? [1, 3, 5] : [1, 2, 3]; // guarantee 3 modern, distinct designer looks
 
-    const makeOne = async (baseUrl, seed) => {
+    const makeOne = async (baseUrl, seed, layoutChoice) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
       const ctaHint = pickFromAllowedCTAs(answers, seed);
       try {
@@ -1493,23 +1544,23 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: headlineHint,
           answers,
           category,
+          layoutChoice,
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, sale },
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, sale, layoutChoice },
         });
         return publicUrl;
       } catch {
-        // Save raw, in case overlay fails
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale },
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale, layoutChoice },
         });
         return baseUrl;
       }
     };
 
-    // If no Pexels key, return 3 crisp placeholder overlays
+    // ---- No Pexels key: generate 3 overlays from placeholders
     if (!PEXELS_API_KEY) {
       const urls = [], absUrls = [];
       for (let i = 0; i < 3; i++) {
@@ -1520,10 +1571,11 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
+          layoutChoice: layouts[i],
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, sale },
+          meta: { category, keyword, placeholder: true, i, sale, layoutChoice: layouts[i] },
         });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
@@ -1537,17 +1589,17 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // Use Pexels, but keep it short and sweet
+    // ---- Pexels
     let photos = [];
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 12 },
+        params: { query: keyword, per_page: 18 },
         timeout: 3000,
       });
       photos = r.data.photos || [];
     } catch {
-      // graceful fallback: placeholders instead of 500
+      // graceful fallback
       const urls = [], absUrls = [];
       for (let i = 0; i < 3; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
@@ -1557,8 +1609,9 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
+          layoutChoice: layouts[i],
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale, layoutChoice: layouts[i] } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1572,7 +1625,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     }
 
     if (!photos.length) {
-      // same graceful fallback if Pexels returned nothing
       const urls = [], absUrls = [];
       for (let i = 0; i < 3; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
@@ -1582,8 +1634,9 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
+          layoutChoice: layouts[i],
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale, layoutChoice: layouts[i] } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1596,9 +1649,9 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
+    // Pick 3 distinct photos deterministically
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
-
     const picks = [];
     for (let i = 0; i < photos.length && picks.length < 3; i++) {
       const idx = (idxHash + i * 7) % photos.length;
@@ -1609,7 +1662,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     for (let pi = 0; pi < picks.length; pi++) {
       const img = photos[picks[pi]];
       const baseUrl = img.src.original || img.src.large2x || img.src.large;
-      const u = await makeOne(baseUrl, seed + '_' + pi);
+      const u = await makeOne(baseUrl, seed + '_' + pi, layouts[pi]);
       urls.push(u); absUrls.push(absolutePublicUrl(u));
     }
 
