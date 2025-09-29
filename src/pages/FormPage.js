@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
 
-/* --------- Palette / fonts (kept distinct from homepage for light variety) --------- */
+/* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
 const DARK_BG = "#11161c";
@@ -12,7 +12,6 @@ const SURFACE = "#1b2026";
 const TEAL = "#14e7b9";
 const TEAL_SOFT = "rgba(20,231,185,0.22)";
 const EDGE = "rgba(255,255,255,0.06)";
-
 const SIDE_CHAT_LIMIT = 5;
 
 /* -------- Backend endpoints -------- */
@@ -34,23 +33,10 @@ const ALLOWED_CTAS = [
 ];
 
 /* ===== image draft helpers ===== */
-function loadImageDrafts() {
-  try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; }
-}
-function saveImageDrafts(map) {
-  try { localStorage.setItem(IMAGE_DRAFTS_KEY, JSON.stringify(map)); } catch {}
-}
-function getImageDraftById(id) {
-  const all = loadImageDrafts();
-  return all[id] || null;
-}
-function saveImageDraftById(id, patch) {
-  const all = loadImageDrafts();
-  const next = { ...(all[id] || {}), ...patch, _updatedAt: Date.now() };
-  all[id] = next;
-  saveImageDrafts(all);
-  return next;
-}
+function loadImageDrafts() { try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; } }
+function saveImageDrafts(map) { try { localStorage.setItem(IMAGE_DRAFTS_KEY, JSON.stringify(map)); } catch {} }
+function getImageDraftById(id) { const all = loadImageDrafts(); return all[id] || null; }
+function saveImageDraftById(id, patch) { const all = loadImageDrafts(); const next = { ...(all[id] || {}), ...patch, _updatedAt: Date.now() }; all[id] = next; saveImageDrafts(all); return next; }
 function normalizeOverlayCTA(s = "") {
   const raw = String(s).trim();
   if (!raw) return "Learn more";
@@ -59,11 +45,9 @@ function normalizeOverlayCTA(s = "") {
   const chosen = match || plain;
   return chosen.replace(/\b\w/g, c => c.toUpperCase());
 }
-function creativeIdFromUrl(url = "") {
-  return `img:${url}`;
-}
+function creativeIdFromUrl(url = "") { return `img:${url}`; }
 
-/* ===== small UI bits ===== */
+/* ===== tiny UI bits ===== */
 function Dotty() {
   return (
     <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
@@ -72,11 +56,7 @@ function Dotty() {
       <span className="dotty-dot" style={dotStyle(2)}>.</span>
       <style>
         {`
-        @keyframes bounceDot {
-          0% { transform: translateY(0);}
-          30% { transform: translateY(-7px);}
-          60% { transform: translateY(0);}
-        }
+        @keyframes bounceDot { 0% { transform: translateY(0);} 30% { transform: translateY(-7px);} 60% { transform: translateY(0);} }
         .dotty-dot { display:inline-block; animation:bounceDot 1.2s infinite; }
         .dotty-dot:nth-child(2) { animation-delay: .15s; }
         .dotty-dot:nth-child(3) { animation-delay: .3s; }
@@ -85,42 +65,20 @@ function Dotty() {
     </span>
   );
 }
-function dotStyle(n) {
-  return { display: "inline-block", margin: "0 3px", fontSize: 36, color: TEAL, animationDelay: `${n * 0.13}s` };
-}
+function dotStyle(n) { return { display: "inline-block", margin: "0 3px", fontSize: 36, color: TEAL, animationDelay: `${n * 0.13}s` }; }
 
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
-    <div style={{
-      position: "fixed", inset: 0,
-      background: "rgba(10,12,15,0.92)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999
-    }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(10,12,15,0.92)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
       <div style={{ position: "relative", background: SURFACE, borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
-        <button
-          onClick={onClose}
-          style={{
-            position: "absolute", top: 16, right: 16, zIndex: 2,
-            background: "#23262a", color: "#fff", border: "none",
-            borderRadius: 20, padding: 8, cursor: "pointer"
-          }}
-        >
+        <button onClick={onClose} style={{ position: "absolute", top: 16, right: 16, zIndex: 2, background: "#23262a", color: "#fff", border: "none", borderRadius: 20, padding: 8, cursor: "pointer" }}>
           <FaTimes size={20} />
         </button>
         <img
           src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
           alt="Full Ad"
-          style={{
-            display: "block",
-            maxWidth: "90vw",
-            maxHeight: "82vh",
-            borderRadius: 16,
-            background: "#222",
-            margin: "40px 28px 28px",
-            boxShadow: "0 8px 38px #000b",
-            fontFamily: AD_FONT
-          }}
+          style={{ display: "block", maxWidth: "90vw", maxHeight: "82vh", borderRadius: 16, background: "#222", margin: "40px 28px 28px", boxShadow: "0 8px 38px #000b", fontFamily: AD_FONT }}
         />
       </div>
     </div>
@@ -128,26 +86,16 @@ function ImageModal({ open, imageUrl, onClose }) {
 }
 
 function MediaTypeToggle({ mediaType, setMediaType }) {
-  const choices = [
-    { key: "image", label: "Image" },
-    { key: "both", label: "Both" },
-    { key: "video", label: "Video" }
-  ];
+  const choices = [ { key: "image", label: "Image" }, { key: "both", label: "Both" }, { key: "video", label: "Video" } ];
   return (
-    <div style={{
-      display: "flex", gap: 16, justifyContent: "center", alignItems: "center",
-      margin: "18px 0 8px 0"
-    }}>
+    <div style={{ display: "flex", gap: 16, justifyContent: "center", alignItems: "center", margin: "18px 0 8px 0" }}>
       {choices.map((choice) => (
         <button
           key={choice.key}
           onClick={() => setMediaType(choice.key)}
           style={{
-            fontWeight: 900,
-            fontSize: "1.06rem",
-            padding: "10px 24px",
-            borderRadius: 12,
-            border: `1px solid ${EDGE}`,
+            fontWeight: 900, fontSize: "1.06rem", padding: "10px 24px",
+            borderRadius: 12, border: `1px solid ${EDGE}`,
             background: mediaType === choice.key ? TEAL : "#23292c",
             color: mediaType === choice.key ? "#0e1418" : "#bcfff6",
             cursor: "pointer",
@@ -171,13 +119,8 @@ function Arrow({ side = "left", onClick, disabled }) {
       onClick={onClick}
       disabled={disabled}
       style={{
-        position: "absolute",
-        top: "50%",
-        [side]: 10,
-        transform: "translateY(-50%)",
-        background: "rgba(0,0,0,0.55)",
-        color: "#fff",
-        border: "none",
+        position: "absolute", top: "50%", [side]: 10, transform: "translateY(-50%)",
+        background: "rgba(0,0,0,0.55)", color: "#fff", border: "none",
         width: 34, height: 34, borderRadius: "50%",
         cursor: disabled ? "not-allowed" : "pointer",
         display: "flex", alignItems: "center", justifyContent: "center",
@@ -187,11 +130,10 @@ function Arrow({ side = "left", onClick, disabled }) {
       title={side === "left" ? "Previous" : "Next"}
     >
       <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
-        {side === "left" ? (
-          <path d="M12.5 15L7.5 10L12.5 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        ) : (
-          <path d="M7.5 5L12.5 10L7.5 15" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        )}
+        {side === "left"
+          ? <path d="M12.5 15L7.5 10L12.5 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          : <path d="M7.5 5L12.5 10L7.5 15" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        }
       </svg>
     </button>
   );
@@ -199,23 +141,13 @@ function Arrow({ side = "left", onClick, disabled }) {
 
 function Dots({ count, active, onClick }) {
   return (
-    <div style={{
-      position: "absolute", bottom: 8, left: 0, right: 0,
-      display: "flex", justifyContent: "center", alignItems: "center",
-      gap: 8, zIndex: 3
-    }}>
+    <div style={{ position: "absolute", bottom: 8, left: 0, right: 0, display: "flex", justifyContent: "center", alignItems: "center", gap: 8, zIndex: 3 }}>
       {Array.from({ length: count }).map((_, i) => (
         <button
           key={i}
           onClick={() => onClick(i)}
-          style={{
-            width: 8, height: 8, borderRadius: "50%",
-            border: "none",
-            background: i === active ? TEAL : "rgba(255,255,255,0.55)",
-            cursor: "pointer", opacity: i === active ? 1 : 0.7
-          }}
-          aria-label={`Go to slide ${i + 1}`}
-          title={`Slide ${i + 1}`}
+          style={{ width: 8, height: 8, borderRadius: "50%", border: "none", background: i === active ? TEAL : "rgba(255,255,255,0.55)", cursor: "pointer", opacity: i === active ? 1 : 0.7 }}
+          aria-label={`Go to slide ${i + 1}`} title={`Slide ${i + 1}`}
         />
       ))}
     </div>
@@ -223,17 +155,8 @@ function Dots({ count, active, onClick }) {
 }
 
 /* ===== helpers ===== */
-function getRandomString() {
-  return Math.random().toString(36).substring(2, 12) + Date.now();
-}
-function isGenerateTrigger(input) {
-  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
-}
-async function safeJson(res) {
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  try { return await res.json(); } catch { throw new Error("Bad JSON"); }
-}
-
+function getRandomString() { return Math.random().toString(36).substring(2, 12) + Date.now(); }
+function isGenerateTrigger(input) { return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim()); }
 const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
 function stripUrls(s = "") { return (s || "").replace(URL_REGEX, ""); }
 function extractFirstUrl(s = "") { const m = (s || "").match(URL_REGEX); return m ? m[0] : null; }
@@ -245,29 +168,58 @@ function isLikelyQuestion(s) {
   const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
-function isLikelySideStatement(s) {
-  const t = (s || "").trim().toLowerCase();
-  const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
-  const hasBang = t.includes("!");
-  return sentimental.test(t) || hasBang;
-}
+function isLikelySideStatement(s) { const t = (s || "").trim().toLowerCase(); const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/; const hasBang = t.includes("!"); return sentimental.test(t) || hasBang; }
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
-  const t = (s || "").trim();
-  if (!currentQ) return false;
-
-  if (currentQ.key === "url") {
-    const hasUrl = !!extractFirstUrl(t);
-    return !hasUrl && t.split(/\s+/).length > 3;
-  }
-  if (currentQ.key === "hasOffer") {
-    return !/^(yes|no|y|n)$/i.test(t);
-  }
-  if (currentQ.key === "industry" || currentQ.key === "businessName") {
-    return t.length > 80;
-  }
+  const t = (s || "").trim(); if (!currentQ) return false;
+  if (currentQ.key === "url") { const hasUrl = !!extractFirstUrl(t); return !hasUrl && t.split(/\s+/).length > 3; }
+  if (currentQ.key === "hasOffer") { return !/^(yes|no|y|n)$/i.test(t); }
+  if (currentQ.key === "industry" || currentQ.key === "businessName") { return t.length > 80; }
   return false;
 }
+
+/* ====== Robust fetch with retry/backoff/timeout ====== */
+async function fetchJsonWithRetry(url, { method = "POST", body = {}, headers = {}, retries = 3, timeoutMs = 20000, backoffMs = 700 } = {}) {
+  let attempt = 0;
+  while (true) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, {
+        method,
+        mode: "cors",
+        credentials: "omit",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: method === "GET" ? undefined : JSON.stringify(body || {}),
+        signal: ctrl.signal
+      });
+      if (!res.ok) {
+        // Special handling for 429/503 — backoff and retry
+        if ((res.status === 429 || res.status === 503) && attempt < retries) {
+          attempt++;
+          const jitter = Math.floor(Math.random() * 300);
+          await new Promise(r => setTimeout(r, backoffMs * attempt + jitter));
+          continue;
+        }
+        const text = await res.text().catch(() => "");
+        throw new Error(`${res.status} ${res.statusText} ${text || ""}`.trim());
+      }
+      try { return await res.json(); } catch { throw new Error("Bad JSON"); }
+    } catch (err) {
+      if (attempt < retries) {
+        attempt++;
+        const jitter = Math.floor(Math.random() * 300);
+        await new Promise(r => setTimeout(r, backoffMs * attempt + jitter));
+        continue;
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+}
+
+const safeJson = async (res) => { if (!res.ok) throw new Error(`${res.status} ${res.statusText}`); try { return await res.json(); } catch { throw new Error("Bad JSON"); } };
 
 /* ========================= Main Component ========================= */
 export default function FormPage() {
@@ -307,6 +259,11 @@ export default function FormPage() {
   /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
 
+  /* ---- Concurrency guards (no overlapping clicks) ---- */
+  const generationLock = useRef(false);
+  const imageLock = useRef(false);
+  const videoLock = useRef(false);
+
   const currentImageId = useMemo(() => {
     const url = imageUrls[activeImage] || "";
     return creativeIdFromUrl(url);
@@ -316,13 +273,10 @@ export default function FormPage() {
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
 
-  // helper for absolute URLs
   const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
 
   /* Scroll chat to bottom */
-  useEffect(() => {
-    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-  }, [chatHistory]);
+  useEffect(() => { if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight; }, [chatHistory]);
 
   /* Restore draft */
   useEffect(() => {
@@ -423,18 +377,10 @@ export default function FormPage() {
       const mergedBody = activeDraft?.body || result?.body || "";
 
       const payload = {
-        answers, step, chatHistory, mediaType, result: {
-          ...(result || {}),
-          headline: mergedHeadline,
-          body: mergedBody
-        },
-        imageUrls, videoItems, activeImage, activeVideo,
-        awaitingReady, input, sideChatCount, hasGenerated
+        answers, step, chatHistory, mediaType, result: { ...(result || {}), headline: mergedHeadline, body: mergedBody },
+        imageUrls, videoItems, activeImage, activeVideo, awaitingReady, input, sideChatCount, hasGenerated
       };
-      localStorage.setItem(
-        FORM_DRAFT_KEY,
-        JSON.stringify({ savedAt: Date.now(), data: payload })
-      );
+      localStorage.setItem(FORM_DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: payload }));
 
       let imgs = imageUrls.slice(0, 2).map(abs);
       let vids = videoItems.map(v => v?.url).filter(Boolean).slice(0, 2).map(abs);
@@ -458,14 +404,11 @@ export default function FormPage() {
 
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
       sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
-    }, 150);
-
+    }, 200);
     return () => clearTimeout(t);
   }, [
-    answers, step, chatHistory, mediaType, result,
-    imageUrls, videoItems, activeImage, activeVideo,
-    awaitingReady, input, sideChatCount, hasGenerated,
-    currentImageId, editHeadline, editBody, editCTA
+    answers, step, chatHistory, mediaType, result, imageUrls, videoItems, activeImage, activeVideo,
+    awaitingReady, input, sideChatCount, hasGenerated, currentImageId, editHeadline, editBody, editCTA
   ]);
 
   function handleImageClick(url) { setShowModal(true); setModalImg(url); }
@@ -474,20 +417,9 @@ export default function FormPage() {
   /* ---- Ask OpenAI (side chat / FAQs) ---- */
   async function askGPT(userText) {
     try {
-      const history = chatHistory.slice(-8).map(m => ({
-        role: m.from === "gpt" ? "assistant" : "user",
-        content: m.text
-      }));
+      const history = chatHistory.slice(-8).map(m => ({ role: m.from === "gpt" ? "assistant" : "user", content: m.text }));
       history.push({ role: "user", content: userText });
-
-      const resp = await fetch(`${API_BASE}/gpt-chat`, {
-        method: "POST",
-        mode: "cors",
-        credentials: "omit",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText, history })
-      });
-      const data = await safeJson(resp);
+      const data = await fetchJsonWithRetry(`${API_BASE}/gpt-chat`, { body: { message: userText, history }, timeoutMs: 12000, retries: 2, backoffMs: 500 });
       return data?.reply || null;
     } catch (e) {
       console.warn("gpt-chat failed:", e.message);
@@ -506,9 +438,8 @@ export default function FormPage() {
     if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
-  /* ---- API calls ---- */
+  /* ---- API calls (sequential + retry) ---- */
   const pickBestImageUrl = (data) => {
-    // Prefer absoluteImageUrl; fallback to absoluteUrl of first variation; finally fallback to relative -> abs()
     if (data?.absoluteImageUrl) return data.absoluteImageUrl;
     const v0 = Array.isArray(data?.imageVariations) ? data.imageVariations[0] : null;
     if (v0?.absoluteUrl) return v0.absoluteUrl;
@@ -517,44 +448,26 @@ export default function FormPage() {
   };
 
   async function fetchImageOnce(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-image-from-prompt`, {
-        method: "POST",
-        mode: "cors",
-        credentials: "omit",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      return pickBestImageUrl(data);
-    } catch (e) {
-      console.warn("image fetch failed:", e.message);
-      return "";
-    }
+    const data = await fetchJsonWithRetry(`${API_BASE}/generate-image-from-prompt`, {
+      body: { answers, regenerateToken: token },
+      timeoutMs: 25000,
+      retries: 3,
+      backoffMs: 800
+    });
+    return pickBestImageUrl(data);
   }
 
   async function fetchVideoOnce(token) {
-    try {
-      const resp = await fetch(`${API_BASE}/generate-video-ad`, {
-        method: "POST",
-        mode: "cors",
-        credentials: "omit",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
-      });
-      const data = await safeJson(resp);
-      const vAbs = data?.absoluteVideoUrl || (data?.video?.absoluteUrl) || null;
-      const vRel = data?.videoUrl || data?.video?.url || "";
-      const vUrl = vAbs || (vRel ? (vRel.startsWith("http") ? vRel : BACKEND_URL + vRel) : "");
-      return {
-        url: vUrl,
-        script: data?.script || data?.video?.script || "",
-        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
-      };
-    } catch (e) {
-      console.warn("video fetch failed:", e.message);
-      return { url: "", script: "", fbVideoId: null };
-    }
+    const data = await fetchJsonWithRetry(`${API_BASE}/generate-video-ad`, {
+      body: { url: answers?.url || "", answers, regenerateToken: token },
+      timeoutMs: 60000,
+      retries: 2,
+      backoffMs: 1200
+    });
+    const vAbs = data?.absoluteVideoUrl || (data?.video?.absoluteUrl) || null;
+    const vRel = data?.videoUrl || data?.video?.url || "";
+    const vUrl = vAbs || (vRel ? (vRel.startsWith("http") ? vRel : BACKEND_URL + vRel) : "");
+    return { url: vUrl, script: data?.script || data?.video?.script || "", fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null };
   }
 
   /* ---- Chat flow ---- */
@@ -586,56 +499,53 @@ export default function FormPage() {
 
     if (step >= CONVO_QUESTIONS.length) {
       if (!hasGenerated && isGenerateTrigger(value)) {
+        if (generationLock.current) return;
+        generationLock.current = true;
         setLoading(true);
         setGenerating(true);
         setChatHistory(ch => [...ch, { from: "gpt", text: "AI generating..." }]);
+        setError("");
 
-        setTimeout(async () => {
-          const tokenA = getRandomString();
-          const tokenB = getRandomString();
+        try {
+          // 1) copy — cheap
+          const copy = await fetchJsonWithRetry(`${API_BASE}/generate-campaign-assets`, {
+            body: { answers },
+            timeoutMs: 15000,
+            retries: 2,
+            backoffMs: 600
+          }).catch(() => ({}));
+          setResult({
+            headline: copy?.headline || "",
+            body: copy?.body || "",
+            image_overlay_text: copy?.image_overlay_text || ""
+          });
 
-          try {
-            const [data, img1, img2, vid1, vid2] = await Promise.all([
-              fetch(`${API_BASE}/generate-campaign-assets`, {
-                method: "POST",
-                mode: "cors",
-                credentials: "omit",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ answers })
-              }).then(safeJson).catch(() => ({})),
-              fetchImageOnce(tokenA),
-              fetchImageOnce(tokenB),
-              fetchVideoOnce(tokenA),
-              fetchVideoOnce(tokenB)
-            ]);
+          // 2) image — one request (sequential)
+          const tokenImg = getRandomString();
+          const img1 = await fetchImageOnce(tokenImg);
+          setImageUrls(img1 ? [img1] : []);
+          setActiveImage(0);
+          setImageUrl(img1 || "");
 
-            setResult({
-              headline: data?.headline || "",
-              body: data?.body || "",
-              image_overlay_text: data?.image_overlay_text || ""
-            });
+          // 3) video — one request (sequential)
+          const tokenVid = getRandomString();
+          const vid1 = await fetchVideoOnce(tokenVid);
+          const vids = vid1 && vid1.url ? [vid1] : [];
+          setVideoItems(vids);
+          setActiveVideo(0);
+          setVideoUrl(vids[0]?.url || "");
+          setVideoScript(vids[0]?.script || "");
 
-            const imgs = [img1, img2].filter(Boolean).slice(0, 2);
-            setImageUrls(imgs);
-            setActiveImage(0);
-            setImageUrl(imgs[0] || "");
-
-            const vids = [vid1, vid2].filter(v => v && v.url).slice(0, 2);
-            setVideoItems(vids);
-            setActiveVideo(0);
-            setVideoUrl(vids[0]?.url || "");
-            setVideoScript(vids[0]?.script || "");
-
-            setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
-            setHasGenerated(true);
-          } catch (err) {
-            console.error("generation failed:", err);
-            setError("Generation failed. Please try again.");
-          } finally {
-            setGenerating(false);
-            setLoading(false);
-          }
-        }, 400);
+          setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
+          setHasGenerated(true);
+        } catch (err) {
+          console.error("generation failed:", err);
+          setError("Generation failed. Please try again.");
+        } finally {
+          setGenerating(false);
+          setLoading(false);
+          generationLock.current = false;
+        }
         return;
       }
 
@@ -682,39 +592,50 @@ export default function FormPage() {
     }
   }
 
-  /* Regenerations */
+  /* Regenerations (single request with guard + retry/backoff) */
   async function handleRegenerateImage() {
+    if (imageLock.current) return;
+    imageLock.current = true;
     setImageLoading(true);
-    const [a, b] = await Promise.all([fetchImageOnce(getRandomString()), fetchImageOnce(getRandomString())]);
-    const imgs = [a, b].filter(Boolean).slice(0, 2);
-    setImageUrls(imgs);
-    setActiveImage(0);
-    setImageUrl(imgs[0] || "");
-    setImageLoading(false);
+    setError("");
+    try {
+      const fresh = await fetchImageOnce(getRandomString());
+      const imgs = [fresh].filter(Boolean);
+      setImageUrls(imgs);
+      setActiveImage(0);
+      setImageUrl(imgs[0] || "");
+    } catch (e) {
+      console.warn("image fetch failed:", e.message);
+      setError("Image generation failed. Please try again.");
+    } finally {
+      setImageLoading(false);
+      imageLock.current = false;
+    }
   }
   async function handleRegenerateVideo() {
+    if (videoLock.current) return;
+    videoLock.current = true;
     setVideoLoading(true);
-    const [a, b] = await Promise.all([fetchVideoOnce(getRandomString()), fetchVideoOnce(getRandomString())]);
-    const vids = [a, b].filter(v => v && v.url).slice(0, 2);
-    setVideoItems(vids);
-    setActiveVideo(0);
-    setVideoUrl(vids[0]?.url || "");
-    setVideoScript(vids[0]?.script || "");
-    setVideoLoading(false);
+    setError("");
+    try {
+      const fresh = await fetchVideoOnce(getRandomString());
+      const vids = (fresh && fresh.url) ? [fresh] : [];
+      setVideoItems(vids);
+      setActiveVideo(0);
+      setVideoUrl(vids[0]?.url || "");
+      setVideoScript(vids[0]?.script || "");
+    } catch (e) {
+      console.warn("video fetch failed:", e.message);
+      setError("Video generation failed. Please try again.");
+    } finally {
+      setVideoLoading(false);
+      videoLock.current = false;
+    }
   }
 
   /* ---------------------- Render ---------------------- */
   return (
-    <div
-      style={{
-        background: DARK_BG,
-        minHeight: "100vh",
-        fontFamily: MODERN_FONT,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-      }}
-    >
+    <div style={{ background: DARK_BG, minHeight: "100vh", fontFamily: MODERN_FONT, display: "flex", flexDirection: "column", alignItems: "center" }}>
       {/* global smooth scroll & subtle glow */}
       <style>{`
         html, body { scroll-behavior: smooth; }
@@ -722,20 +643,7 @@ export default function FormPage() {
         .chat-scroll::-webkit-scrollbar-thumb { background: #2a3138; border-radius: 8px; }
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
-      <div
-        aria-hidden
-        style={{
-          position: "fixed",
-          top: "-15vh",
-          right: "-10vw",
-          width: 640,
-          height: 640,
-          background: "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
-          filter: "blur(18px)",
-          pointerEvents: "none",
-          zIndex: 0
-        }}
-      />
+      <div aria-hidden style={{ position: "fixed", top: "-15vh", right: "-10vw", width: 640, height: 640, background: "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)", filter: "blur(18px)", pointerEvents: "none", zIndex: 0 }} />
 
       {/* Top row */}
       <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
@@ -743,40 +651,20 @@ export default function FormPage() {
           <button
             onClick={() => navigate("/")}
             style={{
-              background: "#202824e0",
-              color: "#fff",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: "1.1rem",
-              padding: "10px 18px",
-              fontWeight: 700,
-              fontSize: "1rem",
-              letterSpacing: "0.6px",
-              cursor: "pointer",
-              boxShadow: "0 2px 10px 0 rgba(0,0,0,0.25)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8
+              background: "#202824e0", color: "#fff", border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "1.1rem", padding: "10px 18px", fontWeight: 700, fontSize: "1rem",
+              letterSpacing: "0.6px", cursor: "pointer", boxShadow: "0 2px 10px 0 rgba(0,0,0,0.25)",
+              display: "flex", alignItems: "center", gap: 8
             }}
             aria-label="Back"
           >
-            <FaArrowLeft />
-            Back
+            <FaArrowLeft /> Back
           </button>
         </div>
 
         {/* Centered title */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: "2.25rem",
-              lineHeight: 1.2,
-              letterSpacing: "-0.5px",
-              color: "#e9feff",
-              textAlign: "center",
-              fontWeight: 900,
-            }}
-          >
+          <h1 style={{ margin: 0, fontSize: "2.25rem", lineHeight: 1.2, letterSpacing: "-0.5px", color: "#e9feff", textAlign: "center", fontWeight: 900 }}>
             Create your ad
           </h1>
         </div>
@@ -785,19 +673,9 @@ export default function FormPage() {
       {/* Chat panel */}
       <div
         style={{
-          width: "100%",
-          maxWidth: 780,
-          marginTop: 18,
-          marginBottom: 22,
-          background: SURFACE,
-          borderRadius: 18,
-          border: `1px solid ${EDGE}`,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-          padding: "28px 28px 22px 28px",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "stretch",
-          zIndex: 1
+          width: "100%", maxWidth: 780, marginTop: 18, marginBottom: 22, background: SURFACE,
+          borderRadius: 18, border: `1px solid ${EDGE}`, boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+          padding: "28px 28px 22px 28px", display: "flex", flexDirection: "column", alignItems: "stretch", zIndex: 1
         }}
       >
         <div style={{ color: "#9dffe9", fontSize: 15, fontWeight: 900, marginBottom: 10, letterSpacing: 1.6, textTransform: "uppercase", textAlign: "center" }}>
@@ -809,18 +687,8 @@ export default function FormPage() {
           ref={chatBoxRef}
           className="chat-scroll"
           style={{
-            width: "100%",
-            minHeight: 240,
-            maxHeight: 480,
-            overflowY: "auto",
-            marginBottom: 16,
-            padding: 16,
-            background: "#151a1f",
-            borderRadius: 12,
-            border: `1px solid ${EDGE}`,
-            display: "flex",
-            flexDirection: "column",
-            gap: 10
+            width: "100%", minHeight: 240, maxHeight: 480, overflowY: "auto", marginBottom: 16, padding: 16,
+            background: "#151a1f", borderRadius: 12, border: `1px solid ${EDGE}`, display: "flex", flexDirection: "column", gap: 10
           }}
         >
           {chatHistory.slice(-40).map((msg, i) => {
@@ -834,10 +702,7 @@ export default function FormPage() {
                   background: isGPT ? "#0f151a" : TEAL,
                   border: isGPT ? `1px solid ${EDGE}` : "none",
                   borderRadius: isGPT ? "14px 16px 16px 8px" : "16px 12px 8px 16px",
-                  padding: "10px 14px",
-                  maxWidth: "85%",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
+                  padding: "10px 14px", maxWidth: "85%", whiteSpace: "pre-wrap", wordBreak: "break-word",
                   boxShadow: isGPT ? "none" : `0 2px 12px ${TEAL_SOFT}`
                 }}
               >
@@ -856,59 +721,21 @@ export default function FormPage() {
               title="Reset chat"
               aria-label="Reset chat"
               style={{
-                background: "#23262a",
-                color: "#9cefdc",
-                border: `1px solid ${EDGE}`,
-                borderRadius: 12,
-                padding: "0 14px",
-                height: 48,
-                cursor: "pointer",
-                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
+                background: "#23262a", color: "#9cefdc", border: `1px solid ${EDGE}`, borderRadius: 12, padding: "0 14px",
+                height: 48, cursor: "pointer", boxShadow: `0 1.5px 8px ${TEAL_SOFT}`, display: "flex", alignItems: "center", justifyContent: "center"
               }}
             >
               <FaSyncAlt />
             </button>
 
             <input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              disabled={loading}
-              autoFocus
-              placeholder="Your answer…"
-              aria-label="Your answer"
-              autoComplete="off"
-              style={{
-                flex: 1,
-                padding: "14px 18px",
-                borderRadius: 12,
-                border: `1px solid ${EDGE}`,
-                outline: "none",
-                fontSize: "1.05rem",
-                fontWeight: 700,
-                background: "#23262a",
-                color: "#fff",
-                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`
-              }}
+              value={input} onChange={e => setInput(e.target.value)} disabled={loading} autoFocus placeholder="Your answer…" aria-label="Your answer" autoComplete="off"
+              style={{ flex: 1, padding: "14px 18px", borderRadius: 12, border: `1px solid ${EDGE}`, outline: "none", fontSize: "1.05rem", fontWeight: 700, background: "#23262a", color: "#fff", boxShadow: `0 1.5px 8px ${TEAL_SOFT}` }}
             />
             <button
               type="submit"
-              style={{
-                background: TEAL,
-                color: "#0e1519",
-                border: "none",
-                borderRadius: 12,
-                fontWeight: 900,
-                fontSize: "1.2rem",
-                padding: "0 18px",
-                cursor: "pointer",
-                height: 48
-              }}
-              disabled={loading}
-              tabIndex={0}
-              aria-label="Send"
+              style={{ background: TEAL, color: "#0e1519", border: "none", borderRadius: 12, fontWeight: 900, fontSize: "1.2rem", padding: "0 18px", cursor: "pointer", height: 48 }}
+              disabled={loading} tabIndex={0} aria-label="Send"
             >
               <FaArrowUp />
             </button>
@@ -924,59 +751,24 @@ export default function FormPage() {
 
       {/* Ad Previews label */}
       <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
-        <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>
-          Ad Previews
-        </div>
+        <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>Ad Previews</div>
       </div>
 
       {/* ---- Ad Preview Cards ---- */}
       <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
         {/* IMAGE CARD */}
         <div style={{
-          background: "#fff",
-          borderRadius: 13,
-          boxShadow: "0 2px 24px #16242714",
-          minWidth: 340,
-          maxWidth: 390,
-          flex: mediaType === "video" ? 0 : 1,
-          marginBottom: 20,
-          padding: "0px 0px 14px 0px",
-          border: "1.5px solid #eaeaea",
-          fontFamily: AD_FONT,
-          display: mediaType === "video" ? "none" : "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative"
+          background: "#fff", borderRadius: 13, boxShadow: "0 2px 24px #16242714", minWidth: 340, maxWidth: 390,
+          flex: mediaType === "video" ? 0 : 1, marginBottom: 20, padding: "0px 0px 14px 0px", border: "1.5px solid #eaeaea",
+          fontFamily: AD_FONT, display: mediaType === "video" ? "none" : "flex", flexDirection: "column", overflow: "hidden", position: "relative"
         }}>
           <div style={{
-            background: "#f5f6fa",
-            padding: "11px 20px",
-            borderBottom: "1px solid #e0e4eb",
-            fontWeight: 700,
-            color: "#495a68",
-            fontSize: 16,
-            letterSpacing: 0.08,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center"
+            background: "#f5f6fa", padding: "11px 20px", borderBottom: "1px solid #e0e4eb", fontWeight: 700, color: "#495a68",
+            fontSize: 16, letterSpacing: 0.08, display: "flex", justifyContent: "space-between", alignItems: "center"
           }}>
             <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
             <button
-              style={{
-                background: "#1ad6b7",
-                color: "#222",
-                border: "none",
-                borderRadius: 12,
-                fontWeight: 700,
-                fontSize: "1.01rem",
-                padding: "6px 20px",
-                cursor: imageLoading ? "not-allowed" : "pointer",
-                marginLeft: 8,
-                boxShadow: "0 2px 7px #19e5b733",
-                display: "flex",
-                alignItems: "center",
-                gap: 7
-              }}
+              style={{ background: "#1ad6b7", color: "#222", border: "none", borderRadius: 12, fontWeight: 700, fontSize: "1.01rem", padding: "6px 20px", cursor: imageLoading ? "not-allowed" : "pointer", marginLeft: 8, boxShadow: "0 2px 7px #19e5b733", display: "flex", alignItems: "center", gap: 7 }}
               onClick={handleRegenerateImage}
               disabled={imageLoading}
               title="Regenerate Image Ad"
@@ -986,7 +778,7 @@ export default function FormPage() {
             </button>
           </div>
 
-          {/* Carousel body */}
+          {/* Carousel body (now single image) */}
           <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
             {imageLoading || generating ? (
               <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -997,31 +789,15 @@ export default function FormPage() {
                 <img
                   src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
                   alt="Ad Preview"
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    objectFit: "cover",
-                    borderRadius: 0,
-                    cursor: "pointer"
-                  }}
+                  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
                   onClick={() => handleImageClick(imageUrls[activeImage])}
                 />
-                <Arrow side="left" onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
-                <Arrow side="right" onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
                 <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
               </>
             ) : (
-              <div style={{
-                height: 220,
-                width: "100%",
-                background: "#e9ecef",
-                color: "#a9abb0",
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22
-              }}>Image goes here</div>
+              <div style={{ height: 220, width: "100%", background: "#e9ecef", color: "#a9abb0", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+                Image goes here
+              </div>
             )}
           </div>
 
@@ -1035,37 +811,17 @@ export default function FormPage() {
             </div>
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
-            <button style={{
-              background: "#14e7b9",
-              color: "#181b20",
-              fontWeight: 700,
-              border: "none",
-              borderRadius: 9,
-              padding: "8px 20px",
-              fontSize: 15,
-              cursor: "pointer"
-            }}>{displayCTA}</button>
+            <button style={{ background: "#14e7b9", color: "#181b20", fontWeight: 700, border: "none", borderRadius: 9, padding: "8px 20px", fontSize: 15, cursor: "pointer" }}>
+              {displayCTA}
+            </button>
           </div>
 
           {/* Image Edit toggle + fields */}
           <button
             style={{
-              position: "absolute",
-              bottom: 10,
-              right: 18,
-              background: "#f3f6f7",
-              color: "#12cbb8",
-              border: "none",
-              borderRadius: 8,
-              fontWeight: 700,
-              fontSize: "1.05rem",
-              padding: "5px 14px",
-              cursor: "pointer",
-              boxShadow: "0 1px 3px #2bcbb828",
-              display: "flex",
-              alignItems: "center",
-              gap: 5,
-              zIndex: 2
+              position: "absolute", bottom: 10, right: 18, background: "#f3f6f7", color: "#12cbb8",
+              border: "none", borderRadius: 8, fontWeight: 700, fontSize: "1.05rem", padding: "5px 14px",
+              cursor: "pointer", boxShadow: "0 1px 3px #2bcbb828", display: "flex", alignItems: "center", gap: 5, zIndex: 2
             }}
             onClick={() => setImageEditing(v => !v)}
           >
@@ -1082,10 +838,7 @@ export default function FormPage() {
                   onBlur={() => saveImageDraftById(currentImageId, { headline: (editHeadline || "").trim() })}
                   placeholder="Headline"
                   maxLength={55}
-                  style={{
-                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
-                    padding: "10px 12px", fontWeight: 700
-                  }}
+                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
                 />
                 <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>{editHeadline.length}/55</div>
               </label>
@@ -1098,10 +851,7 @@ export default function FormPage() {
                   onBlur={() => saveImageDraftById(currentImageId, { body: (editBody || "").trim() })}
                   rows={3}
                   placeholder="Body copy"
-                  style={{
-                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
-                    padding: "10px 12px", fontWeight: 600
-                  }}
+                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 600 }}
                 />
               </label>
 
@@ -1112,10 +862,7 @@ export default function FormPage() {
                   onChange={(e) => setEditCTA(e.target.value)}
                   onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
                   placeholder="CTA"
-                  style={{
-                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
-                    padding: "10px 12px", fontWeight: 700
-                  }}
+                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
                 />
               </label>
             </div>
@@ -1124,50 +871,17 @@ export default function FormPage() {
 
         {/* VIDEO CARD */}
         <div style={{
-          background: "#fff",
-          borderRadius: 13,
-          boxShadow: "0 2px 24px #16242714",
-          minWidth: 340,
-          maxWidth: 390,
-          flex: mediaType === "image" ? 0 : 1,
-          marginBottom: 20,
-          padding: "0px 0px 14px 0px",
-          border: "1.5px solid #eaeaea",
-          fontFamily: AD_FONT,
-          display: mediaType === "image" ? "none" : "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative"
+          background: "#fff", borderRadius: 13, boxShadow: "0 2px 24px #16242714", minWidth: 340, maxWidth: 390,
+          flex: mediaType === "image" ? 0 : 1, marginBottom: 20, padding: "0px 0px 14px 0px", border: "1.5px solid #eaeaea",
+          fontFamily: AD_FONT, display: mediaType === "image" ? "none" : "flex", flexDirection: "column", overflow: "hidden", position: "relative"
         }}>
           <div style={{
-            background: "#f5f6fa",
-            padding: "11px 20px",
-            borderBottom: "1px solid #e0e4eb",
-            fontWeight: 700,
-            color: "#495a68",
-            fontSize: 16,
-            letterSpacing: 0.08,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center"
+            background: "#f5f6fa", padding: "11px 20px", borderBottom: "1px solid #e0e4eb", fontWeight: 700, color: "#495a68",
+            fontSize: 16, letterSpacing: 0.08, display: "flex", justifyContent: "space-between", alignItems: "center"
           }}>
             <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
             <button
-              style={{
-                background: "#1ad6b7",
-                color: "#222",
-                border: "none",
-                borderRadius: 12,
-                fontWeight: 700,
-                fontSize: "1.01rem",
-                padding: "6px 20px",
-                cursor: videoLoading ? "not-allowed" : "pointer",
-                marginLeft: 8,
-                boxShadow: "0 2px 7px #19e5b733",
-                display: "flex",
-                alignItems: "center",
-                gap: 7
-              }}
+              style={{ background: "#1ad6b7", color: "#222", border: "none", borderRadius: 12, fontWeight: 700, fontSize: "1.01rem", padding: "6px 20px", cursor: videoLoading ? "not-allowed" : "pointer", marginLeft: 8, boxShadow: "0 2px 7px #19e5b733", display: "flex", alignItems: "center", gap: 7 }}
               onClick={handleRegenerateVideo}
               disabled={videoLoading}
               title="Regenerate Video Ad"
@@ -1177,7 +891,6 @@ export default function FormPage() {
             </button>
           </div>
 
-          {/* Carousel body */}
           <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
             {videoLoading || generating ? (
               <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1185,42 +898,13 @@ export default function FormPage() {
               </div>
             ) : videoItems.length > 0 ? (
               <>
-                <video
-                  key={videoItems[activeVideo]?.url || "video"}
-                  src={videoItems[activeVideo]?.url}
-                  controls
-                  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
-                />
-                <Arrow side="left" onClick={() => {
-                  const next = (activeVideo + videoItems.length - 1) % videoItems.length;
-                  setActiveVideo(next);
-                  setVideoUrl(videoItems[next]?.url || "");
-                  setVideoScript(videoItems[next]?.script || "");
-                }} disabled={videoItems.length <= 1} />
-                <Arrow side="right" onClick={() => {
-                  const next = (activeVideo + 1) % videoItems.length;
-                  setActiveVideo(next);
-                  setVideoUrl(videoItems[next]?.url || "");
-                  setVideoScript(videoItems[next]?.script || "");
-                }} disabled={videoItems.length <= 1} />
-                <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
-                  setActiveVideo(i);
-                  setVideoUrl(videoItems[i]?.url || "");
-                  setVideoScript(videoItems[i]?.script || "");
-                }} />
+                <video key={videoItems[activeVideo]?.url || "video"} src={videoItems[activeVideo]?.url} controls style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }} />
+                <Dots count={videoItems.length} active={activeVideo} onClick={(i) => { setActiveVideo(i); setVideoUrl(videoItems[i]?.url || ""); setVideoScript(videoItems[i]?.script || ""); }} />
               </>
             ) : (
-              <div style={{
-                height: 220,
-                width: "100%",
-                background: "#e9ecef",
-                color: "#a9abb0",
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22
-              }}>Video goes here</div>
+              <div style={{ height: 220, width: "100%", background: "#e9ecef", color: "#a9abb0", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22 }}>
+                Video goes here
+              </div>
             )}
           </div>
 
@@ -1235,16 +919,9 @@ export default function FormPage() {
             )}
           </div>
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
-            <button style={{
-              background: "#14e7b9",
-              color: "#181b20",
-              fontWeight: 700,
-              border: "none",
-              borderRadius: 9,
-              padding: "8px 20px",
-              fontSize: 15,
-              cursor: "pointer"
-            }}>Learn More</button>
+            <button style={{ background: "#14e7b9", color: "#181b20", fontWeight: 700, border: "none", borderRadius: 9, padding: "8px 20px", fontSize: 15, cursor: "pointer" }}>
+              Learn More
+            </button>
           </div>
         </div>
       </div>
@@ -1253,18 +930,8 @@ export default function FormPage() {
       <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, paddingBottom: 28 }}>
         <button
           style={{
-            background: TEAL,
-            color: "#0e1519",
-            border: "none",
-            borderRadius: 13,
-            fontWeight: 900,
-            fontSize: "1.08rem",
-            padding: "16px 56px",
-            marginBottom: 4,
-            fontFamily: MODERN_FONT,
-            boxShadow: `0 2px 16px ${TEAL_SOFT}`,
-            cursor: "pointer",
-            transition: "background 0.18s"
+            background: TEAL, color: "#0e1519", border: "none", borderRadius: 13, fontWeight: 900, fontSize: "1.08rem",
+            padding: "16px 56px", marginBottom: 4, fontFamily: MODERN_FONT, boxShadow: `0 2px 16px ${TEAL_SOFT}`, cursor: "pointer", transition: "background 0.18s"
           }}
           onClick={() => {
             const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
@@ -1280,37 +947,23 @@ export default function FormPage() {
             if (mediaType === "video") { imgA = []; }
 
             const draftForSetup = {
-              images: imgA,
-              videos: vidA,
-              fbVideoIds: fbIds,
-              headline: mergedHeadline,
-              body: mergedBody,
-              imageOverlayCTA: mergedCTA,
-              videoScript: videoItems[0]?.script || videoScript || "",
-              answers,
-              mediaSelection: mediaType,
-              savedAt: Date.now()
+              images: imgA, videos: vidA, fbVideoIds: fbIds,
+              headline: mergedHeadline, body: mergedBody, imageOverlayCTA: mergedCTA,
+              videoScript: videoItems[0]?.script || videoScript || "", answers, mediaSelection: mediaType, savedAt: Date.now()
             };
 
             sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem("smartmark_media_selection", mediaType);
-
             if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
             if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
             if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
 
             navigate("/setup", {
               state: {
-                imageUrls: imgA,
-                videoUrls: vidA,
-                fbVideoIds: fbIds,
-                headline: mergedHeadline,
-                body: mergedBody,
-                imageOverlayCTA: mergedCTA,
-                videoScript: videoItems[0]?.script || videoScript,
-                answers,
-                mediaSelection: mediaType
+                imageUrls: imgA, videoUrls: vidA, fbVideoIds: fbIds,
+                headline: mergedHeadline, body: mergedBody, imageOverlayCTA: mergedCTA,
+                videoScript: videoItems[0]?.script || videoScript, answers, mediaSelection: mediaType
               }
             });
           }}
