@@ -1276,9 +1276,10 @@ function runSpawn(cmd, args, opts = {}) {
 }
 async function probeDuration(file, timeoutMs = 8000) {
   return new Promise((resolve) => {
-    const child = spawn('ffprobe',
+    const child = spawn(
+      'ffprobe',
       ['-v','error','-show_entries','format=duration','-of','default=nokey=1:noprint_wrappers=1', file],
-      { stdio: ['ignore', 'pipe,', 'ignore'] }
+      { stdio: ['ignore', 'pipe', 'ignore'] } // <-- fixed: 'pipe,' typo
     );
     let out = '';
     const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(0); }, timeoutMs);
