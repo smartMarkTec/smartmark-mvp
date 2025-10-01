@@ -1,10 +1,11 @@
 'use strict';
 
 /**
- * SmartMark AI routes – resilient build
+ * SmartMark AI routes – resilient build (latency-safe)
  * - Unconditional CORS (even on errors) to avoid red-herring CORS failures
  * - Sharp memory discipline + concurrency gate (prevents OOM on Render 512MB)
- * - Hard time budgets with graceful fallbacks to avoid 504s
+ * - Stricter hard time budgets with graceful fallbacks to avoid 502/503/504
+ * - TTS is OFF by default (set env ENABLE_TTS=1 to enable)
  * - Pexels fast path + placeholder overlays when rate-limited/offline
  * - Range media streamer for mp4/jpg/png + asset persistence (24h TTL)
  */
@@ -102,6 +103,7 @@ const db = require('../db');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
+const ENABLE_TTS = String(process.env.ENABLE_TTS || '0') === '1';
 
 /* -------- Disk guard -------- */
 const GEN_DIR = '/tmp/generated';
@@ -315,7 +317,7 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   if (/hair/.test(extra)) return 'hair care';
   if (/(pet|dog|cat)/.test(extra)) return 'pet dog cat';
   if (/(electronics|phone|laptop)/.test(extra)) return 'tech gadgets';
-  return base || fallback;
+  return base || fallback
 }
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
@@ -1169,7 +1171,8 @@ async function composeStillVideo({
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
+  // Shorter killAfter to ensure we always return within route budget
+  await runSpawn('ffmpeg', args, { killAfter: 45000, killMsg: 'still-video timeout' });
 
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
@@ -1245,7 +1248,7 @@ async function composeTitleCardVideo({
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 35000, killMsg: 'title-card timeout' });
   try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
   return {
     publicUrl: mediaPath(outFile),
@@ -1293,8 +1296,8 @@ async function probeDuration(file, timeoutMs = 8000) {
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
   try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(180000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
+    if (typeof res.setTimeout === 'function') res.setTimeout(120000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(120000);
   } catch {}
   res.setHeader('Content-Type', 'application/json');
 
@@ -1311,14 +1314,10 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
 
-    // Hard overall route deadline to avoid 504s at the edge (Render)
-    const HARD_ROUTE_TIMEOUT_MS = 55000;
+    // Tighter hard deadline to avoid gateway 502/503 under load
+    const HARD_ROUTE_TIMEOUT_MS = 45000; // was 55000
     const deadline = Date.now() + HARD_ROUTE_TIMEOUT_MS;
     const timeLeftHard = () => Math.max(0, deadline - Date.now());
-
-    const BUDGET_MS = Number(process.env.AD_GEN_BUDGET_MS || 65000);
-    const startTs = Date.now();
-    const timeLeftSoft = () => Math.max(0, BUDGET_MS - (Date.now() - startTs));
 
     const forbidFashionLine =
       category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
@@ -1333,67 +1332,51 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
 - Structure: brief hook → value/what to expect → CTA.
 Output ONLY the script text.`;
 
-    async function makeTTS(scriptText) {
-      const tmpDir = ensureGeneratedDir();
-      const file = path.join(tmpDir, `${uuidv4()}.mp3`);
-      const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: scriptText });
-      const buf = Buffer.from(await ttsRes.arrayBuffer());
-      fs.writeFileSync(file, buf);
-      return file;
-    }
-
     let script = '';
-    let ttsPath = '';
-    let voDur = 0;
-    const targets = [[58, 72], [70, 84]];
+    try {
+      const r = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [{ role: 'user', content: buildPrompt(48, 62) }],
+        max_tokens: 300,
+        temperature: 0.35,
+      });
+      script = r.choices?.[0]?.message?.content?.trim() || '';
+    } catch {
+      script = `A simple way to support your goals with less hassle. ${ctaText}`;
+    }
+    script = stripFashionIfNotApplicable(script, category);
+    script = enforceCategoryPresence(script, category);
+    script = cleanFinalText(script);
+    script = script.replace(/\s+(SHOP NOW|BUY NOW|CHECK US OUT|VISIT US|TAKE A LOOK|LEARN MORE|GET STARTED)[.!?]*\s*$/i, '').trim();
+    if (!/[.!?]$/.test(script)) script += '.';
+    script += ' ' + ctaText;
 
-    for (let attempt = 0; attempt < targets.length; attempt++) {
-      if (timeLeftHard() < 9000) break; // not enough time to keep trying
+    // TTS ONLY if explicitly enabled and we have time
+    let ttsPath = null, voDur = 0;
+    if (ENABLE_TTS && timeLeftHard() > 12000) {
       try {
-        const [low, high] = targets[attempt];
-        const r = await openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [{ role: 'user', content: buildPrompt(low, high) }],
-          max_tokens: 320,
-          temperature: 0.35,
-        });
-        script = r.choices?.[0]?.message?.content?.trim() || '';
-      } catch {
-        script = script || `A simple way to support your goals with less hassle. ${ctaText}`;
-      }
-      script = stripFashionIfNotApplicable(script, category);
-      script = enforceCategoryPresence(script, category);
-      script = cleanFinalText(script);
-      // Remove duplicate CTA phrases inside script; we'll ensure one at end
-      const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
-      const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
-      script = script.replace(re, '').trim();
-      if (!/[.!?]$/.test(script)) script += '.';
-      script += ' ' + ctaText;
-
-      // TTS unless we are too close to the deadline
-      try {
-        if (timeLeftHard() > 9000) {
-          if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
-          ttsPath = await makeTTS(script);
-          voDur = await probeDuration(ttsPath);
-          if (voDur >= 14.4) break;
-        } else { ttsPath = null; voDur = 0; break; }
-      } catch { ttsPath = null; voDur = 0; break; }
+        const file = path.join(ensureGeneratedDir(), `${uuidv4()}.mp3`);
+        const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script });
+        const buf = Buffer.from(await ttsRes.arrayBuffer());
+        fs.writeFileSync(file, buf);
+        ttsPath = file;
+        voDur = await probeDuration(ttsPath);
+      } catch { ttsPath = null; voDur = 0; }
     }
 
+    // Keep videos short + fast
     const TAIL = 0.8;
-    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
+    const finalDur = Math.max(12.0, Math.min((voDur || 12.8) + TAIL, 18.0));
 
     let imageUrl = null;
     const ensureImageForStill = async () => {
-      if (PEXELS_API_KEY && timeLeftSoft() > 6000 && timeLeftHard() > 7000) {
+      if (PEXELS_API_KEY && timeLeftHard() > 9000) {
         try {
           const keyword = getImageKeyword(answers.industry || '', url) || topic;
           const p = await axios.get(PEXELS_IMG_BASE, {
             headers: { Authorization: PEXELS_API_KEY },
             params: { query: keyword, per_page: 12 },
-            timeout: Math.max(2500, Math.min(4000, timeLeftHard() - 2500)),
+            timeout: 2500,
           });
           const photos = p.data?.photos || [];
           if (photos.length) {
@@ -1409,8 +1392,8 @@ Output ONLY the script text.`;
 
     imageUrl = await ensureImageForStill();
 
-    // If we’re low on time, switch to title card (cheaper than still)
-    const makeTitleCard = timeLeftHard() < 7000;
+    // If we’re tight on time OR TTS is disabled, use cheaper title card
+    const makeTitleCard = timeLeftHard() < 12000 || !ENABLE_TTS;
     const videoBuilder = makeTitleCard ? composeTitleCardVideo : composeStillVideo;
 
     const still = await videoBuilder({
@@ -1450,13 +1433,13 @@ Output ONLY the script text.`;
       fbVideoId,
       script,
       ctaText,
-      voice: ttsPath ? 'alloy' : null,
+      voice: ENABLE_TTS ? 'alloy' : null,
       hasMusic: false,
       video: {
         url: first.url,
         script,
         overlayText: ctaText,
-        voice: ttsPath ? 'alloy' : null,
+        voice: ENABLE_TTS ? 'alloy' : null,
         hasMusic: false,
         subtitlesUrl: first.subtitlesUrl,
       },
