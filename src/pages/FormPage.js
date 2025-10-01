@@ -15,12 +15,21 @@ const EDGE = "rgba(255,255,255,0.06)";
 
 const SIDE_CHAT_LIMIT = 5;
 
-/* -------- Backend endpoints -------- */
+/* -------- Backend endpoints (proxy through Vercel) -------- */
 const USE_LOCAL_BACKEND = false;
-const PROD_BACKEND = "https://smartmark-mvp.onrender.com";
+
+// IMPORTANT: keep PROD_BACKEND blank so everything is same-origin.
+const PROD_BACKEND = "";
+
+// For asset paths returned as relative (e.g., /api/media/..), keep this empty string.
+// Your Vercel rewrite forwards /api/* to Render.
 const BACKEND_URL = USE_LOCAL_BACKEND ? "" : PROD_BACKEND;
-const API_BASE = USE_LOCAL_BACKEND ? "/api" : `${PROD_BACKEND}/api`;
+
+// Always call the API via same-origin /api to avoid CORS, even on 5xx edge responses.
+const API_BASE = USE_LOCAL_BACKEND ? "/api" : "/api";
+
 const WARMUP_URL = `${API_BASE}/test`;
+
 
 /* -------- Draft persistence -------- */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
