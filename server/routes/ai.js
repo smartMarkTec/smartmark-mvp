@@ -1,21 +1,17 @@
 'use strict';
 
 /**
- * SmartMark AI routes – resilient build (latency-safe)
- * - Unconditional CORS (even on errors) to avoid red-herring CORS failures
- * - Sharp memory discipline + concurrency gate (prevents OOM on Render 512MB)
- * - Stricter hard time budgets with graceful fallbacks to avoid 502/503/504
- * - TTS is OFF by default (set env ENABLE_TTS=1 to enable)
- * - Pexels fast path + placeholder overlays when rate-limited/offline
- * - Range media streamer for mp4/jpg/png + asset persistence (24h TTL)
+ * SmartMark AI routes — memory-safe on 512MB dynos
+ * - Always-on CORS (prevents fake “CORS errors” on 50x)
+ * - Sharp memory discipline + single-job concurrency gate
+ * - Strict time/size budgets and graceful fallbacks
+ * - Range-enabled media streamer for mp4/jpg/png
  */
 
 const express = require('express');
 const router = express.Router();
 
-/* ------------------------ CORS (ALWAYS first, unconditional) ------------------------ */
-// Must run before any queue/limit middleware so *all* responses (even errors)
-// carry ACAO headers. This fixes “No Access-Control-Allow-Origin” browser errors.
+/* ------------------------ CORS (ALWAYS first) ------------------------ */
 router.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
@@ -29,24 +25,20 @@ router.use((req, res, next) => {
     'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
-  if (req.method === 'OPTIONS') return res.sendStatus(204); // fast preflight
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
 
-/* ---------------- Memory discipline for Sharp + concurrency gate ---------------- */
+/* ---------------- Memory discipline + concurrency gate --------------- */
 const sharp = require('sharp');
-
-// Keep Sharp tiny and predictable
 try {
-  sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16 MB process cache
+  sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16MB process cache
   sharp.concurrency(1);
 } catch {}
 
-// Simple semaphore: allow only N heavy jobs at once (default 1)
 const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
 let active = 0;
 const waiters = [];
-
 function acquire() {
   return new Promise((resolve) => {
     const tryGo = () => {
@@ -66,14 +58,12 @@ function release() {
   if (next) setImmediate(next);
 }
 
-// Serialize only the generator routes (expensive ones)
+// Only serialize heavy endpoints
 const heavyRoute = (req, res, next) => {
   if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
     return next();
   }
-  // OPTIONS already handled by CORS, but guard anyway
   if (req.method === 'OPTIONS') return res.sendStatus(204);
-
   acquire().then(() => {
     res.on('finish', release);
     res.on('close', release);
@@ -82,15 +72,13 @@ const heavyRoute = (req, res, next) => {
 };
 router.use(heavyRoute);
 
-/* ------------------------ Security & Rate-Limiting ------------------------ */
+/* ------------------------ Security & rate limit ---------------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-// General routes: keep modest
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
-// Heavy generator routes: loosen to avoid 429s while developing
-const heavyLimiter = basicRateLimit({ windowMs: 5 * 60 * 1000, max: 60 });
+router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })); // general
+const heavyLimiter = basicRateLimit({ windowMs: 5 * 60 * 1000, max: 60 }); // heavy only
 
-/* ------------------------------ Deps ------------------------------ */
+/* ------------------------------ Deps -------------------------------- */
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
@@ -103,19 +91,13 @@ const db = require('../db');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
-const ENABLE_TTS = String(process.env.ENABLE_TTS || '0') === '1';
 
-/* -------- Disk guard -------- */
+/* ---------------------- Disk / tmp housekeeping --------------------- */
 const GEN_DIR = '/tmp/generated';
-function ensureGeneratedDir() {
-  try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {}
-  return GEN_DIR;
-}
+function ensureGeneratedDir() { try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {} return GEN_DIR; }
 function dirStats(p) {
   try {
-    const files = fs
-      .readdirSync(p)
-      .map((f) => ({ f, full: path.join(p, f) }))
+    const files = fs.readdirSync(p).map((f) => ({ f, full: path.join(p, f) }))
       .filter((x) => fs.existsSync(x.full) && fs.statSync(x.full).isFile())
       .map((x) => ({ ...x, st: fs.statSync(x.full) }))
       .sort((a, b) => a.st.mtimeMs - b.st.mtimeMs);
@@ -151,8 +133,9 @@ function housekeeping() {
     sweepTmpDirHardCap();
   } catch {}
 }
+function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
-/* --------------------------- Helpers --------------------------- */
+/* -------------------------- Public base URL ------------------------- */
 function publicBase() {
   return (
     process.env.PUBLIC_BASE_URL ||
@@ -165,6 +148,10 @@ function absolutePublicUrl(relativePath) {
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
   return `${publicBase()}${relativePath}`;
 }
+
+/* ------------------------------ Helpers ----------------------------- */
+router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
+
 function getUserToken(req) {
   const auth = req?.headers?.authorization || '';
   if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
@@ -172,6 +159,7 @@ function getUserToken(req) {
   if (req?.body?.userAccessToken) return req.body.userAccessToken;
   return getFbUserToken() || null;
 }
+
 async function uploadVideoToAdAccount(
   adAccountId, userAccessToken, fileUrl,
   name = 'SmartMark Video', description = 'Generated by SmartMark'
@@ -185,6 +173,7 @@ async function uploadVideoToAdAccount(
   const resp = await axios.post(url, form, {
     headers: form.getHeaders(),
     params: { access_token: userAccessToken },
+    timeout: 15000,
   });
   return resp.data;
 }
@@ -232,7 +221,6 @@ router.get('/media/:file', async (req, res) => {
   }
 });
 function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
-function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
@@ -317,7 +305,7 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   if (/hair/.test(extra)) return 'hair care';
   if (/(pet|dog|cat)/.test(extra)) return 'pet dog cat';
   if (/(electronics|phone|laptop)/.test(extra)) return 'tech gadgets';
-  return base || fallback
+  return base || fallback; // <— fixed stray dot
 }
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
@@ -407,8 +395,7 @@ const MAX_FILE_MB = 1.5;
 const MAX_TOTAL_CHARS = 45000;
 function loadTrainingContext() {
   if (!fs.existsSync(DATA_DIR)) return '';
-  const files = fs
-    .readdirSync(DATA_DIR)
+  const files = fs.readdirSync(DATA_DIR)
     .map((f) => path.join(__dirname, '../data', f))
     .filter((full) => {
       const ext = path.extname(full).toLowerCase();
@@ -433,7 +420,6 @@ function loadTrainingContext() {
 let customContext = loadTrainingContext();
 
 /* ---------------------------- Scrape ---------------------------- */
-router.get('/test', (_req, res) => res.json({ msg: 'AI route is working!' }));
 async function getWebsiteText(url) {
   try {
     const clean = String(url || '').trim();
@@ -477,7 +463,6 @@ Output ONLY the script text.`;
   if (url) prompt += `\nWebsite (for context only): ${url}`;
 
   try {
-    // short timeout wrapper
     const TIMEOUT_MS = 5000;
     const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('assets-timeout')), ms))]);
 
@@ -593,15 +578,9 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 
 /* ---------------------- Image overlays ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
-function escSVG(s) {
-  return String(s || '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
-function fitFont(text, maxW, startFs, minFs = 26) {
-  let fs = startFs; while (fs > minFs && estWidth(text, fs) > maxW) fs -= 2; return fs;
-}
+function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidth(text, fs) > maxW) fs -= 2; return fs; }
 function splitTwoLines(text, maxW, startFs) {
   const words = String(text || '').split(/\s+/).filter(Boolean);
   if (words.length <= 2) return { lines: [text], fs: fitFont(text, maxW, startFs) };
@@ -619,24 +598,13 @@ function cleanHeadline(h) {
   const words = h.split(' '); if (words.length > 6) h = words.slice(0, 6).join(' ');
   return h.toUpperCase();
 }
-const ALLOWED_CTAS = [
-  'SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!',
-];
-function pickFromAllowedCTAs(answers = {}, seed = '') {
-  const t = String(answers?.cta || '').trim();
-  if (t) {
-    const norm = t.toUpperCase().replace(/[\'’]/g, '').replace(/[^A-Z0-9 !?]/g, '').replace(/\s+/g, ' ').trim();
-    const withBang = /!$/.test(norm) ? norm : `${norm}!`;
-    if (ALLOWED_CTAS.includes(withBang)) return withBang;
-  }
-  let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return ALLOWED_CTAS[h % ALLOWED_CTAS.length];
-}
+const ALLOWED_CTAS = ['SHOP NOW!', 'BUY NOW!', 'CHECK US OUT!', 'VISIT US!', 'TAKE A LOOK!', 'LEARN MORE!', 'GET STARTED!'];
 function cleanCTA(c) {
   const norm = String(c || '').toUpperCase().replace(/[\'’]/g, '').replace(/[^A-Z0-9 !?]/g, '').replace(/\s+/g, ' ').trim();
   const withBang = /!$/.test(norm) ? norm : norm ? `${norm}!` : '';
   return ALLOWED_CTAS.includes(withBang) ? withBang : 'LEARN MORE!';
 }
+
 function pickSansFontFile() {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -648,6 +616,7 @@ function pickSansFontFile() {
   for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
   return null;
 }
+
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 72, H = 72;
@@ -670,6 +639,7 @@ async function analyzeImageForPlacement(imgBuf) {
     return { darkerSide, darkerBand, brandColor, diffLR };
   } catch { return { darkerSide: 'left', darkerBand: 'top', brandColor: '#E63946', diffLR: 0.0 }; }
 }
+
 function svgDefs(brandColor) {
   return `
     <defs>
@@ -743,13 +713,13 @@ const pillBtn = (x, y, text, fs = 28) => {
     </g>`;
 };
 
-/* ---- flag: only show SALE badge when user mentions an offer ---- */
+/* ---- SALE badge decision ---- */
 function wantsSaleBadge(answers = {}) {
   const t = `${answers.offer || ''} ${answers.description || ''}`.toLowerCase();
   return /(sale|% off|percent off|discount|save|clearance|deal)/i.test(t);
 }
 
-/* ---------- Templated SVG with guaranteed spacing ---------- */
+/* ---------- Overlay template ---------- */
 function svgOverlayCreative({
   W, H, title, subline, cta, prefer = 'left', preferBand = 'top',
   brandColor = '#E63946', choose = 3, sale = false,
@@ -882,7 +852,7 @@ function svgOverlayCreative({
     `;
   }
 
-  // Layout 5: SALE badge (only when requested)
+  // Layout 5: SALE badge (only when relevant)
   if (choose === 5 && sale) {
     const fit5 = fitTitle(W - 160);
     const sub = fitSub(W - 160);
@@ -915,11 +885,11 @@ function svgOverlayCreative({
     `;
   }
 
-  // default to layout 3
+  // default = layout 3
   return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, sale });
 }
 
-/* ---------- Updated builder (sharper, no enlargement) ---------- */
+/* ---------- Overlay builder ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
@@ -1079,6 +1049,41 @@ function buildCaptionDrawtexts(script, duration, fontParam, workId = 'w') {
   return { filter: pieces.join(','), files, srtPath };
 }
 
+/* -------------------------- Spawn helpers -------------------------- */
+function runSpawn(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
+    let killed = false;
+    const killTimer = opts.killAfter
+      ? setTimeout(() => {
+          killed = true;
+          try { child.kill('SIGKILL'); } catch {}
+          reject(new Error(opts.killMsg || 'process timeout'));
+        }, opts.killAfter)
+      : null;
+    child.on('error', (err) => { if (killTimer) clearTimeout(killTimer); reject(err); });
+    child.on('close', (code) => {
+      if (killTimer) clearTimeout(killTimer);
+      if (killed) return;
+      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`));
+    });
+  });
+}
+async function probeDuration(file, timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    const child = spawn(
+      'ffprobe',
+      ['-v','error','-show_entries','format=duration','-of','default=nokey=1:noprint_wrappers=1', file],
+      { stdio: ['ignore', 'pipe', 'ignore'] }
+    );
+    let out = '';
+    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(0); }, timeoutMs);
+    child.stdout.on('data', (d) => { if (out.length < 64) out += d.toString('utf8'); });
+    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s) ? 0 : s); });
+    child.on('error', () => { clearTimeout(timer); resolve(0); });
+  });
+}
+
 /* -------------------- Still video -------------------- */
 async function composeStillVideo({
   imageUrl, duration, ttsPath = null, musicPath = null,
@@ -1116,7 +1121,7 @@ async function composeStillVideo({
   const cta = safeFFText(ctaText);
   const TAIL = 0.8;
 
-  const args = ['-y'];
+  const args = ['-y', '-threads', '1']; // single thread to save memory
   if (imgFile) {
     args.push('-loop', '1', '-t', duration.toFixed(2), '-i', imgFile);
   } else {
@@ -1134,6 +1139,7 @@ async function composeStillVideo({
 
   const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=46:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
   const ctaOutro = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration - TAIL).toFixed(2)})'`;
+
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
   let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter ? ',' + subsBuild.filter : ''},${ctaOutro},format=yuv420p[v]`;
 
@@ -1155,13 +1161,13 @@ async function composeStillVideo({
     '-preset', 'veryfast',
     '-crf', '21',
     '-pix_fmt', 'yuv420p',
-    '-b:v', '5200k',
-    '-maxrate', '6800k',
-    '-bufsize', '13600k',
+    '-b:v', '4200k',
+    '-maxrate', '5600k',
+    '-bufsize', '11200k',
     '-g', String(FPS * 2),
     '-keyint_min', String(FPS),
     '-c:a', 'aac',
-    '-b:a', '160k',
+    '-b:a', '128k',
     '-ar', '48000',
     '-movflags', '+faststart',
     '-shortest',
@@ -1171,8 +1177,7 @@ async function composeStillVideo({
     outPath
   );
 
-  // Shorter killAfter to ensure we always return within route budget
-  await runSpawn('ffmpeg', args, { killAfter: 45000, killMsg: 'still-video timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
 
   try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
   try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
@@ -1204,13 +1209,14 @@ async function composeTitleCardVideo({
   const cta = safeFFText(ctaText);
   const TAIL = 0.8;
 
-  const args = ['-y', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
+  const args = ['-y', '-threads', '1', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
   if (ttsPath) args.push('-i', ttsPath);
   if (musicPath) args.push('-i', musicPath);
   args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
 
   const intro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=58:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration - TAIL - 0.6).toFixed(2)})'`;
   const ctaFx = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration - TAIL).toFixed(2)})'`;
+
   const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
   let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter ? ',' + subsBuild.filter : ''},${ctaFx},format=yuv420p[v]`;
 
@@ -1232,13 +1238,13 @@ async function composeTitleCardVideo({
     '-preset', 'veryfast',
     '-crf', '21',
     '-pix_fmt', 'yuv420p',
-    '-b:v', '5200k',
-    '-maxrate', '6800k',
-    '-bufsize', '13600k',
+    '-b:v', '4200k',
+    '-maxrate', '5600k',
+    '-bufsize', '11200k',
     '-g', String(FPS * 2),
     '-keyint_min', String(FPS),
     '-c:a', 'aac',
-    '-b:a', '160k',
+    '-b:a', '128k',
     '-ar', '48000',
     '-movflags', '+faststart',
     '-avoid_negative_ts', 'make_zero',
@@ -1248,7 +1254,7 @@ async function composeTitleCardVideo({
     outPath
   );
 
-  await runSpawn('ffmpeg', args, { killAfter: 35000, killMsg: 'title-card timeout' });
+  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
   try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
   return {
     publicUrl: mediaPath(outFile),
@@ -1257,47 +1263,12 @@ async function composeTitleCardVideo({
   };
 }
 
-/* -------------------------- Spawn helpers -------------------------- */
-function runSpawn(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
-    let killed = false;
-    const killTimer = opts.killAfter
-      ? setTimeout(() => {
-          killed = true;
-          try { child.kill('SIGKILL'); } catch {}
-          reject(new Error(opts.killMsg || 'process timeout'));
-        }, opts.killAfter)
-      : null;
-    child.on('error', (err) => { if (killTimer) clearTimeout(killTimer); reject(err); });
-    child.on('close', (code) => {
-      if (killTimer) clearTimeout(killTimer);
-      if (killed) return;
-      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`));
-    });
-  });
-}
-async function probeDuration(file, timeoutMs = 8000) {
-  return new Promise((resolve) => {
-    const child = spawn(
-      'ffprobe',
-      ['-v','error','-show_entries','format=duration','-of','default=nokey=1:noprint_wrappers=1', file],
-      { stdio: ['ignore', 'pipe', 'ignore'] } // <-- fixed: 'pipe,' typo
-    );
-    let out = '';
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(0); }, timeoutMs);
-    child.stdout.on('data', (d) => { if (out.length < 64) out += d.toString('utf8'); });
-    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s) ? 0 : s); });
-    child.on('error', () => { clearTimeout(timer); resolve(0); });
-  });
-}
-
-/* ------------------------------- VIDEO ------------------------------- */
+/* ------------------------------- VIDEO API ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
   try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(120000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(120000);
+    if (typeof res.setTimeout === 'function') res.setTimeout(180000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
   } catch {}
   res.setHeader('Content-Type', 'application/json');
 
@@ -1312,10 +1283,10 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
       overlayTitleFromAnswers(answers, category);
     let brandForVideo = (brandBase || 'Your Brand').toUpperCase().replace(/[^A-Z0-9 \-]/g, '').trim();
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
-    const ctaText = pickFromAllowedCTAs(answers, regenerateToken || answers?.businessName || topic);
+    const ctaText = (answers?.cta && cleanCTA(answers.cta)) || 'LEARN MORE!';
 
-    // Tighter hard deadline to avoid gateway 502/503 under load
-    const HARD_ROUTE_TIMEOUT_MS = 45000; // was 55000
+    // Hard route deadline to avoid 504s under load
+    const HARD_ROUTE_TIMEOUT_MS = 55000;
     const deadline = Date.now() + HARD_ROUTE_TIMEOUT_MS;
     const timeLeftHard = () => Math.max(0, deadline - Date.now());
 
@@ -1332,51 +1303,68 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
 - Structure: brief hook → value/what to expect → CTA.
 Output ONLY the script text.`;
 
+    async function makeTTS(scriptText) {
+      const tmpDir = ensureGeneratedDir();
+      const file = path.join(tmpDir, `${uuidv4()}.mp3`);
+      const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: scriptText });
+      const buf = Buffer.from(await ttsRes.arrayBuffer());
+      fs.writeFileSync(file, buf);
+      return file;
+    }
+
     let script = '';
-    try {
-      const r = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: buildPrompt(48, 62) }],
-        max_tokens: 300,
-        temperature: 0.35,
-      });
-      script = r.choices?.[0]?.message?.content?.trim() || '';
-    } catch {
-      script = `A simple way to support your goals with less hassle. ${ctaText}`;
-    }
-    script = stripFashionIfNotApplicable(script, category);
-    script = enforceCategoryPresence(script, category);
-    script = cleanFinalText(script);
-    script = script.replace(/\s+(SHOP NOW|BUY NOW|CHECK US OUT|VISIT US|TAKE A LOOK|LEARN MORE|GET STARTED)[.!?]*\s*$/i, '').trim();
-    if (!/[.!?]$/.test(script)) script += '.';
-    script += ' ' + ctaText;
+    let ttsPath = '';
+    let voDur = 0;
+    const targets = [[58, 72], [70, 84]];
 
-    // TTS ONLY if explicitly enabled and we have time
-    let ttsPath = null, voDur = 0;
-    if (ENABLE_TTS && timeLeftHard() > 12000) {
+    for (let attempt = 0; attempt < targets.length; attempt++) {
+      if (timeLeftHard() < 9000) break;
       try {
-        const file = path.join(ensureGeneratedDir(), `${uuidv4()}.mp3`);
-        const ttsRes = await openai.audio.speech.create({ model: 'tts-1', voice: 'alloy', input: script });
-        const buf = Buffer.from(await ttsRes.arrayBuffer());
-        fs.writeFileSync(file, buf);
-        ttsPath = file;
-        voDur = await probeDuration(ttsPath);
-      } catch { ttsPath = null; voDur = 0; }
+        const [low, high] = targets[attempt];
+        const r = await openai.chat.completions.create({
+          model: 'gpt-4o',
+          messages: [{ role: 'user', content: buildPrompt(low, high) }],
+          max_tokens: 320,
+          temperature: 0.35,
+        });
+        script = r.choices?.[0]?.message?.content?.trim() || '';
+      } catch {
+        script = script || `A simple way to support your goals with less hassle. ${ctaText}`;
+      }
+      script = stripFashionIfNotApplicable(script, category);
+      script = enforceCategoryPresence(script, category);
+      script = cleanFinalText(script);
+      // Remove duplicate CTA phrases inside script; we'll ensure one at end
+      const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
+      const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
+      script = script.replace(re, '').trim();
+      if (!/[.!?]$/.test(script)) script += '.';
+      script += ' ' + ctaText;
+
+      // TTS unless too close to deadline
+      try {
+        if (timeLeftHard() > 9000) {
+          if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
+          ttsPath = await makeTTS(script);
+          voDur = await probeDuration(ttsPath);
+          if (voDur >= 14.4) break;
+        } else { ttsPath = null; voDur = 0; break; }
+      } catch { ttsPath = null; voDur = 0; break; }
     }
 
-    // Keep videos short + fast
     const TAIL = 0.8;
-    const finalDur = Math.max(12.0, Math.min((voDur || 12.8) + TAIL, 18.0));
+    const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
 
+    // Image choice (cheap & bounded)
     let imageUrl = null;
     const ensureImageForStill = async () => {
-      if (PEXELS_API_KEY && timeLeftHard() > 9000) {
+      if (PEXELS_API_KEY && timeLeftHard() > 7000) {
         try {
           const keyword = getImageKeyword(answers.industry || '', url) || topic;
           const p = await axios.get(PEXELS_IMG_BASE, {
             headers: { Authorization: PEXELS_API_KEY },
             params: { query: keyword, per_page: 12 },
-            timeout: 2500,
+            timeout: Math.max(2500, Math.min(4000, timeLeftHard() - 2500)),
           });
           const photos = p.data?.photos || [];
           if (photos.length) {
@@ -1392,8 +1380,8 @@ Output ONLY the script text.`;
 
     imageUrl = await ensureImageForStill();
 
-    // If we’re tight on time OR TTS is disabled, use cheaper title card
-    const makeTitleCard = timeLeftHard() < 12000 || !ENABLE_TTS;
+    // If we’re low on time, switch to title card (cheaper)
+    const makeTitleCard = timeLeftHard() < 7000;
     const videoBuilder = makeTitleCard ? composeTitleCardVideo : composeStillVideo;
 
     const still = await videoBuilder({
@@ -1433,13 +1421,13 @@ Output ONLY the script text.`;
       fbVideoId,
       script,
       ctaText,
-      voice: ENABLE_TTS ? 'alloy' : null,
+      voice: ttsPath ? 'alloy' : null,
       hasMusic: false,
       video: {
         url: first.url,
         script,
         overlayText: ctaText,
-        voice: ENABLE_TTS ? 'alloy' : null,
+        voice: ttsPath ? 'alloy' : null,
         hasMusic: false,
         subtitlesUrl: first.subtitlesUrl,
       },
@@ -1473,7 +1461,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
     const makeOne = async (baseUrl, seed) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
-      const ctaHint = pickFromAllowedCTAs(answers, seed);
+      const ctaHint = cleanCTA(answers?.cta || '');
       try {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: baseUrl,
@@ -1490,7 +1478,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         return publicUrl;
       } catch {
-        // Save raw, in case overlay fails
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
           meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale },
@@ -1506,7 +1493,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          ctaHint: cleanCTA(answers?.cta || ''),
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
@@ -1527,7 +1514,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // Use Pexels, but keep it short and sweet
+    // Use Pexels with short timeouts
     let photos = [];
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
@@ -1537,13 +1524,13 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
       photos = r.data.photos || [];
     } catch {
-      // graceful fallback: placeholders instead of 500
+      // graceful fallback
       const urls = [], absUrls = [];
       for (let i = 0; i < 3; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          ctaHint: cleanCTA(answers?.cta || ''),
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
@@ -1562,13 +1549,12 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     }
 
     if (!photos.length) {
-      // same graceful fallback if Pexels returned nothing
       const urls = [], absUrls = [];
       for (let i = 0; i < 3; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: pickFromAllowedCTAs(answers, regenerateToken + '_' + i),
+          ctaHint: cleanCTA(answers?.cta || ''),
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
