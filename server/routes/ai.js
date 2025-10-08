@@ -1,9 +1,9 @@
 'use strict';
 
 /**
- * SmartMark AI routes — static ads with headline highlight bar
- * - Headline on bold rounded color bar (brand-tinted)
- * - Sub-headline set in Times New Roman
+ * SmartMark AI routes — static ads with headline neutral highlight bar
+ * - Headline on bold rounded neutral-color bar (grays only)
+ * - Sub-headline set in Times New Roman, Title Case
  * - CTA pill with soft shadow
  * - Exactly TWO image variations per generate
  * - Tight timeouts, memory discipline, and graceful fallbacks
@@ -33,7 +33,7 @@ router.use((req, res, next) => {
 /* ---------------- Memory discipline + concurrency gate --------------- */
 const sharp = require('sharp');
 try {
-  sharp.cache({ memory: 16, files: 0, items: 0 }); // ~16MB process cache
+  sharp.cache({ memory: 16, files: 0, items: 0 });
   sharp.concurrency(1);
 } catch {}
 
@@ -58,8 +58,6 @@ function release() {
   const next = waiters.shift();
   if (next) setImmediate(next);
 }
-
-// Only serialize heavy endpoints
 const heavyRoute = (req, res, next) => {
   if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
     return next();
@@ -76,8 +74,8 @@ router.use(heavyRoute);
 /* ------------------------ Security & rate limit ---------------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
-router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 })); // general
-const heavyLimiter = basicRateLimit({ windowMs: 5 * 60 * 1000, max: 60 }); // heavy only
+router.use(basicRateLimit({ windowMs: 15 * 60 * 1000, max: 120 }));
+const heavyLimiter = basicRateLimit({ windowMs: 5 * 60 * 1000, max: 60 });
 
 /* ------------------------------ Deps -------------------------------- */
 const axios = require('axios');
@@ -578,7 +576,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- IMAGE OVERLAYS (new look) ---------------------- */
+/* ---------------------- IMAGE OVERLAYS (neutral + title case) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
@@ -618,18 +616,25 @@ function pickSerifFontFile() {
   return pickSansFontFile();
 }
 
-/* ---------- Image analysis (brand color + simple luminance) ---------- */
+/* ---------- Neutral brand color pick (no warm/blue hues) ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 72, H = 72;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     let rSum = 0, gSum = 0, bSum = 0;
     for (let i = 0; i < data.length; i += 3) { rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2]; }
-    const avg = { r: Math.round(rSum / (W * H)), g: Math.round(gSum / (W * H)), b: Math.round(bSum / (W * H)) };
-    const palette = ['#2563eb','#0ea5e9','#10b981','#6b46c1','#ef4444','#eab308'];
-    const idx = ((avg.r > avg.g) + (avg.g > avg.b) * 2 + (avg.r > avg.b) * 3) % palette.length;
-    return { brandColor: palette[idx] };
-  } catch { return { brandColor: '#2563eb' }; }
+    const lum = Math.round(0.2126*(rSum/(W*H)) + 0.7152*(gSum/(W*H)) + 0.0722*(bSum/(W*H)));
+    // Neutral grayscale palette only
+    const neutrals = ['#111827','#1f2937','#27272a','#374151','#3f3f46','#4b5563']; // gray-900..600 / zinc
+    // Brighter photo -> darker bar; darker photo -> slightly lighter neutral (still dark for contrast with white text)
+    const idx = lum >= 185 ? 0 : lum >= 150 ? 1 : lum >= 120 ? 2 : lum >= 90 ? 3 : lum >= 60 ? 4 : 5;
+    return { brandColor: neutrals[idx] };
+  } catch { return { brandColor: '#1f2937' }; }
+}
+
+/* ---------- Title case helper for subheadline ---------- */
+function toTitleCase(s) {
+  return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1));
 }
 
 /* ---------- SVG defs + layout with HEADLINE HIGHLIGHT BAR ---------- */
@@ -649,7 +654,62 @@ function svgDefs(brandColor) {
     </defs>
   `;
 }
+const LIGHT = '#f5f7f9';
+const pillBtn = (x, y, text, fs = 30) => {
+  fs = Math.max(24, Math.min(fs, 36));
+  const w = Math.min(880, estWidth(text, fs) + 80);
+  const h = 62;
+  const x0 = x - w / 2;
+  return `
+    <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
+      <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
+      <text x="${w / 2}" y="13" text-anchor="middle"
+            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
+        ${escSVG(text)}
+      </text>
+    </g>`;
+};
 
+function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
+  const defs = svgDefs(brandColor);
+  const SAFE_PAD = 24;
+  const maxW = W - SAFE_PAD * 2;
+
+  const HL_FS = 62;
+  const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
+  const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
+  const barH = headlineFs + 28;
+  const barX = (W - barW) / 2;
+  const barY = 110 - barH / 2;
+
+  const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
+  const subY = barY + barH + 38;
+  const ctaY = subY + SUB_FS + 44;
+
+  return `${defs}
+    <rect x="0" y="0" width="${W}" height="${180}" fill="url(#topShade)"/>
+    <g filter="url(#soft)">
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18" fill="${brandColor}" opacity="0.96"/>
+    </g>
+    <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.32}" text-anchor="middle"
+      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1">
+      ${escSVG(title)}
+    </text>
+
+    <text x="${W / 2}" y="${subY}" text-anchor="middle"
+      font-family="'Times New Roman', Times, serif"
+      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.2"
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.4; stroke-opacity:0.35">
+      ${escSVG(subline)}
+    </text>
+
+    ${pillBtn(W / 2, ctaY, cta, 30)}
+  `;
+}
+
+/* ---------- Subline crafting ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const pick = (s) => String(s || '').replace(/[^\w\s\-']/g, '').trim().toLowerCase();
   const defaults = {
@@ -677,64 +737,6 @@ function craftSubline(answers = {}, category = 'generic') {
   return words.join(' ');
 }
 
-const LIGHT = '#f5f7f9';
-const pillBtn = (x, y, text, fs = 30) => {
-  fs = Math.max(24, Math.min(fs, 36));
-  const w = Math.min(880, estWidth(text, fs) + 80);
-  const h = 62;
-  const x0 = x - w / 2;
-  return `
-    <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
-      <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
-      <text x="${w / 2}" y="13" text-anchor="middle"
-            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
-        ${escSVG(text)}
-      </text>
-    </g>`;
-};
-
-function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
-  const defs = svgDefs(brandColor);
-  const SAFE_PAD = 24;
-  const maxW = W - SAFE_PAD * 2;
-
-  // Headline bar — dynamic size
-  const HL_FS = 62;
-  const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
-  const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
-  const barH = headlineFs + 28;
-  const barX = (W - barW) / 2;
-  const barY = 110 - barH / 2;
-
-  // Subheadline (Times New Roman)
-  const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
-  const subY = barY + barH + 38;
-
-  const ctaY = subY + SUB_FS + 44;
-
-  return `${defs}
-    <rect x="0" y="0" width="${W}" height="${180}" fill="url(#topShade)"/>
-    <g filter="url(#soft)">
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18" fill="${brandColor}" opacity="0.96"/>
-    </g>
-    <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.32}" text-anchor="middle"
-      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1">
-      ${escSVG(title)}
-    </text>
-
-    <text x="${W / 2}" y="${subY}" text-anchor="middle"
-      font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.2"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.4; stroke-opacity:0.35">
-      ${escSVG(subline)}
-    </text>
-
-    ${pillBtn(W / 2, ctaY, cta, 30)}
-  `;
-}
-
 /* ---------- Overlay builder ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
@@ -747,7 +749,7 @@ async function buildOverlayImage({
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  const subline = craftSubline(answers, category);
+  const subline = toTitleCase(craftSubline(answers, category)); // Title Case
   const cta = cleanCTA(ctaHint) || 'LEARN MORE';
 
   const overlaySVG = Buffer.from(
@@ -799,310 +801,8 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB =
   });
 }
 
-/* -------------------- Video helpers (unchanged) -------------------- */
-const V_W = 1080;
-const V_H = 1080;
-const FPS = 30;
-function probeDuration(file, timeoutMs = 8000) {
-  return new Promise((resolve) => {
-    const child = spawn(
-      'ffprobe',
-      ['-v','error','-show_entries','format=duration','-of','default=nokey=1:noprint_wrappers=1', file],
-      { stdio: ['ignore', 'pipe', 'ignore'] }
-    );
-    let out = '';
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} resolve(0); }, timeoutMs);
-    child.stdout.on('data', (d) => { if (out.length < 64) out += d.toString('utf8'); });
-    child.on('close', () => { clearTimeout(timer); const s = parseFloat(out.trim()); resolve(isNaN(s) ? 0 : s); });
-    child.on('error', () => { clearTimeout(timer); resolve(0); });
-  });
-}
-function pickSerifFontFile() { return pickSerifFontFile._memo || (pickSerifFontFile._memo = pickSerifFontFile.__impl()); }
-pickSerifFontFile.__impl = function () {
-  const candidates = [
-    '/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf',
-    '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf'
-  ];
-  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
-  return pickSansFontFile();
-};
-function safeFFText(t) {
-  return String(t || '')
-    .replace(/[\'’]/g, '')
-    .replace(/[\n\r]/g, ' ')
-    .replace(/[:]/g, ' ')
-    .replace(/[\\"]/g, '')
-    .replace(/(?:https?:\/\/)?(?:www\.)?[a-z0-9\-]+\.[a-z]{2,}(?:\/\S*)?/gi, '')
-    .replace(/\b(dot|com|net|org|io|co)\b/gi, '')
-    .replace(/[^A-Za-z0-9 !?\-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase()
-    .slice(0, 40);
-}
-
-/* ---- Captions (unchanged) ---- */
-function splitForCaptions(text) {
-  let parts = String(text || '').trim().replace(/\s+/g, ' ').split(/(?<=[.?!])\s+/).filter(Boolean);
-  if (parts.length < 3) {
-    const more = String(text).split(/,\s+/).filter((s) => s.length > 12);
-    parts = parts.concat(more).slice(0, 5);
-  }
-  if (parts.length > 5) {
-    const merged = [];
-    for (const p of parts) {
-      if (!merged.length) merged.push(p);
-      else if (merged[merged.length - 1].length < 40) merged[merged.length - 1] += ' ' + p;
-      else merged.push(p);
-      if (merged.length === 5) break;
-    }
-    parts = merged;
-  }
-  return parts.map((p) => p.trim().replace(/\s+/g, ' ')).filter(Boolean);
-}
-function secsToSrt(ts) {
-  const h = Math.floor(ts / 3600);
-  const m = Math.floor((ts % 3600) / 60);
-  const s = Math.floor(ts % 60);
-  const ms = Math.floor((ts - Math.floor(ts)) * 1000);
-  const pad = (n, l = 2) => `${n}`.padStart(l, '0');
-  const pad3 = (n) => `${n}`.padStart(3, '0');
-  return `${pad(h)}:${pad(m)}:${pad(s)},${pad3(ms)}`;
-}
-function buildCaptionDrawtexts(script, duration, fontParam, workId = 'w') {
-  const outDir = ensureGeneratedDir();
-  const files = [];
-  const WINDOW_START = 0.35, TAIL = 0.8;
-  const endWindow = Math.max(WINDOW_START + 1.2, duration - TAIL);
-  const total = Math.max(1.2, endWindow - WINDOW_START);
-  const segs = splitForCaptions(script);
-  if (!segs.length) return { filter: '', files: [], srtPath: '' };
-
-  const lens = segs.map((s) => Math.max(12, Math.min(90, s.length)));
-  const sum = lens.reduce((a, b) => a + b, 0);
-  let t = WINDOW_START;
-  const pieces = [];
-  const baseStyle =
-    "fontcolor=white@0.99:borderw=2:bordercolor=black@0.85:shadowx=1:shadowy=1:shadowcolor=black@0.7:box=1:boxcolor=0x000000@0.50:boxborderw=28:fontsize=34:x='(w-tw)/2':y='h*0.82'";
-  const srtLines = [];
-
-  for (let i = 0; i < segs.length; i++) {
-    const dur = Math.max(1.2, (lens[i] / sum) * total);
-    const start = t;
-    const stop = Math.min(endWindow, t + dur);
-    t = stop + 0.05;
-    const tf = path.join(outDir, `cap_${workId}_${i}.txt`);
-    try { fs.writeFileSync(tf, segs[i]); files.push(tf); } catch {}
-    pieces.push(
-      `drawtext=${fontParam}textfile='${tf}':reload=0:${baseStyle}:enable='between(t,${start.toFixed(2)},${stop.toFixed(2)})'`
-    );
-    srtLines.push(`${i + 1}\n${secsToSrt(start)} --> ${secsToSrt(stop)}\n${segs[i]}\n`);
-    if (t >= endWindow) break;
-  }
-  const srtPath = path.join(outDir, `sub_${workId}.srt`);
-  try { fs.writeFileSync(srtPath, srtLines.join('\n')); } catch {}
-  return { filter: pieces.join(','), files, srtPath };
-}
-
-/* ------------------------- Video endpoints (kept) ------------------------- */
-async function runSpawn(cmd, args, opts = {}) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { stdio: ['ignore', 'ignore', 'inherit'], ...opts });
-    let killed = false;
-    const killTimer = opts.killAfter
-      ? setTimeout(() => {
-          killed = true;
-          try { child.kill('SIGKILL'); } catch {}
-          reject(new Error(opts.killMsg || 'process timeout'));
-        }, opts.killAfter)
-      : null;
-    child.on('error', (err) => { if (killTimer) clearTimeout(killTimer); reject(err) });
-    child.on('close', (code) => {
-      if (killTimer) clearTimeout(killTimer);
-      if (killed) return;
-      code === 0 ? resolve() : reject(new Error(`${cmd} exited with code ${code}`));
-    });
-  });
-}
-
-async function composeStillVideo({ imageUrl, duration, ttsPath = null, musicPath = null,
-  brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE', scriptText = '' }) {
-  housekeeping();
-  const outDir = ensureGeneratedDir();
-  const id = uuidv4();
-  const outFile = `${id}.mp4`;
-  const outPath = path.join(outDir, outFile);
-
-  let finalImageUrl = imageUrl || 'https://picsum.photos/seed/smartmark/1200/1200';
-  try { await axios.get(finalImageUrl, { timeout: 5000 }); } catch {
-    finalImageUrl = 'https://singlecolorimage.com/get/2b2f33/1200x1200';
-  }
-
-  let imgFile = null;
-  try {
-    imgFile = path.join(outDir, `${id}.jpg`);
-    const imgRes = await axios.get(finalImageUrl, { responseType: 'arraybuffer', timeout: 9000 });
-    const sharped = await sharp(imgRes.data)
-      .resize(1200, 1200, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-      .jpeg({ quality: 92, chromaSubsampling: '4:4:4', mozjpeg: true })
-      .toBuffer();
-    fs.writeFileSync(imgFile, sharped);
-  } catch { imgFile = null; }
-
-  const sansFile = pickSansFontFile();
-  const serifFile = pickSerifFontFile();
-  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
-  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
-  const txtCommon = 'fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75';
-
-  const brand = safeFFText(brandLine);
-  const cta = safeFFText(ctaText);
-  const TAIL = 0.8;
-
-  const args = ['-y', '-threads', '1'];
-  if (imgFile) {
-    args.push('-loop', '1', '-t', duration.toFixed(2), '-i', imgFile);
-  } else {
-    args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`);
-  }
-  if (ttsPath) args.push('-i', ttsPath);
-  if (musicPath) args.push('-i', musicPath);
-  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
-
-  const baseVideo = imgFile
-    ? `[0:v]scale='if(gte(iw/ih,1),${V_W},-2)':'if(gte(iw/ih,1),-2,${V_H})':flags=lanczos,` +
-      `pad=${V_W}:${V_H}:((${V_W}-iw)/2):(${V_H}-ih)/2,setsar=1,format=yuv420p,` +
-      `zoompan=z='min(zoom+0.00022,1.018)':d=${Math.floor(FPS * duration)}:x='(iw-iw/zoom)/2':y='(ih-ih/zoom)/2',fps=${FPS}[cv]`
-    : `[0:v]fps=${FPS},format=yuv420p[cv]`;
-
-  const brandIntro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=46:x='(w-tw)/2':y='h*0.10':enable='between(t,0.2,3.1)'`;
-  const ctaOutro = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50-20)':enable='gte(t,${(duration - TAIL).toFixed(2)})'`;
-
-  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-  let fc = `${baseVideo};[cv]${brandIntro}${subsBuild.filter ? ',' + subsBuild.filter : ''},${ctaOutro},format=yuv420p[v]`;
-
-  const mixInputs = [];
-  let aIdx = 1;
-  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  mixInputs.push(`${aIdx}:a`);
-  fc += `;${mixInputs.map((m, i) => `[${m}]aresample=48000${i === 1 ? ',volume=0.18' : ''}[a${i}]`).join(';')};` +
-        `${mixInputs.map((_, i) => `[a${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
-
-  args.push(
-    '-filter_complex', fc,
-    '-map', '[v]',
-    '-map', '[mix]',
-    '-t', duration.toFixed(2),
-    '-r', String(FPS),
-    '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '21',
-    '-pix_fmt', 'yuv420p',
-    '-b:v', '4200k',
-    '-maxrate', '5600k',
-    '-bufsize', '11200k',
-    '-g', String(FPS * 2),
-    '-keyint_min', String(FPS),
-    '-c:a', 'aac',
-    '-b:a', '128k',
-    '-ar', '48000',
-    '-movflags', '+faststart',
-    '-shortest',
-    '-avoid_negative_ts', 'make_zero',
-    '-max_muxing_queue_size', '1024',
-    '-loglevel', 'error',
-    outPath
-  );
-
-  await runSpawn('ffmpeg', args, { killAfter: 90000, killMsg: 'still-video timeout' });
-
-  try { if (imgFile) fs.unlinkSync(imgFile); } catch {}
-  try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
-  return {
-    publicUrl: mediaPath(outFile),
-    absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
-    subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '',
-  };
-}
-
-async function composeTitleCardVideo({ duration, ttsPath = null, musicPath = null,
-  brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE', scriptText = '' }) {
-  housekeeping();
-  const outDir = ensureGeneratedDir();
-  const id = uuidv4();
-  const outFile = `${id}.mp4`;
-  const outPath = path.join(outDir, outFile);
-
-  const sansFile = pickSansFontFile();
-  const serifFile = pickSerifFontFile();
-  const fontParamSans = sansFile ? `fontfile='${sansFile}':` : `font='Arial':`;
-  const fontParamSerif = serifFile ? `fontfile='${serifFile}':` : `font='Times New Roman':`;
-  const txtCommon = 'fontcolor=white@0.99:borderw=2:bordercolor=black@0.88:shadowx=1:shadowy=1:shadowcolor=black@0.75';
-
-  const brand = safeFFText(brandLine);
-  const cta = safeFFText(ctaText);
-  const TAIL = 0.8;
-
-  const args = ['-y', '-threads', '1', '-f', 'lavfi', '-t', duration.toFixed(2), '-i', `color=c=0x101318:s=${V_W}x${V_H}`];
-  if (ttsPath) args.push('-i', ttsPath);
-  if (musicPath) args.push('-i', musicPath);
-  args.push('-f', 'lavfi', '-t', duration.toFixed(2), '-i', 'anullsrc=channel_layout=stereo:sample_rate=48000');
-
-  const intro = `drawtext=${fontParamSans}text='${brand}':${txtCommon}:fontsize=58:x='(w-tw)/2':y='(h*0.36-88)':enable='between(t,0.3,${(duration - TAIL - 0.6).toFixed(2)})'`;
-  const ctaFx = `drawtext=${fontParamSans}text='${cta}':${txtCommon}:box=1:boxcolor=0x0b0d10@0.82:boxborderw=22:fontsize=58:x='(w-tw)/2':y='(h*0.50)':enable='gte(t,${(duration - TAIL).toFixed(2)})'`;
-
-  const subsBuild = buildCaptionDrawtexts(scriptText, duration, fontParamSerif, id);
-  let fc = `[0:v]fps=${FPS},format=yuv420p,${intro}${subsBuild.filter ? ',' + subsBuild.filter : ''},${ctaFx},format=yuv420p[v]`;
-
-  const mixInputs = [];
-  let aIdx = 1;
-  if (ttsPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  if (musicPath) { mixInputs.push(`${aIdx}:a`); aIdx++; }
-  mixInputs.push(`${aIdx}:a`);
-  fc += `;${mixInputs.map((m, i) => `[${m}]aresample=48000${i === 1 ? ',volume=0.18' : ''}[b${i}]`).join(';')};` +
-        `${mixInputs.map((_, i) => `[b${i}]`).join('')}amix=inputs=${mixInputs.length}:duration=longest:normalize=1[mix]`;
-
-  args.push(
-    '-filter_complex', fc,
-    '-map', '[v]',
-    '-map', '[mix]',
-    '-t', duration.toFixed(2),
-    '-r', String(FPS),
-    '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '21',
-    '-pix_fmt', 'yuv420p',
-    '-b:v', '4200k',
-    '-maxrate', '5600k',
-    '-bufsize', '11200k',
-    '-g', String(FPS * 2),
-    '-keyint_min', String(FPS),
-    '-c:a', 'aac',
-    '-b:a', '128k',
-    '-ar', '48000',
-    '-movflags', '+faststart',
-    '-avoid_negative_ts', 'make_zero',
-    '-shortest',
-    '-max_muxing_queue_size', '1024',
-    '-loglevel', 'error',
-    outPath
-  );
-
-  await runSpawn('ffmpeg', args, { killAfter: 80000, killMsg: 'title-card timeout' });
-  try { for (const f of subsBuild.files || []) fs.unlinkSync(f); } catch {}
-  return {
-    publicUrl: mediaPath(outFile),
-    absoluteUrl: absolutePublicUrl(mediaPath(outFile)),
-    subtitlesUrl: subsBuild.srtPath ? absolutePublicUrl(mediaPath(path.basename(subsBuild.srtPath))) : '',
-  };
-}
-
-/* ------------------------------- VIDEO API (kept) ------------------------------- */
-router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  // unchanged from previous version — kept for API compatibility
-  // (omitted for brevity in this comment; code identical to earlier file)
+/* -------------------- Video endpoint placeholder (unchanged) -------------------- */
+router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
   res.status(501).json({ error: 'Video generation unchanged in this update.' });
 });
 
@@ -1138,19 +838,18 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, highlightBar: true },
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, highlightBar: true, neutral: true },
         });
         return publicUrl;
       } catch {
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, highlightBar: true },
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, highlightBar: true, neutral: true },
         });
         return baseUrl;
       }
     };
 
-    // Pexels optional
     if (!PEXELS_API_KEY) {
       const urls = [], absUrls = [];
       for (let i = 0; i < 2; i++) {
@@ -1164,7 +863,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, highlightBar: true },
+          meta: { category, keyword, placeholder: true, i, highlightBar: true, neutral: true },
         });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
@@ -1197,7 +896,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, highlightBar: true } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, highlightBar: true, neutral: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1221,7 +920,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, highlightBar: true } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, highlightBar: true, neutral: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1234,7 +933,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // Pick exactly 2 deterministically
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
 
