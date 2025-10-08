@@ -1,11 +1,12 @@
 'use strict';
 
 /**
- * SmartMark AI routes — memory-safe on 512MB dynos
+ * SmartMark AI routes — tuned for **simple static ads** (fast + reliable)
  * - Always-on CORS (prevents fake “CORS errors” on 50x)
  * - Sharp memory discipline + single-job concurrency gate
  * - Strict time/size budgets and graceful fallbacks
  * - Range-enabled media streamer for mp4/jpg/png
+ * - IMAGE GENERATION: returns **exactly 2** clean static ad designs (simplicity & oneness)
  */
 
 const express = require('express');
@@ -192,6 +193,7 @@ router.get('/media/:file', async (req, res) => {
       ext === '.mp4' ? 'video/mp4' :
       ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
       ext === '.png' ? 'image/png' :
+      ext === '.webp' ? 'image/webp' :
       ext === '.srt' ? 'text/plain; charset=utf-8' :
       'application/octet-stream';
 
@@ -305,7 +307,7 @@ function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
   if (/hair/.test(extra)) return 'hair care';
   if (/(pet|dog|cat)/.test(extra)) return 'pet dog cat';
   if (/(electronics|phone|laptop)/.test(extra)) return 'tech gadgets';
-  return base || fallback; // <— fixed stray dot
+  return base || fallback;
 }
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
@@ -425,7 +427,7 @@ async function getWebsiteText(url) {
     const clean = String(url || '').trim();
     if (!clean || !/^https?:\/\//i.test(clean)) throw new Error('Invalid URL');
     const { data, headers } = await axios.get(clean, {
-      timeout: 7000, maxRedirects: 3, validateStatus: (s) => s < 400,
+      timeout: 6500, maxRedirects: 3, validateStatus: (s) => s < 400,
     });
     if (!headers['content-type']?.includes('text/html')) throw new Error('Not HTML');
     const body = String(data)
@@ -435,7 +437,7 @@ async function getWebsiteText(url) {
       .replace(/\s+/g, ' ')
       .trim();
     if (body.length < 200 || /cloudflare|access denied|429/i.test(body)) throw new Error('blocked/short');
-    return body.slice(0, 3500);
+    return body.slice(0, 3000);
   } catch { return ''; }
 }
 
@@ -576,7 +578,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- Image overlays ---------------------- */
+/* ---------------------- Image overlays (SIMPLE + FAST) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
@@ -618,8 +620,9 @@ function pickSansFontFile() {
 }
 
 async function analyzeImageForPlacement(imgBuf) {
+  // lightweight brightness skim to choose left/right panel and accent color
   try {
-    const W = 72, H = 72;
+    const W = 64, H = 64;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     let left = 0, right = 0, top = 0, bottom = 0, rSum = 0, gSum = 0, bSum = 0;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -632,12 +635,11 @@ async function analyzeImageForPlacement(imgBuf) {
     const darkerSide = left < right ? 'left' : 'right';
     const darkerBand = top < bottom ? 'top' : 'bottom';
     const avg = { r: Math.round(rSum / (W * H)), g: Math.round(gSum / (W * H)), b: Math.round(bSum / (W * H)) };
-    const palette = ['#E63946','#2B6CB0','#2F855A','#6B46C1','#E98A15','#D61C4E'];
+    const palette = ['#1a8cff','#13b38b','#6b46c1','#e85d2a','#d61c4e','#2463eb'];
     const idx = ((avg.r > avg.g) + (avg.g > avg.b) * 2 + (avg.r > avg.b) * 3) % palette.length;
     const brandColor = palette[idx];
-    const diffLR = Math.abs(left - right) / (W * H);
-    return { darkerSide, darkerBand, brandColor, diffLR };
-  } catch { return { darkerSide: 'left', darkerBand: 'top', brandColor: '#E63946', diffLR: 0.0 }; }
+    return { darkerSide, darkerBand, brandColor, diffLR: Math.abs(left - right) / (W * H) };
+  } catch { return { darkerSide: 'left', darkerBand: 'top', brandColor: '#2463eb', diffLR: 0.0 }; }
 }
 
 function svgDefs(brandColor) {
@@ -646,20 +648,14 @@ function svgDefs(brandColor) {
       <linearGradient id="gShadeV" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#000A"/><stop offset="100%" stop-color="#0000"/>
       </linearGradient>
-      <linearGradient id="gShadeHLeft" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0%" stop-color="#000B"/><stop offset="100%" stop-color="#0000"/>
-      </linearGradient>
       <linearGradient id="panelGrad" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.90"/>
-        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.65"/>
+        <stop offset="0%" stop-color="${brandColor}" stop-opacity="0.92"/>
+        <stop offset="100%" stop-color="${brandColor}" stop-opacity="0.70"/>
       </linearGradient>
       <filter id="glass" x="-10%" y="-10%" width="120%" height="120%">
         <feGaussianBlur in="SourceGraphic" stdDeviation="0.6" result="blur"/>
         <feComponentTransfer><feFuncA type="linear" slope="0.9"/></feComponentTransfer>
       </filter>
-      <pattern id="dots" x="0" y="0" width="18" height="18" patternUnits="userSpaceOnUse">
-        <circle cx="2.5" cy="2.5" r="1.6" fill="#ffffff22"/>
-      </pattern>
     </defs>
   `;
 }
@@ -713,25 +709,25 @@ const pillBtn = (x, y, text, fs = 28) => {
     </g>`;
 };
 
-/* ---- SALE badge decision ---- */
+/* ---- SALE badge decision (kept but not used in simple layouts) ---- */
 function wantsSaleBadge(answers = {}) {
   const t = `${answers.offer || ''} ${answers.description || ''}`.toLowerCase();
   return /(sale|% off|percent off|discount|save|clearance|deal)/i.test(t);
 }
 
-/* ---------- Overlay template ---------- */
+/* ---------- Overlay templates: only TWO simple, clean options ---------- */
 function svgOverlayCreative({
   W, H, title, subline, cta, prefer = 'left', preferBand = 'top',
-  brandColor = '#E63946', choose = 3, sale = false,
+  brandColor = '#2463eb', choose = 1,
 }) {
   const defs = svgDefs(brandColor);
 
   const SAFE_PAD = 24;
-  const PANEL_W = 560;
+  const PANEL_W = 540;
   const PANEL_PAD = 34;
   const TITLE_MAX_W = (W) => W - 2 * (SAFE_PAD + PANEL_PAD);
-  const SUB_FS_BASE = 32;
-  const TITLE_FS_CAP = 66;
+  const SUB_FS_BASE = 30;
+  const TITLE_FS_CAP = 64;
 
   const fitTitle = (maxW) => {
     const first = splitTwoLines(title, maxW, TITLE_FS_CAP);
@@ -742,21 +738,21 @@ function svgOverlayCreative({
     return { fs };
   };
 
-  // Layout 1: top band, centered
+  // Layout 1: top band, centered (ultra-simple)
   if (choose === 1) {
-    const bandH = 252;
+    const bandH = 240;
     const maxW = TITLE_MAX_W(W);
     const t = fitTitle(maxW);
     const s = fitSub(maxW);
-    const yTitle = 128;
-    const ySub = yTitle + t.fs * t.lines.length + 30;
-    const yCTA = ySub + s.fs + 44;
+    const yTitle = 120;
+    const ySub = yTitle + t.fs * t.lines.length + 26;
+    const yCTA = ySub + s.fs + 40;
 
     return `${defs}
       <rect x="0" y="0" width="${W}" height="${bandH}" fill="url(#gShadeV)" />
       <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
         font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.4">
+        font-size="${t.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.2">
         <tspan x="${W / 2}" dy="0">${escSVG(t.lines[0])}</tspan>
         ${t.lines[1] ? `<tspan x="${W / 2}" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
       </text>
@@ -765,128 +761,38 @@ function svgOverlayCreative({
         font-size="${s.fs}" font-weight="700" fill="${LIGHT}" letter-spacing="0.6">
         ${escSVG(subline)}
       </text>
-      ${pillBtn(W / 2, yCTA, cta, 30)}
+      ${pillBtn(W / 2, yCTA, cta, 28)}
     `;
   }
 
+  // Layout 3: glass panel column (clean side card)
   const x0 = prefer === 'left' ? SAFE_PAD : W - PANEL_W - SAFE_PAD;
   const cx = x0 + PANEL_W / 2;
   const textW = PANEL_W - 2 * PANEL_PAD;
   const t3 = fitTitle(textW);
   const s3 = fitSub(textW);
 
-  // Layout 3: glass panel column
-  if (choose === 3) {
-    const yTitle = 180;
-    const ySub = yTitle + t3.fs * t3.lines.length + 22;
-    const yCTA = ySub + s3.fs + 44;
+  const yTitle = 180;
+  const ySub = yTitle + t3.fs * t3.lines.length + 20;
+  const yCTA = ySub + s3.fs + 40;
 
-    return `${defs}
-      <g filter="url(#glass)">
-        <rect x="${x0}" y="${SAFE_PAD}" width="${PANEL_W}" height="${H - 2 * SAFE_PAD}" rx="28" fill="url(#panelGrad)"/>
-      </g>
-      <rect x="${x0}" y="${SAFE_PAD}" width="${PANEL_W}" height="${H - 2 * SAFE_PAD}" rx="28" fill="url(#dots)"/>
-      <text x="${cx}" y="${yTitle}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t3.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.2">
-        <tspan x="${cx}" dy="0">${escSVG(t3.lines[0])}</tspan>
-        ${t3.lines[1] ? `<tspan x="${cx}" dy="${t3.fs * 1.05}">${escSVG(t3.lines[1])}</tspan>` : ''}
-      </text>
-      <text x="${cx}" y="${ySub}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${s3.fs}" font-weight="700" fill="#ffffff" letter-spacing="0.6">
-        ${escSVG(subline)}
-      </text>
-      ${pillBtn(cx, yCTA, cta, 28)}
-    `;
-  }
-
-  // Layout 6: side gradient band
-  if (choose === 6) {
-    const yBase = preferBand === 'top' ? 140 : H - 140 - t3.fs * t3.lines.length;
-    const ySub = yBase + t3.fs * t3.lines.length + 24;
-    const yCTA = ySub + s3.fs + 40;
-    const anchorX =
-      prefer === 'left'
-        ? SAFE_PAD + PANEL_PAD + (textW / 2)
-        : W - SAFE_PAD - PANEL_PAD - (textW / 2);
-
-    return `${defs}
-      <rect x="${prefer === 'left' ? 0 : W - PANEL_W}" y="0" width="${PANEL_W}" height="${H}" fill="url(#gShadeHLeft)"/>
-      <text x="${anchorX}" y="${yBase}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${t3.fs}" font-weight="1000" fill="#f2f5f6" letter-spacing="1.2">
-        <tspan x="${anchorX}" dy="0">${escSVG(t3.lines[0])}</tspan>
-        ${t3.lines[1] ? `<tspan x="${anchorX}" dy="${t3.fs * 1.05}">${escSVG(t3.lines[1])}</tspan>` : ''}
-      </text>
-      <text x="${anchorX}" y="${ySub}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${s3.fs}" font-weight="700" fill="#f2f5f6" letter-spacing="0.6">
-        ${escSVG(subline)}
-      </text>
-      ${pillBtn(anchorX, yCTA, cta, 26)}
-    `;
-  }
-
-  // Layout 4: diagonal ribbon
-  if (choose === 4) {
-    const ribbonH = 170;
-    const angle = prefer === 'left' ? -10 : 10;
-    const xMid = W / 2;
-    const yMid = H * 0.28;
-    const t = fitTitle(W - 240);
-    const yCTA = H * 0.74;
-
-    return `${defs}
-      <g transform="translate(${xMid},${yMid}) rotate(${angle})">
-        <rect x="${-W / 2}" y="${-ribbonH / 2}" width="${W}" height="${ribbonH}" fill="${brandColor}" opacity="0.92" />
-        <rect x="${-W / 2}" y="${-ribbonH / 2}" width="${W}" height="${ribbonH}" fill="url(#dots)" />
-        <text x="0" y="-10" text-anchor="middle"
-          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-          font-size="${t.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.4">
-          <tspan x="0" dy="0">${escSVG(t.lines[0])}</tspan>
-          ${t.lines[1] ? `<tspan x="0" dy="${t.fs * 1.05}">${escSVG(t.lines[1])}</tspan>` : ''}
-        </text>
-      </g>
-      ${pillBtn(W / 2, yCTA, cta, 30)}
-    `;
-  }
-
-  // Layout 5: SALE badge (only when relevant)
-  if (choose === 5 && sale) {
-    const fit5 = fitTitle(W - 160);
-    const sub = fitSub(W - 160);
-    const yTitle = H * 0.76;
-    const ySub = yTitle + fit5.fs * fit5.lines.length + 20;
-    const yCTA = ySub + sub.fs + 36;
-
-    return `${defs}
-      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#gShadeHLeft)"/>
-      <g transform="translate(${prefer === 'left' ? 120 : W - 120}, ${H * 0.18})">
-        <circle r="78" fill="#00000055"></circle>
-        <circle r="74" fill="${brandColor}" opacity="0.95"></circle>
-        <circle r="74" fill="url(#dots)"></circle>
-        <text x="0" y="10" text-anchor="middle"
-          font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-          font-size="28" font-weight="900" fill="#fff">SALE</text>
-      </g>
-      <text x="${W / 2}" y="${yTitle}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${fit5.fs}" font-weight="1000" fill="${LIGHT}" letter-spacing="1.2">
-        <tspan x="${W / 2}" dy="0">${escSVG(fit5.lines[0])}</tspan>
-        ${fit5.lines[1] ? `<tspan x="${W / 2}" dy="${fit5.fs * 1.05}">${escSVG(fit5.lines[1])}</tspan>` : ''}
-      </text>
-      <text x="${W / 2}" y="${ySub}" text-anchor="middle"
-        font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-        font-size="${sub.fs}" font-weight="700" fill="${LIGHT}" letter-spacing="0.6">
-        ${escSVG(subline)}
-      </text>
-      ${pillBtn(W / 2, yCTA, cta, 28)}
-    `;
-  }
-
-  // default = layout 3
-  return svgOverlayCreative({ W, H, title, subline, cta, prefer, preferBand, brandColor, choose: 3, sale });
+  return `${defs}
+    <g filter="url(#glass)">
+      <rect x="${x0}" y="${SAFE_PAD}" width="${PANEL_W}" height="${H - 2 * SAFE_PAD}" rx="28" fill="url(#panelGrad)"/>
+    </g>
+    <text x="${cx}" y="${yTitle}" text-anchor="middle"
+      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+      font-size="${t3.fs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1">
+      <tspan x="${cx}" dy="0">${escSVG(t3.lines[0])}</tspan>
+      ${t3.lines[1] ? `<tspan x="${cx}" dy="${t3.fs * 1.05}">${escSVG(t3.lines[1])}</tspan>` : ''}
+    </text>
+    <text x="${cx}" y="${ySub}" text-anchor="middle"
+      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+      font-size="${s3.fs}" font-weight="700" fill="#ffffff" letter-spacing="0.5">
+      ${escSVG(subline)}
+    </text>
+    ${pillBtn(cx, yCTA, cta, 26)}
+  `;
 }
 
 /* ---------- Overlay builder ---------- */
@@ -895,7 +801,7 @@ async function buildOverlayImage({
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
 }) {
   const W = 1200, H = 628;
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 11000 });
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 9000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
@@ -903,22 +809,24 @@ async function buildOverlayImage({
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const subline = craftSubline(answers, category);
   const cta = cleanCTA(ctaHint) || 'LEARN MORE!';
+
+  // deterministic pick between the two simple layouts [1,3]
   let h = 0; for (const c of String(seed || Date.now())) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  const sale = wantsSaleBadge(answers);
-  const choices = analysis.diffLR > 40 ? [3, 1, 6, 4, sale ? 5 : 1] : [1, 3, 6, 4, sale ? 5 : 3];
+  const choices = [1, 3];
   const tpl = choices[h % choices.length];
+
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
       W, H, title, subline, cta,
       prefer: analysis.darkerSide, preferBand: analysis.darkerBand,
-      brandColor: analysis.brandColor, choose: tpl, sale,
+      brandColor: analysis.brandColor, choose: tpl,
     })}</svg>`
   );
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await base
     .composite([{ input: overlaySVG, top: 0, left: 0 }])
-    .jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .jpeg({ quality: 90, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
   maybeGC();
   return {
@@ -958,7 +866,8 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB =
   });
 }
 
-/* -------------------- Video constants -------------------- */
+/* -------------------- Video (kept for compatibility) -------------------- */
+const { spawn: _spawn } = require('child_process');
 const V_W = 1080;
 const V_H = 1080;
 const FPS = 30;
@@ -1084,7 +993,7 @@ async function probeDuration(file, timeoutMs = 8000) {
   });
 }
 
-/* -------------------- Still video -------------------- */
+/* -------------------- Still video (kept) -------------------- */
 async function composeStillVideo({
   imageUrl, duration, ttsPath = null, musicPath = null,
   brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '',
@@ -1106,7 +1015,7 @@ async function composeStillVideo({
     const imgRes = await axios.get(finalImageUrl, { responseType: 'arraybuffer', timeout: 9000 });
     const sharped = await sharp(imgRes.data)
       .resize(1200, 1200, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-      .jpeg({ quality: 93, chromaSubsampling: '4:4:4', mozjpeg: true })
+      .jpeg({ quality: 92, chromaSubsampling: '4:4:4', mozjpeg: true })
       .toBuffer();
     fs.writeFileSync(imgFile, sharped);
   } catch { imgFile = null; }
@@ -1188,7 +1097,7 @@ async function composeStillVideo({
   };
 }
 
-/* -------------------- Title card (fallback) -------------------- */
+/* -------------------- Title card (fallback; kept) -------------------- */
 async function composeTitleCardVideo({
   duration, ttsPath = null, musicPath = null,
   brandLine = 'YOUR BRAND!', ctaText = 'LEARN MORE!', scriptText = '',
@@ -1263,7 +1172,7 @@ async function composeTitleCardVideo({
   };
 }
 
-/* ------------------------------- VIDEO API ------------------------------- */
+/* ------------------------------- VIDEO API (unchanged) ------------------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
   try {
@@ -1285,7 +1194,6 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     if (!/!$/.test(brandForVideo)) brandForVideo += '!';
     const ctaText = (answers?.cta && cleanCTA(answers.cta)) || 'LEARN MORE!';
 
-    // Hard route deadline to avoid 504s under load
     const HARD_ROUTE_TIMEOUT_MS = 55000;
     const deadline = Date.now() + HARD_ROUTE_TIMEOUT_MS;
     const timeLeftHard = () => Math.max(0, deadline - Date.now());
@@ -1334,14 +1242,12 @@ Output ONLY the script text.`;
       script = stripFashionIfNotApplicable(script, category);
       script = enforceCategoryPresence(script, category);
       script = cleanFinalText(script);
-      // Remove duplicate CTA phrases inside script; we'll ensure one at end
       const plainList = ['SHOP NOW','BUY NOW','CHECK US OUT','VISIT US','TAKE A LOOK','LEARN MORE','GET STARTED'];
       const re = new RegExp(`\\b(?:${plainList.join('|')})\\b[.!?]*`, 'gi');
       script = script.replace(re, '').trim();
       if (!/[.!?]$/.test(script)) script += '.';
       script += ' ' + ctaText;
 
-      // TTS unless too close to deadline
       try {
         if (timeLeftHard() > 9000) {
           if (ttsPath) { try { fs.unlinkSync(ttsPath); } catch {} }
@@ -1355,7 +1261,6 @@ Output ONLY the script text.`;
     const TAIL = 0.8;
     const finalDur = Math.max(16.0, Math.min((voDur || 14.4) + TAIL, 30.0));
 
-    // Image choice (cheap & bounded)
     let imageUrl = null;
     const ensureImageForStill = async () => {
       if (PEXELS_API_KEY && timeLeftHard() > 7000) {
@@ -1363,8 +1268,8 @@ Output ONLY the script text.`;
           const keyword = getImageKeyword(answers.industry || '', url) || topic;
           const p = await axios.get(PEXELS_IMG_BASE, {
             headers: { Authorization: PEXELS_API_KEY },
-            params: { query: keyword, per_page: 12 },
-            timeout: Math.max(2500, Math.min(4000, timeLeftHard() - 2500)),
+            params: { query: keyword, per_page: 10 },
+            timeout: Math.max(2000, Math.min(3500, timeLeftHard() - 2500)),
           });
           const photos = p.data?.photos || [];
           if (photos.length) {
@@ -1380,7 +1285,6 @@ Output ONLY the script text.`;
 
     imageUrl = await ensureImageForStill();
 
-    // If we’re low on time, switch to title card (cheaper)
     const makeTitleCard = timeLeftHard() < 7000;
     const videoBuilder = makeTitleCard ? composeTitleCardVideo : composeStillVideo;
 
@@ -1441,12 +1345,12 @@ Output ONLY the script text.`;
   }
 });
 
-/* --------------------- IMAGE: search + overlay (3 variations) --------------------- */
+/* --------------------- IMAGE: search + overlay (EXACTLY 2 variations) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
   try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(60000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(60000);
+    if (typeof res.setTimeout === 'function') res.setTimeout(45000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(45000);
   } catch {}
 
   try {
@@ -1457,7 +1361,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const industry = answers.industry || top.industry || '';
     const category = resolveCategory(answers || {});
     const keyword = getImageKeyword(industry, url);
-    const sale = wantsSaleBadge(answers);
+    const sale = wantsSaleBadge(answers); // NOTE: not rendering badges in simple mode
 
     const makeOne = async (baseUrl, seed) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
@@ -1474,22 +1378,22 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, sale },
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, sale, simple: true },
         });
         return publicUrl;
       } catch {
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale },
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, sale, simple: true },
         });
         return baseUrl;
       }
     };
 
-    // If no Pexels key, return 3 crisp placeholder overlays
+    // If no Pexels key, return 2 crisp placeholder overlays quickly
     if (!PEXELS_API_KEY) {
       const urls = [], absUrls = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
@@ -1500,7 +1404,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, sale },
+          meta: { category, keyword, placeholder: true, i, simple: true },
         });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
@@ -1508,25 +1412,25 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         imageUrl: urls[0],
         absoluteImageUrl: absUrls[0],
         keyword,
-        totalResults: 3,
+        totalResults: 2,
         usedIndex: 0,
         imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
       });
     }
 
-    // Use Pexels with short timeouts
+    // Use Pexels with short timeouts for **speed**
     let photos = [];
     try {
       const r = await axios.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 12 },
-        timeout: 3000,
+        params: { query: keyword, per_page: 8 },
+        timeout: 2200,
       });
       photos = r.data.photos || [];
     } catch {
-      // graceful fallback
+      // graceful fallback to placeholders (2)
       const urls = [], absUrls = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
@@ -1535,14 +1439,14 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, simple: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
         imageUrl: urls[0],
         absoluteImageUrl: absUrls[0],
         keyword,
-        totalResults: 3,
+        totalResults: 2,
         usedIndex: 0,
         imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
       });
@@ -1550,7 +1454,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
     if (!photos.length) {
       const urls = [], absUrls = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
           headlineHint: overlayTitleFromAnswers(answers, category),
@@ -1559,24 +1463,25 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, sale } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, simple: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
         imageUrl: urls[0],
         absoluteImageUrl: absUrls[0],
         keyword,
-        totalResults: 3,
+        totalResults: 2,
         usedIndex: 0,
         imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
       });
     }
 
+    // Pick **exactly 2** distinct photos deterministically
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
 
     const picks = [];
-    for (let i = 0; i < photos.length && picks.length < 3; i++) {
+    for (let i = 0; i < photos.length && picks.length < 2; i++) {
       const idx = (idxHash + i * 7) % photos.length;
       if (!picks.includes(idx)) picks.push(idx);
     }
