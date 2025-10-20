@@ -729,31 +729,39 @@ const pillBtn = (x, y, text, fs = 30) => {
 };
 
 /* --- SPACING TWEAKS: Looser layout so elements aren’t cramped --- */
+// === REPLACE the existing svgOverlayCreative(...) with THIS version ===
+// Placement: after pillBtn(...) and before craftSubline(...)
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const defs = svgDefs(brandColor);
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
+  // Headline sizing
   const HL_FS = 62;
   const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
   const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
   const barH = headlineFs + 28;
   const barX = (W - barW) / 2;
-  const barY = 96 - Math.floor(barH / 2); // slightly higher to create more room below
+  const barY = 96 - Math.floor(barH / 2); // slightly higher to open space below
 
-  // Increased gaps
-  const GAP_HL_TO_SUB = 56;      // was ~38
-  const GAP_SUB_TO_CTA = 62;     // was ~44
+  // "Glass" look: fully neutral, see-through (no color), readable on any bg
+  const glassOpacity = 0.34;    // how transparent the bar is
+  const strokeOpacity = 0.08;   // subtle edge to feel like glass
 
+  // Spacing: more air between headline → subline → CTA
   const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
-  const subY = barY + barH + GAP_HL_TO_SUB;
-  const ctaY = subY + SUB_FS + GAP_SUB_TO_CTA;
+  const subY = barY + barH + 56;      // increased gap headline → subline
+  const ctaY = subY + SUB_FS + 62;    // increased gap subline → CTA
 
   return `${defs}
     <rect x="0" y="0" width="${W}" height="${180}" fill="url(#topShade)"/>
+    <!-- See-through headline bar (no color), with soft edges -->
     <g filter="url(#soft)">
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18" fill="${brandColor}" opacity="0.96"/>
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18"
+            fill="#000000" fill-opacity="${glassOpacity}"
+            stroke="#ffffff" stroke-opacity="${strokeOpacity}" stroke-width="1"/>
     </g>
+
     <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.32}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
       font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1">
@@ -762,7 +770,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
 
     <text x="${W / 2}" y="${subY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.2"
+      font-size="${SUB_FS}" font-weight="700" fill="#f5f7f9" letter-spacing="0.2"
       style="paint-order: stroke fill; stroke:#000; stroke-width:1.4; stroke-opacity:0.35">
       ${escSVG(subline)}
     </text>
@@ -770,6 +778,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
+
 
 /* ---------- Subline crafting ---------- */
 function craftSubline(answers = {}, category = 'generic') {
