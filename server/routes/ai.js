@@ -616,20 +616,77 @@ function pickSerifFontFile() {
   return pickSansFontFile();
 }
 
-/* ---------- Neutral brand color pick (no warm/blue hues) ---------- */
+/* ---------- Color utils (for polymorphic headline bar) ---------- */
+function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h, s, l = (max + min) / 2;
+  if (max === min) { h = s = 0; }
+  else {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h, s, l };
+}
+function hslToRgb(h, s, l) {
+  const hue2rgb = (p, q, t) => {
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1/6) return p + (q - p) * 6 * t;
+    if (t < 1/2) return q;
+    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+    return p;
+  };
+  let r, g, b;
+  if (s === 0) { r = g = b = l; }
+  else {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    r = hue2rgb(p, q, h + 1/3);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1/3);
+  }
+  return {
+    r: Math.round(r * 255),
+    g: Math.round(g * 255),
+    b: Math.round(b * 255),
+  };
+}
+function rgbToHex({ r, g, b }) {
+  const to = (n) => clamp(n, 0, 255).toString(16).padStart(2, '0');
+  return `#${to(r)}${to(g)}${to(b)}`;
+}
+
+/* ---------- Adaptive (polymorphic) bar color from image ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
-    const W = 72, H = 72;
+    // Downsample strongly for speed and average color
+    const W = 64, H = 64;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let rSum = 0, gSum = 0, bSum = 0;
-    for (let i = 0; i < data.length; i += 3) { rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2]; }
-    const lum = Math.round(0.2126*(rSum/(W*H)) + 0.7152*(gSum/(W*H)) + 0.0722*(bSum/(W*H)));
-    // Neutral grayscale palette only
-    const neutrals = ['#111827','#1f2937','#27272a','#374151','#3f3f46','#4b5563']; // gray-900..600 / zinc
-    // Brighter photo -> darker bar; darker photo -> slightly lighter neutral (still dark for contrast with white text)
-    const idx = lum >= 185 ? 0 : lum >= 150 ? 1 : lum >= 120 ? 2 : lum >= 90 ? 3 : lum >= 60 ? 4 : 5;
-    return { brandColor: neutrals[idx] };
-  } catch { return { brandColor: '#1f2937' }; }
+    let r = 0, g = 0, b = 0;
+    for (let i = 0; i < data.length; i += 3) { r += data[i]; g += data[i + 1]; b += data[i + 2]; }
+    r = Math.round(r / (W * H)); g = Math.round(g / (W * H)); b = Math.round(b / (W * H));
+
+    // Convert to HSL, clamp saturation to keep it neutral-ish (so the bar "matches" without shouting)
+    const { h, s, l } = rgbToHsl(r, g, b);
+    // Slightly desaturated, a bit darker for contrast with white text
+    const sat = Math.min(s * 0.28, 0.24);
+    const lum = l; // 0..1
+    const targetL = lum > 0.65 ? 0.22 : lum > 0.5 ? 0.24 : lum > 0.35 ? 0.26 : 0.30;
+    const rgb = hslToRgb(h, sat, targetL);
+    const brandColor = rgbToHex(rgb);
+    return { brandColor };
+  } catch {
+    // Hard fallback neutral
+    return { brandColor: '#1f2937' };
+  }
 }
 
 /* ---------- Title case helper for subheadline ---------- */
@@ -671,6 +728,7 @@ const pillBtn = (x, y, text, fs = 30) => {
     </g>`;
 };
 
+/* --- SPACING TWEAKS: Looser layout so elements aren’t cramped --- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const defs = svgDefs(brandColor);
   const SAFE_PAD = 24;
@@ -681,11 +739,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
   const barH = headlineFs + 28;
   const barX = (W - barW) / 2;
-  const barY = 110 - barH / 2;
+  const barY = 96 - Math.floor(barH / 2); // slightly higher to create more room below
+
+  // Increased gaps
+  const GAP_HL_TO_SUB = 56;      // was ~38
+  const GAP_SUB_TO_CTA = 62;     // was ~44
 
   const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
-  const subY = barY + barH + 38;
-  const ctaY = subY + SUB_FS + 44;
+  const subY = barY + barH + GAP_HL_TO_SUB;
+  const ctaY = subY + SUB_FS + GAP_SUB_TO_CTA;
 
   return `${defs}
     <rect x="0" y="0" width="${W}" height="${180}" fill="url(#topShade)"/>
