@@ -732,48 +732,29 @@ const pillBtn = (x, y, text, fs = 30) => {
 // === REPLACE the existing svgOverlayCreative(...) with THIS version ===
 // Placement: after pillBtn(...) and before craftSubline(...)
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
-  // Convert brandColor → softer tints for glass (desaturated & lightened)
-  const hexToRgb = (hex) => {
-    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '#6b7280');
-    return m ? { r: parseInt(m[1],16), g: parseInt(m[2],16), b: parseInt(m[3],16) } : { r:107,g:114,b:128 };
-  };
-  const { r, g, b } = hexToRgb(brandColor);
-  const { h, s, l } = rgbToHsl(r, g, b);                 // uses helpers already in file
-  const tintTop = rgbToHex(hslToRgb(h, Math.min(s*0.25 + 0.08, 0.42), Math.min(l*0.55 + 0.30, 0.80)));
-  const tintMid = rgbToHex(hslToRgb(h, Math.min(s*0.22 + 0.06, 0.36), Math.min(l*0.50 + 0.22, 0.70)));
-  const tintBot = rgbToHex(hslToRgb(h, Math.min(s*0.20 + 0.04, 0.30), Math.min(l*0.45 + 0.16, 0.62)));
-
   const defs = svgDefs(brandColor);
   const extraDefs = `
     <defs>
-      <!-- Photo-tinted gradients (avoid gray; follow image hue softly) -->
-      <linearGradient id="glassTintHL" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="${tintTop}" stop-opacity="0.40"/>
-        <stop offset="55%"  stop-color="${tintMid}" stop-opacity="0.26"/>
-        <stop offset="100%" stop-color="${tintBot}" stop-opacity="0.18"/>
-      </linearGradient>
-      <linearGradient id="glassTintSUB" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="${tintTop}" stop-opacity="0.46"/>
-        <stop offset="55%"  stop-color="${tintMid}" stop-opacity="0.32"/>
-        <stop offset="100%" stop-color="${tintBot}" stop-opacity="0.22"/>
-      </linearGradient>
-
-      <!-- Subtle gloss layer -->
-      <linearGradient id="glassGloss" x1="0" y1="0" x2="0" y2="1">
+      <!-- Soft neutral tint (avoids gray cast) -->
+      <linearGradient id="glassTint" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.22"/>
+        <stop offset="55%"  stop-color="#eaf1ff" stop-opacity="0.14"/>
+        <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+      </linearGradient>
+      <!-- Gloss highlight -->
+      <linearGradient id="glassGloss" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.26"/>
         <stop offset="60%"  stop-color="#ffffff" stop-opacity="0.06"/>
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0.00"/>
       </linearGradient>
-
-      <!-- Heavy frost blur (subtitle stronger than headline) -->
-      <filter id="headlineBlur" x="-35%" y="-35%" width="170%" height="170%">
-        <feGaussianBlur stdDeviation="3.0"/>
+      <!-- Stronger frost blur (subtitle > headline) -->
+      <filter id="headlineBlur" x="-40%" y="-40%" width="180%" height="180%">
+        <feGaussianBlur stdDeviation="4.0"/>
       </filter>
-      <filter id="subtitleBlur" x="-40%" y="-40%" width="180%" height="180%">
-        <feGaussianBlur stdDeviation="4.2"/>
+      <filter id="subtitleBlur" x="-45%" y="-45%" width="190%" height="190%">
+        <feGaussianBlur stdDeviation="6.0"/>
       </filter>
-
-      <!-- Clean lift from background -->
+      <!-- Light lift shadow -->
       <filter id="softShadowLite" x="-50%" y="-50%" width="200%" height="200%">
         <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.20"/>
       </filter>
@@ -806,30 +787,31 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const GAP_SUB_TO_CTA = 60;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
-  // Corner radius (modern glass feel)
-  const R = 14;
+  // Corners: semi-round (mostly squared)
+  const R = 6;
 
   return `${defs}${extraDefs}
     <rect x="0" y="0" width="${W}" height="${170}" fill="url(#topShade)"/>
 
-    <!-- HEADLINE glass: photo-tinted + gloss + blur (NO outline) -->
+    <!-- HEADLINE: glass (no outline), heavy blur -->
     <g filter="url(#softShadowLite)">
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassTintHL)"/>
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassTint)"/>
       <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassGloss)"/>
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="#ffffff" fill-opacity="0.06" filter="url(#headlineBlur)"/>
+      <!-- extra blurred layer to amplify frosting -->
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="#ffffff" fill-opacity="0.08" filter="url(#headlineBlur)"/>
     </g>
     <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.30}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
       font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.16">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
       ${escSVG(title)}
     </text>
 
-    <!-- SUBTITLE glass: stronger frost, same tint (NO outline) -->
+    <!-- SUBTITLE: stronger frost blur, no outline -->
     <g filter="url(#softShadowLite)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassTintSUB)"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassTint)"/>
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassGloss)" filter="url(#subtitleBlur)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="#ffffff" fill-opacity="0.08" filter="url(#subtitleBlur)"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="#ffffff" fill-opacity="0.10" filter="url(#subtitleBlur)"/>
     </g>
     <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
@@ -842,7 +824,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
-
 
 
 /* ---------- Subline crafting ---------- */
