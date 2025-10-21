@@ -732,94 +732,95 @@ const pillBtn = (x, y, text, fs = 30) => {
 // === REPLACE the existing svgOverlayCreative(...) with THIS version ===
 // Placement: after pillBtn(...) and before craftSubline(...)
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
-  // Base defs + extra bits for a frosted "glass" subtitle
+  // Base defs + refined “glass” pieces (lighter, glossier, less gray)
   const defs = svgDefs(brandColor);
   const extraDefs = `
     <defs>
-      <!-- Soft blur used for glass edges -->
-      <filter id="glassSoft" x="-30%" y="-30%" width="160%" height="160%">
-        <feGaussianBlur stdDeviation="0.9" />
+      <!-- Gentle blur for glass highlight -->
+      <filter id="glassBlur" x="-25%" y="-25%" width="150%" height="150%">
+        <feGaussianBlur stdDeviation="0.7" />
       </filter>
-      <!-- Subtle top highlight for glass -->
-      <linearGradient id="subGlassGrad" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.18"/>
-        <stop offset="60%"  stop-color="#ffffff" stop-opacity="0.08"/>
+      <!-- Soft drop shadow (kept subtle for FB-static look) -->
+      <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.28"/>
+      </filter>
+      <!-- Gloss highlight used on both bars -->
+      <linearGradient id="glassGloss" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.20"/>
+        <stop offset="50%"  stop-color="#ffffff" stop-opacity="0.08"/>
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0.00"/>
       </linearGradient>
-      <!-- A faint shadow under the subtitle bar for separation -->
-      <filter id="subShadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="1.5" stdDeviation="2.2" flood-color="#000000" flood-opacity="0.35"/>
-      </filter>
     </defs>
   `;
 
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline (transparent glass bar)
+  // Headline sizing (slightly slimmer bar)
   const HL_FS = 62;
   const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
   const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
-  const barH = headlineFs + 28;
+  const barH = Math.max(44, headlineFs + 18);     // slimmer than before
   const barX = (W - barW) / 2;
   const barY = 96 - Math.floor(barH / 2);
-  const glassOpacityHeadline = 0.34;
-  const strokeOpacityHeadline = 0.08;
 
-  // Subtitle sizing — TIGHT width around text (no overly long pill)
+  // Subtitle sizing — tight around text
   const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 44;                       // horizontal padding either side
-  const subW = Math.min(maxW * 0.80, subTextW + subPadX * 2); // clamp width
-  const subH = SUB_FS + 22;
+  const subPadX = 36;                              // slightly tighter pads
+  const subW = Math.min(maxW * 0.78, subTextW + subPadX * 2);
+  const subH = Math.max(38, SUB_FS + 18);
   const subX = Math.round((W - subW) / 2);
   const GAP_HL_TO_SUB = 56;
-  const subBaselineY = barY + barH + GAP_HL_TO_SUB;  // text baseline
-  const subRectY = Math.round(subBaselineY - SUB_FS * 0.88);
+  const subBaselineY = barY + barH + GAP_HL_TO_SUB;
+  const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
 
-  // Subtitle "glass" look: darker base + frosted highlight + soft blur
-  const subBaseOpacity = 0.26;  // slightly darker than before for readability
-  const subStrokeOpacity = 0.08;
+  // Opacities tuned to avoid the “gray slab” look
+  const headlineFillOpacity = 0.18;  // was ~0.34 → lighter
+  const headlineStrokeOpacity = 0.12;
+  const subtitleFillOpacity = 0.16;  // lighter than before; text gets stroke for pop
+  const subtitleStrokeOpacity = 0.10;
 
-  // CTA perfectly centered
-  const GAP_SUB_TO_CTA = 62;
+  // CTA centered
+  const GAP_SUB_TO_CTA = 60;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   return `${defs}${extraDefs}
-    <rect x="0" y="0" width="${W}" height="${180}" fill="url(#topShade)"/>
+    <rect x="0" y="0" width="${W}" height="${160}" fill="url(#topShade)"/>
 
-    <!-- HEADLINE glass (see-through) -->
-    <g filter="url(#soft)">
+    <!-- HEADLINE: airy glass (very light fill + gloss + hairline edge) -->
+    <g filter="url(#softShadow)">
       <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18"
-            fill="#000000" fill-opacity="${glassOpacityHeadline}"
-            stroke="#ffffff" stroke-opacity="${strokeOpacityHeadline}" stroke-width="1"/>
+            fill="#000000" fill-opacity="${headlineFillOpacity}"/>
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18"
+            fill="url(#glassGloss)" filter="url(#glassBlur)"/>
+      <rect x="${barX+0.5}" y="${barY+0.5}" width="${barW-1}" height="${barH-1}" rx="17.5"
+            fill="none" stroke="#ffffff" stroke-opacity="${headlineStrokeOpacity}" stroke-width="1"/>
     </g>
-    <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.32}" text-anchor="middle"
+    <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.30}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1">
+      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1"
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.22">
       ${escSVG(title)}
     </text>
 
-    <!-- SUBTITLE: compact glass-morphism bar (frosted + blur) -->
-    <g filter="url(#subShadow)">
-      <!-- dark base layer -->
+    <!-- SUBTITLE: compact frosted glass, lighter look (no muddy gray) -->
+    <g filter="url(#softShadow)">
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="14"
-            fill="#000000" fill-opacity="${subBaseOpacity}" />
-      <!-- frosted highlight layer -->
+            fill="#000000" fill-opacity="${subtitleFillOpacity}"/>
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="14"
-            fill="url(#subGlassGrad)" filter="url(#glassSoft)" />
-      <!-- hairline edge to sell the glass -->
+            fill="url(#glassGloss)" filter="url(#glassBlur)"/>
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="13.5"
-            fill="none" stroke="#ffffff" stroke-opacity="${subStrokeOpacity}" stroke-width="1"/>
+            fill="none" stroke="#ffffff" stroke-opacity="${subtitleStrokeOpacity}" stroke-width="1"/>
     </g>
     <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
       font-size="${SUB_FS}" font-weight="700" fill="#f5f7f9" letter-spacing="0.2"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.3; stroke-opacity:0.34">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.2; stroke-opacity:0.30">
       ${escSVG(subline)}
     </text>
 
-    <!-- CTA pill: centered -->
+    <!-- CTA pill: perfectly centered -->
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
