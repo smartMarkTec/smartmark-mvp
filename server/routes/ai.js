@@ -732,27 +732,29 @@ const pillBtn = (x, y, text, fs = 30) => {
 // === REPLACE the existing svgOverlayCreative(...) with THIS version ===
 // Placement: after pillBtn(...) and before craftSubline(...)
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
-  // Glassmorphism: translucent white base + cool tint, gloss, crisp outline, soft shadow
   const defs = svgDefs(brandColor);
   const extraDefs = `
     <defs>
-      <!-- Cool tint (prevents gray): faint blue-white gradient -->
+      <!-- Cool tint to avoid gray cast -->
       <linearGradient id="glassTint" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.22"/>
         <stop offset="50%"  stop-color="#e6f0ff" stop-opacity="0.16"/>
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0.12"/>
       </linearGradient>
-      <!-- Soft gloss highlight -->
+      <!-- Soft gloss -->
       <linearGradient id="glassGloss" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.28"/>
         <stop offset="60%"  stop-color="#ffffff" stop-opacity="0.08"/>
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0.00"/>
       </linearGradient>
-      <!-- Subtitle gets a stronger blur to sell the frosted effect -->
-      <filter id="subtitleBlur" x="-25%" y="-25%" width="150%" height="150%">
-        <feGaussianBlur stdDeviation="1.8"/>
+      <!-- Stronger blur for glass effect (subtitle > headline) -->
+      <filter id="headlineBlur" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="2.2"/>
       </filter>
-      <!-- Clean, modern shadow (light, avoids muddy look) -->
+      <filter id="subtitleBlur" x="-35%" y="-35%" width="170%" height="170%">
+        <feGaussianBlur stdDeviation="3.2"/>
+      </filter>
+      <!-- Light shadow to lift from background (no muddy look) -->
       <filter id="softShadowLite" x="-50%" y="-50%" width="200%" height="200%">
         <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.22"/>
       </filter>
@@ -762,7 +764,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline bar sizing
+  // Headline geometry
   const HL_FS = 62;
   const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
   const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
@@ -770,7 +772,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const barX = (W - barW) / 2;
   const barY = 96 - Math.floor(barH / 2);
 
-  // Subtitle sizing — tight to text
+  // Subtitle geometry (tight to text)
   const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
   const subTextW = estWidth(subline, SUB_FS);
   const subPadX = 42;
@@ -781,56 +783,45 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const subBaselineY = barY + barH + GAP_HL_TO_SUB;
   const subRectY = Math.round(subBaselineY - SUB_FS * 0.88);
 
-  // Outline strength (crisper than before)
-  const HL_OUTLINE = 0.55;
-  const SUB_OUTLINE = 0.58;
-
-  // CTA centered
+  // CTA
   const GAP_SUB_TO_CTA = 60;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
-  // Corner radius — keep modern (slight rounding). Change to 0 for squared.
+  // Corner radius (keep modern, rounded—but no outlines)
   const R = 10;
 
   return `${defs}${extraDefs}
     <rect x="0" y="0" width="${W}" height="${170}" fill="url(#topShade)"/>
 
-    <!-- HEADLINE: true glass (white + cool tint) with gloss and crisp outline -->
+    <!-- HEADLINE glass: tint + gloss + additional blur layer (NO outline) -->
     <g filter="url(#softShadowLite)">
-      <!-- Base translucent white/tint (NO BLACK → no gray cast) -->
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}"
-            fill="url(#glassTint)"/>
-      <!-- Gloss highlight -->
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}"
-            fill="url(#glassGloss)"/>
-      <!-- White outline for definition -->
-      <rect x="${barX+0.6}" y="${barY+0.6}" width="${barW-1.2}" height="${barH-1.2}" rx="${Math.max(0,R-0.6)}"
-            fill="none" stroke="#ffffff" stroke-opacity="${HL_OUTLINE}" stroke-width="1.4"/>
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassTint)"/>
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassGloss)"/>
+      <!-- blurred duplicate to mimic frosted background -->
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="#ffffff" fill-opacity="0.06" filter="url(#headlineBlur)"/>
     </g>
     <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.30}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
       font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.20">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
       ${escSVG(title)}
     </text>
 
-    <!-- SUBTITLE: tighter glass panel with stronger blur (frosted) -->
+    <!-- SUBTITLE glass: stronger blur, no outline -->
     <g filter="url(#softShadowLite)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-            fill="url(#glassTint)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-            fill="url(#glassGloss)" filter="url(#subtitleBlur)"/>
-      <rect x="${subX+0.6}" y="${subRectY+0.6}" width="${subW-1.2}" height="${subH-1.2}" rx="${Math.max(0,R-0.6)}"
-            fill="none" stroke="#ffffff" stroke-opacity="${SUB_OUTLINE}" stroke-width="1.4"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassTint)"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassGloss)" filter="url(#subtitleBlur)"/>
+      <!-- extra blurred layer to increase frosting over busy backgrounds -->
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="#ffffff" fill-opacity="0.08" filter="url(#subtitleBlur)"/>
     </g>
     <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
       font-size="${SUB_FS}" font-weight="700" fill="#f5f7f9" letter-spacing="0.2"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.15; stroke-opacity:0.26">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.05; stroke-opacity:0.22">
       ${escSVG(subline)}
     </text>
 
-    <!-- CTA pill: perfectly centered -->
+    <!-- CTA pill: centered -->
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
