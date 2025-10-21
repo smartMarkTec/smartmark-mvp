@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * SmartMark AI routes — static ads with headline neutral highlight bar
- * - Headline on bold rounded neutral-color bar (grays only)
- * - Sub-headline set in Times New Roman, Title Case
- * - CTA pill with soft shadow
+ * SmartMark AI routes — static ads with adaptive headline scrim + subhead chip + solid CTA
+ * - Headline sits on a soft top gradient scrim (NO box)
+ * - Subhead on a tight translucent chip (adaptive blur/opacity; language-sanitized)
+ * - CTA pill with soft shadow and optical centering
  * - Exactly TWO image variations per generate
  * - Tight timeouts, memory discipline, and graceful fallbacks
  */
@@ -576,7 +576,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- IMAGE OVERLAYS (neutral + title case) ---------------------- */
+/* ---------------------- IMAGE OVERLAYS (Option A layout) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
@@ -616,94 +616,115 @@ function pickSerifFontFile() {
   return pickSansFontFile();
 }
 
-/* ---------- Color utils (for polymorphic headline bar) ---------- */
-function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
-function rgbToHsl(r, g, b) {
-  r /= 255; g /= 255; b /= 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h, s, l = (max + min) / 2;
-  if (max === min) { h = s = 0; }
-  else {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
-      case g: h = (b - r) / d + 2; break;
-      default: h = (r - g) / d + 4; break;
-    }
-    h /= 6;
-  }
-  return { h, s, l };
-}
-function hslToRgb(h, s, l) {
-  const hue2rgb = (p, q, t) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1/6) return p + (q - p) * 6 * t;
-    if (t < 1/2) return q;
-    if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-    return p;
-  };
-  let r, g, b;
-  if (s === 0) { r = g = b = l; }
-  else {
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    r = hue2rgb(p, q, h + 1/3);
-    g = hue2rgb(p, q, h);
-    b = hue2rgb(p, q, h - 1/3);
-  }
-  return {
-    r: Math.round(r * 255),
-    g: Math.round(g * 255),
-    b: Math.round(b * 255),
-  };
-}
-function rgbToHex({ r, g, b }) {
-  const to = (n) => clamp(n, 0, 255).toString(16).padStart(2, '0');
-  return `#${to(r)}${to(g)}${to(b)}`;
-}
-
-/* ---------- Adaptive (polymorphic) bar color from image ---------- */
+/* ---------- Image analysis for adaptive placement ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
-    // Downsample strongly for speed and average color
-    const W = 64, H = 64;
+    const W = 96, H = 96; // downsample for stats
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let r = 0, g = 0, b = 0;
-    for (let i = 0; i < data.length; i += 3) { r += data[i]; g += data[i + 1]; b += data[i + 2]; }
-    r = Math.round(r / (W * H)); g = Math.round(g / (W * H)); b = Math.round(b / (W * H));
+    const px = W * H;
+    // overall average
+    let rSum = 0, gSum = 0, bSum = 0;
+    for (let i = 0; i < data.length; i += 3) { rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2]; }
+    const avgR = rSum / px, avgG = gSum / px, avgB = bSum / px;
+    const lum = Math.round(0.2126*avgR + 0.7152*avgG + 0.0722*avgB);
 
-    // Convert to HSL, clamp saturation to keep it neutral-ish (so the bar "matches" without shouting)
-    const { h, s, l } = rgbToHsl(r, g, b);
-    // Slightly desaturated, a bit darker for contrast with white text
-    const sat = Math.min(s * 0.28, 0.24);
-    const lum = l; // 0..1
-    const targetL = lum > 0.65 ? 0.22 : lum > 0.5 ? 0.24 : lum > 0.35 ? 0.26 : 0.30;
-    const rgb = hslToRgb(h, sat, targetL);
-    const brandColor = rgbToHex(rgb);
-    return { brandColor };
+    // band luminance (top and middle)
+    const topRows = Math.floor(H * 0.33), midStart = Math.floor(H * 0.40), midRows = Math.floor(H * 0.20);
+    function bandLum(y0, rows) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let y = y0; y < y0 + rows; y++) {
+        for (let x = 0; x < W; x++) {
+          const i = (y * W + x) * 3;
+          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+        }
+      }
+      const ar = r / n, ag = g / n, ab = b / n;
+      return Math.round(0.2126*ar + 0.7152*ag + 0.0722*ab);
+    }
+    const topLum = bandLum(0, topRows);
+    const midLum = bandLum(midStart, midRows);
+
+    // crude texture = std dev of luminance in middle band
+    let vals = [];
+    for (let y = midStart; y < midStart + midRows; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 3;
+        const L = 0.2126*data[i] + 0.7152*data[i + 1] + 0.0722*data[i + 2];
+        vals.push(L);
+      }
+    }
+    const mean = vals.reduce((a,c)=>a+c,0) / vals.length;
+    const variance = vals.reduce((a,c)=>a+(c-mean)*(c-mean),0) / vals.length;
+    const texture = Math.sqrt(Math.max(variance, 0)); // ~0–70
+
+    // choose a neutral dark for CTA shadows (not used for boxes anymore)
+    const neutrals = ['#111827','#1f2937','#27272a','#374151','#3f3f46','#4b5563'];
+    const idx = lum >= 185 ? 0 : lum >= 150 ? 1 : lum >= 120 ? 2 : lum >= 90 ? 3 : lum >= 60 ? 4 : 5;
+
+    return { brandColor: neutrals[idx], metrics: { topLum, midLum, texture } };
   } catch {
-    // Hard fallback neutral
-    return { brandColor: '#1f2937' };
+    return { brandColor: '#1f2937', metrics: { topLum: 140, midLum: 140, texture: 28 } };
   }
 }
 
-/* ---------- Title case helper for subheadline ---------- */
+/* ---------- Title case helper ---------- */
 function toTitleCase(s) {
   return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1));
 }
 
-/* ---------- SVG defs + layout with HEADLINE HIGHLIGHT BAR ---------- */
-function svgDefs(brandColor) {
+/* ---------- Language sanitizer for subheadline ---------- */
+function normalizeSubline(text, category = 'generic') {
+  let s = String(text || '').toLowerCase().trim();
+
+  // Fix common awkward patterns
+  s = s.replace(/\bour better made is\b/gi, 'better made');        // "Our better made is" → "Better made"
+  s = s.replace(/\bis natural material(s)?\b/gi, 'uses natural materials');
+  s = s.replace(/\bnatural material\b/gi, 'natural materials');
+  s = s.replace(/\bevery day\b/gi, 'everyday');
+
+  // If starts with 'our ' and reads weird, drop 'our'
+  s = s.replace(/^our\s+(better|simple|clean|modern)\b/gi, (_m, w) => `${w}`);
+
+  // Keep it short, positive, and noun/verb sensible
+  const HARD_FALLBACKS = {
+    fashion: ['Better materials, made to last', 'Everyday pieces, easy to wear'],
+    cosmetics: ['Gentle formulas for daily care', 'Simple routine, better skin'],
+    hair: ['Clean care for healthy hair', 'Easy styling, everyday'],
+    food: ['Great taste, less hassle', 'Fresh flavor, easy meals'],
+    pets: ['Simple treats, happy pets', 'Daily care made easy'],
+    electronics: ['Reliable tech for daily use', 'Simple design, solid performance'],
+    home: ['Upgrade your space with ease', 'Clean look, practical use'],
+    coffee: ['Balanced flavor, smooth finish', 'Better coffee breaks'],
+    fitness: ['Made for your workouts', 'Durable gear for training'],
+    generic: ['Made for everyday use', 'Simple design, better value'],
+  }[category] || ['Made for everyday use'];
+
+  // If empty or nonsense, fallback
+  if (!s || s.length < 8) return HARD_FALLBACKS[0];
+
+  // Capitalize key nouns
+  s = s.replace(/\b(quality|materials?|routine|performance|workouts?|training|style|coffee|flavor|design)\b/gi,
+                (m)=>m.toLowerCase());
+
+  // Trim to ~5–8 words
+  const words = s.split(/\s+/).filter(Boolean);
+  if (words.length > 10) s = words.slice(0, 10).join(' ');
+  if (words.length < 4 && HARD_FALLBACKS[1]) s = HARD_FALLBACKS[1];
+
+  // Title Case final
+  return toTitleCase(s);
+}
+
+/* ---------- SVG defs + Option A layout ---------- */
+function svgDefs() {
   return `
     <defs>
       <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000" stop-opacity="0.28"/>
+        <stop offset="0%" stop-color="#000" stop-opacity="0.26"/>
         <stop offset="100%" stop-color="#000" stop-opacity="0.00"/>
       </linearGradient>
       <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="2.5" stdDeviation="3" flood-color="#000" flood-opacity="0.45"/>
+        <feDropShadow dx="0" dy="2.4" stdDeviation="3.2" flood-color="#000" flood-opacity="0.45"/>
       </filter>
       <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
         <feGaussianBlur stdDeviation="0.6"/>
@@ -711,8 +732,9 @@ function svgDefs(brandColor) {
     </defs>
   `;
 }
-// === REPLACE your existing pillBtn with this ===
 const LIGHT = '#f5f7f9';
+
+// CTA pill (optical centering improved)
 const pillBtn = (x, y, text, fs = 30) => {
   fs = Math.max(24, Math.min(fs, 36));
   const w = Math.min(880, estWidth(text, fs) + 80);
@@ -721,6 +743,8 @@ const pillBtn = (x, y, text, fs = 30) => {
   return `
     <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
       <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
+      <rect x="0" y="-18" width="${w}" height="${Math.max(16, Math.floor(h*0.48))}" rx="31"
+            fill="#ffffff" fill-opacity="0.08"/>
       <text x="${w / 2}" y="16" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
             font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
@@ -729,17 +753,14 @@ const pillBtn = (x, y, text, fs = 30) => {
     </g>`;
 };
 
-
-/* --- SPACING TWEAKS: Looser layout so elements aren’t cramped --- */
-// === REPLACE the whole svgOverlayCreative(...) with this ===
-// Option A layout: headline on top scrim, subhead chip, solid CTA pill
-function svgOverlayCreative({ W, H, title, subline, cta /* brandColor unused here */ }) {
-  const defs = svgDefs(); // uses #topShade, #btnShadow, #soft already defined
+// Option A: Headline on scrim, subhead chip, solid CTA
+function svgOverlayCreative({ W, H, title, subline, cta, metrics = { topLum: 140, midLum: 140, texture: 28 } }) {
+  const defs = svgDefs();
   const extraDefs = `
     <defs>
-      <filter id="chipBlur" x="-25%" y="-25%" width="150%" height="150%">
-        <feGaussianBlur stdDeviation="4.5"/>
-      </filter>
+      <filter id="chipBlurLow" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="4"/></filter>
+      <filter id="chipBlurMed" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="6"/></filter>
+      <filter id="chipBlurHigh" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="8"/></filter>
       <filter id="chipShadow" x="-50%" y="-50%" width="200%" height="200%">
         <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.22"/>
       </filter>
@@ -749,24 +770,45 @@ function svgOverlayCreative({ W, H, title, subline, cta /* brandColor unused her
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing (no box—sits on the top scrim)
-  const HL_FS = 62;
-  const headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
+  // Adaptive top scrim opacity (headline region)
+  // brighter top → stronger scrim
+  const scrim = (() => {
+    const { topLum } = metrics;
+    if (topLum >= 190) return 0.32;
+    if (topLum >= 160) return 0.28;
+    if (topLum >= 130) return 0.24;
+    return 0.18;
+  })();
+
+  // Headline sizing; enforce single line down to 32px
+  let HL_FS = 62;
+  let headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
+  const headlineMaxW = Math.min(maxW * 0.90, maxW - 40);
 
   // Subhead chip geometry (tight, semi-square corners)
-  const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
+  const SUB_FS = fitFont(subline, Math.min(W * 0.75, 920), 32, 22);
   const subTextW = estWidth(subline, SUB_FS);
   const subPadX = 36;
-  const subW = Math.min(maxW * 0.78, subTextW + subPadX * 2);
-  const subH = Math.max(40, SUB_FS + 18);
+  const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
+  const subH = Math.max(38, SUB_FS + 16);
   const subX = Math.round((W - subW) / 2);
 
-  // Rhythm — slightly tighter: move subhead up ~8px
+  // Rhythm & positioning: headline in top scrim band; subhead roughly midway to CTA
   const topBandH = 190;
   const headlineY = 96 + headlineFs * 0.38;
-  const GAP_HL_TO_SUB = 32;                 // (was 40)
+  const GAP_HL_TO_SUB = 32;
   const subBaselineY = 96 + 20 + GAP_HL_TO_SUB + headlineFs;
   const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
+
+  // Chip adaptivity by texture
+  const t = metrics.texture; // ~0–70
+  let chipOpacity = 0.20;
+  let chipBlurId = 'chipBlurLow';
+  if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
+  else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+
+  // If mid band very bright, raise chip opacity slightly
+  if (metrics.midLum >= 185) chipOpacity = Math.min(chipOpacity + 0.02, 0.30);
 
   // CTA
   const GAP_SUB_TO_CTA = 60;
@@ -775,63 +817,69 @@ function svgOverlayCreative({ W, H, title, subline, cta /* brandColor unused her
   // Corners
   const R = 6;
 
+  // Build SVG
   return `${defs}${extraDefs}
-    <!-- Top scrim for reliable headline contrast -->
-    <rect x="0" y="0" width="${W}" height="${topBandH}" fill="url(#topShade)"/>
+    <!-- Adaptive top scrim -->
+    <linearGradient id="dynTop" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#000" stop-opacity="${scrim}"/>
+      <stop offset="100%" stop-color="#000" stop-opacity="0.00"/>
+    </linearGradient>
+    <rect x="0" y="0" width="${W}" height="${topBandH}" fill="url(#dynTop)"/>
 
     <!-- Headline (no box) -->
     <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
       font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.22">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:0.9; stroke-opacity:0.18">
       ${escSVG(title)}
     </text>
 
-    <!-- Subhead chip: a touch stronger for readability, still subtle -->
+    <!-- Subhead chip -->
     <g filter="url(#chipShadow)">
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-            fill="#000000" fill-opacity="0.22" />
+            fill="#000000" fill-opacity="${chipOpacity}" />
+      <!-- subtle frost -->
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-            fill="#ffffff" fill-opacity="0.10" filter="url(#chipBlur)"/>
+            fill="#ffffff" fill-opacity="0.10" filter="url(#${chipBlurId})"/>
     </g>
     <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
       font-size="${SUB_FS}" font-weight="700" fill="#f5f7f9" letter-spacing="0.2"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.22">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.20">
       ${escSVG(subline)}
     </text>
 
-    <!-- CTA pill: now with better optical centering from the helper -->
+    <!-- CTA pill -->
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
 
-/* ---------- Subline crafting ---------- */
+/* ---------- Subline crafting (now sanitized) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const pick = (s) => String(s || '').replace(/[^\w\s\-']/g, '').trim().toLowerCase();
   const defaults = {
-    fashion: ['natural materials, better made','everyday pieces, built to last'],
-    cosmetics: ['gentle formulas for daily care','simple routine, better skin'],
-    hair: ['better hair care, less effort','clean formulas, easy styling'],
-    food: ['great taste, less hassle','fresh flavor, easy meals'],
-    pets: ['care for your pet daily','simple treats, happy pets'],
-    electronics: ['reliable everyday tech','simple design, solid performance'],
-    home: ['upgrade your space easily','clean looks, practical use'],
-    coffee: ['balanced flavor, smooth finish','better coffee breaks'],
-    fitness: ['made for your workouts','durable gear, daily training'],
-    generic: ['made for everyday use','simple design, better value'],
-  }[category] || ['made for everyday use'];
+    fashion: ['Better materials, made to last','Everyday pieces, easy to wear'],
+    cosmetics: ['Gentle formulas for daily care','Simple routine, better skin'],
+    hair: ['Clean care for healthy hair','Easy styling, everyday'],
+    food: ['Great taste, less hassle','Fresh flavor, easy meals'],
+    pets: ['Simple treats, happy pets','Daily care made easy'],
+    electronics: ['Reliable tech for daily use','Simple design, solid performance'],
+    home: ['Upgrade your space with ease','Clean look, practical use'],
+    coffee: ['Balanced flavor, smooth finish','Better coffee breaks'],
+    fitness: ['Made for your workouts','Durable gear for training'],
+    generic: ['Made for everyday use','Simple design, better value'],
+  }[category] || ['Made for everyday use'];
+
   const candidates = [answers.mainBenefit, answers.description, answers.productType].map(pick).filter(Boolean);
   let line = candidates[0] || defaults[0];
-  line = line.replace(/\bquality of fashion\b/gi, 'better made');
+
+  // Keep it to a sensible length before normalization
   const words = line.split(/\s+/).filter(Boolean);
-  while (words.length > 8) words.pop();
-  while (words.length < 5 && (candidates[1] || defaults[1])) {
-    const add = (candidates[1] || defaults[1]).split(/\s+/).filter(Boolean);
-    while (words.length < 5 && add.length) words.push(add.shift());
-    break;
-  }
-  return words.join(' ');
+  while (words.length > 10) words.pop();
+  line = words.join(' ');
+
+  // Sanitize awkward phrasing and Title Case it
+  return normalizeSubline(line, category);
 }
 
 /* ---------- Overlay builder ---------- */
@@ -845,13 +893,15 @@ async function buildOverlayImage({
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
+
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  const subline = toTitleCase(craftSubline(answers, category)); // Title Case
+  const rawSubline = craftSubline(answers, category);
+  const subline = rawSubline; // already Title Cased in normalizeSubline
   const cta = cleanCTA(ctaHint) || 'LEARN MORE';
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
-      W, H, title, subline, cta, brandColor: analysis.brandColor,
+      W, H, title, subline, cta, metrics: analysis.metrics,
     })}</svg>`
   );
   const outDir = ensureGeneratedDir();
@@ -935,13 +985,13 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, highlightBar: true, neutral: true },
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, layout: 'optionA', adaptive: true },
         });
         return publicUrl;
       } catch {
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, highlightBar: true, neutral: true },
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, layout: 'optionA', adaptive: false },
         });
         return baseUrl;
       }
@@ -960,7 +1010,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, highlightBar: true, neutral: true },
+          meta: { category, keyword, placeholder: true, i, layout: 'optionA', adaptive: true },
         });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
@@ -993,7 +1043,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, highlightBar: true, neutral: true } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, layout: 'optionA', adaptive: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1017,7 +1067,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, highlightBar: true, neutral: true } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, layout: 'optionA', adaptive: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
