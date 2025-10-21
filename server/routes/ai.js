@@ -785,20 +785,21 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics = { topLum: 140
   let headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
   const headlineMaxW = Math.min(maxW * 0.90, maxW - 40);
 
-  // Subhead chip geometry (tight, semi-square corners)
-  const SUB_FS = fitFont(subline, Math.min(W * 0.75, 920), 32, 22);
-  const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 36;
-  const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-  const subH = Math.max(38, SUB_FS + 16);
-  const subX = Math.round((W - subW) / 2);
+  // --- Subhead chip sizing (make text a bit bigger + chip slightly taller) ---
+const SUB_FS = fitFont(subline, Math.min(W * 0.72, 900), 36, 22); // start bigger (36), cap width to 72%
+const subTextW = estWidth(subline, SUB_FS);
+const subPadX = 32;                                               // a touch tighter padding
+const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
+const subH = Math.max(40, SUB_FS + 20);                           // was ~38 / +16 → a tad taller
+const subX = Math.round((W - subW) / 2);
 
-  // Rhythm & positioning: headline in top scrim band; subhead roughly midway to CTA
-  const topBandH = 190;
-  const headlineY = 96 + headlineFs * 0.38;
-  const GAP_HL_TO_SUB = 32;
-  const subBaselineY = 96 + 20 + GAP_HL_TO_SUB + headlineFs;
-  const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
+// Rhythm & positioning
+const topBandH = 190;
+const headlineY = 96 + headlineFs * 0.38;
+const GAP_HL_TO_SUB = 32;
+const subBaselineY = 96 + 20 + GAP_HL_TO_SUB + headlineFs;
+const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
+
 
   // Chip adaptivity by texture
   const t = metrics.texture; // ~0–70
