@@ -731,32 +731,18 @@ const pillBtn = (x, y, text, fs = 30) => {
 /* --- SPACING TWEAKS: Looser layout so elements aren’t cramped --- */
 // === REPLACE the existing svgOverlayCreative(...) with THIS version ===
 // Placement: after pillBtn(...) and before craftSubline(...)
-function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
-  const defs = svgDefs(brandColor);
+// Option A: Headline on a clean top scrim (no box), subhead on a tight translucent chip, solid CTA pill.
+function svgOverlayCreative({ W, H, title, subline, cta /* brandColor unused for Option A */ }) {
+  const defs = svgDefs(); // already defines #topShade, #btnShadow, #soft
   const extraDefs = `
     <defs>
-      <!-- Soft neutral tint (avoids gray cast) -->
-      <linearGradient id="glassTint" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.22"/>
-        <stop offset="55%"  stop-color="#eaf1ff" stop-opacity="0.14"/>
-        <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
-      </linearGradient>
-      <!-- Gloss highlight -->
-      <linearGradient id="glassGloss" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.26"/>
-        <stop offset="60%"  stop-color="#ffffff" stop-opacity="0.06"/>
-        <stop offset="100%" stop-color="#ffffff" stop-opacity="0.00"/>
-      </linearGradient>
-      <!-- Stronger frost blur (subtitle > headline) -->
-      <filter id="headlineBlur" x="-40%" y="-40%" width="180%" height="180%">
-        <feGaussianBlur stdDeviation="4.0"/>
+      <!-- Blur for the subhead chip only (keeps text crisp) -->
+      <filter id="chipBlur" x="-25%" y="-25%" width="150%" height="150%">
+        <feGaussianBlur stdDeviation="4.5"/>
       </filter>
-      <filter id="subtitleBlur" x="-45%" y="-45%" width="190%" height="190%">
-        <feGaussianBlur stdDeviation="6.0"/>
-      </filter>
-      <!-- Light lift shadow -->
-      <filter id="softShadowLite" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.20"/>
+      <!-- Light lift shadow for chips (subtle, modern) -->
+      <filter id="chipShadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.22"/>
       </filter>
     </defs>
   `;
@@ -764,26 +750,24 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline geometry
+  // Headline: big, centered, NO box. Scrim gives readability across photos.
   const HL_FS = 62;
-  const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
-  const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
-  const barH = Math.max(46, headlineFs + 20);
-  const barX = (W - barW) / 2;
-  const barY = 96 - Math.floor(barH / 2);
+  const headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
 
-  // Subtitle geometry (tight to text)
+  // Subhead chip geometry: tight around text (semi-square corners)
   const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 42;
-  const subW = Math.min(maxW * 0.80, subTextW + subPadX * 2);
-  const subH = Math.max(40, SUB_FS + 20);
+  const subPadX = 36; // padding left/right
+  const subW = Math.min(maxW * 0.78, subTextW + subPadX * 2);
+  const subH = Math.max(40, SUB_FS + 18);
   const subX = Math.round((W - subW) / 2);
-  const GAP_HL_TO_SUB = 56;
-  const subBaselineY = barY + barH + GAP_HL_TO_SUB;
-  const subRectY = Math.round(subBaselineY - SUB_FS * 0.88);
 
-  // CTA
+  // Vertical rhythm (comfortable, non-tacky)
+  const topBandH = 190; // height of the top scrim band
+  const headlineY = 96 + headlineFs * 0.38; // visual centering within the band
+  const GAP_HL_TO_SUB = 40;                 // headline → subhead
+  const subBaselineY = 96 + 20 + GAP_HL_TO_SUB + headlineFs; // after headline
+  const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
   const GAP_SUB_TO_CTA = 60;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
@@ -791,27 +775,24 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const R = 6;
 
   return `${defs}${extraDefs}
-    <rect x="0" y="0" width="${W}" height="${170}" fill="url(#topShade)"/>
+    <!-- Clean top scrim across the banner: modern + reliable contrast -->
+    <rect x="0" y="0" width="${W}" height="${topBandH}" fill="url(#topShade)"/>
 
-    <!-- HEADLINE: glass (no outline), heavy blur -->
-    <g filter="url(#softShadowLite)">
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassTint)"/>
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="url(#glassGloss)"/>
-      <!-- extra blurred layer to amplify frosting -->
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}" fill="#ffffff" fill-opacity="0.08" filter="url(#headlineBlur)"/>
-    </g>
-    <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.30}" text-anchor="middle"
+    <!-- Headline: big, no box -->
+    <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
       font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1"
       style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
       ${escSVG(title)}
     </text>
 
-    <!-- SUBTITLE: stronger frost blur, no outline -->
-    <g filter="url(#softShadowLite)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassTint)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#glassGloss)" filter="url(#subtitleBlur)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="#ffffff" fill-opacity="0.10" filter="url(#subtitleBlur)"/>
+    <!-- Subhead chip: tight translucent bar with soft blur, no outline -->
+    <g filter="url(#chipShadow)">
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
+            fill="#000000" fill-opacity="0.20" />
+      <!-- subtle internal blur to frost the background under the chip -->
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
+            fill="#ffffff" fill-opacity="0.08" filter="url(#chipBlur)"/>
     </g>
     <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
@@ -820,7 +801,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
       ${escSVG(subline)}
     </text>
 
-    <!-- CTA pill: centered -->
+    <!-- CTA pill: standard black pill with soft shadow (existing helper) -->
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
