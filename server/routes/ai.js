@@ -732,21 +732,19 @@ const pillBtn = (x, y, text, fs = 30) => {
 // === REPLACE the existing svgOverlayCreative(...) with THIS version ===
 // Placement: after pillBtn(...) and before craftSubline(...)
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
-  // Keep it airy + modern: transparent bars with subtle gloss; subtitle gets extra blur.
   const defs = svgDefs(brandColor);
   const extraDefs = `
     <defs>
-      <!-- Gentle global top shade to seat the UI -->
       <linearGradient id="glassGloss" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.22"/>
-        <stop offset="55%"  stop-color="#ffffff" stop-opacity="0.08"/>
+        <stop offset="0%"   stop-color="#ffffff" stop-opacity="0.18"/>
+        <stop offset="55%"  stop-color="#ffffff" stop-opacity="0.06"/>
         <stop offset="100%" stop-color="#ffffff" stop-opacity="0.00"/>
       </linearGradient>
-      <!-- Soft blur used ONLY on the subtitle gloss to sell glass -->
+      <!-- Slightly stronger blur for subtitle glass to ensure legibility -->
       <filter id="subtitleBlur" x="-25%" y="-25%" width="150%" height="150%">
         <feGaussianBlur stdDeviation="1.6"/>
       </filter>
-      <!-- Very light shadow; avoids heavy “old gray” look -->
+      <!-- Crisp, modern shadow (light, not muddy) -->
       <filter id="softShadowLite" x="-50%" y="-50%" width="200%" height="200%">
         <feDropShadow dx="0" dy="1.2" stdDeviation="1.6" flood-color="#000" flood-opacity="0.22"/>
       </filter>
@@ -756,46 +754,48 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline bar — thin, see-through, no color tint
+  // Headline bar — rectangular, sharp edges
   const HL_FS = 62;
   const headlineFs = fitFont(title, maxW - 120, HL_FS, 32);
   const barW = Math.min(maxW, estWidth(title, headlineFs) + 120);
-  const barH = Math.max(46, headlineFs + 20);
+  const barH = Math.max(44, headlineFs + 18);
   const barX = (W - barW) / 2;
   const barY = 96 - Math.floor(barH / 2);
 
-  // Subtitle — tight to text, separate glass with stronger blur
+  // Subtitle — tight width around the text, separate frosted glass
   const SUB_FS = fitFont(subline, Math.min(W * 0.86, 920), 32, 22);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 42;
+  const subPadX = 40;
   const subW = Math.min(maxW * 0.80, subTextW + subPadX * 2);
-  const subH = Math.max(40, SUB_FS + 20);
+  const subH = Math.max(38, SUB_FS + 18);
   const subX = Math.round((W - subW) / 2);
   const GAP_HL_TO_SUB = 56;
   const subBaselineY = barY + barH + GAP_HL_TO_SUB;
-  const subRectY = Math.round(subBaselineY - SUB_FS * 0.88);
+  const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
 
-  // Light, modern opacities (no muddy gray)
-  const HL_FILL = 0.28;       // headline glass base
-  const HL_EDGE = 0.06;       // hairline white edge
-  const SUB_FILL = 0.20;      // subtitle glass base (separate from headline)
-  const SUB_EDGE = 0.08;      // hairline white edge on subtitle
+  // Modern, non-gray look: light fills + stronger outline for definition
+  const HL_FILL = 0.22;
+  const HL_EDGE = 0.16;          // stronger outline
+  const SUB_FILL = 0.18;
+  const SUB_EDGE = 0.18;         // stronger outline
 
-  // CTA centered
   const GAP_SUB_TO_CTA = 60;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
+
+  // Sharp rectangle corner radius (almost square)
+  const R = 4;
 
   return `${defs}${extraDefs}
     <rect x="0" y="0" width="${W}" height="${170}" fill="url(#topShade)"/>
 
-    <!-- HEADLINE: clean see-through bar (no tint), subtle gloss + edge -->
+    <!-- HEADLINE: sharp rectangular glass with pronounced outline -->
     <g filter="url(#softShadowLite)">
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18"
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}"
             fill="#000000" fill-opacity="${HL_FILL}"/>
-      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="18"
+      <rect x="${barX}" y="${barY}" width="${barW}" height="${barH}" rx="${R}"
             fill="url(#glassGloss)"/>
-      <rect x="${barX+0.5}" y="${barY+0.5}" width="${barW-1}" height="${barH-1}" rx="17.5"
-            fill="none" stroke="#ffffff" stroke-opacity="${HL_EDGE}" stroke-width="1"/>
+      <rect x="${barX+0.5}" y="${barY+0.5}" width="${barW-1}" height="${barH-1}" rx="${Math.max(0,R-0.5)}"
+            fill="none" stroke="#ffffff" stroke-opacity="${HL_EDGE}" stroke-width="1.4"/>
     </g>
     <text x="${W / 2}" y="${barY + barH / 2 + headlineFs * 0.30}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
@@ -804,14 +804,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
       ${escSVG(title)}
     </text>
 
-    <!-- SUBTITLE: separate glass with stronger blur (modern frosted look) -->
+    <!-- SUBTITLE: sharp rectangular frosted glass, tighter width, stronger outline -->
     <g filter="url(#softShadowLite)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="14"
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
             fill="#000000" fill-opacity="${SUB_FILL}"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="14"
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
             fill="url(#glassGloss)" filter="url(#subtitleBlur)"/>
-      <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="13.5"
-            fill="none" stroke="#ffffff" stroke-opacity="${SUB_EDGE}" stroke-width="1"/>
+      <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${Math.max(0,R-0.5)}"
+            fill="none" stroke="#ffffff" stroke-opacity="${SUB_EDGE}" stroke-width="1.4"/>
     </g>
     <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
       font-family="'Times New Roman', Times, serif"
@@ -820,7 +820,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor }) {
       ${escSVG(subline)}
     </text>
 
-    <!-- CTA pill: perfectly centered -->
+    <!-- CTA pill (unchanged), perfectly centered -->
     ${pillBtn(W / 2, ctaY, cta, 30)}
   `;
 }
