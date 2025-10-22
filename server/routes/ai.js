@@ -785,12 +785,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics = { topLum: 140
   let headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
   const headlineMaxW = Math.min(maxW * 0.90, maxW - 40);
 
- // --- Subhead chip sizing (a touch bigger) + true vertical centering ---
-const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 38, 24); // start at 38px, min 24px
+// --- Subhead chip sizing (a touch bigger) + true vertical centering ---
+const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 38, 24); // start 38px, min 24px
 const subTextW = estWidth(subline, SUB_FS);
 const subPadX = 36;
 const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-const subH = Math.max(44, SUB_FS + 22); // slightly taller so the type doesn't feel cramped
+const subH = Math.max(44, SUB_FS + 22); // a hair taller so it doesn't feel skinny
 const subX = Math.round((W - subW) / 2);
 
 // Rhythm around headline
@@ -798,29 +798,29 @@ const topBandH = 190;
 const headlineY = 96 + headlineFs * 0.38;
 const GAP_HL_TO_SUB = 32;
 
-// Place the chip so the subtitle sits visually between headline and CTA,
-// but compute y via chip center so the text can be truly centered inside it.
-const subRectY = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
-const subCenterY = subRectY + Math.round(subH / 2);
+// Chip Y via chip center (lets us truly center the text)
+const subRectY    = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
+const subCenterY  = subRectY + Math.round(subH / 2);
 
+// Define subBaselineY for downstream users (legacy callers expect this)
+const subBaselineY = subCenterY; // middle alignment
 
+// Chip adaptivity by texture
+const t = metrics.texture; // ~0–70
+let chipOpacity = 0.20;
+let chipBlurId = 'chipBlurLow';
+if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
+else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+// If mid band very bright, raise chip opacity slightly
+if (metrics.midLum >= 185) chipOpacity = Math.min(chipOpacity + 0.02, 0.30);
 
-  // Chip adaptivity by texture
-  const t = metrics.texture; // ~0–70
-  let chipOpacity = 0.20;
-  let chipBlurId = 'chipBlurLow';
-  if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
-  else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+// CTA position: distance from bottom of chip, not baseline (avoids NaN)
+const GAP_SUB_TO_CTA = 60;
+const ctaY = Math.round(subRectY + subH + GAP_SUB_TO_CTA);
 
-  // If mid band very bright, raise chip opacity slightly
-  if (metrics.midLum >= 185) chipOpacity = Math.min(chipOpacity + 0.02, 0.30);
+// Corners
+const R = 6;
 
-  // CTA
-  const GAP_SUB_TO_CTA = 60;
-  const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
-
-  // Corners
-  const R = 6;
 
   // Build SVG
   return `${defs}${extraDefs}
