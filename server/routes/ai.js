@@ -785,20 +785,24 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics = { topLum: 140
   let headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
   const headlineMaxW = Math.min(maxW * 0.90, maxW - 40);
 
-  // --- Subhead chip sizing (make text a bit bigger + chip slightly taller) ---
-const SUB_FS = fitFont(subline, Math.min(W * 0.72, 900), 36, 22); // start bigger (36), cap width to 72%
+ // --- Subhead chip sizing (a touch bigger) + true vertical centering ---
+const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 38, 24); // start at 38px, min 24px
 const subTextW = estWidth(subline, SUB_FS);
-const subPadX = 32;                                               // a touch tighter padding
+const subPadX = 36;
 const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-const subH = Math.max(40, SUB_FS + 20);                           // was ~38 / +16 → a tad taller
+const subH = Math.max(44, SUB_FS + 22); // slightly taller so the type doesn't feel cramped
 const subX = Math.round((W - subW) / 2);
 
-// Rhythm & positioning
+// Rhythm around headline
 const topBandH = 190;
 const headlineY = 96 + headlineFs * 0.38;
 const GAP_HL_TO_SUB = 32;
-const subBaselineY = 96 + 20 + GAP_HL_TO_SUB + headlineFs;
-const subRectY = Math.round(subBaselineY - SUB_FS * 0.86);
+
+// Place the chip so the subtitle sits visually between headline and CTA,
+// but compute y via chip center so the text can be truly centered inside it.
+const subRectY = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
+const subCenterY = subRectY + Math.round(subH / 2);
+
 
 
   // Chip adaptivity by texture
