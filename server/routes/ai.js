@@ -780,37 +780,45 @@ const pillBtn = (x, y, text, fs = 30) => {
 
 
 
-/* --------- Glass overlay creative (lighter headline glass, crisp edges) --------- */
+/* --------- Glass overlay creative (compact chips, true centering) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing/placement (unchanged)
+  // Headline size
   const HL_FS_START = 68;
-  let headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
+  const headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Top scrim for headline legibility (unchanged thresholds)
+  // Top scrim for legibility
   const topLum = metrics?.topLum ?? 150;
   const scrim = topLum >= 190 ? 0.36 : topLum >= 160 ? 0.30 : topLum >= 130 ? 0.26 : 0.20;
 
-  // Subtitle chip sizing (unchanged from your tuned values)
-  const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26);
+  // Subtitle sizing (tight)
+  const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX  = 40;
-  const subW     = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-  const subH     = Math.max(48, SUB_FS + 24);
+  const subPadX  = 18;                            // tighter padding
+  const subW     = Math.min(maxW * 0.95, subTextW + subPadX * 2);  // chip hugs text
+  const subH     = Math.max(42, SUB_FS + 14);     // compact height
   const subX     = Math.round((W - subW) / 2);
 
-  // Rhythm
-  const headlineY     = 96 + headlineFs * 0.38;
-  const GAP_HL_TO_SUB = 32;
+  // Vertical rhythm
+  const headlineCenterY = 96 + Math.round(headlineFs * 0.38); // center line for headline
+  const GAP_HL_TO_SUB   = 32;
 
-  // Chip center positioning
-  const subRectY     = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
-  const subCenterY   = subRectY + Math.round(subH / 2);
+  // Headline chip geometry (tight)
+  const hlTextW = estWidth(title, headlineFs);
+  const hlPadX  = 18;                                          // tighter padding
+  const hlW     = Math.min(maxW * 0.95, hlTextW + hlPadX * 2); // chip hugs text
+  const hlH     = Math.max(46, headlineFs + 12);               // compact height
+  const hlX     = Math.round((W - hlW) / 2);
+  const hlRectY = Math.round(headlineCenterY - hlH / 2);
+
+  // Subtitle chip positioning (centered)
+  const subRectY    = Math.round(headlineCenterY + GAP_HL_TO_SUB - subH / 2 + headlineFs * 0.6);
+  const subCenterY  = subRectY + Math.round(subH / 2);
   const subBaselineY = subCenterY;
 
-  // Glass adaptivity (slightly lighter base)
+  // Glass adaptivity
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
   let chipOpacity = 0.26;
@@ -819,23 +827,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.03, 0.38);
   if (midLum <=  90) chipOpacity = Math.max(0.22, chipOpacity - 0.02);
 
-  // Slightly lower blur for perf + sharper edges
-  const BLUR_SUB = 16;  // was 20
-  const BLUR_HL  = 12;  // was 16
+  // Blur (kept light for sharpness/perf)
+  const BLUR_SUB = 16;
+  const BLUR_HL  = 12;
 
-  // Ambient tint (softened)
+  // Ambient tint
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
 
-  // Headline chip geometry (a touch tighter vertically)
-  const hlTextW = estWidth(title, headlineFs);
-  const hlPadX  = 22;
-  const hlW     = Math.min(maxW * 0.82, hlTextW + hlPadX * 2);
-  const hlH     = Math.max(50, headlineFs + 16);
-  const hlX     = Math.round((W - hlW) / 2);
-  const hlRectY = Math.round(headlineY - hlH / 2);
-
-  // CTA vertical (unchanged from your latest)
+  // CTA vertical (unchanged)
   const GAP_SUB_TO_CTA = 92;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
@@ -843,14 +843,13 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const EDGE_STROKE = 0.35;
   const LIGHT = '#ffffff';
 
-  // ✅ Build CTA pill once, then inject
+  // Build CTA (avoid nested template-literal interpolation)
   const pillSvg = pillBtn(W / 2, ctaY, cta, 32);
 
   return `
   <defs>
     <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
 
-    <!-- Glass blurs -->
     <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" />
     </filter>
@@ -858,19 +857,16 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" />
     </filter>
 
-    <!-- Inner highlight -->
     <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"  stop-color="rgba(255,255,255,0.35)"/>
       <stop offset="55%" stop-color="rgba(255,255,255,0.05)"/>
       <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
     </linearGradient>
 
-    <!-- Soft falloff -->
     <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.20)" flood-opacity="1"/>
     </filter>
 
-    <!-- Micro-noise -->
     <filter id="chipNoise">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
       <feColorMatrix type="saturate" values="0" />
@@ -878,7 +874,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       <feBlend mode="overlay" in2="SourceGraphic"/>
     </filter>
 
-    <!-- Headline scrim -->
     <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="rgba(0,0,0,0.65)"/>
       <stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
@@ -893,7 +888,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
   </g>
 
-  <!-- Headline glass (lighter) -->
+  <!-- Headline glass (tight) -->
   <g clip-path="url(#clipHl)" filter="url(#chipFalloff)">
     <use href="#bg" filter="url(#glassBlurHl)"/>
     <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"
@@ -904,15 +899,16 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Headline text -->
-  <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
+  <!-- Headline text: middle-aligned so it sits dead-center in the chip -->
+  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
+    dominant-baseline="middle" alignment-baseline="middle"
     font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
     font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
     style="paint-order: stroke; stroke:#000; stroke-width:1.1; stroke-opacity:0.18">
     ${escSVG(title)}
   </text>
 
-  <!-- Subtitle glass -->
+  <!-- Subtitle glass (tight) -->
   <g clip-path="url(#clipSub)" filter="url(#chipFalloff)">
     <use href="#bg" filter="url(#glassBlurSub)"/>
     <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
@@ -923,11 +919,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Subtitle text -->
+  <!-- Subtitle text (your exact look) -->
   <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
     font-family="'Times New Roman', Times, serif"
-    font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
+    font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.3"
     style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
     ${escSVG(subline)}
   </text>
