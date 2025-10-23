@@ -776,14 +776,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
     return 0.20;
   })();
 
-  // Subtitle chip sizing (bigger text + shorter bar)
-  const SUB_MAX_W = Math.min(W * 0.66, 820);
-  const SUB_FS = fitFont(subline, SUB_MAX_W - 64, 44, 24);
-  const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 28;
-  const subW = Math.min(SUB_MAX_W, subTextW + subPadX * 2);
-  const subH = Math.max(46, SUB_FS + 22);
-  const subX = Math.round((W - subW) / 2);
+  // --- Subhead chip sizing (bigger) + true vertical centering ---
+const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26); // start 42px, min 26px
+const subTextW = estWidth(subline, SUB_FS);
+const subPadX = 40;                         // a touch more horizontal breathing room
+const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
+const subH = Math.max(48, SUB_FS + 24);     // slightly taller so bigger type sits centered
+const subX = Math.round((W - subW) / 2);
+
 
   // Rhythm
   const headlineY = 96 + headlineFs * 0.38;
