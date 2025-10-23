@@ -233,7 +233,8 @@ function Dots({ count, active, onClick }) {
 }
 
 /* ===== helpers ===== */
-const CONTROLLER_TIMEOUT_MS = 16000;
+// Give the image endpoint enough time to wake the server, fetch stock, and render
+const CONTROLLER_TIMEOUT_MS = 30000;
 function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
@@ -241,7 +242,11 @@ function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
   return fetch(url, final).finally(() => clearTimeout(t));
 }
 
-async function fetchJsonWithRetry(url, opts = {}, { tries = 4, warm = false } = {}) {
+async function fetchJsonWithRetry(
+  url,
+  opts = {},
+  { tries = 4, warm = false, timeoutMs = CONTROLLER_TIMEOUT_MS } = {}
+) {
   let attempt = 0;
   let lastErr = null;
   if (warm) {
@@ -249,17 +254,22 @@ async function fetchJsonWithRetry(url, opts = {}, { tries = 4, warm = false } = 
   }
   while (attempt < tries) {
     try {
-      const res = await fetchWithTimeout(url, { mode: "cors", credentials: "omit", ...opts });
+      const res = await fetchWithTimeout(
+        url,
+        { mode: "cors", credentials: "omit", ...opts },
+        timeoutMs
+      );
       if (!res.ok) {
-        // Handle cold start / throttling gracefully
-        if ([429, 503, 502, 504].includes(res.status)) throw new Error(String(res.status));
+        // Cold start / throttling -> retry
+        if ([429, 502, 503, 504].includes(res.status)) {
+          throw new Error(String(res.status));
+        }
         const text = await res.text().catch(() => "");
         throw new Error(`${res.status} ${res.statusText} ${text}`.trim());
       }
       return await res.json();
     } catch (e) {
       lastErr = e;
-      // Network aborts/ERR_FAILED often surface as "CORS" but are just timeouts/cold-start
       const backoff = 600 * Math.pow(1.8, attempt) + Math.floor(Math.random() * 250);
       await new Promise(r => setTimeout(r, backoff));
       attempt++;
@@ -267,6 +277,7 @@ async function fetchJsonWithRetry(url, opts = {}, { tries = 4, warm = false } = 
   }
   throw lastErr || new Error("request failed");
 }
+
 
 async function warmBackend() {
   // Light GET to ensure instance is awake and CORS middleware attaches headers
@@ -572,20 +583,28 @@ export default function FormPage() {
     return "";
   };
 
-  async function fetchImageOnce(token) {
-    try {
-      await warmBackend();
-      const data = await fetchJsonWithRetry(`${API_BASE}/generate-image-from-prompt`, {
+ async function fetchImageOnce(token) {
+  const fallbackPicsum = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}/1200/628`;
+  try {
+    await warmBackend(); // nudge the server awake
+    const data = await fetchJsonWithRetry(
+      `${API_BASE}/generate-image-from-prompt`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers, regenerateToken: token })
-      }, { tries: 4 });
-      return pickBestImageUrl(data);
-    } catch (e) {
-      console.warn("image fetch failed:", e.message);
-      return "";
-    }
+      },
+      { tries: 4, warm: true, timeoutMs: 30000 } // ↑ longer timeout just for images
+    );
+    const url = pickBestImageUrl(data);
+    return url || fallbackPicsum;
+  } catch (e) {
+    console.warn("image fetch failed:", e.message);
+    // Last resort: lightweight placeholder so the preview still shows an image
+    return fallbackPicsum;
   }
+}
+
 
   async function fetchVideoOnce(token) {
     try {
