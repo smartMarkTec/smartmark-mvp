@@ -780,23 +780,20 @@ const pillBtn = (x, y, text, fs = 30) => {
 
 
 
-/* --------- Glass overlay creative (true glass chips + safe fallback) --------- */
+/* --------- Glass overlay creative (lighter headline glass, crisp edges) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing/placement
+  // Headline sizing/placement (unchanged)
   const HL_FS_START = 68;
   let headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Adaptive top scrim for headline legibility
+  // Top scrim for headline legibility (unchanged thresholds)
   const topLum = metrics?.topLum ?? 150;
-  const scrim =
-    topLum >= 190 ? 0.36 :
-    topLum >= 160 ? 0.30 :
-    topLum >= 130 ? 0.26 : 0.20;
+  const scrim = topLum >= 190 ? 0.36 : topLum >= 160 ? 0.30 : topLum >= 130 ? 0.26 : 0.20;
 
-  // Subhead chip sizing (kept)
+  // Subtitle chip sizing (unchanged from your tuned values)
   const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
   const subPadX  = 40;
@@ -805,7 +802,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const subX     = Math.round((W - subW) / 2);
 
   // Rhythm
-  const headlineY   = 96 + headlineFs * 0.38;
+  const headlineY     = 96 + headlineFs * 0.38;
   const GAP_HL_TO_SUB = 32;
 
   // Chip center positioning
@@ -813,85 +810,71 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const subCenterY   = subRectY + Math.round(subH / 2);
   const subBaselineY = subCenterY;
 
-  // Stronger glass adaptivity
+  // Glass adaptivity (slightly lighter base)
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.28;
-  if (t > 35 && t <= 50) chipOpacity = 0.32;
-  else if (t > 50)       chipOpacity = 0.36;
-  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.42);
-  if (midLum <=  90) chipOpacity = Math.max(0.24, chipOpacity - 0.02);
+  let chipOpacity = 0.26;
+  if (t > 35 && t <= 50) chipOpacity = 0.30;
+  else if (t > 50)       chipOpacity = 0.34;
+  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.03, 0.38);
+  if (midLum <=  90) chipOpacity = Math.max(0.22, chipOpacity - 0.02);
 
-  // Blur strength (kept reasonable for perf)
-  const BLUR_SUB = 14;
-  const BLUR_HL  = 12;
+  // Slightly lower blur for perf + sharper edges
+  const BLUR_SUB = 16;  // was 20
+  const BLUR_HL  = 12;  // was 16
 
-  // Light tint from image avg so it never looks gray
+  // Ambient tint (softened)
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.35).toFixed(2)})`;
+  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
 
-  // Corners
-  const R = 6;
-
-  // Headline chip geometry (tight bar behind headline)
+  // Headline chip geometry (a touch tighter vertically)
   const hlTextW = estWidth(title, headlineFs);
-  const hlPadX  = 28;
+  const hlPadX  = 22;
   const hlW     = Math.min(maxW * 0.82, hlTextW + hlPadX * 2);
-  const hlH     = Math.max(54, headlineFs + 20);
+  const hlH     = Math.max(50, headlineFs + 16);
   const hlX     = Math.round((W - hlW) / 2);
   const hlRectY = Math.round(headlineY - hlH / 2);
 
-  // CTA vertical (you wanted it lower)
+  // CTA vertical (unchanged from your latest)
   const GAP_SUB_TO_CTA = 92;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
+  const R = 8;
+  const EDGE_STROKE = 0.35;
   const LIGHT = '#ffffff';
-  const hasBase = !!baseDataUri; // fallback if not provided
+
+  // ✅ Build CTA pill once, then inject
+  const pillSvg = pillBtn(W / 2, ctaY, cta, 32);
 
   return `
   <defs>
-    ${hasBase ? `
-    <!-- Base image so we can blur the real background under the glass -->
     <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
-    ` : ''}
 
     <!-- Glass blurs -->
     <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" />
-      <feColorMatrix type="matrix" values="
-        1.08 0    0    0  0
-        0    1.08 0    0  0
-        0    0    1.08 0  0
-        0    0    0    1  0"/>
     </filter>
     <filter id="glassBlurHl" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" />
-      <feColorMatrix type="matrix" values="
-        1.06 0    0    0  0
-        0    1.06 0    0  0
-        0    0    1.06 0  0
-        0    0    0    1  0"/>
     </filter>
 
     <!-- Inner highlight -->
     <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="rgba(255,255,255,0.38)"/>
-      <stop offset="55%" stop-color="rgba(255,255,255,0.06)"/>
+      <stop offset="0%"  stop-color="rgba(255,255,255,0.35)"/>
+      <stop offset="55%" stop-color="rgba(255,255,255,0.05)"/>
       <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
     </linearGradient>
 
-    <!-- Soft falloff for thickness -->
+    <!-- Soft falloff -->
     <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="1.2" stdDeviation="2.2" flood-color="rgba(0,0,0,0.22)" flood-opacity="1"/>
+      <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.20)" flood-opacity="1"/>
     </filter>
 
     <!-- Micro-noise -->
     <filter id="chipNoise">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
       <feColorMatrix type="saturate" values="0" />
-      <feComponentTransfer>
-        <feFuncA type="table" tableValues="0 0 0 0.015 0.03"/>
-      </feComponentTransfer>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 0 0 0.012 0.028"/></feComponentTransfer>
       <feBlend mode="overlay" in2="SourceGraphic"/>
     </filter>
 
@@ -901,7 +884,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       <stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
     </linearGradient>
 
-    <!-- Clip paths -->
     <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
     <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
   </defs>
@@ -911,51 +893,48 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
   </g>
 
-  <!-- Headline glass -->
+  <!-- Headline glass (lighter) -->
   <g clip-path="url(#clipHl)" filter="url(#chipFalloff)">
-    ${hasBase ? `<use href="#bg" filter="url(#glassBlurHl)"/>` : ``}
+    <use href="#bg" filter="url(#glassBlurHl)"/>
     <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"
-      fill="${tintRGBA}" opacity="${(chipOpacity*0.9).toFixed(2)}"/>
-    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(10, hlH*0.45)}" rx="${Math.max(0,R-1)}"
+      fill="${tintRGBA}" opacity="${(chipOpacity * 0.85).toFixed(2)}" />
+    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.42)}" rx="${Math.max(0,R-1)}"
       fill="url(#chipInnerHi)"/>
-    <g filter="url(#chipNoise)">
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(255,255,255,0.02)"/>
-    </g>
+    <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}"
+      fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
   <!-- Headline text -->
   <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
     font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
     font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
-    style="paint-order: stroke; stroke:#000; stroke-width:1.2; stroke-opacity:0.18">
+    style="paint-order: stroke; stroke:#000; stroke-width:1.1; stroke-opacity:0.18">
     ${escSVG(title)}
   </text>
 
   <!-- Subtitle glass -->
   <g clip-path="url(#clipSub)" filter="url(#chipFalloff)">
-    ${hasBase ? `<use href="#bg" filter="url(#glassBlurSub)"/>` : ``}
+    <use href="#bg" filter="url(#glassBlurSub)"/>
     <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
       fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
-    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${Math.max(0,R-1)}"
+    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.44)}" rx="${Math.max(0,R-1)}"
       fill="url(#chipInnerHi)"/>
-    <g filter="url(#chipNoise)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(255,255,255,0.02)"/>
-    </g>
+    <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}"
+      fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Subtitle text (your exact look) -->
+  <!-- Subtitle text -->
   <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
     font-family="'Times New Roman', Times, serif"
-    font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.3"
+    font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
     style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
     ${escSVG(subline)}
   </text>
 
-  ${pillBtn(W / 2, ctaY, cta, 32)}
+  ${pillSvg}
   `;
 }
-
 
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
