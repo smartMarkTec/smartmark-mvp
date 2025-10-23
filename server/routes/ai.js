@@ -738,19 +738,22 @@ function svgDefs(brandColor) {
   `;
 }
 
+// Perfectly centered CTA pill (text vertically centered)
 const LIGHT = '#f5f7f9';
 
-// CTA pill with softer shadow; text nudged lower for true visual center
 const pillBtn = (x, y, text, fs = 30) => {
   fs = Math.max(24, Math.min(fs, 36));
-  const w = Math.min(880, estWidth(text, fs) + 80);
-  const h = 62;
-  const x0 = x - w / 2;
+  const padX = 34;
+  const h = Math.round(fs + 26);                // a touch taller for breathing room
+  const w = Math.min(880, estWidth(text, fs) + padX * 2);
+  const x0 = Math.round(x - w / 2);
+  const y0 = Math.round(y - h / 2);
+
   return `
-    <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
-      <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
-      <!-- was y="13"; drop a touch for better optical centering -->
-      <text x="${w / 2}" y="16" text-anchor="middle"
+    <g transform="translate(${x0}, ${y0})" filter="url(#btnShadow)">
+      <rect x="0" y="0" width="${w}" height="${h}" rx="${Math.round(h/2)}" fill="#0b0d10dd"/>
+      <text x="${w / 2}" y="${Math.round(h / 2)}" text-anchor="middle"
+            dominant-baseline="middle" alignment-baseline="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
             font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
         ${escSVG(text)}
@@ -819,11 +822,19 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
   // Corners
   const R = 6;
 
-  // ---- Subtitle contrast guard (UNCHANGED) ----
-  const subTextFill      = midLum >= 175 ? '#111111' : '#ffffff';
-  const subStrokeColor   = midLum >= 175 ? '#ffffff' : '#000000';
-  const subStrokeOpacity = midLum >= 175 ? 0.35 : 0.55;
-  const subLetterSpacing = 0.3;
+  // ---- Headline legibility helpers (micro-glass only when needed) ----
+  const hlTextW = estWidth(title, headlineFs);
+  const hlPadX  = 22;
+  const hlW     = Math.min(maxW * 0.92, hlTextW + hlPadX * 2);
+  const hlH     = Math.max(42, headlineFs + 14);
+  const hlX     = Math.round((W - hlW) / 2);
+  const hlY     = Math.round(headlineY - headlineFs * 0.85);
+
+  const topLum  = metrics?.topLum ?? 150;
+  const topTex  = metrics?.texture ?? 30;
+  const needHlChip = (topLum >= 165) || (topTex >= 46);
+  const hlTint = `rgba(${avg.r},${avg.g},${avg.b},0.07)`;
+  const hlOpacity = needHlChip ? 0.18 : 0.00;
 
   // Build
   return `${defs}
@@ -831,39 +842,42 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
       <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
     </g>
 
+    ${ needHlChip ? `
+      <g filter="url(#chipBlurLow)">
+        <rect x="${hlX}" y="${hlY}" width="${hlW}" height="${hlH}" rx="6"
+              fill="${hlTint}" opacity="${hlOpacity}"/>
+      </g>
+    ` : '' }
+
     <!-- Headline -->
     <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
       font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
-      filter="url(#textStroke)">
+      style="paint-order: stroke fill; stroke:#000; stroke-width:1.15; stroke-opacity:0.22">
       ${escSVG(title)}
     </text>
 
-    <!-- Subtitle Glass Chip (more glassy: stronger blur + slight frost layer) -->
+    <!-- Subtitle Glass Chip -->
     <g filter="url(#${chipBlurId}) url(#chipNoise)">
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
         fill="${tint}" opacity="${chipOpacity}"/>
-      <!-- subtle frost to boost separation without heaviness -->
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-        fill="#ffffff" opacity="0.06"/>
       <!-- inner highlight (top) -->
-      <rect x="${subX + 1}" y="${subRectY + 1}" width="${subW - 2}" height="${Math.max(8, subH * 0.45)}" rx="${R - 1}"
+      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${R-1}"
         fill="url(#chipInnerHi)"/>
     </g>
 
-    <!-- Subtitle text (style/centering UNCHANGED) -->
+    <!-- Subtitle text (middle centered; keep exact style) -->
     <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
       dominant-baseline="middle" alignment-baseline="middle"
       font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="${subTextFill}" letter-spacing="${subLetterSpacing}"
-      style="paint-order: stroke fill; stroke:${subStrokeColor}; stroke-width:1.2; stroke-opacity:${subStrokeOpacity}">
+      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
+      style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
       ${escSVG(subline)}
     </text>
 
     ${pillBtn(W / 2, ctaY, cta, 32)}
   `;
 }
-
 
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
