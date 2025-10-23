@@ -1,10 +1,10 @@
 'use strict';
 
 /**
- * SmartMark AI routes — static ads with adaptive headline scrim + subhead chip + solid CTA
- * - Headline sits on a soft top gradient scrim (NO box)
- * - Subhead on a tight translucent chip (adaptive blur/opacity; language-sanitized)
- * - CTA pill with soft shadow and optical centering
+ * SmartMark AI routes — static ads with glassmorphism chips
+ * - Headline with adaptive top scrim and micro-stroke
+ * - Subtitle chip: ambient-tinted glass with inner highlight, adaptive blur/opacity, micro-noise
+ * - CTA pill with soft shadow + inner highlight
  * - Exactly TWO image variations per generate
  * - Tight timeouts, memory discipline, and graceful fallbacks
  */
@@ -554,7 +554,12 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       const parsed = JSON.parse(jsonStr);
       const clean = (s, max = 200) => cleanFinalText(String(s || '')).slice(0, max);
       headline = clean(parsed.headline, 55);
-      body = stripFashionIfNotApplicable(clean(parsed.body, 220), category);
+      // Grammar guardrails for body (subtitle): simple normalization to avoid "is the best" repetition etc.
+      let bodyRaw = clean(parsed.body, 220)
+        .replace(/\bhigh quality quality\b/gi, 'high quality')
+        .replace(/\bthe best quality\b/gi, 'great quality')
+        .replace(/\bour better made\b/gi, 'better made');
+      body = stripFashionIfNotApplicable(bodyRaw, category);
       overlay = clean(parsed.image_overlay_text, 28);
     } catch {
       headline = `${brand}: New Products`;
@@ -576,7 +581,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- IMAGE OVERLAYS (Option A layout) ---------------------- */
+/* ---------------------- IMAGE OVERLAYS (glass chips) ---------------------- */
 const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
@@ -616,276 +621,266 @@ function pickSerifFontFile() {
   return pickSansFontFile();
 }
 
-/* ---------- Image analysis for adaptive placement ---------- */
+/* ---------- Photo metrics for adaptive layout & glass ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
-    const W = 96, H = 96; // downsample for stats
+    const W = 72, H = 72;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    const px = W * H;
-    // overall average
     let rSum = 0, gSum = 0, bSum = 0;
-    for (let i = 0; i < data.length; i += 3) { rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2]; }
-    const avgR = rSum / px, avgG = gSum / px, avgB = bSum / px;
-    const lum = Math.round(0.2126*avgR + 0.7152*avgG + 0.0722*avgB);
+    // top & mid bands ~ adaptive scrim/chip
+    let rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
+    let varSum = 0;
 
-    // band luminance (top and middle)
-    const topRows = Math.floor(H * 0.33), midStart = Math.floor(H * 0.40), midRows = Math.floor(H * 0.20);
-    function bandLum(y0, rows) {
-      let r = 0, g = 0, b = 0, n = 0;
-      for (let y = y0; y < y0 + rows; y++) {
-        for (let x = 0; x < W; x++) {
-          const i = (y * W + x) * 3;
-          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
-        }
-      }
-      const ar = r / n, ag = g / n, ab = b / n;
-      return Math.round(0.2126*ar + 0.7152*ag + 0.0722*ab);
-    }
-    const topLum = bandLum(0, topRows);
-    const midLum = bandLum(midStart, midRows);
-
-    // crude texture = std dev of luminance in middle band
-    let vals = [];
-    for (let y = midStart; y < midStart + midRows; y++) {
+    for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const i = (y * W + x) * 3;
-        const L = 0.2126*data[i] + 0.7152*data[i + 1] + 0.0722*data[i + 2];
-        vals.push(L);
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        rSum += r; gSum += g; bSum += b;
+        const lum = 0.2126*r + 0.7152*g + 0.0722*b;
+        varSum += lum*lum;
+
+        if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
+        if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
       }
     }
-    const mean = vals.reduce((a,c)=>a+c,0) / vals.length;
-    const variance = vals.reduce((a,c)=>a+(c-mean)*(c-mean),0) / vals.length;
-    const texture = Math.sqrt(Math.max(variance, 0)); // ~0–70
 
-    // choose a neutral dark for CTA shadows (not used for boxes anymore)
+    const px = W*H;
+    const avgR = rSum/px, avgG = gSum/px, avgB = bSum/px;
+    const lumAll = Math.round(0.2126*avgR + 0.7152*avgG + 0.0722*avgB);
+    const lumTop = Math.round(0.2126*(rTop/cTop) + 0.7152*(gTop/cTop) + 0.0722*(bTop/cTop));
+    const lumMid = Math.round(0.2126*(rMid/cMid) + 0.7152*(gMid/cMid) + 0.0722*(bMid/cMid));
+    // texture proxy: variance of luminance
+    const meanLum = lumAll;
+    // approximate variance = E[x^2] - mu^2
+    const e2 = varSum/px;
+    const variance = Math.max(0, e2 - meanLum*meanLum);
+    const texture = Math.min(70, Math.sqrt(variance)/2); // 0..~70 scale
+
+    // Neutral grayscale palette only for headline bar fallback
     const neutrals = ['#111827','#1f2937','#27272a','#374151','#3f3f46','#4b5563'];
-    const idx = lum >= 185 ? 0 : lum >= 150 ? 1 : lum >= 120 ? 2 : lum >= 90 ? 3 : lum >= 60 ? 4 : 5;
+    const idx = lumAll >= 185 ? 0 : lumAll >= 150 ? 1 : lumAll >= 120 ? 2 : lumAll >= 90 ? 3 : lumAll >= 60 ? 4 : 5;
 
-    return { brandColor: neutrals[idx], metrics: { topLum, midLum, texture } };
+    return {
+      brandColor: neutrals[idx],
+      topLum: lumTop,
+      midLum: lumMid,
+      texture,
+      avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) }
+    };
   } catch {
-    return { brandColor: '#1f2937', metrics: { topLum: 140, midLum: 140, texture: 28 } };
+    return { brandColor: '#1f2937', topLum: 150, midLum: 140, texture: 30, avgRGB: { r: 64, g: 64, b: 64 } };
   }
 }
 
-/* ---------- Title case helper ---------- */
+/* ---------- Title case helper for subheadline ---------- */
 function toTitleCase(s) {
   return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1));
 }
 
-/* ---------- Language sanitizer for subheadline ---------- */
-function normalizeSubline(text, category = 'generic') {
-  let s = String(text || '').toLowerCase().trim();
-
-  // Fix common awkward patterns
-  s = s.replace(/\bour better made is\b/gi, 'better made');        // "Our better made is" → "Better made"
-  s = s.replace(/\bis natural material(s)?\b/gi, 'uses natural materials');
-  s = s.replace(/\bnatural material\b/gi, 'natural materials');
-  s = s.replace(/\bevery day\b/gi, 'everyday');
-
-  // If starts with 'our ' and reads weird, drop 'our'
-  s = s.replace(/^our\s+(better|simple|clean|modern)\b/gi, (_m, w) => `${w}`);
-
-  // Keep it short, positive, and noun/verb sensible
-  const HARD_FALLBACKS = {
-    fashion: ['Better materials, made to last', 'Everyday pieces, easy to wear'],
-    cosmetics: ['Gentle formulas for daily care', 'Simple routine, better skin'],
-    hair: ['Clean care for healthy hair', 'Easy styling, everyday'],
-    food: ['Great taste, less hassle', 'Fresh flavor, easy meals'],
-    pets: ['Simple treats, happy pets', 'Daily care made easy'],
-    electronics: ['Reliable tech for daily use', 'Simple design, solid performance'],
-    home: ['Upgrade your space with ease', 'Clean look, practical use'],
-    coffee: ['Balanced flavor, smooth finish', 'Better coffee breaks'],
-    fitness: ['Made for your workouts', 'Durable gear for training'],
-    generic: ['Made for everyday use', 'Simple design, better value'],
-  }[category] || ['Made for everyday use'];
-
-  // If empty or nonsense, fallback
-  if (!s || s.length < 8) return HARD_FALLBACKS[0];
-
-  // Capitalize key nouns
-  s = s.replace(/\b(quality|materials?|routine|performance|workouts?|training|style|coffee|flavor|design)\b/gi,
-                (m)=>m.toLowerCase());
-
-  // Trim to ~5–8 words
-  const words = s.split(/\s+/).filter(Boolean);
-  if (words.length > 10) s = words.slice(0, 10).join(' ');
-  if (words.length < 4 && HARD_FALLBACKS[1]) s = HARD_FALLBACKS[1];
-
-  // Title Case final
-  return toTitleCase(s);
-}
-
-/* ---------- SVG defs + Option A layout ---------- */
-function svgDefs() {
+/* ---------- SVG defs + layout (glass, highlight, noise) ---------- */
+function svgDefs(brandColor) {
   return `
     <defs>
       <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000" stop-opacity="0.26"/>
+        <stop offset="0%" stop-color="#000" stop-opacity="0.34"/>
         <stop offset="100%" stop-color="#000" stop-opacity="0.00"/>
       </linearGradient>
+
+      <!-- subtle white stroke around headline text -->
+      <filter id="textStroke">
+        <feMorphology in="SourceAlpha" operator="dilate" radius="0.6" result="dil"/>
+        <feColorMatrix in="dil" type="matrix" values="
+          0 0 0 0 1
+          0 0 0 0 1
+          0 0 0 0 1
+          0 0 0 0.18 0" result="stroke"/>
+        <feMerge>
+          <feMergeNode in="stroke"/>
+          <feMergeNode in="SourceGraphic"/>
+        </feMerge>
+      </filter>
+
+      <!-- CTA shadow -->
       <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="2.4" stdDeviation="3.2" flood-color="#000" flood-opacity="0.45"/>
+        <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.35"/>
       </filter>
-      <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-        <feGaussianBlur stdDeviation="0.6"/>
+
+      <!-- Glass blur presets (applied to chip group) -->
+      <filter id="chipBlurLow"  x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="1.0"/></filter>
+      <filter id="chipBlurMed"  x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="1.6"/></filter>
+      <filter id="chipBlurHigh" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.2"/></filter>
+
+      <!-- Inner highlight for glass (top gradient clipped in chip) -->
+      <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#fff" stop-opacity="0.14"/>
+        <stop offset="45%" stop-color="#fff" stop-opacity="0.06"/>
+        <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
+
+      <!-- Micro-noise for chip to avoid banding -->
+      <filter id="chipNoise" x="-10%" y="-10%" width="120%" height="120%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" seed="7" result="noise"/>
+        <feColorMatrix type="matrix" values="
+          0 0 0 0 0.5
+          0 0 0 0 0.5
+          0 0 0 0 0.5
+          0 0 0 0.02 0" result="noiseTint"/>
+        <feBlend in="SourceGraphic" in2="noiseTint" mode="normal"/>
       </filter>
+
+      <!-- CTA inner highlight -->
+      <linearGradient id="ctaHi" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#fff" stop-opacity="0.2"/>
+        <stop offset="35%" stop-color="#fff" stop-opacity="0.06"/>
+        <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
+      </linearGradient>
     </defs>
   `;
 }
+
 const LIGHT = '#f5f7f9';
 
-// CTA pill (optical centering improved)
 const pillBtn = (x, y, text, fs = 30) => {
-  fs = Math.max(24, Math.min(fs, 36));
+  fs = Math.max(26, Math.min(fs, 36));
   const w = Math.min(880, estWidth(text, fs) + 80);
-  const h = 62;
+  const h = 64;
   const x0 = x - w / 2;
   return `
     <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
-      <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
-      <rect x="0" y="-18" width="${w}" height="${Math.max(16, Math.floor(h*0.48))}" rx="31"
-            fill="#ffffff" fill-opacity="0.08"/>
-      <text x="${w / 2}" y="16" text-anchor="middle"
+      <g>
+        <rect x="0" y="-18" width="${w}" height="${h}" rx="32" fill="#0b0d10ee"/>
+        <rect x="1" y="-17" width="${w-2}" height="${h*0.35}" rx="30" fill="url(#ctaHi)"/>
+      </g>
+      <text x="${w / 2}" y="13" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
+            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="0.6">
         ${escSVG(text)}
       </text>
     </g>`;
 };
 
-// Option A: Headline on scrim, subhead chip, solid CTA
-function svgOverlayCreative({ W, H, title, subline, cta, metrics = { topLum: 140, midLum: 140, texture: 28 } }) {
-  const defs = svgDefs();
-  const extraDefs = `
-    <defs>
-      <filter id="chipBlurLow" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="4"/></filter>
-      <filter id="chipBlurMed" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="6"/></filter>
-      <filter id="chipBlurHigh" x="-25%" y="-25%" width="150%" height="150%"><feGaussianBlur stdDeviation="8"/></filter>
-      <filter id="chipShadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="1.2" stdDeviation="1.8" flood-color="#000" flood-opacity="0.22"/>
-      </filter>
-    </defs>
-  `;
-
+/* --------- Glass overlay creative --------- */
+function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) {
+  const defs = svgDefs(brandColor);
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
+  // Headline sizing/placement
+  const HL_FS_START = 68;
+  let headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
+
   // Adaptive top scrim opacity (headline region)
-  // brighter top → stronger scrim
   const scrim = (() => {
-    const { topLum } = metrics;
-    if (topLum >= 190) return 0.32;
-    if (topLum >= 160) return 0.28;
-    if (topLum >= 130) return 0.24;
-    return 0.18;
+    const topLum = metrics?.topLum ?? 150;
+    if (topLum >= 190) return 0.36;
+    if (topLum >= 160) return 0.30;
+    if (topLum >= 130) return 0.26;
+    return 0.20;
   })();
 
-  // Headline sizing; enforce single line down to 32px
-  let HL_FS = 62;
-  let headlineFs = fitFont(title, maxW - 40, HL_FS, 32);
-  const headlineMaxW = Math.min(maxW * 0.90, maxW - 40);
+  // Subtitle chip sizing (bigger text + shorter bar)
+  const SUB_MAX_W = Math.min(W * 0.66, 820);
+  const SUB_FS = fitFont(subline, SUB_MAX_W - 64, 44, 24);
+  const subTextW = estWidth(subline, SUB_FS);
+  const subPadX = 28;
+  const subW = Math.min(SUB_MAX_W, subTextW + subPadX * 2);
+  const subH = Math.max(46, SUB_FS + 22);
+  const subX = Math.round((W - subW) / 2);
 
-// --- Subhead chip sizing: bigger type + shorter chip ---
-const SUB_MAX_W = Math.min(W * 0.66, 820);                    // tighter max width so bar isn’t too long
-const SUB_FS     = fitFont(subline, SUB_MAX_W - 64, 44, 24);  // start bigger (44), allow shrink to 24
-const subTextW   = estWidth(subline, SUB_FS);
-const subPadX    = 28;                                        // a bit tighter side padding
-const subW       = Math.min(SUB_MAX_W, subTextW + subPadX * 2);
-const subH       = Math.max(46, SUB_FS + 22);                 // slightly taller to balance the bigger type
-const subX       = Math.round((W - subW) / 2);
+  // Rhythm
+  const headlineY = 96 + headlineFs * 0.38;
+  const GAP_HL_TO_SUB = 32;
 
-// Rhythm around headline
-const topBandH   = 190;
-const headlineY  = 96 + headlineFs * 0.38;
-const GAP_HL_TO_SUB = 32;
+  // Chip pos using center for perfect vertical centering
+  const subRectY = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
+  const subCenterY = subRectY + Math.round(subH / 2);
+  const subBaselineY = subCenterY;
 
-// Chip Y via chip center (true vertical centering)
-const subRectY    = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
-const subCenterY  = subRectY + Math.round(subH / 2);
+  // Chip adaptivity by texture/brightness
+  const t = metrics?.texture ?? 30;
+  const midLum = metrics?.midLum ?? 140;
+  let chipOpacity = 0.20;
+  let chipBlurId = 'chipBlurLow';
+  if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
+  else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+  if (midLum >= 185) chipOpacity = Math.min(chipOpacity + 0.02, 0.30);
+  if (midLum <= 90)  chipOpacity = Math.max(0.16, chipOpacity - 0.02);
 
-// Keep legacy var for downstream consumers
-const subBaselineY = subCenterY;
+  // Ambient tint from photo average color (very subtle)
+  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
+  const tint = `rgba(${avg.r},${avg.g},${avg.b},0.08)`;
 
-// Chip adaptivity by texture/brightness (unchanged)
-const t = metrics.texture; // ~0–70
-let chipOpacity = 0.20;
-let chipBlurId  = 'chipBlurLow';
-if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
-else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
-if (metrics.midLum >= 185) chipOpacity = Math.min(chipOpacity + 0.02, 0.30);
+  // CTA position
+  const GAP_SUB_TO_CTA = 60;
+  const ctaY = Math.round(subRectY + subH + GAP_SUB_TO_CTA);
 
-// CTA position relative to chip
-const GAP_SUB_TO_CTA = 60;
-const ctaY = Math.round(subRectY + subH + GAP_SUB_TO_CTA);
+  // Corners
+  const R = 6;
 
-// Corners (keep your current value or this)
-const R = 6;
+  // Build
+  return `${defs}
+    <g opacity="${scrim}">
+      <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
+    </g>
 
-
-
-  // Build SVG
-  return `${defs}${extraDefs}
-    <!-- Adaptive top scrim -->
-    <linearGradient id="dynTop" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#000" stop-opacity="${scrim}"/>
-      <stop offset="100%" stop-color="#000" stop-opacity="0.00"/>
-    </linearGradient>
-    <rect x="0" y="0" width="${W}" height="${topBandH}" fill="url(#dynTop)"/>
-
-    <!-- Headline (no box) -->
+    <!-- Headline -->
     <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
       font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="1.1"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:0.9; stroke-opacity:0.18">
+      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
+      filter="url(#textStroke)">
       ${escSVG(title)}
     </text>
 
-    <!-- Subhead chip -->
-    <g filter="url(#chipShadow)">
+    <!-- Subtitle Glass Chip -->
+    <g filter="url(#${chipBlurId}) url(#chipNoise)">
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-            fill="#000000" fill-opacity="${chipOpacity}" />
-      <!-- subtle frost -->
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-            fill="#ffffff" fill-opacity="0.10" filter="url(#${chipBlurId})"/>
+        fill="${tint}" opacity="${chipOpacity}"/>
+      <!-- inner highlight (top) -->
+      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${R-1}"
+        fill="url(#chipInnerHi)"/>
     </g>
-    <text x="${W / 2}" y="${subBaselineY}" text-anchor="middle"
+
+    <!-- Subtitle text (middle centered) -->
+    <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
+      dominant-baseline="middle" alignment-baseline="middle"
       font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="#f5f7f9" letter-spacing="0.2"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.0; stroke-opacity:0.20">
+      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
+      style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
       ${escSVG(subline)}
     </text>
 
-    <!-- CTA pill -->
-    ${pillBtn(W / 2, ctaY, cta, 30)}
+    ${pillBtn(W / 2, ctaY, cta, 32)}
   `;
 }
 
-/* ---------- Subline crafting (now sanitized) ---------- */
+/* ---------- Subline crafting ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const pick = (s) => String(s || '').replace(/[^\w\s\-']/g, '').trim().toLowerCase();
   const defaults = {
-    fashion: ['Better materials, made to last','Everyday pieces, easy to wear'],
-    cosmetics: ['Gentle formulas for daily care','Simple routine, better skin'],
-    hair: ['Clean care for healthy hair','Easy styling, everyday'],
-    food: ['Great taste, less hassle','Fresh flavor, easy meals'],
-    pets: ['Simple treats, happy pets','Daily care made easy'],
-    electronics: ['Reliable tech for daily use','Simple design, solid performance'],
-    home: ['Upgrade your space with ease','Clean look, practical use'],
-    coffee: ['Balanced flavor, smooth finish','Better coffee breaks'],
-    fitness: ['Made for your workouts','Durable gear for training'],
-    generic: ['Made for everyday use','Simple design, better value'],
-  }[category] || ['Made for everyday use'];
-
+    fashion: ['natural materials, better made','everyday pieces, built to last'],
+    cosmetics: ['gentle formulas for daily care','simple routine, better skin'],
+    hair: ['better hair care, less effort','clean formulas, easy styling'],
+    food: ['great taste, less hassle','fresh flavor, easy meals'],
+    pets: ['care for your pet daily','simple treats, happy pets'],
+    electronics: ['reliable everyday tech','simple design, solid performance'],
+    home: ['upgrade your space easily','clean looks, practical use'],
+    coffee: ['balanced flavor, smooth finish','better coffee breaks'],
+    fitness: ['made for your workouts','durable gear, daily training'],
+    generic: ['made for everyday use','simple design, better value'],
+  }[category] || ['made for everyday use'];
   const candidates = [answers.mainBenefit, answers.description, answers.productType].map(pick).filter(Boolean);
   let line = candidates[0] || defaults[0];
-
-  // Keep it to a sensible length before normalization
+  line = line.replace(/\bquality of fashion\b/gi, 'better made');
+  // Basic grammar smoothing
+  line = line.replace(/\bis the best\b/gi, 'is great').replace(/\bare the best\b/gi, 'are great');
   const words = line.split(/\s+/).filter(Boolean);
-  while (words.length > 10) words.pop();
-  line = words.join(' ');
-
-  // Sanitize awkward phrasing and Title Case it
-  return normalizeSubline(line, category);
+  while (words.length > 9) words.pop();
+  while (words.length < 5 && (candidates[1] || defaults[1])) {
+    const add = (candidates[1] || defaults[1]).split(/\s+/).filter(Boolean);
+    while (words.length < 5 && add.length) words.push(add.shift());
+    break;
+  }
+  return words.join(' ');
 }
 
 /* ---------- Overlay builder ---------- */
@@ -899,15 +894,13 @@ async function buildOverlayImage({
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
-
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  const rawSubline = craftSubline(answers, category);
-  const subline = rawSubline; // already Title Cased in normalizeSubline
+  const subline = toTitleCase(craftSubline(answers, category)); // Title Case
   const cta = cleanCTA(ctaHint) || 'LEARN MORE';
 
   const overlaySVG = Buffer.from(
     `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
-      W, H, title, subline, cta, metrics: analysis.metrics,
+      W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis,
     })}</svg>`
   );
   const outDir = ensureGeneratedDir();
@@ -991,13 +984,13 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, layout: 'optionA', adaptive: true },
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true },
         });
         return publicUrl;
       } catch {
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, layout: 'optionA', adaptive: false },
+          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, glass: true },
         });
         return baseUrl;
       }
@@ -1016,7 +1009,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, layout: 'optionA', adaptive: true },
+          meta: { category, keyword, placeholder: true, i, glass: true },
         });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
@@ -1049,7 +1042,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, layout: 'optionA', adaptive: true } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, glass: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1073,7 +1066,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, layout: 'optionA', adaptive: true } });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, glass: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
