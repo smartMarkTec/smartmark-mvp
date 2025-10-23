@@ -777,13 +777,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
   })();
 
   // --- Subhead chip sizing (bigger) + true vertical centering ---
-const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26); // start 42px, min 26px
-const subTextW = estWidth(subline, SUB_FS);
-const subPadX = 40;                         // a touch more horizontal breathing room
-const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-const subH = Math.max(48, SUB_FS + 24);     // slightly taller so bigger type sits centered
-const subX = Math.round((W - subW) / 2);
-
+  const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26); // start 42px, min 26px
+  const subTextW = estWidth(subline, SUB_FS);
+  const subPadX = 40;                         // a touch more horizontal breathing room
+  const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
+  const subH = Math.max(48, SUB_FS + 24);     // slightly taller so bigger type sits centered
+  const subX = Math.round((W - subW) / 2);
 
   // Rhythm
   const headlineY = 96 + headlineFs * 0.38;
@@ -798,25 +797,30 @@ const subX = Math.round((W - subW) / 2);
   const t = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
   let chipOpacity = 0.20;
-let chipBlurId = 'chipBlurLow';
-if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
-else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+  let chipBlurId = 'chipBlurLow';
+  if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
+  else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
 
-// If mid band very bright, raise chip opacity slightly
-if (metrics.midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.32);
-
-  if (midLum <= 90)  chipOpacity = Math.max(0.16, chipOpacity - 0.02);
+  // If mid band very bright, raise chip opacity slightly
+  if ((metrics?.midLum ?? midLum) >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.32);
+  if (midLum <= 90) chipOpacity = Math.max(0.16, chipOpacity - 0.02);
 
   // Ambient tint from photo average color (very subtle)
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tint = `rgba(${avg.r},${avg.g},${avg.b},0.08)`;
 
-  // was: const GAP_SUB_TO_CTA = 60;
-const GAP_SUB_TO_CTA = 78; // lower CTA ~18px
-const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
+  // Lower CTA a bit more
+  const GAP_SUB_TO_CTA = 92;
+  const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   // Corners
   const R = 6;
+
+  // ---- Subtitle contrast guard (keeps size/position; improves legibility) ----
+  const subTextFill      = midLum >= 175 ? '#111111' : '#ffffff';
+  const subStrokeColor   = midLum >= 175 ? '#ffffff' : '#000000';
+  const subStrokeOpacity = midLum >= 175 ? 0.35 : 0.55;
+  const subLetterSpacing = 0.3;
 
   // Build
   return `${defs}
@@ -837,22 +841,23 @@ const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
         fill="${tint}" opacity="${chipOpacity}"/>
       <!-- inner highlight (top) -->
-      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${R-1}"
+      <rect x="${subX + 1}" y="${subRectY + 1}" width="${subW - 2}" height="${Math.max(8, subH * 0.45)}" rx="${R - 1}"
         fill="url(#chipInnerHi)"/>
     </g>
 
-    <!-- Subtitle text (middle centered) -->
+    <!-- Subtitle text (size/centering unchanged; adaptive colors for contrast) -->
     <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
       dominant-baseline="middle" alignment-baseline="middle"
       font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
+      font-size="${SUB_FS}" font-weight="700" fill="${subTextFill}" letter-spacing="${subLetterSpacing}"
+      style="paint-order: stroke fill; stroke:${subStrokeColor}; stroke-width:1.2; stroke-opacity:${subStrokeOpacity}">
       ${escSVG(subline)}
     </text>
 
     ${pillBtn(W / 2, ctaY, cta, 32)}
   `;
 }
+
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
