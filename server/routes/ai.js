@@ -740,6 +740,7 @@ function svgDefs(brandColor) {
 
 const LIGHT = '#f5f7f9';
 
+// CTA pill with softer shadow; text nudged lower for true visual center
 const pillBtn = (x, y, text, fs = 30) => {
   fs = Math.max(24, Math.min(fs, 36));
   const w = Math.min(880, estWidth(text, fs) + 80);
@@ -748,6 +749,7 @@ const pillBtn = (x, y, text, fs = 30) => {
   return `
     <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
       <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
+      <!-- was y="13"; drop a touch for better optical centering -->
       <text x="${w / 2}" y="16" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
             font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
@@ -755,6 +757,7 @@ const pillBtn = (x, y, text, fs = 30) => {
       </text>
     </g>`;
 };
+
 
 
 /* --------- Glass overlay creative --------- */
@@ -776,12 +779,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
     return 0.20;
   })();
 
-  // --- Subhead chip sizing (bigger) + true vertical centering ---
+  // --- Subhead chip sizing (kept) + true vertical centering ---
   const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26); // start 42px, min 26px
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 40;                         // a touch more horizontal breathing room
+  const subPadX = 40;
   const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-  const subH = Math.max(48, SUB_FS + 24);     // slightly taller so bigger type sits centered
+  const subH = Math.max(48, SUB_FS + 24);
   const subX = Math.round((W - subW) / 2);
 
   // Rhythm
@@ -793,30 +796,30 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
   const subCenterY = subRectY + Math.round(subH / 2);
   const subBaselineY = subCenterY;
 
-  // Chip adaptivity by texture/brightness
+  // Chip adaptivity (stronger glass look)
   const t = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.20;
+  let chipOpacity = 0.26;                   // was 0.20 → slightly stronger base
   let chipBlurId = 'chipBlurLow';
-  if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
-  else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+  if (t > 35 && t <= 50) { chipOpacity = 0.30; chipBlurId = 'chipBlurMed'; }
+  else if (t > 50)        { chipOpacity = 0.34; chipBlurId = 'chipBlurHigh'; }
 
-  // If mid band very bright, raise chip opacity slightly
-  if ((metrics?.midLum ?? midLum) >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.32);
-  if (midLum <= 90) chipOpacity = Math.max(0.16, chipOpacity - 0.02);
+  // If mid band very bright, raise chip opacity a bit more
+  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.40);
+  if (midLum <= 90)  chipOpacity = Math.max(0.22, chipOpacity - 0.02);
 
   // Ambient tint from photo average color (very subtle)
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tint = `rgba(${avg.r},${avg.g},${avg.b},0.08)`;
 
-  // Lower CTA a bit more
+  // Lower CTA a bit more (no change to subtitle)
   const GAP_SUB_TO_CTA = 92;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   // Corners
   const R = 6;
 
-  // ---- Subtitle contrast guard (keeps size/position; improves legibility) ----
+  // ---- Subtitle contrast guard (UNCHANGED) ----
   const subTextFill      = midLum >= 175 ? '#111111' : '#ffffff';
   const subStrokeColor   = midLum >= 175 ? '#ffffff' : '#000000';
   const subStrokeOpacity = midLum >= 175 ? 0.35 : 0.55;
@@ -836,16 +839,19 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
       ${escSVG(title)}
     </text>
 
-    <!-- Subtitle Glass Chip -->
+    <!-- Subtitle Glass Chip (more glassy: stronger blur + slight frost layer) -->
     <g filter="url(#${chipBlurId}) url(#chipNoise)">
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
         fill="${tint}" opacity="${chipOpacity}"/>
+      <!-- subtle frost to boost separation without heaviness -->
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
+        fill="#ffffff" opacity="0.06"/>
       <!-- inner highlight (top) -->
       <rect x="${subX + 1}" y="${subRectY + 1}" width="${subW - 2}" height="${Math.max(8, subH * 0.45)}" rx="${R - 1}"
         fill="url(#chipInnerHi)"/>
     </g>
 
-    <!-- Subtitle text (size/centering unchanged; adaptive colors for contrast) -->
+    <!-- Subtitle text (style/centering UNCHANGED) -->
     <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
       dominant-baseline="middle" alignment-baseline="middle"
       font-family="'Times New Roman', Times, serif"
@@ -857,6 +863,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
     ${pillBtn(W / 2, ctaY, cta, 32)}
   `;
 }
+
 
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
