@@ -763,7 +763,7 @@ const pillBtn = (x, y, text, fs = 30) => {
 
 
 
-/* --------- Glass overlay creative (true glass chips, fixed pillBtn) --------- */
+/* --------- Glass overlay creative (true glass chips + safe fallback) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -779,7 +779,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     topLum >= 160 ? 0.30 :
     topLum >= 130 ? 0.26 : 0.20;
 
-  // Subtitle chip sizing (kept as tuned)
+  // Subhead chip sizing (kept)
   const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
   const subPadX  = 40;
@@ -792,23 +792,22 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const GAP_HL_TO_SUB = 32;
 
   // Chip center positioning
-  const subRectY    = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
-  const subCenterY  = subRectY + Math.round(subH / 2);
+  const subRectY     = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
+  const subCenterY   = subRectY + Math.round(subH / 2);
   const subBaselineY = subCenterY;
 
   // Stronger glass adaptivity
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
-
   let chipOpacity = 0.28;
   if (t > 35 && t <= 50) chipOpacity = 0.32;
   else if (t > 50)       chipOpacity = 0.36;
   if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.42);
   if (midLum <=  90) chipOpacity = Math.max(0.24, chipOpacity - 0.02);
 
-  // Blur strength
-  const BLUR_SUB = 20;  // subtitle chip blur
-  const BLUR_HL  = 16;  // headline chip blur
+  // Blur strength (kept reasonable for perf)
+  const BLUR_SUB = 16;
+  const BLUR_HL  = 14;
 
   // Light tint from image avg so it never looks gray
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
@@ -825,16 +824,19 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const hlX     = Math.round((W - hlW) / 2);
   const hlRectY = Math.round(headlineY - hlH / 2);
 
-  // CTA vertical (lowered per your request)
+  // CTA vertical (you wanted it lower)
   const GAP_SUB_TO_CTA = 92;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   const LIGHT = '#ffffff';
+  const hasBase = !!baseDataUri; // fallback if not provided
 
   return `
   <defs>
-    <!-- Base image so we can blur the *real* background under the glass -->
+    ${hasBase ? `
+    <!-- Base image so we can blur the real background under the glass -->
     <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
+    ` : ''}
 
     <!-- Glass blurs -->
     <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
@@ -894,7 +896,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
 
   <!-- Headline glass -->
   <g clip-path="url(#clipHl)" filter="url(#chipFalloff)">
-    <use href="#bg" filter="url(#glassBlurHl)"/>
+    ${hasBase ? `<use href="#bg" filter="url(#glassBlurHl)"/>` : ``}
     <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"
       fill="${tintRGBA}" opacity="${(chipOpacity*0.9).toFixed(2)}"/>
     <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(10, hlH*0.45)}" rx="${Math.max(0,R-1)}"
@@ -914,7 +916,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
 
   <!-- Subtitle glass -->
   <g clip-path="url(#clipSub)" filter="url(#chipFalloff)">
-    <use href="#bg" filter="url(#glassBlurSub)"/>
+    ${hasBase ? `<use href="#bg" filter="url(#glassBlurSub)"/>` : ``}
     <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
       fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
     <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${Math.max(0,R-1)}"
@@ -924,11 +926,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     </g>
   </g>
 
-  <!-- Subtitle text (exactly as you liked) -->
+  <!-- Subtitle text (your exact look) -->
   <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
     font-family="'Times New Roman', Times, serif"
-    font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
+    font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.3"
     style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
     ${escSVG(subline)}
   </text>
@@ -936,6 +938,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   ${pillBtn(W / 2, ctaY, cta, 32)}
   `;
 }
+
 
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
@@ -1019,38 +1022,44 @@ function craftSubline(answers = {}, category = 'generic') {
   return words.join(' ');
 }
 
-/* ---------- Overlay builder ---------- */
+/* ---------- Overlay builder (now passes baseDataUri; includes safe fallback) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
 }) {
   const W = 1200, H = 628;
 
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 9000 });
-  const analysis = await analyzeImageForPlacement(imgRes.data);
+  // Fetch with a slightly longer timeout (stock CDNs can be spiky)
+  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
 
-  // Base raster for final composite
-  const base = sharp(imgRes.data)
+  // Pre-resize once and keep the buffer for both: composing and data-URI blur source
+  const resizedBuffer = await sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-    .removeAlpha();
+    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
+    .toBuffer();
 
-  // Make the original image available inside SVG so blur uses the real photo under the chips
-  const baseDataUri = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
+  const analysis = await analyzeImageForPlacement(resizedBuffer);
+  const baseDataUri = `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`;
+  const base = sharp(resizedBuffer).removeAlpha();
 
   const title   = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   const subline = toTitleCase(craftSubline(answers, category));  // Title Case
   const cta     = cleanCTA(ctaHint) || 'LEARN MORE';
 
-  const overlaySVG = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${
-      svgOverlayCreative({
-        W, H, title, subline, cta,
-        brandColor: analysis.brandColor,
-        metrics: analysis,
-        baseDataUri,                        // ← pass data URI for true glass blur
-      })
-    }</svg>`
-  );
+  // Build SVG overlay with true-glass capability; if anything fails, we’ll fall back
+  let overlaySVG;
+  try {
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
+      W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri,
+    })}</svg>`;
+    overlaySVG = Buffer.from(svg);
+  } catch (e) {
+    // Hard fallback: minimal overlay without baseDataUri usage
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
+      W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri: '',
+    })}</svg>`;
+    overlaySVG = Buffer.from(svg);
+  }
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
@@ -1068,7 +1077,6 @@ async function buildOverlayImage({
     filename: file,
   };
 }
-
 
 /* ------------------------------- Utils ------------------------------- */
 async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB = 15) {
