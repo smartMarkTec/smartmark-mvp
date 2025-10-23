@@ -741,23 +741,21 @@ function svgDefs(brandColor) {
 const LIGHT = '#f5f7f9';
 
 const pillBtn = (x, y, text, fs = 30) => {
-  fs = Math.max(26, Math.min(fs, 36));
+  fs = Math.max(24, Math.min(fs, 36));
   const w = Math.min(880, estWidth(text, fs) + 80);
-  const h = 64;
+  const h = 62;
   const x0 = x - w / 2;
   return `
     <g transform="translate(${x0}, ${y - Math.floor(h * 0.55)})" filter="url(#btnShadow)">
-      <g>
-        <rect x="0" y="-18" width="${w}" height="${h}" rx="32" fill="#0b0d10ee"/>
-        <rect x="1" y="-17" width="${w-2}" height="${h*0.35}" rx="30" fill="url(#ctaHi)"/>
-      </g>
-      <text x="${w / 2}" y="13" text-anchor="middle"
+      <rect x="0" y="-18" width="${w}" height="${h}" rx="31" fill="#0b0d10dd"/>
+      <text x="${w / 2}" y="16" text-anchor="middle"
             font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="0.6">
+            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
         ${escSVG(text)}
       </text>
     </g>`;
 };
+
 
 /* --------- Glass overlay creative --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) {
@@ -800,19 +798,22 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
   const t = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
   let chipOpacity = 0.20;
-  let chipBlurId = 'chipBlurLow';
-  if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
-  else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
-  if (midLum >= 185) chipOpacity = Math.min(chipOpacity + 0.02, 0.30);
+let chipBlurId = 'chipBlurLow';
+if (t > 35 && t <= 50) { chipOpacity = 0.24; chipBlurId = 'chipBlurMed'; }
+else if (t > 50)        { chipOpacity = 0.26; chipBlurId = 'chipBlurHigh'; }
+
+// If mid band very bright, raise chip opacity slightly
+if (metrics.midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.32);
+
   if (midLum <= 90)  chipOpacity = Math.max(0.16, chipOpacity - 0.02);
 
   // Ambient tint from photo average color (very subtle)
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tint = `rgba(${avg.r},${avg.g},${avg.b},0.08)`;
 
-  // CTA position
-  const GAP_SUB_TO_CTA = 60;
-  const ctaY = Math.round(subRectY + subH + GAP_SUB_TO_CTA);
+  // was: const GAP_SUB_TO_CTA = 60;
+const GAP_SUB_TO_CTA = 78; // lower CTA ~18px
+const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   // Corners
   const R = 6;
@@ -853,33 +854,84 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
   `;
 }
 
-/* ---------- Subline crafting ---------- */
+/* ---------- Subline crafting (grammar-safe) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
-  const pick = (s) => String(s || '').replace(/[^\w\s\-']/g, '').trim().toLowerCase();
+  const clean = (s) =>
+    String(s || '')
+      .replace(/[^\w\s\-']/g, ' ')   // strip symbols
+      .replace(/\s+/g, ' ')          // collapse spaces
+      .trim()
+      .toLowerCase();
+
+  // Natural, short defaults written as noun/verb taglines
   const defaults = {
-    fashion: ['natural materials, better made','everyday pieces, built to last'],
-    cosmetics: ['gentle formulas for daily care','simple routine, better skin'],
-    hair: ['better hair care, less effort','clean formulas, easy styling'],
-    food: ['great taste, less hassle','fresh flavor, easy meals'],
-    pets: ['care for your pet daily','simple treats, happy pets'],
-    electronics: ['reliable everyday tech','simple design, solid performance'],
-    home: ['upgrade your space easily','clean looks, practical use'],
-    coffee: ['balanced flavor, smooth finish','better coffee breaks'],
-    fitness: ['made for your workouts','durable gear, daily training'],
-    generic: ['made for everyday use','simple design, better value'],
+    fashion:      ['natural materials, made to last', 'everyday pieces built to last'],
+    cosmetics:    ['gentle formulas for daily care', 'simple routine, better skin'],
+    hair:         ['better hair care, less effort', 'clean formulas, easy styling'],
+    food:         ['great taste with less hassle', 'fresh flavor, easy meals'],
+    pets:         ['care for your pet daily', 'simple treats for happy pets'],
+    electronics:  ['reliable everyday tech', 'simple design, solid performance'],
+    home:         ['upgrade your space easily', 'clean looks, practical use'],
+    coffee:       ['balanced flavor, smooth finish', 'better coffee breaks'],
+    fitness:      ['made for daily training', 'durable gear for workouts'],
+    generic:      ['made for everyday use', 'simple design, better value'],
   }[category] || ['made for everyday use'];
-  const candidates = [answers.mainBenefit, answers.description, answers.productType].map(pick).filter(Boolean);
+
+  // Candidate sources from the form
+  const candidates = [
+    clean(answers.mainBenefit),
+    clean(answers.description),
+    clean(answers.productType),
+  ].filter(Boolean);
+
+  // Start with the strongest signal or a category default
   let line = candidates[0] || defaults[0];
-  line = line.replace(/\bquality of fashion\b/gi, 'better made');
-  // Basic grammar smoothing
-  line = line.replace(/\bis the best\b/gi, 'is great').replace(/\bare the best\b/gi, 'are great');
-  const words = line.split(/\s+/).filter(Boolean);
-  while (words.length > 9) words.pop();
-  while (words.length < 5 && (candidates[1] || defaults[1])) {
-    const add = (candidates[1] || defaults[1]).split(/\s+/).filter(Boolean);
-    while (words.length < 5 && add.length) words.push(add.shift());
-    break;
+
+  // --- Grammar & wording normalizers ---
+  // remove weird “quality of …” constructs
+  line = line.replace(/\bquality of\b/gi, '').trim();
+
+  // tone down “is/are the best”
+  line = line.replace(/\bis the best\b/gi, 'is great')
+             .replace(/\bare the best\b/gi, 'are great');
+
+  // friendlier phrases
+  line = line.replace(/\bbetter made\b/gi, 'made to last')
+             .replace(/\bwell made\b/gi, 'made to last')
+             .replace(/\bhigh quality\b/gi, 'great quality');
+
+  // material(s)
+  line = line.replace(/\bnatural material\b/gi, 'natural materials');
+
+  // avoid “our … uses … materials” stiffness -> “made with … materials”
+  line = line.replace(/\bour\b/gi, '').trim();
+  line = line.replace(/\buses natural materials\b/gi, 'is made with natural materials');
+
+  // collapse leftover doubles
+  line = line.replace(/\b(\w+)\s+\1\b/gi, '$1').trim();
+
+  // Token-level shaping: keep it concise (5–9 words)
+  let words = line.split(/\s+/).filter(Boolean);
+
+  // If the sentence begins with a dangling conjunction/article, trim it.
+  while (words[0] && /^(and|or|but|the|a|an)$/.test(words[0])) words.shift();
+
+  // Cap length
+  if (words.length > 9) words = words.slice(0, 9);
+
+  // If too short, pad with secondary signal or category fallback
+  if (words.length < 5) {
+    const filler = clean(candidates[1] || defaults[1] || '')
+      .replace(/\bquality of\b/gi, '')
+      .replace(/\bnatural material\b/gi, 'natural materials')
+      .split(/\s+/)
+      .filter(Boolean);
+    while (words.length < 5 && filler.length) words.push(filler.shift());
   }
+
+  // Final pass: remove terminal “and/with/of”
+  while (words.length && /^(and|with|of)$/.test(words[words.length - 1])) words.pop();
+
   return words.join(' ');
 }
 
@@ -894,8 +946,9 @@ async function buildOverlayImage({
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
+
   const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  const subline = toTitleCase(craftSubline(answers, category)); // Title Case
+  const subline = toTitleCase(craftSubline(answers, category)); // Title Case applied here
   const cta = cleanCTA(ctaHint) || 'LEARN MORE';
 
   const overlaySVG = Buffer.from(
@@ -903,6 +956,7 @@ async function buildOverlayImage({
       W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis,
     })}</svg>`
   );
+
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await base
@@ -910,12 +964,14 @@ async function buildOverlayImage({
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
   maybeGC();
+
   return {
     publicUrl: mediaPath(file),
     absoluteUrl: absolutePublicUrl(mediaPath(file)),
     filename: file,
   };
 }
+
 
 /* ------------------------------- Utils ------------------------------- */
 async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB = 15) {
