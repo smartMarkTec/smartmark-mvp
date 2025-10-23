@@ -763,124 +763,177 @@ const pillBtn = (x, y, text, fs = 30) => {
 
 
 
-/* --------- Glass overlay creative --------- */
-function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) {
-  const defs = svgDefs(brandColor);
+/* --------- Glass overlay creative (true glass chips, fixed pillBtn) --------- */
+function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing/placement (unchanged)
+  // Headline sizing/placement
   const HL_FS_START = 68;
   let headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Adaptive top scrim opacity (headline region) — unchanged
-  const scrim = (() => {
-    const topLum = metrics?.topLum ?? 150;
-    if (topLum >= 190) return 0.36;
-    if (topLum >= 160) return 0.30;
-    if (topLum >= 130) return 0.26;
-    return 0.20;
-  })();
-
-  // ===== Headline GLASS CHIP (new) =====
-  const t = metrics?.texture ?? 30;
+  // Adaptive top scrim for headline legibility
   const topLum = metrics?.topLum ?? 150;
+  const scrim =
+    topLum >= 190 ? 0.36 :
+    topLum >= 160 ? 0.30 :
+    topLum >= 130 ? 0.26 : 0.20;
 
-  const hlTextW  = estWidth(title, headlineFs);
-  const HL_PAD_X = 34;                 // slim horizontal padding
-  const HL_PAD_Y = 12;                 // slim vertical padding
-  const hlW = Math.min(maxW * 0.85, hlTextW + HL_PAD_X * 2);
-  const hlH = Math.max(56, Math.round(headlineFs + HL_PAD_Y * 2));
-  const hlX = Math.round((W - hlW) / 2);
-
-  // Baseline for the headline text
-  const headlineY = 96 + headlineFs * 0.38;
-
-  // Position the chip so text sits optically centered in it
-  const hlY = Math.round(headlineY - hlH * 0.62);
-
-  // Glass strength (lighter than subtitle so it doesn’t feel heavy)
-  let hlOpacity = 0.18;
-  let hlBlurId  = 'chipBlurLow';
-  if (t > 35 || topLum > 170) { hlOpacity = 0.22; hlBlurId = 'chipBlurMed'; }
-  if (t > 55 || topLum > 190) { hlOpacity = 0.26; hlBlurId = 'chipBlurHigh'; }
-
-  // Ambient tint from photo average — super subtle
-  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-  const hlTint = `rgba(${avg.r},${avg.g},${avg.b},0.07)`;
-
-  // ===== Subtitle chip (your kept settings) =====
+  // Subtitle chip sizing (kept as tuned)
   const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX = 40;
-  const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
-  const subH = Math.max(48, SUB_FS + 24);
-  const subX = Math.round((W - subW) / 2);
+  const subPadX  = 40;
+  const subW     = Math.min(maxW * 0.75, subTextW + subPadX * 2);
+  const subH     = Math.max(48, SUB_FS + 24);
+  const subX     = Math.round((W - subW) / 2);
 
+  // Rhythm
+  const headlineY   = 96 + headlineFs * 0.38;
   const GAP_HL_TO_SUB = 32;
-  const subRectY = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
-  const subCenterY = subRectY + Math.round(subH / 2);
+
+  // Chip center positioning
+  const subRectY    = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
+  const subCenterY  = subRectY + Math.round(subH / 2);
   const subBaselineY = subCenterY;
 
-  // Subtitle glass tuning (slightly stronger than headline)
+  // Stronger glass adaptivity
+  const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.26;
-  let chipBlurId = 'chipBlurLow';
-  if (t > 35 && t <= 50) { chipOpacity = 0.30; chipBlurId = 'chipBlurMed'; }
-  else if (t > 50)        { chipOpacity = 0.34; chipBlurId = 'chipBlurHigh'; }
-  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.40);
-  if (midLum <=  90) chipOpacity = Math.max(0.22, chipOpacity - 0.02);
 
-  const tint = `rgba(${avg.r},${avg.g},${avg.b},0.08)`;
+  let chipOpacity = 0.28;
+  if (t > 35 && t <= 50) chipOpacity = 0.32;
+  else if (t > 50)       chipOpacity = 0.36;
+  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.42);
+  if (midLum <=  90) chipOpacity = Math.max(0.24, chipOpacity - 0.02);
 
-  // CTA spacing (your latest)
-  const GAP_SUB_TO_CTA = 92;
-  const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
+  // Blur strength
+  const BLUR_SUB = 20;  // subtitle chip blur
+  const BLUR_HL  = 16;  // headline chip blur
+
+  // Light tint from image avg so it never looks gray
+  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
+  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.35).toFixed(2)})`;
 
   // Corners
   const R = 6;
 
-  return `${defs}
-    <!-- soft top scrim under very bright headers -->
-    <g opacity="${scrim}">
-      <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
+  // Headline chip geometry (tight bar behind headline)
+  const hlTextW = estWidth(title, headlineFs);
+  const hlPadX  = 28;
+  const hlW     = Math.min(maxW * 0.82, hlTextW + hlPadX * 2);
+  const hlH     = Math.max(54, headlineFs + 20);
+  const hlX     = Math.round((W - hlW) / 2);
+  const hlRectY = Math.round(headlineY - hlH / 2);
+
+  // CTA vertical (lowered per your request)
+  const GAP_SUB_TO_CTA = 92;
+  const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
+
+  const LIGHT = '#ffffff';
+
+  return `
+  <defs>
+    <!-- Base image so we can blur the *real* background under the glass -->
+    <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
+
+    <!-- Glass blurs -->
+    <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" />
+      <feColorMatrix type="matrix" values="
+        1.08 0    0    0  0
+        0    1.08 0    0  0
+        0    0    1.08 0  0
+        0    0    0    1  0"/>
+    </filter>
+    <filter id="glassBlurHl" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" />
+      <feColorMatrix type="matrix" values="
+        1.06 0    0    0  0
+        0    1.06 0    0  0
+        0    0    1.06 0  0
+        0    0    0    1  0"/>
+    </filter>
+
+    <!-- Inner highlight -->
+    <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="rgba(255,255,255,0.38)"/>
+      <stop offset="55%" stop-color="rgba(255,255,255,0.06)"/>
+      <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+    </linearGradient>
+
+    <!-- Soft falloff for thickness -->
+    <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="1.2" stdDeviation="2.2" flood-color="rgba(0,0,0,0.22)" flood-opacity="1"/>
+    </filter>
+
+    <!-- Micro-noise -->
+    <filter id="chipNoise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
+      <feColorMatrix type="saturate" values="0" />
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 0 0 0.015 0.03"/>
+      </feComponentTransfer>
+      <feBlend mode="overlay" in2="SourceGraphic"/>
+    </filter>
+
+    <!-- Headline scrim -->
+    <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="rgba(0,0,0,0.65)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
+    </linearGradient>
+
+    <!-- Clip paths -->
+    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
+    <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
+  </defs>
+
+  <!-- Headline scrim -->
+  <g opacity="${scrim}">
+    <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
+  </g>
+
+  <!-- Headline glass -->
+  <g clip-path="url(#clipHl)" filter="url(#chipFalloff)">
+    <use href="#bg" filter="url(#glassBlurHl)"/>
+    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"
+      fill="${tintRGBA}" opacity="${(chipOpacity*0.9).toFixed(2)}"/>
+    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(10, hlH*0.45)}" rx="${Math.max(0,R-1)}"
+      fill="url(#chipInnerHi)"/>
+    <g filter="url(#chipNoise)">
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(255,255,255,0.02)"/>
     </g>
+  </g>
 
-    <!-- Headline glass chip -->
-    <g filter="url(#${hlBlurId}) url(#chipNoise)">
-      <rect x="${hlX}" y="${hlY}" width="${hlW}" height="${hlH}" rx="${R}"
-        fill="${hlTint}" opacity="${hlOpacity}"/>
-      <!-- subtle inner highlight to sell the glass edge -->
-      <rect x="${hlX+1}" y="${hlY+1}" width="${hlW-2}" height="${Math.max(8, hlH*0.45)}" rx="${R-1}"
-        fill="url(#chipInnerHi)"/>
+  <!-- Headline text -->
+  <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
+    font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+    font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
+    style="paint-order: stroke; stroke:#000; stroke-width:1.2; stroke-opacity:0.18">
+    ${escSVG(title)}
+  </text>
+
+  <!-- Subtitle glass -->
+  <g clip-path="url(#clipSub)" filter="url(#chipFalloff)">
+    <use href="#bg" filter="url(#glassBlurSub)"/>
+    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
+      fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
+    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${Math.max(0,R-1)}"
+      fill="url(#chipInnerHi)"/>
+    <g filter="url(#chipNoise)">
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(255,255,255,0.02)"/>
     </g>
+  </g>
 
-    <!-- Headline text (keeps your white + outline look) -->
-    <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
-      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
-      filter="url(#textStroke)">
-      ${escSVG(title)}
-    </text>
+  <!-- Subtitle text (exactly as you liked) -->
+  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
+    dominant-baseline="middle" alignment-baseline="middle"
+    font-family="'Times New Roman', Times, serif"
+    font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
+    style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
+    ${escSVG(subline)}
+  </text>
 
-    <!-- Subtitle chip -->
-    <g filter="url(#${chipBlurId}) url(#chipNoise)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-        fill="${tint}" opacity="${chipOpacity}"/>
-      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}"
-        height="${Math.max(8, subH*0.45)}" rx="${R-1}" fill="url(#chipInnerHi)"/>
-    </g>
-
-    <!-- Subtitle text (kept exactly as you liked) -->
-    <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
-      dominant-baseline="middle" alignment-baseline="middle"
-      font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.3"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
-      ${escSVG(subline)}
-    </text>
-
-    ${pillBtn(W / 2, ctaY, cta, 32)}
+  ${pillBtn(W / 2, ctaY, cta, 32)}
   `;
 }
 
@@ -972,28 +1025,41 @@ async function buildOverlayImage({
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
 }) {
   const W = 1200, H = 628;
+
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 9000 });
   const analysis = await analyzeImageForPlacement(imgRes.data);
+
+  // Base raster for final composite
   const base = sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .removeAlpha();
 
-  const title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  const subline = toTitleCase(craftSubline(answers, category)); // Title Case applied here
-  const cta = cleanCTA(ctaHint) || 'LEARN MORE';
+  // Make the original image available inside SVG so blur uses the real photo under the chips
+  const baseDataUri = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
+
+  const title   = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
+  const subline = toTitleCase(craftSubline(answers, category));  // Title Case
+  const cta     = cleanCTA(ctaHint) || 'LEARN MORE';
 
   const overlaySVG = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
-      W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis,
-    })}</svg>`
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${
+      svgOverlayCreative({
+        W, H, title, subline, cta,
+        brandColor: analysis.brandColor,
+        metrics: analysis,
+        baseDataUri,                        // ← pass data URI for true glass blur
+      })
+    }</svg>`
   );
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
+
   await base
     .composite([{ input: overlaySVG, top: 0, left: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
+
   maybeGC();
 
   return {
