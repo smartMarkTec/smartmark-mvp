@@ -33,6 +33,7 @@ router.use((req, res, next) => {
 /* ---------------- Memory discipline + concurrency gate --------------- */
 const sharp = require('sharp');
 try {
+  // Small cache to avoid Render 512MB OOM, single worker for predictability
   sharp.cache({ memory: 16, files: 0, items: 0 });
   sharp.concurrency(1);
 } catch {}
@@ -79,6 +80,21 @@ const heavyLimiter = basicRateLimit({ windowMs: 5 * 60 * 1000, max: 60 });
 
 /* ------------------------------ Deps -------------------------------- */
 const axios = require('axios');
+const https = require('https');
+const http  = require('http');
+
+// 🔸 Keep-alive axios client used for all outbound HTTP (Pexels, image fetches)
+const ax = axios.create({
+  timeout: 15000, // sane default; individual calls can override
+  httpAgent:  new http.Agent({  keepAlive: true, maxSockets: 25 }),
+  httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 25 }),
+  maxRedirects: 3,
+  // small retry shim for transient ECONNRESET/ETIMEDOUT
+  transitional: { clarifyTimeoutError: true }
+});
+// Export on module scope for reuse below in this file
+module.exports.ax = ax;
+
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -169,7 +185,7 @@ async function uploadVideoToAdAccount(
   form.append('file_url', fileUrl);
   form.append('name', name);
   form.append('description', description);
-  const resp = await axios.post(url, form, {
+  const resp = await ax.post(url, form, {
     headers: form.getHeaders(),
     params: { access_token: userAccessToken },
     timeout: 15000,
@@ -221,6 +237,7 @@ router.get('/media/:file', async (req, res) => {
   }
 });
 function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
+
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
@@ -806,8 +823,8 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   if (midLum <=  90) chipOpacity = Math.max(0.24, chipOpacity - 0.02);
 
   // Blur strength (kept reasonable for perf)
-  const BLUR_SUB = 16;
-  const BLUR_HL  = 14;
+  const BLUR_SUB = 14;
+  const BLUR_HL  = 12;
 
   // Light tint from image avg so it never looks gray
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
@@ -1116,23 +1133,26 @@ router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
 /* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
+
+  // Give the request enough time end-to-end (client also bumped to 60s)
   try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(45000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(45000);
+    if (typeof res.setTimeout === 'function') res.setTimeout(65000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(65000);
   } catch {}
 
   try {
-    const { regenerateToken = '' } = req.body;
-    const top = req.body || {};
-    const answers = top.answers || top;
-    const url = answers.url || top.url || '';
-    const industry = answers.industry || top.industry || '';
-    const category = resolveCategory(answers || {});
-    const keyword = getImageKeyword(industry, url);
+    const { regenerateToken = '' } = req.body || {};
+    const top       = req.body || {};
+    const answers   = top.answers || top;
+    const url       = answers.url || top.url || '';
+    const industry  = answers.industry || top.industry || '';
+    const category  = resolveCategory(answers || {});
+    const keyword   = getImageKeyword(industry, url);
 
     const makeOne = async (baseUrl, seed) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
-      const ctaHint = cleanCTA(answers?.cta || '');
+      const ctaHint      = cleanCTA(answers?.cta || '');
+
       try {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
           imageUrl: baseUrl,
@@ -1143,12 +1163,15 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           answers,
           category,
         });
+
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
           meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true },
         });
+
         return publicUrl;
       } catch {
+        // fall back to raw stock if overlay fails for any reason
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
           meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, glass: true },
@@ -1157,21 +1180,19 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       }
     };
 
+    // No key → placeholder flow (2 variations)
     if (!PEXELS_API_KEY) {
       const urls = [], absUrls = [];
       for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
           headlineHint: overlayTitleFromAnswers(answers, category),
           ctaHint: cleanCTA(answers?.cta || ''),
           seed: regenerateToken + '_' + i,
           fallbackHeadline: overlayTitleFromAnswers(answers, category),
           answers, category,
         });
-        await saveAsset({
-          req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { category, keyword, placeholder: true, i, glass: true },
-        });
+        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, glass: true } });
         urls.push(publicUrl); absUrls.push(absoluteUrl);
       }
       return res.json({
@@ -1184,19 +1205,21 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
+    // Try Pexels with keep-alive axios (slightly higher timeout)
     let photos = [];
     try {
-      const r = await axios.get(PEXELS_IMG_BASE, {
+      const r = await ax.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
-        params: { query: keyword, per_page: 8 },
-        timeout: 2200,
+        params:  { query: keyword, per_page: 8 },
+        timeout: 12000, // allow CDN hiccups
       });
-      photos = r.data.photos || [];
+      photos = r.data?.photos || [];
     } catch {
+      // fallback to placeholders if Pexels is slow/down
       const urls = [], absUrls = [];
       for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
           headlineHint: overlayTitleFromAnswers(answers, category),
           ctaHint: cleanCTA(answers?.cta || ''),
           seed: regenerateToken + '_' + i,
@@ -1220,7 +1243,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       const urls = [], absUrls = [];
       for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: 'https://picsum.photos/seed/smartmark' + i + '/1200/628',
+          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
           headlineHint: overlayTitleFromAnswers(answers, category),
           ctaHint: cleanCTA(answers?.cta || ''),
           seed: regenerateToken + '_' + i,
@@ -1240,6 +1263,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
+    // deterministic pick of 2 images
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
 
@@ -1252,7 +1276,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const urls = [], absUrls = [];
     for (let pi = 0; pi < picks.length; pi++) {
       const img = photos[picks[pi]];
-      const baseUrl = img.src.original || img.src.large2x || img.src.large;
+      const baseUrl = img?.src?.original || img?.src?.large2x || img?.src?.large;
       const u = await makeOne(baseUrl, seed + '_' + pi);
       urls.push(u); absUrls.push(absolutePublicUrl(u));
     }
@@ -1273,6 +1297,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
+
 
 /* ------------------------- RECENT (24h window) ------------------------- */
 async function listRecentForOwner(req) {
