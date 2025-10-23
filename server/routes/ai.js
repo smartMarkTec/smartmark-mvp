@@ -769,11 +769,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing/placement
+  // Headline sizing/placement (unchanged)
   const HL_FS_START = 68;
   let headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Adaptive top scrim opacity (headline region)
+  // Adaptive top scrim opacity (headline region) — unchanged
   const scrim = (() => {
     const topLum = metrics?.topLum ?? 150;
     if (topLum >= 190) return 0.36;
@@ -782,95 +782,100 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics }) 
     return 0.20;
   })();
 
-  // --- Subhead chip sizing (kept) + true vertical centering ---
-  const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26); // start 42px, min 26px
+  // ===== Headline GLASS CHIP (new) =====
+  const t = metrics?.texture ?? 30;
+  const topLum = metrics?.topLum ?? 150;
+
+  const hlTextW  = estWidth(title, headlineFs);
+  const HL_PAD_X = 34;                 // slim horizontal padding
+  const HL_PAD_Y = 12;                 // slim vertical padding
+  const hlW = Math.min(maxW * 0.85, hlTextW + HL_PAD_X * 2);
+  const hlH = Math.max(56, Math.round(headlineFs + HL_PAD_Y * 2));
+  const hlX = Math.round((W - hlW) / 2);
+
+  // Baseline for the headline text
+  const headlineY = 96 + headlineFs * 0.38;
+
+  // Position the chip so text sits optically centered in it
+  const hlY = Math.round(headlineY - hlH * 0.62);
+
+  // Glass strength (lighter than subtitle so it doesn’t feel heavy)
+  let hlOpacity = 0.18;
+  let hlBlurId  = 'chipBlurLow';
+  if (t > 35 || topLum > 170) { hlOpacity = 0.22; hlBlurId = 'chipBlurMed'; }
+  if (t > 55 || topLum > 190) { hlOpacity = 0.26; hlBlurId = 'chipBlurHigh'; }
+
+  // Ambient tint from photo average — super subtle
+  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
+  const hlTint = `rgba(${avg.r},${avg.g},${avg.b},0.07)`;
+
+  // ===== Subtitle chip (your kept settings) =====
+  const SUB_FS = fitFont(subline, Math.min(W * 0.70, 860), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
   const subPadX = 40;
   const subW = Math.min(maxW * 0.75, subTextW + subPadX * 2);
   const subH = Math.max(48, SUB_FS + 24);
   const subX = Math.round((W - subW) / 2);
 
-  // Rhythm
-  const headlineY = 96 + headlineFs * 0.38;
   const GAP_HL_TO_SUB = 32;
-
-  // Chip pos using center for perfect vertical centering
   const subRectY = Math.round(96 + 20 + GAP_HL_TO_SUB + headlineFs - subH / 2);
   const subCenterY = subRectY + Math.round(subH / 2);
   const subBaselineY = subCenterY;
 
-  // Chip adaptivity (stronger glass look)
-  const t = metrics?.texture ?? 30;
+  // Subtitle glass tuning (slightly stronger than headline)
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.26;                   // was 0.20 → slightly stronger base
+  let chipOpacity = 0.26;
   let chipBlurId = 'chipBlurLow';
   if (t > 35 && t <= 50) { chipOpacity = 0.30; chipBlurId = 'chipBlurMed'; }
   else if (t > 50)        { chipOpacity = 0.34; chipBlurId = 'chipBlurHigh'; }
-
-  // If mid band very bright, raise chip opacity a bit more
   if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.04, 0.40);
-  if (midLum <= 90)  chipOpacity = Math.max(0.22, chipOpacity - 0.02);
+  if (midLum <=  90) chipOpacity = Math.max(0.22, chipOpacity - 0.02);
 
-  // Ambient tint from photo average color (very subtle)
-  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tint = `rgba(${avg.r},${avg.g},${avg.b},0.08)`;
 
-  // Lower CTA a bit more (no change to subtitle)
+  // CTA spacing (your latest)
   const GAP_SUB_TO_CTA = 92;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   // Corners
   const R = 6;
 
-  // ---- Headline legibility helpers (micro-glass only when needed) ----
-  const hlTextW = estWidth(title, headlineFs);
-  const hlPadX  = 22;
-  const hlW     = Math.min(maxW * 0.92, hlTextW + hlPadX * 2);
-  const hlH     = Math.max(42, headlineFs + 14);
-  const hlX     = Math.round((W - hlW) / 2);
-  const hlY     = Math.round(headlineY - headlineFs * 0.85);
-
-  const topLum  = metrics?.topLum ?? 150;
-  const topTex  = metrics?.texture ?? 30;
-  const needHlChip = (topLum >= 165) || (topTex >= 46);
-  const hlTint = `rgba(${avg.r},${avg.g},${avg.b},0.07)`;
-  const hlOpacity = needHlChip ? 0.18 : 0.00;
-
-  // Build
   return `${defs}
+    <!-- soft top scrim under very bright headers -->
     <g opacity="${scrim}">
       <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
     </g>
 
-    ${ needHlChip ? `
-      <g filter="url(#chipBlurLow)">
-        <rect x="${hlX}" y="${hlY}" width="${hlW}" height="${hlH}" rx="6"
-              fill="${hlTint}" opacity="${hlOpacity}"/>
-      </g>
-    ` : '' }
-
-    <!-- Headline -->
-    <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
-      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
-      style="paint-order: stroke fill; stroke:#000; stroke-width:1.15; stroke-opacity:0.22">
-      ${escSVG(title)}
-    </text>
-
-    <!-- Subtitle Glass Chip -->
-    <g filter="url(#${chipBlurId}) url(#chipNoise)">
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-        fill="${tint}" opacity="${chipOpacity}"/>
-      <!-- inner highlight (top) -->
-      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.45)}" rx="${R-1}"
+    <!-- Headline glass chip -->
+    <g filter="url(#${hlBlurId}) url(#chipNoise)">
+      <rect x="${hlX}" y="${hlY}" width="${hlW}" height="${hlH}" rx="${R}"
+        fill="${hlTint}" opacity="${hlOpacity}"/>
+      <!-- subtle inner highlight to sell the glass edge -->
+      <rect x="${hlX+1}" y="${hlY+1}" width="${hlW-2}" height="${Math.max(8, hlH*0.45)}" rx="${R-1}"
         fill="url(#chipInnerHi)"/>
     </g>
 
-    <!-- Subtitle text (middle centered; keep exact style) -->
+    <!-- Headline text (keeps your white + outline look) -->
+    <text x="${W / 2}" y="${headlineY}" text-anchor="middle"
+      font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+      font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
+      filter="url(#textStroke)">
+      ${escSVG(title)}
+    </text>
+
+    <!-- Subtitle chip -->
+    <g filter="url(#${chipBlurId}) url(#chipNoise)">
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
+        fill="${tint}" opacity="${chipOpacity}"/>
+      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}"
+        height="${Math.max(8, subH*0.45)}" rx="${R-1}" fill="url(#chipInnerHi)"/>
+    </g>
+
+    <!-- Subtitle text (kept exactly as you liked) -->
     <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
       dominant-baseline="middle" alignment-baseline="middle"
       font-family="'Times New Roman', Times, serif"
-      font-size="${SUB_FS}" font-weight="700" fill="${LIGHT}" letter-spacing="0.3"
+      font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.3"
       style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
       ${escSVG(subline)}
     </text>
