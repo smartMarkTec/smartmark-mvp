@@ -4,7 +4,7 @@
  * SmartMark AI routes — static ads with glassmorphism chips
  * - Headline with adaptive top scrim and micro-stroke
  * - Subtitle chip: ambient-tinted glass with inner highlight, adaptive blur/opacity, micro-noise
- * - CTA pill with soft shadow + inner highlight
+ * - CTA pill with soft shadow + inner highlight + scene-tinted outer glow
  * - Exactly TWO image variations per generate
  * - Tight timeouts, memory discipline, and graceful fallbacks
  */
@@ -571,7 +571,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       const parsed = JSON.parse(jsonStr);
       const clean = (s, max = 200) => cleanFinalText(String(s || '')).slice(0, max);
       headline = clean(parsed.headline, 55);
-      // Grammar guardrails for body (subtitle): simple normalization to avoid "is the best" repetition etc.
+      // Grammar guardrails for body (subtitle)
       let bodyRaw = clean(parsed.body, 220)
         .replace(/\bhigh quality quality\b/gi, 'high quality')
         .replace(/\bthe best quality\b/gi, 'great quality')
@@ -694,201 +694,221 @@ function toTitleCase(s) {
   return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1));
 }
 
-/* ---------- SVG defs + layout (glass, highlight, noise) ---------- */
-function svgDefs(brandColor) {
-  return `
-    <defs>
-      <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#000" stop-opacity="0.34"/>
-        <stop offset="100%" stop-color="#000" stop-opacity="0.00"/>
-      </linearGradient>
+/* ---------- Negative-space preference (photo ranking) ---------- */
+async function analyzeTinyForBands(buf) {
+  try {
+    const W = 64, H = 64;
+    const { data } = await sharp(buf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let varTop = 0, varMid = 0, cTop = 0, cMid = 0;
 
-      <!-- subtle white stroke around headline text -->
-      <filter id="textStroke">
-        <feMorphology in="SourceAlpha" operator="dilate" radius="0.6" result="dil"/>
-        <feColorMatrix in="dil" type="matrix" values="
-          0 0 0 0 1
-          0 0 0 0 1
-          0 0 0 0 1
-          0 0 0 0.18 0" result="stroke"/>
-        <feMerge>
-          <feMergeNode in="stroke"/>
-          <feMergeNode in="SourceGraphic"/>
-        </feMerge>
-      </filter>
+    const lumAt = (r,g,b) => 0.2126*r + 0.7152*g + 0.0722*b;
 
-      <!-- CTA shadow -->
-      <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.35"/>
-      </filter>
+    // First pass: means
+    let sumTop = 0, sumMid = 0;
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 3;
+        const L = lumAt(data[i], data[i+1], data[i+2]);
+        if (y < Math.floor(H * 0.28)) { sumTop += L; cTop++; }
+        if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { sumMid += L; cMid++; }
+      }
+    }
+    const meanTop = sumTop / Math.max(1, cTop);
+    const meanMid = sumMid / Math.max(1, cMid);
 
-      <!-- Glass blur presets (applied to chip group) -->
-      <filter id="chipBlurLow"  x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="1.0"/></filter>
-      <filter id="chipBlurMed"  x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="1.6"/></filter>
-      <filter id="chipBlurHigh" x="-5%" y="-5%" width="110%" height="110%"><feGaussianBlur stdDeviation="2.2"/></filter>
+    // Second pass: variance
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 3;
+        const L = lumAt(data[i], data[i+1], data[i+2]);
+        if (y < Math.floor(H * 0.28)) varTop += (L - meanTop) * (L - meanTop);
+        if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) varMid += (L - meanMid) * (L - meanMid);
+      }
+    }
+    varTop /= Math.max(1, cTop);
+    varMid /= Math.max(1, cMid);
 
-      <!-- Inner highlight for glass (top gradient clipped in chip) -->
-      <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#fff" stop-opacity="0.14"/>
-        <stop offset="45%" stop-color="#fff" stop-opacity="0.06"/>
-        <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
-      </linearGradient>
-
-      <!-- Micro-noise for chip to avoid banding -->
-      <filter id="chipNoise" x="-10%" y="-10%" width="120%" height="120%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" seed="7" result="noise"/>
-        <feColorMatrix type="matrix" values="
-          0 0 0 0 0.5
-          0 0 0 0 0.5
-          0 0 0 0 0.5
-          0 0 0 0.02 0" result="noiseTint"/>
-        <feBlend in="SourceGraphic" in2="noiseTint" mode="normal"/>
-      </filter>
-
-      <!-- CTA inner highlight -->
-      <linearGradient id="ctaHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#fff" stop-opacity="0.2"/>
-        <stop offset="35%" stop-color="#fff" stop-opacity="0.06"/>
-        <stop offset="100%" stop-color="#fff" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-  `;
+    // Lower score = smoother (more negative space)
+    const score = 0.6 * Math.sqrt(varTop) + 0.4 * Math.sqrt(varMid);
+    return score;
+  } catch { return 9999; }
 }
 
-// Perfectly centered CTA pill (text vertically centered)
+async function rankPhotosByNegativeSpace(photos, axInst) {
+  const candidates = photos.slice(0, 8);
+  const jobs = candidates.map(async (p, i) => {
+    const tiny = p?.src?.small || p?.src?.medium || p?.src?.tiny || p?.src?.large;
+    if (!tiny) return { idx: i, score: 9999 };
+    try {
+      const r = await axInst.get(tiny, { responseType: 'arraybuffer', timeout: 6000 });
+      const score = await analyzeTinyForBands(Buffer.from(r.data));
+      return { idx: i, score };
+    } catch { return { idx: i, score: 9999 }; }
+  });
+
+  const results = await Promise.allSettled(jobs);
+  const scored = results
+    .map((r) => (r.status === 'fulfilled' ? r.value : null))
+    .filter(Boolean)
+    .sort((a, b) => a.score - b.score);
+
+  const ordered = [];
+  for (const s of scored) ordered.push(candidates[s.idx]);
+  for (let i = 0; i < candidates.length; i++) {
+    if (!scored.find((s) => s.idx === i)) ordered.push(candidates[i]);
+  }
+  return ordered.concat(photos.slice(8));
+}
+
+/* ---------- SVG defs + layout (glass, highlight, noise) ---------- */
+
+// Perfectly centered CTA pill (with soft scene-tinted glow for dark scenes)
 const LIGHT = '#f5f7f9';
 
-const pillBtn = (x, y, text, fs = 30) => {
+const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
   fs = Math.max(24, Math.min(fs, 36));
   const padX = 34;
-  const h = Math.round(fs + 26);                // a touch taller for breathing room
+  const h = Math.round(fs + 26);
   const w = Math.min(880, estWidth(text, fs) + padX * 2);
   const x0 = Math.round(x - w / 2);
   const y0 = Math.round(y - h / 2);
 
   return `
-    <g transform="translate(${x0}, ${y0})" filter="url(#btnShadow)">
-      <rect x="0" y="0" width="${w}" height="${h}" rx="${Math.round(h/2)}" fill="#0b0d10dd"/>
-      <text x="${w / 2}" y="${Math.round(h / 2)}" text-anchor="middle"
-            dominant-baseline="middle" alignment-baseline="middle"
-            font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-            font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="1.0">
-        ${escSVG(text)}
-      </text>
+    <!-- subtle outer glow behind the button, tied to scene tint -->
+    <g transform="translate(${x0}, ${y0})">
+      <rect x="-8" y="-8" width="${w + 16}" height="${h + 16}" rx="${Math.round(h/2) + 8}"
+            fill="${glowColor}" opacity="0.28" filter="url(#softGlow)"/>
+      <g filter="url(#btnShadow)">
+        <rect x="0" y="0" width="${w}" height="${h}" rx="${Math.round(h/2)}" fill="#0b0d10dd"/>
+        <text x="${w / 2}" y="${Math.round(h / 2)}" text-anchor="middle"
+              dominant-baseline="middle" alignment-baseline="middle"
+              font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
+              font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="0.9">
+          ${escSVG(text)}
+        </text>
+      </g>
     </g>`;
 };
 
-
-
-/* --------- Glass overlay creative (compact chips, proper spacing, soft edges) --------- */
+/* --------- Glass overlay creative (compact chips, naturalized edges) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing
+  // Headline sizing & placement (less “posterized”)
   const HL_FS_START = 68;
   const headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Legibility scrim
+  // Legibility scrim based on top luminance
   const topLum = metrics?.topLum ?? 150;
-  const scrim = topLum >= 190 ? 0.36 : topLum >= 160 ? 0.30 : topLum >= 130 ? 0.26 : 0.20;
+  const scrim = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
 
-  // Subtitle sizing (tight)
+  // Subline sizing (tight to text)
   const SUB_FS   = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX  = 18; // tighter padding
+  const subPadX  = 18;
   const subMaxW  = Math.min(maxW * 0.90, W * 0.90);
-  const subW     = Math.min(subTextW + subPadX * 2, subMaxW); // <- HUGS TEXT
-  const subH     = Math.max(42, SUB_FS + 14);                  // compact height
+  const subW     = Math.min(subTextW + subPadX * 2, subMaxW);
+  const subH     = Math.max(42, SUB_FS + 14);
   const subX     = Math.round((W - subW) / 2);
 
   // Headline chip geometry (tight)
   const hlTextW = estWidth(title, headlineFs);
   const hlPadX  = 18;
-  const hlW     = Math.min(hlTextW + hlPadX * 2, maxW * 0.95); // hugs text
+  const hlW     = Math.min(hlTextW + hlPadX * 2, maxW * 0.95);
   const hlH     = Math.max(46, headlineFs + 12);
   const hlX     = Math.round((W - hlW) / 2);
 
-  // Vertical rhythm: headline centered in its chip; subline spaced BELOW headline chip
-  const headlineCenterY = 96 + Math.round(headlineFs * 0.38);
+  // Vertical rhythm: drop headline ~12px, keep spacing proportionate
+  const headlineCenterY = 108 + Math.round(headlineFs * 0.38); // was ~96
   const hlRectY         = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB   = 40;                                   // spacing restored
+  const GAP_HL_TO_SUB   = 40;
   const subRectY        = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
   const subCenterY      = subRectY + Math.round(subH / 2);
   const subBaselineY    = subCenterY;
 
-  // Glass adaptivity
+  // Glass adaptivity (slightly reduced opacity overall)
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.26;
-  if (t > 35 && t <= 50) chipOpacity = 0.30;
-  else if (t > 50)       chipOpacity = 0.34;
-  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.03, 0.38);
-  if (midLum <=  90) chipOpacity = Math.max(0.22, chipOpacity - 0.02);
+  let chipOpacity = 0.24;                     // ↓ about 2–3%
+  if (t > 35 && t <= 50) chipOpacity = 0.28;
+  else if (t > 50)       chipOpacity = 0.32;
+  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.02, 0.36);
+  if (midLum <=  90) chipOpacity = Math.max(0.20, chipOpacity - 0.02);
 
-  // Blur (kept light)
-  const BLUR_SUB = 16;
-  const BLUR_HL  = 12;
+  // Blur + mild desaturation look more “real” over smooth areas
+  const BLUR_SUB = 14; // a touch less on smooth walls
+  const BLUR_HL  = 11;
 
   // Ambient tint
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
+  const glowRGBA = `rgba(${avg.r},${avg.g},${avg.b},0.30)`; // for CTA outer glow
 
-  // CTA vertical
+  // CTA vertical rhythm
   const GAP_SUB_TO_CTA = 92;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   const R = 8;
-  const EDGE_STROKE = 0.28; // softer edge line
-  const LIGHT = '#ffffff';
+  const EDGE_STROKE = 0.20; // softer edge
 
-  // Build CTA separately to avoid interpolation issues
-  const pillSvg = pillBtn(W / 2, ctaY, cta, 32);
+  // Button SVG (now with adaptive glow color)
+  const pillSvg = pillBtn(W / 2, ctaY, cta, 32, glowRGBA);
 
   return `
   <defs>
     <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
 
-    <!-- Blurs -->
-    <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" />
+    <!-- Button shadow + soft glow -->
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/>
     </filter>
-    <filter id="glassBlurHl" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" />
+    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="16"/>
     </filter>
 
-    <!-- Inner highlight -->
+    <!-- Headline scrim -->
+    <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="rgba(0,0,0,0.60)"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
+    </linearGradient>
+
+    <!-- Glass blurs with slight under-chip desaturation -->
+    <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" result="b"/>
+      <feColorMatrix in="b" type="saturate" values="0.88"/>
+    </filter>
+    <filter id="glassBlurHl" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" result="b"/>
+      <feColorMatrix in="b" type="saturate" values="0.90"/>
+    </filter>
+
+    <!-- Inner highlight (dialed down) -->
     <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"  stop-color="rgba(255,255,255,0.32)"/>
-      <stop offset="55%" stop-color="rgba(255,255,255,0.05)"/>
+      <stop offset="0%"  stop-color="rgba(255,255,255,0.22)"/>
+      <stop offset="55%" stop-color="rgba(255,255,255,0.04)"/>
       <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
     </linearGradient>
 
-    <!-- Soft shadow -->
+    <!-- Soft edge falloff -->
     <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.20)" flood-opacity="1"/>
+      <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/>
     </filter>
 
     <!-- Micro-noise -->
     <filter id="chipNoise">
       <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
-      <feColorMatrix type="saturate" values="0" />
-      <feComponentTransfer><feFuncA type="table" tableValues="0 0 0 0.012 0.028"/></feComponentTransfer>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer><feFuncA type="table" tableValues="0 0 0 0.010 0.022"/></feComponentTransfer>
       <feBlend mode="overlay" in2="SourceGraphic"/>
     </filter>
 
-    <!-- Headline scrim -->
-    <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="rgba(0,0,0,0.65)"/>
-      <stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
-    </linearGradient>
-
-    <!-- Horizontal fade mask to soften chip edges -->
+    <!-- Horizontal fade mask for softer edges -->
     <linearGradient id="edgeFade" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%"   stop-color="white" stop-opacity="0.82"/>
+      <stop offset="0%"   stop-color="white" stop-opacity="0.78"/>
       <stop offset="6%"   stop-color="white" stop-opacity="1"/>
       <stop offset="94%"  stop-color="white" stop-opacity="1"/>
-      <stop offset="100%" stop-color="white" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0.78"/>
     </linearGradient>
     <mask id="maskHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" fill="url(#edgeFade)"/></mask>
     <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
@@ -902,51 +922,49 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
   </g>
 
-  <!-- Headline glass (tight, soft edges) -->
+  <!-- Headline glass -->
   <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
     <use href="#bg" filter="url(#glassBlurHl)"/>
     <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"
-      fill="${tintRGBA}" opacity="${(chipOpacity * 0.85).toFixed(2)}" />
-    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.42)}" rx="${Math.max(0,R-1)}"
+      fill="${tintRGBA}" opacity="${(chipOpacity * 0.82).toFixed(2)}"/>
+    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}"
       fill="url(#chipInnerHi)"/>
     <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}"
-      fill="none" stroke="rgba(255,255,255,0.32)" stroke-width="${EDGE_STROKE}"/>
+      fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Headline text (centered in chip) -->
+  <!-- Headline text (weight/spacing softened) -->
   <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
     font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-    font-size="${headlineFs}" font-weight="1000" fill="#ffffff" letter-spacing="0.4"
-    style="paint-order: stroke; stroke:#000; stroke-width:1.1; stroke-opacity:0.18">
+    font-size="${headlineFs}" font-weight="900" fill="#ffffff" letter-spacing="0.25"
+    style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
     ${escSVG(title)}
   </text>
 
-  <!-- Subtitle glass (tight, soft edges, hugs text) -->
+  <!-- Subline glass -->
   <g clip-path="url(#clipSub)" mask="url(#maskSub)" filter="url(#chipFalloff)">
     <use href="#bg" filter="url(#glassBlurSub)"/>
     <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
       fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
-    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.44)}" rx="${Math.max(0,R-1)}"
+    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}"
       fill="url(#chipInnerHi)"/>
     <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}"
-      fill="none" stroke="rgba(255,255,255,0.32)" stroke-width="${EDGE_STROKE}"/>
+      fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Subtitle text (unchanged) -->
+  <!-- Subline text (less “outlined”) -->
   <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
     font-family="'Times New Roman', Times, serif"
-    font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.3"
-    style="paint-order: stroke fill; stroke:#000; stroke-width:0.95; stroke-opacity:0.18">
+    font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.2"
+    style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16">
     ${escSVG(subline)}
   </text>
 
   ${pillSvg}
   `;
 }
-
-
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
@@ -982,38 +1000,22 @@ function craftSubline(answers = {}, category = 'generic') {
   let line = candidates[0] || defaults[0];
 
   // --- Grammar & wording normalizers ---
-  // remove weird “quality of …” constructs
   line = line.replace(/\bquality of\b/gi, '').trim();
-
-  // tone down “is/are the best”
   line = line.replace(/\bis the best\b/gi, 'is great')
              .replace(/\bare the best\b/gi, 'are great');
-
-  // friendlier phrases
   line = line.replace(/\bbetter made\b/gi, 'made to last')
              .replace(/\bwell made\b/gi, 'made to last')
              .replace(/\bhigh quality\b/gi, 'great quality');
-
-  // material(s)
   line = line.replace(/\bnatural material\b/gi, 'natural materials');
-
-  // avoid “our … uses … materials” stiffness -> “made with … materials”
   line = line.replace(/\bour\b/gi, '').trim();
   line = line.replace(/\buses natural materials\b/gi, 'is made with natural materials');
-
-  // collapse leftover doubles
   line = line.replace(/\b(\w+)\s+\1\b/gi, '$1').trim();
 
   // Token-level shaping: keep it concise (5–9 words)
   let words = line.split(/\s+/).filter(Boolean);
-
-  // If the sentence begins with a dangling conjunction/article, trim it.
   while (words[0] && /^(and|or|but|the|a|an)$/.test(words[0])) words.shift();
-
-  // Cap length
   if (words.length > 9) words = words.slice(0, 9);
 
-  // If too short, pad with secondary signal or category fallback
   if (words.length < 5) {
     const filler = clean(candidates[1] || defaults[1] || '')
       .replace(/\bquality of\b/gi, '')
@@ -1023,23 +1025,20 @@ function craftSubline(answers = {}, category = 'generic') {
     while (words.length < 5 && filler.length) words.push(filler.shift());
   }
 
-  // Final pass: remove terminal “and/with/of”
   while (words.length && /^(and|with|of)$/.test(words[words.length - 1])) words.pop();
 
   return words.join(' ');
 }
 
-/* ---------- Overlay builder (now passes baseDataUri; includes safe fallback) ---------- */
+/* ---------- Overlay builder (passes baseDataUri; includes safe fallback) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
 }) {
   const W = 1200, H = 628;
 
-  // Fetch with a slightly longer timeout (stock CDNs can be spiky)
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
 
-  // Pre-resize once and keep the buffer for both: composing and data-URI blur source
   const resizedBuffer = await sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
@@ -1053,7 +1052,6 @@ async function buildOverlayImage({
   const subline = toTitleCase(craftSubline(answers, category));  // Title Case
   const cta     = cleanCTA(ctaHint) || 'LEARN MORE';
 
-  // Build SVG overlay with true-glass capability; if anything fails, we’ll fall back
   let overlaySVG;
   try {
     const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
@@ -1061,7 +1059,6 @@ async function buildOverlayImage({
     })}</svg>`;
     overlaySVG = Buffer.from(svg);
   } catch (e) {
-    // Hard fallback: minimal overlay without baseDataUri usage
     const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
       W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri: '',
     })}</svg>`;
@@ -1124,7 +1121,6 @@ router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
 
-  // Give the request enough time end-to-end (client also bumped to 60s)
   try {
     if (typeof res.setTimeout === 'function') res.setTimeout(65000);
     if (typeof req.setTimeout === 'function') req.setTimeout(65000);
@@ -1161,7 +1157,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
         return publicUrl;
       } catch {
-        // fall back to raw stock if overlay fails for any reason
         await saveAsset({
           req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
           meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, glass: true },
@@ -1195,17 +1190,20 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // Try Pexels with keep-alive axios (slightly higher timeout)
+    // Try Pexels
     let photos = [];
     try {
       const r = await ax.get(PEXELS_IMG_BASE, {
         headers: { Authorization: PEXELS_API_KEY },
         params:  { query: keyword, per_page: 8 },
-        timeout: 12000, // allow CDN hiccups
+        timeout: 12000,
       });
       photos = r.data?.photos || [];
+      // Reorder by negative-space preference (cleaner bands for headline/subline)
+      if (photos.length >= 2) {
+        try { photos = await rankPhotosByNegativeSpace(photos, ax); } catch {}
+      }
     } catch {
-      // fallback to placeholders if Pexels is slow/down
       const urls = [], absUrls = [];
       for (let i = 0; i < 2; i++) {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
