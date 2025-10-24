@@ -790,69 +790,70 @@ const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
     </g>`;
 };
 
-/* --------- Glass overlay creative (compact chips, naturalized edges) --------- */
+/* --------- Glass overlay creative (headline now serif, subline lower & centered-ish, both chips equally tight) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing & placement (less “posterized”)
+  // Shared tight horizontal padding so headline/subline chips feel identical
+  const PAD_X = 16;
+
+  // Headline sizing (kept big, but font switched to serif to match subline)
   const HL_FS_START = 68;
   const headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Legibility scrim based on top luminance
+  // Legibility scrim
   const topLum = metrics?.topLum ?? 150;
   const scrim = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
 
-  // Subline sizing (tight to text)
+  // Subline sizing (tight to text, same padding as headline)
   const SUB_FS   = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW = estWidth(subline, SUB_FS);
-  const subPadX  = 18;
   const subMaxW  = Math.min(maxW * 0.90, W * 0.90);
-  const subW     = Math.min(subTextW + subPadX * 2, subMaxW);
+  const subW     = Math.min(subTextW + PAD_X * 2, subMaxW);
   const subH     = Math.max(42, SUB_FS + 14);
   const subX     = Math.round((W - subW) / 2);
 
-  // Headline chip geometry (tight)
+  // Headline chip geometry (tight to text, same padding as subline)
   const hlTextW = estWidth(title, headlineFs);
-  const hlPadX  = 18;
-  const hlW     = Math.min(hlTextW + hlPadX * 2, maxW * 0.95);
+  const hlW     = Math.min(hlTextW + PAD_X * 2, maxW * 0.95);
   const hlH     = Math.max(46, headlineFs + 12);
   const hlX     = Math.round((W - hlW) / 2);
 
-  // Vertical rhythm: drop headline ~12px, keep spacing proportionate
-  const headlineCenterY = 108 + Math.round(headlineFs * 0.38); // was ~96
+  // Vertical rhythm: headline a touch lower; subline nudged further down
+  const headlineCenterY = 108 + Math.round(headlineFs * 0.38);
   const hlRectY         = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB   = 40;
+  const GAP_HL_TO_SUB   = 56; // was 40 → drop subline ~16px so it sits nicer between headline & CTA
   const subRectY        = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
   const subCenterY      = subRectY + Math.round(subH / 2);
   const subBaselineY    = subCenterY;
 
-  // Glass adaptivity (slightly reduced opacity overall)
+  // Glass adaptivity
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.24;                     // ↓ about 2–3%
+  let chipOpacity = 0.24;
   if (t > 35 && t <= 50) chipOpacity = 0.28;
   else if (t > 50)       chipOpacity = 0.32;
   if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.02, 0.36);
   if (midLum <=  90) chipOpacity = Math.max(0.20, chipOpacity - 0.02);
 
-  // Blur + mild desaturation look more “real” over smooth areas
-  const BLUR_SUB = 14; // a touch less on smooth walls
+  // Slightly lower blur on smooth backgrounds
+  const BLUR_SUB = 14;
   const BLUR_HL  = 11;
 
-  // Ambient tint
+  // Ambient tint + CTA glow
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
-  const glowRGBA = `rgba(${avg.r},${avg.g},${avg.b},0.30)`; // for CTA outer glow
+  const glowRGBA = `rgba(${avg.r},${avg.g},${avg.b},0.30)`;
 
-  // CTA vertical rhythm
-  const GAP_SUB_TO_CTA = 92;
+  // Try to visually center the subline between headline and CTA by keeping gaps closer
+  const GAP_SUB_TO_CTA = 88; // was 92 (slightly tighter so subline sits nearer the visual midpoint)
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   const R = 8;
   const EDGE_STROKE = 0.20; // softer edge
 
-  // Button SVG (now with adaptive glow color)
+  // Button SVG (with adaptive glow)
   const pillSvg = pillBtn(W / 2, ctaY, cta, 32, glowRGBA);
 
   return `
@@ -895,14 +896,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/>
     </filter>
 
-    <!-- Micro-noise -->
-    <filter id="chipNoise">
-      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" stitchTiles="stitch" />
-      <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer><feFuncA type="table" tableValues="0 0 0 0.010 0.022"/></feComponentTransfer>
-      <feBlend mode="overlay" in2="SourceGraphic"/>
-    </filter>
-
     <!-- Horizontal fade mask for softer edges -->
     <linearGradient id="edgeFade" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0%"   stop-color="white" stop-opacity="0.78"/>
@@ -933,11 +926,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Headline text (weight/spacing softened) -->
+  <!-- Headline text (now SAME serif as subline for a unified vibe) -->
   <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
-    font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-    font-size="${headlineFs}" font-weight="900" fill="#ffffff" letter-spacing="0.25"
+    font-family="'Times New Roman', Times, serif"
+    font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
     style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
     ${escSVG(title)}
   </text>
@@ -953,7 +946,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Subline text (less “outlined”) -->
+  <!-- Subline text (unchanged serif) -->
   <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
     dominant-baseline="middle" alignment-baseline="middle"
     font-family="'Times New Roman', Times, serif"
@@ -965,6 +958,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   ${pillSvg}
   `;
 }
+
 
 /* ---------- Subline crafting (grammar-safe) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
