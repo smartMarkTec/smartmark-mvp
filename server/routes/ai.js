@@ -928,13 +928,14 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category  = resolveCategory(answers || {});
     const keyword   = getImageKeyword(industry, url);
 
-    const makeOne = async (baseUrl, seed) => {
+    // UPDATED: always return a composited image (retry + styled fallback), never raw
+    const makeOne = async (baseUrl, seed, index = 0) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
       const ctaHint      = cleanCTA(answers?.cta || '');
 
-      try {
+      const compose = async (imgUrl, meta = {}) => {
         const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: baseUrl,
+          imageUrl: imgUrl,
           headlineHint,
           ctaHint,
           seed,
@@ -945,16 +946,22 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
 
         await saveAsset({
           req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true },
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
         });
 
         return publicUrl;
+      };
+
+      try {
+        return await compose(baseUrl, { src: 'stock', attempt: 1 });
       } catch {
-        await saveAsset({
-          req, kind: 'image', url: baseUrl, absoluteUrl: baseUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, raw: true, category, glass: true },
-        });
-        return baseUrl;
+        try {
+          return await compose(baseUrl, { src: 'stock', attempt: 2, retry: true });
+        } catch {
+          const fallbackSeedUrl =
+            `https://picsum.photos/seed/${encodeURIComponent(String(seed || 'sm') + '_' + index)}/1200/628`;
+          return await compose(fallbackSeedUrl, { src: 'fallback_picsum', attempt: 'fallback' });
+        }
       }
     };
 
@@ -1056,7 +1063,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     for (let pi = 0; pi < picks.length; pi++) {
       const img = photos[picks[pi]];
       const baseUrl = img?.src?.original || img?.src?.large2x || img?.src?.large;
-      const u = await makeOne(baseUrl, seed + '_' + pi);
+      const u = await makeOne(baseUrl, seed + '_' + pi, pi);
       urls.push(u); absUrls.push(absolutePublicUrl(u));
     }
 
