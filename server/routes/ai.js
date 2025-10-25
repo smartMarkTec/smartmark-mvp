@@ -1,13 +1,8 @@
 'use strict';
-
 /**
  * SmartMark AI routes — static ads with glassmorphism chips
- * - Headline with adaptive top scrim and micro-stroke
- * - Subtitle chip: ambient-tinted glass with inner highlight, adaptive blur/opacity (tight to text)
- * - CTA pill with soft shadow + inner highlight + scene-tinted outer glow
- * - Subtle inner edge frame around photo edges (not a full overlay)
- * - Exactly TWO image variations per generate
- * - Tight timeouts, memory discipline, and graceful fallbacks
+ * Robust SVG for Sharp (no masks/clipPaths/<use>), guaranteed composition,
+ * and relevant no-key image fallback for categories like COMICS/BOOKS.
  */
 
 const express = require('express');
@@ -230,7 +225,6 @@ router.get('/media/:file', async (req, res) => {
 });
 function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
 
-
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
 function ownerKeyFromReq(req) {
@@ -277,8 +271,9 @@ async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   return rec;
 }
 
-/* ---------- Topic/category ---------- */
+/* ---------- Topic/category & keywords ---------- */
 const IMAGE_KEYWORD_MAP = [
+  { match: ['comic','comics','manga','graphic','graphic novel','book','books','bookstore'], keyword: 'comic books graphic novels' },
   { match: ['protein','supplement','muscle','fitness','gym','workout'], keyword: 'gym workout' },
   { match: ['clothing','fashion','apparel','accessory','athleisure'], keyword: 'fashion model' },
   { match: ['makeup','cosmetic','skincare'], keyword: 'makeup application' },
@@ -289,31 +284,17 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['electronics','phone','laptop','tech','gadget'], keyword: 'tech gadgets' },
   { match: ['home','decor','furniture','bedroom','bath'], keyword: 'modern home' },
   { match: ['coffee','cafe','espresso'], keyword: 'coffee shop' },
-  // NEW — books & comics
-  { match: ['comic','comics','manga','graphic','graphic novel','book','books','bookstore','shop comics'], keyword: 'reading comic books' },
 ];
-
 function getImageKeyword(industry = '', url = '', answers = {}) {
   const fields = [
-    industry,
-    url,
-    answers.productType,
-    answers.description,
-    answers.mainBenefit,
-    answers.topic,
-    answers.category,
+    industry, url, answers.productType, answers.description,
+    answers.mainBenefit, answers.topic, answers.category
   ].filter(Boolean).join(' ').toLowerCase();
-
-  for (const row of IMAGE_KEYWORD_MAP) {
+  for (const row of IMAGE_KEYWORD_MAP)
     if (row.match.some((m) => fields.includes(m))) return row.keyword;
-  }
-
-  // fallbacks: try extracting a couple nouns-ish tokens from description
-  const desc = String(answers.description || industry || 'ecommerce').toLowerCase();
-  if (/\bcomic|manga|graphic novel|book(s)?\b/.test(desc)) return 'comic book store';
+  if (/\bcomic|manga|graphic\s*novel|book(s)?\b/.test(fields)) return 'comic book store';
   return industry || 'ecommerce products';
 }
-
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''} ${answers.topic || ''}`.toLowerCase();
   if (/comic|comics|manga|graphic\s*novel|bookstore|book(s)?/.test(txt)) return 'books';
@@ -334,9 +315,9 @@ function stripFashionIfNotApplicable(text, category) {
   return String(text || '').replace(FASHION_TERMS, () => 'options');
 }
 function enforceCategoryPresence(text, category) {
-  const t = String(text || '');
-  const hasAny = (arr) => arr.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(t));
-  const APPEND = (line) => (t.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
+  text = String(text || '');
+  const hasAny = (arr) => arr.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(text));
+  const APPEND = (line) => (text.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
   const req = {
     books: ['book','comic','manga','story','read'],
     fitness: ['workout','training','gym','strength','wellness'],
@@ -348,9 +329,8 @@ function enforceCategoryPresence(text, category) {
     home: ['home','kitchen','decor','space'],
     coffee: ['coffee','brew','roast','espresso'],
     fashion: ['style','outfit','fabric','fit'],
-    generic: [],
   }[category] || [];
-  if (!req.length || hasAny(req)) return t;
+  if (!req.length || hasAny(req)) return text;
   const injection = {
     books: 'Explore stories, comics, and graphic novels.',
     fitness: 'Designed for your workout and training.',
@@ -362,7 +342,7 @@ function enforceCategoryPresence(text, category) {
     home: 'A simple way to upgrade your space.',
     coffee: 'Balanced flavor for a better coffee break.',
     fashion: 'Find a look that works for you.',
-    generic: 'Easy to use and simple to get started.',
+    generic: 'Easy to get started.',
   }[category];
   return APPEND(injection);
 }
@@ -377,8 +357,7 @@ function cleanFinalText(text) {
 }
 function categoryLabelForOverlay(category) {
   return {
-    books: 'BOOKS',
-    fashion: 'FASHION', fitness: 'TRAINING', cosmetics: 'BEAUTY', hair: 'HAIR CARE',
+    books: 'BOOKS', fashion: 'FASHION', fitness: 'TRAINING', cosmetics: 'BEAUTY', hair: 'HAIR CARE',
     food: 'FOOD', pets: 'PET CARE', electronics: 'TECH', home: 'HOME',
     coffee: 'COFFEE', generic: 'SHOP',
   }[category || 'generic'];
@@ -389,16 +368,13 @@ function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
     /^(books|fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
       ? String(categoryOrTopic).toLowerCase()
       : null;
-
   const brand = (answers.businessName || '').trim().toUpperCase();
   const topic = (answers.topic || answers.productType || '').trim().toUpperCase();
-
   if (brand) {
     const label = category ? categoryLabelForOverlay(category) : (topic || 'SHOP');
     const words = brand.split(/\s+/);
     return (words.length === 1 ? `${brand} ${label}` : brand).slice(0, 30);
   }
-
   if (topic) return topic.slice(0, 30);
   if (category) return categoryLabelForOverlay(category);
   return 'SHOP';
@@ -596,12 +572,10 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- IMAGE OVERLAYS (glass chips) ---------------------- */
+/* ---------------------- IMAGE OVERLAYS (robust & Sharp-safe) ---------------------- */
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
-function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidth(text, fs) > maxW) fs -= 2; return fs; }
 function estWidthSerif(text, fs, letterSpacing = 0) { const t = String(text || ''), n = t.length || 1; return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing; }
-
+function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidthSerif(text, fs, 0.1) > maxW) fs -= 2; return fs; }
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
 function cleanHeadline(h) {
   h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
@@ -616,184 +590,60 @@ function cleanCTA(c) {
   if (!ALLOWED_CTAS.includes(norm)) norm = 'LEARN MORE';
   return norm;
 }
-
-/* ---------- Photo metrics ---------- */
-async function analyzeImageForPlacement(imgBuf) {
-  try {
-    const W = 72, H = 72;
-    const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let rSum = 0, gSum = 0, bSum = 0;
-    let rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
-    let varSum = 0;
-
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 3;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      rSum += r; gSum += g; bSum += b;
-      const lum = 0.2126*r + 0.7152*g + 0.0722*b;
-      varSum += lum*lum;
-      if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
-      if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
-    }
-
-    const px = W*H;
-    const avgR = rSum/px, avgG = gSum/px, avgB = bSum/px;
-    const lumAll = Math.round(0.2126*avgR + 0.7152*avgG + 0.0722*avgB);
-    const lumTop = Math.round(0.2126*(rTop/cTop) + 0.7152*(gTop/cTop) + 0.0722*(bTop/cTop));
-    const lumMid = Math.round(0.2126*(rMid/cMid) + 0.7152*(gMid/cMid) + 0.0722*(bMid/cMid));
-    const meanLum = lumAll;
-    const e2 = varSum/px;
-    const variance = Math.max(0, e2 - meanLum*meanLum);
-    const texture = Math.min(70, Math.sqrt(variance)/2);
-    const neutrals = ['#111827','#1f2937','#27272a','#374151','#3f3f46','#4b5563'];
-    const idx = lumAll >= 185 ? 0 : lumAll >= 150 ? 1 : lumAll >= 120 ? 2 : lumAll >= 90 ? 3 : lumAll >= 60 ? 4 : 5;
-    return { brandColor: neutrals[idx], topLum: lumTop, midLum: lumMid, texture,
-             avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) } };
-  } catch {
-    return { brandColor: '#1f2937', topLum: 150, midLum: 140, texture: 30, avgRGB: { r: 64, g: 64, b: 64 } };
-  }
-}
 function toTitleCase(s) { return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)); }
 
-/* --------- Glass overlay creative (headline & subline chips; inner edge frame) --------- */
-function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri }) {
-  const SAFE_PAD = 24;
-  const maxW = W - SAFE_PAD * 2;
-
-  // Padding
-  const PAD_X_SUB = 16;
-  const PAD_X_HL  = 22;
-
-  // Headline sizing (serif estimator + small fudge so glass hugs text)
-  const HL_FS_START = 68;
-  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
-  const hlTextW     = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
-  const hlW         = Math.min(hlTextW + PAD_X_HL * 2, maxW * 0.95);
-  const hlH         = Math.max(46, headlineFs + 12);
-  const hlX         = Math.round((W - hlW) / 2);
-
-  // Legibility scrim
-  const topLum = metrics?.topLum ?? 150;
-  const scrim  = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
-
-  // Subline sizing (tight to text using serif estimator)
-  const SUB_FS   = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
-  const subTextW = estWidthSerif(subline, SUB_FS, 0.20);
-  const subW     = Math.min(subTextW + PAD_X_SUB * 2, maxW);
-  const subH     = Math.max(42, SUB_FS + 14);
-  const subX     = Math.round((W - subW) / 2);
-
-  // Vertical rhythm
-  const headlineCenterY = 108 + Math.round(headlineFs * 0.38);
-  const hlRectY         = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB   = 56;
-  const subRectY        = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
-  const subCenterY      = subRectY + Math.round(subH / 2);
-  const subBaselineY    = subCenterY;
-
-  // Glass adaptivity
-  const t      = metrics?.texture ?? 30;
-  const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.24;
-  if (t > 35 && t <= 50) chipOpacity = 0.28;
-  else if (t > 50)       chipOpacity = 0.32;
-  if (midLum >= 170) chipOpacity = Math.min(chipOpacity + 0.02, 0.36);
-  if (midLum <=  90) chipOpacity = Math.max(0.20, chipOpacity - 0.02);
-
-  const BLUR_SUB = 14;
-  const BLUR_HL  = 11;
-
-  const avg       = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-  const tintRGBA  = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
-  const glowRGBA  = `rgba(${avg.r},${avg.g},${avg.b},0.30)`;
-  const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
-
-  // CTA placement
-  const GAP_SUB_TO_CTA = 88;
-  const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
-
-  const R = 8;
-  const EDGE_STROKE = 0.20;
-
-  const pillSvg = pillBtn(W / 2, ctaY, cta, 32, glowRGBA);
-
-  return `
-  <defs>
-    <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
-    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/></filter>
-    <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
-    <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(0,0,0,0.60)"/><stop offset="100%" stop-color="rgba(0,0,0,0.00)"/></linearGradient>
-    <radialGradient id="vignette" cx="50%" cy="50%" r="70%"><stop offset="60%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(0,0,0,1)"/></radialGradient>
-    <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" result="b"/><feColorMatrix in="b" type="saturate" values="0.88"/></filter>
-    <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}"  result="b"/><feColorMatrix in="b" type="saturate" values="0.90"/></filter>
-    <linearGradient id="chipInnerHi" x1="0" y="0" x2="0" y="1"><stop offset="0%" stop-color="rgba(255,255,255,0.22)"/><stop offset="55%" stop-color="rgba(255,255,255,0.04)"/><stop offset="100%" stop-color="rgba(255,255,255,0.00)"/></linearGradient>
-    <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/></filter>
-    <linearGradient id="edgeFade" x1="0" y="0" x2="1" y2="0"><stop offset="0%" stop-color="white" stop-opacity="0.78"/><stop offset="6%" stop-color="white" stop-opacity="1"/><stop offset="94%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0.78"/></linearGradient>
-
-    <mask id="maskHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" fill="url(#edgeFade)"/></mask>
-    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="8"/></clipPath>
-
-    <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
-    <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="8"/></clipPath>
-  </defs>
-
-  <!-- Top scrim -->
-  <g opacity="${scrim}"><rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/></g>
-
-  <!-- Subtle vignette frame + inner edge frame -->
-  <g opacity="${vignetteOpacity}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/></g>
-  <g pointer-events="none">
-    <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="8"/>
-    <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
-  </g>
-
-  <!-- Headline glass -->
-  <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
-    <use href="#bg" filter="url(#glassBlurHl)"/>
-    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="8" fill="rgba(255,255,255,0.02)"/>
-  </g>
-
-  <!-- Headline text -->
-  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle"
-        font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
-        style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
-    ${escSVG(title)}
-  </text>
-
-  <!-- Subline glass -->
-  <g clip-path="url(#clipSub)" mask="url(#maskSub)" filter="url(#chipFalloff)">
-    <use href="#bg" filter="url(#glassBlurSub)"/>
-    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="8" fill="rgba(255,255,255,0.02)"/>
-  </g>
-
-  <!-- Subline text -->
-  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle"
-        font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.2"
-        style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16">
-    ${escSVG(subline)}
-  </text>
-
-  ${pillBtn(W / 2, Math.round(subBaselineY + SUB_FS + 88), cta, 32, `rgba(${(metrics?.avgRGB?.r ?? 64)},${(metrics?.avgRGB?.g ?? 64)},${(metrics?.avgRGB?.b ?? 64)},0.30)`)}
-  `;
-}
-
-/* ---------- CTA pill ---------- */
-function pillBtn(cx, cy, text, fs, glowRGBA) {
+function pillBtn(cx, cy, text, fs) {
   const padX = 22;
-  const txt = escSVG(text || 'LEARN MORE');
-  const w = Math.round(txt.length * (fs * 0.55)) + padX * 2;
+  const t = escSVG(text || 'LEARN MORE');
+  const w = Math.round(t.length * (fs * 0.55)) + padX * 2;
   const h = fs + 16;
   const x = Math.round(cx - w / 2);
   const y = Math.round(cy - h / 2);
   return `
-  <g filter="url(#btnShadow)">
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-    <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${h*0.45}" rx="${(h/2)-1}" fill="rgba(255,255,255,0.25)"/>
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="none" stroke="${glowRGBA}" stroke-width="6" opacity="0.45"/>
-    <text x="${cx}" y="${cy+2}" text-anchor="middle" dominant-baseline="middle"
-      font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="${fs}" font-weight="700" fill="#fff"
-      style="paint-order: stroke; stroke:#000; stroke-width:0.8; stroke-opacity:0.25">${txt}</text>
-  </g>`;
+    <g>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h/2}" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+      <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${h*0.45}" rx="${(h/2)-1}" fill="rgba(255,255,255,0.22)"/>
+      <text x="${cx}" y="${y+h/2+2}" text-anchor="middle" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
+            font-size="${fs}" font-weight="700" fill="#ffffff">${t}</text>
+    </g>`;
+}
+
+function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
+  const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
+  const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
+  const hlW = Math.min(estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12) + 44, maxW * 0.95);
+  const hlH = Math.max(46, headlineFs + 12); const hlX = Math.round((W - hlW) / 2);
+
+  const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
+  const subW = Math.min(estWidthSerif(subline, SUB_FS, 0.20) + 32, maxW);
+  const subH = Math.max(42, SUB_FS + 14); const subX = Math.round((W - subW) / 2);
+
+  const topLum = metrics?.topLum ?? 150; const scrim = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
+  const headlineCenterY = 108 + Math.round(headlineFs * 0.38); const hlRectY = Math.round(headlineCenterY - hlH / 2);
+  const GAP_HL_TO_SUB = 56; const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB); const subCenterY = subRectY + Math.round(subH / 2);
+  const midLum = metrics?.midLum ?? 140; const chipOpacity = (midLum >= 170 ? 0.30 : midLum >= 120 ? 0.26 : 0.22);
+  const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
+  const R = 8;
+
+  return `
+    <rect x="0" y="0" width="${W}" height="${200}" fill="rgba(0,0,0,${scrim})"/>
+    <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="rgba(0,0,0,${vignetteOpacity})"/>
+    <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
+
+    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(255,255,255,${chipOpacity})" />
+    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="rgba(255,255,255,0.22)"/>
+
+    <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle" font-family="'Times New Roman', Times, serif"
+          font-size="${headlineFs}" font-weight="700" fill="#ffffff">${escSVG(title)}</text>
+
+    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(255,255,255,${chipOpacity - 0.04})" />
+    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="rgba(255,255,255,0.20)"/>
+
+    <text x="${W / 2}" y="${subCenterY}" text-anchor="middle" font-family="'Times New Roman', Times, serif"
+          font-size="${SUB_FS}" font-weight="700" fill="#ffffff">${escSVG(subline)}</text>
+
+    ${pillBtn(W / 2, Math.round(subCenterY + SUB_FS + 70), cta, 32)}
+  `;
 }
 
 /* ---------- Subline crafting ---------- */
@@ -857,7 +707,31 @@ function craftSubline(answers = {}, category = 'generic') {
   return words.join(' ');
 }
 
-/* ---------- Overlay builder ---------- */
+/* ---------- Placement analysis ---------- */
+async function analyzeImageForPlacement(imgBuf) {
+  try {
+    const W = 72, H = 72;
+    const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let rSum = 0, gSum = 0, bSum = 0, rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0, varSum = 0;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 3;
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      rSum += r; gSum += g; bSum += b;
+      const lum = 0.2126*r + 0.7152*g + 0.0722*b; varSum += lum * lum;
+      if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
+      if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
+    }
+    const px = W*H;
+    const avgR = rSum/px, avgG = gSum/px, avgB = bSum/px;
+    const lumTop = Math.round(0.2126*(rTop/cTop) + 0.7152*(gTop/cTop) + 0.0722*(bTop/cTop));
+    const lumMid = Math.round(0.2126*(rMid/cMid) + 0.7152*(gMid/cMid) + 0.0722*(bMid/cMid));
+    return { topLum: lumTop, midLum: lumMid, avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) } };
+  } catch {
+    return { topLum: 150, midLum: 140, avgRGB: { r: 64, g: 64, b: 64 } };
+  }
+}
+
+/* ---------- Overlay builder (guaranteed composite) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
@@ -865,32 +739,31 @@ async function buildOverlayImage({
   const W = 1200, H = 628;
 
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-
-  const resizedBuffer = await sharp(imgRes.data)
+  const baseBuf = await sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
     .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
     .toBuffer();
 
-  const analysis = await analyzeImageForPlacement(resizedBuffer);
-  const baseDataUri = `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`;
-  const base = sharp(resizedBuffer).removeAlpha();
+  const analysis = await analyzeImageForPlacement(baseBuf);
 
-  let title   = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  if (!title || title.trim().length === 0) title = 'SHOP';
-  let cta     = cleanCTA(ctaHint) || 'LEARN MORE';
-  if (!cta || cta.trim().length === 0) cta = 'LEARN MORE';
+  let title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
+  if (!title.trim()) title = 'SHOP';
+  let cta = cleanCTA(ctaHint) || 'LEARN MORE';
+  if (!cta.trim()) cta = 'LEARN MORE';
   const subline = toTitleCase(craftSubline(answers, category));
 
-  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${svgOverlayCreative({
-    W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri,
-  })}</svg>`;
-  const overlaySVG = Buffer.from(svg, 'utf8');
+  const svg = Buffer.from(
+    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      ${svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis })}
+    </svg>`,
+    'utf8'
+  );
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
 
-  await base
-    .composite([{ input: overlaySVG, top: 0, left: 0 }])
+  await sharp(baseBuf)
+    .composite([{ input: svg, top: 0, left: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
 
@@ -903,7 +776,7 @@ async function buildOverlayImage({
   };
 }
 
-/* -------------------- Video endpoint placeholder (return 200) -------------------- */
+/* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
   res.status(200).json({ ok: true, disabled: true, message: 'Video generation is disabled in this build.' });
 });
@@ -912,10 +785,8 @@ router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
 
-  try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(65000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(65000);
-  } catch {}
+  try { if (typeof res.setTimeout === 'function') res.setTimeout(65000); if (typeof req.setTimeout === 'function') req.setTimeout(65000); }
+  catch {}
 
   try {
     const { regenerateToken = '' } = req.body || {};
@@ -926,162 +797,76 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category  = resolveCategory(answers || {});
     const keyword   = getImageKeyword(industry, url, answers);
 
-    // ALWAYS return a composited image (retry + styled fallback), never raw
-    const makeOne = async (baseUrl, seed, index = 0) => {
+    const compose = async (imgUrl, seed, meta = {}) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
       const ctaHint      = cleanCTA(answers?.cta || '');
-
-      const compose = async (imgUrl, meta = {}) => {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: imgUrl,
-          headlineHint,
-          ctaHint,
-          seed,
-          fallbackHeadline: headlineHint,
-          answers,
-          category,
-        });
-
-        await saveAsset({
-          req, kind: 'image', url: publicUrl, absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
-        });
-
-        return publicUrl;
-      };
-
-      try {
-        return await compose(baseUrl, { src: 'stock', attempt: 1 });
-      } catch {
-        try {
-          return await compose(baseUrl, { src: 'stock', attempt: 2, retry: true });
-        } catch {
-          const fallbackSeedUrl =
-            `https://picsum.photos/seed/${encodeURIComponent(String(seed || 'sm') + '_' + index)}/1200/628`;
-          return await compose(fallbackSeedUrl, { src: 'fallback_picsum', attempt: 'fallback' });
-        }
-      }
+      const { publicUrl, absoluteUrl } = await buildOverlayImage({
+        imageUrl: imgUrl,
+        headlineHint,
+        ctaHint,
+        seed,
+        fallbackHeadline: headlineHint,
+        answers,
+        category,
+      });
+      await saveAsset({
+        req, kind: 'image', url: publicUrl, absoluteUrl,
+        meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
+      });
+      return publicUrl;
     };
 
-    // No key → placeholder flow (2 variations)
-    if (!PEXELS_API_KEY) {
-      const urls = [], absUrls = [];
-      for (let i = 0; i < 2; i++) {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
-          headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: cleanCTA(answers?.cta || ''),
-          seed: regenerateToken + '_' + i,
-          fallbackHeadline: overlayTitleFromAnswers(answers, category),
-          answers, category,
-        });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, glass: true } });
-        urls.push(publicUrl); absUrls.push(absoluteUrl);
-      }
-      return res.json({
-        imageUrl: urls[0],
-        absoluteImageUrl: absUrls[0],
-        keyword,
-        totalResults: 2,
-        usedIndex: 0,
-        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
-      });
-    }
-
-    // Try Pexels (return TWO)
-    let photos = [];
-    try {
-      const r = await ax.get('https://api.pexels.com/v1/search', {
-        headers: { Authorization: PEXELS_API_KEY },
-        params:  { query: keyword, per_page: 12 },
-        timeout: 12000,
-      });
-      photos = r.data?.photos || [];
-      if (photos.length >= 2) {
-        try { photos = await rankPhotosByNegativeSpace(photos, ax); } catch {}
-      }
-    } catch {
-      const urls = [], absUrls = [];
-      for (let i = 0; i < 2; i++) {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
-          headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: cleanCTA(answers?.cta || ''),
-          seed: regenerateToken + '_' + i,
-          fallbackHeadline: overlayTitleFromAnswers(answers, category),
-          answers, category,
-        });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, glass: true } });
-        urls.push(publicUrl); absUrls.push(absoluteUrl);
-      }
-      return res.json({
-        imageUrl: urls[0],
-        absoluteImageUrl: absUrls[0],
-        keyword,
-        totalResults: 2,
-        usedIndex: 0,
-        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
-      });
-    }
-
-    if (!photos.length) {
-      const urls = [], absUrls = [];
-      for (let i = 0; i < 2; i++) {
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: `https://picsum.photos/seed/smartmark${i}/1200/628`,
-          headlineHint: overlayTitleFromAnswers(answers, category),
-          ctaHint: cleanCTA(answers?.cta || ''),
-          seed: regenerateToken + '_' + i,
-          fallbackHeadline: overlayTitleFromAnswers(answers, category),
-          answers, category,
-        });
-        await saveAsset({ req, kind: 'image', url: publicUrl, absoluteUrl, meta: { category, keyword, placeholder: true, i, glass: true } });
-        urls.push(publicUrl); absUrls.push(absoluteUrl);
-      }
-      return res.json({
-        imageUrl: urls[0],
-        absoluteImageUrl: absUrls[0],
-        keyword,
-        totalResults: 2,
-        usedIndex: 0,
-        imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
-      });
-    }
-
-    const seed = regenerateToken || answers?.businessName || keyword || Date.now();
-    let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
-
-    const picks = [];
-    for (let i = 0; i < photos.length && picks.length < 2; i++) {
-      const idx = (idxHash + i * 7) % photos.length;
-      if (!picks.includes(idx)) picks.push(idx);
-    }
-
     const urls = [], absUrls = [];
-    for (let pi = 0; pi < picks.length; pi++) {
-      const img = photos[picks[pi]];
-      const baseUrl = img?.src?.original || img?.src?.large2x || img?.src?.large;
-      const u = await makeOne(baseUrl, seed + '_' + pi, pi);
-      urls.push(u); absUrls.push(absolutePublicUrl(u));
+
+    if (PEXELS_API_KEY) {
+      let photos = [];
+      try {
+        const r = await ax.get('https://api.pexels.com/v1/search', {
+          headers: { Authorization: PEXELS_API_KEY },
+          params:  { query: keyword, per_page: 12 },
+          timeout: 12000,
+        });
+        photos = r.data?.photos || [];
+      } catch {}
+
+      if (!photos.length) throw new Error('pexels-empty');
+
+      const seed = regenerateToken || answers?.businessName || keyword || Date.now();
+      let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
+      const picks = [];
+      for (let i = 0; i < photos.length && picks.length < 2; i++) {
+        const idx = (idxHash + i * 7) % photos.length;
+        if (!picks.includes(idx)) picks.push(idx);
+      }
+      for (let i = 0; i < picks.length; i++) {
+        const img = photos[picks[i]];
+        const baseUrl = img?.src?.original || img?.src?.large2x || img?.src?.large;
+        const u = await compose(baseUrl, `${seed}_${i}`, { src: 'pexels', idx: picks[i] });
+        urls.push(u); absUrls.push(absolutePublicUrl(u));
+      }
+    } else {
+      // Keyless, relevant fallback (Unsplash Source API)
+      const q = encodeURIComponent(`${keyword},comic,books,graphic-novel`);
+      for (let i = 0; i < 2; i++) {
+        const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${encodeURIComponent((regenerateToken || 'seed') + '_' + i)}`;
+        const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', i });
+        urls.push(u); absUrls.push(absolutePublicUrl(u));
+      }
     }
 
-    const img0 = photos[picks[0]];
     return res.json({
       imageUrl: urls[0],
       absoluteImageUrl: absUrls[0],
-      photographer: img0?.photographer,
-      pexelsUrl: img0?.url,
       keyword,
-      totalResults: photos.length,
-      usedIndex: picks[0],
-      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
+      totalResults: urls.length,
+      usedIndex: 0,
+      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
     });
 
   } catch (e) {
     res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
   }
 });
-
 
 /* ------------------------- RECENT (24h window) ------------------------- */
 async function listRecentForOwner(req) {
