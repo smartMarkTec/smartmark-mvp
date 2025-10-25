@@ -289,15 +289,34 @@ const IMAGE_KEYWORD_MAP = [
   { match: ['electronics','phone','laptop','tech','gadget'], keyword: 'tech gadgets' },
   { match: ['home','decor','furniture','bedroom','bath'], keyword: 'modern home' },
   { match: ['coffee','cafe','espresso'], keyword: 'coffee shop' },
+  // NEW — books & comics
+  { match: ['comic','comics','manga','graphic','graphic novel','book','books','bookstore','shop comics'], keyword: 'reading comic books' },
 ];
-function getImageKeyword(industry = '', url = '') {
-  const input = `${industry} ${url}`.toLowerCase();
-  for (const row of IMAGE_KEYWORD_MAP)
-    if (row.match.some((m) => input.includes(m))) return row.keyword;
-  return industry || 'ecommerce';
+
+function getImageKeyword(industry = '', url = '', answers = {}) {
+  const fields = [
+    industry,
+    url,
+    answers.productType,
+    answers.description,
+    answers.mainBenefit,
+    answers.topic,
+    answers.category,
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  for (const row of IMAGE_KEYWORD_MAP) {
+    if (row.match.some((m) => fields.includes(m))) return row.keyword;
+  }
+
+  // fallbacks: try extracting a couple nouns-ish tokens from description
+  const desc = String(answers.description || industry || 'ecommerce').toLowerCase();
+  if (/\bcomic|manga|graphic novel|book(s)?\b/.test(desc)) return 'comic book store';
+  return industry || 'ecommerce products';
 }
+
 function resolveCategory(answers = {}) {
-  const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
+  const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''} ${answers.topic || ''}`.toLowerCase();
+  if (/comic|comics|manga|graphic\s*novel|bookstore|book(s)?/.test(txt)) return 'books';
   if (/fashion|apparel|clothing|athleisure|outfit|wardrobe/.test(txt)) return 'fashion';
   if (/fitness|gym|workout|trainer|supplement|protein|yoga|crossfit|wellness/.test(txt)) return 'fitness';
   if (/makeup|cosmetic|skincare|beauty|serum|lipstick|foundation/.test(txt)) return 'cosmetics';
@@ -319,6 +338,7 @@ function enforceCategoryPresence(text, category) {
   const hasAny = (arr) => arr.some((w) => new RegExp(`\\b${w}\\b`, 'i').test(t));
   const APPEND = (line) => (t.replace(/\s+/g, ' ').trim().replace(/[.]*\s*$/, '') + '. ' + line).trim();
   const req = {
+    books: ['book','comic','manga','story','read'],
     fitness: ['workout','training','gym','strength','wellness'],
     cosmetics: ['skin','makeup','beauty','serum','routine'],
     hair: ['hair','shampoo','conditioner','styling'],
@@ -332,6 +352,7 @@ function enforceCategoryPresence(text, category) {
   }[category] || [];
   if (!req.length || hasAny(req)) return t;
   const injection = {
+    books: 'Explore stories, comics, and graphic novels.',
     fitness: 'Designed for your workout and training.',
     cosmetics: 'Made to fit into your beauty routine.',
     hair: 'Helps you care for and style your hair.',
@@ -356,6 +377,7 @@ function cleanFinalText(text) {
 }
 function categoryLabelForOverlay(category) {
   return {
+    books: 'BOOKS',
     fashion: 'FASHION', fitness: 'TRAINING', cosmetics: 'BEAUTY', hair: 'HAIR CARE',
     food: 'FOOD', pets: 'PET CARE', electronics: 'TECH', home: 'HOME',
     coffee: 'COFFEE', generic: 'SHOP',
@@ -364,17 +386,22 @@ function categoryLabelForOverlay(category) {
 function overlayTitleFromAnswers(answers = {}, categoryOrTopic = '') {
   const category =
     categoryOrTopic &&
-    /^(fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
+    /^(books|fashion|fitness|cosmetics|hair|food|pets|electronics|home|coffee|generic)$/i.test(categoryOrTopic)
       ? String(categoryOrTopic).toLowerCase()
       : null;
+
   const brand = (answers.businessName || '').trim().toUpperCase();
+  const topic = (answers.topic || answers.productType || '').trim().toUpperCase();
+
   if (brand) {
-    const label = category ? categoryLabelForOverlay(category) : 'SHOP';
+    const label = category ? categoryLabelForOverlay(category) : (topic || 'SHOP');
     const words = brand.split(/\s+/);
     return (words.length === 1 ? `${brand} ${label}` : brand).slice(0, 30);
   }
+
+  if (topic) return topic.slice(0, 30);
   if (category) return categoryLabelForOverlay(category);
-  return String(categoryOrTopic || 'SHOP').toUpperCase().slice(0, 24);
+  return 'SHOP';
 }
 
 /* ------------------------ Training context ------------------------ */
@@ -570,7 +597,6 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 });
 
 /* ---------------------- IMAGE OVERLAYS (glass chips) ---------------------- */
-const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
 function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidth(text, fs) > maxW) fs -= 2; return fs; }
@@ -628,50 +654,6 @@ async function analyzeImageForPlacement(imgBuf) {
   }
 }
 function toTitleCase(s) { return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)); }
-
-/* ---------- Negative-space ranking ---------- */
-async function analyzeTinyForBands(buf) {
-  try {
-    const W = 64, H = 64;
-    const { data } = await sharp(buf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let varTop = 0, varMid = 0, cTop = 0, cMid = 0;
-    const lumAt = (r,g,b) => 0.2126*r + 0.7152*g + 0.0722*b;
-    let sumTop = 0, sumMid = 0;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 3;
-      const L = lumAt(data[i], data[i+1], data[i+2]);
-      if (y < Math.floor(H * 0.28)) { sumTop += L; cTop++; }
-      if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { sumMid += L; cMid++; }
-    }
-    const meanTop = sumTop / Math.max(1, cTop);
-    const meanMid = sumMid / Math.max(1, cMid);
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 3;
-      const L = lumAt(data[i], data[i+1], data[i+2]);
-      if (y < Math.floor(H * 0.28)) varTop += (L - meanTop) * (L - meanTop);
-      if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) varMid += (L - meanMid) * (L - meanMid);
-    }
-    varTop /= Math.max(1, cTop); varMid /= Math.max(1, cMid);
-    return 0.6 * Math.sqrt(varTop) + 0.4 * Math.sqrt(varMid);
-  } catch { return 9999; }
-}
-async function rankPhotosByNegativeSpace(photos, axInst) {
-  const candidates = photos.slice(0, 8);
-  const jobs = candidates.map(async (p, i) => {
-    const tiny = p?.src?.small || p?.src?.medium || p?.src?.tiny || p?.src?.large;
-    if (!tiny) return { idx: i, score: 9999 };
-    try {
-      const r = await axInst.get(tiny, { responseType: 'arraybuffer', timeout: 6000 });
-      const score = await analyzeTinyForBands(Buffer.from(r.data));
-      return { idx: i, score };
-    } catch { return { idx: i, score: 9999 }; }
-  });
-  const results = await Promise.allSettled(jobs);
-  const scored = results.map(r => r.status === 'fulfilled' ? r.value : null).filter(Boolean).sort((a,b)=>a.score-b.score);
-  const ordered = []; for (const s of scored) ordered.push(candidates[s.idx]);
-  for (let i = 0; i < candidates.length; i++) if (!scored.find(s=>s.idx===i)) ordered.push(candidates[i]);
-  return ordered.concat(photos.slice(8));
-}
 
 /* --------- Glass overlay creative (headline & subline chips; inner edge frame) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri }) {
@@ -748,12 +730,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri })
     <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/></filter>
     <linearGradient id="edgeFade" x1="0" y="0" x2="1" y2="0"><stop offset="0%" stop-color="white" stop-opacity="0.78"/><stop offset="6%" stop-color="white" stop-opacity="1"/><stop offset="94%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0.78"/></linearGradient>
 
-    <!-- Masks & clips use the SAME computed geometry -->
     <mask id="maskHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" fill="url(#edgeFade)"/></mask>
-    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
+    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="8"/></clipPath>
 
     <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
-    <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
+    <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="8"/></clipPath>
   </defs>
 
   <!-- Top scrim -->
@@ -769,13 +750,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri })
   <!-- Headline glass -->
   <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
     <use href="#bg" filter="url(#glassBlurHl)"/>
-    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacity * 0.82).toFixed(2)}"/>
-    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-    <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
+    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="8" fill="rgba(255,255,255,0.02)"/>
   </g>
 
   <!-- Headline text -->
-  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle"
         font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
         style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
     ${escSVG(title)}
@@ -784,20 +763,37 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri })
   <!-- Subline glass -->
   <g clip-path="url(#clipSub)" mask="url(#maskSub)" filter="url(#chipFalloff)">
     <use href="#bg" filter="url(#glassBlurSub)"/>
-    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
-    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-    <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
+    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="8" fill="rgba(255,255,255,0.02)"/>
   </g>
 
   <!-- Subline text -->
-  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle"
         font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.2"
         style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16">
     ${escSVG(subline)}
   </text>
 
-  ${pillSvg}
+  ${pillBtn(W / 2, Math.round(subBaselineY + SUB_FS + 88), cta, 32, `rgba(${(metrics?.avgRGB?.r ?? 64)},${(metrics?.avgRGB?.g ?? 64)},${(metrics?.avgRGB?.b ?? 64)},0.30)`)}
   `;
+}
+
+/* ---------- CTA pill ---------- */
+function pillBtn(cx, cy, text, fs, glowRGBA) {
+  const padX = 22;
+  const txt = escSVG(text || 'LEARN MORE');
+  const w = Math.round(txt.length * (fs * 0.55)) + padX * 2;
+  const h = fs + 16;
+  const x = Math.round(cx - w / 2);
+  const y = Math.round(cy - h / 2);
+  return `
+  <g filter="url(#btnShadow)">
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="rgba(255,255,255,0.12)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+    <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${h*0.45}" rx="${(h/2)-1}" fill="rgba(255,255,255,0.25)"/>
+    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="none" stroke="${glowRGBA}" stroke-width="6" opacity="0.45"/>
+    <text x="${cx}" y="${cy+2}" text-anchor="middle" dominant-baseline="middle"
+      font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial" font-size="${fs}" font-weight="700" fill="#fff"
+      style="paint-order: stroke; stroke:#000; stroke-width:0.8; stroke-opacity:0.25">${txt}</text>
+  </g>`;
 }
 
 /* ---------- Subline crafting ---------- */
@@ -810,6 +806,7 @@ function craftSubline(answers = {}, category = 'generic') {
       .toLowerCase();
 
   const defaults = {
+    books:        ['new stories, classic runs', 'comics and graphic novels'],
     fashion:      ['natural materials, made to last', 'everyday pieces built to last'],
     cosmetics:    ['gentle formulas for daily care', 'simple routine, better skin'],
     hair:         ['better hair care, less effort', 'clean formulas, easy styling'],
@@ -826,6 +823,7 @@ function craftSubline(answers = {}, category = 'generic') {
     clean(answers.mainBenefit),
     clean(answers.description),
     clean(answers.productType),
+    clean(answers.topic),
   ].filter(Boolean);
 
   let line = candidates[0] || defaults[0];
@@ -926,9 +924,9 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const url       = answers.url || top.url || '';
     const industry  = answers.industry || top.industry || '';
     const category  = resolveCategory(answers || {});
-    const keyword   = getImageKeyword(industry, url);
+    const keyword   = getImageKeyword(industry, url, answers);
 
-    // UPDATED: always return a composited image (retry + styled fallback), never raw
+    // ALWAYS return a composited image (retry + styled fallback), never raw
     const makeOne = async (baseUrl, seed, index = 0) => {
       const headlineHint = overlayTitleFromAnswers(answers, category);
       const ctaHint      = cleanCTA(answers?.cta || '');
@@ -990,12 +988,12 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // Try Pexels (also return TWO)
+    // Try Pexels (return TWO)
     let photos = [];
     try {
       const r = await ax.get('https://api.pexels.com/v1/search', {
         headers: { Authorization: PEXELS_API_KEY },
-        params:  { query: keyword, per_page: 8 },
+        params:  { query: keyword, per_page: 12 },
         timeout: 12000,
       });
       photos = r.data?.photos || [];
