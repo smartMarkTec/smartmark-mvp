@@ -30,7 +30,6 @@ const API_BASE = USE_LOCAL_BACKEND ? "/api" : "/api";
 
 const WARMUP_URL = `${API_BASE}/test`;
 
-
 /* -------- Draft persistence -------- */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
@@ -375,8 +374,6 @@ export default function FormPage() {
   /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
 
-  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
-
   const currentImageId = useMemo(() => {
     const url = imageUrls[activeImage] || "";
     return creativeIdFromUrl(url);
@@ -385,6 +382,8 @@ export default function FormPage() {
   const [editHeadline, setEditHeadline] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
+
+  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
 
   /* Scroll chat to bottom */
   useEffect(() => {
@@ -573,41 +572,38 @@ export default function FormPage() {
     if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
-  /* ---- API calls ---- */
+  /* ---------- IMAGE helpers (always prefer composited variations) ---------- */
+  const normalizeUrl = (u) => {
+    if (!u) return "";
+    return /^https?:\/\//.test(u) ? u : (BACKEND_URL + u);
+  };
 
-  // Parse up to TWO images from the API response; fall back to two picsum seeds.
-  const pickImageArray = (data) => {
-    const arr = [];
+  const parseImageResults = (data) => {
+    const out = [];
 
-    if (data?.absoluteImageUrl) arr.push(data.absoluteImageUrl);
-    if (data?.imageUrl) arr.push(data.imageUrl);
-
-    if (Array.isArray(data?.imageVariations)) {
-      for (const v of data.imageVariations) {
-        if (v?.absoluteUrl) arr.push(v.absoluteUrl);
-        if (v?.url) arr.push(v.url);
+    // Prefer variations (server returns TWO baked images)
+    if (Array.isArray(data?.imageVariations) && data.imageVariations.length) {
+      for (const v of data.imageVariations.slice(0, 2)) {
+        const u = normalizeUrl(v?.absoluteUrl || v?.url);
+        if (u) out.push(u);
       }
     }
 
-    // de-dupe, prefer absolute, keep first two
-    const out = [];
-    const seen = new Set();
-    for (const u of arr) {
-      if (!u) continue;
-      const key = u.startsWith("http") ? u : (BACKEND_URL + u);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(u.startsWith("http") ? u : (BACKEND_URL + u));
-      if (out.length === 2) break;
+    // Fallback single fields if needed
+    if (out.length === 0) {
+      const u = normalizeUrl(data?.absoluteImageUrl || data?.imageUrl);
+      if (u) out.push(u);
     }
-    return out;
+
+    // Dedup + clamp to two
+    return Array.from(new Set(out)).slice(0, 2);
   };
 
   async function fetchImagesOnce(token) {
-    const fallback1 = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
-    const fallback2 = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
+    const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
+    const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
     try {
-      await warmBackend();
+      await warmBackend(); // nudge the server awake
       const data = await fetchJsonWithRetry(
         `${API_BASE}/generate-image-from-prompt`,
         {
@@ -617,13 +613,14 @@ export default function FormPage() {
         },
         { tries: 4, warm: true, timeoutMs: 30000 }
       );
-      const imgs = pickImageArray(data);
-      if (imgs.length === 2) return imgs;
-      if (imgs.length === 1) return [imgs[0], fallback2];
-      return [fallback1, fallback2];
+      const urls = parseImageResults(data);
+      if (urls.length === 1) urls.push(fallbackB);
+      if (urls.length === 0) return [fallbackA, fallbackB];
+      return urls;
     } catch (e) {
       console.warn("image fetch failed:", e.message);
-      return [fallback1, fallback2];
+      // Show *two* placeholders so carousel still has A/B
+      return [fallbackA, fallbackB];
     }
   }
 
@@ -688,7 +685,7 @@ export default function FormPage() {
             // Pre-warm before heavy work
             await warmBackend();
 
-            // Fetch campaign assets first (light), then image, then video — sequential to reduce load
+            // 1) campaign assets
             const data = await fetchJsonWithRetry(`${API_BASE}/generate-campaign-assets`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -701,13 +698,13 @@ export default function FormPage() {
               image_overlay_text: data?.image_overlay_text || ""
             });
 
-            // IMAGES (exactly two for A/B)
+            // 2) images (now *two* URLs)
             const imgs = await fetchImagesOnce(token);
             setImageUrls(imgs);
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
 
-            // VIDEO (optional)
+            // 3) video (unchanged)
             const vid1 = await fetchVideoOnce(token);
             const vids = [vid1].filter(v => v && v.url);
             setVideoItems(vids);
