@@ -929,6 +929,16 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   <g opacity="${vignetteOpacity}">
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
   </g>
+    <!-- Inner edge frame (around photo edges only) -->
+  <g pointer-events="none">
+    <!-- soft dark matte near the border -->
+    <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18"
+          fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="8"/>
+    <!-- thin highlight just inside -->
+    <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16"
+          fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
+  </g>
+
 
   <!-- Headline glass -->
   <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
