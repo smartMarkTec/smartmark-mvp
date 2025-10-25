@@ -3,8 +3,9 @@
 /**
  * SmartMark AI routes — static ads with glassmorphism chips
  * - Headline with adaptive top scrim and micro-stroke
- * - Subtitle chip: ambient-tinted glass with inner highlight, adaptive blur/opacity, micro-noise
+ * - Subtitle chip: ambient-tinted glass with inner highlight, adaptive blur/opacity
  * - CTA pill with soft shadow + inner highlight + scene-tinted outer glow
+ * - Subtle inner frame around photo edges (not a full overlay)
  * - Exactly TWO image variations per generate
  * - Tight timeouts, memory discipline, and graceful fallbacks
  */
@@ -33,7 +34,6 @@ router.use((req, res, next) => {
 /* ---------------- Memory discipline + concurrency gate --------------- */
 const sharp = require('sharp');
 try {
-  // Small cache to avoid Render 512MB OOM, single worker for predictability
   sharp.cache({ memory: 16, files: 0, items: 0 });
   sharp.concurrency(1);
 } catch {}
@@ -83,23 +83,19 @@ const axios = require('axios');
 const https = require('https');
 const http  = require('http');
 
-// 🔸 Keep-alive axios client used for all outbound HTTP (Pexels, image fetches)
 const ax = axios.create({
-  timeout: 15000, // sane default; individual calls can override
+  timeout: 15000,
   httpAgent:  new http.Agent({  keepAlive: true, maxSockets: 25 }),
   httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 25 }),
   maxRedirects: 3,
-  // small retry shim for transient ECONNRESET/ETIMEDOUT
   transitional: { clarifyTimeoutError: true }
 });
-// Export on module scope for reuse below in this file
 module.exports.ax = ax;
 
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
-const { spawn } = require('child_process');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
 const db = require('../db');
@@ -284,14 +280,6 @@ async function saveAsset({ req, kind, url, absoluteUrl, meta = {} }) {
   housekeeping();
   return rec;
 }
-async function getRecentImageForOwner(req) {
-  await purgeExpiredAssets();
-  const owner = ownerKeyFromReq(req);
-  const img = (db.data.generated_assets || [])
-    .filter((a) => a.owner === owner && a.kind === 'image')
-    .sort((a, b) => b.createdAt - a.createdAt)[0];
-  return img ? img.absoluteUrl || absolutePublicUrl(img.url) : null;
-}
 
 /* ---------- Topic/category ---------- */
 const IMAGE_KEYWORD_MAP = [
@@ -311,18 +299,6 @@ function getImageKeyword(industry = '', url = '') {
   for (const row of IMAGE_KEYWORD_MAP)
     if (row.match.some((m) => input.includes(m))) return row.keyword;
   return industry || 'ecommerce';
-}
-function deriveTopicKeywords(answers = {}, url = '', fallback = 'shopping') {
-  const industry = answers.industry || answers.productType || '';
-  const base = getImageKeyword(industry, url) || industry || fallback;
-  const extra = String(answers.description || answers.product || answers.mainBenefit || '').toLowerCase();
-  if (extra.includes('coffee')) return 'coffee shop';
-  if (/(protein|fitness|gym|workout|trainer)/.test(extra)) return 'gym workout';
-  if (/(makeup|skincare|cosmetic)/.test(extra)) return 'makeup application';
-  if (/hair/.test(extra)) return 'hair care';
-  if (/(pet|dog|cat)/.test(extra)) return 'pet dog cat';
-  if (/(electronics|phone|laptop)/.test(extra)) return 'tech gadgets';
-  return base || fallback;
 }
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''}`.toLowerCase();
@@ -571,7 +547,6 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
       const parsed = JSON.parse(jsonStr);
       const clean = (s, max = 200) => cleanFinalText(String(s || '')).slice(0, max);
       headline = clean(parsed.headline, 55);
-      // Grammar guardrails for body (subtitle)
       let bodyRaw = clean(parsed.body, 220)
         .replace(/\bhigh quality quality\b/gi, 'high quality')
         .replace(/\bthe best quality\b/gi, 'great quality')
@@ -603,7 +578,6 @@ const PEXELS_IMG_BASE = 'https://api.pexels.com/v1/search';
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidth(text, fs) { return (String(text || '').length || 1) * fs * 0.6; }
 function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidth(text, fs) > maxW) fs -= 2; return fs; }
-// Serif width estimator for subline chip (keeps subline box tight)
 function estWidthSerif(text, fs, letterSpacing = 0) {
   const t = String(text || ''), n = t.length || 1;
   return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing;
@@ -623,26 +597,6 @@ function cleanCTA(c) {
   if (!ALLOWED_CTAS.includes(norm)) norm = 'LEARN MORE';
   return norm;
 }
-function pickSansFontFile() {
-  const candidates = [
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-    '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
-    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-    '/usr/share/fonts/truetype/freefont/FreeSans.ttf'
-  ];
-  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
-  return null;
-}
-function pickSerifFontFile() {
-  const candidates = [
-    '/usr/share/fonts/truetype/noto/NotoSerif-Regular.ttf',
-    '/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf',
-    '/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf'
-  ];
-  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
-  return pickSansFontFile();
-}
 
 /* ---------- Photo metrics for adaptive layout & glass ---------- */
 async function analyzeImageForPlacement(imgBuf) {
@@ -650,7 +604,6 @@ async function analyzeImageForPlacement(imgBuf) {
     const W = 72, H = 72;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
     let rSum = 0, gSum = 0, bSum = 0;
-    // top & mid bands ~ adaptive scrim/chip
     let rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
     let varSum = 0;
 
@@ -672,14 +625,11 @@ async function analyzeImageForPlacement(imgBuf) {
     const lumAll = Math.round(0.2126*avgR + 0.7152*avgG + 0.0722*avgB);
     const lumTop = Math.round(0.2126*(rTop/cTop) + 0.7152*(gTop/cTop) + 0.0722*(bTop/cTop));
     const lumMid = Math.round(0.2126*(rMid/cMid) + 0.7152*(gMid/cMid) + 0.0722*(bMid/cMid));
-    // texture proxy: variance of luminance
     const meanLum = lumAll;
-    // approximate variance = E[x^2] - mu^2
     const e2 = varSum/px;
     const variance = Math.max(0, e2 - meanLum*meanLum);
-    const texture = Math.min(70, Math.sqrt(variance)/2); // 0..~70 scale
+    const texture = Math.min(70, Math.sqrt(variance)/2);
 
-    // Neutral grayscale palette only for headline bar fallback
     const neutrals = ['#111827','#1f2937','#27272a','#374151','#3f3f46','#4b5563'];
     const idx = lumAll >= 185 ? 0 : lumAll >= 150 ? 1 : lumAll >= 120 ? 2 : lumAll >= 90 ? 3 : lumAll >= 60 ? 4 : 5;
 
@@ -709,7 +659,6 @@ async function analyzeTinyForBands(buf) {
 
     const lumAt = (r,g,b) => 0.2126*r + 0.7152*g + 0.0722*b;
 
-    // First pass: means
     let sumTop = 0, sumMid = 0;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
@@ -722,7 +671,6 @@ async function analyzeTinyForBands(buf) {
     const meanTop = sumTop / Math.max(1, cTop);
     const meanMid = sumMid / Math.max(1, cMid);
 
-    // Second pass: variance
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
         const i = (y * W + x) * 3;
@@ -734,7 +682,6 @@ async function analyzeTinyForBands(buf) {
     varTop /= Math.max(1, cTop);
     varMid /= Math.max(1, cMid);
 
-    // Lower score = smoother (more negative space)
     const score = 0.6 * Math.sqrt(varTop) + 0.4 * Math.sqrt(varMid);
     return score;
   } catch { return 9999; }
@@ -766,9 +713,8 @@ async function rankPhotosByNegativeSpace(photos, axInst) {
   return ordered.concat(photos.slice(8));
 }
 
-/* ---------- SVG defs + layout (glass, highlight, noise) ---------- */
+/* ---------- SVG defs + layout ---------- */
 
-// Perfectly centered CTA pill (with soft scene-tinted glow for dark scenes)
 const LIGHT = '#f5f7f9';
 
 const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
@@ -780,14 +726,12 @@ const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
   const y0 = Math.round(y - h / 2);
 
   return `
-    <!-- subtle outer glow behind the button, tied to scene tint -->
     <g transform="translate(${x0}, ${y0})">
       <rect x="-8" y="-8" width="${w + 16}" height="${h + 16}" rx="${Math.round(h/2) + 8}"
             fill="${glowColor}" opacity="0.28" filter="url(#softGlow)"/>
       <g filter="url(#btnShadow)">
         <rect x="0" y="0" width="${w}" height="${h}" rx="${Math.round(h/2)}" fill="#0b0d10dd"/>
-        <text x="${w / 2}" y="${Math.round(h / 2)}" text-anchor="middle"
-              dominant-baseline="middle" alignment-baseline="middle"
+        <text x="${w / 2}" y="${Math.round(h / 2)}" dy=".35em" text-anchor="middle"
               font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
               font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="0.9">
           ${escSVG(text)}
@@ -796,37 +740,30 @@ const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
     </g>`;
 };
 
-/* --------- Glass overlay creative (headline chip slightly wider + subtle vignette frame) --------- */
 function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Padding: give headline a touch more to avoid glyphs kissing the rounded edge
   const PAD_X_SUB = 16;
-  const PAD_X_HL  = 22; // +6px vs subline → “a tad bit longer”
+  const PAD_X_HL  = 22;
 
-  // Headline sizing (unchanged logic)
   const HL_FS_START = 68;
   const headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
 
-  // Legibility scrim
   const topLum = metrics?.topLum ?? 150;
   const scrim = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
 
-  // Subline sizing (tight to text, subline-only uses serif estimator)
   const SUB_FS   = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW = estWidthSerif(subline, SUB_FS, 0.2);
-  const subW     = Math.min(subTextW + PAD_X_SUB * 2, maxW);   // no 90% clamp
+  const subW     = Math.min(subTextW + PAD_X_SUB * 2, maxW);
   const subH     = Math.max(42, SUB_FS + 14);
   const subX     = Math.round((W - subW) / 2);
 
-  // Headline chip geometry (slightly wider via PAD_X_HL)
   const hlTextW = estWidth(title, headlineFs);
-  const hlW     = Math.min(hlTextW + PAD_X_HL * 2 + 2, maxW * 0.95); // +2px fudge to prevent “flooding”
+  const hlW     = Math.min(hlTextW + PAD_X_HL * 2 + 2, maxW * 0.95);
   const hlH     = Math.max(46, headlineFs + 12);
   const hlX     = Math.round((W - hlW) / 2);
 
-  // Vertical rhythm (subline nudged further down per last pass)
   const headlineCenterY = 108 + Math.round(headlineFs * 0.38);
   const hlRectY         = Math.round(headlineCenterY - hlH / 2);
   const GAP_HL_TO_SUB   = 56;
@@ -834,7 +771,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const subCenterY      = subRectY + Math.round(subH / 2);
   const subBaselineY    = subCenterY;
 
-  // Glass adaptivity
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
   let chipOpacity = 0.24;
@@ -850,42 +786,31 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
   const glowRGBA = `rgba(${avg.r},${avg.g},${avg.b},0.30)`;
 
-  // Subtle vignette frame (one extra element): draws a soft edge to focus the center
   const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
 
-  // Spacing to CTA (kept slightly tighter so subline feels centered between)
   const GAP_SUB_TO_CTA = 88;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
   const R = 8;
   const EDGE_STROKE = 0.20;
 
-  // Button SVG
   const pillSvg = pillBtn(W / 2, ctaY, cta, 32, glowRGBA);
 
   return `
   <defs>
     <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
-
-    <!-- Button shadow + soft glow -->
     <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
       <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/>
     </filter>
     <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
-
-    <!-- Headline scrim -->
     <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%"   stop-color="rgba(0,0,0,0.60)"/>
       <stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
     </linearGradient>
-
-    <!-- Vignette frame -->
     <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
       <stop offset="60%" stop-color="rgba(0,0,0,0)" />
       <stop offset="100%" stop-color="rgba(0,0,0,1)" />
     </radialGradient>
-
-    <!-- Glass blurs with slight under-chip desaturation -->
     <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" result="b"/>
       <feColorMatrix in="b" type="saturate" values="0.88"/>
@@ -894,20 +819,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" result="b"/>
       <feColorMatrix in="b" type="saturate" values="0.90"/>
     </filter>
-
-    <!-- Inner highlight (dialed down) -->
     <linearGradient id="chipInnerHi" x1="0" y="0" x2="0" y="1">
       <stop offset="0%"  stop-color="rgba(255,255,255,0.22)"/>
       <stop offset="55%" stop-color="rgba(255,255,255,0.04)"/>
       <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
     </linearGradient>
-
-    <!-- Soft edge falloff -->
     <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/>
     </filter>
-
-    <!-- Horizontal fade mask for softer edges -->
     <linearGradient id="edgeFade" x1="0" y="0" x2="1" y2="0">
       <stop offset="0%"   stop-color="white" stop-opacity="0.78"/>
       <stop offset="6%"   stop-color="white" stop-opacity="1"/>
@@ -920,25 +839,21 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
   </defs>
 
-  <!-- Headline scrim -->
   <g opacity="${scrim}">
     <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
   </g>
 
-  <!-- Subtle vignette frame over the whole image -->
   <g opacity="${vignetteOpacity}">
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
   </g>
-    <!-- Inner edge frame (around photo edges only) -->
+
+  <!-- Inner edge frame (around photo edges only) -->
   <g pointer-events="none">
-    <!-- soft dark matte near the border -->
     <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18"
           fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="8"/>
-    <!-- thin highlight just inside -->
     <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16"
           fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
   </g>
-
 
   <!-- Headline glass -->
   <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
@@ -951,9 +866,8 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
       fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Headline text (serif to match subline) -->
-  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
-    dominant-baseline="middle" alignment-baseline="middle"
+  <!-- Headline text (positioned with dy for engines that ignore dominant-baseline) -->
+  <text x="${W / 2}" y="${headlineCenterY}" dy=".35em" text-anchor="middle"
     font-family="'Times New Roman', Times, serif"
     font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
     style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
@@ -972,8 +886,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   </g>
 
   <!-- Subline text -->
-  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
-    dominant-baseline="middle" alignment-baseline="middle"
+  <text x="${W / 2}" y="${subCenterY}" dy=".35em" text-anchor="middle"
     font-family="'Times New Roman', Times, serif"
     font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.2"
     style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16">
@@ -984,17 +897,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   `;
 }
 
-
-/* ---------- Subline crafting (grammar-safe) ---------- */
+/* ---------- Subline crafting ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const clean = (s) =>
     String(s || '')
-      .replace(/[^\w\s\-']/g, ' ')   // strip symbols
-      .replace(/\s+/g, ' ')          // collapse spaces
+      .replace(/[^\w\s\-']/g, ' ')
+      .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
 
-  // Natural, short defaults written as noun/verb taglines
   const defaults = {
     fashion:      ['natural materials, made to last', 'everyday pieces built to last'],
     cosmetics:    ['gentle formulas for daily care', 'simple routine, better skin'],
@@ -1008,17 +919,14 @@ function craftSubline(answers = {}, category = 'generic') {
     generic:      ['made for everyday use', 'simple design, better value'],
   }[category] || ['made for everyday use'];
 
-  // Candidate sources from the form
   const candidates = [
     clean(answers.mainBenefit),
     clean(answers.description),
     clean(answers.productType),
   ].filter(Boolean);
 
-  // Start with the strongest signal or a category default
   let line = candidates[0] || defaults[0];
 
-  // --- Grammar & wording normalizers ---
   line = line.replace(/\bquality of\b/gi, '').trim();
   line = line.replace(/\bis the best\b/gi, 'is great')
              .replace(/\bare the best\b/gi, 'are great');
@@ -1030,7 +938,6 @@ function craftSubline(answers = {}, category = 'generic') {
   line = line.replace(/\buses natural materials\b/gi, 'is made with natural materials');
   line = line.replace(/\b(\w+)\s+\1\b/gi, '$1').trim();
 
-  // Token-level shaping: keep it concise (5–9 words)
   let words = line.split(/\s+/).filter(Boolean);
   while (words[0] && /^(and|or|but|the|a|an)$/.test(words[0])) words.shift();
   if (words.length > 9) words = words.slice(0, 9);
@@ -1049,7 +956,7 @@ function craftSubline(answers = {}, category = 'generic') {
   return words.join(' ');
 }
 
-/* ---------- Overlay builder (passes baseDataUri; includes safe fallback) ---------- */
+/* ---------- Overlay builder ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
@@ -1067,21 +974,23 @@ async function buildOverlayImage({
   const baseDataUri = `data:image/jpeg;base64,${resizedBuffer.toString('base64')}`;
   const base = sharp(resizedBuffer).removeAlpha();
 
-  const title   = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  const subline = toTitleCase(craftSubline(answers, category));  // Title Case
-  const cta     = cleanCTA(ctaHint) || 'LEARN MORE';
+  let title   = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
+  if (!title || title.trim().length === 0) title = 'SHOP'; // hard fallback
+  let cta     = cleanCTA(ctaHint) || 'LEARN MORE';
+  if (!cta || cta.trim().length === 0) cta = 'LEARN MORE'; // hard fallback
+  const subline = toTitleCase(craftSubline(answers, category));
 
   let overlaySVG;
   try {
-    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${svgOverlayCreative({
       W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri,
     })}</svg>`;
-    overlaySVG = Buffer.from(svg);
+    overlaySVG = Buffer.from(svg, 'utf8');
   } catch (e) {
-    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">${svgOverlayCreative({
+    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${svgOverlayCreative({
       W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri: '',
     })}</svg>`;
-    overlaySVG = Buffer.from(svg);
+    overlaySVG = Buffer.from(svg, 'utf8');
   }
 
   const outDir = ensureGeneratedDir();
@@ -1131,7 +1040,7 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB =
   });
 }
 
-/* -------------------- Video endpoint placeholder (unchanged) -------------------- */
+/* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
   res.status(501).json({ error: 'Video generation unchanged in this update.' });
 });
@@ -1209,7 +1118,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // Try Pexels
+    // Try Pexels (also return TWO)
     let photos = [];
     try {
       const r = await ax.get(PEXELS_IMG_BASE, {
@@ -1218,7 +1127,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         timeout: 12000,
       });
       photos = r.data?.photos || [];
-      // Reorder by negative-space preference (cleaner bands for headline/subline)
       if (photos.length >= 2) {
         try { photos = await rankPhotosByNegativeSpace(photos, ax); } catch {}
       }
@@ -1270,7 +1178,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
       });
     }
 
-    // deterministic pick of 2 images
     const seed = regenerateToken || answers?.businessName || keyword || Date.now();
     let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
 
