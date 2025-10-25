@@ -713,9 +713,7 @@ async function rankPhotosByNegativeSpace(photos, axInst) {
   return ordered.concat(photos.slice(8));
 }
 
-/* ---------- SVG defs + layout ---------- */
-
-const LIGHT = '#f5f7f9';
+/* ---------- SVG defs + layout (no <use>; direct <image> per group) ---------- */
 
 const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
   fs = Math.max(24, Math.min(fs, 36));
@@ -740,7 +738,7 @@ const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
     </g>`;
 };
 
-function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
+function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
@@ -784,7 +782,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
 
   const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
-  const glowRGBA = `rgba(${avg.r},${avg.g},${avg.b},0.30)`;
 
   const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
 
@@ -794,11 +791,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const R = 8;
   const EDGE_STROKE = 0.20;
 
-  const pillSvg = pillBtn(W / 2, ctaY, cta, 32, glowRGBA);
+  const pillSvg = pillBtn(W / 2, ctaY, cta, 32, `rgba(${avg.r},${avg.g},${avg.b},0.30)`);
 
   return `
   <defs>
-    <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
     <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
       <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/>
     </filter>
@@ -827,22 +823,20 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
     <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
       <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/>
     </filter>
-    <linearGradient id="edgeFade" x1="0" y="0" x2="1" y2="0">
+    <linearGradient id="edgeFade" x1="0" y="0" x2="1" y="0">
       <stop offset="0%"   stop-color="white" stop-opacity="0.78"/>
       <stop offset="6%"   stop-color="white" stop-opacity="1"/>
       <stop offset="94%"  stop-color="white" stop-opacity="1"/>
       <stop offset="100%" stop-color="white" stop-opacity="0.78"/>
     </linearGradient>
-    <mask id="maskHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" fill="url(#edgeFade)"/></mask>
-    <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
-    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
-    <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
   </defs>
 
+  <!-- Headline scrim -->
   <g opacity="${scrim}">
     <rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/>
   </g>
 
+  <!-- Subtle vignette frame -->
   <g opacity="${vignetteOpacity}">
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
   </g>
@@ -856,17 +850,20 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   </g>
 
   <!-- Headline glass -->
+  <mask id="maskHl"><rect x="${Math.round((W - Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)) / 2)}" y="${Math.round(headlineCenterY - Math.max(46, headlineFs + 12) / 2)}" width="${Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)}" height="${Math.max(46, headlineFs + 12)}" fill="url(#edgeFade)"/></mask>
+  <clipPath id="clipHl"><rect x="${Math.round((W - Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)) / 2)}" y="${Math.round(headlineCenterY - Math.max(46, headlineFs + 12) / 2)}" width="${Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)}" height="${Math.max(46, headlineFs + 12)}" rx="8"/></clipPath>
+
   <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
-    <use href="#bg" filter="url(#glassBlurHl)"/>
-    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"
-      fill="${tintRGBA}" opacity="${(chipOpacity * 0.82).toFixed(2)}"/>
-    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}"
+    <image href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
+    <rect x="${Math.round((W - Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)) / 2)}" y="${Math.round(headlineCenterY - Math.max(46, headlineFs + 12) / 2)}" width="${Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)}" height="${Math.max(46, headlineFs + 12)}" rx="8"
+      fill="${tintRGBA(metrics, 0.28)}" opacity="0.82"/>
+    <rect x="${Math.round((W - Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)) / 2)+1}" y="${Math.round(headlineCenterY - Math.max(46, headlineFs + 12) / 2)+1}" width="${Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)-2}" height="${Math.max(9, Math.max(46, headlineFs + 12)*0.40)}" rx="7"
       fill="url(#chipInnerHi)"/>
-    <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}"
+    <rect x="${Math.round((W - Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)) / 2)+0.5}" y="${Math.round(headlineCenterY - Math.max(46, headlineFs + 12) / 2)+0.5}" width="${Math.min(estWidth(title, headlineFs) + PAD_X_HL * 2 + 2, maxW * 0.95)-1}" height="${Math.max(46, headlineFs + 12)-1}" rx="7.5"
       fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
-  <!-- Headline text (positioned with dy for engines that ignore dominant-baseline) -->
+  <!-- Headline text -->
   <text x="${W / 2}" y="${headlineCenterY}" dy=".35em" text-anchor="middle"
     font-family="'Times New Roman', Times, serif"
     font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
@@ -875,13 +872,16 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   </text>
 
   <!-- Subline glass -->
+  <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
+  <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="8"/></clipPath>
+
   <g clip-path="url(#clipSub)" mask="url(#maskSub)" filter="url(#chipFalloff)">
-    <use href="#bg" filter="url(#glassBlurSub)"/>
-    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"
-      fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
-    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}"
+    <image href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
+    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="8"
+      fill="${tintRGBA(metrics, 0.28)}" opacity="${chipOpacity(metrics).toFixed(2)}"/>
+    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="7"
       fill="url(#chipInnerHi)"/>
-    <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}"
+    <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="7.5"
       fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
@@ -895,6 +895,22 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
 
   ${pillSvg}
   `;
+}
+
+// helpers to reuse scene tint math inside string template
+function chipOpacity(metrics) {
+  const t = metrics?.texture ?? 30;
+  const midLum = metrics?.midLum ?? 140;
+  let op = 0.24;
+  if (t > 35 && t <= 50) op = 0.28;
+  else if (t > 50) op = 0.32;
+  if (midLum >= 170) op = Math.min(op + 0.02, 0.36);
+  if (midLum <= 90)  op = Math.max(0.20, op - 0.02);
+  return op;
+}
+function tintRGBA(metrics, factor = 0.28) {
+  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
+  return `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity(metrics) * factor).toFixed(2)})`;
 }
 
 /* ---------- Subline crafting ---------- */
@@ -975,23 +991,15 @@ async function buildOverlayImage({
   const base = sharp(resizedBuffer).removeAlpha();
 
   let title   = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  if (!title || title.trim().length === 0) title = 'SHOP'; // hard fallback
+  if (!title || title.trim().length === 0) title = 'SHOP';
   let cta     = cleanCTA(ctaHint) || 'LEARN MORE';
-  if (!cta || cta.trim().length === 0) cta = 'LEARN MORE'; // hard fallback
+  if (!cta || cta.trim().length === 0) cta = 'LEARN MORE';
   const subline = toTitleCase(craftSubline(answers, category));
 
-  let overlaySVG;
-  try {
-    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${svgOverlayCreative({
-      W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri,
-    })}</svg>`;
-    overlaySVG = Buffer.from(svg, 'utf8');
-  } catch (e) {
-    const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${svgOverlayCreative({
-      W, H, title, subline, cta, brandColor: analysis.brandColor, metrics: analysis, baseDataUri: '',
-    })}</svg>`;
-    overlaySVG = Buffer.from(svg, 'utf8');
-  }
+  const svg = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${svgOverlayCreative({
+    W, H, title, subline, cta, metrics: analysis, baseDataUri,
+  })}</svg>`;
+  const overlaySVG = Buffer.from(svg, 'utf8');
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
@@ -1040,9 +1048,9 @@ async function downloadFileWithTimeout(url, dest, timeoutMs = 16000, maxSizeMB =
   });
 }
 
-/* -------------------- Video endpoint placeholder -------------------- */
+/* -------------------- Video endpoint placeholder (return 200) -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
-  res.status(501).json({ error: 'Video generation unchanged in this update.' });
+  res.status(200).json({ ok: true, disabled: true, message: 'Video generation is disabled in this build.' });
 });
 
 /* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
