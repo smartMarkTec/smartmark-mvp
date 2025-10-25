@@ -278,7 +278,6 @@ async function fetchJsonWithRetry(
   throw lastErr || new Error("request failed");
 }
 
-
 async function warmBackend() {
   // Light GET to ensure instance is awake and CORS middleware attaches headers
   try {
@@ -376,6 +375,8 @@ export default function FormPage() {
   /* ---- Image copy editing state ---- */
   const [imageEditing, setImageEditing] = useState(false);
 
+  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+
   const currentImageId = useMemo(() => {
     const url = imageUrls[activeImage] || "";
     return creativeIdFromUrl(url);
@@ -384,8 +385,6 @@ export default function FormPage() {
   const [editHeadline, setEditHeadline] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
-
-  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
 
   /* Scroll chat to bottom */
   useEffect(() => {
@@ -575,36 +574,58 @@ export default function FormPage() {
   }
 
   /* ---- API calls ---- */
-  const pickBestImageUrl = (data) => {
-    if (data?.absoluteImageUrl) return data.absoluteImageUrl;
-    const v0 = Array.isArray(data?.imageVariations) ? data.imageVariations[0] : null;
-    if (v0?.absoluteUrl) return v0.absoluteUrl;
-    if (data?.imageUrl) return abs(data.imageUrl);
-    return "";
+
+  // Parse up to TWO images from the API response; fall back to two picsum seeds.
+  const pickImageArray = (data) => {
+    const arr = [];
+
+    if (data?.absoluteImageUrl) arr.push(data.absoluteImageUrl);
+    if (data?.imageUrl) arr.push(data.imageUrl);
+
+    if (Array.isArray(data?.imageVariations)) {
+      for (const v of data.imageVariations) {
+        if (v?.absoluteUrl) arr.push(v.absoluteUrl);
+        if (v?.url) arr.push(v.url);
+      }
+    }
+
+    // de-dupe, prefer absolute, keep first two
+    const out = [];
+    const seen = new Set();
+    for (const u of arr) {
+      if (!u) continue;
+      const key = u.startsWith("http") ? u : (BACKEND_URL + u);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(u.startsWith("http") ? u : (BACKEND_URL + u));
+      if (out.length === 2) break;
+    }
+    return out;
   };
 
- async function fetchImageOnce(token) {
-  const fallbackPicsum = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}/1200/628`;
-  try {
-    await warmBackend(); // nudge the server awake
-    const data = await fetchJsonWithRetry(
-      `${API_BASE}/generate-image-from-prompt`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, regenerateToken: token })
-      },
-      { tries: 4, warm: true, timeoutMs: 30000 } // ↑ longer timeout just for images
-    );
-    const url = pickBestImageUrl(data);
-    return url || fallbackPicsum;
-  } catch (e) {
-    console.warn("image fetch failed:", e.message);
-    // Last resort: lightweight placeholder so the preview still shows an image
-    return fallbackPicsum;
+  async function fetchImagesOnce(token) {
+    const fallback1 = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
+    const fallback2 = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
+    try {
+      await warmBackend();
+      const data = await fetchJsonWithRetry(
+        `${API_BASE}/generate-image-from-prompt`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ answers, regenerateToken: token })
+        },
+        { tries: 4, warm: true, timeoutMs: 30000 }
+      );
+      const imgs = pickImageArray(data);
+      if (imgs.length === 2) return imgs;
+      if (imgs.length === 1) return [imgs[0], fallback2];
+      return [fallback1, fallback2];
+    } catch (e) {
+      console.warn("image fetch failed:", e.message);
+      return [fallback1, fallback2];
+    }
   }
-}
-
 
   async function fetchVideoOnce(token) {
     try {
@@ -680,14 +701,14 @@ export default function FormPage() {
               image_overlay_text: data?.image_overlay_text || ""
             });
 
-            const img1 = await fetchImageOnce(token);
-            const vid1 = await fetchVideoOnce(token);
-
-            const imgs = [img1].filter(Boolean);
+            // IMAGES (exactly two for A/B)
+            const imgs = await fetchImagesOnce(token);
             setImageUrls(imgs);
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
 
+            // VIDEO (optional)
+            const vid1 = await fetchVideoOnce(token);
             const vids = [vid1].filter(v => v && v.url);
             setVideoItems(vids);
             setActiveVideo(0);
@@ -755,8 +776,7 @@ export default function FormPage() {
     setImageLoading(true);
     try {
       await warmBackend();
-      const img = await fetchImageOnce(getRandomString());
-      const imgs = [img].filter(Boolean);
+      const imgs = await fetchImagesOnce(getRandomString());
       setImageUrls(imgs);
       setActiveImage(0);
       setImageUrl(imgs[0] || "");

@@ -673,52 +673,35 @@ async function rankPhotosByNegativeSpace(photos, axInst) {
   return ordered.concat(photos.slice(8));
 }
 
-/* --------- Glass overlay creative (subline-only tight chip; headline unchanged) --------- */
-const pillBtn = (x, y, text, fs = 30, glowColor = 'rgba(255,255,255,0.18)') => {
-  fs = Math.max(24, Math.min(fs, 36));
-  const padX = 34;
-  const h = Math.round(fs + 26);
-  const w = Math.min(880, estWidth(text, fs) + padX * 2);
-  const x0 = Math.round(x - w / 2);
-  const y0 = Math.round(y - h / 2);
-  return `
-    <g transform="translate(${x0}, ${y0})">
-      <rect x="-8" y="-8" width="${w + 16}" height="${h + 16}" rx="${Math.round(h/2) + 8}"
-            fill="${glowColor}" opacity="0.28" filter="url(#softGlow)"/>
-      <g filter="url(#btnShadow)">
-        <rect x="0" y="0" width="${w}" height="${h}" rx="${Math.round(h/2)}" fill="#0b0d10dd"/>
-        <text x="${w / 2}" y="${Math.round(h / 2)}" text-anchor="middle"
-              dominant-baseline="middle" alignment-baseline="middle"
-              font-family="Inter, Helvetica, Arial, DejaVu Sans, sans-serif"
-              font-size="${fs}" font-weight="900" fill="#ffffff" letter-spacing="0.9">
-          ${escSVG(text)}
-        </text>
-      </g>
-    </g>`;
-};
-
-function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, baseDataUri }) {
+/* --------- Glass overlay creative (headline & subline chips; inner edge frame) --------- */
+function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseDataUri }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
-  const PAD_X = 16;
 
+  // Padding
+  const PAD_X_SUB = 16;
+  const PAD_X_HL  = 22;
+
+  // Headline sizing (serif estimator + small fudge so glass hugs text)
   const HL_FS_START = 68;
-  const headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
+  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
+  const hlTextW     = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
+  const hlW         = Math.min(hlTextW + PAD_X_HL * 2, maxW * 0.95);
+  const hlH         = Math.max(46, headlineFs + 12);
+  const hlX         = Math.round((W - hlW) / 2);
 
+  // Legibility scrim
   const topLum = metrics?.topLum ?? 150;
-  const scrim = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
+  const scrim  = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
 
+  // Subline sizing (tight to text using serif estimator)
   const SUB_FS   = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
-  const subTextW = estWidthSerif(subline, SUB_FS, 0.2);
-  const subW     = Math.min(subTextW + PAD_X * 2, maxW);
+  const subTextW = estWidthSerif(subline, SUB_FS, 0.20);
+  const subW     = Math.min(subTextW + PAD_X_SUB * 2, maxW);
   const subH     = Math.max(42, SUB_FS + 14);
   const subX     = Math.round((W - subW) / 2);
 
-  const hlTextW = estWidth(title, headlineFs);
-  const hlW     = Math.min(hlTextW + PAD_X * 2, maxW * 0.95);
-  const hlH     = Math.max(46, headlineFs + 12);
-  const hlX     = Math.round((W - hlW) / 2);
-
+  // Vertical rhythm
   const headlineCenterY = 108 + Math.round(headlineFs * 0.38);
   const hlRectY         = Math.round(headlineCenterY - hlH / 2);
   const GAP_HL_TO_SUB   = 56;
@@ -726,6 +709,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const subCenterY      = subRectY + Math.round(subH / 2);
   const subBaselineY    = subCenterY;
 
+  // Glass adaptivity
   const t      = metrics?.texture ?? 30;
   const midLum = metrics?.midLum ?? 140;
   let chipOpacity = 0.24;
@@ -737,10 +721,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
   const BLUR_SUB = 14;
   const BLUR_HL  = 11;
 
-  const avg = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
-  const glowRGBA = `rgba(${avg.r},${avg.g},${avg.b},0.30)`;
+  const avg       = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
+  const tintRGBA  = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
+  const glowRGBA  = `rgba(${avg.r},${avg.g},${avg.b},0.30)`;
+  const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
 
+  // CTA placement
   const GAP_SUB_TO_CTA = 88;
   const ctaY = Math.round(subBaselineY + SUB_FS + GAP_SUB_TO_CTA);
 
@@ -751,79 +737,62 @@ function svgOverlayCreative({ W, H, title, subline, cta, brandColor, metrics, ba
 
   return `
   <defs>
-    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/>
-    </filter>
+    <image id="bg" href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" />
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/></filter>
     <filter id="softGlow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="16"/></filter>
-    <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="rgba(0,0,0,0.60)"/><stop offset="100%" stop-color="rgba(0,0,0,0.00)"/>
-    </linearGradient>
-    <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" result="b"/><feColorMatrix in="b" type="saturate" values="0.88"/>
-    </filter>
-    <filter id="glassBlurHl" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}" result="b"/><feColorMatrix in="b" type="saturate" values="0.90"/>
-    </filter>
-    <linearGradient id="chipInnerHi" x1="0" y="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="rgba(255,255,255,0.22)"/><stop offset="55%" stop-color="rgba(255,255,255,0.04)"/><stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
-    </linearGradient>
-    <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/>
-    </filter>
-    <linearGradient id="edgeFade" x1="0" y="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="white" stop-opacity="0.78"/><stop offset="6%" stop-color="white" stop-opacity="1"/>
-      <stop offset="94%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0.78"/>
-    </linearGradient>
+    <linearGradient id="topShade" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="rgba(0,0,0,0.60)"/><stop offset="100%" stop-color="rgba(0,0,0,0.00)"/></linearGradient>
+    <radialGradient id="vignette" cx="50%" cy="50%" r="70%"><stop offset="60%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(0,0,0,1)"/></radialGradient>
+    <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_SUB}" result="b"/><feColorMatrix in="b" type="saturate" values="0.88"/></filter>
+    <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur in="SourceGraphic" stdDeviation="${BLUR_HL}"  result="b"/><feColorMatrix in="b" type="saturate" values="0.90"/></filter>
+    <linearGradient id="chipInnerHi" x1="0" y="0" x2="0" y="1"><stop offset="0%" stop-color="rgba(255,255,255,0.22)"/><stop offset="55%" stop-color="rgba(255,255,255,0.04)"/><stop offset="100%" stop-color="rgba(255,255,255,0.00)"/></linearGradient>
+    <filter id="chipFalloff" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="1.2" stdDeviation="2.0" flood-color="rgba(0,0,0,0.18)" flood-opacity="1"/></filter>
+    <linearGradient id="edgeFade" x1="0" y="0" x2="1" y2="0"><stop offset="0%" stop-color="white" stop-opacity="0.78"/><stop offset="6%" stop-color="white" stop-opacity="1"/><stop offset="94%" stop-color="white" stop-opacity="1"/><stop offset="100%" stop-color="white" stop-opacity="0.78"/></linearGradient>
+
+    <!-- Masks & clips use the SAME computed geometry -->
     <mask id="maskHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" fill="url(#edgeFade)"/></mask>
-    <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
     <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
+
+    <mask id="maskSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" fill="url(#edgeFade)"/></mask>
     <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
   </defs>
 
-  <!-- Headline scrim -->
+  <!-- Top scrim -->
   <g opacity="${scrim}"><rect x="0" y="0" width="${W}" height="200" fill="url(#topShade)"/></g>
 
-  <!-- Subtle inner edge frame around photo -->
+  <!-- Subtle vignette frame + inner edge frame -->
+  <g opacity="${vignetteOpacity}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/></g>
   <g pointer-events="none">
-    <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18"
-          fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="8"/>
-    <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16"
-          fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
+    <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000000" stroke-opacity="0.18" stroke-width="8"/>
+    <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
   </g>
 
-  <!-- Headline glass (DIRECT image, no <use>) -->
+  <!-- Headline glass -->
   <g clip-path="url(#clipHl)" mask="url(#maskHl)" filter="url(#chipFalloff)">
-    <image href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
+    <use href="#bg" filter="url(#glassBlurHl)"/>
     <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacity * 0.82).toFixed(2)}"/>
     <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-    <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none"
-          stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
+    <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
   <!-- Headline text -->
-  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
-    dominant-baseline="middle" alignment-baseline="middle"
-    font-family="'Times New Roman', Times, serif"
-    font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
-    style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
+  <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+        font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#ffffff" letter-spacing="0.10"
+        style="paint-order: stroke; stroke:#000; stroke-width:1.0; stroke-opacity:0.18">
     ${escSVG(title)}
   </text>
 
-  <!-- Subline glass (DIRECT image, tight chip) -->
+  <!-- Subline glass -->
   <g clip-path="url(#clipSub)" mask="url(#maskSub)" filter="url(#chipFalloff)">
-    <image href="${baseDataUri}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
+    <use href="#bg" filter="url(#glassBlurSub)"/>
     <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
     <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-    <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none"
-          stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
+    <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
   </g>
 
   <!-- Subline text -->
-  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
-    dominant-baseline="middle" alignment-baseline="middle"
-    font-family="'Times New Roman', Times, serif"
-    font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.2"
-    style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16">
+  <text x="${W / 2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+        font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#ffffff" letter-spacing="0.2"
+        style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16">
     ${escSVG(subline)}
   </text>
 
