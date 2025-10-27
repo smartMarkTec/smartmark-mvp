@@ -592,6 +592,7 @@ function cleanCTA(c) {
 }
 function toTitleCase(s) { return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)); }
 
+/* --- CTA pill with TRUE vertical centering --- */
 function pillBtn(cx, cy, text, fs) {
   const padX = 22;
   const t = escSVG(text || 'LEARN MORE');
@@ -602,12 +603,15 @@ function pillBtn(cx, cy, text, fs) {
   return `
     <g>
       <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h/2}" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-      <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${h*0.45}" rx="${(h/2)-1}" fill="rgba(255,255,255,0.22)"/>
-      <text x="${cx}" y="${y+h/2+2}" text-anchor="middle" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
+      <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${Math.max(10, h*0.45)}" rx="${Math.max(0,(h/2)-1)}" fill="rgba(255,255,255,0.22)"/>
+      <text x="${cx}" y="${y + h/2}" text-anchor="middle"
+            dominant-baseline="middle" alignment-baseline="middle"
+            font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
             font-size="${fs}" font-weight="700" fill="#ffffff">${t}</text>
     </g>`;
 }
 
+/* --- Overlay with centered text and NO top scrim --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
   const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
@@ -618,28 +622,38 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
   const subW = Math.min(estWidthSerif(subline, SUB_FS, 0.20) + 32, maxW);
   const subH = Math.max(42, SUB_FS + 14); const subX = Math.round((W - subW) / 2);
 
-  const topLum = metrics?.topLum ?? 150; const scrim = topLum >= 190 ? 0.34 : topLum >= 160 ? 0.28 : topLum >= 130 ? 0.24 : 0.18;
-  const headlineCenterY = 108 + Math.round(headlineFs * 0.38); const hlRectY = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB = 56; const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB); const subCenterY = subRectY + Math.round(subH / 2);
-  const midLum = metrics?.midLum ?? 140; const chipOpacity = (midLum >= 170 ? 0.30 : midLum >= 120 ? 0.26 : 0.22);
+  // Removed the top gray scrim entirely
+  const midLum = metrics?.midLum ?? 140;
+  const chipOpacity = (midLum >= 170 ? 0.30 : midLum >= 120 ? 0.26 : 0.22);
   const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
   const R = 8;
 
+  // Slightly lower headline center Y; use true centering on all texts
+  const headlineCenterY = 126;
+  const hlRectY = Math.round(headlineCenterY - hlH / 2);
+
+  const GAP_HL_TO_SUB = 56;
+  const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
+  const subCenterY = subRectY + Math.round(subH / 2);
+
   return `
-    <rect x="0" y="0" width="${W}" height="${200}" fill="rgba(0,0,0,${scrim})"/>
     <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="rgba(0,0,0,${vignetteOpacity})"/>
     <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
 
     <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(255,255,255,${chipOpacity})" />
     <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="rgba(255,255,255,0.22)"/>
 
-    <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle" font-family="'Times New Roman', Times, serif"
+    <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
+          dominant-baseline="middle" alignment-baseline="middle"
+          font-family="'Times New Roman', Times, serif"
           font-size="${headlineFs}" font-weight="700" fill="#ffffff">${escSVG(title)}</text>
 
     <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(255,255,255,${chipOpacity - 0.04})" />
     <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="rgba(255,255,255,0.20)"/>
 
-    <text x="${W / 2}" y="${subCenterY}" text-anchor="middle" font-family="'Times New Roman', Times, serif"
+    <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
+          dominant-baseline="middle" alignment-baseline="middle"
+          font-family="'Times New Roman', Times, serif"
           font-size="${SUB_FS}" font-weight="700" fill="#ffffff">${escSVG(subline)}</text>
 
     ${pillBtn(W / 2, Math.round(subCenterY + SUB_FS + 70), cta, 32)}
@@ -712,19 +726,19 @@ async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 72, H = 72;
     const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let rSum = 0, gSum = 0, bSum = 0, rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0, varSum = 0;
+    let rSum = 0, gSum = 0, bSum = 0, rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const i = (y * W + x) * 3;
       const r = data[i], g = data[i + 1], b = data[i + 2];
       rSum += r; gSum += g; bSum += b;
-      const lum = 0.2126*r + 0.7152*g + 0.0722*b; varSum += lum * lum;
       if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
       if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
     }
     const px = W*H;
     const avgR = rSum/px, avgG = gSum/px, avgB = bSum/px;
-    const lumTop = Math.round(0.2126*(rTop/cTop) + 0.7152*(gTop/cTop) + 0.0722*(bTop/cTop));
-    const lumMid = Math.round(0.2126*(rMid/cMid) + 0.7152*(gMid/cMid) + 0.0722*(bMid/cMid));
+    const lum = (r,g,b)=> Math.round(0.2126*r + 0.7152*g + 0.0722*b);
+    const lumTop = lum(rTop/cTop, gTop/cTop, bTop/cTop);
+    const lumMid = lum(rMid/cMid, gMid/cMid, bMid/cMid);
     return { topLum: lumTop, midLum: lumMid, avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) } };
   } catch {
     return { topLum: 150, midLum: 140, avgRGB: { r: 64, g: 64, b: 64 } };
