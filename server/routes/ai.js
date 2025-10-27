@@ -588,43 +588,56 @@ function cleanCTA(c) { let norm = String(c || '').toUpperCase().replace(/[\'’!
 const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
 
 /* --- CTA pill (fit text inside, always) --- */
-function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)') {
+function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum = 140) {
   const padX = 28;
   const txt  = String(label || 'LEARN MORE').toUpperCase().replace(/[^\w ]/g, ' ').replace(/\s+/g, ' ').trim();
   const estW = Math.max(120, txt.length * fs * 0.55 + padX * 2);
   const estH = Math.max(46, fs + 18);
   const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
-  const innerTextW = estW - 32; // reserved for text so it never leaks
+  const innerTextW = estW - 32;
+
+  // Adaptive text color & outline based on background brightness
+  const textFill = midLum >= 178 ? '#111111' : '#FFFFFF';
+  const outline  = midLum >= 178 ? '#FFFFFF' : '#000000';
+  const strokeW  = midLum >= 178 ? 0.9 : 0.9;
+  const shadowOpacity = midLum >= 178 ? 0.25 : 0.35;
 
   return `
+  <defs>
+    <filter id="btnTextShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="2.2" stdDeviation="2.6" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
+    </filter>
+  </defs>
   <g>
-    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/></filter>
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
     <g filter="url(#btnShadow)">
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
       <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
       <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}"
+            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextShadow)"
             font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="${fs}" font-weight="700"
-            fill="#fff" style="paint-order: stroke; stroke:#000; stroke-width:0.7; stroke-opacity:0.22; letter-spacing:0.06em">
+            fill="${textFill}" style="paint-order: stroke; stroke:${outline}; stroke-width:${strokeW}; stroke-opacity:0.8; letter-spacing:0.06em">
         ${escSVG(txt)}
       </text>
     </g>
   </g>`;
 }
 
-/* --- Glass overlay (clips + textLength so text always fits) --- */
+/* --- Glass overlay (adds back-shade + text shadow + adaptive text color) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
-  // headline sizing (min 34px to avoid tiny brands)
+  // headline sizing (min 34px)
   const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 34);
   const hlTextW = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
   const hlW = Math.min(hlTextW + 44, maxW * 0.95);
   const hlH = Math.max(48, headlineFs + 12);
   const hlX = Math.round((W - hlW) / 2);
-  const hlInnerTextW = Math.max(80, hlW - 36); // text box width inside chip
+  const hlInnerTextW = Math.max(80, hlW - 36);
 
   const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW = estWidthSerif(subline, SUB_FS, 0.18);
@@ -641,30 +654,46 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const subCenterY = subRectY + Math.round(subH / 2);
   const ctaY = Math.round(subCenterY + SUB_FS + 86);
 
-  // adaptive chips
+  // adaptive chips & colors
   const midLum = metrics?.midLum ?? 140;
+  const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
+
   let chipOpacityHead = 0.26; if (midLum >= 170) chipOpacityHead += 0.02; if (midLum <= 100) chipOpacityHead -= 0.02;
   chipOpacityHead = Math.max(0.24, Math.min(0.30, chipOpacityHead));
   const chipOpacitySub = Math.max(0.20, Math.min(0.26, chipOpacityHead - 0.02));
-  const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.28).toFixed(2)})`;
   const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
   const EDGE_STROKE = 0.20, R = 8;
-  const chipStrokeDarkOpacity = (midLum < 100) ? 0.15 : 0.0;
-  const esc = escSVG;
+
+  // Extra back-shade inside chips when background is bright
+  const backShadeHead = midLum >= 170 ? 0.18 : midLum >= 150 ? 0.12 : 0.08;
+  const backShadeSub  = Math.max(0, backShadeHead - 0.03);
+
+  // Adaptive text colors & outlines
+  const headTextFill = midLum >= 178 ? '#111111' : '#FFFFFF';
+  const headOutline  = midLum >= 178 ? '#FFFFFF' : '#000000';
+  const subTextFill  = midLum >= 178 ? '#111111' : '#FFFFFF';
+  const subOutline   = midLum >= 178 ? '#FFFFFF' : '#000000';
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <!-- blur kept simple to avoid Sharp parser issues -->
       <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
       <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
       <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/><stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/><stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
+        <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
+        <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
       </linearGradient>
-      <radialGradient id="vignette" cx="50%" cy="50%" r="70%"><stop offset="60%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(0,0,0,1)"/></radialGradient>
+      <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
+        <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
+      </radialGradient>
       <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
+      <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="2.2" stdDeviation="2.6" flood-color="#000000" flood-opacity="${midLum >= 178 ? 0.22 : 0.35}"/>
+      </filter>
     </defs>
 
     <!-- vignette + frame -->
@@ -676,41 +705,42 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
     <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
-      <image href="${esc(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead*0.82).toFixed(2)}"
-            stroke="rgba(0,0,0,${chipStrokeDarkOpacity})" stroke-width="${chipStrokeDarkOpacity ? 1 : 0}"/>
+      <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(0,0,0,${backShadeHead})"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead*0.82).toFixed(2)}"/>
       <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(12, Math.round(hlH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text (forced to fit) -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${Math.round(hlRectY + hlH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-          lengthAdjust="spacingAndGlyphs" textLength="${hlInnerTextW}"
-          font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#fff"
-          style="paint-order: stroke; stroke:#000; stroke-width:1; stroke-opacity:0.14; letter-spacing:0.08">
-      ${esc(title)}
+          lengthAdjust="spacingAndGlyphs" textLength="${hlInnerTextW}" filter="url(#textShadow)"
+          font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="${headTextFill}"
+          style="paint-order: stroke; stroke:${headOutline}; stroke-width:1.05; stroke-opacity:0.85; letter-spacing:0.08">
+      ${escSVG(title)}
     </text>
 
     <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
-      <image href="${esc(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"
-            stroke="rgba(0,0,0,${chipStrokeDarkOpacity})" stroke-width="${chipStrokeDarkOpacity ? 1 : 0}"/>
+      <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(0,0,0,${backShadeSub})"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
       <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(10, Math.round(subH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text (forced to fit) -->
+    <!-- Subline text -->
     <text x="${W/2}" y="${Math.round(subRectY + subH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-          lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}"
-          font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#fff"
-          style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.14; letter-spacing:0.16">
-      ${esc(subline)}
+          lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}" filter="url(#textShadow)"
+          font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="${subTextFill}"
+          style="paint-order: stroke fill; stroke:${subOutline}; stroke-width:0.9; stroke-opacity:0.8; letter-spacing:0.16">
+      ${escSVG(subline)}
     </text>
 
-    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`)}
+    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum)}
   </svg>`;
 }
+
 
 /* ---------- Subline crafting (coherent, sentence-case, 7–9 words) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
