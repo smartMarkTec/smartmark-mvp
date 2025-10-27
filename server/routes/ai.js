@@ -592,72 +592,131 @@ function cleanCTA(c) {
 }
 function toTitleCase(s) { return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)); }
 
-/* --- CTA pill with TRUE vertical centering --- */
-function pillBtn(cx, cy, text, fs) {
-  const padX = 22;
-  const t = escSVG(text || 'LEARN MORE');
-  const w = Math.round(t.length * (fs * 0.55)) + padX * 2;
-  const h = fs + 16;
-  const x = Math.round(cx - w / 2);
-  const y = Math.round(cy - h / 2);
+/* --- CTA pill with TRUE vertical centering + soft glow --- */
+function pillBtn(cx, cy, label, fs = 30, glow = 'rgba(255,255,255,0.35)') {
+  const padX = 28;
+  const txt  = String(label || 'LEARN MORE').toUpperCase().replace(/[^\w ]/g, ' ').replace(/\s+/g, ' ').trim();
+  const estW = Math.max(120, txt.length * fs * 0.55 + padX * 2);
+  const estH = Math.max(44, fs + 18);
+  const x = Math.round(cx - estW / 2);
+  const y = Math.round(cy - estH / 2);
+  const r = Math.round(estH / 2);
+
   return `
-    <g>
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h/2}" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-      <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${Math.max(10, h*0.45)}" rx="${Math.max(0,(h/2)-1)}" fill="rgba(255,255,255,0.22)"/>
-      <text x="${cx}" y="${y + h/2}" text-anchor="middle"
-            dominant-baseline="middle" alignment-baseline="middle"
-            font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial"
-            font-size="${fs}" font-weight="700" fill="#ffffff">${t}</text>
-    </g>`;
+  <g>
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/>
+    </filter>
+    <g filter="url(#btnShadow)">
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+      <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, estH * 0.45)}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="1" opacity="0.35"/>
+      <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
+      <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+            font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="${fs}" font-weight="700"
+            fill="#fff" style="paint-order: stroke; stroke:#000; stroke-width:0.7; stroke-opacity:0.25; letter-spacing:0.06em">
+        ${txt}
+      </text>
+    </g>
+  </g>`;
 }
 
-/* --- Overlay with centered text and NO top scrim --- */
-function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
+/* --- Glassmorphism overlay (blurred backdrop inside chips, centered text, NO top scrim) --- */
+function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
   const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
-  const hlW = Math.min(estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12) + 44, maxW * 0.95);
-  const hlH = Math.max(46, headlineFs + 12); const hlX = Math.round((W - hlW) / 2);
+  const hlTextW = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
+  const hlW = Math.min(hlTextW + 44, maxW * 0.95);
+  const hlH = Math.max(46, headlineFs + 12);
+  const hlX = Math.round((W - hlW) / 2);
 
   const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
-  const subW = Math.min(estWidthSerif(subline, SUB_FS, 0.20) + 32, maxW);
-  const subH = Math.max(42, SUB_FS + 14); const subX = Math.round((W - subW) / 2);
+  const subTextW = estWidthSerif(subline, SUB_FS, 0.20);
+  const subW = Math.min(subTextW + 32, maxW);
+  const subH = Math.max(42, SUB_FS + 14);
+  const subX = Math.round((W - subW) / 2);
 
-  // Removed the top gray scrim entirely
-  const midLum = metrics?.midLum ?? 140;
-  const chipOpacity = (midLum >= 170 ? 0.30 : midLum >= 120 ? 0.26 : 0.22);
-  const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
-  const R = 8;
-
-  // Slightly lower headline center Y; use true centering on all texts
+  // positions (slightly lower headline); no top scrim
   const headlineCenterY = 126;
   const hlRectY = Math.round(headlineCenterY - hlH / 2);
-
   const GAP_HL_TO_SUB = 56;
   const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
   const subCenterY = subRectY + Math.round(subH / 2);
+  const ctaY = Math.round(subCenterY + SUB_FS + 80);
+
+  // adaptive chip opacity + tint
+  const midLum = metrics?.midLum ?? 140;
+  let chipOpacity = 0.26;
+  if (midLum >= 170) chipOpacity += 0.02;
+  if (midLum <= 100) chipOpacity -= 0.02;
+  chipOpacity = Math.max(0.20, Math.min(0.34, chipOpacity));
+  const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
+  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
+  const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
+  const EDGE_STROKE = 0.20;
+  const R = 8;
+
+  const esc = (s='') => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   return `
-    <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="rgba(0,0,0,${vignetteOpacity})"/>
-    <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#ffffff" stroke-opacity="0.24" stroke-width="2"/>
+  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="11"/></filter>
+      <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+      <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
+        <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
+        <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+      </linearGradient>
+      <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
+        <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
+      </radialGradient>
+      <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
+      <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
+    </defs>
 
-    <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(255,255,255,${chipOpacity})" />
-    <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="rgba(255,255,255,0.22)"/>
+    <!-- subtle vignette + frame -->
+    <g opacity="${vignetteOpacity}">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
+    </g>
+    <g pointer-events="none">
+      <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.18" stroke-width="8"/>
+      <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
+    </g>
 
-    <text x="${W / 2}" y="${headlineCenterY}" text-anchor="middle"
-          dominant-baseline="middle" alignment-baseline="middle"
-          font-family="'Times New Roman', Times, serif"
-          font-size="${headlineFs}" font-weight="700" fill="#ffffff">${escSVG(title)}</text>
+    <!-- Headline chip (blurred backdrop + tint + edge) -->
+    <g clip-path="url(#clipHl)">
+      <image href="${esc(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacity*0.82).toFixed(2)}"/>
+      <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
+      <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
+    </g>
 
-    <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(255,255,255,${chipOpacity - 0.04})" />
-    <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="rgba(255,255,255,0.20)"/>
+    <!-- Headline text (dead-center) -->
+    <text x="${W/2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+          font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#fff"
+          style="paint-order: stroke; stroke:#000; stroke-width:1; stroke-opacity:0.18; letter-spacing:0.10">
+      ${esc(title)}
+    </text>
 
-    <text x="${W / 2}" y="${subCenterY}" text-anchor="middle"
-          dominant-baseline="middle" alignment-baseline="middle"
-          font-family="'Times New Roman', Times, serif"
-          font-size="${SUB_FS}" font-weight="700" fill="#ffffff">${escSVG(subline)}</text>
+    <!-- Subline chip -->
+    <g clip-path="url(#clipSub)">
+      <image href="${esc(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
+      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
+      <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
+    </g>
 
-    ${pillBtn(W / 2, Math.round(subCenterY + SUB_FS + 70), cta, 32)}
-  `;
+    <!-- Subline text (dead-center) -->
+    <text x="${W/2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+          font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#fff"
+          style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16; letter-spacing:0.20">
+      ${esc(subline)}
+    </text>
+
+    ${pillBtn(W/2, ctaY, cta, 32, `rgba(${avg.r},${avg.g},${avg.b},0.30)`)}
+  </svg>`;
 }
 
 /* ---------- Subline crafting ---------- */
@@ -693,11 +752,8 @@ function craftSubline(answers = {}, category = 'generic') {
   let line = candidates[0] || defaults[0];
 
   line = line.replace(/\bquality of\b/gi, '').trim();
-  line = line.replace(/\bis the best\b/gi, 'is great')
-             .replace(/\bare the best\b/gi, 'are great');
-  line = line.replace(/\bbetter made\b/gi, 'made to last')
-             .replace(/\bwell made\b/gi, 'made to last')
-             .replace(/\bhigh quality\b/gi, 'great quality');
+  line = line.replace(/\bis the best\b/gi, 'is great').replace(/\bare the best\b/gi, 'are great');
+  line = line.replace(/\bbetter made\b/gi, 'made to last').replace(/\bwell made\b/gi, 'made to last').replace(/\bhigh quality\b/gi, 'great quality');
   line = line.replace(/\bnatural material\b/gi, 'natural materials');
   line = line.replace(/\bour\b/gi, '').trim();
   line = line.replace(/\buses natural materials\b/gi, 'is made with natural materials');
@@ -766,10 +822,10 @@ async function buildOverlayImage({
   if (!cta.trim()) cta = 'LEARN MORE';
   const subline = toTitleCase(craftSubline(answers, category));
 
+  // pass the base image into the SVG so chips can blur it
+  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
   const svg = Buffer.from(
-    `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      ${svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis })}
-    </svg>`,
+    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
     'utf8'
   );
 
@@ -789,6 +845,7 @@ async function buildOverlayImage({
     filename: file,
   };
 }
+
 
 /* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
