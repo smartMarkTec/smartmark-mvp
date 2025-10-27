@@ -583,29 +583,46 @@ function cleanHeadline(h) {
   const words = h.split(' '); if (words.length > 6) h = words.slice(0, 6).join(' ');
   return h.toUpperCase();
 }
-const ALLOWED_CTAS = ['SHOP NOW','LEARN MORE','GET STARTED','VISIT US','BUY NOW','TAKE A LOOK','CHECK US OUT'];
-function cleanCTA(c) { let norm = String(c || '').toUpperCase().replace(/[\'’!]/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim(); if (!ALLOWED_CTAS.includes(norm)) norm='LEARN MORE'; return norm; }
 const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
 
-/* --- CTA pill (fit text inside, always) --- */
+/* ---------- CTA normalization + variants (single source of truth) ---------- */
+const CTA_VARIANTS = [
+  'LEARN MORE','SEE MORE','VIEW MORE','EXPLORE','DISCOVER',
+  'SHOP NOW','BUY NOW','GET STARTED','TRY IT','SEE DETAILS',
+  'SEE COLLECTION','BROWSE NOW','CHECK IT OUT','VISIT US','TAKE A LOOK','CHECK US OUT'
+];
+const ALLOWED_CTAS = new Set(CTA_VARIANTS);
+
+function normalizeCTA(s='') {
+  return String(s)
+    .toUpperCase()
+    .replace(/[’']/g, '')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function pickCtaVariant(seed='') { if (!seed) return 'LEARN MORE'; let h = 0; for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0; return CTA_VARIANTS[h % CTA_VARIANTS.length]; }
+function cleanCTA(c, seed='') { const norm = normalizeCTA(c); if (norm && ALLOWED_CTAS.has(norm)) return norm; return pickCtaVariant(seed); }
+
+/* --- CTA pill (always fits) --- */
 function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum = 140) {
   const padX = 28;
-  const txt  = String(label || 'LEARN MORE').toUpperCase().replace(/[^\w ]/g, ' ').replace(/\s+/g, ' ').trim();
-  const estW = Math.max(120, txt.length * fs * 0.55 + padX * 2);
+  const txt  = normalizeCTA(label || 'LEARN MORE');
+  const estW = Math.max(132, Math.round(txt.length * fs * 0.55) + padX * 2);
   const estH = Math.max(46, fs + 18);
   const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
   const innerTextW = estW - 32;
 
-  // Adaptive text color & outline based on background brightness
   const textFill = midLum >= 178 ? '#111111' : '#FFFFFF';
   const outline  = midLum >= 178 ? '#FFFFFF' : '#000000';
-  const strokeW  = midLum >= 178 ? 0.9 : 0.9;
-  const shadowOpacity = midLum >= 178 ? 0.25 : 0.35;
+  const shadowOpacity = midLum >= 178 ? 0.24 : 0.36;
 
   return `
   <defs>
-    <filter id="btnTextShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="2.2" stdDeviation="2.6" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
+    <!-- crisp dual-halo for CTA text -->
+    <filter id="btnTextHalo" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="0" stdDeviation="1.2" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="2.8" flood-color="#000000" flood-opacity="${shadowOpacity * 0.75}"/>
     </filter>
   </defs>
   <g>
@@ -618,33 +635,37 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
       <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextShadow)"
+            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextHalo)"
             font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="${fs}" font-weight="700"
-            fill="${textFill}" style="paint-order: stroke; stroke:${outline}; stroke-width:${strokeW}; stroke-opacity:0.8; letter-spacing:0.06em">
+            fill="${textFill}" style="paint-order: stroke; stroke:${outline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.06em">
         ${escSVG(txt)}
       </text>
     </g>
   </g>`;
 }
 
-/* --- Glass overlay (adds back-shade + text shadow + adaptive text color) --- */
+/* --- Glass overlay (headline chip grows with text + stronger legibility) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
-  // headline sizing (min 34px)
-  const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 34);
-  const hlTextW = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
-  const hlW = Math.min(hlTextW + 44, maxW * 0.95);
-  const hlH = Math.max(48, headlineFs + 12);
-  const hlX = Math.round((W - hlW) / 2);
-  const hlInnerTextW = Math.max(80, hlW - 36);
+  // Headline sizing + roomy padding so text never touches edges
+  const HL_FS_START = 68;
+  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 34);
+  const hlTextW     = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
+  const extraPadX   = Math.round(Math.max(30, headlineFs * 0.5));
+  const hlW         = Math.min(hlTextW + extraPadX * 2, Math.round(maxW * 0.97));
+  const hlH         = Math.max(52, headlineFs + 16);
+  const hlX         = Math.round((W - hlW) / 2);
+  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.35)); // fit-to-box width
 
-  const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
-  const subTextW = estWidthSerif(subline, SUB_FS, 0.18);
-  const subW = Math.min(subTextW + 32, maxW);
-  const subH = Math.max(44, SUB_FS + 14);
-  const subX = Math.round((W - subW) / 2);
-  const subInnerTextW = Math.max(80, subW - 28);
+  // Subline chip auto-sizes to text
+  const SUB_FS         = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
+  const subTextW       = estWidthSerif(subline, SUB_FS, 0.18);
+  const subPadX        = 22;
+  const subW           = Math.min(subTextW + subPadX * 2, maxW);
+  const subH           = Math.max(46, SUB_FS + 16);
+  const subX           = Math.round((W - subW) / 2);
+  const subInnerTextW  = Math.max(92, subW - Math.round(subPadX * 1.25));
 
   // positions
   const headlineCenterY = 126;
@@ -654,26 +675,27 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const subCenterY = subRectY + Math.round(subH / 2);
   const ctaY = Math.round(subCenterY + SUB_FS + 86);
 
-  // adaptive chips & colors
+  // adaptive styling from image metrics
   const midLum = metrics?.midLum ?? 140;
   const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
 
-  let chipOpacityHead = 0.26; if (midLum >= 170) chipOpacityHead += 0.02; if (midLum <= 100) chipOpacityHead -= 0.02;
-  chipOpacityHead = Math.max(0.24, Math.min(0.30, chipOpacityHead));
-  const chipOpacitySub = Math.max(0.20, Math.min(0.26, chipOpacityHead - 0.02));
-  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.28).toFixed(2)})`;
-  const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
+  let chipOpacityHead = 0.28; if (midLum >= 170) chipOpacityHead += 0.03; if (midLum <= 110) chipOpacityHead -= 0.02;
+  chipOpacityHead = Math.max(0.24, Math.min(0.33, chipOpacityHead));
+  const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
+  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
+  const vignetteOpacity = midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
+
+  // extra *local* dark backplate for text areas (helps white-on-bright zones)
+  const backShadeHead = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
+  const backShadeSub  = Math.max(0.07, backShadeHead - 0.04);
+
   const EDGE_STROKE = 0.20, R = 8;
 
-  // Extra back-shade inside chips when background is bright
-  const backShadeHead = midLum >= 170 ? 0.18 : midLum >= 150 ? 0.12 : 0.08;
-  const backShadeSub  = Math.max(0, backShadeHead - 0.03);
-
-  // Adaptive text colors & outlines
-  const headTextFill = midLum >= 178 ? '#111111' : '#FFFFFF';
-  const headOutline  = midLum >= 178 ? '#FFFFFF' : '#000000';
-  const subTextFill  = midLum >= 178 ? '#111111' : '#FFFFFF';
-  const subOutline   = midLum >= 178 ? '#FFFFFF' : '#000000';
+  // text color stays white but with dual halo; switch to dark text only on very bright scenes
+  const headTextFill = midLum >= 188 ? '#111111' : '#FFFFFF';
+  const headOutline  = midLum >= 188 ? '#FFFFFF' : '#000000';
+  const subTextFill  = midLum >= 188 ? '#111111' : '#FFFFFF';
+  const subOutline   = midLum >= 188 ? '#FFFFFF' : '#000000';
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -689,11 +711,24 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
-      <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
-      <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
-      <filter id="textShadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="2.2" stdDeviation="2.6" flood-color="#000000" flood-opacity="${midLum >= 178 ? 0.22 : 0.35}"/>
+
+      <!-- dual-halo for headline/subline text -->
+      <filter id="textHalo" x="-60%" y="-60%" width="220%" height="220%">
+        <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.20 : 0.38}"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.18 : 0.32}"/>
       </filter>
+
+      <!-- subtle center-dark gradient inside chips (extra readability on bright areas) -->
+      <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
+        <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeHead})"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
+      </linearGradient>
+      <linearGradient id="centerShadeSub" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
+        <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeSub})"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
+      </linearGradient>
     </defs>
 
     <!-- vignette + frame -->
@@ -704,26 +739,28 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
 
     <!-- Headline chip -->
+    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="rgba(0,0,0,${backShadeHead})"/>
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead*0.82).toFixed(2)}"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="url(#centerShadeHl)"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead).toFixed(2)}"/>
       <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(12, Math.round(hlH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
     <!-- Headline text -->
     <text x="${W/2}" y="${Math.round(hlRectY + hlH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-          lengthAdjust="spacingAndGlyphs" textLength="${hlInnerTextW}" filter="url(#textShadow)"
+          lengthAdjust="spacingAndGlyphs" textLength="${hlInnerTextW}" filter="url(#textHalo)"
           font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="${headTextFill}"
-          style="paint-order: stroke; stroke:${headOutline}; stroke-width:1.05; stroke-opacity:0.85; letter-spacing:0.08">
+          style="paint-order: stroke; stroke:${headOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.08">
       ${escSVG(title)}
     </text>
 
     <!-- Subline chip -->
+    <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipSub)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="rgba(0,0,0,${backShadeSub})"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#centerShadeSub)"/>
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
       <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(10, Math.round(subH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
@@ -731,9 +768,9 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
     <!-- Subline text -->
     <text x="${W/2}" y="${Math.round(subRectY + subH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-          lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}" filter="url(#textShadow)"
+          lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}" filter="url(#textHalo)"
           font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="${subTextFill}"
-          style="paint-order: stroke fill; stroke:${subOutline}; stroke-width:0.9; stroke-opacity:0.8; letter-spacing:0.16">
+          style="paint-order: stroke fill; stroke:${subOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.16">
       ${escSVG(subline)}
     </text>
 
@@ -741,8 +778,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   </svg>`;
 }
 
-
-/* ---------- Subline crafting (coherent, sentence-case, 7–9 words) ---------- */
+/* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const clean = (s) => String(s || '').replace(/[^\w\s\-']/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
 
@@ -759,14 +795,11 @@ function craftSubline(answers = {}, category = 'generic') {
     fitness:      ['made for daily training sessions','durable gear built for workouts'],
     generic:      ['made for everyday use','simple design with better value'],
   };
-
   const defaults = TPL[category] || TPL.generic;
 
-  // try to use user benefit if it looks like a phrase with a verb/noun
   const cand = [answers.mainBenefit, answers.description, answers.productType, answers.topic].map(clean).filter(Boolean);
   let line = cand.find(s => /\b(made|built|designed|helps|fits|improves|keeps|protects|wear|train|read|brew)\b/.test(s)) || defaults[0];
 
-  // hard grammar guards
   line = line
     .replace(/\bnatural material(s)?\b/g, 'natural materials')
     .replace(/\bfashion material is natural( everyday)?\b/g, 'made with natural materials')
@@ -778,64 +811,35 @@ function craftSubline(answers = {}, category = 'generic') {
     .replace(/\s+/g,' ')
     .trim();
 
-// enforce word count 7–9
-let words = line.split(' ').filter(Boolean);
-if (words.length > 9) words = words.slice(0, 9);
-if (words.length < 7) {
-  const fill = clean(defaults[1] || '').split(' ').filter(Boolean);
-  while (words.length < 7 && fill.length) words.push(fill.shift());
-}
-return sentenceCase(words.join(' ')); // final sentence-case
+  let words = line.split(' ').filter(Boolean);
+  if (words.length > 9) words = words.slice(0, 9);
+  if (words.length < 7) {
+    const fill = clean(defaults[1] || '').split(' ').filter(Boolean);
+    while (words.length < 7 && fill.length) words.push(fill.shift());
+  }
+
+  return sentenceCase(words.join(' '));
 }
 
 /* ---------- Placement analysis (needed by buildOverlayImage) ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 72, H = 72;
-    const { data } = await sharp(imgBuf)
-      .resize(W, H, { fit: 'cover' })
-      .removeAlpha()
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    let rSum = 0, gSum = 0, bSum = 0;
-    let rTop = 0, gTop = 0, bTop = 0, cTop = 0;
-    let rMid = 0, gMid = 0, bMid = 0, cMid = 0;
-
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const i = (y * W + x) * 3;
-        const r = data[i], g = data[i + 1], b = data[i + 2];
-        rSum += r; gSum += g; bSum += b;
-
-        if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
-        if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
-      }
+    const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+    let rSum=0,gSum=0,bSum=0, rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
+    for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+      const i=(y*W+x)*3, r=data[i], g=data[i+1], b=data[i+2];
+      rSum+=r; gSum+=g; bSum+=b;
+      if (y < Math.floor(H*0.28)) { rTop+=r; gTop+=g; bTop+=b; cTop++; }
+      if (y >= Math.floor(H*0.38) && y < Math.floor(H*0.62)) { rMid+=r; gMid+=g; bMid+=b; cMid++; }
     }
-
-    const px = W * H;
-    const avgR = rSum / px, avgG = gSum / px, avgB = bSum / px;
-    const lum = (r, g, b) => Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
-
-    // guards: avoid divide-by-zero just in case
-    cTop = Math.max(1, cTop);
-    cMid = Math.max(1, cMid);
-
-    const lumTop = lum(rTop / cTop, gTop / cTop, bTop / cTop);
-    const lumMid = lum(rMid / cMid, gMid / cMid, bMid / cMid);
-
-    return {
-      topLum: lumTop,
-      midLum: lumMid,
-      avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) }
-    };
-  } catch {
-    // safe defaults
-    return { topLum: 150, midLum: 140, avgRGB: { r: 64, g: 64, b: 64 } };
-  }
+    const px=W*H, avgR=rSum/px, avgG=gSum/px, avgB=bSum/px;
+    const lum=(r,g,b)=> Math.round(0.2126*r + 0.7152*g + 0.0722*b);
+    return { topLum: lum(rTop/cTop,gTop/cTop,bTop/cTop), midLum: lum(rMid/cMid,gMid/cMid,bMid/cMid), avgRGB: { r:Math.round(avgR), g:Math.round(avgG), b:Math.round(avgB) } };
+  } catch { return { topLum:150, midLum:140, avgRGB:{ r:64,g:64,b:64 } }; }
 }
 
-/* ---------- Overlay builder (use coherent subline + inline base for blur) ---------- */
+/* ---------- Overlay builder (coherent subline + inline base for blur) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
@@ -843,37 +847,25 @@ async function buildOverlayImage({
   const W = 1200, H = 628;
 
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseBuf = await sharp(imgRes.data)
-    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
-    .toBuffer();
+  const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true }).jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
 
   const analysis = await analyzeImageForPlacement(baseBuf);
 
   let title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   if (!title.trim()) title = 'SHOP';
-  let cta = cleanCTA(ctaHint) || 'LEARN MORE';
+  const titleSeed = title || category || '';
+  let cta = cleanCTA(ctaHint, titleSeed);
   if (!cta.trim()) cta = 'LEARN MORE';
-  const subline = craftSubline(answers, category); // already sentence-cased
+  const subline = craftSubline(answers, category);
 
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svg = Buffer.from(
-    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
-    'utf8'
-  );
+  const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
 
-  const outDir = ensureGeneratedDir();
-  const file = `${uuidv4()}.jpg`;
-
-  await sharp(baseBuf)
-    .composite([{ input: svg, top: 0, left: 0 }])
-    .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
-    .toFile(path.join(outDir, file));
-
+  const outDir = ensureGeneratedDir(); const file = `${uuidv4()}.jpg`;
+  await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true }).toFile(path.join(outDir, file));
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
-
 
 /* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
