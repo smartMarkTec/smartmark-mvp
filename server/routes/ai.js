@@ -572,7 +572,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- IMAGE OVERLAYS (robust & Sharp-safe) ---------------------- */
+/* ---------------------- IMAGE OVERLAYS (glass + centered + tuned) ---------------------- */
 function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
 function estWidthSerif(text, fs, letterSpacing = 0) { const t = String(text || ''), n = t.length || 1; return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing; }
 function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidthSerif(text, fs, 0.1) > maxW) fs -= 2; return fs; }
@@ -592,12 +592,12 @@ function cleanCTA(c) {
 }
 function toTitleCase(s) { return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)); }
 
-/* --- CTA pill with TRUE vertical centering + soft glow --- */
-function pillBtn(cx, cy, label, fs = 30, glow = 'rgba(255,255,255,0.35)') {
+/* --- CTA pill (true vertical centering + softened shadow) --- */
+function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)') {
   const padX = 28;
   const txt  = String(label || 'LEARN MORE').toUpperCase().replace(/[^\w ]/g, ' ').replace(/\s+/g, ' ').trim();
   const estW = Math.max(120, txt.length * fs * 0.55 + padX * 2);
-  const estH = Math.max(44, fs + 18);
+  const estH = Math.max(46, fs + 18);
   const x = Math.round(cx - estW / 2);
   const y = Math.round(cy - estH / 2);
   const r = Math.round(estH / 2);
@@ -605,64 +605,69 @@ function pillBtn(cx, cy, label, fs = 30, glow = 'rgba(255,255,255,0.35)') {
   return `
   <g>
     <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="8" stdDeviation="11" flood-color="#000" flood-opacity="0.33"/>
+      <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/>
     </filter>
     <g filter="url(#btnShadow)">
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-      <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, estH * 0.45)}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
-      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.35)" stroke-width="1" opacity="0.35"/>
+      <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
       <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="${fs}" font-weight="700"
-            fill="#fff" style="paint-order: stroke; stroke:#000; stroke-width:0.7; stroke-opacity:0.25; letter-spacing:0.06em">
+            fill="#fff" style="paint-order: stroke; stroke:#000; stroke-width:0.7; stroke-opacity:0.22; letter-spacing:0.06em">
         ${txt}
       </text>
     </g>
   </g>`;
 }
 
-/* --- Glassmorphism overlay (blurred backdrop inside chips, centered text, NO top scrim) --- */
+/* --- Glass overlay (blurred backdrop, centered text, no top scrim) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
-  const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 32);
+
+  // headline sizing (min 34px to avoid tiny brands)
+  const HL_FS_START = 68, headlineFs = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 34);
   const hlTextW = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
   const hlW = Math.min(hlTextW + 44, maxW * 0.95);
-  const hlH = Math.max(46, headlineFs + 12);
+  const hlH = Math.max(48, headlineFs + 12);
   const hlX = Math.round((W - hlW) / 2);
 
   const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
-  const subTextW = estWidthSerif(subline, SUB_FS, 0.20);
+  const subTextW = estWidthSerif(subline, SUB_FS, 0.18);
   const subW = Math.min(subTextW + 32, maxW);
-  const subH = Math.max(42, SUB_FS + 14);
+  const subH = Math.max(44, SUB_FS + 14);
   const subX = Math.round((W - subW) / 2);
 
-  // positions (slightly lower headline); no top scrim
+  // positions
   const headlineCenterY = 126;
   const hlRectY = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB = 56;
+  const GAP_HL_TO_SUB = 64; // spacing +8
   const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
   const subCenterY = subRectY + Math.round(subH / 2);
-  const ctaY = Math.round(subCenterY + SUB_FS + 80);
+  const ctaY = Math.round(subCenterY + SUB_FS + 86); // slightly more breathing room
 
-  // adaptive chip opacity + tint
+  // adaptive chips
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacity = 0.26;
-  if (midLum >= 170) chipOpacity += 0.02;
-  if (midLum <= 100) chipOpacity -= 0.02;
-  chipOpacity = Math.max(0.20, Math.min(0.34, chipOpacity));
+  let chipOpacityHead = 0.26;
+  if (midLum >= 170) chipOpacityHead += 0.02;
+  if (midLum <= 100) chipOpacityHead -= 0.02;
+  chipOpacityHead = Math.max(0.24, Math.min(0.30, chipOpacityHead));
+  const chipOpacitySub = Math.max(0.20, Math.min(0.26, chipOpacityHead - 0.02));
+
   const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
-  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacity * 0.28).toFixed(2)})`;
+  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.28).toFixed(2)})`;
   const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
   const EDGE_STROKE = 0.20;
   const R = 8;
-
+  const chipStrokeDarkOpacity = (midLum < 100) ? 0.15 : 0.0; // safety border on light photos
   const esc = (s='') => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="11"/></filter>
-      <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="14"/></filter>
+      <!-- softer blurs -->
+      <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
+      <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
       <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
         <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
@@ -676,50 +681,52 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
     </defs>
 
-    <!-- subtle vignette + frame -->
+    <!-- vignette + frame (dark frame toned down) -->
     <g opacity="${vignetteOpacity}">
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
     </g>
     <g pointer-events="none">
-      <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.18" stroke-width="8"/>
+      <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.10" stroke-width="8"/>
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
     </g>
 
-    <!-- Headline chip (blurred backdrop + tint + edge) -->
+    <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <image href="${esc(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacity*0.82).toFixed(2)}"/>
-      <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(9, hlH*0.40)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead*0.82).toFixed(2)}"
+            stroke="rgba(0,0,0,${chipStrokeDarkOpacity})" stroke-width="${chipStrokeDarkOpacity ? 1 : 0}"/>
+      <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(12, Math.round(hlH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text (dead-center) -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
           font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#fff"
-          style="paint-order: stroke; stroke:#000; stroke-width:1; stroke-opacity:0.18; letter-spacing:0.10">
+          style="paint-order: stroke; stroke:#000; stroke-width:1; stroke-opacity:0.14; letter-spacing:0.08">
       ${esc(title)}
     </text>
 
     <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
       <image href="${esc(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
-      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacity.toFixed(2)}"/>
-      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(8, subH*0.42)}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
+      <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"
+            stroke="rgba(0,0,0,${chipStrokeDarkOpacity})" stroke-width="${chipStrokeDarkOpacity ? 1 : 0}"/>
+      <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(10, Math.round(subH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text (dead-center) -->
+    <!-- Subline text -->
     <text x="${W/2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
           font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#fff"
-          style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.16; letter-spacing:0.20">
+          style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.14; letter-spacing:0.17">
       ${esc(subline)}
     </text>
 
-    ${pillBtn(W/2, ctaY, cta, 32, `rgba(${avg.r},${avg.g},${avg.b},0.30)`)}
+    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`)}
   </svg>`;
 }
 
-/* ---------- Subline crafting ---------- */
+/* ---------- Subline crafting (better fashion templates + grammar guards) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const clean = (s) =>
     String(s || '')
@@ -728,19 +735,26 @@ function craftSubline(answers = {}, category = 'generic') {
       .trim()
       .toLowerCase();
 
-  const defaults = {
-    books:        ['new stories, classic runs', 'comics and graphic novels'],
-    fashion:      ['natural materials, made to last', 'everyday pieces built to last'],
-    cosmetics:    ['gentle formulas for daily care', 'simple routine, better skin'],
-    hair:         ['better hair care, less effort', 'clean formulas, easy styling'],
-    food:         ['great taste with less hassle', 'fresh flavor, easy meals'],
-    pets:         ['care for your pet daily', 'simple treats for happy pets'],
-    electronics:  ['reliable everyday tech', 'simple design, solid performance'],
-    home:         ['upgrade your space easily', 'clean looks, practical use'],
-    coffee:       ['balanced flavor, smooth finish', 'better coffee breaks'],
-    fitness:      ['made for daily training', 'durable gear for workouts'],
-    generic:      ['made for everyday use', 'simple design, better value'],
-  }[category] || ['made for everyday use'];
+  const TEMPLATES = {
+    fashion: [
+      'made with natural materials',
+      'everyday pieces built to last',
+      'simple fits easy to wear',
+      'clean design made for comfort',
+    ],
+    books:       ['new stories classic runs', 'comics and graphic novels'],
+    cosmetics:   ['gentle formulas for daily care', 'simple routine better skin'],
+    hair:        ['better hair care less effort', 'clean formulas easy styling'],
+    food:        ['great taste with less hassle', 'fresh flavor easy meals'],
+    pets:        ['care for your pet daily', 'simple treats for happy pets'],
+    electronics: ['reliable everyday tech', 'simple design solid performance'],
+    home:        ['upgrade your space easily', 'clean looks practical use'],
+    coffee:      ['balanced flavor smooth finish', 'better coffee breaks'],
+    fitness:     ['made for daily training', 'durable gear for workouts'],
+    generic:     ['made for everyday use', 'simple design better value'],
+  };
+
+  const defaults = TEMPLATES[category] || TEMPLATES.generic;
 
   const candidates = [
     clean(answers.mainBenefit),
@@ -749,29 +763,28 @@ function craftSubline(answers = {}, category = 'generic') {
     clean(answers.topic),
   ].filter(Boolean);
 
+  // prefer provided copy, else template
   let line = candidates[0] || defaults[0];
 
+  // grammar fixes / bans
   line = line.replace(/\bquality of\b/gi, '').trim();
   line = line.replace(/\bis the best\b/gi, 'is great').replace(/\bare the best\b/gi, 'are great');
-  line = line.replace(/\bbetter made\b/gi, 'made to last').replace(/\bwell made\b/gi, 'made to last').replace(/\bhigh quality\b/gi, 'great quality');
-  line = line.replace(/\bnatural material\b/gi, 'natural materials');
+  line = line.replace(/\bbetter made\b/gi, 'made to last').replace(/\bwell made\b/gi, 'made to last');
+  line = line.replace(/\bhigh quality\b/gi, 'great quality');
+  line = line.replace(/\bnatural material(s)?\b/gi, 'natural materials');
+  line = line.replace(/\bfashion material is natural( everyday)?\b/gi, 'made with natural materials');
   line = line.replace(/\bour\b/gi, '').trim();
   line = line.replace(/\buses natural materials\b/gi, 'is made with natural materials');
   line = line.replace(/\b(\w+)\s+\1\b/gi, '$1').trim();
 
+  // word count clamp (target 7-9)
   let words = line.split(/\s+/).filter(Boolean);
   while (words[0] && /^(and|or|but|the|a|an)$/.test(words[0])) words.shift();
   if (words.length > 9) words = words.slice(0, 9);
-
-  if (words.length < 5) {
-    const filler = clean(candidates[1] || defaults[1] || '')
-      .replace(/\bquality of\b/gi, '')
-      .replace(/\bnatural material\b/gi, 'natural materials')
-      .split(/\s+/)
-      .filter(Boolean);
-    while (words.length < 5 && filler.length) words.push(filler.shift());
+  if (words.length < 7) {
+    const filler = clean(candidates[1] || defaults[1] || '').split(/\s+/).filter(Boolean);
+    while (words.length < 7 && filler.length) words.push(filler.shift());
   }
-
   while (words.length && /^(and|with|of)$/.test(words[words.length - 1])) words.pop();
 
   return words.join(' ');
@@ -822,7 +835,7 @@ async function buildOverlayImage({
   if (!cta.trim()) cta = 'LEARN MORE';
   const subline = toTitleCase(craftSubline(answers, category));
 
-  // pass the base image into the SVG so chips can blur it
+  // inline base image so chips can blur it
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
   const svg = Buffer.from(
     svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
@@ -845,7 +858,6 @@ async function buildOverlayImage({
     filename: file,
   };
 }
-
 
 /* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
