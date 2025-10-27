@@ -572,56 +572,49 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
-/* ---------------------- IMAGE OVERLAYS (glass + centered + tuned) ---------------------- */
-function escSVG(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+/* ---------------------- IMAGE OVERLAYS (fit-to-box + coherent copy) ---------------------- */
+function escSVG(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function estWidthSerif(text, fs, letterSpacing = 0) { const t = String(text || ''), n = t.length || 1; return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing; }
 function fitFont(text, maxW, startFs, minFs = 26) { let fs = startFs; while (fs > minFs && estWidthSerif(text, fs, 0.1) > maxW) fs -= 2; return fs; }
 const BANNED_TERMS = /\b(unisex|global|vibes?|forward|finds?|chic|bespoke|avant|couture)\b/i;
 function cleanHeadline(h) {
   h = String(h || '').replace(/[^a-z0-9 &\-]/gi, ' ').replace(/\s+/g, ' ').trim();
   if (!h || BANNED_TERMS.test(h)) return '';
-  const words = h.split(' ');
-  if (words.length > 6) h = words.slice(0, 6).join(' ');
+  const words = h.split(' '); if (words.length > 6) h = words.slice(0, 6).join(' ');
   return h.toUpperCase();
 }
-const ALLOWED_CTAS = ['SHOP NOW', 'LEARN MORE', 'GET STARTED', 'VISIT US', 'BUY NOW', 'TAKE A LOOK', 'CHECK US OUT'];
-function cleanCTA(c) {
-  let norm = String(c || '').toUpperCase().replace(/[\'’!]/g, '').replace(/[^A-Z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
-  if (!ALLOWED_CTAS.includes(norm)) norm = 'LEARN MORE';
-  return norm;
-}
-function toTitleCase(s) { return String(s || '').replace(/\S+/g, (w) => w.charAt(0).toUpperCase() + w.slice(1)); }
+const ALLOWED_CTAS = ['SHOP NOW','LEARN MORE','GET STARTED','VISIT US','BUY NOW','TAKE A LOOK','CHECK US OUT'];
+function cleanCTA(c) { let norm = String(c || '').toUpperCase().replace(/[\'’!]/g,'').replace(/[^A-Z0-9 ]/g,'').replace(/\s+/g,' ').trim(); if (!ALLOWED_CTAS.includes(norm)) norm='LEARN MORE'; return norm; }
+const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
 
-/* --- CTA pill (true vertical centering + softened shadow) --- */
+/* --- CTA pill (fit text inside, always) --- */
 function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)') {
   const padX = 28;
   const txt  = String(label || 'LEARN MORE').toUpperCase().replace(/[^\w ]/g, ' ').replace(/\s+/g, ' ').trim();
   const estW = Math.max(120, txt.length * fs * 0.55 + padX * 2);
   const estH = Math.max(46, fs + 18);
-  const x = Math.round(cx - estW / 2);
-  const y = Math.round(cy - estH / 2);
-  const r = Math.round(estH / 2);
+  const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
+  const innerTextW = estW - 32; // reserved for text so it never leaks
 
   return `
   <g>
-    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/>
-    </filter>
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000" flood-opacity="0.28"/></filter>
     <g filter="url(#btnShadow)">
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
       <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
       <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}"
             font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="${fs}" font-weight="700"
             fill="#fff" style="paint-order: stroke; stroke:#000; stroke-width:0.7; stroke-opacity:0.22; letter-spacing:0.06em">
-        ${txt}
+        ${escSVG(txt)}
       </text>
     </g>
   </g>`;
 }
 
-/* --- Glass overlay (blurred backdrop, centered text, no top scrim) --- */
+/* --- Glass overlay (clips + textLength so text always fits) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
@@ -631,60 +624,51 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlW = Math.min(hlTextW + 44, maxW * 0.95);
   const hlH = Math.max(48, headlineFs + 12);
   const hlX = Math.round((W - hlW) / 2);
+  const hlInnerTextW = Math.max(80, hlW - 36); // text box width inside chip
 
   const SUB_FS = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW = estWidthSerif(subline, SUB_FS, 0.18);
   const subW = Math.min(subTextW + 32, maxW);
   const subH = Math.max(44, SUB_FS + 14);
   const subX = Math.round((W - subW) / 2);
+  const subInnerTextW = Math.max(80, subW - 28);
 
   // positions
   const headlineCenterY = 126;
   const hlRectY = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB = 64; // spacing +8
+  const GAP_HL_TO_SUB = 64;
   const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
   const subCenterY = subRectY + Math.round(subH / 2);
-  const ctaY = Math.round(subCenterY + SUB_FS + 86); // slightly more breathing room
+  const ctaY = Math.round(subCenterY + SUB_FS + 86);
 
   // adaptive chips
   const midLum = metrics?.midLum ?? 140;
-  let chipOpacityHead = 0.26;
-  if (midLum >= 170) chipOpacityHead += 0.02;
-  if (midLum <= 100) chipOpacityHead -= 0.02;
+  let chipOpacityHead = 0.26; if (midLum >= 170) chipOpacityHead += 0.02; if (midLum <= 100) chipOpacityHead -= 0.02;
   chipOpacityHead = Math.max(0.24, Math.min(0.30, chipOpacityHead));
   const chipOpacitySub = Math.max(0.20, Math.min(0.26, chipOpacityHead - 0.02));
-
   const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
   const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.28).toFixed(2)})`;
   const vignetteOpacity = midLum >= 160 ? 0.14 : midLum >= 120 ? 0.18 : 0.22;
-  const EDGE_STROKE = 0.20;
-  const R = 8;
-  const chipStrokeDarkOpacity = (midLum < 100) ? 0.15 : 0.0; // safety border on light photos
-  const esc = (s='') => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const EDGE_STROKE = 0.20, R = 8;
+  const chipStrokeDarkOpacity = (midLum < 100) ? 0.15 : 0.0;
+  const esc = escSVG;
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <!-- softer blurs -->
+      <!-- blur kept simple to avoid Sharp parser issues -->
       <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
       <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
       <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
-        <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
-        <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/><stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/><stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
       </linearGradient>
-      <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
-        <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
-      </radialGradient>
+      <radialGradient id="vignette" cx="50%" cy="50%" r="70%"><stop offset="60%" stop-color="rgba(0,0,0,0)"/><stop offset="100%" stop-color="rgba(0,0,0,1)"/></radialGradient>
       <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
     </defs>
 
-    <!-- vignette + frame (dark frame toned down) -->
-    <g opacity="${vignetteOpacity}">
-      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
-    </g>
+    <!-- vignette + frame -->
+    <g opacity="${vignetteOpacity}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/></g>
     <g pointer-events="none">
       <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.10" stroke-width="8"/>
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
@@ -699,8 +683,9 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text -->
-    <text x="${W/2}" y="${headlineCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+    <!-- Headline text (forced to fit) -->
+    <text x="${W/2}" y="${Math.round(hlRectY + hlH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+          lengthAdjust="spacingAndGlyphs" textLength="${hlInnerTextW}"
           font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="#fff"
           style="paint-order: stroke; stroke:#000; stroke-width:1; stroke-opacity:0.14; letter-spacing:0.08">
       ${esc(title)}
@@ -715,10 +700,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text -->
-    <text x="${W/2}" y="${subCenterY}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+    <!-- Subline text (forced to fit) -->
+    <text x="${W/2}" y="${Math.round(subRectY + subH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+          lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}"
           font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="#fff"
-          style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.14; letter-spacing:0.17">
+          style="paint-order: stroke fill; stroke:#000; stroke-width:0.75; stroke-opacity:0.14; letter-spacing:0.16">
       ${esc(subline)}
     </text>
 
@@ -726,95 +712,54 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   </svg>`;
 }
 
-/* ---------- Subline crafting (better fashion templates + grammar guards) ---------- */
+/* ---------- Subline crafting (coherent, sentence-case, 7–9 words) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
-  const clean = (s) =>
-    String(s || '')
-      .replace(/[^\w\s\-']/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
+  const clean = (s) => String(s || '').replace(/[^\w\s\-']/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
 
-  const TEMPLATES = {
-    fashion: [
-      'made with natural materials',
-      'everyday pieces built to last',
-      'simple fits easy to wear',
-      'clean design made for comfort',
-    ],
-    books:       ['new stories classic runs', 'comics and graphic novels'],
-    cosmetics:   ['gentle formulas for daily care', 'simple routine better skin'],
-    hair:        ['better hair care less effort', 'clean formulas easy styling'],
-    food:        ['great taste with less hassle', 'fresh flavor easy meals'],
-    pets:        ['care for your pet daily', 'simple treats for happy pets'],
-    electronics: ['reliable everyday tech', 'simple design solid performance'],
-    home:        ['upgrade your space easily', 'clean looks practical use'],
-    coffee:      ['balanced flavor smooth finish', 'better coffee breaks'],
-    fitness:     ['made for daily training', 'durable gear for workouts'],
-    generic:     ['made for everyday use', 'simple design better value'],
+  const TPL = {
+    fashion:      ['made with natural materials for everyday wear','everyday pieces built to last','simple fits that are easy to wear'],
+    books:        ['new stories and classic runs','comics and graphic novels to explore'],
+    cosmetics:    ['gentle formulas for daily care','a simple routine for better skin'],
+    hair:         ['better hair care with less effort','clean formulas for easy styling'],
+    food:         ['great taste with less hassle','fresh flavor made easy'],
+    pets:         ['everyday care for happy pets','simple treats your pet will love'],
+    electronics:  ['reliable tech for everyday use','simple design with solid performance'],
+    home:         ['upgrade your space the simple way','clean looks with practical use'],
+    coffee:       ['balanced flavor for better breaks','smooth finish in every cup'],
+    fitness:      ['made for daily training sessions','durable gear built for workouts'],
+    generic:      ['made for everyday use','simple design with better value'],
   };
 
-  const defaults = TEMPLATES[category] || TEMPLATES.generic;
+  const defaults = TPL[category] || TPL.generic;
 
-  const candidates = [
-    clean(answers.mainBenefit),
-    clean(answers.description),
-    clean(answers.productType),
-    clean(answers.topic),
-  ].filter(Boolean);
+  // try to use user benefit if it looks like a phrase with a verb/noun
+  const cand = [answers.mainBenefit, answers.description, answers.productType, answers.topic].map(clean).filter(Boolean);
+  let line = cand.find(s => /\b(made|built|designed|helps|fits|improves|keeps|protects|wear|train|read|brew)\b/.test(s)) || defaults[0];
 
-  // prefer provided copy, else template
-  let line = candidates[0] || defaults[0];
+  // hard grammar guards
+  line = line
+    .replace(/\bnatural material(s)?\b/g, 'natural materials')
+    .replace(/\bfashion material is natural( everyday)?\b/g, 'made with natural materials')
+    .replace(/\bour\b/g,'')
+    .replace(/\bquality of\b/g,'')
+    .replace(/\b(high|best)\s+quality\b/g, 'great quality')
+    .replace(/\bwell made|better made\b/g, 'made to last')
+    .replace(/\b\s+(and|with|of|to|for|in|on|at|by)\s*$/,'')
+    .replace(/\s+/g,' ')
+    .trim();
 
-  // grammar fixes / bans
-  line = line.replace(/\bquality of\b/gi, '').trim();
-  line = line.replace(/\bis the best\b/gi, 'is great').replace(/\bare the best\b/gi, 'are great');
-  line = line.replace(/\bbetter made\b/gi, 'made to last').replace(/\bwell made\b/gi, 'made to last');
-  line = line.replace(/\bhigh quality\b/gi, 'great quality');
-  line = line.replace(/\bnatural material(s)?\b/gi, 'natural materials');
-  line = line.replace(/\bfashion material is natural( everyday)?\b/gi, 'made with natural materials');
-  line = line.replace(/\bour\b/gi, '').trim();
-  line = line.replace(/\buses natural materials\b/gi, 'is made with natural materials');
-  line = line.replace(/\b(\w+)\s+\1\b/gi, '$1').trim();
-
-  // word count clamp (target 7-9)
-  let words = line.split(/\s+/).filter(Boolean);
-  while (words[0] && /^(and|or|but|the|a|an)$/.test(words[0])) words.shift();
+  // enforce word count 7–9
+  let words = line.split(' ').filter(Boolean);
   if (words.length > 9) words = words.slice(0, 9);
   if (words.length < 7) {
-    const filler = clean(candidates[1] || defaults[1] || '').split(/\s+/).filter(Boolean);
-    while (words.length < 7 && filler.length) words.push(filler.shift());
+    const fill = clean(defaults[1] || '').split(' ').filter(Boolean);
+    while (words.length < 7 && fill.length) words.push(fill.shift());
   }
-  while (words.length && /^(and|with|of)$/.test(words[words.length - 1])) words.pop();
 
-  return words.join(' ');
+  return sentenceCase(words.join(' ')); // final sentence-case
 }
 
-/* ---------- Placement analysis ---------- */
-async function analyzeImageForPlacement(imgBuf) {
-  try {
-    const W = 72, H = 72;
-    const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let rSum = 0, gSum = 0, bSum = 0, rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 3;
-      const r = data[i], g = data[i + 1], b = data[i + 2];
-      rSum += r; gSum += g; bSum += b;
-      if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
-      if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
-    }
-    const px = W*H;
-    const avgR = rSum/px, avgG = gSum/px, avgB = bSum/px;
-    const lum = (r,g,b)=> Math.round(0.2126*r + 0.7152*g + 0.0722*b);
-    const lumTop = lum(rTop/cTop, gTop/cTop, bTop/cTop);
-    const lumMid = lum(rMid/cMid, gMid/cMid, bMid/cMid);
-    return { topLum: lumTop, midLum: lumMid, avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) } };
-  } catch {
-    return { topLum: 150, midLum: 140, avgRGB: { r: 64, g: 64, b: 64 } };
-  }
-}
-
-/* ---------- Overlay builder (guaranteed composite) ---------- */
+/* ---------- Overlay builder (use coherent subline + inline base for blur) ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
@@ -822,10 +767,7 @@ async function buildOverlayImage({
   const W = 1200, H = 628;
 
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseBuf = await sharp(imgRes.data)
-    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
-    .toBuffer();
+  const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true }).jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
 
   const analysis = await analyzeImageForPlacement(baseBuf);
 
@@ -833,31 +775,17 @@ async function buildOverlayImage({
   if (!title.trim()) title = 'SHOP';
   let cta = cleanCTA(ctaHint) || 'LEARN MORE';
   if (!cta.trim()) cta = 'LEARN MORE';
-  const subline = toTitleCase(craftSubline(answers, category));
+  const subline = craftSubline(answers, category); // already sentence-cased
 
-  // inline base image so chips can blur it
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svg = Buffer.from(
-    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
-    'utf8'
-  );
+  const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
 
-  const outDir = ensureGeneratedDir();
-  const file = `${uuidv4()}.jpg`;
-
-  await sharp(baseBuf)
-    .composite([{ input: svg, top: 0, left: 0 }])
-    .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
-    .toFile(path.join(outDir, file));
-
+  const outDir = ensureGeneratedDir(); const file = `${uuidv4()}.jpg`;
+  await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true }).toFile(path.join(outDir, file));
   maybeGC();
-
-  return {
-    publicUrl: mediaPath(file),
-    absoluteUrl: absolutePublicUrl(mediaPath(file)),
-    filename: file,
-  };
+  return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
+
 
 /* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
