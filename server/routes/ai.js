@@ -748,15 +748,61 @@ function craftSubline(answers = {}, category = 'generic') {
     .replace(/\s+/g,' ')
     .trim();
 
-  // enforce word count 7–9
-  let words = line.split(' ').filter(Boolean);
-  if (words.length > 9) words = words.slice(0, 9);
-  if (words.length < 7) {
-    const fill = clean(defaults[1] || '').split(' ').filter(Boolean);
-    while (words.length < 7 && fill.length) words.push(fill.shift());
-  }
+// enforce word count 7–9
+let words = line.split(' ').filter(Boolean);
+if (words.length > 9) words = words.slice(0, 9);
+if (words.length < 7) {
+  const fill = clean(defaults[1] || '').split(' ').filter(Boolean);
+  while (words.length < 7 && fill.length) words.push(fill.shift());
+}
+return sentenceCase(words.join(' ')); // final sentence-case
+}
 
-  return sentenceCase(words.join(' ')); // final sentence-case
+/* ---------- Placement analysis (needed by buildOverlayImage) ---------- */
+async function analyzeImageForPlacement(imgBuf) {
+  try {
+    const W = 72, H = 72;
+    const { data } = await sharp(imgBuf)
+      .resize(W, H, { fit: 'cover' })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+
+    let rSum = 0, gSum = 0, bSum = 0;
+    let rTop = 0, gTop = 0, bTop = 0, cTop = 0;
+    let rMid = 0, gMid = 0, bMid = 0, cMid = 0;
+
+    for (let y = 0; y < H; y++) {
+      for (let x = 0; x < W; x++) {
+        const i = (y * W + x) * 3;
+        const r = data[i], g = data[i + 1], b = data[i + 2];
+        rSum += r; gSum += g; bSum += b;
+
+        if (y < Math.floor(H * 0.28)) { rTop += r; gTop += g; bTop += b; cTop++; }
+        if (y >= Math.floor(H * 0.38) && y < Math.floor(H * 0.62)) { rMid += r; gMid += g; bMid += b; cMid++; }
+      }
+    }
+
+    const px = W * H;
+    const avgR = rSum / px, avgG = gSum / px, avgB = bSum / px;
+    const lum = (r, g, b) => Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
+
+    // guards: avoid divide-by-zero just in case
+    cTop = Math.max(1, cTop);
+    cMid = Math.max(1, cMid);
+
+    const lumTop = lum(rTop / cTop, gTop / cTop, bTop / cTop);
+    const lumMid = lum(rMid / cMid, gMid / cMid, bMid / cMid);
+
+    return {
+      topLum: lumTop,
+      midLum: lumMid,
+      avgRGB: { r: Math.round(avgR), g: Math.round(avgG), b: Math.round(avgB) }
+    };
+  } catch {
+    // safe defaults
+    return { topLum: 150, midLum: 140, avgRGB: { r: 64, g: 64, b: 64 } };
+  }
 }
 
 /* ---------- Overlay builder (use coherent subline + inline base for blur) ---------- */
@@ -767,7 +813,10 @@ async function buildOverlayImage({
   const W = 1200, H = 628;
 
   const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true }).jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
+  const baseBuf = await sharp(imgRes.data)
+    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
+    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
+    .toBuffer();
 
   const analysis = await analyzeImageForPlacement(baseBuf);
 
@@ -778,10 +827,19 @@ async function buildOverlayImage({
   const subline = craftSubline(answers, category); // already sentence-cased
 
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
+  const svg = Buffer.from(
+    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
+    'utf8'
+  );
 
-  const outDir = ensureGeneratedDir(); const file = `${uuidv4()}.jpg`;
-  await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true }).toFile(path.join(outDir, file));
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.jpg`;
+
+  await sharp(baseBuf)
+    .composite([{ input: svg, top: 0, left: 0 }])
+    .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .toFile(path.join(outDir, file));
+
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
