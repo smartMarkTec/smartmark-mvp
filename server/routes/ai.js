@@ -606,12 +606,14 @@ function cleanCTA(c, seed='') { const norm = normalizeCTA(c); if (norm && ALLOWE
 
 /* --- CTA pill (always fits) --- */
 function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum = 140) {
+  // more conservative width estimate so text never spills
   const padX = 28;
   const txt  = normalizeCTA(label || 'LEARN MORE');
-  const estW = Math.max(132, Math.round(txt.length * fs * 0.55) + padX * 2);
+  const estTextW = Math.round(txt.length * fs * 0.62); // was 0.55
+  const estW = Math.max(132, Math.min(estTextW + padX * 2, Math.round(1200 * 0.92))); // cap to canvas
   const estH = Math.max(46, fs + 18);
   const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
-  const innerTextW = estW - 32;
+  const innerTextW = Math.max(92, estW - 40); // give extra breathing room
 
   const textFill = midLum >= 178 ? '#111111' : '#FFFFFF';
   const outline  = midLum >= 178 ? '#FFFFFF' : '#000000';
@@ -619,25 +621,36 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
 
   return `
   <defs>
+    <!-- clip text strictly to the pill -->
+    <clipPath id="btnClip">
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"/>
+    </clipPath>
+
     <!-- crisp dual-halo for CTA text -->
     <filter id="btnTextHalo" x="-60%" y="-60%" width="220%" height="220%">
       <feDropShadow dx="0" dy="0" stdDeviation="1.2" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
       <feDropShadow dx="0" dy="0" stdDeviation="2.8" flood-color="#000000" flood-opacity="${shadowOpacity * 0.75}"/>
     </filter>
-  </defs>
-  <g>
+
     <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
       <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/>
     </filter>
-    <g filter="url(#btnShadow)">
-      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-      <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
-      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
-      <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
+  </defs>
+
+  <g filter="url(#btnShadow)">
+    <!-- glassmorphism pill -->
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+    <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
+    <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
+
+    <!-- CTA text (Times to match other words) -->
+    <g clip-path="url(#btnClip)">
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextHalo)"
-            font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="${fs}" font-weight="700"
-            fill="${textFill}" style="paint-order: stroke; stroke:${outline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.06em">
+            font-family="'Times New Roman', Times, serif" font-size="${fs}" font-weight="700"
+            fill="${textFill}"
+            style="paint-order: stroke; stroke:${outline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.06em">
         ${escSVG(txt)}
       </text>
     </g>
@@ -648,15 +661,16 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing + roomy padding so text never touches edges
+    // Headline sizing + roomy padding so text never touches edges
   const HL_FS_START = 68;
-  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 34);
+  // allow smaller fallback to guarantee fit on very long titles
+  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 24); // min was 34
   const hlTextW     = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
   const extraPadX   = Math.round(Math.max(30, headlineFs * 0.5));
   const hlW         = Math.min(hlTextW + extraPadX * 2, Math.round(maxW * 0.97));
   const hlH         = Math.max(52, headlineFs + 16);
   const hlX         = Math.round((W - hlW) / 2);
-  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.35)); // fit-to-box width
+  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.45)); // a touch tighter so text stays inside
 
   // Subline chip auto-sizes to text
   const SUB_FS         = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
