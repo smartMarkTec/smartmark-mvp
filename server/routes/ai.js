@@ -661,7 +661,7 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
   </g>`;
 }
 
-/* --- Glass overlay (headline chip grows with text + stronger legibility) --- */
+/* --- Glass overlay (headline chip grows with text + subtle readability plates) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
@@ -750,6 +750,24 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const subTextFill  = midLum >= 188 ? '#111111' : '#FFFFFF';
   const subOutline   = midLum >= 188 ? '#FFFFFF' : '#000000';
 
+  // ---------- Readability plates (slightly darker, still see-through) ----------
+  // Opacity adapts to brightness; small padding hugs the text
+  const plateOpacityHead = midLum >= 170 ? 0.18 : midLum >= 130 ? 0.22 : 0.26;
+  const plateOpacitySub  = Math.max(0.16, plateOpacityHead - 0.04);
+
+  const headPlateW = Math.min(textBlockW + Math.round(headlineFs * 0.9), hlW - 12);
+  const headPlateH = Math.max(
+    Math.round(lineCount * headlineFs + (lineCount - 1) * lineGap - Math.round(headlineFs * 0.25)),
+    Math.round(hlH * 0.68)
+  );
+  const headPlateX = Math.round((W - headPlateW) / 2);
+  const headPlateY = Math.round(hlRectY + (hlH - headPlateH) / 2);
+
+  const subPlateW  = Math.min(subTextW + Math.round(SUB_FS * 0.9), subW - 12);
+  const subPlateH  = Math.max(Math.round(SUB_FS * 1.05), Math.round(subH * 0.66));
+  const subPlateX  = Math.round((W - subPlateW) / 2);
+  const subPlateY  = Math.round(subRectY + (subH - subPlateH) / 2);
+
   // ---------- SVG ----------
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -766,7 +784,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
 
-      <!-- dual-halo for headline/subline text -->
+      <!-- dual-halo for text -->
       <filter id="textHalo" x="-60%" y="-60%" width="220%" height="220%">
         <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.20 : 0.38}"/>
         <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.18 : 0.32}"/>
@@ -792,19 +810,20 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
     </g>
 
-    <!-- Headline chip -->
-    <clipPath id="clipHl">
-      <rect x="${hlX - 3}" y="${hlRectY}" width="${hlW + 6}" height="${hlH}" rx="${R}"/>
-    </clipPath>
+    <!-- Headline chip (with readability plate) -->
+    <clipPath id="clipHl"><rect x="${hlX - 3}" y="${hlRectY}" width="${hlW + 6}" height="${hlH}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
       <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="url(#centerShadeHl)"/>
       <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead).toFixed(2)}"/>
+      <!-- readability plate -->
+      <rect x="${headPlateX}" y="${headPlateY}" width="${headPlateW}" height="${headPlateH}" rx="6"
+            fill="rgba(0,0,0,${plateOpacityHead.toFixed(2)})"/>
       <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(12, Math.round(hlH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text (wrapped to 1–2 lines, chip expands accordingly) -->
+    <!-- Headline text -->
     <g clip-path="url(#clipHl)">
       <text x="${W/2}"
             y="${Math.round(hlRectY + hlH/2 - (lineCount === 2 ? (lineGap + headlineFs) / 2 : 0))}"
@@ -818,12 +837,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </text>
     </g>
 
-    <!-- Subline chip -->
+    <!-- Subline chip (with readability plate) -->
     <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipSub)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="url(#centerShadeSub)"/>
       <rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
+      <!-- readability plate -->
+      <rect x="${subPlateX}" y="${subPlateY}" width="${subPlateW}" height="${subPlateH}" rx="6"
+            fill="rgba(0,0,0,${plateOpacitySub.toFixed(2)})"/>
       <rect x="${subX+1}" y="${subRectY+1}" width="${subW-2}" height="${Math.max(10, Math.round(subH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
