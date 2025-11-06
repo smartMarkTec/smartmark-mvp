@@ -660,7 +660,7 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
     </g>
   </g>`;
 }
-/* --- Glass overlay (headline/subline CTA with subtle group box) --- */
+/* --- Glass overlay (readability-tuned text, no group box) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
@@ -675,9 +675,8 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     let l1 = '', l2 = '';
     for (const w of words) {
       const try1 = (l1 ? l1 + ' ' : '') + w;
-      if (estWidthSerif(try1, fs, 0.10) <= MAX_LINE_W) {
-        l1 = try1;
-      } else {
+      if (estWidthSerif(try1, fs, 0.10) <= MAX_LINE_W) { l1 = try1; }
+      else {
         const try2 = (l2 ? l2 + ' ' : '') + w;
         if (!l1) l1 = w;
         if (estWidthSerif(try2, fs, 0.10) <= MAX_LINE_W) l2 = try2;
@@ -723,12 +722,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const GAP_HL_TO_SUB = 64;
   const subRectY  = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
   const subCenterY= subRectY + Math.round(subH / 2);
-
-  // CTA vertical position (matches pillBtn call below)
   const ctaY      = Math.round(subCenterY + SUB_FS + 86);
-  const CTA_FS    = 34;
-  const CTA_H     = Math.max(46, CTA_FS + 18); // pill height used in pillBtn
-  const CTA_HALF  = Math.round(CTA_H / 2);
 
   // ---------- Adaptive styling ----------
   const midLum = metrics?.midLum ?? 140;
@@ -745,40 +739,33 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const EDGE_STROKE = 0.20, R = 8;
 
-  // Text colors
+  // Text colors (unchanged aesthetic)
   const headTextFill = midLum >= 188 ? '#111111' : '#FFFFFF';
   const headOutline  = midLum >= 188 ? '#FFFFFF' : '#000000';
   const subTextFill  = midLum >= 188 ? '#111111' : '#FFFFFF';
   const subOutline   = midLum >= 188 ? '#FFFFFF' : '#000000';
 
-  // ---------- GROUP BOX around headline + subline + CTA ----------
-  // Bounds (hug content with gentle padding)
-  const groupLeft   = Math.min(hlX, subX);
-  const groupRight  = Math.max(hlX + hlW, subX + subW);
-  const groupTop    = hlRectY - 18;
-  const groupBottom = ctaY + CTA_HALF + 18;
+  // **Legibility boosts without changing style**
+  // Stronger multi-pass halo + adaptive stroke widths on bright scenes
+  const haloA = midLum >= 190 ? 0.44 : midLum >= 160 ? 0.40 : 0.36;
+  const haloB = haloA * 0.85;
+  const haloC = haloA * 0.70;
+  const headStrokeW = midLum >= 188 ? 1.30 : 1.15;
+  const subStrokeW  = midLum >= 188 ? 1.18 : 1.05;
 
-  const gPadX = 18, gPadY = 16;
-  let gX = Math.max(SAFE_PAD, groupLeft - gPadX);
-  let gW = Math.min(W - SAFE_PAD - gX, (groupRight - groupLeft) + gPadX * 2);
-  let gY = Math.max(SAFE_PAD, groupTop - gPadY);
-  let gH = Math.min(H - SAFE_PAD - gY, (groupBottom - groupTop) + gPadY * 2);
-
-  const groupRX = 16;
-  // Opacity (very subtle)
-  const groupShade = midLum >= 170 ? 0.12 : midLum >= 130 ? 0.15 : 0.18;
-
-  // ---------- SVG ----------
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
       <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
-      <filter id="groupBlur"    x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="9"/></filter>
-      <filter id="textHalo" x="-60%" y="-60%" width="220%" height="220%">
-        <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.20 : 0.38}"/>
-        <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.18 : 0.32}"/>
+
+      <!-- upgraded halo: three soft shadows tuned to brightness -->
+      <filter id="textHalo" x="-70%" y="-70%" width="240%" height="240%">
+        <feDropShadow dx="0" dy="0" stdDeviation="1.0" flood-color="#000000" flood-opacity="${haloA}"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#000000" flood-opacity="${haloB}"/>
+        <feDropShadow dx="0" dy="0" stdDeviation="3.8" flood-color="#000000" flood-opacity="${haloC}"/>
       </filter>
+
       <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
         <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
@@ -800,7 +787,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </linearGradient>
       <clipPath id="clipHl"><rect x="${hlX - 3}" y="${hlRectY}" width="${hlW + 6}" height="${hlH}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
-      <clipPath id="clipGroup"><rect x="${gX}" y="${gY}" width="${gW}" height="${gH}" rx="${groupRX}"/></clipPath>
     </defs>
 
     <!-- vignette + frame -->
@@ -809,13 +795,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.10" stroke-width="8"/>
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
     </g>
-
-    <!-- GROUP BOX (behind all three elements) -->
-    <g clip-path="url(#clipGroup)">
-      <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#groupBlur)"/>
-      <rect x="${gX}" y="${gY}" width="${gW}" height="${gH}" rx="${groupRX}" fill="rgba(0,0,0,${groupShade})"/>
-    </g>
-    <rect x="${gX+0.5}" y="${gY+0.5}" width="${gW-1}" height="${gH-1}" rx="${groupRX-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
 
     <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
@@ -834,7 +813,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
             filter="url(#textHalo)"
             font-family="'Times New Roman', Times, serif"
             font-size="${headlineFs}" font-weight="700" fill="${headTextFill}"
-            style="paint-order: stroke; stroke:${headOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06">
+            style="paint-order: stroke; stroke:${headOutline}; stroke-width:${headStrokeW}; stroke-linejoin:round; letter-spacing:0.06">
         <tspan x="${W/2}" dy="0">${escSVG(lines.l1)}</tspan>
         ${lines.l2 ? `<tspan x="${W/2}" dy="${lineGap + headlineFs}">${escSVG(lines.l2)}</tspan>` : ''}
       </text>
@@ -853,11 +832,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <text x="${W/2}" y="${Math.round(subRectY + subH/2)}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
           lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}" filter="url(#textHalo)"
           font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700" fill="${subTextFill}"
-          style="paint-order: stroke fill; stroke:${subOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.16">
+          style="paint-order: stroke fill; stroke:${subOutline}; stroke-width:${subStrokeW}; stroke-linejoin:round; letter-spacing:0.16">
       ${escSVG(subline)}
     </text>
 
-    ${pillBtn(W/2, ctaY, cta, CTA_FS, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
+    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
 
