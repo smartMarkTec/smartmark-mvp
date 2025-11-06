@@ -665,21 +665,53 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing + roomy padding so text never touches edges
+  // ---------- Headline: auto-wrap to 1–2 lines and auto-expand chip ----------
   const HL_FS_START = 68;
-  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 24);
-  const hlTextW     = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
+  const MAX_LINE_W  = Math.min(maxW * 0.92, maxW - 40);
+
+  let headlineFs = fitFont(title, MAX_LINE_W, HL_FS_START, 24);
+
+  // Greedy wrap (≤2 lines) using our serif width estimator
+  function wrapTwoLines(t, fs) {
+    const words = String(t || '').split(/\s+/).filter(Boolean);
+    let l1 = '', l2 = '';
+    for (const w of words) {
+      const test1 = (l1 ? l1 + ' ' : '') + w;
+      if (estWidthSerif(test1, fs, 0.10) <= MAX_LINE_W) {
+        l1 = test1;
+      } else {
+        const test2 = (l2 ? l2 + ' ' : '') + w;
+        if (!l1) l1 = w; // safety
+        if (estWidthSerif(test2, fs, 0.10) <= MAX_LINE_W) {
+          l2 = test2;
+        } else {
+          return null; // overflow at this fs
+        }
+      }
+    }
+    return { l1, l2 };
+  }
+
+  let lines = wrapTwoLines(title, headlineFs);
+  while (!lines) {
+    headlineFs -= 2;
+    if (headlineFs <= 24) { headlineFs = 24; lines = wrapTwoLines(title, headlineFs) || { l1: title, l2: '' }; break; }
+    lines = wrapTwoLines(title, headlineFs);
+  }
+
+  const lineCount   = lines.l2 ? 2 : 1;
+  const lineGap     = Math.round(headlineFs * 0.22);
+  const textBlockW  = Math.max(
+    estWidthSerif(lines.l1, headlineFs, 0.10),
+    estWidthSerif(lines.l2, headlineFs, 0.10)
+  );
   const extraPadX   = Math.round(Math.max(30, headlineFs * 0.5));
-  const hlW         = Math.min(hlTextW + extraPadX * 2, Math.round(maxW * 0.97));
-  const hlH         = Math.max(52, headlineFs + 16);
+  const hlW         = Math.min(textBlockW + extraPadX * 2 + Math.round(headlineFs * 0.12), Math.round(maxW * 0.97));
+  const hlH         = Math.max(52, lineCount * headlineFs + (lineCount - 1) * lineGap + 16);
   const hlX         = Math.round((W - hlW) / 2);
-  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.45));
+  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.20));
 
-  // ensure absolute no-leak: horizontally scale text down if our estimate is off
-  const hlNaturalW  = Math.max(1, estWidthSerif(title, headlineFs, 0.10));
-  const hlScale     = Math.min(1, hlInnerTextW / hlNaturalW);
-
-  // Subline chip auto-sizes to text
+  // ---------- Subline chip (auto-size to text) ----------
   const SUB_FS         = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW       = estWidthSerif(subline, SUB_FS, 0.18);
   const subPadX        = 22;
@@ -688,36 +720,36 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const subX           = Math.round((W - subW) / 2);
   const subInnerTextW  = Math.max(92, subW - Math.round(subPadX * 1.25));
 
-  // positions
+  // ---------- Positions ----------
   const headlineCenterY = 126;
-  const hlRectY = Math.round(headlineCenterY - hlH / 2);
+  const hlRectY   = Math.round(headlineCenterY - hlH / 2);
   const GAP_HL_TO_SUB = 64;
-  const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
-  const subCenterY = subRectY + Math.round(subH / 2);
-  const ctaY = Math.round(subCenterY + SUB_FS + 86);
+  const subRectY  = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
+  const subCenterY= subRectY + Math.round(subH / 2);
+  const ctaY      = Math.round(subCenterY + SUB_FS + 86);
 
-  // adaptive styling from image metrics
+  // ---------- Adaptive styling from image metrics ----------
   const midLum = metrics?.midLum ?? 140;
-  const avg = metrics?.avgRGB || { r:64,g:64,b:64 };
+  const avg    = metrics?.avgRGB || { r:64, g:64, b:64 };
 
   let chipOpacityHead = 0.28; if (midLum >= 170) chipOpacityHead += 0.03; if (midLum <= 110) chipOpacityHead -= 0.02;
   chipOpacityHead = Math.max(0.24, Math.min(0.33, chipOpacityHead));
   const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
-  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
-  const vignetteOpacity = midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
+  const tintRGBA       = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
+  const vignetteOpacity= midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
 
-  // extra *local* dark backplate for text areas (helps white-on-bright zones)
   const backShadeHead = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
   const backShadeSub  = Math.max(0.07, backShadeHead - 0.04);
 
   const EDGE_STROKE = 0.20, R = 8;
 
-  // text color stays white but with dual halo; switch to dark text only on very bright scenes
+  // Text colors
   const headTextFill = midLum >= 188 ? '#111111' : '#FFFFFF';
   const headOutline  = midLum >= 188 ? '#FFFFFF' : '#000000';
   const subTextFill  = midLum >= 188 ? '#111111' : '#FFFFFF';
   const subOutline   = midLum >= 188 ? '#FFFFFF' : '#000000';
 
+  // ---------- SVG ----------
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -739,7 +771,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${midLum >= 188 ? 0.18 : 0.32}"/>
       </filter>
 
-      <!-- subtle center-dark gradient inside chips (extra readability on bright areas) -->
+      <!-- subtle center-dark gradients inside chips -->
       <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
         <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeHead})"/>
@@ -769,17 +801,19 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-      <!-- Headline text (clipped + scaled to never exceed the chip) -->
-    <g clip-path="url(#clipHl)" transform="translate(${(W/2) * (1 - hlScale)},0) scale(${hlScale},1)">
-      <text x="${W/2}" y="${Math.round(hlRectY + hlH/2)}"
+    <!-- Headline text (wrapped to 1–2 lines, chip expands accordingly) -->
+    <g clip-path="url(#clipHl)">
+      <text x="${W/2}"
+            y="${Math.round(hlRectY + hlH/2 - (lineCount === 2 ? (lineGap + headlineFs) / 2 : 0))}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             filter="url(#textHalo)"
-            font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700" fill="${headTextFill}"
+            font-family="'Times New Roman', Times, serif"
+            font-size="${headlineFs}" font-weight="700" fill="${headTextFill}"
             style="paint-order: stroke; stroke:${headOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06">
-        ${escSVG(title)}
+        <tspan x="${W/2}" dy="0">${escSVG(lines.l1)}</tspan>
+        ${lines.l2 ? `<tspan x="${W/2}" dy="${lineGap + headlineFs}">${escSVG(lines.l2)}</tspan>` : ''}
       </text>
     </g>
-
 
     <!-- Subline chip -->
     <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
@@ -799,10 +833,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       ${escSVG(subline)}
     </text>
 
-        ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
-
+    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
+
 
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
