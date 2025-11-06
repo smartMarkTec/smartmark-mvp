@@ -660,14 +660,13 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
     </g>
   </g>`;
 }
-/* --- Glass overlay (readability-tuned text, no group box) --- */
+/* --- Glass overlay with premium frame accents (outer shadow + inner mat + bevel + corner glints) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
 
-  // ---------- Headline: auto-wrap to 1–2 lines and auto-expand chip ----------
+  // ---------- Headline (auto-wrap 1–2 lines, chip grows) ----------
   const HL_FS_START = 68;
   const MAX_LINE_W  = Math.min(maxW * 0.92, maxW - 40);
-
   let headlineFs = fitFont(title, MAX_LINE_W, HL_FS_START, 24);
 
   function wrapTwoLines(t, fs) {
@@ -739,14 +738,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const EDGE_STROKE = 0.20, R = 8;
 
-  // Text colors (unchanged aesthetic)
   const headTextFill = midLum >= 188 ? '#111111' : '#FFFFFF';
   const headOutline  = midLum >= 188 ? '#FFFFFF' : '#000000';
   const subTextFill  = midLum >= 188 ? '#111111' : '#FFFFFF';
   const subOutline   = midLum >= 188 ? '#FFFFFF' : '#000000';
 
-  // **Legibility boosts without changing style**
-  // Stronger multi-pass halo + adaptive stroke widths on bright scenes
+  // Legibility halos (kept from last version)
   const haloA = midLum >= 190 ? 0.44 : midLum >= 160 ? 0.40 : 0.36;
   const haloB = haloA * 0.85;
   const haloC = haloA * 0.70;
@@ -756,16 +753,43 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
+      <!-- text blurs -->
       <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
       <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
 
-      <!-- upgraded halo: three soft shadows tuned to brightness -->
+      <!-- upgraded text halo -->
       <filter id="textHalo" x="-70%" y="-70%" width="240%" height="240%">
         <feDropShadow dx="0" dy="0" stdDeviation="1.0" flood-color="#000000" flood-opacity="${haloA}"/>
         <feDropShadow dx="0" dy="0" stdDeviation="2.2" flood-color="#000000" flood-opacity="${haloB}"/>
         <feDropShadow dx="0" dy="0" stdDeviation="3.8" flood-color="#000000" flood-opacity="${haloC}"/>
       </filter>
 
+      <!-- frame effects -->
+      <filter id="outerMatShadow" x="-8%" y="-8%" width="116%" height="116%">
+        <feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="#000000" flood-opacity="0.28"/>
+      </filter>
+      <filter id="innerGlow" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur stdDeviation="8" result="b"/>
+        <feComposite in="b" in2="SourceAlpha" operator="in"/>
+      </filter>
+
+      <linearGradient id="frameSheen" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.45)"/>
+        <stop offset="40%"  stop-color="rgba(255,255,255,0.10)"/>
+        <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+      </linearGradient>
+      <linearGradient id="edgeDark" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="rgba(0,0,0,0.28)"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,0.06)"/>
+      </linearGradient>
+
+      <radialGradient id="cornerGlint" cx="50%" cy="50%" r="0.9">
+        <stop offset="0%"   stop-color="rgba(255,255,255,0.55)"/>
+        <stop offset="70%"  stop-color="rgba(255,255,255,0.08)"/>
+        <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+      </radialGradient>
+
+      <!-- chip internals -->
       <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
         <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
@@ -776,31 +800,58 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
       <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
-        <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeHead})"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
+        <stop offset="0%"   stop-color="rgba(0,0,0,${(midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10) * 0.7})"/>
+        <stop offset="50%"  stop-color="rgba(0,0,0,${(midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10)})"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,${(midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10) * 0.7})"/>
       </linearGradient>
       <linearGradient id="centerShadeSub" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
-        <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeSub})"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
+        <stop offset="0%"   stop-color="rgba(0,0,0,${(Math.max(0.07, (midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10) - 0.04)) * 0.7})"/>
+        <stop offset="50%"  stop-color="rgba(0,0,0,${Math.max(0.07, (midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10) - 0.04)})"/>
+        <stop offset="100%" stop-color="rgba(0,0,0,${(Math.max(0.07, (midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10) - 0.04)) * 0.7})"/>
       </linearGradient>
+
+      <!-- clip paths -->
       <clipPath id="clipHl"><rect x="${hlX - 3}" y="${hlRectY}" width="${hlW + 6}" height="${hlH}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${subX}" y="${subRectY}" width="${subW}" height="${subH}" rx="${R}"/></clipPath>
     </defs>
 
-    <!-- vignette + frame -->
+    <!-- vignette -->
     <g opacity="${vignetteOpacity}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/></g>
+
+    <!-- ======= PREMIUM FRAME STACK (subtle) ======= -->
+    <!-- outer soft shadow to lift the photo frame -->
+    <rect x="16" y="16" width="${W - 32}" height="${H - 32}" rx="20" fill="rgba(0,0,0,0)" filter="url(#outerMatShadow)"/>
+
+    <!-- base frame ring (your existing look, kept) -->
     <g pointer-events="none">
       <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.10" stroke-width="8"/>
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
     </g>
 
+    <!-- inner "mat" just inside the ring -->
+    <rect x="26" y="26" width="${W - 52}" height="${H - 52}" rx="14"
+          fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>
+
+    <!-- bevel/sheen on top edge + subtle inner dark edge -->
+    <rect x="26" y="26" width="${W - 52}" height="${Math.max(4, Math.round((H - 52) * 0.14))}" rx="14"
+          fill="url(#frameSheen)" />
+    <rect x="26" y="${H - 26 - 2}" width="${W - 52}" height="2" rx="1"
+          fill="url(#edgeDark)" opacity="0.55"/>
+
+    <!-- tiny corner glints (very subtle) -->
+    <g opacity="0.45">
+      <circle cx="26"           cy="26"           r="10" fill="url(#cornerGlint)"/>
+      <circle cx="${W - 26}"    cy="26"           r="10" fill="url(#cornerGlint)"/>
+      <circle cx="26"           cy="${H - 26}"    r="10" fill="url(#cornerGlint)"/>
+      <circle cx="${W - 26}"    cy="${H - 26}"    r="10" fill="url(#cornerGlint)"/>
+    </g>
+    <!-- ======= END FRAME STACK ======= -->
+
     <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
       <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="url(#centerShadeHl)"/>
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead).toFixed(2)}"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacityHead.toFixed(2)}"/>
       <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(12, Math.round(hlH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
@@ -839,7 +890,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
-
 
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
