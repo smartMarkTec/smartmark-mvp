@@ -604,8 +604,15 @@ function normalizeCTA(s='') {
 function pickCtaVariant(seed='') { if (!seed) return 'LEARN MORE'; let h = 0; for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0; return CTA_VARIANTS[h % CTA_VARIANTS.length]; }
 function cleanCTA(c, seed='') { const norm = normalizeCTA(c); if (norm && ALLOWED_CTAS.has(norm)) return norm; return pickCtaVariant(seed); }
 
-/* --- CTA pill (always fits) --- */
-function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum = 140, baseImage = '') {
+/* --- CTA pill (always fits, glass, unified color) --- */
+function pillBtn(
+  cx, cy, label,
+  fs = 34,
+  glow = 'rgba(255,255,255,0.35)',
+  midLum = 140,
+  baseImage = '',
+  forceDark = null // <-- pass true/false to lock black/white; null = auto by midLum
+) {
   const padX = 28;
   const txt  = normalizeCTA(label || 'LEARN MORE');
   const estTextW = Math.round(txt.length * fs * 0.62);
@@ -614,9 +621,10 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
   const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
   const innerTextW = Math.max(92, estW - 40);
 
-  const textFill = midLum >= 178 ? '#111111' : '#FFFFFF';
-  const outline  = midLum >= 178 ? '#FFFFFF' : '#000000';
-  const shadowOpacity = midLum >= 178 ? 0.24 : 0.36;
+  const useDark = (forceDark === true) ? true : (forceDark === false) ? false : (midLum >= 188);
+  const textFill = useDark ? '#111111' : '#FFFFFF';
+  const outline  = useDark ? '#FFFFFF' : '#000000';
+  const shadowOpacity = useDark ? 0.24 : 0.36;
 
   return `
   <defs>
@@ -648,7 +656,7 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
     <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
     <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
 
-    <!-- CTA text, clipped to the pill so it never leaks -->
+    <!-- CTA text, clipped so it never leaks -->
     <g clip-path="url(#btnClip)">
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextHalo)"
@@ -660,6 +668,7 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.35)', midLum
     </g>
   </g>`;
 }
+
 /* --- Glass overlay with premium frame accents (outer shadow + inner mat + bevel + corner glints) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24, maxW = W - SAFE_PAD * 2;
@@ -901,7 +910,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       ${escSVG(subline)}
     </text>
 
-    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
+        ${pillBtn(
+      W/2, ctaY, cta, 34,
+      `rgba(${avg.r},${avg.g},${avg.b},0.30)`,
+      midLum,
+      baseImage,
+      useDarkText // <-- unify CTA with headline/subline color
+    )}
+
   </svg>`;
 }
 
