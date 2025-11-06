@@ -671,7 +671,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   let headlineFs = fitFont(title, MAX_LINE_W, HL_FS_START, 24);
 
-  // Greedy wrap (≤2 lines) using our serif width estimator
   function wrapTwoLines(t, fs) {
     const words = String(t || '').split(/\s+/).filter(Boolean);
     let l1 = '', l2 = '';
@@ -685,7 +684,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         if (estWidthSerif(test2, fs, 0.10) <= MAX_LINE_W) {
           l2 = test2;
         } else {
-          return null; // overflow at this fs
+          return null;
         }
       }
     }
@@ -705,11 +704,13 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     estWidthSerif(lines.l1, headlineFs, 0.10),
     estWidthSerif(lines.l2, headlineFs, 0.10)
   );
+
   const extraPadX   = Math.round(Math.max(30, headlineFs * 0.5));
-  const hlW         = Math.min(textBlockW + extraPadX * 2 + Math.round(headlineFs * 0.12), Math.round(maxW * 0.97));
+  const safetyW     = Math.ceil(headlineFs * 0.9); // extra width so last glyph never clips
+  const hlW         = Math.min(textBlockW + extraPadX * 2 + safetyW, Math.round(maxW * 0.97));
   const hlH         = Math.max(52, lineCount * headlineFs + (lineCount - 1) * lineGap + 16);
   const hlX         = Math.round((W - hlW) / 2);
-  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.20));
+  const hlInnerTextW= Math.max(100, hlW - Math.round(extraPadX * 1.05));
 
   // ---------- Subline chip (auto-size to text) ----------
   const SUB_FS         = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
@@ -792,7 +793,9 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
 
     <!-- Headline chip -->
-    <clipPath id="clipHl"><rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}"/></clipPath>
+    <clipPath id="clipHl">
+      <rect x="${hlX - 3}" y="${hlRectY}" width="${hlW + 6}" height="${hlH}" rx="${R}"/>
+    </clipPath>
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
       <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="url(#centerShadeHl)"/>
@@ -836,6 +839,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
+
 
 
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
