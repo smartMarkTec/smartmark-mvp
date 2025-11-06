@@ -723,8 +723,9 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const subCenterY= subRectY + Math.round(subH / 2);
   const ctaY      = Math.round(subCenterY + SUB_FS + 86);
 
-  // ---------- Adaptive styling ----------
+   // ---------- Adaptive styling ----------
   const midLum = metrics?.midLum ?? 140;
+  const topLum = metrics?.topLum ?? midLum;
   const avg    = metrics?.avgRGB || { r:64, g:64, b:64 };
 
   let chipOpacityHead = 0.28; if (midLum >= 170) chipOpacityHead += 0.03; if (midLum <= 110) chipOpacityHead -= 0.02;
@@ -738,17 +739,30 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const EDGE_STROKE = 0.20, R = 8;
 
-  const headTextFill = midLum >= 188 ? '#111111' : '#FFFFFF';
-  const headOutline  = midLum >= 188 ? '#FFFFFF' : '#000000';
-  const subTextFill  = midLum >= 188 ? '#111111' : '#FFFFFF';
-  const subOutline   = midLum >= 188 ? '#FFFFFF' : '#000000';
+  // ---------- Adaptive text color mix (≈60% white / 40% black) ----------
+  // Brightness score that weighs overall midtones + top area (where the headline often sits)
+  const brightScore = Math.round(0.6 * midLum + 0.4 * topLum); // 0–255
 
-  // Legibility halos (kept from last version)
-  const haloA = midLum >= 190 ? 0.44 : midLum >= 160 ? 0.40 : 0.36;
+  // Use dark text on very bright scenes, or moderately bright scenes with bright top band.
+  // Tuned to yield ~40% dark across varied lifestyle/food/fashion photos.
+  const useDarkText =
+    (brightScore >= 198) ||                      // very bright overall
+    (brightScore >= 170 && topLum >= midLum - 6); // bright top vs mid
+
+  const headTextFill = useDarkText ? '#111111' : '#FFFFFF';
+  const headOutline  = useDarkText ? '#FFFFFF' : '#000000';
+  const subTextFill  = useDarkText ? '#111111' : '#FFFFFF';
+  const subOutline   = useDarkText ? '#FFFFFF' : '#000000';
+
+  // Halos & stroke widths tuned per palette (keeps the same aesthetic, just improves contrast)
+  const headStrokeW = useDarkText ? 1.00 : (midLum >= 188 ? 1.30 : 1.15);
+  const subStrokeW  = useDarkText ? 0.95 : (midLum >= 188 ? 1.18 : 1.05);
+
+  // Slightly lighter halo when using dark text; stronger when using white text on bright shots
+  const haloA = useDarkText ? 0.28 : (midLum >= 190 ? 0.44 : midLum >= 160 ? 0.40 : 0.36);
   const haloB = haloA * 0.85;
   const haloC = haloA * 0.70;
-  const headStrokeW = midLum >= 188 ? 1.30 : 1.15;
-  const subStrokeW  = midLum >= 188 ? 1.18 : 1.05;
+
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
