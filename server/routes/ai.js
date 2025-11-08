@@ -669,45 +669,46 @@ function pillBtn(
   </g>`;
 }
 
-/* --- Glass overlay (headline/subline ALWAYS fit; no spill, no scale fighting) --- */
+/* --- Glass overlay (chips GROW to fit text; no spill, no squish) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
 
-  // Headline sizing (estimate) + roomy padding
+  // ---------- Headline sizing (chip width = measured text + padding) ----------
   const HL_FS_START = 68;
-  const headlineFs  = fitFont(title, Math.min(maxW * 0.92, maxW - 40), HL_FS_START, 34);
-  const hlTextW     = estWidthSerif(title, headlineFs, 0.10) + Math.round(headlineFs * 0.12);
-  const extraPadX   = Math.round(Math.max(30, headlineFs * 0.5));
-  const hlW         = Math.min(hlTextW + extraPadX * 2, Math.round(maxW * 0.97));
-  const hlH         = Math.max(52, headlineFs + 16);
+  // pick a size that is visually right; we DO NOT force-fit to a narrow box
+  const headlineFs  = fitFont(title, Math.min(maxW * 0.98, maxW - 24), HL_FS_START, 34);
+  const HL_PAD_X    = Math.round(Math.max(30, headlineFs * 0.52)); // roomy left/right
+  const HL_PAD_Y    = Math.round(Math.max(10, headlineFs * 0.18));
+
+  const hlTextW     = estWidthSerif(title, headlineFs, 0.10);
+  // Box grows to text; only cap is the safe canvas width
+  const hlW         = Math.min(hlTextW + HL_PAD_X * 2, maxW);
+  const hlH         = Math.max(52, headlineFs + HL_PAD_Y * 2);
   const hlX         = Math.round((W - hlW) / 2);
+  const hlCenterY   = 126;
+  const hlRectY     = Math.round(hlCenterY - hlH / 2);
 
-  // Give the text a conservative inner width so it never touches edges
-  const hlInnerTextW = Math.max(110, hlW - Math.round(extraPadX * 1.55));
+  // ---------- Subline sizing (same rule: grow to text) ----------
+  const SUB_FS_START   = 42;
+  const SUB_FS         = fitFont(subline, Math.min(maxW * 0.98, maxW - 24), SUB_FS_START, 26);
+  const SUB_PAD_X      = Math.round(Math.max(22, SUB_FS * 0.50));
+  const SUB_PAD_Y      = Math.round(Math.max(8,  SUB_FS * 0.18));
 
-  // Subline chip sizing
-  const SUB_FS         = fitFont(subline, Math.min(W * 0.84, maxW), 42, 26);
   const subTextW       = estWidthSerif(subline, SUB_FS, 0.18);
-  const subPadX        = 22;
-  const subW           = Math.min(subTextW + subPadX * 2, maxW);
-  const subH           = Math.max(46, SUB_FS + 16);
+  const subW           = Math.min(subTextW + SUB_PAD_X * 2, maxW);
+  const subH           = Math.max(46, SUB_FS + SUB_PAD_Y * 2);
   const subX           = Math.round((W - subW) / 2);
 
-  // Conservative inner width for subline
-  const subInnerTextW  = Math.max(100, subW - Math.round(subPadX * 1.45));
+  const GAP_HL_TO_SUB  = 64;
+  const subRectY       = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
+  const subCenterY     = subRectY + Math.round(subH / 2);
 
-  // Positions
-  const headlineCenterY = 126;
-  const hlRectY = Math.round(headlineCenterY - hlH / 2);
-  const GAP_HL_TO_SUB = 64;
-  const subRectY = Math.round(hlRectY + hlH + GAP_HL_TO_SUB);
-  const subCenterY = subRectY + Math.round(subH / 2);
-  const ctaY = Math.round(subCenterY + SUB_FS + 86);
+  const ctaY           = Math.round(subCenterY + SUB_FS + 86);
 
-  // Image metrics → chip styling
+  // ---------- Image metrics → chip styling ----------
   const midLum = metrics?.midLum ?? 140;
-  const avg = metrics?.avgRGB || { r:64, g:64, b:64 };
+  const avg    = metrics?.avgRGB || { r:64, g:64, b:64 };
 
   let chipOpacityHead = 0.28;
   if (midLum >= 170) chipOpacityHead += 0.03;
@@ -715,24 +716,24 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   chipOpacityHead = Math.max(0.24, Math.min(0.33, chipOpacityHead));
 
   const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
-  const tintRGBA = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
-  const vignetteOpacity = midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
+  const tintRGBA       = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
+  const vignetteOpacity= midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
 
-  // Soft global shade for readability (keeps glass look)
-  const globalShade = midLum >= 170 ? 0.10 : midLum >= 140 ? 0.12 : 0.14;
+  // Soft global shade for readability (preserves image & glass)
+  const globalShade    = midLum >= 170 ? 0.10 : midLum >= 140 ? 0.12 : 0.14;
 
-  // Local center-dark backplate
-  const backShadeHead = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
-  const backShadeSub  = Math.max(0.07, backShadeHead - 0.04);
+  // Local center-dark backplates
+  const backShadeHead  = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
+  const backShadeSub   = Math.max(0.07, backShadeHead - 0.04);
+
+  // Text colors unified (your 60/40 preference auto-switches by brightness)
+  const useDark        = midLum >= 188;
+  const headTextFill   = useDark ? '#111111' : '#FFFFFF';
+  const headOutline    = useDark ? '#FFFFFF' : '#000000';
+  const subTextFill    = headTextFill;
+  const subOutline     = headOutline;
 
   const EDGE_STROKE = 0.20, R = 8;
-
-  // Auto white/black text choice – consistent across chips
-  const useDark = midLum >= 188;
-  const headTextFill = useDark ? '#111111' : '#FFFFFF';
-  const headOutline  = useDark ? '#FFFFFF' : '#000000';
-  const subTextFill  = headTextFill;
-  const subOutline   = headOutline;
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -785,17 +786,20 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
       <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="url(#centerShadeHl)"/>
-      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${(chipOpacityHead).toFixed(2)}"/>
+      <rect x="${hlX}" y="${hlRectY}" width="${hlW}" height="${hlH}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacityHead.toFixed(2)}"/>
       <rect x="${hlX+1}" y="${hlRectY+1}" width="${hlW-2}" height="${Math.max(12, Math.round(hlH*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
       <rect x="${hlX+0.5}" y="${hlRectY+0.5}" width="${hlW-1}" height="${hlH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text: forced fit via textLength -->
+    <!-- Headline text (no textLength; chip is sized to the words) -->
     <g clip-path="url(#clipHl)">
-      <text x="${W/2}" y="${Math.round(hlRectY + hlH/2)}"
-            text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            lengthAdjust="spacingAndGlyphs" textLength="${hlInnerTextW}" filter="url(#textHalo)"
-            font-family="'Times New Roman', Times, serif" font-size="${headlineFs}" font-weight="700"
+      <text x="${W/2}"
+            y="${Math.round(hlRectY + hlH/2)}"
+            text-anchor="middle"
+            dominant-baseline="middle" alignment-baseline="middle"
+            filter="url(#textHalo)"
+            font-family="'Times New Roman', Times, serif"
+            font-size="${headlineFs}" font-weight="700"
             fill="${headTextFill}"
             style="paint-order: stroke; stroke:${headOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
         ${escSVG(title)}
@@ -812,12 +816,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${subX+0.5}" y="${subRectY+0.5}" width="${subW-1}" height="${subH-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text: forced fit via textLength -->
+    <!-- Subline text (chip sized to the words) -->
     <g clip-path="url(#clipSub)">
-      <text x="${W/2}" y="${Math.round(subRectY + subH/2)}"
-            text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            lengthAdjust="spacingAndGlyphs" textLength="${subInnerTextW}" filter="url(#textHalo)"
-            font-family="'Times New Roman', Times, serif" font-size="${SUB_FS}" font-weight="700"
+      <text x="${W/2}"
+            y="${Math.round(subRectY + subH/2)}"
+            text-anchor="middle"
+            dominant-baseline="middle" alignment-baseline="middle"
+            filter="url(#textHalo)"
+            font-family="'Times New Roman', Times, serif"
+            font-size="${SUB_FS}" font-weight="700"
             fill="${subTextFill}"
             style="paint-order: stroke fill; stroke:${subOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.14em">
         ${escSVG(subline)}
@@ -827,8 +834,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
-
-
 
 
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
