@@ -636,7 +636,7 @@ function pillBtn(
   <defs>
     <clipPath id="btnClip"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"/></clipPath>
     <filter id="btnBlur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="8"/></filter>
-    <filter id="btnTextHalo" x="-60%" y="-60%" width="220%" height="220%">
+    <filter id="btnTextHalo" x="-60%" y="-60%" width="220%">
       <feDropShadow dx="0" dy="0" stdDeviation="1.3" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
       <feDropShadow dx="0" dy="0" stdDeviation="3.0" flood-color="#000000" flood-opacity="${shadowOpacity*0.75}"/>
     </filter>
@@ -700,11 +700,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlCenterY = 126;
   const hlRectY   = Math.round(hlCenterY - headline.h / 2);
 
-  // Subline — match the look from your screenshot:
-  // (tighter tracking + slightly lighter weight later in <text>)
+  // Subline — a tad larger + matched look
   const sub = settleBlock({
-    text: String(subline || ''), fsStart: 42, fsMin: 22,
-    tracking: 0.06,                 // tighter than before to match reference
+    text: String(subline || ''), fsStart: 46, fsMin: 24,  // +4 from before
+    tracking: 0.05,                 // slightly tighter like your reference
     padXFactor: 0.60, padYFactor: 0.20,
   });
   const GAP_HL_TO_SUB = 64;
@@ -748,7 +747,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
-      <filter id="textHalo" x="-60%" y="-60%" width="220%" height="220%">
+      <filter id="textHalo" x="-60%" y="-60%" width="220%">
         <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="${useDark ? 0.20 : 0.38}"/>
         <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${useDark ? 0.18 : 0.32}"/>
       </filter>
@@ -762,16 +761,32 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeSub})"/>
         <stop offset="100%" stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
       </linearGradient>
+
+      <!-- subtle inner glow for the photo frame -->
+      <filter id="innerGlow" x="-10%" y="-10%" width="120%" height="120%">
+        <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
+        <feOffset dy="0" dx="0"/>
+        <feComposite in2="SourceAlpha" operator="out"/>
+        <feColorMatrix type="matrix" values="
+          0 0 0 0 1
+          0 0 0 0 1
+          0 0 0 0 1
+          0 0 0 .18 0"/>
+      </filter>
     </defs>
 
     <!-- subtle global shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
 
-    <!-- vignette + frame -->
+    <!-- vignette + enhanced double frame -->
     <g opacity="${vignetteOpacity}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/></g>
-    <g pointer-events="none">
-      <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.10" stroke-width="8"/>
+    <g pointer-events="none" filter="url(#innerGlow)">
+      <!-- outer soft dark rim -->
+      <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.12" stroke-width="8"/>
+      <!-- main inner white line (existing) -->
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
+      <!-- NEW: secondary hairline for a doubled premium frame -->
+      <rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
     </g>
 
     <!-- Headline chip -->
@@ -806,7 +821,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text (matches your reference: lighter weight + tighter tracking) -->
+    <!-- Subline text (a tad larger, lighter weight, tighter tracking) -->
     <g clip-path="url(#clipSub)">
       <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
@@ -814,7 +829,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
             font-family="'Times New Roman', Times, serif"
             font-size="${sub.fs}" font-weight="600"
             fill="${textFill}"
-            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.03em">
+            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.02em">
         ${escSVG(subline)}
       </text>
     </g>
