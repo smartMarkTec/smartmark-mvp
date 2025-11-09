@@ -610,7 +610,6 @@ function pillBtn(
 ) {
   const txt = normalizeCTA(label || 'LEARN MORE');
 
-  // conservative width estimate for serif caps
   const FUDGE = 1.16;
   const textWidth = (fs) => Math.max(1, (txt.length * fs * 0.62) * FUDGE);
 
@@ -620,7 +619,7 @@ function pillBtn(
   const recompute = () => {
     padX = Math.round(Math.max(24, fs * 0.70));
     padY = Math.round(Math.max(10, fs * 0.40));
-    w    = Math.min(MAX_W, textWidth(fs) + padX * 2 + 24); // 24 = inner gap both sides
+    w    = Math.min(MAX_W, textWidth(fs) + padX * 2 + 24);
     h    = Math.max(46, fs + padY * 2);
   };
   recompute();
@@ -654,7 +653,6 @@ function pillBtn(
     <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
     <rect x="${x-6}" y="${y-6}" width="${w+12}" height="${h+12}" rx="${r+6}" fill="${glow}" opacity="0.30"/>
 
-    <!-- no textLength; always fits by construction -->
     <g clip-path="url(#btnClip)">
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             filter="url(#btnTextHalo)"
@@ -685,7 +683,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       padX  = Math.round(Math.max(32, fs * padXFactor));
       padY  = Math.round(Math.max(10, fs * padYFactor));
       textW = measureSerifWidth(text, fs, tracking);
-      w     = textW + padX * 2 + MIN_INNER_GAP * 2; // ensure inner gap
+      w     = textW + padX * 2 + MIN_INNER_GAP * 2;
       h     = Math.max(44, fs + padY * 2);
     };
     recompute();
@@ -702,10 +700,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlCenterY = 126;
   const hlRectY   = Math.round(hlCenterY - headline.h / 2);
 
-  // Subline — SAME font/spacing feel as headline
+  // Subline — match the look from your screenshot:
+  // (tighter tracking + slightly lighter weight later in <text>)
   const sub = settleBlock({
     text: String(subline || ''), fsStart: 42, fsMin: 22,
-    tracking: 0.10, padXFactor: 0.60, padYFactor: 0.20,
+    tracking: 0.06,                 // tighter than before to match reference
+    padXFactor: 0.60, padYFactor: 0.20,
   });
   const GAP_HL_TO_SUB = 64;
   const subRectY   = Math.round(hlRectY + headline.h + GAP_HL_TO_SUB);
@@ -806,14 +806,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text (same font + spacing as headline) -->
+    <!-- Subline text (matches your reference: lighter weight + tighter tracking) -->
     <g clip-path="url(#clipSub)">
       <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             filter="url(#textHalo)"
-            font-family="'Times New Roman', Times, serif" font-size="${sub.fs}" font-weight="700"
+            font-family="'Times New Roman', Times, serif"
+            font-size="${sub.fs}" font-weight="600"
             fill="${textFill}"
-            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
+            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.03em">
         ${escSVG(subline)}
       </text>
     </g>
