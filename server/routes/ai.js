@@ -602,7 +602,13 @@ function normalizeCTA(s='') {
     .trim();
 }
 function pickCtaVariant(seed='') { if (!seed) return 'LEARN MORE'; let h = 0; for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0; return CTA_VARIANTS[h % CTA_VARIANTS.length]; }
-function cleanCTA(c, seed='') { const norm = normalizeCTA(c); if (norm && ALLOWED_CTAS.has(norm)) return norm; return pickCtaVariant(seed); }
+
+/* Updated so it won’t always be “LEARN MORE” — we rotate sensible two-word CTAs */
+function cleanCTA(c, seed='') {
+  const norm = normalizeCTA(c);
+  if (norm && ALLOWED_CTAS.has(norm) && norm !== 'LEARN MORE') return norm;
+  return pickCtaVariant(seed);
+}
 
 /* --- CTA pill (always fits, glass, unified color) --- */
 function pillBtn(
@@ -611,7 +617,7 @@ function pillBtn(
   glow = 'rgba(255,255,255,0.35)',
   midLum = 140,
   baseImage = '',
-  forceDark = null // <-- pass true/false to lock black/white; null = auto by midLum
+  forceDark = null
 ) {
   const padX = 28;
   const txt  = normalizeCTA(label || 'LEARN MORE');
@@ -644,19 +650,16 @@ function pillBtn(
   </defs>
 
   <g filter="url(#btnShadow)">
-    <!-- true glassmorphism: blurred image inside the pill -->
     <g clip-path="url(#btnClip)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="1200" height="628" preserveAspectRatio="xMidYMid slice" filter="url(#btnBlur)"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)"/>
       <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
     </g>
 
-    <!-- strokes/glow over the clip -->
     <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
     <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
     <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
 
-    <!-- CTA text, clipped so it never leaks -->
     <g clip-path="url(#btnClip)">
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextHalo)"
@@ -669,14 +672,14 @@ function pillBtn(
   </g>`;
 }
 
-/* --- Glass overlay (return chips as-before; only enhance the frame) --- */
+/* --- Glass overlay (chips grow; guaranteed inner gap; unified fonts) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
   const R = 8;
   const EDGE_STROKE = 0.20;
 
-  // ---------- helpers (unchanged) ----------
+  // ---------- helpers ----------
   const FUDGE = 1.18;
   const MIN_INNER_GAP = 12;
   function measureSerifWidth(txt, fs, tracking = 0.10) {
@@ -697,7 +700,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // ---------- HEADLINE (unchanged) ----------
+  // ---------- HEADLINE ----------
   const headline = settleBlock({
     text: String(title || ''),
     fsStart: 68,
@@ -709,12 +712,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlCenterY = 126;
   const hlRectY   = Math.round(hlCenterY - headline.h / 2);
 
-  // ---------- SUBLINE (exactly as before) ----------
+  // ---------- SUBLINE (Match the reference: tighter tracking like headline + a tad larger) ----------
   const sub = settleBlock({
     text: String(subline || ''),
-    fsStart: 42,          // back to your previous size
+    fsStart: 44,          // slightly larger
     fsMin: 22,
-    tracking: 0.18,       // back to previous tracking
+    tracking: 0.10,       // tighter (was 0.18)
     padXFactor: 0.54,
     padYFactor: 0.20,
   });
@@ -722,10 +725,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const subRectY   = Math.round(hlRectY + headline.h + GAP_HL_TO_SUB);
   const subCenterY = subRectY + Math.round(sub.h / 2);
 
-  // ---------- CTA position (unchanged) ----------
+  // ---------- CTA position ----------
   const ctaY = Math.round(subCenterY + sub.fs + 86);
 
-  // ---------- styling from image metrics (unchanged) ----------
+  // ---------- styling from image metrics ----------
   const midLum = metrics?.midLum ?? 140;
   const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
 
@@ -737,14 +740,17 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
   const tintRGBA       = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
   const vignetteOpacity= midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
-  const globalShade    = midLum >= 170 ? 0.10 : midLum >= 140 ? 0.12 : 0.14;
+  const globalShade    = midLum >= 170 ? 0.12 : midLum >= 140 ? 0.14 : 0.16; // a hair darker for legibility
 
   const backShadeHead  = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
   const backShadeSub   = Math.max(0.07, backShadeHead - 0.04);
 
-  const useDark        = midLum >= 188; // unified color for headline/subline/CTA
+  const useDark        = midLum >= 188;
   const textFill       = useDark ? '#111111' : '#FFFFFF';
   const textOutline    = useDark ? '#FFFFFF' : '#000000';
+
+  // Pick a sensible CTA if blank or just "LEARN MORE"
+  const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -779,20 +785,17 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <!-- subtle global shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
 
-    <!-- vignette + **enhanced double frame only** -->
+    <!-- vignette + double frame (unchanged from your good version) -->
     <g opacity="${vignetteOpacity}">
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
     </g>
     <g pointer-events="none">
-      <!-- outer soft rim -->
       <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.12" stroke-width="8"/>
-      <!-- main inner white line -->
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
-      <!-- secondary hairline for premium look -->
       <rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
     </g>
 
-    <!-- Headline chip (unchanged) -->
+    <!-- Headline chip -->
     <clipPath id="clipHl"><rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
@@ -802,7 +805,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text (unchanged) -->
+    <!-- Headline text -->
     <g clip-path="url(#clipHl)">
       <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
@@ -814,7 +817,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </text>
     </g>
 
-    <!-- Subline chip (unchanged) -->
+    <!-- Subline chip -->
     <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipSub)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
@@ -824,7 +827,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text (unchanged: same font/weight/spacing as before) -->
+    <!-- Subline text (matched style: tighter spacing like headline) -->
     <g clip-path="url(#clipSub)">
       <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
@@ -832,15 +835,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
             font-family="'Times New Roman', Times, serif"
             font-size="${sub.fs}" font-weight="700"
             fill="${textFill}"
-            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.14em">
+            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
         ${escSVG(subline)}
       </text>
     </g>
 
-    ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
+    ${pillBtn(W/2, ctaY, chosenCTA, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
-
 
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
