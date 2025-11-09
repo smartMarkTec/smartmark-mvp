@@ -594,38 +594,32 @@ const CTA_VARIANTS = [
 const ALLOWED_CTAS = new Set(CTA_VARIANTS);
 
 function normalizeCTA(s='') {
-  return String(s).toUpperCase().replace(/[’']/g,'').replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+  return String(s)
+    .toUpperCase()
+    .replace(/[’']/g, '')
+    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
-function pickCtaVariant(seed=''){ if(!seed) return 'LEARN MORE'; let h=0; for(let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0; return CTA_VARIANTS[h%CTA_VARIANTS.length]; }
-function cleanCTA(c, seed=''){ const norm = normalizeCTA(c); if (norm && ALLOWED_CTAS.has(norm)) return norm; return pickCtaVariant(seed); }
+function pickCtaVariant(seed='') { if (!seed) return 'LEARN MORE'; let h = 0; for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0; return CTA_VARIANTS[h % CTA_VARIANTS.length]; }
+function cleanCTA(c, seed='') { const norm = normalizeCTA(c); if (norm && ALLOWED_CTAS.has(norm)) return norm; return pickCtaVariant(seed); }
 
 /* --- CTA pill (always fits, glass, unified color) --- */
 function pillBtn(
   cx, cy, label,
-  fsStart = 34,
+  fs = 34,
   glow = 'rgba(255,255,255,0.35)',
   midLum = 140,
   baseImage = '',
-  forceDark = null // true=black text, false=white, null=auto
+  forceDark = null // <-- pass true/false to lock black/white; null = auto by midLum
 ) {
-  const txt = normalizeCTA(label || 'LEARN MORE');
-
-  const FUDGE = 1.16;
-  const textWidth = (fs) => Math.max(1, (txt.length * fs * 0.62) * FUDGE);
-
-  const MAX_W = Math.round(1200 * 0.92);
-  let fs = fsStart, padX, padY, w, h;
-
-  const recompute = () => {
-    padX = Math.round(Math.max(24, fs * 0.70));
-    padY = Math.round(Math.max(10, fs * 0.40));
-    w    = Math.min(MAX_W, textWidth(fs) + padX * 2 + 24);
-    h    = Math.max(46, fs + padY * 2);
-  };
-  recompute();
-  while (w >= MAX_W && fs > 20) { fs -= 2; recompute(); }
-
-  const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2), r = Math.round(h / 2);
+  const padX = 28;
+  const txt  = normalizeCTA(label || 'LEARN MORE');
+  const estTextW = Math.round(txt.length * fs * 0.62);
+  const estW = Math.max(132, Math.min(estTextW + padX * 2, Math.round(1200 * 0.92)));
+  const estH = Math.max(46, fs + 18);
+  const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
+  const innerTextW = Math.max(92, estW - 40);
 
   const useDark = (forceDark === true) ? true : (forceDark === false) ? false : (midLum >= 188);
   const textFill = useDark ? '#111111' : '#FFFFFF';
@@ -634,28 +628,38 @@ function pillBtn(
 
   return `
   <defs>
-    <clipPath id="btnClip"><rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"/></clipPath>
-    <filter id="btnBlur" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="8"/></filter>
-    <filter id="btnTextHalo" x="-60%" y="-60%" width="220%">
-      <feDropShadow dx="0" dy="0" stdDeviation="1.3" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="3.0" flood-color="#000000" flood-opacity="${shadowOpacity*0.75}"/>
+    <clipPath id="btnClip">
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"/>
+    </clipPath>
+    <filter id="btnBlur" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8"/>
     </filter>
-    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/></filter>
+    <filter id="btnTextHalo" x="-60%" y="-60%" width="220%" height="220%">
+      <feDropShadow dx="0" dy="0" stdDeviation="1.2" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
+      <feDropShadow dx="0" dy="0" stdDeviation="2.8" flood-color="#000000" flood-opacity="${shadowOpacity * 0.75}"/>
+    </filter>
+    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
   </defs>
 
   <g filter="url(#btnShadow)">
+    <!-- true glassmorphism: blurred image inside the pill -->
     <g clip-path="url(#btnClip)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="1200" height="628" preserveAspectRatio="xMidYMid slice" filter="url(#btnBlur)"/>
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="rgba(255,255,255,0.10)"/>
-      <rect x="${x+1}" y="${y+1}" width="${w-2}" height="${Math.max(10, Math.round(h*0.40))}" rx="${Math.max(0, r-1)}" fill="rgba(255,255,255,0.24)"/>
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)"/>
+      <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
     </g>
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-    <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
-    <rect x="${x-6}" y="${y-6}" width="${w+12}" height="${h+12}" rx="${r+6}" fill="${glow}" opacity="0.30"/>
 
+    <!-- strokes/glow over the clip -->
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
+    <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
+
+    <!-- CTA text, clipped so it never leaks -->
     <g clip-path="url(#btnClip)">
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            filter="url(#btnTextHalo)"
+            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextHalo)"
             font-family="'Times New Roman', Times, serif" font-size="${fs}" font-weight="700"
             fill="${textFill}"
             style="paint-order: stroke; stroke:${outline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.06em">
@@ -665,18 +669,19 @@ function pillBtn(
   </g>`;
 }
 
-/* --- Glass overlay (chips grow; guaranteed inner gap; unified fonts) --- */
+/* --- Glass overlay (return chips as-before; only enhance the frame) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
   const R = 8;
   const EDGE_STROKE = 0.20;
 
-  // helpers
+  // ---------- helpers (unchanged) ----------
   const FUDGE = 1.18;
   const MIN_INNER_GAP = 12;
-  const measureSerifWidth = (txt, fs, tracking=0.10) => Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
-
+  function measureSerifWidth(txt, fs, tracking = 0.10) {
+    return Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
+  }
   function settleBlock({ text, fsStart, fsMin, tracking, padXFactor, padYFactor }) {
     let fs = fsStart, padX, padY, textW, w, h;
     const recompute = () => {
@@ -692,29 +697,37 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // Headline
+  // ---------- HEADLINE (unchanged) ----------
   const headline = settleBlock({
-    text: String(title || ''), fsStart: 68, fsMin: 26,
-    tracking: 0.10, padXFactor: 0.60, padYFactor: 0.20,
+    text: String(title || ''),
+    fsStart: 68,
+    fsMin: 26,
+    tracking: 0.10,
+    padXFactor: 0.60,
+    padYFactor: 0.20,
   });
   const hlCenterY = 126;
   const hlRectY   = Math.round(hlCenterY - headline.h / 2);
 
-  // Subline — a tad larger + matched look
+  // ---------- SUBLINE (exactly as before) ----------
   const sub = settleBlock({
-    text: String(subline || ''), fsStart: 46, fsMin: 24,  // +4 from before
-    tracking: 0.05,                 // slightly tighter like your reference
-    padXFactor: 0.60, padYFactor: 0.20,
+    text: String(subline || ''),
+    fsStart: 42,          // back to your previous size
+    fsMin: 22,
+    tracking: 0.18,       // back to previous tracking
+    padXFactor: 0.54,
+    padYFactor: 0.20,
   });
   const GAP_HL_TO_SUB = 64;
   const subRectY   = Math.round(hlRectY + headline.h + GAP_HL_TO_SUB);
   const subCenterY = subRectY + Math.round(sub.h / 2);
 
+  // ---------- CTA position (unchanged) ----------
   const ctaY = Math.round(subCenterY + sub.fs + 86);
 
-  // styling from image metrics
+  // ---------- styling from image metrics (unchanged) ----------
   const midLum = metrics?.midLum ?? 140;
-  const avg    = metrics?.avgRGB || { r:64,g:64,b:64 };
+  const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
 
   let chipOpacityHead = 0.28;
   if (midLum >= 170) chipOpacityHead += 0.03;
@@ -729,9 +742,9 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const backShadeHead  = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
   const backShadeSub   = Math.max(0.07, backShadeHead - 0.04);
 
-  const useDark     = midLum >= 188; // unified color
-  const textFill    = useDark ? '#111111' : '#FFFFFF';
-  const textOutline = useDark ? '#FFFFFF' : '#000000';
+  const useDark        = midLum >= 188; // unified color for headline/subline/CTA
+  const textFill       = useDark ? '#111111' : '#FFFFFF';
+  const textOutline    = useDark ? '#FFFFFF' : '#000000';
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -747,7 +760,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
-      <filter id="textHalo" x="-60%" y="-60%" width="220%">
+      <filter id="textHalo" x="-60%" y="-60%" width="220%" height="220%">
         <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="${useDark ? 0.20 : 0.38}"/>
         <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${useDark ? 0.18 : 0.32}"/>
       </filter>
@@ -761,35 +774,25 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeSub})"/>
         <stop offset="100%" stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
       </linearGradient>
-
-      <!-- subtle inner glow for the photo frame -->
-      <filter id="innerGlow" x="-10%" y="-10%" width="120%" height="120%">
-        <feGaussianBlur in="SourceAlpha" stdDeviation="2" result="blur"/>
-        <feOffset dy="0" dx="0"/>
-        <feComposite in2="SourceAlpha" operator="out"/>
-        <feColorMatrix type="matrix" values="
-          0 0 0 0 1
-          0 0 0 0 1
-          0 0 0 0 1
-          0 0 0 .18 0"/>
-      </filter>
     </defs>
 
     <!-- subtle global shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
 
-    <!-- vignette + enhanced double frame -->
-    <g opacity="${vignetteOpacity}"><rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/></g>
-    <g pointer-events="none" filter="url(#innerGlow)">
-      <!-- outer soft dark rim -->
+    <!-- vignette + **enhanced double frame only** -->
+    <g opacity="${vignetteOpacity}">
+      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
+    </g>
+    <g pointer-events="none">
+      <!-- outer soft rim -->
       <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.12" stroke-width="8"/>
-      <!-- main inner white line (existing) -->
+      <!-- main inner white line -->
       <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
-      <!-- NEW: secondary hairline for a doubled premium frame -->
+      <!-- secondary hairline for premium look -->
       <rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
     </g>
 
-    <!-- Headline chip -->
+    <!-- Headline chip (unchanged) -->
     <clipPath id="clipHl"><rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipHl)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
@@ -799,7 +802,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Headline text -->
+    <!-- Headline text (unchanged) -->
     <g clip-path="url(#clipHl)">
       <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
@@ -811,7 +814,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </text>
     </g>
 
-    <!-- Subline chip -->
+    <!-- Subline chip (unchanged) -->
     <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
     <g clip-path="url(#clipSub)">
       <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
@@ -821,15 +824,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
     </g>
 
-    <!-- Subline text (a tad larger, lighter weight, tighter tracking) -->
+    <!-- Subline text (unchanged: same font/weight/spacing as before) -->
     <g clip-path="url(#clipSub)">
       <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             filter="url(#textHalo)"
             font-family="'Times New Roman', Times, serif"
-            font-size="${sub.fs}" font-weight="600"
+            font-size="${sub.fs}" font-weight="700"
             fill="${textFill}"
-            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.02em">
+            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.14em">
         ${escSVG(subline)}
       </text>
     </g>
@@ -837,6 +840,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     ${pillBtn(W/2, ctaY, cta, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
   </svg>`;
 }
+
 
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
