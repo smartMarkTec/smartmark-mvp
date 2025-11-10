@@ -844,6 +844,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   </svg>`;
 }
 
+
 /* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
 function craftSubline(answers = {}, category = 'generic') {
   const clean = (s) => String(s || '').replace(/[^\w\s\-']/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
