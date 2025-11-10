@@ -1032,24 +1032,41 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category  = resolveCategory(answers || {});
     const keyword   = getImageKeyword(industry, url, answers);
 
-    const compose = async (imgUrl, seed, meta = {}) => {
-      const headlineHint = overlayTitleFromAnswers(answers, category);
-      const ctaHint      = cleanCTA(answers?.cta || '');
-      const { publicUrl, absoluteUrl } = await buildOverlayImage({
-        imageUrl: imgUrl,
-        headlineHint,
-        ctaHint,
-        seed,
-        fallbackHeadline: headlineHint,
-        answers,
-        category,
-      });
-      await saveAsset({
-        req, kind: 'image', url: publicUrl, absoluteUrl,
-        meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
-      });
-      return publicUrl;
-    };
+   const compose = async (imgUrl, seed, meta = {}) => {
+  try {
+    const headlineHint = overlayTitleFromAnswers(answers, category);
+    const ctaHint      = cleanCTA(answers?.cta || '');
+    const { publicUrl, absoluteUrl } = await buildOverlayImage({
+      imageUrl: imgUrl,
+      headlineHint,
+      ctaHint,
+      seed,
+      fallbackHeadline: headlineHint,
+      answers,
+      category,
+    });
+    await saveAsset({
+      req, kind: 'image', url: publicUrl, absoluteUrl,
+      meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
+    });
+    return publicUrl;
+  } catch (err) {
+    // Try a bare-minimum frame-only overlay as a last resort
+    try {
+      const W = 1200, H = 628;
+      const imgRes = await ax.get(imgUrl, { responseType: 'arraybuffer', timeout: 12000 });
+      const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
+      const frameSvg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+        <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="18" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="8"/>
+        <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="16" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="2"/>
+      </svg>`);
+      const file = `${uuidv4()}.jpg`;
+      await sharp(baseBuf).composite([{ input: frameSvg, top: 0, left: 0 }]).jpeg({ quality: 90 }).toFile(path.join(ensureGeneratedDir(), file));
+      return mediaPath(file);
+    } catch { throw err; }
+  }
+};
+
 
     const urls = [], absUrls = [];
 
@@ -1080,13 +1097,16 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         urls.push(u); absUrls.push(absolutePublicUrl(u));
       }
     } else {
-      // Keyless, relevant fallback (Unsplash Source API)
-      const q = encodeURIComponent(`${keyword},comic,books,graphic-novel`);
-      for (let i = 0; i < 2; i++) {
-        const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${encodeURIComponent((regenerateToken || 'seed') + '_' + i)}`;
-        const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', i });
-        urls.push(u); absUrls.push(absolutePublicUrl(u));
-      }
+      // Keyless, relevant fallback (Unsplash Source API) — always compose overlays
+const q = encodeURIComponent(keyword || 'ecommerce products');
+for (let i = 0; i < 2; i++) {
+  const sig = encodeURIComponent((regenerateToken || 'seed') + '_' + i);
+  const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${sig}`;
+  const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', i });
+  urls.push(u); 
+  absUrls.push(absolutePublicUrl(u));
+}
+
     }
 
     return res.json({
