@@ -601,17 +601,55 @@ function normalizeCTA(s='') {
     .replace(/\s+/g, ' ')
     .trim();
 }
-function pickCtaVariant(seed='') { if (!seed) return 'LEARN MORE'; let h = 0; for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0; return CTA_VARIANTS[h % CTA_VARIANTS.length]; }
-
-/* Updated so it won’t always be “LEARN MORE” — we rotate sensible two-word CTAs */
+function pickCtaVariant(seed='') {
+  if (!seed) return 'LEARN MORE';
+  let h = 0;
+  for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0;
+  return CTA_VARIANTS[h % CTA_VARIANTS.length];
+}
 function cleanCTA(c, seed='') {
   const norm = normalizeCTA(c);
   if (norm && ALLOWED_CTAS.has(norm) && norm !== 'LEARN MORE') return norm;
   return pickCtaVariant(seed);
 }
 
-/* --- CTA pill (always fits, glass, unified color) --- */
-function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.30)', midLum = 140) {
+/* ---------- required helpers for subline + SVG ---------- */
+function escSVG(s='') {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
+}
+// approximate serif width (for fitting)
+function estWidthSerif(text, fs, letterSpacing = 0) {
+  const t = String(text || ''), n = t.length || 1;
+  return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing * fs;
+}
+// seeded RNG + picker (craftSubline uses these)
+function _hash32(str = '') {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function _rng(seed = '') {
+  let h = _hash32(String(seed));
+  return function () {
+    h = (h + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    t = (t ^ (t >>> 14)) >>> 0;
+    return t / 4294967296;
+  };
+}
+function _pick(rng, arr) {
+  if (!arr || !arr.length) return '';
+  return arr[Math.floor(rng() * arr.length)] ?? arr[0];
+}
+
+/* --- CTA pill (SVG-safe; no rgba() in stop-color) --- */
+function pillBtn(cx, cy, label, fs = 34, glowColor = '255,255,255', glowOpacity = 0.30, midLum = 140) {
   const txt = normalizeCTA(label || 'LEARN MORE');
   const padX = 28;
   const estTextW = Math.round(txt.length * fs * 0.62);
@@ -626,12 +664,12 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.30)', midLum
 
   return `
     <g>
-      <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.28"/>
+      <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}"
+            fill="rgb(${glowColor})" opacity="${glowOpacity}"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${r}" fill="rgba(255,255,255,0.25)"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.28)" stroke-width="1" opacity="0.32"/>
-      <!-- font-family changed to a guaranteed fallback -->
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}"
             font-family="sans-serif" font-size="${fs}" font-weight="700"
@@ -642,15 +680,14 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.30)', midLum
     </g>`;
 }
 
-
-/* --- Glass overlay (chips grow; guaranteed inner gap; unified fonts) --- */
-function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
+/* --- Glass overlay (chips grow; SVG-compliant gradients) --- */
+function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
   const R = 8;
   const EDGE_STROKE = 0.20;
 
-  // ---------- helpers ----------
+  // helpers
   const FUDGE = 1.18;
   const MIN_INNER_GAP = 12;
   function measureSerifWidth(txt, fs, tracking = 0.10) {
@@ -671,72 +708,38 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  /* ---------- tiny deterministic RNG + picker (used by craftSubline) ---------- */
-function _hash32(str = '') {
-  let h = 2166136261 >>> 0;           // FNV-1a base
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-function _rng(seed = '') {
-  let h = _hash32(String(seed));
-  return function () {
-    // xorshift-like step
-    h = (h + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(h ^ (h >>> 15), 1 | h);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    t = (t ^ (t >>> 14)) >>> 0;
-    return t / 4294967296;            // [0,1)
-  };
-}
-function _pick(rng, arr) {
-  if (!arr || !arr.length) return '';
-  const idx = Math.floor(rng() * arr.length);
-  return arr[Math.max(0, Math.min(arr.length - 1, idx))];
-}
-
-
-  // ---------- HEADLINE ----------
+  // HEADLINE
   const headline = settleBlock({
     text: String(title || ''),
-    fsStart: 68,
-    fsMin: 26,
-    tracking: 0.10,
-    padXFactor: 0.60,
-    padYFactor: 0.20,
+    fsStart: 68, fsMin: 26, tracking: 0.10, padXFactor: 0.60, padYFactor: 0.20,
   });
   const hlCenterY = 126;
   const hlRectY   = Math.round(hlCenterY - headline.h / 2);
 
-  // ---------- SUBLINE ----------
+  // SUBLINE
   const sub = settleBlock({
     text: String(subline || ''),
-    fsStart: 44,
-    fsMin: 22,
-    tracking: 0.10,
-    padXFactor: 0.54,
-    padYFactor: 0.20,
+    fsStart: 44, fsMin: 22, tracking: 0.10, padXFactor: 0.54, padYFactor: 0.20,
   });
   const GAP_HL_TO_SUB = 64;
   const subRectY   = Math.round(hlRectY + headline.h + GAP_HL_TO_SUB);
   const subCenterY = subRectY + Math.round(sub.h / 2);
 
-  // ---------- CTA position ----------
+  // CTA position
   const ctaY = Math.round(subCenterY + sub.fs + 86);
 
-  // ---------- styling from image metrics ----------
+  // styling from image metrics
   const midLum = metrics?.midLum ?? 140;
   const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
 
-  let chipOpacityHead = 0.28;
+  let chipOpacityHead  = 0.28;
   if (midLum >= 170) chipOpacityHead += 0.03;
   if (midLum <= 110) chipOpacityHead -= 0.02;
   chipOpacityHead = Math.max(0.24, Math.min(0.33, chipOpacityHead));
 
   const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
-  const tintRGBA       = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
+  const tintAlpha      = Number((chipOpacityHead * 0.30).toFixed(2));
+  const tintRGB        = `rgb(${avg.r},${avg.g},${avg.b})`;
   const vignetteOpacity= midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
   const globalShade    = midLum >= 170 ? 0.12 : midLum >= 140 ? 0.14 : 0.16;
 
@@ -747,7 +750,7 @@ function _pick(rng, arr) {
   const textFill       = useDark ? '#111111' : '#FFFFFF';
   const textOutline    = useDark ? '#FFFFFF' : '#000000';
 
-  // Pick a sensible CTA if blank or just "LEARN MORE"
+  // pick sensible CTA
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
   return `
@@ -755,31 +758,35 @@ function _pick(rng, arr) {
     <defs>
       <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
       <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
+
       <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(255,255,255,0.22)"/>
-        <stop offset="55%"  stop-color="rgba(255,255,255,0.04)"/>
-        <stop offset="100%" stop-color="rgba(255,255,255,0.00)"/>
+        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.22"/>
+        <stop offset="55%"  stop-color="#FFFFFF" stop-opacity="0.04"/>
+        <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
+
       <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
-        <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
+        <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="1"/>
       </radialGradient>
+
       <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
-        <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeHead})"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
+        <stop offset="0%"   stop-color="#000000" stop-opacity="${(backShadeHead * 0.7).toFixed(2)}"/>
+        <stop offset="50%"  stop-color="#000000" stop-opacity="${(backShadeHead).toFixed(2)}"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="${(backShadeHead * 0.7).toFixed(2)}"/>
       </linearGradient>
+
       <linearGradient id="centerShadeSub" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
-        <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeSub})"/>
-        <stop offset="100%" stop-color="rgba(0,0,0,${backShadeSub * 0.7})"/>
+        <stop offset="0%"   stop-color="#000000" stop-opacity="${(backShadeSub * 0.7).toFixed(2)}"/>
+        <stop offset="50%"  stop-color="#000000" stop-opacity="${(backShadeSub).toFixed(2)}"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="${(backShadeSub * 0.7).toFixed(2)}"/>
       </linearGradient>
     </defs>
 
     <!-- subtle global shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
 
-    <!-- vignette + double frame (unchanged) -->
+    <!-- vignette + double frame -->
     <g opacity="${vignetteOpacity}">
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
     </g>
@@ -791,11 +798,11 @@ function _pick(rng, arr) {
 
     <!-- Headline chip -->
     <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="url(#centerShadeHl)"/>
-    <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacityHead.toFixed(2)}"/>
+    <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGB}" opacity="${tintAlpha}"/>
     <rect x="${headline.x+1}" y="${Math.round(hlRectY)+1}" width="${headline.w-2}" height="${Math.max(12, Math.round(headline.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
     <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Headline text (fallback duplicate) -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family="sans-serif" font-size="${headline.fs}" font-weight="700"
@@ -812,11 +819,11 @@ function _pick(rng, arr) {
 
     <!-- Subline chip -->
     <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="url(#centerShadeSub)"/>
-    <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
+    <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGB}" opacity="${chipOpacitySub.toFixed(2)}"/>
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${Math.max(10, Math.round(sub.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Subline text (fallback duplicate) -->
+    <!-- Subline text -->
     <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family="sans-serif" font-size="${sub.fs}" font-weight="700"
@@ -831,15 +838,12 @@ function _pick(rng, arr) {
       ${escSVG(subline)}
     </text>
 
-    ${pillBtn(W/2, ctaY, chosenCTA, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum)}
+    ${pillBtn(W/2, ctaY, chosenCTA, 34, `${avg.r},${avg.g},${avg.b}`, 0.30, midLum)}
   </svg>`;
 }
 
-
-
 /* ---------- Subline crafting (seeded, coherent, strict 7–9 words) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
-  // uses your _rng/_pick helpers already declared above
   const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}`);
 
   const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
@@ -854,7 +858,6 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
   const END_STOP = new Set(['and','with','for','to','of','in','on','at','by']);
   const trimEndStops = (words) => { while (words.length && END_STOP.has(words[words.length-1])) words.pop(); return words; };
 
-  // curated templates per category (already 7–9 words, no trailing stopwords)
   const T = {
     fashion: [
       'Natural materials for everyday wear made simple',
@@ -904,7 +907,6 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
   };
   const defaults = T[category] || T.generic;
 
-  // try to extract a short benefit (2–3 content words)
   const STOP = new Set(['and','with','for','the','a','an','of','to','in','on','by','your','you','is','are']);
   function shortBenefit(src=''){
     const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
@@ -916,20 +918,16 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
     .map(shortBenefit).filter(Boolean);
   const benefit = cand.length ? _pick(rnd, cand) : '';
 
-  // dynamic patterns; each resolves to 7–9 words after filling
   const DYN = benefit ? [
-    `Made for ${benefit} every day`,              // 5–7 → we may add a tail
-    `${benefit} made simple for everyday use`,   // ~7–9
-    `Clean easy ${benefit} for busy days`        // ~6–8 → may add a tail
+    `Made for ${benefit} every day`,
+    `${benefit} made simple for everyday use`,
+    `Clean easy ${benefit} for busy days`
   ] : [];
 
-  // pick source: 60% curated, 40% dynamic when available
   let line = (DYN.length && rnd() < 0.40) ? _pick(rnd, DYN) : _pick(rnd, defaults);
 
-  // normalize → tokens
   let words = clean(line).split(' ').filter(Boolean);
 
-  // enforce 7–9 words; never end on a stopword
   const SOFT_TAILS = [
     ['every','day'],
     ['made','simple'],
@@ -937,27 +935,21 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
     ['for','busy','days'],
     ['built','to','last']
   ];
-  // if too long: trim then clean ending
   while (words.length > 9) words.pop();
   words = trimEndStops(words);
 
-  // if short: append soft tails until at least 7 (but max 9)
   while (words.length < 7) {
     const tail = _pick(rnd, SOFT_TAILS);
-    for (const w of tail) {
-      if (words.length < 9) words.push(w);
-    }
+    for (const w of tail) if (words.length < 9) words.push(w);
     words = trimEndStops(words);
   }
 
-  // final safety: if still >9, slice and trim ending again
   if (words.length > 9) words = trimEndStops(words.slice(0, 9));
 
   return sentenceCase(words.join(' '));
 }
 
-
-/* ---------- Placement analysis (needed by buildOverlayImage) ---------- */
+/* ---------- Placement analysis ---------- */
 async function analyzeImageForPlacement(imgBuf) {
   try {
     const W = 72, H = 72;
@@ -975,14 +967,13 @@ async function analyzeImageForPlacement(imgBuf) {
   } catch { return { topLum:150, midLum:140, avgRGB:{ r:64,g:64,b:64 } }; }
 }
 
-/* ---------- Overlay builder (coherent subline + inline base for blur) ---------- */
+/* ---------- Overlay builder ---------- */
 async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
 }) {
   const W = 1200, H = 628;
 
-  // ⬇️ use pooled axios instance (keeps timeouts consistent)
   const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
   const baseBuf = await sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
@@ -996,14 +987,17 @@ async function buildOverlayImage({
   const titleSeed = title || category || '';
   let cta = cleanCTA(ctaHint, titleSeed);
   if (!cta.trim()) cta = 'LEARN MORE';
-  const subline = craftSubline(answers, category, seed);
 
-  
+  let subline = 'Made for everyday use with less hassle';
+  try { subline = craftSubline(answers, category, seed) || subline; } catch (e) { console.warn('craftSubline failed:', e?.message); }
 
-  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
+  const svg = Buffer.from(
+    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis }),
+    'utf8'
+  );
 
-  const outDir = ensureGeneratedDir(); const file = `${uuidv4()}.jpg`;
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.jpg`;
   await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
@@ -1011,6 +1005,10 @@ async function buildOverlayImage({
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
 
+/* -------------------- Health check -------------------- */
+router.get('/test', (_req, res) => {
+  res.status(200).json({ ok: true, t: Date.now() });
+});
 
 /* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
@@ -1021,8 +1019,7 @@ router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
 
-  try { if (typeof res.setTimeout === 'function') res.setTimeout(65000); if (typeof req.setTimeout === 'function') req.setTimeout(65000); }
-  catch {}
+  try { if (typeof res.setTimeout === 'function') res.setTimeout(65000); if (typeof req.setTimeout === 'function') req.setTimeout(65000); } catch {}
 
   try {
     const { regenerateToken = '' } = req.body || {};
@@ -1033,41 +1030,40 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category  = resolveCategory(answers || {});
     const keyword   = getImageKeyword(industry, url, answers);
 
-   const compose = async (imgUrl, seed, meta = {}) => {
-  try {
-    const headlineHint = overlayTitleFromAnswers(answers, category);
-    const ctaHint      = cleanCTA(answers?.cta || '');
-    const { publicUrl, absoluteUrl } = await buildOverlayImage({
-      imageUrl: imgUrl,
-      headlineHint,
-      ctaHint,
-      seed,
-      fallbackHeadline: headlineHint,
-      answers,
-      category,
-    });
-    await saveAsset({
-      req, kind: 'image', url: publicUrl, absoluteUrl,
-      meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
-    });
-    return publicUrl;
-  } catch (err) {
-    // Try a bare-minimum frame-only overlay as a last resort
-    try {
-      const W = 1200, H = 628;
-      const imgRes = await ax.get(imgUrl, { responseType: 'arraybuffer', timeout: 12000 });
-      const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
-      const frameSvg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-        <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="18" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="8"/>
-        <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="16" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="2"/>
-      </svg>`);
-      const file = `${uuidv4()}.jpg`;
-      await sharp(baseBuf).composite([{ input: frameSvg, top: 0, left: 0 }]).jpeg({ quality: 90 }).toFile(path.join(ensureGeneratedDir(), file));
-      return mediaPath(file);
-    } catch { throw err; }
-  }
-};
-
+    const compose = async (imgUrl, seed, meta = {}) => {
+      try {
+        const headlineHint = overlayTitleFromAnswers(answers, category);
+        const ctaHint      = cleanCTA(answers?.cta || '');
+        const { publicUrl, absoluteUrl } = await buildOverlayImage({
+          imageUrl: imgUrl,
+          headlineHint,
+          ctaHint,
+          seed,
+          fallbackHeadline: headlineHint,
+          answers,
+          category,
+        });
+        await saveAsset({
+          req, kind: 'image', url: publicUrl, absoluteUrl,
+          meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
+        });
+        return publicUrl;
+      } catch (err) {
+        // Frame-only fallback as last resort
+        try {
+          const W = 1200, H = 628;
+          const imgRes = await ax.get(imgUrl, { responseType: 'arraybuffer', timeout: 12000 });
+          const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
+          const frameSvg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+            <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="18" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="8"/>
+            <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="16" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="2"/>
+          </svg>`);
+          const file = `${uuidv4()}.jpg`;
+          await sharp(baseBuf).composite([{ input: frameSvg, top: 0, left: 0 }]).jpeg({ quality: 90 }).toFile(path.join(ensureGeneratedDir(), file));
+          return mediaPath(file);
+        } catch { throw err; }
+      }
+    };
 
     const urls = [], absUrls = [];
 
@@ -1098,16 +1094,15 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         urls.push(u); absUrls.push(absolutePublicUrl(u));
       }
     } else {
-      // Keyless, relevant fallback (Unsplash Source API) — always compose overlays
-const q = encodeURIComponent(keyword || 'ecommerce products');
-for (let i = 0; i < 2; i++) {
-  const sig = encodeURIComponent((regenerateToken || 'seed') + '_' + i);
-  const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${sig}`;
-  const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', i });
-  urls.push(u); 
-  absUrls.push(absolutePublicUrl(u));
-}
-
+      // Unsplash Source API fallback — always compose overlays
+      const q = encodeURIComponent(keyword || 'ecommerce products');
+      for (let i = 0; i < 2; i++) {
+        const sig = encodeURIComponent((regenerateToken || 'seed') + '_' + i);
+        const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${sig}`;
+        const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', i });
+        urls.push(u);
+        absUrls.push(absolutePublicUrl(u));
+      }
     }
 
     return res.json({
