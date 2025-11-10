@@ -671,6 +671,33 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
+  /* ---------- tiny deterministic RNG + picker (used by craftSubline) ---------- */
+function _hash32(str = '') {
+  let h = 2166136261 >>> 0;           // FNV-1a base
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function _rng(seed = '') {
+  let h = _hash32(String(seed));
+  return function () {
+    // xorshift-like step
+    h = (h + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    t = (t ^ (t >>> 14)) >>> 0;
+    return t / 4294967296;            // [0,1)
+  };
+}
+function _pick(rng, arr) {
+  if (!arr || !arr.length) return '';
+  const idx = Math.floor(rng() * arr.length);
+  return arr[Math.max(0, Math.min(arr.length - 1, idx))];
+}
+
+
   // ---------- HEADLINE ----------
   const headline = settleBlock({
     text: String(title || ''),
@@ -970,6 +997,8 @@ async function buildOverlayImage({
   let cta = cleanCTA(ctaHint, titleSeed);
   if (!cta.trim()) cta = 'LEARN MORE';
   const subline = craftSubline(answers, category, seed);
+
+  
 
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
   const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
