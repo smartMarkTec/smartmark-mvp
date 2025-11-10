@@ -750,7 +750,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
   const textFill       = useDark ? '#111111' : '#FFFFFF';
   const textOutline    = useDark ? '#FFFFFF' : '#000000';
 
-  // pick sensible CTA
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
   return `
@@ -802,18 +801,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
     <rect x="${headline.x+1}" y="${Math.round(hlRectY)+1}" width="${headline.w-2}" height="${Math.max(12, Math.round(headline.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
     <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Headline text -->
+    <!-- Headline text (single draw; stroke handled via paint-order) -->
     <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family="sans-serif" font-size="${headline.fs}" font-weight="700"
           fill="${textFill}" text-rendering="geometricPrecision" xml:space="preserve"
           style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
-      ${escSVG(title)}
-    </text>
-    <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family="sans-serif" font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}">
       ${escSVG(title)}
     </text>
 
@@ -823,7 +816,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${Math.max(10, Math.round(sub.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Subline text -->
+    <!-- Subline text (single draw) -->
     <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family="sans-serif" font-size="${sub.fs}" font-weight="700"
@@ -831,16 +824,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
           style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
       ${escSVG(subline)}
     </text>
-    <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family="sans-serif" font-size="${sub.fs}" font-weight="700"
-          fill="${textFill}">
-      ${escSVG(subline)}
-    </text>
 
     ${pillBtn(W/2, ctaY, chosenCTA, 34, `${avg.r},${avg.g},${avg.b}`, 0.30, midLum)}
   </svg>`;
 }
+
 
 /* ---------- Subline crafting (seeded, coherent, strict 7–9 words) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
