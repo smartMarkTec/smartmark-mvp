@@ -680,16 +680,15 @@ function pillBtn(cx, cy, label, fs = 34, glowColor = '255,255,255', glowOpacity 
     </g>`;
 }
 
-/* === GLASS TEMPLATE: match the screenshot (serif text, classic glass chips) === */
+/* === GLASS (real blur) + serif text — matches your screenshot === */
 
-/* Use one serif stack everywhere for text */
 const SERIF = `'Times New Roman', Times, serif`;
 
-/* CTA pill — soft frosted pill with subtle bevel and serif text */
+/* CTA pill (kept subtle; unchanged API) */
 function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 0.30, midLum = 140) {
   const txt = normalizeCTA(label || 'LEARN MORE');
   const padX = 32;
-  const estTextW = Math.round(txt.length * fs * 0.6);
+  const estTextW = Math.round(txt.length * fs * 0.60);
   const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
   const estH = Math.max(56, fs + 22);
   const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
@@ -700,56 +699,51 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
 
   return `
   <g>
-    <!-- soft outer glow -->
     <rect x="${x-8}" y="${y-8}" width="${estW+16}" height="${estH+16}" rx="${r+8}"
           fill="rgb(${glowRGB})" opacity="${glowOpacity*0.9}"/>
-    <!-- frosted base -->
     <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
-          fill="rgba(255,255,255,0.12)"/>
-    <!-- bevel highlight -->
+          fill="rgba(255,255,255,0.10)"/>
     <linearGradient id="pillHi" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.38"/>
       <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
       <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
     </linearGradient>
     <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(12, Math.round(estH*0.45))}" rx="${r}"
           fill="url(#pillHi)"/>
-    <!-- twin hairline to get that crisp rim -->
     <rect x="${x+0.5}" y="${y+0.5}" width="${estW-1}" height="${estH-1}" rx="${r-0.5}"
           fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="1"/>
     <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
-          fill="none" stroke="rgba(0,0,0,0.25)" stroke-width="1" opacity="0.45"/>
-
-    <!-- label -->
+          fill="none" stroke="rgba(0,0,0,0.30)" stroke-width="1" opacity="0.45"/>
     <text x="${cx}" y="${y + estH/2}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${outline}; stroke-width:1.15; letter-spacing:0.10em">
+          fill="${textFill}"
+          style="paint-order: stroke; stroke:${outline}; stroke-width:1.15; letter-spacing:0.10em">
       ${escSVG(txt)}
     </text>
   </g>`;
 }
 
-/* Main SVG overlay — restores the *exact* glassmorphism look (frame, chips, serif text) */
-function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
+/* REAL-GLASS overlay: blur the actual background within each chip via clipPath */
+
+function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
-  const R = 16;                  // more rounded like your screenshot
-  const EDGE_STROKE = 0.8;
+  const R = 18;
 
-  // --- sizing helpers (unchanged math, serif width tuning) ---
+  // --- sizing helpers (serif tuned) ---
   const FUDGE = 1.18, MIN_INNER_GAP = 12;
-  function measureSerifWidth(txt, fs, tracking = 0.08) {
+  function measureSerifWidth(txt, fs, tracking = 0.06) {
     return Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
   }
   function settleBlock({ text, fsStart, fsMin, tracking, padXFactor, padYFactor }) {
     let fs = fsStart, padX, padY, textW, w, h;
     const recompute = () => {
       padX = Math.round(Math.max(28, fs * padXFactor));
-      padY = Math.round(Math.max(10, fs * padYFactor));
+      padY = Math.round(Math.max(12, fs * padYFactor));
       textW = measureSerifWidth(text, fs, tracking);
       w = textW + padX * 2 + MIN_INNER_GAP * 2;
-      h = Math.max(54, fs + padY * 2);
+      h = Math.max(56, fs + padY * 2);
     };
     recompute();
     while (w > maxW && fs > fsMin) { fs -= 2; recompute(); }
@@ -757,110 +751,115 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // Headline (big serif, uppercase)
+  // Font balances per your note: headline ↓, subline ↑
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
-    text: title, fsStart: 84, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
+    text: title, fsStart: 76, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
   });
-  const hlCenterY = 150;
+  const hlCenterY = 148;
   const hlRectY   = Math.round(hlCenterY - headline.h/2);
 
-  // Subline (serif, sentence case)
   const sub = settleBlock({
-    text: String(subline || ''), fsStart: 44, fsMin: 22, tracking: 0.04, padXFactor: 0.62, padYFactor: 0.22
+    text: String(subline || ''), fsStart: 50, fsMin: 24, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.22
   });
-  const subRectY   = Math.round(hlRectY + headline.h + 44);
+  const subRectY   = Math.round(hlRectY + headline.h + 42);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
-  // CTA position
-  const ctaY = Math.round(subCenterY + sub.fs + 90);
+  const ctaY = Math.round(subCenterY + sub.fs + 92);
 
-  // palette derived from image (kept from your previous version)
+  // palette from image
   const midLum = metrics?.midLum ?? 140;
   const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-
-  const useDark        = midLum >= 188;
-  const textFill       = useDark ? '#111111' : '#FFFFFF';
-  const textOutline    = useDark ? '#FFFFFF' : '#000000';
-
-  // glass chip opacities tuned to the screenshot
-  const chipOpacityHead = 0.30;
-  const chipOpacitySub  = 0.26;
-  const tintRGB         = `rgb(${avg.r},${avg.g},${avg.b})`;
+  const useDark     = midLum >= 188;
+  const textFill    = useDark ? '#111111' : '#FFFFFF';
+  const textOutline = useDark ? '#FFFFFF' : '#000000';
+  const tintRGB     = `rgb(${avg.r},${avg.g},${avg.b})`;
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
+
+  // blur strengths (stronger for that frosted look)
+  const BLUR_H = 9;   // headline chip blur
+  const BLUR_S = 8;   // subline chip blur
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <!-- inner sheen for chips -->
+      <!-- background image available to blur inside chips -->
+      <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+
+      <!-- clip paths for chips -->
+      <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
+      <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
+
+      <!-- gaussian blurs -->
+      <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
+      <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
+
+      <!-- inner highlight gradient for glass sheen -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
         <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
 
-      <!-- soft vignette -->
+      <!-- vignette -->
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
     </defs>
 
-    <!-- global subtle shade -->
+    <!-- global soft shade + triple frame -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.14)"/>
-
-    <!-- frame (triple rim like your template) -->
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
       <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="20" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2"/>
       <rect x="22" y="22" width="${W-44}" height="${H-44}" rx="18" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1"/>
     </g>
-
-    <!-- faint vignette -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- Headline chip (frosted + tint) -->
-    <g>
+    <!-- Headline chip: clipped blurred background + tint + rim -->
+    <g clip-path="url(#clipHl)">
+      <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
-            fill="${tintRGB}" opacity="${chipOpacityHead}"/>
+            fill="${tintRGB}" opacity="0.24"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
             fill="url(#chipHi)" opacity="0.9"/>
-      <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
-            fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="${EDGE_STROKE}"/>
     </g>
+    <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
+          fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="0.8"/>
 
-    <!-- Headline text (serif, bold, white with stroke) -->
+    <!-- Headline text (serif) -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.35; letter-spacing:0.10em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.35; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip -->
-    <g>
+    <!-- Subline chip: clipped blurred background + tint + rim -->
+    <g clip-path="url(#clipSub)">
+      <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
-            fill="${tintRGB}" opacity="${chipOpacitySub}"/>
+            fill="${tintRGB}" opacity="0.22"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
             fill="url(#chipHi)"/>
-      <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-            fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="${EDGE_STROKE}"/>
     </g>
+    <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
+          fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="0.8"/>
 
-    <!-- Subline text (serif) -->
+    <!-- Subline text (slightly bigger) -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
-          fill="${textFill}"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; letter-spacing:0.02em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; letter-spacing:0.02em">
       ${escSVG(subline)}
     </text>
 
     ${pillBtn(W/2, ctaY, chosenCTA, 34, `${avg.r},${avg.g},${avg.b}`, 0.30, midLum)}
   </svg>`;
 }
+
 
 
 /* ---------- Subline crafting (seeded, coherent, strict 7–9 words) ---------- */
@@ -1012,10 +1011,12 @@ async function buildOverlayImage({
   let subline = 'Made for everyday use with less hassle';
   try { subline = craftSubline(answers, category, seed) || subline; } catch (e) { console.warn('craftSubline failed:', e?.message); }
 
-  const svg = Buffer.from(
-    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis }),
-    'utf8'
-  );
+  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
+const svg = Buffer.from(
+  svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
+  'utf8'
+);
+
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
