@@ -682,12 +682,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlCenterY = 126;
   const hlRectY   = Math.round(hlCenterY - headline.h / 2);
 
-  // ---------- SUBLINE (Match the reference: tighter tracking like headline + a tad larger) ----------
+  // ---------- SUBLINE ----------
   const sub = settleBlock({
     text: String(subline || ''),
-    fsStart: 44,          // slightly larger
+    fsStart: 44,
     fsMin: 22,
-    tracking: 0.10,       // tighter (was 0.18)
+    tracking: 0.10,
     padXFactor: 0.54,
     padYFactor: 0.20,
   });
@@ -710,7 +710,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
   const tintRGBA       = `rgba(${avg.r},${avg.g},${avg.b},${(chipOpacityHead * 0.30).toFixed(2)})`;
   const vignetteOpacity= midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
-  const globalShade    = midLum >= 170 ? 0.12 : midLum >= 140 ? 0.14 : 0.16; // a hair darker for legibility
+  const globalShade    = midLum >= 170 ? 0.12 : midLum >= 140 ? 0.14 : 0.16;
 
   const backShadeHead  = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
   const backShadeSub   = Math.max(0.07, backShadeHead - 0.04);
@@ -736,7 +736,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
-      <!-- Removed feDropShadow text filter (caused Sharp failures) to ensure text renders -->
       <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
         <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeHead})"/>
@@ -752,7 +751,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <!-- subtle global shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
 
-    <!-- vignette + double frame (unchanged from your good version) -->
+    <!-- vignette + double frame -->
     <g opacity="${vignetteOpacity}">
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
     </g>
@@ -762,48 +761,36 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
     </g>
 
-    <!-- Headline chip -->
-    <clipPath id="clipHl"><rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
-    <g clip-path="url(#clipHl)">
-      <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurHl)"/>
-      <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="url(#centerShadeHl)"/>
-      <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacityHead.toFixed(2)}"/>
-      <rect x="${headline.x+1}" y="${Math.round(hlRectY)+1}" width="${headline.w-2}" height="${Math.max(12, Math.round(headline.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-      <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
-    </g>
+    <!-- Headline chip (no clipPath) -->
+    <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="url(#centerShadeHl)"/>
+    <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacityHead.toFixed(2)}"/>
+    <rect x="${headline.x+1}" y="${Math.round(hlRectY)+1}" width="${headline.w-2}" height="${Math.max(12, Math.round(headline.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
+    <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
 
     <!-- Headline text -->
-    <g clip-path="url(#clipHl)">
-      <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
-            text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            font-family="'Times New Roman', Times, serif" font-size="${headline.fs}" font-weight="700"
-            fill="${textFill}"
-            style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
-        ${escSVG(title)}
-      </text>
-    </g>
+    <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
+          text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+          font-family="'Times New Roman', Times, serif" font-size="${headline.fs}" font-weight="700"
+          fill="${textFill}"
+          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
+      ${escSVG(title)}
+    </text>
 
-    <!-- Subline chip -->
-    <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
-    <g clip-path="url(#clipSub)">
-      <image href="${escSVG(baseImage)}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice" filter="url(#glassBlurSub)"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="url(#centerShadeSub)"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
-      <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${Math.max(10, Math.round(sub.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-      <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
-    </g>
+    <!-- Subline chip (no clipPath) -->
+    <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="url(#centerShadeSub)"/>
+    <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
+    <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${Math.max(10, Math.round(sub.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
+    <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Subline text (matched style: tighter spacing like headline) -->
-    <g clip-path="url(#clipSub)">
-      <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
-            text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            font-family="'Times New Roman', Times, serif"
-            font-size="${sub.fs}" font-weight="700"
-            fill="${textFill}"
-            style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
-        ${escSVG(subline)}
-      </text>
-    </g>
+    <!-- Subline text -->
+    <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
+          text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
+          font-family="'Times New Roman', Times, serif"
+          font-size="${sub.fs}" font-weight="700"
+          fill="${textFill}"
+          style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
+      ${escSVG(subline)}
+    </text>
 
     ${pillBtn(W/2, ctaY, chosenCTA, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum)}
   </svg>`;
