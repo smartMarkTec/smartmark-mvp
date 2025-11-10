@@ -845,17 +845,12 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 }
 
 
-/* ---------- Subline crafting (seeded, coherent, 7–9 words) ---------- */
-// tiny seeded PRNG so "regenerate" gives variety but is deterministic per seed
-function _hash32(s=''){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
-function _rng(seedStr=''){ let a=(_hash32(seedStr)||Date.now())>>>0; return function(){ a+=0x6D2B79F5; let t=a; t=Math.imul(t^(t>>>15), t|1); t^=t+Math.imul(t^(t>>>7), t|61); return ((t^(t>>>14))>>>0)/4294967296; }; }
-function _pick(rnd, arr){ return arr[Math.floor(rnd()*arr.length)]; }
-
-function craftSubline(answers={}, category='generic', seed=''){
+/* ---------- Subline crafting (seeded, coherent, strict 7–9 words) ---------- */
+function craftSubline(answers = {}, category = 'generic', seed = '') {
+  // uses your _rng/_pick helpers already declared above
   const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}`);
 
-  // helpers
-  const sentenceCase = (s='') => { s=String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
+  const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
   const clean = (s='') => String(s)
     .replace(/https?:\/\/\S+/g,' ')
     .replace(/[^\w\s'-]/g,' ')
@@ -864,25 +859,15 @@ function craftSubline(answers={}, category='generic', seed=''){
     .trim()
     .toLowerCase();
 
-  // try to extract a short, useful benefit (2–4 content words)
-  const STOP = new Set(['and','with','for','the','a','an','of','to','in','on','by','your','you','is','are']);
-  function shortBenefit(src=''){
-    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
-    if (!words.length) return '';
-    // prefer 2–4 words
-    const take = Math.max(2, Math.min(4, words.length));
-    return words.slice(0, take).join(' ');
-  }
-  const candRaw = [answers.mainBenefit, answers.description, answers.productType, answers.topic]
-    .map(s=>shortBenefit(s)).filter(Boolean);
-  const benefit = candRaw.length ? _pick(rnd, candRaw) : '';
+  const END_STOP = new Set(['and','with','for','to','of','in','on','at','by']);
+  const trimEndStops = (words) => { while (words.length && END_STOP.has(words[words.length-1])) words.pop(); return words; };
 
-  // curated templates per category (already 7–9 words)
+  // curated templates per category (already 7–9 words, no trailing stopwords)
   const T = {
     fashion: [
-      'Natural materials made for everyday wear',
+      'Natural materials for everyday wear made simple',
       'Simple pieces built to last every day',
-      'Comfortable fits with clean, easy style'
+      'Comfortable fits with clean easy style'
     ],
     books: [
       'New stories and classic runs to explore',
@@ -890,18 +875,18 @@ function craftSubline(answers={}, category='generic', seed=''){
     ],
     cosmetics: [
       'Gentle formulas for daily care and glow',
-      'A simple routine for better skin every day'
+      'A simple routine for better skin daily'
     ],
     hair: [
       'Better hair care with less effort daily',
-      'Clean formulas for easy styling every day'
+      'Clean formulas for easy styling each day'
     ],
     food: [
       'Great taste with less hassle every day',
       'Fresh flavor made easy for busy nights'
     ],
     pets: [
-      'Everyday care for happy pets, made simple',
+      'Everyday care for happy pets made simple',
       'Simple treats your pet will love daily'
     ],
     electronics: [
@@ -909,12 +894,12 @@ function craftSubline(answers={}, category='generic', seed=''){
       'Simple design with solid performance daily'
     ],
     home: [
-      'Upgrade your space the simple, practical way',
-      'Clean looks with everyday, useful function'
+      'Upgrade your space the simple practical way',
+      'Clean looks with everyday useful function'
     ],
     coffee: [
       'Balanced flavor for better breaks each day',
-      'Smooth finish in every cup, every day'
+      'Smooth finish in every cup every day'
     ],
     fitness: [
       'Made for daily training sessions that stick',
@@ -922,35 +907,59 @@ function craftSubline(answers={}, category='generic', seed=''){
     ],
     generic: [
       'Made for everyday use with less hassle',
-      'Simple design that’s built to last daily'
+      'Simple design that is built to last'
     ]
   };
   const defaults = T[category] || T.generic;
 
-  // dynamic patterns when we have a clean benefit
+  // try to extract a short benefit (2–3 content words)
+  const STOP = new Set(['and','with','for','the','a','an','of','to','in','on','by','your','you','is','are']);
+  function shortBenefit(src=''){
+    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
+    if (!words.length) return '';
+    const take = Math.max(2, Math.min(3, words.length));
+    return words.slice(0, take).join(' ');
+  }
+  const cand = [answers.mainBenefit, answers.description, answers.productType, answers.topic]
+    .map(shortBenefit).filter(Boolean);
+  const benefit = cand.length ? _pick(rnd, cand) : '';
+
+  // dynamic patterns; each resolves to 7–9 words after filling
   const DYN = benefit ? [
-    `Made for ${benefit} every day`,
-    `${benefit} made simple for everyday use`,
-    `Clean, easy ${benefit} for busy days`
+    `Made for ${benefit} every day`,              // 5–7 → we may add a tail
+    `${benefit} made simple for everyday use`,   // ~7–9
+    `Clean easy ${benefit} for busy days`        // ~6–8 → may add a tail
   ] : [];
 
-  // 60% curated / 40% dynamic when available
-  let line = (DYN.length && rnd()<0.40) ? _pick(rnd, DYN) : _pick(rnd, defaults);
+  // pick source: 60% curated, 40% dynamic when available
+  let line = (DYN.length && rnd() < 0.40) ? _pick(rnd, DYN) : _pick(rnd, defaults);
 
-  // normalize & cap to 7–9 words to keep font size up
-  line = clean(line).replace(/\s+/g,' ').trim();
-  let words = line.split(' ').filter(Boolean);
+  // normalize → tokens
+  let words = clean(line).split(' ').filter(Boolean);
 
-  // ban empty
-  if (!words.length) words = clean(_pick(rnd, defaults)).split(' ').filter(Boolean);
-
-  // enforce 7–9 words
+  // enforce 7–9 words; never end on a stopword
+  const SOFT_TAILS = [
+    ['every','day'],
+    ['made','simple'],
+    ['with','less','hassle'],
+    ['for','busy','days'],
+    ['built','to','last']
+  ];
+  // if too long: trim then clean ending
   while (words.length > 9) words.pop();
-  const softTails = ['every day','made simple','with less hassle','for busy days','built to last'];
-  while (words.length < 7){
-    const tail = _pick(rnd, softTails).split(' ');
-    for (const w of tail){ if (words.length < 7) words.push(w); }
+  words = trimEndStops(words);
+
+  // if short: append soft tails until at least 7 (but max 9)
+  while (words.length < 7) {
+    const tail = _pick(rnd, SOFT_TAILS);
+    for (const w of tail) {
+      if (words.length < 9) words.push(w);
+    }
+    words = trimEndStops(words);
   }
+
+  // final safety: if still >9, slice and trim ending again
+  if (words.length > 9) words = trimEndStops(words.slice(0, 9));
 
   return sentenceCase(words.join(' '));
 }
