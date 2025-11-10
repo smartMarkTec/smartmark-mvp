@@ -611,66 +611,36 @@ function cleanCTA(c, seed='') {
 }
 
 /* --- CTA pill (always fits, glass, unified color) --- */
-function pillBtn(
-  cx, cy, label,
-  fs = 34,
-  glow = 'rgba(255,255,255,0.35)',
-  midLum = 140,
-  baseImage = '',
-  forceDark = null
-) {
+function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.30)', midLum = 140) {
+  const txt = normalizeCTA(label || 'LEARN MORE');
   const padX = 28;
-  const txt  = normalizeCTA(label || 'LEARN MORE');
   const estTextW = Math.round(txt.length * fs * 0.62);
   const estW = Math.max(132, Math.min(estTextW + padX * 2, Math.round(1200 * 0.92)));
   const estH = Math.max(46, fs + 18);
   const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
   const innerTextW = Math.max(92, estW - 40);
 
-  const useDark = (forceDark === true) ? true : (forceDark === false) ? false : (midLum >= 188);
+  const useDark = midLum >= 188;
   const textFill = useDark ? '#111111' : '#FFFFFF';
   const outline  = useDark ? '#FFFFFF' : '#000000';
-  const shadowOpacity = useDark ? 0.24 : 0.36;
 
   return `
-  <defs>
-    <clipPath id="btnClip">
-      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"/>
-    </clipPath>
-    <filter id="btnBlur" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="8"/>
-    </filter>
-    <filter id="btnTextHalo" x="-60%" y="-60%" width="220%" height="220%">
-      <feDropShadow dx="0" dy="0" stdDeviation="1.2" flood-color="#000000" flood-opacity="${shadowOpacity}"/>
-      <feDropShadow dx="0" dy="0" stdDeviation="2.8" flood-color="#000000" flood-opacity="${shadowOpacity * 0.75}"/>
-    </filter>
-    <filter id="btnShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feDropShadow dx="0" dy="7" stdDeviation="10" flood-color="#000000" flood-opacity="0.28"/>
-    </filter>
-  </defs>
-
-  <g filter="url(#btnShadow)">
-    <g clip-path="url(#btnClip)">
-      <image href="${escSVG(baseImage)}" x="0" y="0" width="1200" height="628" preserveAspectRatio="xMidYMid slice" filter="url(#btnBlur)"/>
+    <g>
+      <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.28"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="rgba(255,255,255,0.10)"/>
-      <rect x="${x + 1}" y="${y + 1}" width="${estW - 2}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${Math.max(0, r - 1)}" fill="rgba(255,255,255,0.25)"/>
-    </g>
-
-    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
-    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.32)" stroke-width="1" opacity="0.32"/>
-    <rect x="${x - 6}" y="${y - 6}" width="${estW + 12}" height="${estH + 12}" rx="${r + 6}" fill="${glow}" opacity="0.30"/>
-
-    <g clip-path="url(#btnClip)">
+      <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${r}" fill="rgba(255,255,255,0.25)"/>
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
+      <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.28)" stroke-width="1" opacity="0.32"/>
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}" filter="url(#btnTextHalo)"
+            lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}"
             font-family="'Times New Roman', Times, serif" font-size="${fs}" font-weight="700"
             fill="${textFill}"
-            style="paint-order: stroke; stroke:${outline}; stroke-width:0.9; stroke-linejoin:round; letter-spacing:0.06em">
+            style="paint-order: stroke; stroke:${outline}; stroke-width:1.1; stroke-linejoin:round; letter-spacing:0.06em">
         ${escSVG(txt)}
       </text>
-    </g>
-  </g>`;
+    </g>`;
 }
+
 
 /* --- Glass overlay (chips grow; guaranteed inner gap; unified fonts) --- */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
@@ -766,10 +736,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="60%" stop-color="rgba(0,0,0,0)"/>
         <stop offset="100%" stop-color="rgba(0,0,0,1)"/>
       </radialGradient>
-      <filter id="textHalo" x="-60%" y="-60%" width="220%" height="220%">
-        <feDropShadow dx="0" dy="0" stdDeviation="1.1" flood-color="#000000" flood-opacity="${useDark ? 0.20 : 0.38}"/>
-        <feDropShadow dx="0" dy="0" stdDeviation="2.6" flood-color="#000000" flood-opacity="${useDark ? 0.18 : 0.32}"/>
-      </filter>
+      <!-- Removed feDropShadow text filter (caused Sharp failures) to ensure text renders -->
       <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="rgba(0,0,0,${backShadeHead * 0.7})"/>
         <stop offset="50%"  stop-color="rgba(0,0,0,${backShadeHead})"/>
@@ -809,7 +776,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <g clip-path="url(#clipHl)">
       <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            filter="url(#textHalo)"
             font-family="'Times New Roman', Times, serif" font-size="${headline.fs}" font-weight="700"
             fill="${textFill}"
             style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
@@ -831,7 +797,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <g clip-path="url(#clipSub)">
       <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
             text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-            filter="url(#textHalo)"
             font-family="'Times New Roman', Times, serif"
             font-size="${sub.fs}" font-weight="700"
             fill="${textFill}"
@@ -840,7 +805,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </text>
     </g>
 
-    ${pillBtn(W/2, ctaY, chosenCTA, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum, baseImage)}
+    ${pillBtn(W/2, ctaY, chosenCTA, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum)}
   </svg>`;
 }
 
@@ -990,8 +955,12 @@ async function buildOverlayImage({
 }) {
   const W = 1200, H = 628;
 
-  const imgRes = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true }).jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
+  // ⬇️ use pooled axios instance (keeps timeouts consistent)
+  const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
+  const baseBuf = await sharp(imgRes.data)
+    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
+    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
+    .toBuffer();
 
   const analysis = await analyzeImageForPlacement(baseBuf);
 
@@ -1006,10 +975,13 @@ async function buildOverlayImage({
   const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
 
   const outDir = ensureGeneratedDir(); const file = `${uuidv4()}.jpg`;
-  await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }]).jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true }).toFile(path.join(outDir, file));
+  await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }])
+    .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .toFile(path.join(outDir, file));
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
+
 
 /* -------------------- Video endpoint placeholder -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
