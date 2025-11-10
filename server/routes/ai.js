@@ -631,10 +631,11 @@ function pillBtn(cx, cy, label, fs = 34, glow = 'rgba(255,255,255,0.30)', midLum
       <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(10, Math.round(estH * 0.40))}" rx="${r}" fill="rgba(255,255,255,0.25)"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="1"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.28)" stroke-width="1" opacity="0.32"/>
+      <!-- font-family changed to a guaranteed fallback -->
       <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
             lengthAdjust="spacingAndGlyphs" textLength="${innerTextW}"
-            font-family="'Times New Roman', Times, serif" font-size="${fs}" font-weight="700"
-            fill="${textFill}"
+            font-family="sans-serif" font-size="${fs}" font-weight="700"
+            fill="${textFill}" text-rendering="geometricPrecision" xml:space="preserve"
             style="paint-order: stroke; stroke:${outline}; stroke-width:1.1; stroke-linejoin:round; letter-spacing:0.06em">
         ${escSVG(txt)}
       </text>
@@ -751,7 +752,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <!-- subtle global shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
 
-    <!-- vignette + double frame -->
+    <!-- vignette + double frame (unchanged) -->
     <g opacity="${vignetteOpacity}">
       <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
     </g>
@@ -761,40 +762,52 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
     </g>
 
-    <!-- Headline chip (no clipPath) -->
+    <!-- Headline chip -->
     <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="url(#centerShadeHl)"/>
     <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacityHead.toFixed(2)}"/>
     <rect x="${headline.x+1}" y="${Math.round(hlRectY)+1}" width="${headline.w-2}" height="${Math.max(12, Math.round(headline.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
     <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Headline text -->
+    <!-- Headline text (fallback duplicate) -->
     <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
-          text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-          font-family="'Times New Roman', Times, serif" font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}"
+          text-anchor="middle" dominant-baseline="middle"
+          font-family="sans-serif" font-size="${headline.fs}" font-weight="700"
+          fill="${textFill}" text-rendering="geometricPrecision" xml:space="preserve"
           style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
       ${escSVG(title)}
     </text>
+    <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
+          text-anchor="middle" dominant-baseline="middle"
+          font-family="sans-serif" font-size="${headline.fs}" font-weight="700"
+          fill="${textFill}">
+      ${escSVG(title)}
+    </text>
 
-    <!-- Subline chip (no clipPath) -->
+    <!-- Subline chip -->
     <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="url(#centerShadeSub)"/>
     <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGBA}" opacity="${chipOpacitySub.toFixed(2)}"/>
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${Math.max(10, Math.round(sub.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
 
-    <!-- Subline text -->
+    <!-- Subline text (fallback duplicate) -->
     <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
-          text-anchor="middle" dominant-baseline="middle" alignment-baseline="middle"
-          font-family="'Times New Roman', Times, serif"
-          font-size="${sub.fs}" font-weight="700"
-          fill="${textFill}"
-          style="paint-order: stroke fill; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
+          text-anchor="middle" dominant-baseline="middle"
+          font-family="sans-serif" font-size="${sub.fs}" font-weight="700"
+          fill="${textFill}" text-rendering="geometricPrecision" xml:space="preserve"
+          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
+      ${escSVG(subline)}
+    </text>
+    <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
+          text-anchor="middle" dominant-baseline="middle"
+          font-family="sans-serif" font-size="${sub.fs}" font-weight="700"
+          fill="${textFill}">
       ${escSVG(subline)}
     </text>
 
     ${pillBtn(W/2, ctaY, chosenCTA, 34, `rgba(${avg.r},${avg.g},${avg.b},0.30)`, midLum)}
   </svg>`;
 }
+
 
 
 /* ---------- Subline crafting (seeded, coherent, strict 7–9 words) ---------- */
