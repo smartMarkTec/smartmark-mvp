@@ -845,10 +845,20 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 }
 
 
-/* ---------- Subline crafting (coherent, 7–9 words, sentence-case) ---------- */
-function craftSubline(answers = {}, category = 'generic') {
+/* ---------- Subline crafting (seeded, coherent, 7–10 words, sentence-case) ---------- */
+// tiny seeded PRNG so "regenerate" gives variety but is deterministic per seed
+function _hash32(s='') { let h = 2166136261 >>> 0; for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function _rng(seedStr='') { // mulberry32
+  let a = (_hash32(seedStr) || Date.now()) >>> 0;
+  return function(){ a += 0x6D2B79F5; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+function _pick(rnd, arr, fallback='') { return (arr && arr.length) ? arr[Math.floor(rnd()*arr.length)] : fallback; }
+
+function craftSubline(answers = {}, category = 'generic', seed = '') {
+  const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}`);
   const clean = (s) => String(s || '').replace(/[^\w\s\-']/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
 
+  // Base templates per category (kept close to your tone)
   const TPL = {
     fashion:      ['made with natural materials for everyday wear','everyday pieces built to last','simple fits that are easy to wear'],
     books:        ['new stories and classic runs','comics and graphic novels to explore'],
@@ -864,9 +874,21 @@ function craftSubline(answers = {}, category = 'generic') {
   };
   const defaults = TPL[category] || TPL.generic;
 
-  const cand = [answers.mainBenefit, answers.description, answers.productType, answers.topic].map(clean).filter(Boolean);
-  let line = cand.find(s => /\b(made|built|designed|helps|fits|improves|keeps|protects|wear|train|read|brew)\b/.test(s)) || defaults[0];
+  // Soft postfixes to help reach 7–10 words without sounding spammy
+  const TAIL = [
+    'for everyday use','with less hassle','built to last','made simple','that just works',
+    'with clean design','for busy days','with practical value'
+  ];
 
+  // Candidate phrases from user answers
+  const cand = [answers.mainBenefit, answers.description, answers.productType, answers.topic]
+    .map(clean).filter(Boolean);
+
+  // 60%: pick a category template, 40%: transform a candidate phrase
+  let line = (_pick(rnd, [0,1,2,3,4]) <= 2) ? _pick(rnd, defaults)
+            : (cand.length ? _pick(rnd, cand) : _pick(rnd, defaults));
+
+  // Light normalization
   line = line
     .replace(/\bnatural material(s)?\b/g, 'natural materials')
     .replace(/\bfashion material is natural( everyday)?\b/g, 'made with natural materials')
@@ -878,15 +900,39 @@ function craftSubline(answers = {}, category = 'generic') {
     .replace(/\s+/g,' ')
     .trim();
 
-  let words = line.split(' ').filter(Boolean);
-  if (words.length > 9) words = words.slice(0, 9);
-  if (words.length < 7) {
-    const fill = clean(defaults[1] || '').split(' ').filter(Boolean);
-    while (words.length < 7 && fill.length) words.push(fill.shift());
+  // If the "candidate" looks like a noun chunk, give it a natural prefix
+  if (!/^(made|built|designed|helps|fits|improves|keeps|protects|wear|train|read|brew)\b/.test(line)) {
+    const prefixes = ['made for','built for','designed for','simple for'];
+    line = `${_pick(rnd, prefixes)} ${line}`;
   }
 
+  // Ensure 7–10 words by optionally appending a soft tail
+  let words = line.split(' ').filter(Boolean);
+  if (words.length > 10) words = words.slice(0, 10);
+  while (words.length < 7) {
+    const tail = _pick(rnd, TAIL);
+    const tailWords = tail.split(' ');
+    for (const w of tailWords) { if (words.length < 7) words.push(w); }
+    if (words.length < 7) words.push(_pick(rnd, ['today','daily']));
+  }
+  if (words.length <= 9 && rnd() < 0.33) {
+    const tail = _pick(rnd, TAIL);
+    words = (words.join(' ') + ' ' + tail).trim().split(' ').slice(0, 10);
+  }
+
+    // extra tidy-ups before casing
+  line = words.join(' ')
+    .replace(/\bfor for\b/gi, 'for')
+    .replace(/\s+/g, ' ')
+    .trim();
+  words = line.split(' ');
+
+
+  // Final: sentence case
+  const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
   return sentenceCase(words.join(' '));
 }
+
 
 /* ---------- Placement analysis (needed by buildOverlayImage) ---------- */
 async function analyzeImageForPlacement(imgBuf) {
@@ -923,7 +969,7 @@ async function buildOverlayImage({
   const titleSeed = title || category || '';
   let cta = cleanCTA(ctaHint, titleSeed);
   if (!cta.trim()) cta = 'LEARN MORE';
-  const subline = craftSubline(answers, category);
+  const subline = craftSubline(answers, category, seed);
 
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
   const svg = Buffer.from(svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }), 'utf8');
