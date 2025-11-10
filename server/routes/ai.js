@@ -680,27 +680,76 @@ function pillBtn(cx, cy, label, fs = 34, glowColor = '255,255,255', glowOpacity 
     </g>`;
 }
 
-/* --- Glass overlay (chips grow; SVG-compliant gradients) --- */
+/* === GLASS TEMPLATE: match the screenshot (serif text, classic glass chips) === */
+
+/* Use one serif stack everywhere for text */
+const SERIF = `'Times New Roman', Times, serif`;
+
+/* CTA pill — soft frosted pill with subtle bevel and serif text */
+function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 0.30, midLum = 140) {
+  const txt = normalizeCTA(label || 'LEARN MORE');
+  const padX = 32;
+  const estTextW = Math.round(txt.length * fs * 0.6);
+  const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
+  const estH = Math.max(56, fs + 22);
+  const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
+
+  const useDark  = midLum >= 188;
+  const textFill = useDark ? '#111' : '#fff';
+  const outline  = useDark ? '#fff' : '#000';
+
+  return `
+  <g>
+    <!-- soft outer glow -->
+    <rect x="${x-8}" y="${y-8}" width="${estW+16}" height="${estH+16}" rx="${r+8}"
+          fill="rgb(${glowRGB})" opacity="${glowOpacity*0.9}"/>
+    <!-- frosted base -->
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
+          fill="rgba(255,255,255,0.12)"/>
+    <!-- bevel highlight -->
+    <linearGradient id="pillHi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
+    </linearGradient>
+    <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(12, Math.round(estH*0.45))}" rx="${r}"
+          fill="url(#pillHi)"/>
+    <!-- twin hairline to get that crisp rim -->
+    <rect x="${x+0.5}" y="${y+0.5}" width="${estW-1}" height="${estH-1}" rx="${r-0.5}"
+          fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="1"/>
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
+          fill="none" stroke="rgba(0,0,0,0.25)" stroke-width="1" opacity="0.45"/>
+
+    <!-- label -->
+    <text x="${cx}" y="${y + estH/2}"
+          text-anchor="middle" dominant-baseline="middle"
+          font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
+          fill="${textFill}" style="paint-order: stroke; stroke:${outline}; stroke-width:1.15; letter-spacing:0.10em">
+      ${escSVG(txt)}
+    </text>
+  </g>`;
+}
+
+/* Main SVG overlay — restores the *exact* glassmorphism look (frame, chips, serif text) */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
-  const R = 8;
-  const EDGE_STROKE = 0.20;
+  const R = 16;                  // more rounded like your screenshot
+  const EDGE_STROKE = 0.8;
 
-  // helpers
-  const FUDGE = 1.18;
-  const MIN_INNER_GAP = 12;
-  function measureSerifWidth(txt, fs, tracking = 0.10) {
+  // --- sizing helpers (unchanged math, serif width tuning) ---
+  const FUDGE = 1.18, MIN_INNER_GAP = 12;
+  function measureSerifWidth(txt, fs, tracking = 0.08) {
     return Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
   }
   function settleBlock({ text, fsStart, fsMin, tracking, padXFactor, padYFactor }) {
     let fs = fsStart, padX, padY, textW, w, h;
     const recompute = () => {
-      padX  = Math.round(Math.max(32, fs * padXFactor));
-      padY  = Math.round(Math.max(10, fs * padYFactor));
+      padX = Math.round(Math.max(28, fs * padXFactor));
+      padY = Math.round(Math.max(10, fs * padYFactor));
       textW = measureSerifWidth(text, fs, tracking);
-      w     = textW + padX * 2 + MIN_INNER_GAP * 2;
-      h     = Math.max(44, fs + padY * 2);
+      w = textW + padX * 2 + MIN_INNER_GAP * 2;
+      h = Math.max(54, fs + padY * 2);
     };
     recompute();
     while (w > maxW && fs > fsMin) { fs -= 2; recompute(); }
@@ -708,120 +757,104 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // HEADLINE
+  // Headline (big serif, uppercase)
+  title = String(title || '').toUpperCase();
   const headline = settleBlock({
-    text: String(title || ''),
-    fsStart: 68, fsMin: 26, tracking: 0.10, padXFactor: 0.60, padYFactor: 0.20,
+    text: title, fsStart: 84, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
   });
-  const hlCenterY = 126;
-  const hlRectY   = Math.round(hlCenterY - headline.h / 2);
+  const hlCenterY = 150;
+  const hlRectY   = Math.round(hlCenterY - headline.h/2);
 
-  // SUBLINE
+  // Subline (serif, sentence case)
   const sub = settleBlock({
-    text: String(subline || ''),
-    fsStart: 44, fsMin: 22, tracking: 0.10, padXFactor: 0.54, padYFactor: 0.20,
+    text: String(subline || ''), fsStart: 44, fsMin: 22, tracking: 0.04, padXFactor: 0.62, padYFactor: 0.22
   });
-  const GAP_HL_TO_SUB = 64;
-  const subRectY   = Math.round(hlRectY + headline.h + GAP_HL_TO_SUB);
-  const subCenterY = subRectY + Math.round(sub.h / 2);
+  const subRectY   = Math.round(hlRectY + headline.h + 44);
+  const subCenterY = subRectY + Math.round(sub.h/2);
 
   // CTA position
-  const ctaY = Math.round(subCenterY + sub.fs + 86);
+  const ctaY = Math.round(subCenterY + sub.fs + 90);
 
-  // styling from image metrics
+  // palette derived from image (kept from your previous version)
   const midLum = metrics?.midLum ?? 140;
   const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-
-  let chipOpacityHead  = 0.28;
-  if (midLum >= 170) chipOpacityHead += 0.03;
-  if (midLum <= 110) chipOpacityHead -= 0.02;
-  chipOpacityHead = Math.max(0.24, Math.min(0.33, chipOpacityHead));
-
-  const chipOpacitySub = Math.max(0.22, Math.min(0.30, chipOpacityHead - 0.02));
-  const tintAlpha      = Number((chipOpacityHead * 0.30).toFixed(2));
-  const tintRGB        = `rgb(${avg.r},${avg.g},${avg.b})`;
-  const vignetteOpacity= midLum >= 160 ? 0.15 : midLum >= 120 ? 0.19 : 0.23;
-  const globalShade    = midLum >= 170 ? 0.12 : midLum >= 140 ? 0.14 : 0.16;
-
-  const backShadeHead  = midLum >= 170 ? 0.22 : midLum >= 150 ? 0.16 : 0.10;
-  const backShadeSub   = Math.max(0.07, backShadeHead - 0.04);
 
   const useDark        = midLum >= 188;
   const textFill       = useDark ? '#111111' : '#FFFFFF';
   const textOutline    = useDark ? '#FFFFFF' : '#000000';
+
+  // glass chip opacities tuned to the screenshot
+  const chipOpacityHead = 0.30;
+  const chipOpacitySub  = 0.26;
+  const tintRGB         = `rgb(${avg.r},${avg.g},${avg.b})`;
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <filter id="glassBlurHl"  x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="8"/></filter>
-      <filter id="glassBlurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="10"/></filter>
-
-      <linearGradient id="chipInnerHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.22"/>
-        <stop offset="55%"  stop-color="#FFFFFF" stop-opacity="0.04"/>
+      <!-- inner sheen for chips -->
+      <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
+        <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
 
-      <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
+      <!-- soft vignette -->
+      <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="1"/>
+        <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
-
-      <linearGradient id="centerShadeHl" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#000000" stop-opacity="${(backShadeHead * 0.7).toFixed(2)}"/>
-        <stop offset="50%"  stop-color="#000000" stop-opacity="${(backShadeHead).toFixed(2)}"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="${(backShadeHead * 0.7).toFixed(2)}"/>
-      </linearGradient>
-
-      <linearGradient id="centerShadeSub" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#000000" stop-opacity="${(backShadeSub * 0.7).toFixed(2)}"/>
-        <stop offset="50%"  stop-color="#000000" stop-opacity="${(backShadeSub).toFixed(2)}"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="${(backShadeSub * 0.7).toFixed(2)}"/>
-      </linearGradient>
     </defs>
 
-    <!-- subtle global shade for readability -->
-    <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${globalShade})"/>
+    <!-- global subtle shade -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.14)"/>
 
-    <!-- vignette + double frame -->
-    <g opacity="${vignetteOpacity}">
-      <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vignette)"/>
-    </g>
+    <!-- frame (triple rim like your template) -->
     <g pointer-events="none">
-      <rect x="10" y="10" width="${W - 20}" height="${H - 20}" rx="18" fill="none" stroke="#000" stroke-opacity="0.12" stroke-width="8"/>
-      <rect x="14" y="14" width="${W - 28}" height="${H - 28}" rx="16" fill="none" stroke="#fff" stroke-opacity="0.24" stroke-width="2"/>
-      <rect x="22" y="22" width="${W - 44}" height="${H - 44}" rx="14" fill="none" stroke="#ffffff" stroke-opacity="0.14" stroke-width="1"/>
+      <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
+      <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="20" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2"/>
+      <rect x="22" y="22" width="${W-44}" height="${H-44}" rx="18" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1"/>
     </g>
 
-    <!-- Headline chip -->
-    <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="url(#centerShadeHl)"/>
-    <rect x="${headline.x}" y="${Math.round(hlRectY)}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGB}" opacity="${tintAlpha}"/>
-    <rect x="${headline.x+1}" y="${Math.round(hlRectY)+1}" width="${headline.w-2}" height="${Math.max(12, Math.round(headline.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-    <rect x="${headline.x+0.5}" y="${Math.round(hlRectY)+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="${EDGE_STROKE}"/>
+    <!-- faint vignette -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- Headline text (single draw; stroke handled via paint-order) -->
-    <text x="${W/2}" y="${Math.round(hlRectY + headline.h/2)}"
+    <!-- Headline chip (frosted + tint) -->
+    <g>
+      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
+            fill="${tintRGB}" opacity="${chipOpacityHead}"/>
+      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
+            fill="url(#chipHi)" opacity="0.9"/>
+      <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
+            fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="${EDGE_STROKE}"/>
+    </g>
+
+    <!-- Headline text (serif, bold, white with stroke) -->
+    <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
-          font-family="sans-serif" font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}" text-rendering="geometricPrecision" xml:space="preserve"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; stroke-linejoin:round; letter-spacing:0.06em">
+          font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
+          fill="${textFill}"
+          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.35; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
     <!-- Subline chip -->
-    <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="url(#centerShadeSub)"/>
-    <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGB}" opacity="${chipOpacitySub.toFixed(2)}"/>
-    <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${Math.max(10, Math.round(sub.h*0.38))}" rx="${Math.max(0,R-1)}" fill="url(#chipInnerHi)"/>
-    <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,0.26)" stroke-width="${EDGE_STROKE}"/>
+    <g>
+      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
+            fill="${tintRGB}" opacity="${chipOpacitySub}"/>
+      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
+            fill="url(#chipHi)"/>
+      <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
+            fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="${EDGE_STROKE}"/>
+    </g>
 
-    <!-- Subline text (single draw) -->
-    <text x="${W/2}" y="${Math.round(subRectY + sub.h/2)}"
+    <!-- Subline text (serif) -->
+    <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
-          font-family="sans-serif" font-size="${sub.fs}" font-weight="700"
-          fill="${textFill}" text-rendering="geometricPrecision" xml:space="preserve"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; stroke-linejoin:round; letter-spacing:0.06em">
+          font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
+          fill="${textFill}"
+          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; letter-spacing:0.02em">
       ${escSVG(subline)}
     </text>
 
