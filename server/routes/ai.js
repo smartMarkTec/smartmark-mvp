@@ -834,7 +834,7 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
   </g>`;
 }
 
-/* === REAL-GLASS overlay (softer tint, extra glow rim like purple ref) === */
+/* === REAL-GLASS overlay — match purple reference (ultra-light rims, thin bars) === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -848,11 +848,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   function settleBlock({ text, fsStart, fsMin, tracking, padXFactor, padYFactor }) {
     let fs = fsStart, padX, padY, textW, w, h;
     const recompute = () => {
-      padX = Math.round(Math.max(28, fs * padXFactor));
-      padY = Math.round(Math.max(12, fs * padYFactor));
+      padX = Math.round(Math.max(26, fs * padXFactor));
+      padY = Math.round(Math.max(10, fs * padYFactor));   // thinner bar height
       textW = measureSerifWidth(text, fs, tracking);
       w = textW + padX * 2 + MIN_INNER_GAP * 2;
-      h = Math.max(56, fs + padY * 2);
+      h = Math.max(48, fs + padY * 2);
     };
     recompute();
     while (w > maxW && fs > fsMin) { fs -= 2; recompute(); }
@@ -860,18 +860,18 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // Font balances
+  // headline slightly smaller; subline slightly larger, bars thinner (like the purple ref)
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
-    text: title, fsStart: 76, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
+    text: title, fsStart: 74, fsMin: 34, tracking: 0.06, padXFactor: 0.66, padYFactor: 0.20
   });
   const hlCenterY = 148;
   const hlRectY   = Math.round(hlCenterY - headline.h/2);
 
-  // Subline a touch larger and lower (like purple reference)
   const sub = settleBlock({
-    text: String(subline || ''), fsStart: 52, fsMin: 26, tracking: 0.03, padXFactor: 0.64, padYFactor: 0.24
+    text: String(subline || ''), fsStart: 52, fsMin: 26, tracking: 0.03, padXFactor: 0.60, padYFactor: 0.18
   });
+  // spacing matches your purple screenshot (headline → gap → subline)
   const subRectY   = Math.round(hlRectY + headline.h + 58);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
@@ -887,9 +887,11 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // **GLASS tune**: less solid tint, stronger top sheen, subtle dual rim
-  const CHIP_TINT = useDark ? 0.10 : 0.16;   // ↓ from 0.22–0.24
-  const BLUR_H = 10, BLUR_S = 9;             // a tad more blur
+  // glass tuning to avoid "solid" look
+  const CHIP_TINT = useDark ? 0.08 : 0.12;     // ↓ tint = more see-through
+  const BLUR_H = 10, BLUR_S = 9;               // soft frosting
+  const RIM_LIGHT = 0.18;                      // barely visible edge
+  const RIM_DARK  = 0.12;                      // faint under-rim
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -902,14 +904,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
 
-      <!-- brighter upper sheen + narrow specular line -->
+      <!-- bright upper sheen + hairline specular like the purple ref -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.70"/>
-        <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.08"/>
+        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.78"/>
+        <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
       <linearGradient id="spec" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.65"/>
+        <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.60"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
       </linearGradient>
 
@@ -919,7 +921,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </radialGradient>
     </defs>
 
-    <!-- global soft shade + triple frame -->
+    <!-- existing frame/vignette kept the same -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.14)"/>
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
@@ -933,44 +935,46 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
-            fill="url(#chipHi)" opacity="0.95"/>
-      <!-- narrow specular strip -->
-      <rect x="${headline.x+8}" y="${hlRectY+6}" width="${headline.w-16}" height="${Math.max(3, Math.round(headline.h*0.10))}" rx="${Math.max(2, Math.round(R*0.4))}" fill="url(#spec)" opacity="0.55"/>
+      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(12, Math.round(headline.h*0.42))}" rx="${R}"
+            fill="url(#chipHi)" opacity="0.96"/>
+      <!-- hairline specular strip -->
+      <rect x="${headline.x+9}" y="${hlRectY+6}" width="${headline.w-18}" height="${Math.max(2, Math.round(headline.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
+            fill="url(#spec)" opacity="0.50"/>
     </g>
-    <!-- dual rim: light + faint under-rim -->
+    <!-- ultra-light rim (nearly invisible) -->
     <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.34)" stroke-width="0.8"/>
+          fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
     <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}"
-          fill="none" stroke="rgba(0,0,0,0.20)" stroke-width="0.6" opacity="0.32"/>
+          fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
     <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.35; letter-spacing:0.10em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip (even softer tint, same glass treatment) -->
+    <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
+      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}"
             fill="url(#chipHi)"/>
-      <rect x="${sub.x+8}" y="${subRectY+6}" width="${sub.w-16}" height="${Math.max(3, Math.round(sub.h*0.10))}" rx="${Math.max(2, Math.round(R*0.4))}" fill="url(#spec)" opacity="0.55"/>
+      <rect x="${sub.x+9}" y="${subRectY+6}" width="${sub.w-18}" height="${Math.max(2, Math.round(sub.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
+            fill="url(#spec)" opacity="0.50"/>
     </g>
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="0.8"/>
+          fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
-          fill="none" stroke="rgba(0,0,0,0.22)" stroke-width="0.6" opacity="0.35"/>
+          fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
     <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.05; letter-spacing:0.02em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.00; letter-spacing:0.02em">
       ${escSVG(subline)}
     </text>
 
