@@ -680,7 +680,51 @@ function pillBtn(cx, cy, label, fs = 34, glowColor = '255,255,255', glowOpacity 
     </g>`;
 }
 
-/* === REAL-GLASS overlay (same template) with subtler rims + lower subline === */
+/* === GLASS (real blur) + serif text — matches your screenshot === */
+
+const SERIF = `'Times New Roman', Times, serif`;
+
+/* CTA pill (kept subtle; unchanged API) */
+function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 0.30, midLum = 140) {
+  const txt = normalizeCTA(label || 'LEARN MORE');
+  const padX = 32;
+  const estTextW = Math.round(txt.length * fs * 0.60);
+  const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
+  const estH = Math.max(56, fs + 22);
+  const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
+
+  const useDark  = midLum >= 188;
+  const textFill = useDark ? '#111' : '#fff';
+  const outline  = useDark ? '#fff' : '#000';
+
+  return `
+  <g>
+    <rect x="${x-8}" y="${y-8}" width="${estW+16}" height="${estH+16}" rx="${r+8}"
+          fill="rgb(${glowRGB})" opacity="${glowOpacity*0.9}"/>
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
+          fill="rgba(255,255,255,0.10)"/>
+    <linearGradient id="pillHi" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.38"/>
+      <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
+    </linearGradient>
+    <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(12, Math.round(estH*0.45))}" rx="${r}"
+          fill="url(#pillHi)"/>
+    <rect x="${x+0.5}" y="${y+0.5}" width="${estW-1}" height="${estH-1}" rx="${r-0.5}"
+          fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="1"/>
+    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
+          fill="none" stroke="rgba(0,0,0,0.30)" stroke-width="1" opacity="0.45"/>
+    <text x="${cx}" y="${y + estH/2}"
+          text-anchor="middle" dominant-baseline="middle"
+          font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
+          fill="${textFill}"
+          style="paint-order: stroke; stroke:${outline}; stroke-width:1.15; letter-spacing:0.10em">
+      ${escSVG(txt)}
+    </text>
+  </g>`;
+}
+
+/* REAL-GLASS overlay: blur the actual background within each chip via clipPath */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -706,7 +750,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // Font balances: headline slightly smaller, subline slightly larger
+  // Font balances per your note: headline ↓, subline ↑
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
     text: title, fsStart: 76, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
@@ -717,7 +761,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const sub = settleBlock({
     text: String(subline || ''), fsStart: 50, fsMin: 24, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.22
   });
-  // ↓ Scoot subline down (was +42). +58 matches the purple reference proportions.
+  /* ↓ Move subline down to match purple reference (was +42) */
   const subRectY   = Math.round(hlRectY + headline.h + 58);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
@@ -733,35 +777,39 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // blur strengths (keep frosted look)
+  // blur strengths (stronger for that frosted look)
   const BLUR_H = 9;   // headline chip blur
   const BLUR_S = 8;   // subline chip blur
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
+      <!-- background image available to blur inside chips -->
       <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
 
+      <!-- clip paths for chips -->
       <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
 
+      <!-- gaussian blurs -->
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
 
-      <!-- Inner highlight gradient (stronger sheen; borders stay subtle) -->
+      <!-- inner highlight gradient for glass sheen -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.62"/>
-        <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
+        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
+        <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
 
+      <!-- vignette -->
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
     </defs>
 
-    <!-- global shade + frame -->
+    <!-- global soft shade + triple frame -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.14)"/>
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
@@ -770,39 +818,39 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- Headline chip -->
+    <!-- Headline chip: clipped blurred background + tint + rim -->
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
-            fill="${tintRGB}" opacity="0.22"/>
+            fill="${tintRGB}" opacity="0.24"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
-            fill="url(#chipHi)" opacity="0.96"/>
+            fill="url(#chipHi)" opacity="0.9"/>
     </g>
-    <!-- Subtle rim (thinner + lower opacity) -->
+    <!-- subtler rim -->
     <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="0.6"/>
+          fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="0.7"/>
 
-    <!-- Headline text -->
+    <!-- Headline text (serif) -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.35; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip -->
+    <!-- Subline chip: clipped blurred background + tint + rim -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
-            fill="${tintRGB}" opacity="0.20"/>
+            fill="${tintRGB}" opacity="0.22"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
             fill="url(#chipHi)"/>
     </g>
-    <!-- Subtle rim (thinner + lower opacity) -->
+    <!-- subtler rim -->
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.20)" stroke-width="0.6"/>
+          fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="0.7"/>
 
-    <!-- Subline text -->
+    <!-- Subline text (slightly bigger) -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
@@ -863,11 +911,11 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
   }
   if (productHead === 'quality') productHead = 'products';
 
-  const benefitPhrase = benefitTerms.join(' ').replace(/\bquality\b/gi,'').trim(); // remove "quality" noun misuse
+  const benefitPhrase = benefitTerms.join(' ').replace(/\bquality\b/gi,'').trim();
   const audiencePhrase= audienceTerms.join(' ').trim();
   const diffPhrase    = diffTerms.join(' ').trim();
 
-  // candidate templates (each yields a clean phrase fragment, no pronouns)
+  // candidate templates
   const T = [
     () => (benefitPhrase && audiencePhrase) && `${benefitPhrase} for ${audiencePhrase} every day`,
     () => (benefitPhrase && locationTerm)  && `${benefitPhrase} for ${locationTerm} locals daily`,
@@ -882,7 +930,6 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
   let line = '';
   for (const f of T) { const c = f(); if (c && /\S/.test(c)) { line = c; break; } }
 
-  // safe fallbacks per category
   if (!line) {
     const FALL = {
       fashion: [
@@ -904,7 +951,7 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
     line = FALL[Math.floor(rnd() * FALL.length)];
   }
 
-  // enforce 7–9 words and avoid trailing prepositions
+  // enforce 7–9 words
   let words = clean(line).split(' ').filter(Boolean);
   const tails = [
     ['every','day'],
