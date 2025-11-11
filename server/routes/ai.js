@@ -680,51 +680,7 @@ function pillBtn(cx, cy, label, fs = 34, glowColor = '255,255,255', glowOpacity 
     </g>`;
 }
 
-/* === GLASS (real blur) + serif text — matches your screenshot === */
-
-const SERIF = `'Times New Roman', Times, serif`;
-
-/* CTA pill (kept subtle; unchanged API) */
-function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 0.30, midLum = 140) {
-  const txt = normalizeCTA(label || 'LEARN MORE');
-  const padX = 32;
-  const estTextW = Math.round(txt.length * fs * 0.60);
-  const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
-  const estH = Math.max(56, fs + 22);
-  const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
-
-  const useDark  = midLum >= 188;
-  const textFill = useDark ? '#111' : '#fff';
-  const outline  = useDark ? '#fff' : '#000';
-
-  return `
-  <g>
-    <rect x="${x-8}" y="${y-8}" width="${estW+16}" height="${estH+16}" rx="${r+8}"
-          fill="rgb(${glowRGB})" opacity="${glowOpacity*0.9}"/>
-    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
-          fill="rgba(255,255,255,0.10)"/>
-    <linearGradient id="pillHi" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.38"/>
-      <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
-    </linearGradient>
-    <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(12, Math.round(estH*0.45))}" rx="${r}"
-          fill="url(#pillHi)"/>
-    <rect x="${x+0.5}" y="${y+0.5}" width="${estW-1}" height="${estH-1}" rx="${r-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="1"/>
-    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
-          fill="none" stroke="rgba(0,0,0,0.30)" stroke-width="1" opacity="0.45"/>
-    <text x="${cx}" y="${y + estH/2}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
-          fill="${textFill}"
-          style="paint-order: stroke; stroke:${outline}; stroke-width:1.15; letter-spacing:0.10em">
-      ${escSVG(txt)}
-    </text>
-  </g>`;
-}
-
-/* === REAL-GLASS overlay (same template) with subtler rims === */
+/* === REAL-GLASS overlay (same template) with subtler rims + lower subline === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -750,7 +706,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // Font balances per your note: headline ↓, subline ↑
+  // Font balances: headline slightly smaller, subline slightly larger
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
     text: title, fsStart: 76, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
@@ -761,7 +717,8 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const sub = settleBlock({
     text: String(subline || ''), fsStart: 50, fsMin: 24, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.22
   });
-  const subRectY   = Math.round(hlRectY + headline.h + 42);
+  // ↓ Scoot subline down (was +42). +58 matches the purple reference proportions.
+  const subRectY   = Math.round(hlRectY + headline.h + 58);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
   const ctaY = Math.round(subCenterY + sub.fs + 92);
@@ -804,7 +761,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       </radialGradient>
     </defs>
 
-    <!-- global shade + frame (unchanged) -->
+    <!-- global shade + frame -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.14)"/>
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
@@ -858,143 +815,113 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 }
 
 
-/* ---------- Subline crafting v2 (seeded, 7–9 words, from user inputs) ---------- */
+/* ---------- Subline crafting v3 (coherent 7–9 words from user inputs) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
   // deterministic RNG
-  function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619);} return h>>>0; }
-  function _rng(seedStr=''){ let h=_hash32(seedStr); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
+  function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+  function _rng(s=''){ let h=_hash32(s); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
   const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}|${answers.description||''}`);
 
   // helpers
-  const sentenceCase = (s='') => { s=String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s? s[0].toUpperCase()+s.slice(1):s; };
+  const sentenceCase = (s='') => { s=String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
   const clean = (s='') => String(s)
     .replace(/https?:\/\/\S+/g,' ')
     .replace(/[^\w\s'-]/g,' ')
-    .replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate)\b/gi,' ')
+    .replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate|our|we)\b/gi,' ')
     .replace(/\s+/g,' ')
     .trim()
     .toLowerCase();
 
   const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
   const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
+  const trimEnd = (arr)=>{ while(arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
 
-  const takeKeyTerms = (src='', max=3) => {
+  const takeTerms = (src='', max=3) => {
     const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
-    if (!words.length) return '';
-    return words.slice(0, Math.max(1, Math.min(max, words.length))).join(' ');
+    return words.slice(0, Math.max(1, Math.min(max, words.length)));
   };
 
-  // extract facts from answers
-  const product       = takeKeyTerms(answers.productType || answers.topic || answers.title || '');
-  const benefit       = takeKeyTerms(answers.mainBenefit || answers.description || '');
-  const audience      = takeKeyTerms(answers.audience || answers.target || answers.customer || '', 2);
-  const differentiator= takeKeyTerms(answers.differentiator || answers.whyUs || '');
-  const location      = takeKeyTerms(answers.location || answers.city || answers.region || '');
-  const timeClaimRaw  = String(answers.timeClaim || answers.promise || '').match(/\b\d+\s*(minutes?|hours?|days?)\b/i);
-  const timeClaim     = timeClaimRaw ? timeClaimRaw[0].toLowerCase() : '';
+  // extract structured bits
+  const productTerms = takeTerms(answers.productType || answers.topic || answers.title || '');
+  const benefitTerms = takeTerms(answers.mainBenefit || answers.description || '');
+  const audienceTerms= takeTerms(answers.audience || answers.target || answers.customer || '', 2);
+  const diffTerms    = takeTerms(answers.differentiator || answers.whyUs || '', 3);
+  const locationTerm = takeTerms(answers.location || answers.city || answers.region || '', 1)[0] || '';
+  const timeClaimRaw = String(answers.timeClaim || answers.promise || '').match(/\b\d+\s*(minutes?|hours?|days?)\b/i);
+  const timeClaim    = timeClaimRaw ? timeClaimRaw[0].toLowerCase() : '';
 
-  // candidate fragments (only factual inputs; never fabricate)
-  const facts = {
-    product, benefit, audience, differentiator, location, timeClaim
-  };
+  // light domain hints (materials for fashion)
+  const txtBlob = `${answers.description||''} ${answers.mainBenefit||''}`.toLowerCase();
+  const materials = (txtBlob.match(/\b(cotton|linen|wool|leather|silk|denim|bamboo|hemp|cashmere)\b/g) || []);
+  const material  = materials[0] || '';
 
-  // templates (7–9 words after cleaning). We’ll pick the first that can be filled cleanly.
-  const TEMPLATES = [
-    // benefit + audience
-    ({benefit, audience}) => (benefit && audience) && `${benefit} made simple for ${audience} daily`,
-    ({benefit, location}) => (benefit && location) && `${benefit} for ${location} locals every day`,
-    ({benefit, product})  => (benefit && product) && `${benefit} focused ${product} for everyday use`,
-    ({product, audience}) => (product && audience) && `${product} made easy for ${audience} daily`,
-    ({product, differentiator}) => (product && differentiator) && `${product} with ${differentiator} for daily use`,
-    ({product, timeClaim}) => (product && timeClaim) && `${product} set up in just ${timeClaim}`,
-    ({benefit}) => benefit && `${benefit} made simple for everyday use`,
-    ({product}) => product && `${product} made simple for everyday wear`,
-  ].filter(Boolean);
+  // normalize product head (avoid "clothing quality" style glitches)
+  let productHead = productTerms[0] || '';
+  if (category === 'fashion') {
+    if (/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) productHead = productHead;
+    else productHead = 'clothing';
+  }
+  if (productHead === 'quality') productHead = 'products';
 
-  // category fallbacks (neutral, ad-safe)
-  const FALLBACKS = {
-    fashion: [
-      'Natural materials for everyday wear made simple',
-      'Simple pieces built to last every day',
-      'Comfortable fits with clean easy style'
-    ],
-    books: [
-      'New stories and classic runs to explore',
-      'Graphic novels and comics for quiet nights'
-    ],
-    cosmetics: [
-      'Gentle formulas for daily care and glow',
-      'A simple routine for better skin daily'
-    ],
-    hair: [
-      'Better hair care with less effort daily',
-      'Clean formulas for easy styling each day'
-    ],
-    food: [
-      'Great taste with less hassle every day',
-      'Fresh flavor made easy for busy nights'
-    ],
-    pets: [
-      'Everyday care for happy pets made simple',
-      'Simple treats your pet will love daily'
-    ],
-    electronics: [
-      'Reliable tech for everyday use and value',
-      'Simple design with solid performance daily'
-    ],
-    home: [
-      'Upgrade your space the simple practical way',
-      'Clean looks with everyday useful function'
-    ],
-    coffee: [
-      'Balanced flavor for better breaks each day',
-      'Smooth finish in every cup every day'
-    ],
-    fitness: [
-      'Made for daily training sessions that stick',
-      'Durable gear built for consistent workouts'
-    ],
-    generic: [
-      'Made for everyday use with less hassle',
-      'Simple design that is built to last'
-    ],
-  }[category] || ['Made for everyday use with less hassle'];
+  const benefitPhrase = benefitTerms.join(' ').replace(/\bquality\b/gi,'').trim(); // remove "quality" noun misuse
+  const audiencePhrase= audienceTerms.join(' ').trim();
+  const diffPhrase    = diffTerms.join(' ').trim();
 
-  // try templates in order; keep deterministic by choosing the first valid, else fallback (seeded pick)
+  // candidate templates (each yields a clean phrase fragment, no pronouns)
+  const T = [
+    () => (benefitPhrase && audiencePhrase) && `${benefitPhrase} for ${audiencePhrase} every day`,
+    () => (benefitPhrase && locationTerm)  && `${benefitPhrase} for ${locationTerm} locals daily`,
+    () => (productHead && benefitPhrase)   && `${benefitPhrase} built into ${productHead} essentials`,
+    () => (productHead && material)        && `${material} ${productHead} for everyday wear`,
+    () => (productHead && diffPhrase)      && `${productHead} with ${diffPhrase} for daily use`,
+    () => (productHead && timeClaim)       && `${productHead} set up in just ${timeClaim}`,
+    () =>  benefitPhrase                    && `${benefitPhrase} made simple for everyday use`,
+    () =>  productHead                      && `${productHead} made simple for everyday wear`,
+  ];
+
   let line = '';
-  for (const fn of TEMPLATES) {
-    try {
-      const candidate = fn(facts);
-      if (candidate && typeof candidate === 'string') { line = candidate; break; }
-    } catch {}
-  }
+  for (const f of T) { const c = f(); if (c && /\S/.test(c)) { line = c; break; } }
+
+  // safe fallbacks per category
   if (!line) {
-    const i = Math.floor(rnd() * FALLBACKS.length);
-    line = FALLBACKS[i];
+    const FALL = {
+      fashion: [
+        'Natural materials for everyday wear made simple',
+        'Simple pieces built to last every day',
+        'Comfortable fits with clean easy style'
+      ],
+      books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
+      cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
+      hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
+      food: ['Great taste with less hassle every day','Fresh flavor made easy for busy nights'],
+      pets: ['Everyday care for happy pets made simple','Simple treats your pet will love daily'],
+      electronics: ['Reliable tech for everyday use and value','Simple design with solid performance daily'],
+      home: ['Upgrade your space the simple practical way','Clean looks with everyday useful function'],
+      coffee: ['Balanced flavor for better breaks each day','Smooth finish in every cup every day'],
+      fitness: ['Made for daily training sessions that stick','Durable gear built for consistent workouts'],
+      generic: ['Made for everyday use with less hassle','Simple design that is built to last']
+    }[category] || ['Made for everyday use with less hassle'];
+    line = FALL[Math.floor(rnd() * FALL.length)];
   }
 
-  // word count enforcement 7–9
+  // enforce 7–9 words and avoid trailing prepositions
   let words = clean(line).split(' ').filter(Boolean);
-  const softTails = [
+  const tails = [
     ['every','day'],
     ['made','simple'],
     ['with','less','hassle'],
     ['for','busy','days'],
     ['built','to','last']
   ];
-  const trimEnd = (arr)=>{ while(arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
-
   while (words.length > 9) words.pop();
   words = trimEnd(words);
   while (words.length < 7) {
-    const tail = softTails[Math.floor(rnd()*softTails.length)];
+    const tail = tails[Math.floor(rnd()*tails.length)];
     for (const w of tail) if (words.length < 9) words.push(w);
     words = trimEnd(words);
   }
 
-  // final polish
-  const finalLine = sentenceCase(words.join(' '));
-  return finalLine;
+  return sentenceCase(words.join(' '));
 }
 
 
