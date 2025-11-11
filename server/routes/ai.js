@@ -613,8 +613,8 @@ function cleanCTA(c, seed='') {
   return pickCtaVariant(seed);
 }
 
-/* ---------- Coherent subline (7–9 words, ad-ready, server-side GPT + guardrails) ---------- */
-async function getCoherentSubline(answers = {}, category = 'generic') {
+/* ---------- Coherent subline (7–9 words), GPT + seeded variance ---------- */
+async function getCoherentSubline(answers = {}, category = 'generic', seed = '') {
   const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
   const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
   const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
@@ -670,14 +670,23 @@ async function getCoherentSubline(answers = {}, category = 'generic') {
   const audienceTerms = takeTerms(answers.audience || answers.target || answers.customer || '', 2);
   const locationTerm  = takeTerms(answers.location || answers.city || answers.region || '', 1)[0] || '';
 
-  // normalize for fashion to avoid "clothing quality ..."
+  // normalize for fashion to avoid “clothing quality …”
   let productHead = productTerms[0] || '';
   if ((category||'').toLowerCase() === 'fashion' && !/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) {
     productHead = 'fashion';
   }
   if (productHead === 'quality') productHead = 'products';
 
-  // --- GPT compose (fast & cheap) ---
+  // seed → variant cue (nudges different phrasings each image)
+  const cues = [
+    'use “built for”, everyday tone',
+    'use “made for”, utility tone',
+    'use “designed for”, comfort tone',
+    'use “crafted for”, style tone'
+  ];
+  let cue = cues[Math.abs((seed||'').split('').reduce((h,c)=>((h*31 + c.charCodeAt(0))|0), 7)) % cues.length];
+
+  // --- GPT compose (short + cheap; varied by seed) ---
   let line = '';
   try {
     const system = [
@@ -687,17 +696,17 @@ async function getCoherentSubline(answers = {}, category = 'generic') {
       "Do NOT end with: to, for, with, of, in, on, at, by."
     ].join(' ');
     const user = [
-      `Category: ${category || 'generic'}.`,
+      `Category: ${category || 'generic'}. Cue: ${cue}.`,
       productHead ? `Product/topic: ${productHead}.` : '',
       benefitTerms.length ? `Main benefit: ${benefitTerms.join(' ')}.` : '',
       audienceTerms.length ? `Audience: ${audienceTerms.join(' ')}.` : '',
       locationTerm ? `Location: ${locationTerm}.` : '',
-      '',
+      `Variation seed: ${seed}.`,
       'Return ONLY the line.'
     ].join(' ');
     const r = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.2,
+      temperature: 0.35,          // a little higher for variety
       max_tokens: 24,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
     });
@@ -707,14 +716,9 @@ async function getCoherentSubline(answers = {}, category = 'generic') {
   }
 
   if (!line) line = categoryFallback(category);
-
-  // quick fashion-specific guard
-  if ((category||'').toLowerCase() === 'fashion') {
-    if (/\bfashion\s+modern\b/i.test(line) || /\bmodern\s+built\s+into\b/i.test(line)) {
-      line = 'Modern fashion built for everyday wear';
-    }
+  if ((category||'').toLowerCase() === 'fashion' && /\bfashion\s+modern\b/i.test(line)) {
+    line = 'Modern fashion built for everyday wear';
   }
-
   return ensure7to9(line);
 }
 
@@ -830,7 +834,7 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
   </g>`;
 }
 
-/* === REAL-GLASS overlay (glassier subline rim + correct spacing/size) === */
+/* === REAL-GLASS overlay (softer tint, extra glow rim like purple ref) === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -883,9 +887,9 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // blur strengths (stronger for frosted glass)
-  const BLUR_H = 9;   // headline chip blur
-  const BLUR_S = 8;   // subline chip blur
+  // **GLASS tune**: less solid tint, stronger top sheen, subtle dual rim
+  const CHIP_TINT = useDark ? 0.10 : 0.16;   // ↓ from 0.22–0.24
+  const BLUR_H = 10, BLUR_S = 9;             // a tad more blur
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -898,10 +902,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
 
+      <!-- brighter upper sheen + narrow specular line -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
-        <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
+        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.70"/>
+        <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.08"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
+      </linearGradient>
+      <linearGradient id="spec" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.65"/>
+        <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
       </linearGradient>
 
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
@@ -923,12 +932,17 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
-            fill="${tintRGB}" opacity="0.24"/>
+            fill="${tintRGB}" opacity="${CHIP_TINT}"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
-            fill="url(#chipHi)" opacity="0.9"/>
+            fill="url(#chipHi)" opacity="0.95"/>
+      <!-- narrow specular strip -->
+      <rect x="${headline.x+8}" y="${hlRectY+6}" width="${headline.w-16}" height="${Math.max(3, Math.round(headline.h*0.10))}" rx="${Math.max(2, Math.round(R*0.4))}" fill="url(#spec)" opacity="0.55"/>
     </g>
+    <!-- dual rim: light + faint under-rim -->
     <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="0.7"/>
+          fill="none" stroke="rgba(255,255,255,0.34)" stroke-width="0.8"/>
+    <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}"
+          fill="none" stroke="rgba(0,0,0,0.20)" stroke-width="0.6" opacity="0.32"/>
 
     <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
@@ -938,19 +952,19 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip (glassier, like purple reference) -->
+    <!-- Subline chip (even softer tint, same glass treatment) -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
-            fill="${tintRGB}" opacity="0.22"/>
+            fill="${tintRGB}" opacity="${CHIP_TINT}"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
             fill="url(#chipHi)"/>
+      <rect x="${sub.x+8}" y="${subRectY+6}" width="${sub.w-16}" height="${Math.max(3, Math.round(sub.h*0.10))}" rx="${Math.max(2, Math.round(R*0.4))}" fill="url(#spec)" opacity="0.55"/>
     </g>
-    <!-- Glassy rim: white rim + faint dark under-rim -->
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="0.8"/>
+          fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="0.8"/>
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
-          fill="none" stroke="rgba(0,0,0,0.20)" stroke-width="0.6" opacity="0.35"/>
+          fill="none" stroke="rgba(0,0,0,0.22)" stroke-width="0.6" opacity="0.35"/>
 
     <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
@@ -963,6 +977,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     ${pillBtn(W/2, ctaY, chosenCTA, 34, `${avg.r},${avg.g},${avg.b}`, 0.30, midLum)}
   </svg>`;
 }
+
 
 
 /* ---------- Subline crafting v3 (coherent 7–9 words from user inputs) ---------- */
