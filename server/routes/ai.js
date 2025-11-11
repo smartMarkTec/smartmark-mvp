@@ -613,6 +613,112 @@ function cleanCTA(c, seed='') {
   return pickCtaVariant(seed);
 }
 
+/* ---------- Coherent subline (7–9 words, ad-ready, server-side GPT + guardrails) ---------- */
+async function getCoherentSubline(answers = {}, category = 'generic') {
+  const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
+  const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
+  const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
+  const clean = (s='') => String(s)
+    .replace(/https?:\/\/\S+/g,' ')
+    .replace(/[^\w\s'-]/g,' ')
+    .replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate|our|we)\b/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim()
+    .toLowerCase();
+  const trimEnd = (arr)=>{ while (arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
+  const takeTerms = (src='', max=3) => {
+    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
+    return words.slice(0, Math.max(1, Math.min(max, words.length)));
+  };
+  function ensure7to9(line='') {
+    let words = clean(line).split(' ').filter(Boolean);
+    const tails = [['every','day'],['made','simple'],['with','less','hassle'],['for','busy','days'],['built','to','last']];
+    while (words.length > 9) words.pop();
+    words = trimEnd(words);
+    while (words.length < 7) {
+      const t = tails[Math.floor(Math.random()*tails.length)];
+      for (const w of t) if (words.length < 9) words.push(w);
+      words = trimEnd(words);
+    }
+    return sentenceCase(words.join(' '));
+  }
+  function categoryFallback(cat='generic') {
+    const MAP = {
+      fashion: [
+        'Modern fashion built for everyday wear',
+        'Natural materials for everyday wear made simple',
+        'Simple pieces built to last every day'
+      ],
+      books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
+      cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
+      hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
+      food: ['Great taste with less hassle every day','Fresh flavor made easy for busy nights'],
+      pets: ['Everyday care for happy pets made simple','Simple treats your pet will love daily'],
+      electronics: ['Reliable tech for everyday use and value','Simple design with solid performance daily'],
+      home: ['Upgrade your space the simple practical way','Clean looks with everyday useful function'],
+      coffee: ['Balanced flavor for better breaks each day','Smooth finish in every cup every day'],
+      fitness: ['Made for daily training sessions that stick','Durable gear built for consistent workouts'],
+      generic: ['Made for everyday use with less hassle','Simple design that is built to last']
+    };
+    const arr = MAP[cat] || MAP.generic;
+    return arr[Math.floor(Math.random()*arr.length)];
+  }
+
+  // extract light facts
+  const productTerms  = takeTerms(answers.productType || answers.topic || answers.title || '');
+  const benefitTerms  = takeTerms(answers.mainBenefit || answers.description || '');
+  const audienceTerms = takeTerms(answers.audience || answers.target || answers.customer || '', 2);
+  const locationTerm  = takeTerms(answers.location || answers.city || answers.region || '', 1)[0] || '';
+
+  // normalize for fashion to avoid "clothing quality ..."
+  let productHead = productTerms[0] || '';
+  if ((category||'').toLowerCase() === 'fashion' && !/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) {
+    productHead = 'fashion';
+  }
+  if (productHead === 'quality') productHead = 'products';
+
+  // --- GPT compose (fast & cheap) ---
+  let line = '';
+  try {
+    const system = [
+      "You are SmartMark's subline composer.",
+      "Write ONE ad subline of 7–9 words, sentence case, plain language.",
+      "Must be coherent English. No buzzwords. No domains.",
+      "Do NOT end with: to, for, with, of, in, on, at, by."
+    ].join(' ');
+    const user = [
+      `Category: ${category || 'generic'}.`,
+      productHead ? `Product/topic: ${productHead}.` : '',
+      benefitTerms.length ? `Main benefit: ${benefitTerms.join(' ')}.` : '',
+      audienceTerms.length ? `Audience: ${audienceTerms.join(' ')}.` : '',
+      locationTerm ? `Location: ${locationTerm}.` : '',
+      '',
+      'Return ONLY the line.'
+    ].join(' ');
+    const r = await openai.chat.completions.create({
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+      temperature: 0.2,
+      max_tokens: 24,
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
+    });
+    line = (r.choices?.[0]?.message?.content || '').trim().replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g,'');
+  } catch (e) {
+    console.warn('getCoherentSubline GPT error:', e?.message);
+  }
+
+  if (!line) line = categoryFallback(category);
+
+  // quick fashion-specific guard
+  if ((category||'').toLowerCase() === 'fashion') {
+    if (/\bfashion\s+modern\b/i.test(line) || /\bmodern\s+built\s+into\b/i.test(line)) {
+      line = 'Modern fashion built for everyday wear';
+    }
+  }
+
+  return ensure7to9(line);
+}
+
+
 /* ---------- required helpers for subline + SVG ---------- */
 function escSVG(s='') {
   return String(s)
@@ -724,7 +830,7 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
   </g>`;
 }
 
-/* REAL-GLASS overlay: blur the actual background within each chip via clipPath */
+/* === REAL-GLASS overlay (glassier subline rim + correct spacing/size) === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -750,7 +856,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // Font balances per your note: headline ↓, subline ↑
+  // Font balances
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
     text: title, fsStart: 76, fsMin: 34, tracking: 0.06, padXFactor: 0.70, padYFactor: 0.26
@@ -758,10 +864,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlCenterY = 148;
   const hlRectY   = Math.round(hlCenterY - headline.h/2);
 
+  // Subline a touch larger and lower (like purple reference)
   const sub = settleBlock({
-    text: String(subline || ''), fsStart: 50, fsMin: 24, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.22
+    text: String(subline || ''), fsStart: 52, fsMin: 26, tracking: 0.03, padXFactor: 0.64, padYFactor: 0.24
   });
-  /* ↓ Move subline down to match purple reference (was +42) */
   const subRectY   = Math.round(hlRectY + headline.h + 58);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
@@ -777,32 +883,27 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // blur strengths (stronger for that frosted look)
+  // blur strengths (stronger for frosted glass)
   const BLUR_H = 9;   // headline chip blur
   const BLUR_S = 8;   // subline chip blur
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <!-- background image available to blur inside chips -->
       <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
 
-      <!-- clip paths for chips -->
       <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
 
-      <!-- gaussian blurs -->
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
 
-      <!-- inner highlight gradient for glass sheen -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
         <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
 
-      <!-- vignette -->
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
@@ -818,7 +919,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- Headline chip: clipped blurred background + tint + rim -->
+    <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
@@ -826,11 +927,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
             fill="url(#chipHi)" opacity="0.9"/>
     </g>
-    <!-- subtler rim -->
     <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
           fill="none" stroke="rgba(255,255,255,0.28)" stroke-width="0.7"/>
 
-    <!-- Headline text (serif) -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
@@ -838,7 +938,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip: clipped blurred background + tint + rim -->
+    <!-- Subline chip (glassier, like purple reference) -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
@@ -846,11 +946,13 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
             fill="url(#chipHi)"/>
     </g>
-    <!-- subtler rim -->
+    <!-- Glassy rim: white rim + faint dark under-rim -->
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="0.7"/>
+          fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="0.8"/>
+    <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
+          fill="none" stroke="rgba(0,0,0,0.20)" stroke-width="0.6" opacity="0.35"/>
 
-    <!-- Subline text (slightly bigger) -->
+    <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
@@ -1011,8 +1113,14 @@ async function buildOverlayImage({
   let cta = cleanCTA(ctaHint, titleSeed);
   if (!cta.trim()) cta = 'LEARN MORE';
 
-  let subline = 'Made for everyday use with less hassle';
-  try { subline = craftSubline(answers, category, seed) || subline; } catch (e) { console.warn('craftSubline failed:', e?.message); }
+  // Prefer GPT-coherent subline; fallback to local craftSubline
+let subline = 'Made for everyday use with less hassle';
+try {
+  subline = await getCoherentSubline(answers, category);
+} catch (e) {
+  console.warn('getCoherentSubline failed, using local craftSubline:', e?.message);
+  try { subline = craftSubline(answers, category, seed) || subline; } catch {}
+}
 
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
 const svg = Buffer.from(
