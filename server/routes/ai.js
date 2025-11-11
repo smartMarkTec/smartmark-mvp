@@ -724,8 +724,7 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
   </g>`;
 }
 
-/* REAL-GLASS overlay: blur the actual background within each chip via clipPath */
-
+/* === REAL-GLASS overlay (same template) with subtler rims === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -777,39 +776,35 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // blur strengths (stronger for that frosted look)
+  // blur strengths (keep frosted look)
   const BLUR_H = 9;   // headline chip blur
   const BLUR_S = 8;   // subline chip blur
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
-      <!-- background image available to blur inside chips -->
       <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
 
-      <!-- clip paths for chips -->
       <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
 
-      <!-- gaussian blurs -->
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
 
-      <!-- inner highlight gradient for glass sheen -->
+      <!-- Inner highlight gradient (stronger sheen; borders stay subtle) -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.55"/>
-        <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
+        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.62"/>
+        <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
 
-      <!-- vignette -->
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
     </defs>
 
-    <!-- global soft shade + triple frame -->
+    <!-- global shade + frame (unchanged) -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.14)"/>
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
@@ -818,37 +813,39 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- Headline chip: clipped blurred background + tint + rim -->
+    <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
-            fill="${tintRGB}" opacity="0.24"/>
+            fill="${tintRGB}" opacity="0.22"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(14, Math.round(headline.h*0.48))}" rx="${R}"
-            fill="url(#chipHi)" opacity="0.9"/>
+            fill="url(#chipHi)" opacity="0.96"/>
     </g>
+    <!-- Subtle rim (thinner + lower opacity) -->
     <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.40)" stroke-width="0.8"/>
+          fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="0.6"/>
 
-    <!-- Headline text (serif) -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.35; letter-spacing:0.10em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip: clipped blurred background + tint + rim -->
+    <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
-            fill="${tintRGB}" opacity="0.22"/>
+            fill="${tintRGB}" opacity="0.20"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(12, Math.round(sub.h*0.45))}" rx="${R}"
             fill="url(#chipHi)"/>
     </g>
+    <!-- Subtle rim (thinner + lower opacity) -->
     <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.35)" stroke-width="0.8"/>
+          fill="none" stroke="rgba(255,255,255,0.20)" stroke-width="0.6"/>
 
-    <!-- Subline text (slightly bigger) -->
+    <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
@@ -861,24 +858,61 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 }
 
 
-
-/* ---------- Subline crafting (seeded, coherent, strict 7–9 words) ---------- */
+/* ---------- Subline crafting v2 (seeded, 7–9 words, from user inputs) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
-  const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}`);
+  // deterministic RNG
+  function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h, 16777619);} return h>>>0; }
+  function _rng(seedStr=''){ let h=_hash32(seedStr); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
+  const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}|${answers.description||''}`);
 
-  const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
+  // helpers
+  const sentenceCase = (s='') => { s=String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s? s[0].toUpperCase()+s.slice(1):s; };
   const clean = (s='') => String(s)
     .replace(/https?:\/\/\S+/g,' ')
     .replace(/[^\w\s'-]/g,' ')
-    .replace(/\b(we|our|promise|best|guarantee|#1|no\.?1|the most|premium|luxury)\b/gi,' ')
+    .replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate)\b/gi,' ')
     .replace(/\s+/g,' ')
     .trim()
     .toLowerCase();
 
-  const END_STOP = new Set(['and','with','for','to','of','in','on','at','by']);
-  const trimEndStops = (words) => { while (words.length && END_STOP.has(words[words.length-1])) words.pop(); return words; };
+  const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
+  const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
 
-  const T = {
+  const takeKeyTerms = (src='', max=3) => {
+    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
+    if (!words.length) return '';
+    return words.slice(0, Math.max(1, Math.min(max, words.length))).join(' ');
+  };
+
+  // extract facts from answers
+  const product       = takeKeyTerms(answers.productType || answers.topic || answers.title || '');
+  const benefit       = takeKeyTerms(answers.mainBenefit || answers.description || '');
+  const audience      = takeKeyTerms(answers.audience || answers.target || answers.customer || '', 2);
+  const differentiator= takeKeyTerms(answers.differentiator || answers.whyUs || '');
+  const location      = takeKeyTerms(answers.location || answers.city || answers.region || '');
+  const timeClaimRaw  = String(answers.timeClaim || answers.promise || '').match(/\b\d+\s*(minutes?|hours?|days?)\b/i);
+  const timeClaim     = timeClaimRaw ? timeClaimRaw[0].toLowerCase() : '';
+
+  // candidate fragments (only factual inputs; never fabricate)
+  const facts = {
+    product, benefit, audience, differentiator, location, timeClaim
+  };
+
+  // templates (7–9 words after cleaning). We’ll pick the first that can be filled cleanly.
+  const TEMPLATES = [
+    // benefit + audience
+    ({benefit, audience}) => (benefit && audience) && `${benefit} made simple for ${audience} daily`,
+    ({benefit, location}) => (benefit && location) && `${benefit} for ${location} locals every day`,
+    ({benefit, product})  => (benefit && product) && `${benefit} focused ${product} for everyday use`,
+    ({product, audience}) => (product && audience) && `${product} made easy for ${audience} daily`,
+    ({product, differentiator}) => (product && differentiator) && `${product} with ${differentiator} for daily use`,
+    ({product, timeClaim}) => (product && timeClaim) && `${product} set up in just ${timeClaim}`,
+    ({benefit}) => benefit && `${benefit} made simple for everyday use`,
+    ({product}) => product && `${product} made simple for everyday wear`,
+  ].filter(Boolean);
+
+  // category fallbacks (neutral, ad-safe)
+  const FALLBACKS = {
     fashion: [
       'Natural materials for everyday wear made simple',
       'Simple pieces built to last every day',
@@ -923,51 +957,46 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
     generic: [
       'Made for everyday use with less hassle',
       'Simple design that is built to last'
-    ]
-  };
-  const defaults = T[category] || T.generic;
+    ],
+  }[category] || ['Made for everyday use with less hassle'];
 
-  const STOP = new Set(['and','with','for','the','a','an','of','to','in','on','by','your','you','is','are']);
-  function shortBenefit(src=''){
-    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
-    if (!words.length) return '';
-    const take = Math.max(2, Math.min(3, words.length));
-    return words.slice(0, take).join(' ');
+  // try templates in order; keep deterministic by choosing the first valid, else fallback (seeded pick)
+  let line = '';
+  for (const fn of TEMPLATES) {
+    try {
+      const candidate = fn(facts);
+      if (candidate && typeof candidate === 'string') { line = candidate; break; }
+    } catch {}
   }
-  const cand = [answers.mainBenefit, answers.description, answers.productType, answers.topic]
-    .map(shortBenefit).filter(Boolean);
-  const benefit = cand.length ? _pick(rnd, cand) : '';
+  if (!line) {
+    const i = Math.floor(rnd() * FALLBACKS.length);
+    line = FALLBACKS[i];
+  }
 
-  const DYN = benefit ? [
-    `Made for ${benefit} every day`,
-    `${benefit} made simple for everyday use`,
-    `Clean easy ${benefit} for busy days`
-  ] : [];
-
-  let line = (DYN.length && rnd() < 0.40) ? _pick(rnd, DYN) : _pick(rnd, defaults);
-
+  // word count enforcement 7–9
   let words = clean(line).split(' ').filter(Boolean);
-
-  const SOFT_TAILS = [
+  const softTails = [
     ['every','day'],
     ['made','simple'],
     ['with','less','hassle'],
     ['for','busy','days'],
     ['built','to','last']
   ];
-  while (words.length > 9) words.pop();
-  words = trimEndStops(words);
+  const trimEnd = (arr)=>{ while(arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
 
+  while (words.length > 9) words.pop();
+  words = trimEnd(words);
   while (words.length < 7) {
-    const tail = _pick(rnd, SOFT_TAILS);
+    const tail = softTails[Math.floor(rnd()*softTails.length)];
     for (const w of tail) if (words.length < 9) words.push(w);
-    words = trimEndStops(words);
+    words = trimEnd(words);
   }
 
-  if (words.length > 9) words = trimEndStops(words.slice(0, 9));
-
-  return sentenceCase(words.join(' '));
+  // final polish
+  const finalLine = sentenceCase(words.join(' '));
+  return finalLine;
 }
+
 
 /* ---------- Placement analysis ---------- */
 async function analyzeImageForPlacement(imgBuf) {
