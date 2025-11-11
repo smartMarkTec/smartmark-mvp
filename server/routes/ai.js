@@ -846,53 +846,81 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
   </g>`;
 }
 
-/* === REAL-GLASS overlay — fixed text sizes, longer subline bar, global photo shade === */
+/* ---------- SOLID BLACK CTA (modern rounded-square) ---------- */
+function btnSolidDark(cx, cy, label, fs = 32) {
+  const txt = normalizeCTA(label || 'LEARN MORE');
+  const padX = 28;
+  const estTextW = Math.round(txt.length * fs * 0.60);
+  const w = Math.max(200, Math.min(estTextW + padX * 2, 980));
+  const h = Math.max(56, fs + 22);
+  const r = Math.min(14, Math.round(h * 0.22)); // modern soft-rectangle radius
+  const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2);
+
+  return `
+    <g>
+      <!-- subtle outer glow for legibility on busy photos -->
+      <rect x="${x-2}" y="${y-2}" width="${w+4}" height="${h+4}" rx="${r+2}"
+            fill="#000000" opacity="0.30"/>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"
+            fill="#000000" opacity="0.92" />
+      <rect x="${x+0.5}" y="${y+0.5}" width="${w-1}" height="${h-1}" rx="${r-1}"
+            fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1" />
+      <text x="${cx}" y="${y + h/2}"
+            text-anchor="middle" dominant-baseline="middle"
+            font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
+            fill="#FFFFFF" style="letter-spacing:0.10em">
+        ${escSVG(txt)}
+      </text>
+    </g>`;
+}
+
+/* === REAL-GLASS overlay — slightly smaller type, extended subline, solid CTA === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
   const R = 18;
 
-  // ---- lock font sizes (no auto-shrink across images) ----
-  const HEADLINE_FS = 74;     // consistent headline size
-  const SUBLINE_FS  = 46;     // larger for legibility
-  const TRACK_HL = 0.06, TRACK_SUB = 0.03;
-
+  // --- sizing helpers (serif tuned) ---
   const FUDGE = 1.18, MIN_INNER_GAP = 12;
-  const measureSerifWidth = (txt, fs, tracking = 0.06) =>
-    Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
-
-  // size chips without changing font sizes; we’ll squeeze spacing via textLength if needed
-  function dimsFixed({ text, fs, tracking, padXFactor, padYFactor }) {
-    const padX = Math.round(Math.max(26, fs * padXFactor));
-    const padY = Math.round(Math.max(10, fs * padYFactor));
-    const rawTextW = measureSerifWidth(text, fs, tracking);
-    let w = rawTextW + padX * 2 + MIN_INNER_GAP * 2;
-    if (w > maxW) w = maxW;
-    const h = Math.max(48, fs + padY * 2);
-    const x = Math.round((W - w) / 2);
-    return { fs, padX, padY, rawTextW, w, h, x };
+  function measureSerifWidth(txt, fs, tracking = 0.06) {
+    return Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
+  }
+  function settleBlock({ text, fsStart, fsMin, tracking, padXFactor, padYFactor }) {
+    let fs = fsStart, padX, padY, textW, w, h;
+    const recompute = () => {
+      padX = Math.round(Math.max(26, fs * padXFactor));
+      padY = Math.round(Math.max(10, fs * padYFactor));
+      textW = measureSerifWidth(text, fs, tracking);
+      w = textW + padX * 2 + MIN_INNER_GAP * 2;
+      h = Math.max(48, fs + padY * 2);
+    };
+    recompute();
+    while (w > maxW && fs > fsMin) { fs -= 2; recompute(); }
+    const x = Math.round((W - Math.min(w, maxW)) / 2);
+    return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // headline (fixed size)
+  // ↓ font sizes nudged down a tad for the look you asked
   title = String(title || '').toUpperCase();
-  const headline = dimsFixed({
-    text: title, fs: HEADLINE_FS, tracking: TRACK_HL, padXFactor: 0.66, padYFactor: 0.20
+  const headline = settleBlock({
+    text: title, fsStart: 72, fsMin: 34, tracking: 0.06, padXFactor: 0.66, padYFactor: 0.20
   });
   const hlCenterY = 148;
-  const hlRectY   = Math.round(hlCenterY - headline.h / 2);
+  const hlRectY   = Math.round(hlCenterY - headline.h/2);
 
-  // subline (fixed size) + extra-long bar
-  let sub = dimsFixed({
-    text: String(subline || ''), fs: SUBLINE_FS, tracking: TRACK_SUB, padXFactor: 0.62, padYFactor: 0.20
+  // subline stays prominent but a hair smaller than before
+  let sub = settleBlock({
+    text: String(subline || ''), fsStart: 58, fsMin: 28, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.20
   });
-  const SUB_MIN_W = Math.round(maxW * 0.86); // ~86% canvas width
-  if (sub.w < SUB_MIN_W) { sub.w = SUB_MIN_W; sub.x = Math.round((W - sub.w) / 2); }
-
+  const SUB_MIN_W = Math.round(maxW * 0.86);
+  if (sub.w < SUB_MIN_W) {
+    sub.w = SUB_MIN_W;
+    sub.x = Math.round((W - sub.w) / 2);
+  }
   const subRectY   = Math.round(hlRectY + headline.h + 58);
-  const subCenterY = subRectY + Math.round(sub.h / 2);
+  const subCenterY = subRectY + Math.round(sub.h/2);
 
-  // CTA
-  const ctaY = Math.round(subCenterY + SUBLINE_FS + 92);
+  const ctaY = Math.round(subCenterY + sub.fs + 92);
 
   // palette from image
   const midLum = metrics?.midLum ?? 140;
@@ -904,19 +932,17 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // glass tuning
+  // airy chips
   const CHIP_TINT = useDark ? 0.08 : 0.12;
   const BLUR_H = 10, BLUR_S = 9;
-  const RIM_LIGHT = 0.18, RIM_DARK = 0.12;
-
-  // keep font size, squeeze spacing if needed
-  const hlTextLen  = Math.max(32, headline.w - (headline.padX * 2 + MIN_INNER_GAP * 2));
-  const subTextLen = Math.max(32, sub.w       - (sub.padX       * 2 + MIN_INNER_GAP * 2));
+  const RIM_LIGHT = 0.18;
+  const RIM_DARK  = 0.12;
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+
       <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
 
@@ -932,65 +958,74 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.60"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
       </linearGradient>
+
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
     </defs>
 
-    <!-- ultra-light shade across the entire photo for legibility -->
-    <use href="#bg"/>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="#000000" opacity="0.10"/>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
+    <!-- global photo shade for readability -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.10)"/>
 
-    <!-- frame -->
+    <!-- frame + vignette -->
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
       <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="20" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2"/>
       <rect x="22" y="22" width="${W-44}" height="${H-44}" rx="18" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1"/>
     </g>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
     <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
-      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}" fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(12, Math.round(headline.h*0.42))}" rx="${R}" fill="url(#chipHi)" opacity="0.96"/>
-      <rect x="${headline.x+9}" y="${hlRectY+6}" width="${headline.w-18}" height="${Math.max(2, Math.round(headline.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}" fill="url(#spec)" opacity="0.50"/>
+      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
+            fill="${tintRGB}" opacity="${CHIP_TINT}"/>
+      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(12, Math.round(headline.h*0.42))}" rx="${R}"
+            fill="url(#chipHi)" opacity="0.96"/>
+      <rect x="${headline.x+9}" y="${hlRectY+6}" width="${headline.w-18}" height="${Math.max(2, Math.round(headline.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
+            fill="url(#spec)" opacity="0.50"/>
     </g>
-    <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
-    <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}" fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
+    <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
+          fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
+    <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}"
+          fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
-    <!-- Headline text (fixed size; spacing squeezed if needed) -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
-          lengthAdjust="spacingAndGlyphs" textLength="${hlTextLen}"
-          font-family=${JSON.stringify(SERIF)} font-size="${HEADLINE_FS}" font-weight="700"
+          font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
           fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
-    <!-- Subline chip (extended) -->
+    <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}" fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}" fill="url(#chipHi)"/>
-      <rect x="${sub.x+9}" y="${subRectY+6}" width="${sub.w-18}" height="${Math.max(2, Math.round(sub.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}" fill="url(#spec)" opacity="0.50"/>
+      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
+            fill="${tintRGB}" opacity="${CHIP_TINT}"/>
+      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}"
+            fill="url(#chipHi)"/>
+      <rect x="${sub.x+9}" y="${subRectY+6}" width="${sub.w-18}" height="${Math.max(2, Math.round(sub.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
+            fill="url(#spec)" opacity="0.50"/>
     </g>
-    <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}" fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
-    <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}" fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
+    <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
+          fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
+    <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
+          fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
-    <!-- Subline text (fixed size; spacing squeezed if needed) -->
+    <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
-          lengthAdjust="spacingAndGlyphs" textLength="${subTextLen}"
-          font-family=${JSON.stringify(SERIF)} font-size="${SUBLINE_FS}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.15; letter-spacing:0.03em">
+          font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.10; letter-spacing:0.03em">
       ${escSVG(subline)}
     </text>
 
-    ${pillBtn(W/2, ctaY, chosenCTA, 36, `${avg.r},${avg.g},${avg.b}`, 0.36, midLum)}
+    ${btnSolidDark(W/2, ctaY, chosenCTA, 30)}
   </svg>`;
 }
+
 
 
 /* ---------- Subline crafting v3 (coherent 7–9 words from user inputs) ---------- */
