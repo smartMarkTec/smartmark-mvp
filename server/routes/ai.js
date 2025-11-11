@@ -615,6 +615,12 @@ function cleanCTA(c, seed='') {
 
 /* ---------- Coherent subline (7–9 words), GPT + seeded variance ---------- */
 async function getCoherentSubline(answers = {}, category = 'generic', seed = '') {
+  // --- seeded RNG (so img #0 vs #1 and each regen produce different lines) ---
+  function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h,16777619);} return h>>>0; }
+  function _rng(s=''){ let h=_hash32(String(s||'')); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
+  const rnd = _rng(seed || (Date.now()+':subline'));
+
+  // --- text helpers ---
   const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
   const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
   const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
@@ -630,18 +636,20 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
     return words.slice(0, Math.max(1, Math.min(max, words.length)));
   };
+
   function ensure7to9(line='') {
     let words = clean(line).split(' ').filter(Boolean);
     const tails = [['every','day'],['made','simple'],['with','less','hassle'],['for','busy','days'],['built','to','last']];
     while (words.length > 9) words.pop();
     words = trimEnd(words);
     while (words.length < 7) {
-      const t = tails[Math.floor(Math.random()*tails.length)];
+      const t = tails[Math.floor(rnd()*tails.length)];
       for (const w of t) if (words.length < 9) words.push(w);
       words = trimEnd(words);
     }
     return sentenceCase(words.join(' '));
   }
+
   function categoryFallback(cat='generic') {
     const MAP = {
       fashion: [
@@ -661,7 +669,7 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
       generic: ['Made for everyday use with less hassle','Simple design that is built to last']
     };
     const arr = MAP[cat] || MAP.generic;
-    return arr[Math.floor(Math.random()*arr.length)];
+    return arr[Math.floor(rnd()*arr.length)];
   }
 
   // extract light facts
@@ -672,21 +680,21 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
 
   // normalize for fashion to avoid “clothing quality …”
   let productHead = productTerms[0] || '';
-  if ((category||'').toLowerCase() === 'fashion' && !/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) {
+  if ((category||'').toLowerCase() === 'fashion' && !/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear|clothing|fashion/i.test(productHead)) {
     productHead = 'fashion';
   }
   if (productHead === 'quality') productHead = 'products';
 
-  // seed → variant cue (nudges different phrasings each image)
+  // seed → variant cue (deterministic)
   const cues = [
     'use “built for”, everyday tone',
     'use “made for”, utility tone',
     'use “designed for”, comfort tone',
     'use “crafted for”, style tone'
   ];
-  let cue = cues[Math.abs((seed||'').split('').reduce((h,c)=>((h*31 + c.charCodeAt(0))|0), 7)) % cues.length];
+  const cue = cues[Math.floor(rnd()*cues.length)];
 
-  // --- GPT compose (short + cheap; varied by seed) ---
+  // --- GPT compose (varied by seed) ---
   let line = '';
   try {
     const system = [
@@ -706,7 +714,7 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     ].join(' ');
     const r = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.35,          // a little higher for variety
+      temperature: 0.45,          // slight variety
       max_tokens: 24,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
     });
@@ -716,9 +724,10 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
   }
 
   if (!line) line = categoryFallback(category);
-  if ((category||'').toLowerCase() === 'fashion' && /\bfashion\s+modern\b/i.test(line)) {
-    line = 'Modern fashion built for everyday wear';
-  }
+
+  // tiny guardrail for awkward bigrams seen before
+  line = line.replace(/\bfashion modern\b/gi, 'modern fashion');
+
   return ensure7to9(line);
 }
 
@@ -833,7 +842,8 @@ function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 
     </text>
   </g>`;
 }
-/* === REAL-GLASS overlay — legibility tuned (global shade + inner stripes + text halo) === */
+
+/* === REAL-GLASS overlay — match purple reference (ultra-light rims, thin bars) + global backdrop shade === */
 function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const SAFE_PAD = 24;
   const maxW = W - SAFE_PAD * 2;
@@ -848,7 +858,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     let fs = fsStart, padX, padY, textW, w, h;
     const recompute = () => {
       padX = Math.round(Math.max(26, fs * padXFactor));
-      padY = Math.round(Math.max(10, fs * padYFactor));   // thin bars like ref
+      padY = Math.round(Math.max(10, fs * padYFactor));   // thinner bar height
       textW = measureSerifWidth(text, fs, tracking);
       w = textW + padX * 2 + MIN_INNER_GAP * 2;
       h = Math.max(48, fs + padY * 2);
@@ -859,7 +869,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // proportions match the purple screenshot
+  // headline slightly smaller; subline slightly larger, bars thinner (like the purple ref)
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
     text: title, fsStart: 74, fsMin: 34, tracking: 0.06, padXFactor: 0.66, padYFactor: 0.20
@@ -870,6 +880,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const sub = settleBlock({
     text: String(subline || ''), fsStart: 52, fsMin: 26, tracking: 0.03, padXFactor: 0.60, padYFactor: 0.18
   });
+  // spacing matches your purple screenshot (headline → gap → subline)
   const subRectY   = Math.round(hlRectY + headline.h + 58);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
@@ -885,15 +896,15 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // glass + legibility tuning
-  const CHIP_TINT   = useDark ? 0.08 : 0.12;      // keep chips airy
-  const GLOBAL_SHADE= useDark ? 0.20 : 0.12;      // extra backdrop shade on bright images
-  const BLUR_H = 10, BLUR_S = 9;
-  const RIM_LIGHT = 0.18, RIM_DARK = 0.12;
+  // glass tuning to avoid "solid" look
+  const CHIP_TINT = useDark ? 0.08 : 0.12;     // ↓ tint = more see-through
+  const BLUR_H = 10, BLUR_S = 9;               // soft frosting
+  const RIM_LIGHT = 0.18;                      // barely visible edge
+  const RIM_DARK  = 0.12;                      // faint under-rim
 
-  // inner “legibility stripe” heights (centered inside chip)
-  const HL_STRIPE_H = Math.max(20, Math.round(headline.h * 0.56));
-  const SUB_STRIPE_H= Math.max(18, Math.round(sub.h * 0.62));
+  // NEW: global backdrop (over the whole photo, outside chips) for legibility
+  // a touch stronger on very bright images
+  const BACKDROP_OPACITY = useDark ? 0.22 : 0.14;
 
   return `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -906,27 +917,27 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
 
-      <!-- bright upper sheen -->
+      <!-- bright upper sheen + hairline specular like the purple ref -->
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.78"/>
         <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
-      <!-- narrow specular strip -->
       <linearGradient id="spec" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.60"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
       </linearGradient>
 
-      <!-- global vignette kept -->
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
     </defs>
 
-    <!-- global soft shade + frame -->
-    <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${GLOBAL_SHADE})"/>
+    <!-- NEW global backdrop shade (this is the only extra visual layer you asked for) -->
+    <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,${BACKDROP_OPACITY})"/>
+
+    <!-- existing frame/vignette kept the same -->
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
       <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="20" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2"/>
@@ -937,46 +948,31 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
-      <!-- centered legibility stripe (very soft) -->
-      <rect x="${headline.x}" y="${hlRectY + Math.round((headline.h - HL_STRIPE_H)/2)}"
-            width="${headline.w}" height="${HL_STRIPE_H}" rx="${Math.max(10, Math.round(R*0.8))}"
-            fill="#000000" opacity="${useDark ? 0.26 : 0.18}"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(12, Math.round(headline.h*0.42))}" rx="${R}"
             fill="url(#chipHi)" opacity="0.96"/>
+      <!-- hairline specular strip -->
       <rect x="${headline.x+9}" y="${hlRectY+6}" width="${headline.w-18}" height="${Math.max(2, Math.round(headline.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
             fill="url(#spec)" opacity="0.50"/>
     </g>
-    <!-- hairline rims -->
+    <!-- ultra-light rim (nearly invisible) -->
     <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
           fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
     <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}"
           fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
-    <!-- Headline text: halo (stroke only) + normal -->
+    <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="none"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:2.2; stroke-linejoin:round; opacity:0.35; letter-spacing:0.10em">
-      ${escSVG(title)}
-    </text>
-    <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
+          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
       ${escSVG(title)}
     </text>
 
     <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
-      <!-- centered legibility stripe -->
-      <rect x="${sub.x}" y="${subRectY + Math.round((sub.h - SUB_STRIPE_H)/2)}"
-            width="${sub.w}" height="${SUB_STRIPE_H}" rx="${Math.max(10, Math.round(R*0.8))}"
-            fill="#000000" opacity="${useDark ? 0.24 : 0.16}"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}"
@@ -989,14 +985,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
           fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
-    <!-- Subline text: halo + normal -->
-    <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
-          fill="none"
-          style="paint-order: stroke; stroke:${textOutline}; stroke-width:2.0; stroke-linejoin:round; opacity:0.32; letter-spacing:0.02em">
-      ${escSVG(subline)}
-    </text>
+    <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
