@@ -613,7 +613,7 @@ function cleanCTA(c, seed='') {
   return pickCtaVariant(seed);
 }
 
-/* ---------- Coherent subline (7–9 words), GPT + seeded variance ---------- */
+/* ---------- Coherent subline (7–9 words), GPT + seeded variance + smart tail cleanup ---------- */
 async function getCoherentSubline(answers = {}, category = 'generic', seed = '') {
   // --- seeded RNG (so img #0 vs #1 and each regen produce different lines) ---
   function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h,16777619);} return h>>>0; }
@@ -637,13 +637,46 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     return words.slice(0, Math.max(1, Math.min(max, words.length)));
   };
 
+  // --- FINAL POLISH: remove awkward terminal fillers (“daily/always/today/now/tonight” etc.) ---
+  function polishTail(line='') {
+    let s = clean(line);
+
+    // collapse duplicate words (e.g., "fashion fashion")
+    s = s.replace(/\b(\w+)\s+\1\b/g, '$1');
+
+    // remove filler adverbs only if they are at the end
+    s = s.replace(/\b(daily|always|now|today|tonight)\s*$/i, '');
+
+    // fix verb + daily endings (wear/use/shop/enjoy/appreciate/love + daily)
+    s = s.replace(/\b(wear|use|shop|enjoy|appreciate|love|choose)\s+daily\b$/i, '$1');
+
+    // drop lone "everyday" at the very end (keeps “everyday wear” earlier)
+    s = s.replace(/\beveryday\s*$/i, '');
+
+    // tidy “fashion daily/always” → “fashion”
+    s = s.replace(/\bfashion\s+(daily|always)\b$/i, 'fashion');
+
+    // clean stray joiners at end
+    s = s.replace(/\b(and|with|for|to|of|in|on|at|by)\s*$/i, '');
+
+    // consolidate spaces
+    s = s.replace(/\s+/g, ' ').trim();
+
+    return s;
+  }
+
+  // keep copy length tight without adding “every day/daily”
   function ensure7to9(line='') {
     let words = clean(line).split(' ').filter(Boolean);
-    const tails = [['every','day'],['made','simple'],['with','less','hassle'],['for','busy','days'],['built','to','last']];
+    const safeTails = [
+      ['built','to','last'],
+      ['made','simple'],
+      ['for','busy','days'] // neutral, not “daily/every day”
+    ];
     while (words.length > 9) words.pop();
     words = trimEnd(words);
     while (words.length < 7) {
-      const t = tails[Math.floor(rnd()*tails.length)];
+      const t = safeTails[Math.floor(rnd()*safeTails.length)];
       for (const w of t) if (words.length < 9) words.push(w);
       words = trimEnd(words);
     }
@@ -701,6 +734,7 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
       "You are SmartMark's subline composer.",
       "Write ONE ad subline of 7–9 words, sentence case, plain language.",
       "Must be coherent English. No buzzwords. No domains.",
+      "Avoid ending with fillers like: daily, always, now, today, tonight.",
       "Do NOT end with: to, for, with, of, in, on, at, by."
     ].join(' ');
     const user = [
@@ -714,7 +748,7 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     ].join(' ');
     const r = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.45,          // slight variety
+      temperature: 0.40,          // slight variety
       max_tokens: 24,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
     });
@@ -728,7 +762,17 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
   // tiny guardrail for awkward bigrams seen before
   line = line.replace(/\bfashion modern\b/gi, 'modern fashion');
 
-  return ensure7to9(line);
+  // polish away awkward endings like “… fashion daily”
+  line = polishTail(line);
+
+  // guard: if polishing made it too short, pad without “daily/every day”
+  const wc = clean(line).split(' ').filter(Boolean).length;
+  if (wc < 7) line = ensure7to9(line);
+
+  // final polish (in case padding introduced a joiner)
+  line = polishTail(line);
+
+  return sentenceCase(line);
 }
 
 
