@@ -1,8 +1,11 @@
 'use strict';
 /**
- * SmartMark AI routes — static ads with glassmorphism chips
- * Robust SVG for Sharp (no masks/clipPaths/<use>), guaranteed composition,
- * and relevant no-key image fallback for categories like COMICS/BOOKS.
+ * SmartMark AI routes — static ads with glassmorphism chips + video gen
+ * - Video ads: 3–4 stock clips, crossfades, AI voiceover, optional BGM
+ * - Word-by-word subtitle pop (ASS karaoke-style), timed to TTS duration
+ * - Ensures total play ≥ (voice duration + 2s)
+ * - Returns TWO video variants per request
+ * - Image pipeline left intact
  */
 
 const express = require('express');
@@ -87,12 +90,16 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
+const child_process = require('child_process');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
 const db = require('../db');
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
+const BACKGROUND_MUSIC_URL = process.env.BACKGROUND_MUSIC_URL || ''; // optional
+const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
+const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
 
 /* ---------------------- Disk / tmp housekeeping --------------------- */
 const GEN_DIR = '/tmp/generated';
@@ -196,6 +203,7 @@ router.get('/media/:file', async (req, res) => {
       ext === '.png' ? 'image/png' :
       ext === '.webp' ? 'image/webp' :
       ext === '.srt' ? 'text/plain; charset=utf-8' :
+      ext === '.ass' ? 'text/plain; charset=utf-8' :
       'application/octet-stream';
 
     res.setHeader('Content-Type', type);
@@ -585,14 +593,13 @@ function cleanHeadline(h) {
 }
 const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
 
-/* ---------- CTA normalization + variants (single source of truth) ---------- */
+/* ---------- CTA normalization + variants ---------- */
 const CTA_VARIANTS = [
   'LEARN MORE','SEE MORE','VIEW MORE','EXPLORE','DISCOVER',
   'SHOP NOW','BUY NOW','GET STARTED','TRY IT','SEE DETAILS',
   'SEE COLLECTION','BROWSE NOW','CHECK IT OUT','VISIT US','TAKE A LOOK','CHECK US OUT'
 ];
 const ALLOWED_CTAS = new Set(CTA_VARIANTS);
-
 function normalizeCTA(s='') {
   return String(s)
     .toUpperCase()
@@ -613,14 +620,12 @@ function cleanCTA(c, seed='') {
   return pickCtaVariant(seed);
 }
 
-/* ---------- Coherent subline (7–9 words), GPT + seeded variance + smart tail cleanup ---------- */
+/* ---------- Coherent subline (7–9 words) via GPT, with fallbacks ---------- */
 async function getCoherentSubline(answers = {}, category = 'generic', seed = '') {
-  // --- seeded RNG (so img #0 vs #1 and each regen produce different lines) ---
   function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h,16777619);} return h>>>0; }
   function _rng(s=''){ let h=_hash32(String(s||'')); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
   const rnd = _rng(seed || (Date.now()+':subline'));
 
-  // --- text helpers ---
   const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
   const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
   const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
@@ -637,42 +642,20 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     return words.slice(0, Math.max(1, Math.min(max, words.length)));
   };
 
-  // --- FINAL POLISH: remove awkward terminal fillers (“daily/always/today/now/tonight” etc.) ---
   function polishTail(line='') {
     let s = clean(line);
-
-    // collapse duplicate words (e.g., "fashion fashion")
     s = s.replace(/\b(\w+)\s+\1\b/g, '$1');
-
-    // remove filler adverbs only if they are at the end
     s = s.replace(/\b(daily|always|now|today|tonight)\s*$/i, '');
-
-    // fix verb + daily endings (wear/use/shop/enjoy/appreciate/love + daily)
     s = s.replace(/\b(wear|use|shop|enjoy|appreciate|love|choose)\s+daily\b$/i, '$1');
-
-    // drop lone "everyday" at the very end (keeps “everyday wear” earlier)
     s = s.replace(/\beveryday\s*$/i, '');
-
-    // tidy “fashion daily/always” → “fashion”
     s = s.replace(/\bfashion\s+(daily|always)\b$/i, 'fashion');
-
-    // clean stray joiners at end
     s = s.replace(/\b(and|with|for|to|of|in|on|at|by)\s*$/i, '');
-
-    // consolidate spaces
     s = s.replace(/\s+/g, ' ').trim();
-
     return s;
   }
-
-  // keep copy length tight without adding “every day/daily”
   function ensure7to9(line='') {
     let words = clean(line).split(' ').filter(Boolean);
-    const safeTails = [
-      ['built','to','last'],
-      ['made','simple'],
-      ['for','busy','days'] // neutral, not “daily/every day”
-    ];
+    const safeTails = [['built','to','last'],['made','simple'],['for','busy','days']];
     while (words.length > 9) words.pop();
     words = trimEnd(words);
     while (words.length < 7) {
@@ -683,51 +666,34 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     return sentenceCase(words.join(' '));
   }
 
-  function categoryFallback(cat='generic') {
-    const MAP = {
-      fashion: [
-        'Modern fashion built for everyday wear',
-        'Natural materials for everyday wear made simple',
-        'Simple pieces built to last every day'
-      ],
-      books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
-      cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
-      hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
-      food: ['Great taste with less hassle every day','Fresh flavor made easy for busy nights'],
-      pets: ['Everyday care for happy pets made simple','Simple treats your pet will love daily'],
-      electronics: ['Reliable tech for everyday use and value','Simple design with solid performance daily'],
-      home: ['Upgrade your space the simple practical way','Clean looks with everyday useful function'],
-      coffee: ['Balanced flavor for better breaks each day','Smooth finish in every cup every day'],
-      fitness: ['Made for daily training sessions that stick','Durable gear built for consistent workouts'],
-      generic: ['Made for everyday use with less hassle','Simple design that is built to last']
-    };
-    const arr = MAP[cat] || MAP.generic;
-    return arr[Math.floor(rnd()*arr.length)];
-  }
+  const MAP = {
+    fashion: ['Modern fashion built for everyday wear','Natural materials for everyday wear made simple','Simple pieces built to last every day'],
+    books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
+    cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
+    hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
+    food: ['Great taste with less hassle every day','Fresh flavor made easy for busy nights'],
+    pets: ['Everyday care for happy pets made simple','Simple treats your pet will love daily'],
+    electronics: ['Reliable tech for everyday use and value','Simple design with solid performance daily'],
+    home: ['Upgrade your space the simple practical way','Clean looks with everyday useful function'],
+    coffee: ['Balanced flavor for better breaks each day','Smooth finish in every cup every day'],
+    fitness: ['Made for daily training sessions that stick','Durable gear built for consistent workouts'],
+    generic: ['Made for everyday use with less hassle','Simple design that is built to last']
+  };
 
-  // extract light facts
   const productTerms  = takeTerms(answers.productType || answers.topic || answers.title || '');
   const benefitTerms  = takeTerms(answers.mainBenefit || answers.description || '');
   const audienceTerms = takeTerms(answers.audience || answers.target || answers.customer || '', 2);
   const locationTerm  = takeTerms(answers.location || answers.city || answers.region || '', 1)[0] || '';
 
-  // normalize for fashion to avoid “clothing quality …”
   let productHead = productTerms[0] || '';
   if ((category||'').toLowerCase() === 'fashion' && !/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear|clothing|fashion/i.test(productHead)) {
     productHead = 'fashion';
   }
   if (productHead === 'quality') productHead = 'products';
 
-  // seed → variant cue (deterministic)
-  const cues = [
-    'use “built for”, everyday tone',
-    'use “made for”, utility tone',
-    'use “designed for”, comfort tone',
-    'use “crafted for”, style tone'
-  ];
+  const cues = ['use “built for”, everyday tone','use “made for”, utility tone','use “designed for”, comfort tone','use “crafted for”, style tone'];
   const cue = cues[Math.floor(rnd()*cues.length)];
 
-  // --- GPT compose (varied by seed) ---
   let line = '';
   try {
     const system = [
@@ -748,36 +714,28 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
     ].join(' ');
     const r = await openai.chat.completions.create({
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.40,          // slight variety
+      temperature: 0.40,
       max_tokens: 24,
       messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
     });
     line = (r.choices?.[0]?.message?.content || '').trim().replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g,'');
-  } catch (e) {
-    console.warn('getCoherentSubline GPT error:', e?.message);
+  } catch {}
+
+  if (!line) {
+    const arr = MAP[category] || MAP.generic;
+    line = arr[Math.floor(rnd()*arr.length)];
   }
 
-  if (!line) line = categoryFallback(category);
-
-  // tiny guardrail for awkward bigrams seen before
   line = line.replace(/\bfashion modern\b/gi, 'modern fashion');
-
-  // polish away awkward endings like “… fashion daily”
   line = polishTail(line);
-
-  // guard: if polishing made it too short, pad without “daily/every day”
   const wc = clean(line).split(' ').filter(Boolean).length;
   if (wc < 7) line = ensure7to9(line);
-
-  // final polish (in case padding introduced a joiner)
   line = polishTail(line);
-
   return sentenceCase(line);
 }
 
-
 /* ---------- required helpers for subline + SVG ---------- */
-function escSVG(s='') {
+function escSVG2(s='') {
   return String(s)
     .replace(/&/g,'&amp;')
     .replace(/</g,'&lt;')
@@ -785,12 +743,10 @@ function escSVG(s='') {
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
-// approximate serif width (for fitting)
-function estWidthSerif(text, fs, letterSpacing = 0) {
+function estWidthSerif2(text, fs, letterSpacing = 0) {
   const t = String(text || ''), n = t.length || 1;
   return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing * fs;
 }
-// seeded RNG + picker (craftSubline uses these)
 function _hash32(str = '') {
   let h = 2166136261 >>> 0;
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
@@ -822,73 +778,28 @@ function pillBtn(cx, cy, label, fs = 34, _glowRGB = '0,0,0', _glowOpacity = 0.28
 
   return `
     <g>
-      <!-- soft outer glow to keep it readable on bright areas -->
       <rect x="${x-8}" y="${y-8}" width="${estW+16}" height="${estH+16}" rx="${r+8}" fill="rgb(0,0,0)" opacity="0.25"/>
-      <!-- main button -->
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="#000000" opacity="0.92"/>
-      <!-- subtle top highlight -->
       <linearGradient id="btnHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.18"/>
         <stop offset="65%"  stop-color="#FFFFFF" stop-opacity="0.00"/>
       </linearGradient>
       <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(12, Math.round(estH*0.42))}" rx="${r}" fill="url(#btnHi)"/>
-      <!-- hairline rims -->
       <rect x="${x+0.5}" y="${y+0.5}" width="${estW-1}" height="${estH-1}" rx="${r-0.5}" fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="1"/>
       <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}" fill="none" stroke="rgba(0,0,0,0.55)" stroke-width="1" opacity="0.55"/>
       <text x="${cx}" y="${y + estH/2}"
             text-anchor="middle" dominant-baseline="middle"
-            font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
+            font-family='Times New Roman, Times, serif' font-size="${fs}" font-weight="700"
             fill="#FFFFFF"
             style="paint-order: stroke; stroke:#000; stroke-width:0.8; letter-spacing:0.10em">
-        ${escSVG(txt)}
+        ${escSVG2(txt)}
       </text>
     </g>`;
 }
 
-
 /* === GLASS (real blur) + serif text — matches your screenshot === */
 
 const SERIF = `'Times New Roman', Times, serif`;
-
-/* CTA pill (kept subtle; unchanged API) */
-function pillBtn(cx, cy, label, fs = 34, glowRGB = '255,255,255', glowOpacity = 0.30, midLum = 140) {
-  const txt = normalizeCTA(label || 'LEARN MORE');
-  const padX = 32;
-  const estTextW = Math.round(txt.length * fs * 0.60);
-  const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
-  const estH = Math.max(56, fs + 22);
-  const x = Math.round(cx - estW / 2), y = Math.round(cy - estH / 2), r = Math.round(estH / 2);
-
-  const useDark  = midLum >= 188;
-  const textFill = useDark ? '#111' : '#fff';
-  const outline  = useDark ? '#fff' : '#000';
-
-  return `
-  <g>
-    <rect x="${x-8}" y="${y-8}" width="${estW+16}" height="${estH+16}" rx="${r+8}"
-          fill="rgb(${glowRGB})" opacity="${glowOpacity*0.9}"/>
-    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
-          fill="rgba(255,255,255,0.10)"/>
-    <linearGradient id="pillHi" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.38"/>
-      <stop offset="60%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
-      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
-    </linearGradient>
-    <rect x="${x}" y="${y}" width="${estW}" height="${Math.max(12, Math.round(estH*0.45))}" rx="${r}"
-          fill="url(#pillHi)"/>
-    <rect x="${x+0.5}" y="${y+0.5}" width="${estW-1}" height="${estH-1}" rx="${r-0.5}"
-          fill="none" stroke="rgba(255,255,255,0.38)" stroke-width="1"/>
-    <rect x="${x}" y="${y}" width="${estW}" height="${estH}" rx="${r}"
-          fill="none" stroke="rgba(0,0,0,0.30)" stroke-width="1" opacity="0.45"/>
-    <text x="${cx}" y="${y + estH/2}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
-          fill="${textFill}"
-          style="paint-order: stroke; stroke:${outline}; stroke-width:1.15; letter-spacing:0.10em">
-      ${escSVG(txt)}
-    </text>
-  </g>`;
-}
 
 /* ---------- SOLID BLACK CTA (modern rounded-square) ---------- */
 function btnSolidDark(cx, cy, label, fs = 32) {
@@ -897,24 +808,17 @@ function btnSolidDark(cx, cy, label, fs = 32) {
   const estTextW = Math.round(txt.length * fs * 0.60);
   const w = Math.max(200, Math.min(estTextW + padX * 2, 980));
   const h = Math.max(56, fs + 22);
-  const r = Math.min(14, Math.round(h * 0.22)); // modern soft-rectangle radius
+  const r = Math.min(14, Math.round(h * 0.22));
   const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2);
 
   return `
     <g>
-      <!-- subtle outer glow for legibility on busy photos -->
-      <rect x="${x-2}" y="${y-2}" width="${w+4}" height="${h+4}" rx="${r+2}"
-            fill="#000000" opacity="0.30"/>
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}"
-            fill="#000000" opacity="0.92" />
-      <rect x="${x+0.5}" y="${y+0.5}" width="${w-1}" height="${h-1}" rx="${r-1}"
-            fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1" />
-      <text x="${cx}" y="${y + h/2}"
-            text-anchor="middle" dominant-baseline="middle"
+      <rect x="${x-2}" y="${y-2}" width="${w+4}" height="${h+4}" rx="${r+2}" fill="#000000" opacity="0.30"/>
+      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="#000000" opacity="0.92" />
+      <rect x="${x+0.5}" y="${y+0.5}" width="${w-1}" height="${h-1}" rx="${r-1}" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1" />
+      <text x="${cx}" y="${y + h/2}" text-anchor="middle" dominant-baseline="middle"
             font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
-            fill="#FFFFFF" style="letter-spacing:0.10em">
-        ${escSVG(txt)}
-      </text>
+            fill="#FFFFFF" style="letter-spacing:0.10em">${escSVG2(txt)}</text>
     </g>`;
 }
 
@@ -924,7 +828,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const maxW = W - SAFE_PAD * 2;
   const R = 18;
 
-  // --- sizing helpers (serif tuned) ---
   const FUDGE = 1.18, MIN_INNER_GAP = 12;
   function measureSerifWidth(txt, fs, tracking = 0.06) {
     return Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
@@ -944,7 +847,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
   }
 
-  // ↓ font sizes nudged down a tad for the look you asked
   title = String(title || '').toUpperCase();
   const headline = settleBlock({
     text: title, fsStart: 72, fsMin: 34, tracking: 0.06, padXFactor: 0.66, padYFactor: 0.20
@@ -952,21 +854,16 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   const hlCenterY = 148;
   const hlRectY   = Math.round(hlCenterY - headline.h/2);
 
-  // subline stays prominent but a hair smaller than before
   let sub = settleBlock({
     text: String(subline || ''), fsStart: 58, fsMin: 28, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.20
   });
   const SUB_MIN_W = Math.round(maxW * 0.86);
-  if (sub.w < SUB_MIN_W) {
-    sub.w = SUB_MIN_W;
-    sub.x = Math.round((W - sub.w) / 2);
-  }
+  if (sub.w < SUB_MIN_W) { sub.w = SUB_MIN_W; sub.x = Math.round((W - sub.w) / 2); }
   const subRectY   = Math.round(hlRectY + headline.h + 58);
   const subCenterY = subRectY + Math.round(sub.h/2);
 
   const ctaY = Math.round(subCenterY + sub.fs + 92);
 
-  // palette from image
   const midLum = metrics?.midLum ?? 140;
   const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
   const useDark     = midLum >= 188;
@@ -976,7 +873,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
   const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
 
-  // airy chips
   const CHIP_TINT = useDark ? 0.08 : 0.12;
   const BLUR_H = 10, BLUR_S = 9;
   const RIM_LIGHT = 0.18;
@@ -986,13 +882,10 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-
       <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
       <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
-
       <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
       <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
-
       <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
         <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.78"/>
         <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
@@ -1002,17 +895,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
         <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.60"/>
         <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
       </linearGradient>
-
       <radialGradient id="vig" cx="50%" cy="50%" r="70%">
         <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
         <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
       </radialGradient>
     </defs>
 
-    <!-- global photo shade for readability -->
     <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.10)"/>
 
-    <!-- frame + vignette -->
     <g pointer-events="none">
       <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
       <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="20" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2"/>
@@ -1020,7 +910,6 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- Headline chip -->
     <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
@@ -1035,21 +924,18 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}"
           fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
-    <!-- Headline text -->
     <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.30; letter-spacing:0.10em">
-      ${escSVG(title)}
+          fill="${useDark ? '#111' : '#fff'}" style="paint-order: stroke; stroke:${useDark ? '#fff' : '#000'}; stroke-width:1.30; letter-spacing:0.10em">
+      ${escSVG2(title)}
     </text>
 
-    <!-- Subline chip -->
     <g clip-path="url(#clipSub)">
       <use href="#bg" filter="url(#blurSub)"/>
       <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}"
-            fill="url(#chipHi)"/>
+      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}" fill="url(#chipHi)"/>
       <rect x="${sub.x+9}" y="${subRectY+6}" width="${sub.w-18}" height="${Math.max(2, Math.round(sub.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
             fill="url(#spec)" opacity="0.50"/>
     </g>
@@ -1058,47 +944,32 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
           fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
 
-    <!-- Subline text -->
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
-          fill="${textFill}" style="paint-order: stroke; stroke:${textOutline}; stroke-width:1.10; letter-spacing:0.03em">
-      ${escSVG(subline)}
+          fill="${useDark ? '#111' : '#fff'}" style="paint-order: stroke; stroke:${useDark ? '#fff' : '#000'}; stroke-width:1.10; letter-spacing:0.03em">
+      ${escSVG2(subline)}
     </text>
 
-    ${btnSolidDark(W/2, ctaY, chosenCTA, 30)}
+    ${btnSolidDark(W/2, Math.round(subCenterY + sub.fs + 92), cleanCTA('LEARN MORE'), 30)}
   </svg>`;
 }
 
-
-
-/* ---------- Subline crafting v3 (coherent 7–9 words from user inputs) ---------- */
+/* ---------- Local craftSubline (fallback) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
-  // deterministic RNG
   function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
-  function _rng(s=''){ let h=_hash32(s); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
+  function _rng(s=''){ let h=_hash32(s); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),61|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
   const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}|${answers.description||''}`);
-
-  // helpers
   const sentenceCase = (s='') => { s=String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
-  const clean = (s='') => String(s)
-    .replace(/https?:\/\/\S+/g,' ')
-    .replace(/[^\w\s'-]/g,' ')
-    .replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate|our|we)\b/gi,' ')
-    .replace(/\s+/g,' ')
-    .trim()
-    .toLowerCase();
-
+  const clean = (s='') => String(s).replace(/https?:\/\/\S+/g,' ').replace(/[^\w\s'-]/g,' ').replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate|our|we)\b/gi,' ').replace(/\s+/g,' ').trim().toLowerCase();
   const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
   const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
   const trimEnd = (arr)=>{ while(arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
-
   const takeTerms = (src='', max=3) => {
     const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
     return words.slice(0, Math.max(1, Math.min(max, words.length)));
   };
 
-  // extract structured bits
   const productTerms = takeTerms(answers.productType || answers.topic || answers.title || '');
   const benefitTerms = takeTerms(answers.mainBenefit || answers.description || '');
   const audienceTerms= takeTerms(answers.audience || answers.target || answers.customer || '', 2);
@@ -1107,45 +978,29 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
   const timeClaimRaw = String(answers.timeClaim || answers.promise || '').match(/\b\d+\s*(minutes?|hours?|days?)\b/i);
   const timeClaim    = timeClaimRaw ? timeClaimRaw[0].toLowerCase() : '';
 
-  // light domain hints (materials for fashion)
-  const txtBlob = `${answers.description||''} ${answers.mainBenefit||''}`.toLowerCase();
-  const materials = (txtBlob.match(/\b(cotton|linen|wool|leather|silk|denim|bamboo|hemp|cashmere)\b/g) || []);
-  const material  = materials[0] || '';
-
-  // normalize product head (avoid "clothing quality" style glitches)
   let productHead = productTerms[0] || '';
   if (category === 'fashion') {
-    if (/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) productHead = productHead;
-    else productHead = 'clothing';
+    if (!/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) productHead = 'clothing';
   }
   if (productHead === 'quality') productHead = 'products';
-
   const benefitPhrase = benefitTerms.join(' ').replace(/\bquality\b/gi,'').trim();
   const audiencePhrase= audienceTerms.join(' ').trim();
   const diffPhrase    = diffTerms.join(' ').trim();
 
-  // candidate templates
   const T = [
     () => (benefitPhrase && audiencePhrase) && `${benefitPhrase} for ${audiencePhrase} every day`,
     () => (benefitPhrase && locationTerm)  && `${benefitPhrase} for ${locationTerm} locals daily`,
     () => (productHead && benefitPhrase)   && `${benefitPhrase} built into ${productHead} essentials`,
-    () => (productHead && material)        && `${material} ${productHead} for everyday wear`,
     () => (productHead && diffPhrase)      && `${productHead} with ${diffPhrase} for daily use`,
     () => (productHead && timeClaim)       && `${productHead} set up in just ${timeClaim}`,
     () =>  benefitPhrase                    && `${benefitPhrase} made simple for everyday use`,
     () =>  productHead                      && `${productHead} made simple for everyday wear`,
   ];
-
   let line = '';
   for (const f of T) { const c = f(); if (c && /\S/.test(c)) { line = c; break; } }
-
   if (!line) {
     const FALL = {
-      fashion: [
-        'Natural materials for everyday wear made simple',
-        'Simple pieces built to last every day',
-        'Comfortable fits with clean easy style'
-      ],
+      fashion: ['Natural materials for everyday wear made simple','Simple pieces built to last every day','Comfortable fits with clean easy style'],
       books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
       cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
       hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
@@ -1159,16 +1014,8 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
     }[category] || ['Made for everyday use with less hassle'];
     line = FALL[Math.floor(rnd() * FALL.length)];
   }
-
-  // enforce 7–9 words
   let words = clean(line).split(' ').filter(Boolean);
-  const tails = [
-    ['every','day'],
-    ['made','simple'],
-    ['with','less','hassle'],
-    ['for','busy','days'],
-    ['built','to','last']
-  ];
+  const tails = [['every','day'],['made','simple'],['with','less','hassle'],['for','busy','days'],['built','to','last']];
   while (words.length > 9) words.pop();
   words = trimEnd(words);
   while (words.length < 7) {
@@ -1176,10 +1023,8 @@ function craftSubline(answers = {}, category = 'generic', seed = '') {
     for (const w of tail) if (words.length < 9) words.push(w);
     words = trimEnd(words);
   }
-
   return sentenceCase(words.join(' '));
 }
-
 
 /* ---------- Placement analysis ---------- */
 async function analyzeImageForPlacement(imgBuf) {
@@ -1220,21 +1065,15 @@ async function buildOverlayImage({
   let cta = cleanCTA(ctaHint, titleSeed);
   if (!cta.trim()) cta = 'LEARN MORE';
 
-  // Prefer GPT-coherent subline; fallback to local craftSubline
-let subline = 'Made for everyday use with less hassle';
-try {
-  subline = await getCoherentSubline(answers, category);
-} catch (e) {
-  console.warn('getCoherentSubline failed, using local craftSubline:', e?.message);
-  try { subline = craftSubline(answers, category, seed) || subline; } catch {}
-}
+  let subline = 'Made for everyday use with less hassle';
+  try { subline = await getCoherentSubline(answers, category); }
+  catch (e) { try { subline = craftSubline(answers, category, seed) || subline; } catch {} }
 
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-const svg = Buffer.from(
-  svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
-  'utf8'
-);
-
+  const svg = Buffer.from(
+    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
+    'utf8'
+  );
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
@@ -1250,9 +1089,336 @@ router.get('/test', (_req, res) => {
   res.status(200).json({ ok: true, t: Date.now() });
 });
 
-/* -------------------- Video endpoint placeholder -------------------- */
-router.post('/generate-video-ad', heavyLimiter, async (_req, res) => {
-  res.status(200).json({ ok: true, disabled: true, message: 'Video generation is disabled in this build.' });
+/* ============================ VIDEO GENERATION ============================ */
+/* ----- Local helpers (ffmpeg, downloads, timings, ASS subtitles) ----- */
+function execFile(cmd, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const p = child_process.spawn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+    let out = '', err = '';
+    p.stdout.on('data', (d) => { out += d.toString(); });
+    p.stderr.on('data', (d) => { err += d.toString(); });
+    p.on('close', (code) => {
+      if (code === 0) resolve({ out, err });
+      else reject(new Error(`Command failed: ${cmd} ${args.join(' ')}\n${err || out}`));
+    });
+  });
+}
+async function ffprobeDuration(file) {
+  const args = ['-v','error','-show_entries','format=duration','-of','default=noprint_wrappers=1:nokey=1',file];
+  const { out } = await execFile('ffprobe', args);
+  const sec = parseFloat((out||'').trim());
+  return isFinite(sec) ? sec : 0;
+}
+async function downloadToTmp(url, ext) {
+  const id = uuidv4();
+  const out = path.join(ensureGeneratedDir(), `${id}${ext}`);
+  const resp = await ax.get(url, { responseType: 'stream', timeout: 20000 });
+  const ws = fs.createWriteStream(out);
+  await new Promise((resolve, reject) => {
+    resp.data.pipe(ws); ws.on('finish', resolve); ws.on('error', reject);
+  });
+  return out;
+}
+function tokenizeScriptWords(script) {
+  const clean = String(script||'').replace(/\s+/g,' ').trim();
+  const parts = clean.split(/(\s+)/).filter(Boolean);
+  const words = [];
+  for (const p of parts) {
+    if (/\s+/.test(p)) continue;
+    words.push(p);
+  }
+  return words;
+}
+function wordWeight(w) {
+  const t = w.toLowerCase();
+  let weight = 1.0 + Math.min(0.8, Math.max(0, (w.length - 4) * 0.08));
+  if (/[.,!?]$/.test(w)) weight += 0.35;
+  if (/[;:–—-]$/.test(w)) weight += 0.20;
+  if (/^and$|^but$|^so$/.test(t)) weight += 0.05;
+  return weight;
+}
+function buildAssKaraoke(script, audioDurationSec, videoW=1280, videoH=720) {
+  const words = tokenizeScriptWords(script);
+  if (!words.length) return '';
+  // allocate durations proportionally to weights, target full audio duration minus small lead-in/out
+  const weights = words.map(wordWeight);
+  const totalWeight = weights.reduce((a,b)=>a+b,0) || 1;
+  const lead = 0.15, tail = 0.25;
+  const usable = Math.max(0.8, audioDurationSec - (lead + tail));
+  const perWord = weights.map(w => (w/totalWeight)*usable);
+
+  // Build ASS with one line using incremental {\k} tags (centisecond units: 1/100 sec)
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'PlayResX: '+videoW,
+    'PlayResY: '+videoH,
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, '+
+    'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, '+
+    'Alignment, MarginL, MarginR, MarginV, Encoding',
+    // Glassy, bold serif with soft shadow
+    'Style: Sub,Times New Roman,40,&H00FFFFFF,&H00FFFFFF,&H00101010,&H80101010,1,0,0,0,100,100,0,0,1,2.6,1.2,2,64,64,36,1',
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
+  ];
+  let cur = lead;
+  const kTags = [];
+  for (let i=0;i<words.length;i++) {
+    const dur = perWord[i];
+    const centi = Math.max(1, Math.round(dur*100));
+    kTags.push(`{\\k${centi}}${words[i]}`);
+    cur += dur;
+  }
+  const total = cur + tail;
+  function fmt(t) {
+    const hh = Math.floor(t/3600).toString().padStart(1,'0');
+    const mm = Math.floor((t%3600)/60).toString().padStart(2,'0');
+    const ss = Math.floor(t%60).toString().padStart(2,'0');
+    const cs = Math.round((t - Math.floor(t))*100).toString().padStart(2,'0');
+    return `${hh}:${mm}:${ss}.${cs}`;
+  }
+  const start = fmt(0);
+  const end   = fmt(total);
+  const dialogue = `Dialogue: 0,${start},${end},Sub,,0000,0000,0000,,{\\an2\\bord2\\shad1\\1c&HFFFFFF&\\3c&H101010&\\4c&H101010&\\fsp1\\pos(${Math.floor(videoW/2)},${videoH-64})}${kTags.join(' ')}`;
+  return header.concat(dialogue).join('\n') + '\n';
+}
+
+/* ----- Stock video selection (Pexels) ----- */
+async function fetchPexelsVideos(keyword, want = 4) {
+  if (!PEXELS_API_KEY) return [];
+  try {
+    const r = await ax.get('https://api.pexels.com/videos/search', {
+      headers: { Authorization: PEXELS_API_KEY },
+      params:  { query: keyword || 'product', per_page: 10, orientation: 'landscape' },
+      timeout: 12000,
+    });
+    const vids = r.data?.videos || [];
+    const pick = [];
+    for (let i=0;i<vids.length;i++) {
+      const v = vids[i];
+      const file720 = (v.video_files || []).find(f => f.height === 720 && f.quality === 'hd') ||
+                      (v.video_files || []).find(f => f.height >= 720) ||
+                      (v.video_files || []).find(f => f.link);
+      if (file720) pick.push({ url: file720.link, id: v.id });
+      if (pick.length >= want) break;
+    }
+    return pick;
+  } catch { return []; }
+}
+
+/* ----- TTS via OpenAI ----- */
+async function synthTTS(script) {
+  const id = uuidv4();
+  const out = path.join(ensureGeneratedDir(), `${id}.mp3`);
+  const resp = await openai.audio.speech.create({
+    model: OPENAI_TTS_MODEL,
+    voice: OPENAI_TTS_VOICE,
+    input: script,
+    format: 'mp3'
+  });
+  const buf = Buffer.from(await resp.arrayBuffer());
+  fs.writeFileSync(out, buf);
+  return out;
+}
+
+/* ----- Compose video with crossfades, VO + bgm, burn-in subtitles ----- */
+async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17, tailPadSec = 2, musicPath = '' }) {
+  // Prepare voice
+  const voicePath = await synthTTS(script);
+  const voiceDur  = await ffprobeDuration(voicePath);
+  const minTotal  = Math.max(targetMinSec, Math.ceil(voiceDur) + tailPadSec);
+
+  // Download clips (3–4)
+  const needClips = Math.min(Math.max(3, clips.length), 4);
+  const chosen = [];
+  for (let i=0;i<needClips;i++) {
+    const c = clips[(i + variant) % clips.length];
+    if (!c) break;
+    const p = await downloadToTmp(c.url, '.mp4');
+    chosen.push(p);
+  }
+  if (!chosen.length) throw new Error('No stock clips available');
+
+  // Normalize, scale & trim/loop to cover minTotal
+  const W = 1280, H = 720;
+  const normPaths = [];
+  const perClip = Math.max(3.5, (minTotal + (variant?1:0)) / chosen.length); // ~evenly spread
+  for (let i=0;i<chosen.length;i++) {
+    const inp = chosen[i];
+    const out = path.join(ensureGeneratedDir(), `${uuidv4()}-norm.mp4`);
+    const args = [
+      '-y','-i', inp,
+      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=cover,center=crop=${W}:${H}`,
+      '-t', perClip.toFixed(2),
+      '-an',
+      '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
+      out
+    ];
+    await execFile('ffmpeg', args);
+    normPaths.push(out);
+  }
+
+  // Build filter_complex for crossfades
+  // xfade chain between [v0][v1] -> v01, then with v2 -> v012, etc.
+  const fadeDur = 0.5;
+  const inputs = normPaths.flatMap(p => ['-i', p]);
+  const filterParts = [];
+  let lastLabel = null;
+  let vIndex = 0;
+  for (let i=0;i<normPaths.length;i++) {
+    const label = `[v${i}]`;
+    filterParts.push(`${i}:v${label}`);
+  }
+  let chainLabel = `[v0]`;
+  let offset = 0;
+  for (let i=1;i<normPaths.length;i++) {
+    const inA = (i===1) ? '[v0]' : chainLabel;
+    const inB = `[v${i}]`;
+    // duration read via perClip, start at end - fadeDur
+    const xfadeType = (['fade','wipeleft','smoothleft','circlecrop','dissolve'])[ (variant + i) % 5 ];
+    chainLabel = `[xf${i}]`;
+    filterParts.push(`${inA}${inB} xfade=transition=${xfadeType}:duration=${fadeDur}:offset=${(perClip*i - fadeDur).toFixed(2)} ${chainLabel}`);
+  }
+  const finalV = (normPaths.length===1) ? '[v0]' : chainLabel;
+
+  // Background music (optional)
+  let musicIn = '';
+  let musicArgs = [];
+  if (musicPath) {
+    musicArgs = ['-i', musicPath];
+    musicIn = `${inputs.length/2 + 0}:a`; // after N video inputs, next index is music
+  }
+
+  // Prepare ASS subtitles
+  const assText = buildAssKaraoke(script, voiceDur, W, H);
+  const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  fs.writeFileSync(assPath, assText, 'utf8');
+
+  // Construct full ffmpeg command
+  // - Build silent base audio (we'll mix voice + bgm)
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+  const args = [
+    '-y',
+    ...inputs,
+    '-i', voicePath,
+    ...musicArgs,
+    '-filter_complex',
+    [
+      // video chain
+      ...filterParts,
+      // subtitle burn-in on finalV
+      `${finalV} ass=${assPath.replace(/:/g,'\\:')} [vout]`,
+      // audio chain: voice at 0 dB, bgm ducked -14 to -18 dB and loop if needed
+      musicIn
+        ? `[${inputs.length/2}:a]volume=0.18,aloop=loop=-1:size=2e5:start=0,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];` +
+          `[${inputs.length/2 - 0}:a] volume=1.0[vo];` +
+          `[bgm][vo] amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0 [aout]`
+        : `[${inputs.length/2 - 0}:a] anull [aout]`
+    ].join(';'),
+    '-map','[vout]',
+    '-map','[aout]',
+    '-t', (Math.max(minTotal, voiceDur + tailPadSec)).toFixed(2),
+    '-c:v','libx264','-preset','veryfast','-crf','22','-pix_fmt','yuv420p',
+    '-c:a','aac','-b:a','160k',
+    outPath
+  ];
+  await execFile('ffmpeg', args);
+
+  return { outPath, voicePath, assPath, duration: await ffprobeDuration(outPath) };
+}
+
+/* ----- Tiny util: fetch bgm if env provided ----- */
+async function prepareBgm() {
+  if (!BACKGROUND_MUSIC_URL) return '';
+  try { return await downloadToTmp(BACKGROUND_MUSIC_URL, '.mp3'); }
+  catch { return ''; }
+}
+
+/* -------------------- VIDEO: main endpoint (ENABLED) -------------------- */
+router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
+  housekeeping();
+  try { if (typeof res.setTimeout === 'function') res.setTimeout(65000); if (typeof req.setTimeout === 'function') req.setTimeout(65000); } catch {}
+
+  try {
+    const top       = req.body || {};
+    const answers   = top.answers || top;
+    const url       = answers.url || top.url || '';
+    const industry  = answers.industry || top.industry || '';
+    const category  = resolveCategory(answers || {});
+    const keyword   = getImageKeyword(industry, url, answers);
+    const targetSec = Math.max(16, Math.min(24, Number(top.targetSeconds || 17)));
+
+    // Script: use provided or generate
+    let script = (top.adCopy || '').trim();
+    if (!script) {
+      try {
+        const prompt = `Write only the exact words for a spoken ad script (≈15–17s, 46–72 words) for category "${category}". Hook → value → simple CTA. Neutral, no website.`;
+        const r = await openai.chat.completions.create({
+          model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], max_tokens: 220, temperature: 0.35
+        });
+        script = cleanFinalText(r.choices?.[0]?.message?.content || '');
+        script = enforceCategoryPresence(stripFashionIfNotApplicable(script, category), category);
+      } catch {
+        script = 'A simple way to get started with less hassle and more value. Learn more.';
+      }
+    }
+
+    // Stock clips
+    let clips = await fetchPexelsVideos(keyword, 4);
+    if (!clips.length) {
+      // Last-resort generic search
+      clips = await fetchPexelsVideos('product shopping', 4);
+    }
+    if (!clips.length) return res.status(500).json({ error: 'No stock videos available' });
+
+    // Optional BGM
+    const bgm = await prepareBgm();
+
+    // Build two variants
+    const v1 = await makeVideoVariant({ clips, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+    const v2 = await makeVideoVariant({ clips, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+
+    // Persist + URLs
+    const rel1 = path.basename(v1.outPath);
+    const rel2 = path.basename(v2.outPath);
+    const url1 = mediaPath(rel1);
+    const url2 = mediaPath(rel2);
+    const abs1 = absolutePublicUrl(url1);
+    const abs2 = absolutePublicUrl(url2);
+
+    await saveAsset({
+      req, kind: 'video', url: url1, absoluteUrl: abs1,
+      meta: { variant: 0, category, keyword, hasSubtitles: true, voiceSec: v1.duration }
+    });
+    await saveAsset({
+      req, kind: 'video', url: url2, absoluteUrl: abs2,
+      meta: { variant: 1, category, keyword, hasSubtitles: true, voiceSec: v2.duration }
+    });
+
+    // Also expose the ASS files in case frontend wants downloadable captions
+    const ass1 = mediaPath(path.basename(v1.assPath));
+    const ass2 = mediaPath(path.basename(v2.assPath));
+
+    return res.json({
+      ok: true,
+      script,
+      targetSeconds: targetSec,
+      voiceModel: OPENAI_TTS_MODEL,
+      videos: [
+        { url: url1, absoluteUrl: abs1, subtitlesAss: ass1, duration: v1.duration },
+        { url: url2, absoluteUrl: abs2, subtitlesAss: ass2, duration: v2.duration },
+      ]
+    });
+  } catch (e) {
+    return res.status(500).json({ error: 'Video generation failed', detail: e?.message || String(e) });
+  } finally {
+    maybeGC();
+  }
 });
 
 /* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
@@ -1289,7 +1455,7 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         });
         return publicUrl;
       } catch (err) {
-        // Frame-only fallback as last resort
+        // Frame-only fallback
         try {
           const W = 1200, H = 628;
           const imgRes = await ax.get(imgUrl, { responseType: 'arraybuffer', timeout: 12000 });
@@ -1334,7 +1500,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
         urls.push(u); absUrls.push(absolutePublicUrl(u));
       }
     } else {
-      // Unsplash Source API fallback — always compose overlays
       const q = encodeURIComponent(keyword || 'ecommerce products');
       for (let i = 0; i < 2; i++) {
         const sig = encodeURIComponent((regenerateToken || 'seed') + '_' + i);
