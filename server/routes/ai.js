@@ -1247,13 +1247,14 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   // Normalize, scale & trim/loop to cover minTotal
   const W = 1280, H = 720;
   const normPaths = [];
-  const perClip = Math.max(3.5, (minTotal + (variant?1:0)) / chosen.length); // ~evenly spread
-  for (let i=0;i<chosen.length;i++) {
+  const perClip = Math.max(3.5, (minTotal + (variant ? 1 : 0)) / chosen.length); // ~evenly spread
+  for (let i = 0; i < chosen.length; i++) {
     const inp = chosen[i];
     const out = path.join(ensureGeneratedDir(), `${uuidv4()}-norm.mp4`);
+    const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H}`; // fixed cover fit
     const args = [
       '-y','-i', inp,
-      '-vf', `scale=${W}:${H}:force_original_aspect_ratio=cover,center=crop=${W}:${H}`,
+      '-vf', vf,
       '-t', perClip.toFixed(2),
       '-an',
       '-c:v','libx264','-preset','veryfast','-crf','21','-pix_fmt','yuv420p',
@@ -1264,43 +1265,37 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   }
 
   // Build filter_complex for crossfades
-  // xfade chain between [v0][v1] -> v01, then with v2 -> v012, etc.
   const fadeDur = 0.5;
   const inputs = normPaths.flatMap(p => ['-i', p]);
   const filterParts = [];
-  let lastLabel = null;
-  let vIndex = 0;
   for (let i=0;i<normPaths.length;i++) {
     const label = `[v${i}]`;
     filterParts.push(`${i}:v${label}`);
   }
   let chainLabel = `[v0]`;
-  let offset = 0;
   for (let i=1;i<normPaths.length;i++) {
     const inA = (i===1) ? '[v0]' : chainLabel;
     const inB = `[v${i}]`;
-    // duration read via perClip, start at end - fadeDur
-    const xfadeType = (['fade','wipeleft','smoothleft','circlecrop','dissolve'])[ (variant + i) % 5 ];
+    const xfadeType = (['fade','wipeleft','smoothleft','circlecrop','dissolve'])[(variant + i) % 5];
     chainLabel = `[xf${i}]`;
     filterParts.push(`${inA}${inB} xfade=transition=${xfadeType}:duration=${fadeDur}:offset=${(perClip*i - fadeDur).toFixed(2)} ${chainLabel}`);
   }
   const finalV = (normPaths.length===1) ? '[v0]' : chainLabel;
 
   // Background music (optional)
-  let musicIn = '';
   let musicArgs = [];
+  let musicIn = '';
   if (musicPath) {
     musicArgs = ['-i', musicPath];
     musicIn = `${inputs.length/2 + 0}:a`; // after N video inputs, next index is music
   }
 
-  // Prepare ASS subtitles
+  // Prepare ASS subtitles (karaoke-style word pop)
   const assText = buildAssKaraoke(script, voiceDur, W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
   fs.writeFileSync(assPath, assText, 'utf8');
 
   // Construct full ffmpeg command
-  // - Build silent base audio (we'll mix voice + bgm)
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   const args = [
     '-y',
@@ -1309,16 +1304,15 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
     ...musicArgs,
     '-filter_complex',
     [
-      // video chain
+      // video chain with subtitle burn-in
       ...filterParts,
-      // subtitle burn-in on finalV
       `${finalV} ass=${assPath.replace(/:/g,'\\:')} [vout]`,
-      // audio chain: voice at 0 dB, bgm ducked -14 to -18 dB and loop if needed
+      // audio chain: voice + ducked bgm
       musicIn
-        ? `[${inputs.length/2}:a]volume=0.18,aloop=loop=-1:size=2e5:start=0,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];` +
-          `[${inputs.length/2 - 0}:a] volume=1.0[vo];` +
-          `[bgm][vo] amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0 [aout]`
-        : `[${inputs.length/2 - 0}:a] anull [aout]`
+        ? `[${inputs.length/2}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];` +
+          `[${inputs.length/2 - 0}:a]volume=1.0[vo];` +
+          `[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
+        : `[${inputs.length/2 - 0}:a]anull[aout]`
     ].join(';'),
     '-map','[vout]',
     '-map','[aout]',
@@ -1331,6 +1325,7 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
 
   return { outPath, voicePath, assPath, duration: await ffprobeDuration(outPath) };
 }
+
 
 /* ----- Tiny util: fetch bgm if env provided ----- */
 async function prepareBgm() {
