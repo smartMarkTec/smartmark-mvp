@@ -1089,6 +1089,78 @@ router.get('/test', (_req, res) => {
   res.status(200).json({ ok: true, t: Date.now() });
 });
 
+/* =================== CORE VIDEO HELPERS (TTS, ffprobe, downloads, ASS) =================== */
+const { promisify } = require('util');
+const _execFile = promisify(child_process.execFile);
+
+/** Exec a binary with safe defaults */
+async function execFile(bin, args, opts = {}) {
+  const { stdout, stderr } = await _execFile(bin, args, { maxBuffer: 1024 * 1024 * 16, ...opts });
+  if (stderr && /error|invalid|failed/i.test(stderr)) {
+    // ffmpeg/ffprobe chat a lot; only throw on clear errors
+    if (!/past duration|non-monotonous/i.test(stderr)) throw new Error(stderr.slice(0, 3000));
+  }
+  return { stdout, stderr };
+}
+
+/** Download remote media to a tmp file and return its absolute path */
+async function downloadToTmp(url, ext = '.bin') {
+  const out = path.join(ensureGeneratedDir(), `${uuidv4()}${ext}`);
+  const resp = await ax.get(url, { responseType: 'arraybuffer', timeout: 15000, maxRedirects: 5 });
+  fs.writeFileSync(out, Buffer.from(resp.data));
+  return out;
+}
+
+/** Text-to-speech using OpenAI TTS -> MP3 file path */
+async function synthTTS(text = '') {
+  const speechPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp3`);
+  const resp = await openai.audio.speech.create({
+    model: OPENAI_TTS_MODEL,           // e.g., 'gpt-4o-mini-tts'
+    voice: OPENAI_TTS_VOICE,           // e.g., 'alloy'
+    input: String(text || '').slice(0, 2000),
+    format: 'mp3',
+  });
+  const buf = Buffer.from(await resp.arrayBuffer());
+  fs.writeFileSync(speechPath, buf);
+  return speechPath;
+}
+
+/** Probe media duration (seconds, float) */
+async function ffprobeDuration(filePath) {
+  const { stdout } = await execFile('ffprobe', [
+    '-v','error',
+    '-show_entries','format=duration',
+    '-of','default=noprint_wrappers=1:nokey=1',
+    filePath
+  ]);
+  const d = parseFloat(String(stdout || '').trim());
+  return Number.isFinite(d) ? d : 0;
+}
+
+/** Super-simple ASS builder (single centered line for entire VO duration) */
+function buildAssKaraoke(text, totalSec = 16, W = 1280, H = 720) {
+  const safe = String(text || '').replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim();
+  const start = '0:00:00.00';
+  const endMs = Math.max(1, Math.round(totalSec * 100)); // centiseconds
+  const end = `0:${String(Math.floor(totalSec / 60)).padStart(2,'0')}:${String(Math.floor(totalSec % 60)).padStart(2,'0')}.${String(endMs % 100).padStart(2,'0')}`;
+  return [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'PlayResX: ' + W,
+    'PlayResY: ' + H,
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, '
+      + 'Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    'Style: Default,Times New Roman,42,&H00FFFFFF,&H000000FF,&H7F000000,&H7F000000,0,0,0,0,100,100,0,0,1,2.2,0,2,20,20,30,0',
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+    `Dialogue: 0,${start},${end},Default,,0,0,0,,{\\an2\\bord2\\blur2}${safe}`
+  ].join('\n');
+}
+
+
 /* ============================ VIDEO GENERATION — DROP-IN REPLACEMENT ============================ */
 /* ----- Stock video selection (Pexels VIDEOS) ----- */
 async function fetchPexelsVideos(keyword, want = 4) {
