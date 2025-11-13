@@ -1089,69 +1089,91 @@ router.get('/test', (_req, res) => {
   res.status(200).json({ ok: true, t: Date.now() });
 });
 
-/* =================== CORE VIDEO HELPERS (TTS, ffprobe, downloads, ASS) =================== */
+/* =================== CORE VIDEO HELPERS (low-memory, stream-to-disk) =================== */
+const { spawn } = require('child_process');
+const { pipeline } = require('stream');
 const { promisify } = require('util');
-const _execFile = promisify(child_process.execFile);
+const streamPipeline = promisify(pipeline);
 
-/** Exec a binary with safe defaults */
-async function execFile(bin, args, opts = {}) {
-  const { stdout, stderr } = await _execFile(bin, args, { maxBuffer: 1024 * 1024 * 16, ...opts });
-  if (stderr && /error|invalid|failed/i.test(stderr)) {
-    // ffmpeg/ffprobe chat a lot; only throw on clear errors
-    if (!/past duration|non-monotonous/i.test(stderr)) throw new Error(stderr.slice(0, 3000));
-  }
-  return { stdout, stderr };
+/** Exec a binary without buffering stdout (prevents big memory spikes on Render free) */
+async function execFile(bin, args = [], opts = {}) {
+  return new Promise((resolve, reject) => {
+    const p = spawn(bin, args, {
+      stdio: ['ignore', 'ignore', 'inherit'], // don't buffer stdout; show errors only
+      env: process.env,
+      ...opts,
+    });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}`))));
+  });
 }
 
-/** Download remote media to a tmp file and return its absolute path */
-async function downloadToTmp(url, ext = '.bin') {
-  const out = path.join(ensureGeneratedDir(), `${uuidv4()}${ext}`);
-  const resp = await ax.get(url, { responseType: 'arraybuffer', timeout: 15000, maxRedirects: 5 });
-  fs.writeFileSync(out, Buffer.from(resp.data));
+/** Stream any URL straight to /tmp (no large arraybuffers in RAM) */
+async function downloadToTmp(url, ext = '') {
+  ensureGeneratedDir();
+  const out = path.join(GEN_DIR, `${uuidv4()}${ext || ''}`);
+  const res = await ax.get(url, { responseType: 'stream', timeout: 20000, maxRedirects: 4 });
+  await streamPipeline(res.data, fs.createWriteStream(out, { flags: 'w' }));
   return out;
 }
 
-/** Text-to-speech using OpenAI TTS -> MP3 file path */
+/** Text-to-speech → MP3 written directly to disk */
 async function synthTTS(text = '') {
   const speechPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp3`);
   const resp = await openai.audio.speech.create({
-    model: OPENAI_TTS_MODEL,           // e.g., 'gpt-4o-mini-tts'
-    voice: OPENAI_TTS_VOICE,           // e.g., 'alloy'
-    input: String(text || '').slice(0, 2000),
+    model: OPENAI_TTS_MODEL,     // e.g., 'gpt-4o-mini-tts'
+    voice: OPENAI_TTS_VOICE,     // e.g., 'alloy'
+    input: String(text || '').slice(0, 800), // keep short to reduce RAM/CPU
     format: 'mp3',
   });
   const buf = Buffer.from(await resp.arrayBuffer());
-  fs.writeFileSync(speechPath, buf);
+  await fs.promises.writeFile(speechPath, buf);
   return speechPath;
 }
 
-/** Probe media duration (seconds, float) */
+/** Probe duration (seconds) via ffprobe with unbuffered output */
 async function ffprobeDuration(filePath) {
-  const { stdout } = await execFile('ffprobe', [
-    '-v','error',
-    '-show_entries','format=duration',
-    '-of','default=noprint_wrappers=1:nokey=1',
-    filePath
-  ]);
-  const d = parseFloat(String(stdout || '').trim());
-  return Number.isFinite(d) ? d : 0;
+  // write stdout to a tiny temp file so it isn't buffered in memory
+  const outTxt = path.join(GEN_DIR, `${uuidv4()}.dur.txt`);
+  const fd = fs.openSync(outTxt, 'w');
+  try {
+    await new Promise((resolve, reject) => {
+      const p = spawn('ffprobe', [
+        '-v','error',
+        '-show_entries','format=duration',
+        '-of','default=nw=1:nk=1',
+        filePath
+      ], { stdio: ['ignore', fd, 'inherit'] });
+      p.on('error', reject);
+      p.on('close', code => code === 0 ? resolve() : reject(new Error(`ffprobe exited ${code}`)));
+    });
+    const d = parseFloat((await fs.promises.readFile(outTxt, 'utf8')).trim());
+    return Number.isFinite(d) ? d : 0;
+  } finally {
+    try { fs.closeSync(fd); } catch {}
+    try { fs.unlinkSync(outTxt); } catch {}
+  }
 }
 
-/** Super-simple ASS builder (single centered line for entire VO duration) */
+/** Lightweight ASS subtitle (single centered line for full VO duration) */
 function buildAssKaraoke(text, totalSec = 16, W = 1280, H = 720) {
   const safe = String(text || '').replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim();
-  const start = '0:00:00.00';
-  const endMs = Math.max(1, Math.round(totalSec * 100)); // centiseconds
-  const end = `0:${String(Math.floor(totalSec / 60)).padStart(2,'0')}:${String(Math.floor(totalSec % 60)).padStart(2,'0')}.${String(endMs % 100).padStart(2,'0')}`;
+  const toTime = (sec) => {
+    const s = Math.max(0, sec);
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = Math.floor(s%60);
+    const cs = Math.floor((s - Math.floor(s)) * 100);
+    const pad = (n)=>String(n).padStart(2,'0');
+    return `${pad(h)}:${pad(m)}:${pad(ss)}.${String(cs).padStart(2,'0')}`;
+  };
+  const start = toTime(0);
+  const end   = toTime(totalSec);
   return [
     '[Script Info]',
-    'ScriptType: v4.00+',
-    'PlayResX: ' + W,
-    'PlayResY: ' + H,
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
     '',
     '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, '
-      + 'Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     'Style: Default,Times New Roman,42,&H00FFFFFF,&H000000FF,&H7F000000,&H7F000000,0,0,0,0,100,100,0,0,1,2.2,0,2,20,20,30,0',
     '',
     '[Events]',
@@ -1159,6 +1181,7 @@ function buildAssKaraoke(text, totalSec = 16, W = 1280, H = 720) {
     `Dialogue: 0,${start},${end},Default,,0,0,0,,{\\an2\\bord2\\blur2}${safe}`
   ].join('\n');
 }
+/* ================= end low-memory helpers ================= */
 
 
 /* ============================ VIDEO GENERATION — DROP-IN REPLACEMENT ============================ */
