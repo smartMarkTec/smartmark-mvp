@@ -94,33 +94,6 @@ app.use('/generated', express.static(generatedPath, {
   }
 }));
 
-// Return the newest finished MP4 so the UI can show it without guessing a name
-app.get('/api/generated-latest', (req, res) => {
-  try {
-    const dir = process.env.GENERATED_DIR || generatedPath;
-    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
-
-    const entries = fs.readdirSync(dir, { withFileTypes: true })
-      .filter(d => d.isFile() && /\.mp4$/i.test(d.name))
-      .map(d => {
-        const full = path.join(dir, d.name);
-        const st = fs.statSync(full);
-        return { name: d.name, mtime: st.mtimeMs, size: st.size };
-      })
-      .filter(x => x.size > 0);
-
-    if (!entries.length) {
-      return res.status(404).json({ error: 'No finished videos yet.' });
-    }
-
-    const newest = entries.sort((a, b) => b.mtime - a.mtime)[0];
-    res.set('Cache-Control', 'no-store');
-    res.json({ url: `/generated/${newest.name}`, size: newest.size, mtime: newest.mtime });
-  } catch (e) {
-    console.error('generated-latest error:', e);
-    res.status(500).json({ error: 'Unable to scan generated folder.' });
-  }
-});
 
 /** Local fallback image for testing */
 app.get('/__fallback/1200.jpg', async (_req, res) => {
