@@ -68,6 +68,7 @@ const heavyRoute = (req, res, next) => {
 };
 router.use(heavyRoute);
 
+
 /* ------------------------ Security & rate limit ---------------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
 router.use(secureHeaders());
@@ -1462,7 +1463,7 @@ async function runVideoJob(job) {
     v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
   }
 
-  // Persist (so your /api/generated-latest + /recent keep working)
+  // Persist two variants
   const rel1 = path.basename(v1.outPath), rel2 = path.basename(v2.outPath);
   const url1 = mediaPath(rel1), url2 = mediaPath(rel2);
   const abs1 = absolutePublicUrl(url1), abs2 = absolutePublicUrl(url2);
@@ -1485,6 +1486,30 @@ async function pumpVideoQueue() {
       });
   }
 }
+
+/* -------------------- VIDEO: main endpoint (TRIGGER + POLL) -------------------- */
+router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
+  housekeeping();
+  try { if (typeof res.setTimeout === 'function') res.setTimeout(15000); if (typeof req.setTimeout === 'function') req.setTimeout(15000); } catch {}
+
+  const reqLike = { headers: req.headers, cookies: req.cookies, ip: req.ip };
+  const top = req.body || {};
+  videoQueue.push({ reqLike, top });
+  setImmediate(pumpVideoQueue);
+
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  return res.status(202).json({
+    ok: true,
+    message: 'Video generation started',
+    poll: '/api/generated-latest'
+  });
+});
+
 
 /* -------------------- VIDEO: main endpoint (TRIGGER + POLL) -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
@@ -1658,12 +1683,10 @@ router.get('/generated-latest', async (req, res) => {
     await purgeExpiredAssets();
     const owner = ownerKeyFromReq(req);
 
-    // Prefer DB (what saveAsset writes during generation)
     const all = (db.data?.generated_assets || [])
       .filter(a => a.owner === owner && a.kind === 'video')
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
-    // If DB empty, fall back to scanning /tmp/generated for .mp4
     let url = '';
     let absoluteUrl = '';
     let filename = '';
@@ -1672,19 +1695,17 @@ router.get('/generated-latest', async (req, res) => {
       absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
       filename = (url || '').split('/').pop();
     } else {
-      // Fallback: newest .mp4 in /tmp/generated
       const dir = ensureGeneratedDir();
       const files = fs.readdirSync(dir)
         .filter(f => f.toLowerCase().endsWith('.mp4'))
         .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
         .sort((a, b) => b.m - a.m);
-      if (!files.length) return res.status(204).end(); // nothing yet
+      if (!files.length) return res.status(204).end();
       filename = files[0].f;
-      url = mediaPath(filename);                  // /api/media/<file>
+      url = mediaPath(filename);
       absoluteUrl = absolutePublicUrl(url);
     }
 
-    // CORS for frontend
     const origin = req.headers.origin;
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
@@ -1694,8 +1715,8 @@ router.get('/generated-latest', async (req, res) => {
 
     return res.json({
       ok: true,
-      url,                 // relative URL your player can load
-      absoluteUrl,         // absolute URL (useful for uploads)
+      url,
+      absoluteUrl,
       type: 'video/mp4',
       filename
     });
@@ -1704,6 +1725,7 @@ router.get('/generated-latest', async (req, res) => {
     return res.status(500).json({ ok: false, error: 'GEN_LATEST_FAIL' });
   }
 });
+
 
 
 /* -------- Ensure CORS even on errors -------- */
