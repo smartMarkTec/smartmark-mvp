@@ -1128,7 +1128,7 @@ const streamPipeline = promisify(pipeline);
 async function execFile(bin, args = [], opts = {}, hardKillMs = 120000) {
   return new Promise((resolve, reject) => {
     const p = spawn(bin, args, {
-      stdio: ['ignore', 'ignore', 'inherit'], // show errors only
+      stdio: ['ignore', 'ignore', 'inherit'], // stdout muted, stderr shown
       env: process.env,
       ...opts,
     });
@@ -1137,6 +1137,7 @@ async function execFile(bin, args = [], opts = {}, hardKillMs = 120000) {
     p.on('close', (code) => { clearTimeout(killer); code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}`)); });
   });
 }
+
 
 /** Stream any URL straight to /tmp (no large arraybuffers in RAM) */
 async function downloadToTmp(url, ext = '') {
@@ -1185,21 +1186,18 @@ async function ffprobeDuration(filePath) {
 }
 
 /** Lightweight ASS subtitle (single centered line for full VO duration) */
-function buildAssKaraoke(text, totalSec = 16, W = 1280, H = 720) {
+function buildAssKaraoke(text, totalSec = 19, W = 1280, H = 720) {
   const safe = String(text || '').replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim();
-  const toTime = (sec) => {
-    const s = Math.max(0, sec);
-    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), ss = Math.floor(s%60);
-    const cs = Math.floor((s - Math.floor(s)) * 100);
-    const pad = (n)=>String(n).padStart(2,'0');
-    return `${pad(h)}:${pad(m)}:${pad(ss)}.${String(cs).padStart(2,'0')}`;
-  };
-  const start = toTime(0);
-  const end   = toTime(totalSec);
+  const words = safe.split(' ').filter(Boolean);
+  const per = Math.max(0.35, Math.min(0.9, totalSec / Math.max(8, words.length))); // 0.35–0.9s per word
+  const kfCs = Math.max(10, Math.round(per * 100)); // \kf uses centiseconds
+
+  const karaoke = words.map(w => `{\\kf${kfCs}}${w}`).join(' ');
   return [
     '[Script Info]',
     `PlayResX: ${W}`,
     `PlayResY: ${H}`,
+    'ScaledBorderAndShadow: yes',
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
@@ -1207,9 +1205,10 @@ function buildAssKaraoke(text, totalSec = 16, W = 1280, H = 720) {
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    `Dialogue: 0,${start},${end},Default,,0,0,0,,{\\an2\\bord2\\blur2}${safe}`
+    `Dialogue: 0,0:00:00.00,0:00:${String(Math.max(1, Math.floor(totalSec))).padStart(2,'0')}.00,Default,,0,0,0,,{\\an2\\bord2\\blur2}${karaoke}`
   ].join('\n');
 }
+
 /* ================= end low-memory helpers ================= */
 
 
@@ -1258,32 +1257,34 @@ async function fetchPexelsPhotos(keyword, want = 4) {
   } catch { return []; }
 }
 
-/* ----- Compose video with crossfades, VO + bgm, burn-in subtitles (low-memory) ----- */
-async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17, tailPadSec = 2, musicPath = '' }) {
+async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 19, tailPadSec = 2, musicPath = '' }) {
   const voicePath = await synthTTS(script);
   const voiceDur  = await ffprobeDuration(voicePath);
-  const minTotal  = Math.max(targetMinSec, Math.ceil(voiceDur) + tailPadSec);
+  // keep between 18–20s and guarantee voice finishes
+  const hardTarget = Math.max(18, Math.min(20, targetMinSec || 19));
+  const minTotal   = Math.max(hardTarget, Math.ceil(voiceDur) + tailPadSec);
 
-  // ---- pick & download 3–4 clips
-  const needClips = Math.min(Math.max(3, clips.length), 4);
+  // ---- pick & download 3–4 clips (prefer 4)
+  const want = Math.min(4, Math.max(3, clips.length));
   const chosen = [];
-  for (let i = 0; i < needClips; i++) {
+  for (let i = 0; i < want; i++) {
     const c = clips[(i + variant) % clips.length];
     if (!c) break;
     chosen.push(await downloadToTmp(c.url, '.mp4'));
   }
   if (!chosen.length) throw new Error('No stock clips available');
 
-  // ---- normalize to SAME size + SAME fps (critical for xfade!)
+  // ---- normalize to unified canvas/fps (needed for xfade)
   const W = 1280, H = 720, FPS = 30;
   const normPaths = [];
-  const perClip = Math.max(3.4, (minTotal + (variant ? 1 : 0)) / chosen.length);
+  // distribute duration evenly then fine-tune for crossfades
+  const perClip = Math.max(3.8, (minTotal + (variant ? 0.6 : 0)) / chosen.length);
   for (let i = 0; i < chosen.length; i++) {
     const inp = chosen[i];
     const out = path.join(ensureGeneratedDir(), `${uuidv4()}-norm.mp4`);
     const vf  = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS}`;
     await execFile('ffmpeg',
-      ['-y','-nostdin','-i', inp, '-vf', vf, '-t', perClip.toFixed(2), '-an',
+      ['-y','-nostdin','-loglevel','error','-i', inp, '-vf', vf, '-t', perClip.toFixed(2), '-an',
        '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
        '-x264-params','threads=1','-threads','1','-r', String(FPS), out],
       {}, 120000
@@ -1291,15 +1292,13 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
     normPaths.push(out);
   }
 
-  // ---- build filter graph (VALID labels)
+  // ---- filter graph
   const fadeDur = 0.5;
   const inputs = normPaths.flatMap(p => ['-i', p]); // N inputs
   const filterParts = [];
-
   for (let i = 0; i < normPaths.length; i++) {
     filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
   }
-
   let chainLabel = '[v0]';
   for (let i = 1; i < normPaths.length; i++) {
     const inA = (i === 1) ? '[v0]' : chainLabel;
@@ -1310,15 +1309,14 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   }
   const finalV = (normPaths.length === 1) ? '[v0]' : chainLabel;
 
-  // ---- subtitles
-  const assText = buildAssKaraoke(script, voiceDur, W, H);
+  // ---- subtitles (karaoke timed to VO)
+  const assText = buildAssKaraoke(script, Math.max(voiceDur, minTotal), W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(assPath, 'utf8', assText); // intentionally swapped order? keep original:
-  fs.writeFileSync(assPath, assText, 'utf8');
+  fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
-  // ---- audio (VO + optional BGM)
-  const videoCount = inputs.length / 2;   // N
-  const voiceIdx   = videoCount;          // N
+  // ---- audio mixing (VO + optional BGM)
+  const videoCount = inputs.length / 2;
+  const voiceIdx   = videoCount;
   let musicArgs = [], musicIdx = null;
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = videoCount + 1; }
 
@@ -1332,12 +1330,13 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   await execFile('ffmpeg', [
-    '-y','-nostdin',
+    '-y','-nostdin','-loglevel','error',
     ...inputs,
     '-i', voicePath,
     ...musicArgs,
     '-filter_complex', fc,
     '-map','[vout]','-map','[aout]',
+    // cap between 18–20s but NEVER cut VO; add tiny pad
     '-t', (Math.max(minTotal, voiceDur + tailPadSec)).toFixed(2),
     '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
     '-x264-params','threads=1','-threads','1','-r', String(FPS),
@@ -1348,15 +1347,17 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   return { outPath, voicePath, assPath, duration: await ffprobeDuration(outPath) };
 }
 
+
 /* ----- Slideshow fallback if no videos are returned (low-memory) ----- */
-async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, targetMinSec = 17, tailPadSec = 2, musicPath = '' }) {
+async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, targetMinSec = 19, tailPadSec = 2, musicPath = '' }) {
   const voicePath = await synthTTS(script);
   const voiceDur  = await ffprobeDuration(voicePath);
-  const minTotal  = Math.max(targetMinSec, Math.ceil(voiceDur) + tailPadSec);
+  const hardTarget = Math.max(18, Math.min(20, targetMinSec || 19));
+  const minTotal   = Math.max(hardTarget, Math.ceil(voiceDur) + tailPadSec);
 
-  const need = Math.min(Math.max(3, photos.length), 4);
+  const want = Math.min(4, Math.max(3, photos.length));
   const chosen = [];
-  for (let i = 0; i < need; i++) {
+  for (let i = 0; i < want; i++) {
     const c = photos[(i + variant) % photos.length];
     if (!c) break;
     chosen.push(await downloadToTmp(c.url, '.jpg'));
@@ -1365,13 +1366,13 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
 
   const W = 1280, H = 720, FPS = 30;
   const segs = [];
-  const perClip = Math.max(3.4, (minTotal + (variant ? 1 : 0)) / chosen.length);
+  const perClip = Math.max(3.8, (minTotal + (variant ? 0.6 : 0)) / chosen.length);
   for (let i = 0; i < chosen.length; i++) {
     const img = chosen[i];
     const out = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
     const vf  = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p,fade=t=in:st=0:d=0.25,fade=t=out:st=${Math.max(0, perClip - 0.25).toFixed(2)}:d=0.25`;
     await execFile('ffmpeg',
-      ['-y','-nostdin','-loop','1','-t', perClip.toFixed(2), '-i', img, '-vf', vf, '-an',
+      ['-y','-nostdin','-loglevel','error','-loop','1','-t', perClip.toFixed(2), '-i', img, '-vf', vf, '-an',
        '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
        '-x264-params','threads=1','-threads','1','-r', String(FPS), out],
       {}, 120000
@@ -1380,11 +1381,9 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   }
 
   const fadeDur = 0.5;
-  const inputs = segs.flatMap(p => ['-i', p]); // N inputs
+  const inputs = segs.flatMap(p => ['-i', p]);
   const filterParts = [];
-  for (let i = 0; i < segs.length; i++) {
-    filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
-  }
+  for (let i = 0; i < segs.length; i++) filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
 
   let chainLabel = '[v0]';
   for (let i = 1; i < segs.length; i++) {
@@ -1396,9 +1395,9 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   }
   const finalV = (segs.length === 1) ? '[v0]' : chainLabel;
 
-  const assText = buildAssKaraoke(script, voiceDur, W, H);
+  const assText = buildAssKaraoke(script, Math.max(voiceDur, minTotal), W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(assPath, assText, 'utf8');
+  fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
   const videoCount = inputs.length / 2;
   const voiceIdx   = videoCount;
@@ -1415,7 +1414,7 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   await execFile('ffmpeg', [
-    '-y','-nostdin',
+    '-y','-nostdin','-loglevel','error',
     ...inputs,
     '-i', voicePath,
     ...musicArgs,
