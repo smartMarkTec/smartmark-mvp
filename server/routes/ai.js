@@ -11,11 +11,9 @@
 const express = require('express');
 const router = express.Router();
 
-
-
 /* ------------------------ CORS (ALWAYS first) ------------------------ */
 router.use((req, res, next) => {
-  const origin = req.headers.origin;
+  const origin = req.headers && req.headers.origin;
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
@@ -117,6 +115,33 @@ function dirStats(p) {
     return { files, bytes };
   } catch { return { files: [], bytes: 0 }; }
 }
+
+/**
+ * VIDEO_STITCH_BUILD
+ * - Normalize inputs into a 3–5 clip plan totaling ~targetSeconds
+ * - You pass in: { clipPaths: string[], targetSeconds: number }
+ * - Returns: { selected: string[], durations: number[] }
+ */
+function buildStitchPlan({ clipPaths = [], targetSeconds = 17 }) {
+  const CLEAN = (arr) => (arr || []).filter(Boolean);
+  const clips = CLEAN(clipPaths);
+
+  // Ensure we can always montage
+  while (clips.length < 3 && clips.length > 0) clips.push(clips[clips.length - 1]);
+
+  const maxClips = Math.min(5, Math.max(3, Math.min(clips.length, 5)));
+  const selected = clips.slice(0, maxClips);
+
+  const base = Math.max(6, Math.min(28, targetSeconds || 17));
+  const parts = selected.length;
+  const weights = selected.map((_, i) => (i === 0 || i === parts - 1) ? 1.2 : 1.0);
+  const totalW = weights.reduce((a, b) => a + b, 0);
+  const raw = weights.map(w => (base * w) / totalW);
+
+  const durations = raw.map(s => Math.max(2.2, Math.min(7.0, s)));
+  return { selected, durations };
+}
+
 const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024);
 function sweepTmpDirHardCap() {
   ensureGeneratedDir();
@@ -913,7 +938,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <g clip-path="url(#clipHl)">
+       <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
@@ -950,13 +975,14 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
           text-anchor="middle" dominant-baseline="middle"
           font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
-          fill="${useDark ? '#111' : '#fff'}" style="paint-order: stroke; stroke:${useDark ? '#fff' : '#000'}; stroke-width:1.10; letter-spacing:0.03em">
+          fill="${useDark ? '#111' : '#fff'}"
+          style="paint-order: stroke; stroke:${useDark ? '#000' : '#fff'}; stroke-width:1.10; letter-spacing:0.03em">
       ${escSVG2(subline)}
     </text>
 
     ${btnSolidDark(W/2, Math.round(subCenterY + sub.fs + 92), cleanCTA('LEARN MORE'), 30)}
   </svg>`;
-}
+} // <-- MISSING BRACE WAS HERE; now fixed.
 
 /* ---------- Local craftSubline (fallback) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
@@ -1088,7 +1114,7 @@ async function buildOverlayImage({
 }
 
 /* -------------------- Health check -------------------- */
-router.get('/test', (_req, res) => {
+router.get('/test2', (_req, res) => {
   res.status(200).json({ ok: true, t: Date.now() });
 });
 
@@ -1102,7 +1128,7 @@ const streamPipeline = promisify(pipeline);
 async function execFile(bin, args = [], opts = {}, hardKillMs = 120000) {
   return new Promise((resolve, reject) => {
     const p = spawn(bin, args, {
-      stdio: ['ignore', 'ignore', 'inherit'], // don't buffer stdout; show errors only
+      stdio: ['ignore', 'ignore', 'inherit'], // show errors only
       env: process.env,
       ...opts,
     });
@@ -1271,7 +1297,6 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   const filterParts = [];
 
   for (let i = 0; i < normPaths.length; i++) {
-    // IMPORTANT: use proper input label + a no-op filter to relabel
     filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
   }
 
@@ -1288,6 +1313,7 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   // ---- subtitles
   const assText = buildAssKaraoke(script, voiceDur, W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  fs.writeFileSync(assPath, 'utf8', assText); // intentionally swapped order? keep original:
   fs.writeFileSync(assPath, assText, 'utf8');
 
   // ---- audio (VO + optional BGM)
@@ -1296,15 +1322,13 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   let musicArgs = [], musicIdx = null;
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = videoCount + 1; }
 
- const fc = [
-  ...filterParts,
-  `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
-  musicIdx !== null
-    ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
-    : `[${voiceIdx}:a]volume=1.0[aout]`
-].join(';');
-
-
+  const fc = [
+    ...filterParts,
+    `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
+    musicIdx !== null
+      ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
+      : `[${voiceIdx}:a]volume=1.0[aout]`
+  ].join(';');
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   await execFile('ffmpeg', [
@@ -1382,13 +1406,12 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = videoCount + 1; }
 
   const fc = [
-  ...filterParts,
-  `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
-  musicIdx !== null
-    ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
-    : `[${voiceIdx}:a]volume=1.0[aout]`
-].join(';');
-
+    ...filterParts,
+    `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
+    musicIdx !== null
+      ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
+      : `[${voiceIdx}:a]volume=1.0[aout]`
+  ].join(';');
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   await execFile('ffmpeg', [
@@ -1493,46 +1516,23 @@ async function pumpVideoQueue() {
 /* -------------------- VIDEO: main endpoint (TRIGGER + POLL) -------------------- */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
-  try { if (typeof res.setTimeout === 'function') res.setTimeout(15000); if (typeof req.setTimeout === 'function') req.setTimeout(15000); } catch {}
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(15000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(15000);
+  } catch {}
 
   const reqLike = { headers: req.headers, cookies: req.cookies, ip: req.ip };
   const top = req.body || {};
   videoQueue.push({ reqLike, top });
   setImmediate(pumpVideoQueue);
 
-  const origin = req.headers.origin;
+  const origin = req.headers && req.headers.origin;
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
   }
-  return res.status(202).json({
-    ok: true,
-    message: 'Video generation started',
-    poll: '/api/generated-latest'
-  });
-});
 
-
-/* -------------------- VIDEO: main endpoint (TRIGGER + POLL) -------------------- */
-router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  housekeeping();
-  try { if (typeof res.setTimeout === 'function') res.setTimeout(15000); if (typeof req.setTimeout === 'function') req.setTimeout(15000); } catch {}
-
-  // Enqueue a job using a tiny request-like object so saveAsset can still compute owner
-  const reqLike = { headers: req.headers, cookies: req.cookies, ip: req.ip };
-  const top = req.body || {};
-
-  videoQueue.push({ reqLike, top });
-  setImmediate(pumpVideoQueue);
-
-  // Return immediately; Frontend should poll /api/generated-latest (already in your server.js)
-  const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
   return res.status(202).json({
     ok: true,
     message: 'Video generation started',
@@ -1545,7 +1545,10 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
 
-  try { if (typeof res.setTimeout === 'function') res.setTimeout(65000); if (typeof req.setTimeout === 'function') req.setTimeout(65000); } catch {}
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(65000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(65000);
+  } catch {}
 
   try {
     const { regenerateToken = '' } = req.body || {};
@@ -1554,8 +1557,9 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const url       = answers.url || top.url || '';
     const industry  = answers.industry || top.industry || '';
     const category  = resolveCategory(answers || {});
-    const keyword   = getImageKeyword(industry, url, answers);
+    const keyword   = getImageKeyword(industry, url, answers) || 'ecommerce products';
 
+    // Compose one overlay image and persist it
     const compose = async (imgUrl, seed, meta = {}) => {
       try {
         const headlineHint = overlayTitleFromAnswers(answers, category);
@@ -1569,29 +1573,48 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           answers,
           category,
         });
+
         await saveAsset({
-          req, kind: 'image', url: publicUrl, absoluteUrl,
+          req, // NOTE: saveAsset expects an object with { req, kind, ... }
+          kind: 'image',
+          url: publicUrl,
+          absoluteUrl,
           meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
         });
+
         return publicUrl;
       } catch (err) {
         // Frame-only fallback
         try {
           const W = 1200, H = 628;
           const imgRes = await ax.get(imgUrl, { responseType: 'arraybuffer', timeout: 12000 });
-          const baseBuf = await sharp(imgRes.data).resize(W, H, { fit: 'cover' }).jpeg({ quality: 92 }).toBuffer();
-          const frameSvg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-            <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="18" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="8"/>
-            <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="16" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="2"/>
-          </svg>`);
+          const baseBuf = await sharp(imgRes.data)
+            .resize(W, H, { fit: 'cover' })
+            .jpeg({ quality: 92 })
+            .toBuffer();
+
+          const frameSvg = Buffer.from(
+            `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+              <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="18" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="8"/>
+              <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="16" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="2"/>
+            </svg>`
+          );
+
           const file = `${uuidv4()}.jpg`;
-          await sharp(baseBuf).composite([{ input: frameSvg, top: 0, left: 0 }]).jpeg({ quality: 90 }).toFile(path.join(ensureGeneratedDir(), file));
+          await sharp(baseBuf)
+            .composite([{ input: frameSvg, top: 0, left: 0 }])
+            .jpeg({ quality: 90 })
+            .toFile(path.join(ensureGeneratedDir(), file));
+
           return mediaPath(file);
-        } catch { throw err; }
+        } catch {
+          throw err;
+        }
       }
     };
 
-    const urls = [], absUrls = [];
+    const urls = [];
+    const absUrls = [];
 
     if (PEXELS_API_KEY) {
       let photos = [];
@@ -1601,46 +1624,56 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
           params:  { query: keyword, per_page: 12 },
           timeout: 12000,
         });
-        photos = r.data?.photos || [];
-      } catch {}
+        photos = Array.isArray(r.data?.photos) ? r.data.photos : [];
+      } catch {
+        photos = [];
+      }
 
       if (!photos.length) throw new Error('pexels-empty');
 
       const seed = regenerateToken || answers?.businessName || keyword || Date.now();
-      let idxHash = 0; for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
-      const picks = [];
-      for (let i = 0; i < photos.length && picks.length < 2; i++) {
+      let idxHash = 0;
+      for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
+
+      const picks = new Set();
+      for (let i = 0; i < photos.length && picks.size < 2; i++) {
         const idx = (idxHash + i * 7) % photos.length;
-        if (!picks.includes(idx)) picks.push(idx);
+        picks.add(idx);
       }
-      for (let i = 0; i < picks.length; i++) {
-        const img = photos[picks[i]];
+
+      for (const idx of picks) {
+        const img = photos[idx];
         const baseUrl = img?.src?.original || img?.src?.large2x || img?.src?.large;
-        const u = await compose(baseUrl, `${seed}_${i}`, { src: 'pexels', idx: picks[i] });
-        urls.push(u); absUrls.push(absolutePublicUrl(u));
+        if (!baseUrl) continue;
+        const u = await compose(baseUrl, `${seed}_${idx}`, { src: 'pexels', idx });
+        urls.push(u);
+        absUrls.push(absolutePublicUrl(u));
       }
     } else {
       const q = encodeURIComponent(keyword || 'ecommerce products');
       for (let i = 0; i < 2; i++) {
         const sig = encodeURIComponent((regenerateToken || 'seed') + '_' + i);
         const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${sig}`;
-        const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', i });
+        const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', index: i });
         urls.push(u);
         absUrls.push(absolutePublicUrl(u));
       }
     }
 
+    // Nothing produced? Return 204 so the client can retry gracefully.
+    if (!urls.length) return res.status(204).end();
+
     return res.json({
-      imageUrl: urls[0],
-      absoluteImageUrl: absUrls[0],
+      imageUrl: urls[0] || '',
+      absoluteImageUrl: absUrls[0] || '',
       keyword,
       totalResults: urls.length,
       usedIndex: 0,
-      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] })),
+      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
     });
 
   } catch (e) {
-    res.status(500).json({ error: 'Failed to fetch stock image', detail: e.message });
+    return res.status(500).json({ error: 'Failed to fetch stock image', detail: String(e?.message || e) });
   }
 });
 
@@ -1653,17 +1686,32 @@ async function listRecentForOwner(req) {
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 50);
 }
+
 router.get('/recent', async (req, res) => {
-  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
-  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
+  try {
+    const items = await listRecentForOwner(req);
+    res.json({ items, ttlMs: ASSET_TTL_MS });
+  } catch {
+    res.status(500).json({ error: 'Failed to load recent assets' });
+  }
 });
+
 router.get('/assets/recent', async (req, res) => {
-  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
-  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
+  try {
+    const items = await listRecentForOwner(req);
+    res.json({ items, ttlMs: ASSET_TTL_MS });
+  } catch {
+    res.status(500).json({ error: 'Failed to load recent assets' });
+  }
 });
+
 router.get('/recent-assets', async (req, res) => {
-  try { const items = await listRecentForOwner(req); res.json({ items, ttlMs: ASSET_TTL_MS }); }
-  catch { res.status(500).json({ error: 'Failed to load recent assets' }); }
+  try {
+    const items = await listRecentForOwner(req);
+    res.json({ items, ttlMs: ASSET_TTL_MS });
+  } catch {
+    res.status(500).json({ error: 'Failed to load recent assets' });
+  }
 });
 
 router.post('/assets/clear', async (req, res) => {
@@ -1674,7 +1722,9 @@ router.post('/assets/clear', async (req, res) => {
     await db.write();
     housekeeping();
     res.json({ success: true });
-  } catch { res.status(500).json({ error: 'Failed to clear assets' }); }
+  } catch {
+    res.status(500).json({ error: 'Failed to clear assets' });
+  }
 });
 
 // -----------------------------------------------------------------------
@@ -1693,30 +1743,30 @@ router.get('/generated-latest', async (req, res) => {
     let url = '';
     let absoluteUrl = '';
     let filename = '';
+
     if (all.length) {
       url = all[0].url;
       absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
       filename = (url || '').split('/').pop();
-   } else {
-  // Fallback: newest *final* .mp4 in /tmp/generated  (skip interim -norm.mp4)
-  const dir = ensureGeneratedDir();
-  const files = fs.readdirSync(dir)
-    .filter(f =>
-      f.toLowerCase().endsWith('.mp4') &&
-      !/-norm\.mp4$/i.test(f)         // <-- ignore interim normalized segments
-    )
-    .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
-    .sort((a, b) => b.m - a.m);
+    } else {
+      // Fallback: newest *final* .mp4 in /tmp/generated  (skip interim -norm.mp4)
+      const dir = ensureGeneratedDir();
+      const files = fs.readdirSync(dir)
+        .filter(f =>
+          f.toLowerCase().endsWith('.mp4') &&
+          !/-norm\.mp4$/i.test(f) // <-- ignore interim normalized segments
+        )
+        .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.m - a.m);
 
-  if (!files.length) return res.status(204).end(); // nothing final yet
+      if (!files.length) return res.status(204).end(); // nothing final yet
 
-  filename = files[0].f;
-  url = mediaPath(filename);                  // /api/media/<file>
-  absoluteUrl = absolutePublicUrl(url);
-}
+      filename = files[0].f;
+      url = mediaPath(filename); // /api/media/<file>
+      absoluteUrl = absolutePublicUrl(url);
+    }
 
-
-    const origin = req.headers.origin;
+    const origin = req.headers && req.headers.origin;
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
@@ -1737,11 +1787,10 @@ router.get('/generated-latest', async (req, res) => {
 });
 
 
-
 /* -------- Ensure CORS even on errors -------- */
 router.use((err, req, res, _next) => {
   try {
-    const origin = req.headers.origin;
+    const origin = req.headers && req.headers.origin;
     if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Credentials', 'true');
