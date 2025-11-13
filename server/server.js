@@ -97,28 +97,54 @@ app.use('/generated', express.static(generatedPath, {
 // Return the newest finished MP4 so the UI can show it without guessing a name
 app.get('/api/generated-latest', (req, res) => {
   try {
-    const files = fs.readdirSync(generatedPath);
-    const mp4s = files.filter(f => f.toLowerCase().endsWith('.mp4'));
-    if (!mp4s.length) return res.status(404).json({ error: 'No videos yet.' });
+    const dir = process.env.GENERATED_DIR || generatedPath;
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {}
 
-    const newest = mp4s
-      .map(name => {
-        const full = path.join(generatedPath, name);
+    const entries = fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => d.isFile() && /\.mp4$/i.test(d.name))
+      .map(d => {
+        const full = path.join(dir, d.name);
         const st = fs.statSync(full);
-        return { name, mtime: st.mtimeMs, size: st.size };
+        return { name: d.name, mtime: st.mtimeMs, size: st.size };
       })
-      .filter(x => x.size > 0) // ignore zero-byte/in-progress
-      .sort((a, b) => b.mtime - a.mtime)[0];
+      .filter(x => x.size > 0);
 
-    if (!newest) return res.status(404).json({ error: 'No finished videos yet.' });
+    if (!entries.length) {
+      return res.status(404).json({ error: 'No finished videos yet.' });
+    }
+
+    const newest = entries.sort((a, b) => b.mtime - a.mtime)[0];
+    res.set('Cache-Control', 'no-store');
     res.json({ url: `/generated/${newest.name}`, size: newest.size, mtime: newest.mtime });
   } catch (e) {
     console.error('generated-latest error:', e);
     res.status(500).json({ error: 'Unable to scan generated folder.' });
   }
 });
-/* ---------------------------------------------------------------------- */
 
+/** Local fallback image for testing */
+app.get('/__fallback/1200.jpg', async (_req, res) => {
+  try {
+    const buf = await sharp({
+      create: { width: 1200, height: 1200, channels: 3, background: { r: 30, g: 200, b: 133 } }
+    }).jpeg({ quality: 82 }).toBuffer();
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.end(buf);
+  } catch {
+    res.status(500).send('fallback image error');
+  }
+});
+
+// Guard against handlers that “hang”
+app.use((req, res, next) => {
+  res.setTimeout(180000, () => {
+    try {
+      res.status(504).json({ error: 'Gateway Timeout', route: req.originalUrl });
+    } catch {}
+  });
+  next();
+});
 
 /* --------------------------------- ROUTES --------------------------------- */
 const authRoutes = require('./routes/auth');

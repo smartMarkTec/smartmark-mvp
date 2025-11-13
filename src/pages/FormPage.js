@@ -624,15 +624,15 @@ export default function FormPage() {
     }
   }
 
- // Poll the backend for the newest finished .mp4 living under /generated
-async function pollLatestVideoUrl({ maxTries = 40, delayMs = 3000 } = {}) {
+// Poll the backend for the newest finished .mp4 living under /generated
+async function pollLatestVideoUrl({ maxTries = 60, delayMs = 2000 } = {}) {
   let tries = 0;
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms + Math.floor(Math.random() * 250)));
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms + Math.floor(Math.random() * 200)));
 
   while (tries < maxTries) {
     try {
-      const r = await fetch('/api/generated-latest', { method: 'GET' });
-      if (r.status === 404) { // none yet
+      const r = await fetch(`${API_BASE}/generated-latest`, { method: 'GET' });
+      if (r.status === 404) { // none yet -> wait and retry
         tries++;
         await sleep(delayMs);
         continue;
@@ -643,7 +643,7 @@ async function pollLatestVideoUrl({ maxTries = 40, delayMs = 3000 } = {}) {
         continue;
       }
       const data = await r.json();
-      if (data?.url) return data.url; // e.g. /generated/xyz.mp4
+      if (data?.url) return data.url; // e.g. /generated/79a9...-norm.mp4
     } catch {
       // ignore and keep polling
     }
@@ -654,9 +654,10 @@ async function pollLatestVideoUrl({ maxTries = 40, delayMs = 3000 } = {}) {
 }
 
 async function fetchVideoOnce(token) {
-  // 1) Trigger generation but don’t rely on immediate URL in the response
+  // 1) Trigger server-side generation (don’t rely on immediate URL)
   try {
     await warmBackend();
+    // Long timeout because Render can be slow on ffmpeg spin-up
     await fetchJsonWithRetry(
       `${API_BASE}/generate-video-ad`,
       {
@@ -664,15 +665,15 @@ async function fetchVideoOnce(token) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
       },
-      { tries: 3, timeoutMs: 30000 }
+      { tries: 2, timeoutMs: 120000 } // let the server breathe
     );
   } catch (e) {
-    // Even if this times out, ffmpeg may still be working server-side
-    console.warn("video trigger warn:", e.message || e);
+    // Even if this times out, ffmpeg likely continues; we’ll poll the folder.
+    console.warn("video trigger warn:", e?.message || e);
   }
 
-  // 2) Poll for the newest completed MP4 in /generated
-  const latestUrl = await pollLatestVideoUrl({ maxTries: 40, delayMs: 3000 });
+  // 2) Poll for newest completed MP4 from /generated
+  const latestUrl = await pollLatestVideoUrl({ maxTries: 60, delayMs: 2000 });
   if (!latestUrl) return { url: "", script: "", fbVideoId: null };
 
   return {
