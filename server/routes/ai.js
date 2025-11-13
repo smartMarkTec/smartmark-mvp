@@ -1215,27 +1215,94 @@ function buildAssKaraoke(text, totalSec = 19, W = 1280, H = 720) {
 
 /* ============================ VIDEO GENERATION — DROP-IN REPLACEMENT ============================ */
 
-/* ----- Stock video selection (Pexels VIDEOS) ----- */
-async function fetchPexelsVideos(keyword, want = 6) {
+/* ----- Stock video selection (Pexels VIDEOS) — multi-query + dedupe + shuffle ----- */
+function _hash32_str(s=''){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){h^=s.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
+function shuffleDeterministic(seed, arr) {
+  const a = arr.slice();
+  let h = _hash32_str(String(seed||'seed'));
+  for (let i = a.length - 1; i > 0; i--) {
+    h = (h + 0x9e3779b9) >>> 0;
+    const j = h % (i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function fetchPexelsVideosMulti(keyword, want = 9) {
   if (!PEXELS_API_KEY) return [];
-  try {
-    const r = await ax.get('https://api.pexels.com/videos/search', {
-      headers: { Authorization: PEXELS_API_KEY },
-      params:  { query: keyword || 'product', per_page: Math.max(10, want * 3), orientation: 'landscape' },
-      timeout: 12000,
-    });
-    const vids = r.data?.videos || [];
-    const pick = [];
-    for (let i = 0; i < vids.length && pick.length < want; i++) {
-      const v = vids[i];
-      const file =
-        (v.video_files || []).find(f => f.height === 720 && f.quality === 'hd') ||
-        (v.video_files || []).find(f => (f.height || 0) >= 720) ||
-        (v.video_files || []).find(f => f.link);
-      if (file?.link) pick.push({ url: file.link, id: v.id });
+  const q = String(keyword || '').toLowerCase();
+  const expansions = [
+    q,
+    q + ' product b-roll',
+    q + ' close up',
+    q + ' montage',
+    q + ' lifestyle',
+  ];
+  // category-based fallbacks to ensure >=3 unique clips
+  const fallbacks = {
+    fashion: ['fashion runway','streetwear shopping','clothing texture','model posing'],
+    coffee:  ['coffee shop','espresso machine','pour over coffee','latte art close up'],
+    food:    ['cooking close up','food plating','kitchen prep','restaurant serving'],
+    fitness: ['gym training','workout montage','weightlifting close up','running outdoors'],
+    cosmetics:['makeup application','skincare routine','beauty close up','serum dropper'],
+    electronics:['tech unboxing','laptop typing','phone close up','electronics desk'],
+    home:    ['home decor','living room details','kitchen counter','bedroom aesthetic'],
+    pets:    ['dog playing','cat relaxing','pet treats','walking dog'],
+    books:   ['bookstore browsing','reading book close up','turning pages','library aisles'],
+    generic: ['product shopping','hands close up','montage b-roll','daily life']
+  };
+
+  const seen = new Set();
+  const out = [];
+
+  async function fetchOne(query) {
+    try {
+      const r = await ax.get('https://api.pexels.com/videos/search', {
+        headers: { Authorization: PEXELS_API_KEY },
+        params:  { query, per_page: 24, orientation: 'landscape' },
+        timeout: 12000,
+      });
+      const vids = r.data?.videos || [];
+      for (const v of vids) {
+        const f =
+          (v.video_files || []).find(f => f.height === 720 && f.quality === 'hd') ||
+          (v.video_files || []).find(f => (f.height || 0) >= 720) ||
+          (v.video_files || []).find(f => f.link);
+        if (!f?.link) continue;
+        const key = `${v.id}:${f.link}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({ url: f.link, id: v.id });
+      }
+    } catch {}
+  }
+
+  // primary expansions
+  for (const e of expansions) await fetchOne(e);
+
+  // ensure we have enough: backfill with category fallbacks if needed
+  if (out.length < want) {
+    const categoryGuess =
+      /fashion|apparel|clothing/.test(q) ? 'fashion' :
+      /coffee|espresso|cafe|café/.test(q) ? 'coffee' :
+      /food|restaurant|pizza|burger|kitchen/.test(q) ? 'food' :
+      /fitness|gym|workout|trainer/.test(q) ? 'fitness' :
+      /makeup|cosmetic|skincare|beauty/.test(q) ? 'cosmetics' :
+      /electronics|phone|laptop|tech|gadget/.test(q) ? 'electronics' :
+      /home|decor|kitchen|furniture|bedroom|bath/.test(q) ? 'home' :
+      /pet|dog|cat/.test(q) ? 'pets' :
+      /book|comic|manga/.test(q) ? 'books' :
+      'generic';
+
+    for (const fb of (fallbacks[categoryGuess] || fallbacks.generic)) {
+      if (out.length >= want) break;
+      await fetchOne(fb);
     }
-    return pick;
-  } catch { return []; }
+  }
+
+  // shuffle deterministically so variant 0/1 differ
+  const shuffled = shuffleDeterministic(q + ':' + out.length, out);
+  return shuffled.slice(0, Math.max(6, want));
 }
 
 /* ----- Stock photo fallback (Pexels PHOTOS -> slideshow) ----- */
@@ -1490,23 +1557,43 @@ async function runVideoJob(job) {
     }
   }
 
-  // Media
-  let clips = await fetchPexelsVideos(keyword, 6);
-  if (!clips.length) clips = await fetchPexelsVideos('product shopping', 6);
-
-  const bgm = await prepareBgm();
-  let v1, v2;
-
-  if (clips.length) {
-    v1 = await makeVideoVariant({ clips, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
-    v2 = await makeVideoVariant({ clips, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
-  } else {
-    let photos = await fetchPexelsPhotos(keyword, 8);
-    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 8);
-    if (!photos.length) throw new Error('No stock media available');
-    v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
-    v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+   // Media
+  let clips = await fetchPexelsVideosMulti(keyword, 12); // <<< NEW multi-query
+  if (clips.length < 3) {
+    const backup = await fetchPexelsVideosMulti('product shopping', 12);
+    clips = clips.concat(backup).filter((v, i, a) => a.findIndex(x => x.url === v.url) === i);
   }
+  // Hard stop if still too few
+  if (clips.length < 3) {
+    // fallback to photos (slideshow), still yields 3–4 segments
+    let photos = await fetchPexelsPhotos(keyword, 12);
+    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 12);
+    if (!photos.length) throw new Error('No stock media available');
+    const bgm = await prepareBgm();
+    const v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+    const v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+    // Persist two variants
+    const rel1 = path.basename(v1.outPath), rel2 = path.basename(v2.outPath);
+    const url1 = mediaPath(rel1), url2 = mediaPath(rel2);
+    const abs1 = absolutePublicUrl(url1), abs2 = absolutePublicUrl(url2);
+    await saveAsset({ req: reqLike, kind: 'video', url: url1, absoluteUrl: abs1, meta: { variant: 0, category, keyword, hasSubtitles: true, voiceSec: v1.duration } });
+    await saveAsset({ req: reqLike, kind: 'video', url: url2, absoluteUrl: abs2, meta: { variant: 1, category, keyword, hasSubtitles: true, voiceSec: v2.duration } });
+    console.log('[video] ready (slideshow):', url1, url2);
+    return;
+  }
+
+  // Two different variants: we re-shuffle the same pool differently
+  const bgm = await prepareBgm();
+
+  // Variant 0: use first 4 from clips
+  const clipsV0 = clips.slice(0, 4);
+  const v1 = await makeVideoVariant({ clips: clipsV0, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+
+  // Variant 1: rotate/shuffle pool so order + clip set changes
+  const clipsRot = clips.slice(2).concat(clips.slice(0, 2)); // rotate by 2 for visible change
+  const clipsV1 = clipsRot.slice(0, 4);
+  const v2 = await makeVideoVariant({ clips: clipsV1, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
+
 
   // Persist two variants
   const rel1 = path.basename(v1.outPath), rel2 = path.basename(v2.outPath);
@@ -1555,9 +1642,46 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   return res.status(202).json({
     ok: true,
     message: 'Video generation started',
-    poll: '/api/generated-latest'
+    poll: '/api/generated-videos?limit=2'  // <<< new: returns two latest videos
   });
+
 });
+
+// -----------------------------------------------------------------------
+// NEW: /api/generated-videos?limit=2 — return the most recent N video assets
+// -----------------------------------------------------------------------
+router.get('/generated-videos', async (req, res) => {
+  try {
+    await purgeExpiredAssets();
+    const owner = ownerKeyFromReq(req);
+    const limit = Math.max(1, Math.min(6, parseInt(req.query.limit, 10) || 2));
+
+    const vids = (db.data?.generated_assets || [])
+      .filter(a => a.owner === owner && a.kind === 'video')
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, limit)
+      .map(v => ({
+        url: v.url,
+        absoluteUrl: v.absoluteUrl || absolutePublicUrl(v.url),
+        meta: v.meta || {},
+        createdAt: v.createdAt
+      }));
+
+    if (!vids.length) return res.status(204).end();
+
+    const origin = req.headers && req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.json({ ok: true, items: vids });
+  } catch (e) {
+    console.error('generated-videos error:', e?.message || e);
+    res.status(500).json({ ok: false, error: 'GEN_VIDEOS_FAIL' });
+  }
+});
+
 /* ========================== END DROP-IN VIDEO SECTION ========================== */
 
 
