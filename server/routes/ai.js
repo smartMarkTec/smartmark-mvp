@@ -1214,13 +1214,14 @@ function buildAssKaraoke(text, totalSec = 19, W = 1280, H = 720) {
 
 
 /* ============================ VIDEO GENERATION — DROP-IN REPLACEMENT ============================ */
+
 /* ----- Stock video selection (Pexels VIDEOS) ----- */
-async function fetchPexelsVideos(keyword, want = 4) {
+async function fetchPexelsVideos(keyword, want = 6) {
   if (!PEXELS_API_KEY) return [];
   try {
     const r = await ax.get('https://api.pexels.com/videos/search', {
       headers: { Authorization: PEXELS_API_KEY },
-      params:  { query: keyword || 'product', per_page: Math.max(8, want * 3), orientation: 'landscape' },
+      params:  { query: keyword || 'product', per_page: Math.max(10, want * 3), orientation: 'landscape' },
       timeout: 12000,
     });
     const vids = r.data?.videos || [];
@@ -1238,12 +1239,12 @@ async function fetchPexelsVideos(keyword, want = 4) {
 }
 
 /* ----- Stock photo fallback (Pexels PHOTOS -> slideshow) ----- */
-async function fetchPexelsPhotos(keyword, want = 4) {
+async function fetchPexelsPhotos(keyword, want = 6) {
   if (!PEXELS_API_KEY) return [];
   try {
     const r = await ax.get('https://api.pexels.com/v1/search', {
       headers: { Authorization: PEXELS_API_KEY },
-      params:  { query: keyword || 'product', per_page: Math.max(10, want * 3) },
+      params:  { query: keyword || 'product', per_page: Math.max(12, want * 3) },
       timeout: 12000,
     });
     const photos = r.data?.photos || [];
@@ -1257,48 +1258,72 @@ async function fetchPexelsPhotos(keyword, want = 4) {
   } catch { return []; }
 }
 
-async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 19, tailPadSec = 2, musicPath = '' }) {
+/* ----- Build a 3–4 clip plan, virtualizing if we have <3 real clips ----- */
+async function materializeClipPlan(rawClips, want = 4, variant = 0) {
+  // always cycle so we have at least 3, at most 4
+  const uniq = rawClips.slice(0, Math.max(1, Math.min(rawClips.length, want)));
+  const need = Math.max(3, Math.min(4, uniq.length || 1));
+
+  // cycle and attach distinct start offsets (virtual clips) to avoid a single long shot
+  const picks = [];
+  for (let i = 0; i < need; i++) {
+    const base = uniq[(i + variant) % uniq.length];
+    picks.push({ url: base.url, virtualIndex: i });
+  }
+  return picks; // [{url, virtualIndex}, ...]
+}
+
+/* ----- Compose video with crossfades, VO + bgm, burn-in subtitles (low-memory) ----- */
+async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 18, tailPadSec = 2, musicPath = '' }) {
+  // Clamp target in [18,20]
+  const target = Math.max(18, Math.min(20, Number(targetMinSec || 18)));
+
   const voicePath = await synthTTS(script);
   const voiceDur  = await ffprobeDuration(voicePath);
-  // keep between 18–20s and guarantee voice finishes
-  const hardTarget = Math.max(18, Math.min(20, targetMinSec || 19));
-  const minTotal   = Math.max(hardTarget, Math.ceil(voiceDur) + tailPadSec);
+  const minTotal  = Math.max(target, Math.ceil(voiceDur) + tailPadSec);
 
-  // ---- pick & download 3–4 clips (prefer 4)
-  const want = Math.min(4, Math.max(3, clips.length));
-  const chosen = [];
-  for (let i = 0; i < want; i++) {
-    const c = clips[(i + variant) % clips.length];
-    if (!c) break;
-    chosen.push(await downloadToTmp(c.url, '.mp4'));
-  }
-  if (!chosen.length) throw new Error('No stock clips available');
+  // ---- ensure 3–4 items and assign offsets
+  const planned   = await materializeClipPlan(clips, 4, variant);
 
-  // ---- normalize to unified canvas/fps (needed for xfade)
-  const W = 1280, H = 720, FPS = 30;
+  // ---- download & normalize to SAME size + SAME fps
+  const W = 1280, H = 720, FPS = 30, fadeDur = 0.5;
+  const perClip  = Math.max(3.8, (minTotal + (variant ? 0.6 : 0)) / planned.length);
   const normPaths = [];
-  // distribute duration evenly then fine-tune for crossfades
-  const perClip = Math.max(3.8, (minTotal + (variant ? 0.6 : 0)) / chosen.length);
-  for (let i = 0; i < chosen.length; i++) {
-    const inp = chosen[i];
+
+  for (let i = 0; i < planned.length; i++) {
+    const srcUrl = planned[i].url;
+    const tmpIn  = await downloadToTmp(srcUrl, '.mp4');
+
+    // probe duration to choose a safe offset for this "virtual" slice
+    let ss = 0;
+    try {
+      const d = await ffprobeDuration(tmpIn);
+      const headroom = Math.max(0, d - perClip - 0.8);
+      // spread offsets using virtualIndex and variant so we don't repeat the same segment
+      const frac = (planned[i].virtualIndex + 1 + variant * 0.37) / (planned.length + 1);
+      ss = Math.max(0, Math.min(headroom, headroom * frac));
+    } catch { ss = 0; }
+
     const out = path.join(ensureGeneratedDir(), `${uuidv4()}-norm.mp4`);
     const vf  = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS}`;
-    await execFile('ffmpeg',
-      ['-y','-nostdin','-loglevel','error','-i', inp, '-vf', vf, '-t', perClip.toFixed(2), '-an',
-       '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
-       '-x264-params','threads=1','-threads','1','-r', String(FPS), out],
-      {}, 120000
-    );
+    // IMPORTANT: -ss comes BEFORE -i for input seeking (fast) and we hard cut to perClip
+    const args = [
+      '-y','-nostdin','-loglevel','error',
+      ...(ss > 0 ? ['-ss', ss.toFixed(2)] : []),
+      '-i', tmpIn,
+      '-vf', vf, '-t', perClip.toFixed(2), '-an',
+      '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
+      '-x264-params','threads=1','-threads','1','-r', String(FPS), out
+    ];
+    await execFile('ffmpeg', args, {}, 120000);
     normPaths.push(out);
   }
 
-  // ---- filter graph
-  const fadeDur = 0.5;
-  const inputs = normPaths.flatMap(p => ['-i', p]); // N inputs
+  // ---- build xfade filter graph with proper labels
+  const inputs = normPaths.flatMap(p => ['-i', p]); // N video inputs
   const filterParts = [];
-  for (let i = 0; i < normPaths.length; i++) {
-    filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
-  }
+  for (let i = 0; i < normPaths.length; i++) filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+
   let chainLabel = '[v0]';
   for (let i = 1; i < normPaths.length; i++) {
     const inA = (i === 1) ? '[v0]' : chainLabel;
@@ -1309,13 +1334,13 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 19,
   }
   const finalV = (normPaths.length === 1) ? '[v0]' : chainLabel;
 
-  // ---- subtitles (karaoke timed to VO)
-  const assText = buildAssKaraoke(script, Math.max(voiceDur, minTotal), W, H);
+  // ---- subtitles
+  const assText = buildAssKaraoke(script, Math.max(minTotal, voiceDur + tailPadSec), W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
   fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
-  // ---- audio mixing (VO + optional BGM)
-  const videoCount = inputs.length / 2;
+  // ---- audio (VO + optional BGM)
+  const videoCount = inputs.length / 2; // N
   const voiceIdx   = videoCount;
   let musicArgs = [], musicIdx = null;
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = videoCount + 1; }
@@ -1336,7 +1361,6 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 19,
     ...musicArgs,
     '-filter_complex', fc,
     '-map','[vout]','-map','[aout]',
-    // cap between 18–20s but NEVER cut VO; add tiny pad
     '-t', (Math.max(minTotal, voiceDur + tailPadSec)).toFixed(2),
     '-c:v','libx264','-preset','veryfast','-crf','26','-pix_fmt','yuv420p',
     '-x264-params','threads=1','-threads','1','-r', String(FPS),
@@ -1347,17 +1371,16 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 19,
   return { outPath, voicePath, assPath, duration: await ffprobeDuration(outPath) };
 }
 
-
-/* ----- Slideshow fallback if no videos are returned (low-memory) ----- */
-async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, targetMinSec = 19, tailPadSec = 2, musicPath = '' }) {
+/* ----- Slideshow fallback if no videos are returned (still 3–4 segments) ----- */
+async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, targetMinSec = 18, tailPadSec = 2, musicPath = '' }) {
+  const target    = Math.max(18, Math.min(20, Number(targetMinSec || 18)));
   const voicePath = await synthTTS(script);
   const voiceDur  = await ffprobeDuration(voicePath);
-  const hardTarget = Math.max(18, Math.min(20, targetMinSec || 19));
-  const minTotal   = Math.max(hardTarget, Math.ceil(voiceDur) + tailPadSec);
+  const minTotal  = Math.max(target, Math.ceil(voiceDur) + tailPadSec);
 
-  const want = Math.min(4, Math.max(3, photos.length));
+  const need = Math.max(3, Math.min(4, photos.length || 3));
   const chosen = [];
-  for (let i = 0; i < want; i++) {
+  for (let i = 0; i < need; i++) {
     const c = photos[(i + variant) % photos.length];
     if (!c) break;
     chosen.push(await downloadToTmp(c.url, '.jpg'));
@@ -1381,7 +1404,7 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   }
 
   const fadeDur = 0.5;
-  const inputs = segs.flatMap(p => ['-i', p]);
+  const inputs = segs.flatMap(p => ['-i', p]); // N inputs
   const filterParts = [];
   for (let i = 0; i < segs.length; i++) filterParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
 
@@ -1395,7 +1418,7 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   }
   const finalV = (segs.length === 1) ? '[v0]' : chainLabel;
 
-  const assText = buildAssKaraoke(script, Math.max(voiceDur, minTotal), W, H);
+  const assText = buildAssKaraoke(script, Math.max(minTotal, voiceDur + tailPadSec), W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
   fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
@@ -1430,7 +1453,6 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   return { outPath, voicePath, assPath, duration: await ffprobeDuration(outPath) };
 }
 
-
 /* ----- Tiny util: fetch bgm if env provided ----- */
 async function prepareBgm() {
   if (!BACKGROUND_MUSIC_URL) return '';
@@ -1450,13 +1472,13 @@ async function runVideoJob(job) {
   const industry  = answers.industry || top.industry || '';
   const category  = resolveCategory(answers || {});
   const keyword   = getImageKeyword(industry, url, answers);
-  const targetSec = Math.max(16, Math.min(24, Number(top.targetSeconds || 17)));
+  const targetSec = Math.max(18, Math.min(20, Number(top.targetSeconds || 18)));
 
   // Script
   let script = (top.adCopy || '').trim();
   if (!script) {
     try {
-      const prompt = `Write only the exact words for a spoken ad script (≈15–17s, 46–72 words) for category "${category}". Hook → value → simple CTA. Neutral, no website.`;
+      const prompt = `Write only the exact words for a spoken ad script (~46–72 words, 15–17s) for category "${category}". Hook → value → simple CTA. Neutral, no website.`;
       const r = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [{ role: 'user', content: prompt }],
@@ -1471,8 +1493,8 @@ async function runVideoJob(job) {
   }
 
   // Media
-  let clips = await fetchPexelsVideos(keyword, 4);
-  if (!clips.length) clips = await fetchPexelsVideos('product shopping', 4);
+  let clips = await fetchPexelsVideos(keyword, 6);
+  if (!clips.length) clips = await fetchPexelsVideos('product shopping', 6);
 
   const bgm = await prepareBgm();
   let v1, v2;
@@ -1481,8 +1503,8 @@ async function runVideoJob(job) {
     v1 = await makeVideoVariant({ clips, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
     v2 = await makeVideoVariant({ clips, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
   } else {
-    let photos = await fetchPexelsPhotos(keyword, 4);
-    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 4);
+    let photos = await fetchPexelsPhotos(keyword, 8);
+    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 8);
     if (!photos.length) throw new Error('No stock media available');
     v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
     v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetMinSec: targetSec, tailPadSec: 2, musicPath: bgm });
@@ -1538,6 +1560,7 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
     poll: '/api/generated-latest'
   });
 });
+/* ========================== END DROP-IN VIDEO SECTION ========================== */
 
 
 /* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
