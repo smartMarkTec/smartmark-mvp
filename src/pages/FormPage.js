@@ -624,64 +624,50 @@ export default function FormPage() {
     }
   }
 
-// Poll the backend for the newest finished .mp4 living under /generated
-async function pollLatestVideoUrl({ maxTries = 60, delayMs = 2000 } = {}) {
-  let tries = 0;
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms + Math.floor(Math.random() * 200)));
-
-  while (tries < maxTries) {
-    try {
-      const r = await fetch(`${API_BASE}/generated-latest`, { method: 'GET' });
-      if (r.status === 404) { // none yet -> wait and retry
-        tries++;
-        await sleep(delayMs);
-        continue;
-      }
-      if (!r.ok) {
-        tries++;
-        await sleep(delayMs);
-        continue;
-      }
-      const data = await r.json();
-      if (data?.url) return data.url; // e.g. /generated/79a9...-norm.mp4
-    } catch {
-      // ignore and keep polling
+  /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
+  async function pollLatestVideo({ tries = 30, intervalMs = 1500 } = {}) {
+    for (let i = 0; i < tries; i++) {
+      try {
+        const r = await fetchWithTimeout(`${API_BASE}/generated-latest`, { mode: "cors", credentials: "omit" }, 6000);
+        if (r.ok) {
+          const j = await r.json();
+          if (j?.url) return j.url.startsWith("http") ? j.url : (BACKEND_URL + j.url);
+        }
+      } catch {}
+      await new Promise(r => setTimeout(r, intervalMs));
     }
-    tries++;
-    await sleep(delayMs);
-  }
-  return '';
-}
-
-async function fetchVideoOnce(token) {
-  // 1) Trigger server-side generation (don’t rely on immediate URL)
-  try {
-    await warmBackend();
-    // Long timeout because Render can be slow on ffmpeg spin-up
-    await fetchJsonWithRetry(
-      `${API_BASE}/generate-video-ad`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
-      },
-      { tries: 2, timeoutMs: 120000 } // let the server breathe
-    );
-  } catch (e) {
-    // Even if this times out, ffmpeg likely continues; we’ll poll the folder.
-    console.warn("video trigger warn:", e?.message || e);
+    return "";
   }
 
-  // 2) Poll for newest completed MP4 from /generated
-  const latestUrl = await pollLatestVideoUrl({ maxTries: 60, delayMs: 2000 });
-  if (!latestUrl) return { url: "", script: "", fbVideoId: null };
+  async function fetchVideoOnce(token) {
+    // 1) trigger (fast 202 response) — don’t wait on long ffmpeg
+    try {
+      await warmBackend();
+      await fetchWithTimeout(
+        `${API_BASE}/generate-video-ad`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          // Pass any landing page URL you captured; backend will download or seed a tiny clip
+          body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token }),
+        },
+        8000 // short timeout; job runs in background
+      ).catch(() => {});
+    } catch {}
 
-  return {
-    url: latestUrl.startsWith('http') ? latestUrl : (BACKEND_URL + latestUrl),
-    script: "",      // keep your existing script state if you have one
-    fbVideoId: null
-  };
-}
+    // 2) poll newest finished video exposed by /api/generated-latest
+    const latestUrl = await pollLatestVideo({ tries: 40, intervalMs: 1500 });
+    if (!latestUrl) {
+      return { url: "", script: "", fbVideoId: null };
+    }
+
+    // (Optional) attach a simple script line; your backend can generate richer copy
+    return {
+      url: latestUrl,
+      script: result?.body ? `Narration: ${result.body}` : "Quick intro. Show product. Flash offer. CTA.",
+      fbVideoId: null
+    };
+  }
 
 
   /* ---- Chat flow ---- */
