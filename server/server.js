@@ -83,38 +83,42 @@ if (process.env.RENDER) {
 }
 process.env.GENERATED_DIR = generatedPath;
 
+// Serve generated files (images/videos) with friendly headers
 app.use('/generated', express.static(generatedPath, {
-  maxAge: '1d',
+  maxAge: '1y',
   immutable: true,
-  setHeaders(res) {
+  setHeaders(res, filePath) {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
+    if (filePath.endsWith('.mp4')) res.setHeader('Content-Type', 'video/mp4');
   }
 }));
 
-/** Local fallback image for testing */
-app.get('/__fallback/1200.jpg', async (_req, res) => {
+// Return the newest finished MP4 so the UI can show it without guessing a name
+app.get('/api/generated-latest', (req, res) => {
   try {
-    const buf = await sharp({
-      create: { width: 1200, height: 1200, channels: 3, background: { r: 30, g: 200, b: 133 } }
-    }).jpeg({ quality: 82 }).toBuffer();
-    res.setHeader('Content-Type', 'image/jpeg');
-    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-    res.end(buf);
-  } catch {
-    res.status(500).send('fallback image error');
+    const files = fs.readdirSync(generatedPath);
+    const mp4s = files.filter(f => f.toLowerCase().endsWith('.mp4'));
+    if (!mp4s.length) return res.status(404).json({ error: 'No videos yet.' });
+
+    const newest = mp4s
+      .map(name => {
+        const full = path.join(generatedPath, name);
+        const st = fs.statSync(full);
+        return { name, mtime: st.mtimeMs, size: st.size };
+      })
+      .filter(x => x.size > 0) // ignore zero-byte/in-progress
+      .sort((a, b) => b.mtime - a.mtime)[0];
+
+    if (!newest) return res.status(404).json({ error: 'No finished videos yet.' });
+    res.json({ url: `/generated/${newest.name}`, size: newest.size, mtime: newest.mtime });
+  } catch (e) {
+    console.error('generated-latest error:', e);
+    res.status(500).json({ error: 'Unable to scan generated folder.' });
   }
 });
+/* ---------------------------------------------------------------------- */
 
-// Guard against handlers that “hang”
-app.use((req, res, next) => {
-  res.setTimeout(180000, () => {
-    try {
-      res.status(504).json({ error: 'Gateway Timeout', route: req.originalUrl });
-    } catch {}
-  });
-  next();
-});
 
 /* --------------------------------- ROUTES --------------------------------- */
 const authRoutes = require('./routes/auth');

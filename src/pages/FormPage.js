@@ -624,27 +624,64 @@ export default function FormPage() {
     }
   }
 
-  async function fetchVideoOnce(token) {
+ // Poll the backend for the newest finished .mp4 living under /generated
+async function pollLatestVideoUrl({ maxTries = 40, delayMs = 3000 } = {}) {
+  let tries = 0;
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms + Math.floor(Math.random() * 250)));
+
+  while (tries < maxTries) {
     try {
-      await warmBackend();
-      const data = await fetchJsonWithRetry(`${API_BASE}/generate-video-ad`, {
+      const r = await fetch('/api/generated-latest', { method: 'GET' });
+      if (r.status === 404) { // none yet
+        tries++;
+        await sleep(delayMs);
+        continue;
+      }
+      if (!r.ok) {
+        tries++;
+        await sleep(delayMs);
+        continue;
+      }
+      const data = await r.json();
+      if (data?.url) return data.url; // e.g. /generated/xyz.mp4
+    } catch {
+      // ignore and keep polling
+    }
+    tries++;
+    await sleep(delayMs);
+  }
+  return '';
+}
+
+async function fetchVideoOnce(token) {
+  // 1) Trigger generation but don’t rely on immediate URL in the response
+  try {
+    await warmBackend();
+    await fetchJsonWithRetry(
+      `${API_BASE}/generate-video-ad`,
+      {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token })
-      }, { tries: 4 });
-      const vAbs = data?.absoluteVideoUrl || (data?.video?.absoluteUrl) || null;
-      const vRel = data?.videoUrl || data?.video?.url || "";
-      const vUrl = vAbs || (vRel ? (vRel.startsWith("http") ? vRel : BACKEND_URL + vRel) : "");
-      return {
-        url: vUrl,
-        script: data?.script || data?.video?.script || "",
-        fbVideoId: data?.fbVideoId || data?.video?.fbVideoId || null
-      };
-    } catch (e) {
-      console.warn("video fetch failed:", e.message);
-      return { url: "", script: "", fbVideoId: null };
-    }
+      },
+      { tries: 3, timeoutMs: 30000 }
+    );
+  } catch (e) {
+    // Even if this times out, ffmpeg may still be working server-side
+    console.warn("video trigger warn:", e.message || e);
   }
+
+  // 2) Poll for the newest completed MP4 in /generated
+  const latestUrl = await pollLatestVideoUrl({ maxTries: 40, delayMs: 3000 });
+  if (!latestUrl) return { url: "", script: "", fbVideoId: null };
+
+  return {
+    url: latestUrl.startsWith('http') ? latestUrl : (BACKEND_URL + latestUrl),
+    script: "",      // keep your existing script state if you have one
+    fbVideoId: null
+  };
+}
+
 
   /* ---- Chat flow ---- */
   async function handleUserInput(e) {
