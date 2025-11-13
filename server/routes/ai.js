@@ -1296,13 +1296,15 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 17,
   let musicArgs = [], musicIdx = null;
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = videoCount + 1; }
 
-  const fc = [
-    ...filterParts,
-    `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
-    musicIdx !== null
-      ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
-      : `[${voiceIdx}:a]anull[aout]`
-  ].join(';');
+ const fc = [
+  ...filterParts,
+  `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
+  musicIdx !== null
+    ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
+    : `[${voiceIdx}:a]volume=1.0[aout]`
+].join(';');
+
+
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   await execFile('ffmpeg', [
@@ -1380,12 +1382,13 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = videoCount + 1; }
 
   const fc = [
-    ...filterParts,
-    `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
-    musicIdx !== null
-      ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
-      : `[${voiceIdx}:a]anull[aout]`
-  ].join(';');
+  ...filterParts,
+  `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vout]`,
+  musicIdx !== null
+    ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(minTotal)+2}[bgm];[${voiceIdx}:a]volume=1.0[vo];[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2,volume=1.0[aout]`
+    : `[${voiceIdx}:a]volume=1.0[aout]`
+].join(';');
+
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   await execFile('ffmpeg', [
@@ -1694,17 +1697,24 @@ router.get('/generated-latest', async (req, res) => {
       url = all[0].url;
       absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
       filename = (url || '').split('/').pop();
-    } else {
-      const dir = ensureGeneratedDir();
-      const files = fs.readdirSync(dir)
-        .filter(f => f.toLowerCase().endsWith('.mp4'))
-        .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.m - a.m);
-      if (!files.length) return res.status(204).end();
-      filename = files[0].f;
-      url = mediaPath(filename);
-      absoluteUrl = absolutePublicUrl(url);
-    }
+   } else {
+  // Fallback: newest *final* .mp4 in /tmp/generated  (skip interim -norm.mp4)
+  const dir = ensureGeneratedDir();
+  const files = fs.readdirSync(dir)
+    .filter(f =>
+      f.toLowerCase().endsWith('.mp4') &&
+      !/-norm\.mp4$/i.test(f)         // <-- ignore interim normalized segments
+    )
+    .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+    .sort((a, b) => b.m - a.m);
+
+  if (!files.length) return res.status(204).end(); // nothing final yet
+
+  filename = files[0].f;
+  url = mediaPath(filename);                  // /api/media/<file>
+  absoluteUrl = absolutePublicUrl(url);
+}
+
 
     const origin = req.headers.origin;
     if (origin) {
