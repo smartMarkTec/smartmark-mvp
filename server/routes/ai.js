@@ -11,6 +11,8 @@
 const express = require('express');
 const router = express.Router();
 
+
+
 /* ------------------------ CORS (ALWAYS first) ------------------------ */
 router.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -1646,6 +1648,63 @@ router.post('/assets/clear', async (req, res) => {
     res.json({ success: true });
   } catch { res.status(500).json({ error: 'Failed to clear assets' }); }
 });
+
+// -----------------------------------------------------------------------
+// LATEST GENERATED VIDEO (for frontend poller) -> /api/generated-latest
+// Returns newest video for the current owner. 204 = not ready yet.
+// -----------------------------------------------------------------------
+router.get('/generated-latest', async (req, res) => {
+  try {
+    await purgeExpiredAssets();
+    const owner = ownerKeyFromReq(req);
+
+    // Prefer DB (what saveAsset writes during generation)
+    const all = (db.data?.generated_assets || [])
+      .filter(a => a.owner === owner && a.kind === 'video')
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    // If DB empty, fall back to scanning /tmp/generated for .mp4
+    let url = '';
+    let absoluteUrl = '';
+    let filename = '';
+    if (all.length) {
+      url = all[0].url;
+      absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
+      filename = (url || '').split('/').pop();
+    } else {
+      // Fallback: newest .mp4 in /tmp/generated
+      const dir = ensureGeneratedDir();
+      const files = fs.readdirSync(dir)
+        .filter(f => f.toLowerCase().endsWith('.mp4'))
+        .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.m - a.m);
+      if (!files.length) return res.status(204).end(); // nothing yet
+      filename = files[0].f;
+      url = mediaPath(filename);                  // /api/media/<file>
+      absoluteUrl = absolutePublicUrl(url);
+    }
+
+    // CORS for frontend
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    return res.json({
+      ok: true,
+      url,                 // relative URL your player can load
+      absoluteUrl,         // absolute URL (useful for uploads)
+      type: 'video/mp4',
+      filename
+    });
+  } catch (e) {
+    console.error('generated-latest error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'GEN_LATEST_FAIL' });
+  }
+});
+
 
 /* -------- Ensure CORS even on errors -------- */
 router.use((err, req, res, _next) => {
