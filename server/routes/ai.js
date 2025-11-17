@@ -1605,6 +1605,8 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
 });
 /* ========================== END DROP-IN VIDEO SECTION ========================== */
 
+/* ========================== END DROP-IN VIDEO SECTION ========================== */
+
 
 // -----------------------------------------------------------------------
 // NEW: /api/generated-videos?limit=2 — return the most recent N video assets
