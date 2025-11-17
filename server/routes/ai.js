@@ -1125,7 +1125,7 @@ const { promisify } = require('util');
 const streamPipeline = promisify(pipeline);
 
 /** Exec a binary without buffering stdout (prevents big memory spikes) */
-async function execFile(bin, args = [], opts = {}, hardKillMs = 120000) {
+async function execFile(bin, args = [], opts = {}, hardKillMs = 300000) { // was 120000
   return new Promise((resolve, reject) => {
     const p = spawn(bin, args, {
       stdio: ['ignore', 'ignore', 'inherit'], // stdout muted, stderr shown
@@ -1137,6 +1137,7 @@ async function execFile(bin, args = [], opts = {}, hardKillMs = 120000) {
     p.on('close', (code) => { clearTimeout(killer); code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}`)); });
   });
 }
+
 
 /** Stream any URL straight to /tmp (no large arraybuffers in RAM) */
 async function downloadToTmp(url, ext = '') {
@@ -1271,14 +1272,13 @@ async function materializeClipPlan(rawClips, want = 4, variant = 0) {
   return Array.from({ length: segCount }, (_, i) => ({ url: base, virtualIndex: i }));
 }
 
-/* ----- Compose video (3–4 stitched clips) with VO + optional BGM + ASS subs ----- */
 async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 18, tailPadSec = 2, musicPath = '' }) {
   // Target window 18–20s
   const target = Math.max(18, Math.min(20, Number(targetMinSec || 18)));
 
   // TTS and duration
-  const voicePath = await synthTTS(script);
-  let voiceDur = await ffprobeDuration(voicePath);
+  let voicePath = await synthTTS(script);                 // <-- let (was const)
+  let voiceDur  = await ffprobeDuration(voicePath);
 
   // If VO is too long, gently speed it up (max 1.18x) to try to fit ~20s
   if (voiceDur > 21) {
@@ -1291,11 +1291,12 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 18,
     ], {}, 60000);
     voiceDur = await ffprobeDuration(sped);
     try { fs.unlinkSync(voicePath); } catch {}
-    voicePath = sped;
+    voicePath = sped;                                     // <-- reassignment is now legal
   }
 
   // Total play must at least cover VO + tail
   const minTotal = Math.max(target, Math.ceil(voiceDur) + tailPadSec);
+
 
   // Build plan (always 3–4 segments even with 1 source)
   const planned = await materializeClipPlan(clips, 4, variant);
@@ -1400,17 +1401,22 @@ async function makeVideoVariant({ clips, script, variant = 0, targetMinSec = 18,
 async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, targetMinSec = 18, tailPadSec = 2, musicPath = '' }) {
   const target = Math.max(18, Math.min(20, Number(targetMinSec || 18)));
 
-  let voicePath = await synthTTS(script);
+  let voicePath = await synthTTS(script);                 // <-- let (was const)
   let voiceDur  = await ffprobeDuration(voicePath);
   if (voiceDur > 21) {
     const sped = path.join(ensureGeneratedDir(), `${uuidv4()}-vo.mp3`);
     const factor = Math.min(1.18, voiceDur / 19.5);
-    await execFile('ffmpeg', ['-y','-nostdin','-loglevel','error','-i', voicePath, '-filter:a', `atempo=${factor.toFixed(2)}`, '-c:a','mp3', sped], {}, 60000);
+    await execFile('ffmpeg', [
+      '-y','-nostdin','-loglevel','error',
+      '-i', voicePath, '-filter:a', `atempo=${factor.toFixed(2)}`,
+      '-c:a','mp3', sped
+    ], {}, 60000);
     voiceDur = await ffprobeDuration(sped);
     try { fs.unlinkSync(voicePath); } catch {}
-    voicePath = sped;
+    voicePath = sped;                                     // <-- reassignment is now legal
   }
   const minTotal = Math.max(target, Math.ceil(voiceDur) + tailPadSec);
+
 
   const need = Math.max(3, Math.min(4, photos.length || 3));
   const chosen = [];
