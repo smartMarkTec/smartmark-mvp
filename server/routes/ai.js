@@ -1264,9 +1264,8 @@ async function makeVideoVariant({ clips, script, variant = 0, targetSec = 18.5, 
   let voiceDur = await ffprobeDuration(voicePath);
   if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-  // Time-align: micro stretch/compress so VO always fits ~TARGET
-  const rawRate = TARGET / voiceDur;
-  const ATEMPO = Math.max(0.85, Math.min(1.25, rawRate)); // keep quality
+  // Time-align: micro stretch/compress so VO ~ TARGET
+  const ATEMPO = Math.max(0.85, Math.min(1.25, TARGET / voiceDur));
   const OUTLEN = TARGET;
 
   // Plan 3–4 segments
@@ -1274,7 +1273,7 @@ async function makeVideoVariant({ clips, script, variant = 0, targetSec = 18.5, 
   const perClip = Math.max(3.8, OUTLEN / plan.length);
   const normPaths = [];
 
-  // Normalize each clip to W×H, cut segment with soft head offset
+  // Normalize each clip and cut segment
   for (let i = 0; i < plan.length; i++) {
     const srcUrl = plan[i].url;
     const tmpIn  = await downloadToTmp(srcUrl, '.mp4');
@@ -1302,8 +1301,8 @@ async function makeVideoVariant({ clips, script, variant = 0, targetSec = 18.5, 
     normPaths.push(out);
   }
 
-  // Build filter graph: setpts, xfade chain → [vv]
-  const inputs = normPaths.flatMap(p => ['-i', p]); // video inputs
+  // Video xfade chain → [vv]
+  const inputs = normPaths.flatMap(p => ['-i', p]); // video inputs first
   const vParts = [];
   for (let i = 0; i < normPaths.length; i++) vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
   let chain = '[v0]';
@@ -1316,13 +1315,13 @@ async function makeVideoVariant({ clips, script, variant = 0, targetSec = 18.5, 
   }
   const finalV = (normPaths.length === 1) ? '[v0]' : chain;
 
-  // Subtitles
+  // Subtitles (ASS)
   const assText = buildAssKaraoke(script, OUTLEN, W, H);
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
   fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
-  // Audio chain: always produce [aout] (no “unconnected output”)
-  const voiceIdx = normPaths.length; // after the video inputs
+  // Audio chain — NO dangling filters; always output [aout]
+  const voiceIdx = normPaths.length; // voice input comes after all video inputs
   const audioInputs = ['-i', voicePath];
   let musicArgs = [], musicIdx = null;
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
@@ -1330,9 +1329,8 @@ async function makeVideoVariant({ clips, script, variant = 0, targetSec = 18.5, 
   const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000,apad=pad_dur=${Math.ceil(tailPadSec)}[vo]`;
   const audioChain = (musicIdx !== null)
     ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(OUTLEN)+2}[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
-    : `${voiceFilt};[vo]anullsink;[vo]acopy[aout]`.replace(';[vo]anullsink',''); // keep single stream as [aout]
+    : `${voiceFilt};[vo]anull[aout]`; // simple pass-through; no 'acopy', no dangling sinks
 
-  // Full filter_complex
   const fc = [
     ...vParts,
     `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vv]`,
@@ -1405,7 +1403,7 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
   fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
-  const voiceIdx = segs.length;
+  const voiceIdx = segs.length; // voice after video inputs
   const audioInputs = ['-i', voicePath];
   let musicArgs = [], musicIdx = null;
   if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
@@ -1413,7 +1411,7 @@ async function makeSlideshowVariantFromPhotos({ photos, script, variant = 0, tar
   const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000,apad=pad_dur=${Math.ceil(tailPadSec)}[vo]`;
   const audioChain = (musicIdx !== null)
     ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(OUTLEN)+2}[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
-    : `${voiceFilt};[vo]acopy[aout]`;
+    : `${voiceFilt};[vo]anull[aout]`;
 
   const fc = [
     ...vParts,
