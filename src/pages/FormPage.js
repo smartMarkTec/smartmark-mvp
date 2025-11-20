@@ -624,9 +624,9 @@ export default function FormPage() {
     }
   }
 
-  /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
-  async function pollLatestVideo({ tries = 60, intervalMs = 1500 } = {}) {
-    // 60 tries * 1.5s ≈ 90 seconds max wait
+    /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
+  async function pollLatestVideo({ tries = 60, intervalMs = 2000 } = {}) {
+    // Poll /generated-latest for up to ~2 minutes
     for (let i = 0; i < tries; i++) {
       try {
         const r = await fetchWithTimeout(
@@ -637,8 +637,8 @@ export default function FormPage() {
         if (r.ok) {
           const j = await r.json();
           if (j?.url) {
-            const u = j.url.startsWith("http") ? j.url : (BACKEND_URL + j.url);
-            return u;
+            const url = j.url.startsWith("http") ? j.url : (BACKEND_URL + j.url);
+            return url;
           }
         }
       } catch {
@@ -649,8 +649,27 @@ export default function FormPage() {
     return "";
   }
 
+  // Extra safety: don't use the URL until the file actually exists (avoid 404s)
+  async function ensureUrlExists(url, { tries = 10, intervalMs = 1500 } = {}) {
+    if (!url) return "";
+    for (let i = 0; i < tries; i++) {
+      try {
+        const res = await fetchWithTimeout(
+          url,
+          { method: "HEAD", mode: "cors", credentials: "omit" },
+          6000
+        );
+        if (res.ok) return url;
+      } catch {
+        // ignore and retry
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    return "";
+  }
+
   async function fetchVideoOnce(token) {
-    // 1) trigger (fast 202 response) — don’t wait on long ffmpeg
+    // 1) trigger (fast 202 response) — job runs in background
     try {
       await warmBackend();
       await fetchWithTimeout(
@@ -658,33 +677,35 @@ export default function FormPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: answers?.url || "",
-            answers,
-            regenerateToken: token,
-          }),
+          body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token }),
         },
-        8000 // short timeout; job runs in background
+        8000
       ).catch(() => {});
     } catch {
-      // ignore trigger failures; we rely on polling anyway
+      // fire-and-forget; even if this throws, job may still be queued
     }
 
     // 2) poll newest finished video exposed by /api/generated-latest
-    const latestUrl = await pollLatestVideo({ tries: 60, intervalMs: 1500 });
+    const latestUrl = await pollLatestVideo({ tries: 60, intervalMs: 2000 });
     if (!latestUrl) {
       return { url: "", script: "", fbVideoId: null };
     }
 
-    // (Optional) attach a simple script line; your backend can generate richer copy
+    // 3) make sure the file is actually there (avoid the 404 race)
+    const confirmedUrl = await ensureUrlExists(latestUrl, { tries: 10, intervalMs: 1500 });
+    if (!confirmedUrl) {
+      return { url: "", script: "", fbVideoId: null };
+    }
+
     return {
-      url: latestUrl,
+      url: confirmedUrl,
       script: result?.body
         ? `Narration: ${result.body}`
         : "Quick intro. Show product. Flash offer. CTA.",
       fbVideoId: null,
     };
   }
+
 
 
   /* ---- Chat flow ---- */
@@ -825,10 +846,15 @@ export default function FormPage() {
 
   async function handleRegenerateVideo() {
     setVideoLoading(true);
+    // Optional: hide old video while new one is cooking
+    setVideoItems([]);
+    setVideoUrl("");
+    setVideoScript("");
+
     try {
       await warmBackend();
       const vid = await fetchVideoOnce(getRandomString());
-      const vids = [vid].filter(v => v && v.url);
+      const vids = [vid].filter((v) => v && v.url);
       setVideoItems(vids);
       setActiveVideo(0);
       setVideoUrl(vids[0]?.url || "");
@@ -837,6 +863,7 @@ export default function FormPage() {
       setVideoLoading(false);
     }
   }
+
 
   /* ---------------------- Render ---------------------- */
   return (
