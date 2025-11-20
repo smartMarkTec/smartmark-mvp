@@ -89,6 +89,14 @@ module.exports.ax = ax;
 
 const fs = require('fs');
 const path = require('path');
+// Where we store generated images/videos
+const GENERATED_DIR =
+  process.env.GENERATED_DIR ||
+  path.join(require('os').tmpdir(), 'generated');
+
+// Make sure the folder exists
+fs.mkdirSync(GENERATED_DIR, { recursive: true });
+
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
 const child_process = require('child_process');
