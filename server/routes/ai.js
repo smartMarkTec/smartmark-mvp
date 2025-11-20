@@ -1131,10 +1131,24 @@ const streamPipeline = promisify(pipeline);
 /** Exec a binary without buffering stdout (prevents big memory spikes on Render free) */
 async function execFile(bin, args = [], opts = {}, hardKillMs = 180000) {
   return new Promise((resolve, reject) => {
-    const p = spawn(bin, args, { stdio: ['ignore', 'ignore', 'inherit'], env: process.env, ...opts });
-    const killer = setTimeout(() => { try { p.kill('SIGKILL'); } catch {} }, hardKillMs);
-    p.on('error', (e) => { clearTimeout(killer); reject(e); });
-    p.on('close', (code) => { clearTimeout(killer); code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}`)); });
+    if (!bin) return reject(new Error('execFile: binary is undefined'));
+    const p = spawn(bin, args, {
+      stdio: ['ignore', 'ignore', 'inherit'],
+      env: process.env,
+      ...opts
+    });
+    const killer = setTimeout(() => {
+      try { p.kill('SIGKILL'); } catch {}
+    }, hardKillMs);
+    p.on('error', (e) => {
+      clearTimeout(killer);
+      reject(e);
+    });
+    p.on('close', (code) => {
+      clearTimeout(killer);
+      if (code === 0) return resolve();
+      reject(new Error(`${bin} exited ${code}`));
+    });
   });
 }
 
@@ -1142,12 +1156,45 @@ async function execFile(bin, args = [], opts = {}, hardKillMs = 180000) {
 async function downloadToTmp(url, ext = '') {
   ensureGeneratedDir();
   const out = path.join(GEN_DIR, `${uuidv4()}${ext || ''}`);
-  const res = await ax.get(url, { responseType: 'stream', timeout: 20000, maxRedirects: 4 });
+  const res = await ax.get(url, {
+    responseType: 'stream',
+    timeout: 20000,
+    maxRedirects: 4,
+  });
   await streamPipeline(res.data, fs.createWriteStream(out, { flags: 'w' }));
   return out;
 }
 
-// --- TTS (returns { path, ok }) ---
+/** ffprobe duration (sec) - tolerant version */
+async function ffprobeDuration(filePath = '') {
+  try {
+    if (!filePath || !fs.existsSync(filePath)) return 0;
+    const outTxt = path.join(GEN_DIR, `${uuidv4()}.dur.txt`);
+    const fd = fs.openSync(outTxt, 'w');
+    try {
+      await new Promise((resolve) => {
+        const p = spawn('ffprobe', [
+          '-v','error',
+          '-show_entries','format=duration',
+          '-of','default=nw=1:nk=1',
+          filePath
+        ], { stdio: ['ignore', fd, 'inherit'] });
+        p.on('error', () => resolve());   // resolve, don’t throw
+        p.on('close', () => resolve());   // resolve even if non-zero
+      });
+      const txt = await fs.promises.readFile(outTxt, 'utf8').catch(() => '0');
+      const d = parseFloat(String(txt).trim());
+      return Number.isFinite(d) ? d : 0;
+    } finally {
+      try { fs.closeSync(fd); } catch {}
+      try { fs.unlinkSync(outTxt); } catch {}
+    }
+  } catch {
+    return 0;
+  }
+}
+
+// --- TTS (returns { path, ok } with tone fallback so audio is never empty) ---
 async function synthTTS(text = '') {
   const speechPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp3`);
   try {
@@ -1165,48 +1212,23 @@ async function synthTTS(text = '') {
     const fallback = path.join(ensureGeneratedDir(), `${uuidv4()}-tone.mp3`);
     await execFile('ffmpeg', [
       '-y','-f','lavfi','-i','sine=frequency=400:duration=19:sample_rate=48000',
-      '-filter:a','volume=0.12', '-c:a','mp3', fallback
+      '-filter:a','volume=0.12',
+      '-c:a','mp3',
+      fallback
     ], {}, 20000);
     return { path: fallback, ok: false };
   }
 }
 
-
 /** Optional BGM (returns '' if missing or download fails) */
 async function prepareBgm() {
   if (!BACKGROUND_MUSIC_URL) return '';
-  try { return await downloadToTmp(BACKGROUND_MUSIC_URL, '.mp3'); }
-  catch { return ''; }
-}
-
-
-/** ffprobe duration (sec) - tolerant version */
-async function ffprobeDuration(filePath = '') {
   try {
-    if (!filePath || !fs.existsSync(filePath)) return 0;
-    const outTxt = path.join(GEN_DIR, `${uuidv4()}.dur.txt`);
-    const fd = fs.openSync(outTxt, 'w');
-    try {
-      await new Promise((resolve) => {
-        const p = spawn('ffprobe', [
-          '-v','error',
-          '-show_entries','format=duration',
-          '-of','default=nw=1:nk=1',
-          filePath
-        ], { stdio: ['ignore', fd, 'inherit'] });
-        p.on('error', () => resolve());         // resolve, don’t throw
-        p.on('close', () => resolve());         // resolve even if non-zero
-      });
-      const txt = await fs.promises.readFile(outTxt, 'utf8').catch(() => '0');
-      const d = parseFloat(String(txt).trim());
-      return Number.isFinite(d) ? d : 0;
-    } finally {
-      try { fs.closeSync(fd); } catch {}
-      try { fs.unlinkSync(outTxt); } catch {}
-    }
-  } catch { return 0; }
+    return await downloadToTmp(BACKGROUND_MUSIC_URL, '.mp3');
+  } catch {
+    return '';
+  }
 }
-
 
 /** ASS karaoke (centered) */
 function buildAssKaraoke(text, totalSec = 18.5, W = 1280, H = 720) {
@@ -1229,11 +1251,8 @@ function buildAssKaraoke(text, totalSec = 18.5, W = 1280, H = 720) {
     `Dialogue: 0,0:00:00.00,0:00:${String(Math.max(1, Math.floor(totalSec))).padStart(2,'0')}.00,Default,,0,0,0,,{\\an2\\bord2\\blur2}${karaoke}`
   ].join('\n');
 }
-/* ================= end helpers ================= */
 
-
-
-/* ============================ VIDEO GENERATION (3–4 clips, ~18s) ============================ */
+/* ============================ VIDEO GENERATION (3–4 clips, ~18–20s) ============================ */
 
 /* Pexels video + photo fetchers */
 async function fetchPexelsVideos(keyword, want = 8) {
@@ -1247,7 +1266,6 @@ async function fetchPexelsVideos(keyword, want = 8) {
     const vids = r.data?.videos || [];
     const pick = [];
     for (const v of vids) {
-      // prefer 720p+ landscape mp4
       const f = (v.video_files || []).find(f => (f.height || 0) >= 720 && /mp4/i.test(f.file_type || ''))
             || (v.video_files || []).find(f => f.link);
       if (f?.link) pick.push({ url: f.link, id: v.id, dur: v.duration || 0 });
@@ -1276,54 +1294,62 @@ async function fetchPexelsPhotos(keyword, want = 8) {
       if (pick.length >= want) break;
     }
     return pick;
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 /** Ensure we have 3–4 clips (duplicate with different offsets if needed) */
 function buildVirtualPlan(rawClips, variant = 0) {
   const uniq = Array.isArray(rawClips) ? rawClips.filter(Boolean) : [];
-  const want = uniq.length >= 4 ? 4 : Math.max(3, Math.min(4, uniq.length || 1));
+  const baseCount = uniq.length || 1;
+  const want = baseCount >= 4 ? 4 : Math.max(3, Math.min(4, baseCount));
   const out = [];
   for (let i = 0; i < want; i++) {
-    const base = uniq[i % Math.max(1, uniq.length)];
+    const base = uniq[i % baseCount];
     out.push({ url: base.url, seed: `${variant}-${i}-${Date.now()}` });
   }
   return out;
 }
 
-
-/** Compose stitched video with VO, optional bgm, ASS subs (safe args) */
+/** Compose stitched video with VO, optional bgm, ASS subs (safe args, low-mem) */
 async function makeVideoVariant({
   clips, script, variant = 0, targetSec = 18.5, tailPadSec = 1.8, musicPath = ''
 }) {
-  // Drop resolution a notch to avoid OOM on free 512MB; looks fine on feeds
   const W = 960, H = 540, FPS = 30, FADE = 0.5;
   const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
 
   const tmpToDelete = [];
+  const segs = [];
+  let assPath = '';
+  let voicePath = '';
+  let stage = 'init';
 
   try {
     // Voice
-    const { path: voicePath } = await synthTTS(script);
+    stage = 'tts';
+    const ttsRes = await synthTTS(script);
+    voicePath = ttsRes.path;
     tmpToDelete.push(voicePath);
+
+    stage = 'tts-duration';
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-    // Micro time-stretch so VO ~ target
     const ATEMPO = Math.max(0.85, Math.min(1.25, OUTLEN / voiceDur));
 
     // Plan 3–4 segments
+    stage = 'plan';
     const plan = buildVirtualPlan(clips, variant);
     const perClip = Math.max(3.8, OUTLEN / plan.length);
 
     // Normalize each clip to segment and free originals immediately
-    const segs = [];
+    stage = 'download+normalize';
     for (let i = 0; i < plan.length; i++) {
       const srcUrl = plan[i].url;
       const tmpIn  = await downloadToTmp(srcUrl, '.mp4');
       tmpToDelete.push(tmpIn);
 
-      // pick a safe offset within the clip
       let ss = 0;
       try {
         const d = await ffprobeDuration(tmpIn);
@@ -1342,18 +1368,30 @@ async function makeVideoVariant({
         '-vf', vf,
         '-an',
         '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-        '-x264-params','threads=1','-threads','1','-r', String(FPS)
-      , outSeg], {}, 180000);
+        '-x264-params','threads=1',
+        '-threads','1',
+        '-r', String(FPS),
+        outSeg
+      ], {}, 180000);
 
       segs.push(outSeg);
-      // free the downloaded source right away
+      tmpToDelete.push(outSeg);
       safeUnlink(tmpIn);
     }
 
-    // Build xfade chain
-    const inputs = segs.flatMap(p => ['-i', p]); // video inputs first
+    // ASS subs
+    stage = 'subtitles';
+    const assText = buildAssKaraoke(script, OUTLEN, W, H);
+    assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
+    tmpToDelete.push(assPath);
+
+    // Video chain
+    const inputs = segs.flatMap(p => ['-i', p]);
     const vParts = [];
-    for (let i = 0; i < segs.length; i++) vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+    for (let i = 0; i < segs.length; i++) {
+      vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+    }
     let chain = '[v0]';
     for (let i = 1; i < segs.length; i++) {
       const A = (i === 1) ? '[v0]' : chain;
@@ -1364,14 +1402,8 @@ async function makeVideoVariant({
     }
     const finalV = (segs.length === 1) ? '[v0]' : chain;
 
-    // ASS subs
-    const assText = buildAssKaraoke(script, OUTLEN, W, H);
-    const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
-    tmpToDelete.push(assPath);
-
     // Audio graph
-    const voiceIdx = segs.length; // after video inputs
+    const voiceIdx = segs.length;
     const audioInputs = ['-i', voicePath];
     let musicArgs = [], musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
@@ -1387,6 +1419,8 @@ async function makeVideoVariant({
       audioChain
     ].join(';');
 
+    // Final mux
+    stage = 'mux';
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile('ffmpeg', [
       '-y','-nostdin','-loglevel','error',
@@ -1397,24 +1431,24 @@ async function makeVideoVariant({
       '-map','[vv]','-map','[aout]',
       '-t', OUTLEN.toFixed(2),
       '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-      '-x264-params','threads=1','-threads','1','-r', String(FPS),
+      '-x264-params','threads=1',
+      '-threads','1',
+      '-r', String(FPS),
       '-c:a','aac','-b:a','128k',
       '-movflags','+faststart'
     ], {}, 180000);
 
-    // cleanup segs + ass + voice
-    cleanupMany([...segs, assPath, voicePath]);
+    // cleanup all temps (keep only final mp4)
+    cleanupMany(tmpToDelete);
+    maybeGC();
 
     return { outPath, duration: OUTLEN };
   } catch (e) {
-    // best-effort cleanup
+    console.error('[video] makeVideoVariant failed at stage', stage, 'variant', variant, '-', e?.message || e);
     cleanupMany(tmpToDelete);
     throw e;
   }
 }
-
-
-
 
 /** Photo slideshow fallback (3–4 segments) */
 async function makeSlideshowVariantFromPhotos({
@@ -1424,27 +1458,38 @@ async function makeSlideshowVariantFromPhotos({
   const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
 
   const tmpToDelete = [];
+  const segs = [];
+  let assPath = '';
+  let voicePath = '';
+  let stage = 'init';
 
   try {
-    const { path: voicePath } = await synthTTS(script);
+    stage = 'tts';
+    const ttsRes = await synthTTS(script);
+    voicePath = ttsRes.path;
     tmpToDelete.push(voicePath);
+
+    stage = 'tts-duration';
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
     const ATEMPO = Math.max(0.85, Math.min(1.25, OUTLEN / voiceDur));
 
-    const need = Math.max(3, Math.min(4, photos.length || 3));
+    stage = 'select-photos';
+    const totalPhotos = photos.length || 0;
+    if (!totalPhotos) throw new Error('No stock photos available');
+    const need = Math.max(3, Math.min(4, totalPhotos));
     const chosen = [];
     for (let i = 0; i < need; i++) {
-      const c = photos[(i + variant) % photos.length];
+      const c = photos[(i + variant) % totalPhotos];
       if (c?.url) {
         const img = await downloadToTmp(c.url, '.jpg');
-        tmpToDelete.push(img);
         chosen.push(img);
+        tmpToDelete.push(img);
       }
     }
-    if (!chosen.length) throw new Error('No stock photos available');
+    if (!chosen.length) throw new Error('No usable photo URLs');
 
-    const segs = [];
+    stage = 'encode-segments';
     const perClip = Math.max(3.8, OUTLEN / chosen.length);
     for (let i = 0; i < chosen.length; i++) {
       const img = chosen[i];
@@ -1453,16 +1498,29 @@ async function makeSlideshowVariantFromPhotos({
       await execFile('ffmpeg', [
         '-y','-nostdin','-loglevel','error',
         '-loop','1','-t', perClip.toFixed(2), '-i', img,
-        '-vf', vf, '-an',
+        '-vf', vf,
+        '-an',
         '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-        '-x264-params','threads=1','-threads','1','-r', String(FPS)
-      , outSeg], {}, 180000);
+        '-x264-params','threads=1',
+        '-threads','1',
+        '-r', String(FPS),
+        outSeg
+      ], {}, 180000);
       segs.push(outSeg);
+      tmpToDelete.push(outSeg);
     }
+
+    stage = 'subtitles';
+    const assText = buildAssKaraoke(script, OUTLEN, W, H);
+    assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
+    tmpToDelete.push(assPath);
 
     const inputs = segs.flatMap(p => ['-i', p]);
     const vParts = [];
-    for (let i = 0; i < segs.length; i++) vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+    for (let i = 0; i < segs.length; i++) {
+      vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+    }
     let chain = '[v0]';
     for (let i = 1; i < segs.length; i++) {
       const A = (i === 1) ? '[v0]' : chain;
@@ -1472,10 +1530,6 @@ async function makeSlideshowVariantFromPhotos({
       vParts.push(`${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(perClip * i - FADE).toFixed(2)}${chain}`);
     }
     const finalV = (segs.length === 1) ? '[v0]' : chain;
-
-    const assText = buildAssKaraoke(script, OUTLEN, W, H);
-    const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
 
     const voiceIdx = segs.length;
     const audioInputs = ['-i', voicePath];
@@ -1493,6 +1547,7 @@ async function makeSlideshowVariantFromPhotos({
       audioChain
     ].join(';');
 
+    stage = 'mux';
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile('ffmpeg', [
       '-y','-nostdin','-loglevel','error',
@@ -1503,19 +1558,23 @@ async function makeSlideshowVariantFromPhotos({
       '-map','[vv]','-map','[aout]',
       '-t', OUTLEN.toFixed(2),
       '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-      '-x264-params','threads=1','-threads','1','-r', String(FPS),
+      '-x264-params','threads=1',
+      '-threads','1',
+      '-r', String(FPS),
       '-c:a','aac','-b:a','128k',
       '-movflags','+faststart'
     ], {}, 180000);
 
-    cleanupMany([...segs, assPath, voicePath, ...chosen]);
+    cleanupMany(tmpToDelete);
+    maybeGC();
+
     return { outPath, duration: OUTLEN };
   } catch (e) {
+    console.error('[video] makeSlideshowVariant failed at stage', stage, 'variant', variant, '-', e?.message || e);
     cleanupMany(tmpToDelete);
     throw e;
   }
 }
-
 
 /* ===================== BACKGROUND VIDEO QUEUE ===================== */
 const VIDEO_QUEUE_CONC = Number(process.env.VIDEO_QUEUE_CONCURRENCY || 1);
@@ -1531,7 +1590,7 @@ async function runVideoJob(job) {
   const keyword   = getImageKeyword(industry, url, answers);
   const targetSec = Math.max(18, Math.min(20, Number(top.targetSeconds || 18.5)));
 
-  
+  housekeeping();
 
   // Script (short, so VO fits ~18s)
   let script = (top.adCopy || '').trim();
@@ -1558,15 +1617,20 @@ async function runVideoJob(job) {
   const bgm = await prepareBgm();
   let v1, v2;
 
-  if (clips.length) {
-    v1 = await makeVideoVariant({ clips, script, variant: 0, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-    v2 = await makeVideoVariant({ clips, script, variant: 1, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-  } else {
-    let photos = await fetchPexelsPhotos(keyword, 10);
-    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 10);
-    if (!photos.length) throw new Error('No stock media available');
-    v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-    v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
+  try {
+    if (clips.length) {
+      v1 = await makeVideoVariant({ clips, script, variant: 0, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
+      v2 = await makeVideoVariant({ clips, script, variant: 1, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
+    } else {
+      let photos = await fetchPexelsPhotos(keyword, 10);
+      if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 10);
+      if (!photos.length) throw new Error('No stock media available');
+      v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
+      v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
+    }
+  } finally {
+    // bgm is optional and can be reused; if you want to free it per job, uncomment:
+    // if (bgm) safeUnlink(bgm);
   }
 
   // Persist two variants
@@ -1574,10 +1638,23 @@ async function runVideoJob(job) {
   const url1 = mediaPath(rel1), url2 = mediaPath(rel2);
   const abs1 = absolutePublicUrl(url1), abs2 = absolutePublicUrl(url2);
 
-  await saveAsset({ req: reqLike, kind: 'video', url: url1, absoluteUrl: abs1, meta: { variant: 0, category, keyword, hasSubtitles: true, targetSec: v1.duration } });
-  await saveAsset({ req: reqLike, kind: 'video', url: url2, absoluteUrl: abs2, meta: { variant: 1, category, keyword, hasSubtitles: true, targetSec: v2.duration } });
+  await saveAsset({
+    req: reqLike,
+    kind: 'video',
+    url: url1,
+    absoluteUrl: abs1,
+    meta: { variant: 0, category, keyword, hasSubtitles: true, targetSec: v1.duration }
+  });
+  await saveAsset({
+    req: reqLike,
+    kind: 'video',
+    url: url2,
+    absoluteUrl: abs2,
+    meta: { variant: 1, category, keyword, hasSubtitles: true, targetSec: v2.duration }
+  });
 
   console.log('[video] ready:', url1, url2);
+  housekeeping();
 }
 
 async function pumpVideoQueue() {
@@ -1596,12 +1673,18 @@ async function pumpVideoQueue() {
 /* TRIGGER + POLL */
 router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   housekeeping();
-  try { if (typeof res.setTimeout === 'function') res.setTimeout(15000); if (typeof req.setTimeout === 'function') req.setTimeout(15000); } catch {}
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(15000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(15000);
+  } catch {}
 
-  // hard cap to avoid memory-pile during spikes
   const MAX_QUEUE = Number(process.env.MAX_VIDEO_QUEUE || 2);
   if (videoQueue.length + videoWorking >= MAX_QUEUE) {
-    return res.status(429).json({ ok:false, error:'BUSY', message:'Video queue is busy — try again in a minute.' });
+    return res.status(429).json({
+      ok:false,
+      error:'BUSY',
+      message:'Video queue is busy — try again in a minute.'
+    });
   }
 
   const reqLike = { headers: req.headers, cookies: req.cookies, ip: req.ip };
@@ -1610,17 +1693,21 @@ router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
   setImmediate(pumpVideoQueue);
 
   const origin = req.headers && req.headers.origin;
-  if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); res.setHeader('Access-Control-Allow-Credentials', 'true'); }
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
 
-  return res.status(202).json({ ok: true, message: 'Video generation started', poll: '/api/generated-latest' });
+  return res.status(202).json({
+    ok: true,
+    message: 'Video generation started',
+    poll: '/api/generated-latest'
+  });
 });
 
-/* ========================== END DROP-IN VIDEO SECTION ========================== */
-
-
-
 // -----------------------------------------------------------------------
-// NEW: /api/generated-videos?limit=2 — return the most recent N video assets
+// /api/generated-videos?limit=2 — return the most recent N video assets
 // -----------------------------------------------------------------------
 router.get('/generated-videos', async (req, res) => {
   try {
@@ -1654,7 +1741,91 @@ router.get('/generated-videos', async (req, res) => {
   }
 });
 
+// -----------------------------------------------------------------------
+// /debug/mem — quick memory usage snapshot
+// -----------------------------------------------------------------------
+router.get('/debug/mem', (req, res) => {
+  try {
+    const m = process.memoryUsage();
+    const origin = req.headers && req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+    res.json({
+      rss: m.rss,
+      heapTotal: m.heapTotal,
+      heapUsed: m.heapUsed,
+      external: m.external,
+      arrayBuffers: m.arrayBuffers,
+      uptimeSec: process.uptime()
+    });
+  } catch (e) {
+    res.status(500).json({ error: 'MEM_DEBUG_FAIL', detail: String(e?.message || e) });
+  }
+});
+
+// -----------------------------------------------------------------------
+// LATEST GENERATED VIDEO (for frontend poller) -> /api/generated-latest
+// Returns newest video for the current owner. 204 = not ready yet.
+// -----------------------------------------------------------------------
+router.get('/generated-latest', async (req, res) => {
+  try {
+    await purgeExpiredAssets();
+    const owner = ownerKeyFromReq(req);
+
+    const all = (db.data?.generated_assets || [])
+      .filter(a => a.owner === owner && a.kind === 'video')
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    let url = '';
+    let absoluteUrl = '';
+    let filename = '';
+
+    if (all.length) {
+      url = all[0].url;
+      absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
+      filename = (url || '').split('/').pop();
+    } else {
+      const dir = ensureGeneratedDir();
+      const files = fs.readdirSync(dir)
+        .filter(f =>
+          f.toLowerCase().endsWith('.mp4') &&
+          !/-norm\.mp4$/i.test(f)
+        )
+        .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.m - a.m);
+
+      if (!files.length) return res.status(204).end();
+
+      filename = files[0].f;
+      url = mediaPath(filename);
+      absoluteUrl = absolutePublicUrl(url);
+    }
+
+    const origin = req.headers && req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+
+    return res.json({
+      ok: true,
+      url,
+      absoluteUrl,
+      type: 'video/mp4',
+      filename
+    });
+  } catch (e) {
+    console.error('generated-latest error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'GEN_LATEST_FAIL' });
+  }
+});
+
 /* ========================== END DROP-IN VIDEO SECTION ========================== */
+
 
 
 /* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
