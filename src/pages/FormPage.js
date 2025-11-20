@@ -864,7 +864,8 @@ export default function FormPage() {
 
   async function handleRegenerateVideo() {
     setVideoLoading(true);
-    // Optional: hide old video while new one is cooking
+
+    // Clear old video from UI while new one is cooking (optional but feels cleaner)
     setVideoItems([]);
     setVideoUrl("");
     setVideoScript("");
@@ -873,6 +874,7 @@ export default function FormPage() {
       await warmBackend();
       const vid = await fetchVideoOnce(getRandomString());
       const vids = [vid].filter((v) => v && v.url);
+
       setVideoItems(vids);
       setActiveVideo(0);
       setVideoUrl(vids[0]?.url || "");
@@ -881,6 +883,7 @@ export default function FormPage() {
       setVideoLoading(false);
     }
   }
+
 
 
   /* ---------------------- Render ---------------------- */
