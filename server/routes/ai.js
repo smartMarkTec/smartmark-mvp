@@ -941,7 +941,7 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
     </g>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-       <g clip-path="url(#clipHl)">
+    <g clip-path="url(#clipHl)">
       <use href="#bg" filter="url(#blurHl)"/>
       <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
             fill="${tintRGB}" opacity="${CHIP_TINT}"/>
@@ -985,7 +985,8 @@ function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
 
     ${btnSolidDark(W/2, Math.round(subCenterY + sub.fs + 92), cleanCTA('LEARN MORE'), 30)}
   </svg>`;
-} // <-- MISSING BRACE WAS HERE; now fixed.
+} // <-- corrected/closed brace
+
 
 /* ---------- Local craftSubline (fallback) ---------- */
 function craftSubline(answers = {}, category = 'generic', seed = '') {
@@ -1146,7 +1147,7 @@ async function downloadToTmp(url, ext = '') {
   return out;
 }
 
-// --- replace synthTTS with this ---
+/** TTS → MP3 on disk (robust; falls back to quiet tone). Returns file path. */
 async function synthTTS(text = '') {
   const speechPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp3`);
   try {
@@ -1158,19 +1159,17 @@ async function synthTTS(text = '') {
     });
     const buf = Buffer.from(await resp.arrayBuffer());
     await fs.promises.writeFile(speechPath, buf);
-    return { path: speechPath, ok: true };
+    return speechPath;
   } catch (e) {
-    console.warn('[tts] OpenAI TTS failed, falling back to tone:', e.message);
-    // fallback: 400Hz quiet tone for target length (we’ll time-stretch later anyway)
+    console.warn('[tts] OpenAI TTS failed; using fallback tone:', e?.message || e);
     const fallback = path.join(ensureGeneratedDir(), `${uuidv4()}-tone.mp3`);
     await execFile('ffmpeg', [
       '-y','-f','lavfi','-i','sine=frequency=400:duration=19:sample_rate=48000',
-      '-filter:a','volume=0.15', '-c:a','mp3', fallback
+      '-filter:a','volume=0.15','-c:a','mp3', fallback
     ], {}, 20000);
-    return { path: fallback, ok: false };
+    return fallback;
   }
 }
-
 
 /** ffprobe duration (sec) */
 async function ffprobeDuration(filePath) {
@@ -1188,6 +1187,13 @@ async function ffprobeDuration(filePath) {
     try { fs.closeSync(fd); } catch {}
     try { fs.unlinkSync(outTxt); } catch {}
   }
+}
+
+/** Optional BGM (returns '' if missing or download fails) */
+async function prepareBgm() {
+  if (!BACKGROUND_MUSIC_URL) return '';
+  try { return await downloadToTmp(BACKGROUND_MUSIC_URL, '.mp3'); }
+  catch { return ''; }
 }
 
 /** ASS karaoke (centered) */
@@ -1212,6 +1218,7 @@ function buildAssKaraoke(text, totalSec = 18.5, W = 1280, H = 720) {
   ].join('\n');
 }
 /* ================= end helpers ================= */
+
 
 
 /* ============================ VIDEO GENERATION (3–4 clips, ~18s) ============================ */
