@@ -97,6 +97,7 @@ const GENERATED_DIR =
 // Make sure the folder exists
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
+
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
 const child_process = require('child_process');
@@ -109,6 +110,193 @@ const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 const BACKGROUND_MUSIC_URL = process.env.BACKGROUND_MUSIC_URL || ''; // optional
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
+
+/* ---------------------- FFmpeg + subtitle helpers ---------------------- */
+
+function runFFmpeg(args, label = "ffmpeg") {
+  return new Promise((resolve, reject) => {
+    const proc = child_process.spawn("ffmpeg", ["-y", ...args], {
+      stdio: ["ignore", "inherit", "inherit"],
+    });
+    proc.on("exit", (code) => {
+      if (code === 0) return resolve();
+      reject(new Error(`${label} exited ${code || "unknown"}`));
+    });
+  });
+}
+
+function runFFprobe(args) {
+  return new Promise((resolve, reject) => {
+    const proc = child_process.spawn("ffprobe", args, {
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let out = "";
+    proc.stdout.on("data", (d) => (out += d.toString()));
+    proc.on("exit", (code) => {
+      if (code !== 0) return reject(new Error(`ffprobe exited ${code}`));
+      resolve(out);
+    });
+  });
+}
+
+async function getMediaDurationSeconds(filePath) {
+  try {
+    const raw = await runFFprobe([
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration",
+      "-of",
+      "default=nk=1:nw=1",
+      filePath,
+    ]);
+    const val = parseFloat(String(raw).trim());
+    if (!isFinite(val) || val <= 0) throw new Error("bad duration");
+    return val;
+  } catch (e) {
+    console.warn("[ffprobe] duration fail:", e.message);
+    return null;
+  }
+}
+
+/**
+ * Build a modern, timed subtitles filter for ffmpeg.
+ * - Splits the script into up to ~6 chunks
+ * - Shows each chunk for a slice of the total duration
+ * - White text, black outline, dark box, bottom-center
+ */
+function buildSubtitleFilter(script, totalDurationSec) {
+  const clean = String(script || "").replace(/\s+/g, " ").trim();
+  if (!clean) {
+    // just pass video through unchanged
+    return "[0:v]scale=1280:-2,format=yuv420p[vout]";
+  }
+
+  // Split into sentences / chunks
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const parts = sentences.slice(0, 6); // up to 6 caption blocks
+  const count = parts.length || 1;
+  const total = Math.max(6, Math.min(40, totalDurationSec || 18)); // clamp 6–40s
+  const chunk = total / count;
+
+  let inLabel = "[0:v]";
+  const filters = [];
+
+  for (let i = 0; i < parts.length; i++) {
+    // strip characters that break ffmpeg quoting
+    const line = parts[i].replace(/[':\\]/g, "").trim();
+    if (!line) continue;
+
+    const start = i * chunk;
+    const end = Math.min(total, (i + 1) * chunk + 0.25);
+    const outLabel = i === parts.length - 1 ? "[vout]" : `[v${i + 1}]`;
+
+    const f =
+      `${inLabel}drawtext=` +
+      `text='${line}':` +
+      `fontcolor=white:` +
+      `fontsize=40:` +
+      `line_spacing=6:` +
+      `bordercolor=black:` +
+      `borderw=3:` +
+      `box=1:` +
+      `boxcolor=black@0.55:` +
+      `boxborderw=12:` +
+      `x=(w-text_w)/2:` +
+      `y=h-140:` +
+      `shadowcolor=black@0.8:` +
+      `shadowx=0:` +
+      `shadowy=0:` +
+      `enable='between(t,${start.toFixed(2)},${end.toFixed(2)})'` +
+      outLabel;
+
+    filters.push(f);
+    inLabel = outLabel;
+  }
+
+  if (!filters.length) {
+    return "[0:v]scale=1280:-2,format=yuv420p[vout]";
+  }
+  return filters.join(";");
+}
+
+/**
+ * Combine a silent montage + voiceover + modern timed subtitles.
+ * - Trims video to roughly the audio length (no freeze frame)
+ * - Uses hard cuts (no fades) for transitions (done earlier via concat)
+ */
+async function addVoiceAndSubtitles({
+  silentVideoPath,
+  audioPath,
+  script,
+  outPath,
+  targetSeconds = 18,
+}) {
+  // Measure audio; if it fails, fall back to targetSeconds
+  const audioDur = (await getMediaDurationSeconds(audioPath)) || targetSeconds;
+  const totalDur = Math.max(6, Math.min(40, audioDur + 0.4)); // keep it sane
+
+  const subFilter = buildSubtitleFilter(script, totalDur);
+
+  const args = [
+    "-i",
+    silentVideoPath,
+    "-i",
+    audioPath,
+    "-filter_complex",
+    subFilter,
+    "-map",
+    "[vout]",
+    "-map",
+    "1:a:0",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "23",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "128k",
+    "-shortest",
+    outPath,
+  ];
+
+  await runFFmpeg(args, "ffmpeg-subtitled");
+}
+
+async function buildSilentMontage(clipPaths, outPath, totalSeconds = 18) {
+  const listPath = path.join(GENERATED_DIR, `${uuidv4()}-list.txt`);
+  const listTxt = clipPaths
+    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+    .join("\n");
+  fs.writeFileSync(listPath, listTxt, "utf8");
+
+  const trimDur = Math.max(6, Math.min(40, totalSeconds));
+
+  const args = [
+    "-f",
+    "concat",
+    "-safe",
+    "0",
+    "-i",
+    listPath,
+    "-an",
+    "-vf",
+    `scale=1280:-2,format=yuv420p,trim=duration=${trimDur.toFixed(
+      2
+    )},setpts=PTS-STARTPTS`,
+    outPath,
+  ];
+
+  await runFFmpeg(args, "ffmpeg-concat");
+}
+
 
 /* ---------------------- Disk / tmp housekeeping --------------------- */
 const GEN_DIR = '/tmp/generated';
