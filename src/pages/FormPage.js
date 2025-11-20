@@ -624,10 +624,10 @@ export default function FormPage() {
     }
   }
 
-    /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
+  /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
 
   // Poll /generated-latest until we see a video whose mtimeMs is AFTER we started this job
-  async function pollLatestVideo({ tries = 60, intervalMs = 2000, minMtimeMs = 0 } = {}) {
+  async function pollLatestVideo({ tries = 80, intervalMs = 2000, minMtimeMs = 0 } = {}) {
     for (let i = 0; i < tries; i++) {
       try {
         const res = await fetchWithTimeout(
@@ -645,25 +645,6 @@ export default function FormPage() {
             return url;
           }
         }
-      } catch {
-        // ignore and retry
-      }
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-    return "";
-  }
-
-  // Extra safety: don't use the URL until the file actually exists (avoid 404s)
-  async function ensureUrlExists(url, { tries = 40, intervalMs = 1500 } = {}) {
-    if (!url) return "";
-    for (let i = 0; i < tries; i++) {
-      try {
-        const res = await fetchWithTimeout(
-          url,
-          { method: "HEAD", mode: "cors", credentials: "omit" },
-          6000
-        );
-        if (res.ok) return url;
       } catch {
         // ignore and retry
       }
@@ -698,7 +679,7 @@ export default function FormPage() {
 
     // 2) Poll /generated-latest until it returns a video whose mtimeMs is >= triggeredAt
     const latestUrl = await pollLatestVideo({
-      tries: 60,
+      tries: 80,
       intervalMs: 2000,
       minMtimeMs: triggeredAt - 500, // small fudge window
     });
@@ -706,17 +687,9 @@ export default function FormPage() {
       return { url: "", script: "", fbVideoId: null };
     }
 
-    // 3) Make sure the file is actually there (avoid 404 race)
-    const confirmedUrl = await ensureUrlExists(latestUrl, {
-      tries: 40,
-      intervalMs: 1500,
-    });
-    if (!confirmedUrl) {
-      return { url: "", script: "", fbVideoId: null };
-    }
-
+    // No HEAD check now — /generated-latest only returns files that exist
     return {
-      url: confirmedUrl,
+      url: latestUrl,
       script: result?.body
         ? `Narration: ${result.body}`
         : "Quick intro. Show product. Flash offer. CTA.",
@@ -725,28 +698,40 @@ export default function FormPage() {
   }
 
 
-
-  /* ---- Chat flow ---- */
+/* ---- Chat flow ---- */
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
     const value = (input || "").trim();
     if (!value) return;
 
-    setChatHistory(ch => [...ch, { from: "user", text: value }]);
+    setChatHistory((ch) => [...ch, { from: "user", text: value }]);
     setInput("");
 
     if (awaitingReady) {
-      if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
+      if (
+        /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
+          value
+        )
+      ) {
         setAwaitingReady(false);
-        setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[0].question }]);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: CONVO_QUESTIONS[0].question },
+        ]);
         setStep(0);
         return;
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
-        setChatHistory(ch => [...ch, { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }]);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
+        ]);
         return;
       } else {
-        setChatHistory(ch => [...ch, { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }]);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "Please reply 'yes' when you're ready to start!" },
+        ]);
         return;
       }
     }
@@ -757,25 +742,38 @@ export default function FormPage() {
       if (!hasGenerated && isGenerateTrigger(value)) {
         setLoading(true);
         setGenerating(true);
-        setChatHistory(ch => [...ch, { from: "gpt", text: "AI generating..." }]);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "AI generating..." },
+        ]);
 
         setTimeout(async () => {
           const token = getRandomString();
+
+          // 🔄 Clear any previous video while we wait for a fresh one
+          setVideoItems([]);
+          setVideoUrl("");
+          setVideoScript("");
+
           try {
             // Pre-warm before heavy work
             await warmBackend();
 
             // 1) campaign assets
-            const data = await fetchJsonWithRetry(`${API_BASE}/generate-campaign-assets`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ answers })
-            }, { tries: 4 });
+            const data = await fetchJsonWithRetry(
+              `${API_BASE}/generate-campaign-assets`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ answers }),
+              },
+              { tries: 4 }
+            );
 
             setResult({
               headline: data?.headline || "",
               body: data?.body || "",
-              image_overlay_text: data?.image_overlay_text || ""
+              image_overlay_text: data?.image_overlay_text || "",
             });
 
             // 2) images (now *two* URLs)
@@ -784,19 +782,28 @@ export default function FormPage() {
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
 
-            // 3) video (unchanged)
+            // 3) video (uses timestamp-safe fetchVideoOnce)
             const vid1 = await fetchVideoOnce(token);
-            const vids = [vid1].filter(v => v && v.url);
+            const vids = [vid1].filter((v) => v && v.url);
             setVideoItems(vids);
             setActiveVideo(0);
             setVideoUrl(vids[0]?.url || "");
             setVideoScript(vids[0]?.script || "");
 
-            setChatHistory(ch => [...ch, { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." }]);
+            setChatHistory((ch) => [
+              ...ch,
+              {
+                from: "gpt",
+                text:
+                  "Done! Here are your ad previews. You can regenerate the image or video below.",
+              },
+            ]);
             setHasGenerated(true);
           } catch (err) {
             console.error("generation failed:", err);
-            setError("Generation failed (server cold or busy). Try again in a few seconds.");
+            setError(
+              "Generation failed (server cold or busy). Try again in a few seconds."
+            );
           } finally {
             setGenerating(false);
             setLoading(false);
@@ -808,13 +815,19 @@ export default function FormPage() {
       if (hasGenerated) {
         await handleSideChat(value, null);
       } else {
-        await handleSideChat(value, "Ready to generate your campaign? (yes/no)");
+        await handleSideChat(
+          value,
+          "Ready to generate your campaign? (yes/no)"
+        );
       }
       return;
     }
 
     if (currentQ && isLikelySideChat(value, currentQ)) {
-      await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
+      await handleSideChat(
+        value,
+        `Ready for the next question?\n${currentQ.question}`
+      );
       return;
     }
 
@@ -832,19 +845,29 @@ export default function FormPage() {
       while (
         CONVO_QUESTIONS[nextStep] &&
         CONVO_QUESTIONS[nextStep].conditional &&
-        newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
+        newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !==
+          CONVO_QUESTIONS[nextStep].conditional.value
       ) {
         nextStep += 1;
       }
 
       if (!CONVO_QUESTIONS[nextStep]) {
-        setChatHistory(ch => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
+        setChatHistory((ch) => [
+          ...ch,
+          {
+            from: "gpt",
+            text: "Are you ready for me to generate your campaign? (yes/no)",
+          },
+        ]);
         setStep(nextStep);
         return;
       }
 
       setStep(nextStep);
-      setChatHistory(ch => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
+      setChatHistory((ch) => [
+        ...ch,
+        { from: "gpt", text: CONVO_QUESTIONS[nextStep].question },
+      ]);
     }
   }
 
@@ -862,10 +885,10 @@ export default function FormPage() {
     }
   }
 
-  async function handleRegenerateVideo() {
+    async function handleRegenerateVideo() {
     setVideoLoading(true);
 
-    // Clear old video from UI while new one is cooking (optional but feels cleaner)
+    // Clear old video from UI while new one is cooking
     setVideoItems([]);
     setVideoUrl("");
     setVideoScript("");
@@ -883,6 +906,7 @@ export default function FormPage() {
       setVideoLoading(false);
     }
   }
+
 
 
 

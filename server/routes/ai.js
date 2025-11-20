@@ -2267,7 +2267,6 @@ router.post('/assets/clear', async (req, res) => {
 // Latest generated VIDEO from the local generated dir, with mtimeMs included
 router.get('/generated-latest', async (req, res) => {
   try {
-    // Look at everything in GENERATED_DIR that ends with .mp4
     const files = fs.readdirSync(GENERATED_DIR)
       .filter((f) => f.toLowerCase().endsWith('.mp4'))
       .map((f) => {
@@ -2296,8 +2295,6 @@ router.get('/generated-latest', async (req, res) => {
     return res.status(500).json({ error: 'internal', message: e.message });
   }
 });
-
-
 
 
 /* -------- Ensure CORS even on errors -------- */
