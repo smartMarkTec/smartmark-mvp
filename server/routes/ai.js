@@ -1331,107 +1331,119 @@ function buildVirtualPlan(rawClips, variant = 0) {
   return out;
 }
 
-/** Compose stitched video with VO (3–4 clips, fades, no BGM, no subs) */
-async function makeVideoVariant({
-  clips,
-  script,
-  variant = 0,
-  targetSec = 18.5,
-  tailPadSec = 1.8,   // kept for compatibility, not heavily used now
-  musicPath = ''      // ignored (no BGM for low-mem pipeline)
-}) {
-  const W = 854, H = 480, FPS = 30;
-  const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
-  const tmpToDelete = [];
+// ---------------- VIDEO MONTAGE: 3–4 CLIPS + VO + SUBS ----------------
+async function makeVideoVariant(jobId, clips, voicePath, subsPath, variantIndex = 0, targetSeconds = 18) {
+  const id = (jobId || 'job') + '-' + (variantIndex || 0);
+  const outPath = path.join(GENERATED_DIR, `${id}-final.mp4`);
 
-  try {
-    // 1) Voiceover (single audio file)
-    const { path: voicePath } = await synthTTS(script);
-    tmpToDelete.push(voicePath);
+  // --- choose 3–4 clips ---
+  const uniq = Array.from(new Map(clips.map(c => [c.file, c])).values());
+  const want = Math.min(
+    Math.max(3, targetSeconds >= 16 ? 4 : 3),
+    uniq.length || 1
+  );
 
-    // 2) Build 3–4 segment plan
-    const plan = buildVirtualPlan(clips, variant);
-    const segDur = Math.max(3.8, OUTLEN / plan.length + 0.4); // a bit longer so -t OUTLEN can trim
+  const plan = [];
+  while (plan.length < want) {
+    plan.push(uniq[plan.length % uniq.length]);
+  }
 
-    const segFiles = [];
+  // each clip ~3–5 seconds to land around ~18s total
+  const totalSeconds = targetSeconds || 18;
+  const perClip = Math.max(3.5, Math.min(5.5, totalSeconds / plan.length));
 
-    for (let i = 0; i < plan.length; i++) {
-      const srcUrl = plan[i].url;
-      const tmpIn  = await downloadToTmp(srcUrl, '.mp4');
-      tmpToDelete.push(tmpIn);
+  const segPaths = [];
 
-      const segOut = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
-      const vf = [
-        `scale=${W}:${H}:force_original_aspect_ratio=increase`,
-        `crop=${W}:${H}`,
-        `fps=${FPS}`,
-        'format=yuv420p',
-        'fade=t=in:st=0:d=0.25',
-        `fade=t=out:st=${Math.max(0, segDur - 0.25).toFixed(2)}:d=0.25`
-      ].join(',');
+  // --- normalize each segment to 1280x720, no audio ---
+  for (let i = 0; i < plan.length; i++) {
+    const src = plan[i].file;
+    const segPath = path.join(
+      GENERATED_DIR,
+      `${id}-seg${i}.mp4`
+    );
 
-      await execFile('ffmpeg', [
-        '-y', '-nostdin', '-loglevel', 'error',
-        '-t', segDur.toFixed(2),
-        '-i', tmpIn,
-        '-vf', vf,
-        '-an',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', '27',
-        '-pix_fmt', 'yuv420p',
-        '-x264-params', 'threads=1',
-        '-threads', '1',
-        '-r', String(FPS),
-        segOut
-      ], {}, 180000);
-
-      segFiles.push(segOut);
-      safeUnlink(tmpIn); // free source clip immediately
-    }
-
-    // 3) Concat segments into one silent video
-    const listPath = path.join(ensureGeneratedDir(), `${uuidv4()}-concat.txt`);
-    const listBody = segFiles.map(f => `file '${f}'`).join('\n');
-    fs.writeFileSync(listPath, listBody, { encoding: 'utf8' });
-
-    const midVideo = path.join(ensureGeneratedDir(), `${uuidv4()}-noaudio.mp4`);
-    await execFile('ffmpeg', [
-      '-y', '-nostdin', '-loglevel', 'error',
-      '-f', 'concat', '-safe', '0',
-      '-i', listPath,
+    const segArgs = [
+      '-y',
+      '-ss', '0',
+      '-t', perClip.toFixed(2),
+      '-i', src,
+      '-vf', 'scale=1280:720:force_original_aspect_ratio=cover,crop=1280:720',
       '-c:v', 'libx264',
       '-preset', 'veryfast',
-      '-crf', '27',
-      '-pix_fmt', 'yuv420p',
-      '-r', String(FPS),
-      '-t', OUTLEN.toFixed(2),
-      '-movflags', '+faststart',
-      midVideo
-    ], {}, 180000);
+      '-crf', '23',
+      '-an',
+      segPath
+    ];
 
-    // 4) Mux voiceover on top (no fancy filters)
-    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
-    await execFile('ffmpeg', [
-      '-y', '-nostdin', '-loglevel', 'error',
-      '-i', midVideo,
-      '-i', voicePath,
-      '-c:v', 'copy',
-      '-c:a', 'aac',
-      '-b:a', '128k',
-      '-shortest',
-      '-movflags', '+faststart',
-      outPath
-    ], {}, 120000);
-
-    // 5) Cleanup
-    cleanupMany([...segFiles, listPath, midVideo, voicePath]);
-    return { outPath, duration: OUTLEN };
-  } catch (e) {
-    cleanupMany(tmpToDelete);
-    throw e;
+    await runFfmpeg(segArgs, `segment_${i}`);
+    segPaths.push(segPath);
   }
+
+  // --- now build montage with xfade transitions + hard subtitles + mixed audio ---
+  const inputArgs = segPaths.flatMap(p => ['-i', p]);
+
+  // voice + background music
+  inputArgs.push('-i', voicePath, '-i', BG_MUSIC_PATH);
+
+  const vFilters = [];
+  const transitions = ['fade', 'wipeleft', 'smoothleft', 'circlecrop', 'dissolve'];
+
+  // label each segment video
+  for (let i = 0; i < segPaths.length; i++) {
+    vFilters.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
+  }
+
+  // chain with xfade
+  let chain = '[v0]';
+  const FADE = 0.5;
+
+  for (let i = 1; i < segPaths.length; i++) {
+    const A = (i === 1) ? '[v0]' : chain;
+    const B = `[v${i}]`;
+    const out = `[vx${i}]`;
+    const trans = transitions[(variantIndex + i) % transitions.length];
+    const offset = perClip * i - FADE;
+
+    vFilters.push(
+      `${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${offset.toFixed(2)}${out}`
+    );
+    chain = out;
+  }
+
+  const finalV = (segPaths.length === 1) ? '[v0]' : chain;
+
+  // SUBTITLES: use subtitles= (SRT), NOT ass=
+  const safeSubs = subsPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+
+  const filterComplex = [
+    ...vFilters,
+    // hard-burn subtitles on the final video chain
+    `${finalV}subtitles='${safeSubs}'[vv]`,
+    // voice + bg music -> mix
+    `[${segPaths.length}:a]volume=1.0[a0]`,
+    `[${segPaths.length + 1}:a]volume=0.20[a1]`,
+    '[a0][a1]amix=inputs=2:normalize=0,volume=1.0[aa]'
+  ].join(';');
+
+  const ffArgs = [
+    ...inputArgs,
+    '-filter_complex', filterComplex,
+    '-map', '[vv]',
+    '-map', '[aa]',
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '23',
+    '-c:a', 'aac',
+    '-b:a', '128k',
+    '-shortest',
+    '-y',
+    outPath
+  ];
+
+  await runFfmpeg(ffArgs, 'montage_final');
+  return outPath;
 }
+
 
 /** Photo slideshow fallback (3–4 segments, fades, VO only) */
 async function makeSlideshowVariantFromPhotos({
