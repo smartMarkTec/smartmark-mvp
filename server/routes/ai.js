@@ -1117,10 +1117,29 @@ async function buildOverlayImage({
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
 
-/* -------------------- Health check -------------------- */
+/* -------------------- Health check + memory debug -------------------- */
 router.get('/test2', (_req, res) => {
   res.status(200).json({ ok: true, t: Date.now() });
 });
+
+router.get('/debug/mem', (_req, res) => {
+  const mu = process.memoryUsage();
+  const toMb = (x) => Math.round((x / 1024 / 1024) * 10) / 10;
+
+  res.status(200).json({
+    rss: mu.rss,
+    heapTotal: mu.heapTotal,
+    heapUsed: mu.heapUsed,
+    external: mu.external,
+    arrayBuffers: mu.arrayBuffers,
+    rssMb: toMb(mu.rss),
+    heapUsedMb: toMb(mu.heapUsed),
+    nodeVersion: process.version,
+    genConcurrency: process.env.GEN_CONCURRENCY || '1',
+    videoQueueConcurrency: process.env.VIDEO_QUEUE_CONCURRENCY || '1',
+  });
+});
+
 
 /* =================== CORE VIDEO HELPERS (low-mem, stream-to-disk) =================== */
 const { spawn } = require('child_process');
