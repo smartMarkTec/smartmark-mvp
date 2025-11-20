@@ -1331,269 +1331,214 @@ function buildVirtualPlan(rawClips, variant = 0) {
   return out;
 }
 
-/** Compose stitched video with VO, optional bgm, ASS subs (safe args, low-mem) */
+/** Compose stitched video with VO (3–4 clips, fades, no BGM, no subs) */
 async function makeVideoVariant({
-  clips, script, variant = 0, targetSec = 18.5, tailPadSec = 1.8, musicPath = ''
+  clips,
+  script,
+  variant = 0,
+  targetSec = 18.5,
+  tailPadSec = 1.8,   // kept for compatibility, not heavily used now
+  musicPath = ''      // ignored (no BGM for low-mem pipeline)
 }) {
-  const W = 960, H = 540, FPS = 30, FADE = 0.5;
+  const W = 854, H = 480, FPS = 30;
   const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
-
   const tmpToDelete = [];
-  const segs = [];
-  let assPath = '';
-  let voicePath = '';
-  let stage = 'init';
 
   try {
-    // Voice
-    stage = 'tts';
-    const ttsRes = await synthTTS(script);
-    voicePath = ttsRes.path;
+    // 1) Voiceover (single audio file)
+    const { path: voicePath } = await synthTTS(script);
     tmpToDelete.push(voicePath);
 
-    stage = 'tts-duration';
-    let voiceDur = await ffprobeDuration(voicePath);
-    if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-
-    const ATEMPO = Math.max(0.85, Math.min(1.25, OUTLEN / voiceDur));
-
-    // Plan 3–4 segments
-    stage = 'plan';
+    // 2) Build 3–4 segment plan
     const plan = buildVirtualPlan(clips, variant);
-    const perClip = Math.max(3.8, OUTLEN / plan.length);
+    const segDur = Math.max(3.8, OUTLEN / plan.length + 0.4); // a bit longer so -t OUTLEN can trim
 
-    // Normalize each clip to segment and free originals immediately
-    stage = 'download+normalize';
+    const segFiles = [];
+
     for (let i = 0; i < plan.length; i++) {
       const srcUrl = plan[i].url;
       const tmpIn  = await downloadToTmp(srcUrl, '.mp4');
       tmpToDelete.push(tmpIn);
 
-      let ss = 0;
-      try {
-        const d = await ffprobeDuration(tmpIn);
-        const headroom = Math.max(0, d - perClip - 0.8);
-        const frac = (i + 1 + variant * 0.37) / (plan.length + 1);
-        ss = Math.max(0, Math.min(headroom, headroom * frac));
-      } catch {}
+      const segOut = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
+      const vf = [
+        `scale=${W}:${H}:force_original_aspect_ratio=increase`,
+        `crop=${W}:${H}`,
+        `fps=${FPS}`,
+        'format=yuv420p',
+        'fade=t=in:st=0:d=0.25',
+        `fade=t=out:st=${Math.max(0, segDur - 0.25).toFixed(2)}:d=0.25`
+      ].join(',');
 
-      const outSeg = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
-      const vf  = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p`;
       await execFile('ffmpeg', [
-        '-y','-nostdin','-loglevel','error',
-        ...(ss > 0 ? ['-ss', ss.toFixed(2)] : []),
+        '-y', '-nostdin', '-loglevel', 'error',
+        '-t', segDur.toFixed(2),
         '-i', tmpIn,
-        '-t', perClip.toFixed(2),
         '-vf', vf,
         '-an',
-        '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-        '-x264-params','threads=1',
-        '-threads','1',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '27',
+        '-pix_fmt', 'yuv420p',
+        '-x264-params', 'threads=1',
+        '-threads', '1',
         '-r', String(FPS),
-        outSeg
+        segOut
       ], {}, 180000);
 
-      segs.push(outSeg);
-      tmpToDelete.push(outSeg);
-      safeUnlink(tmpIn);
+      segFiles.push(segOut);
+      safeUnlink(tmpIn); // free source clip immediately
     }
 
-    // ASS subs
-    stage = 'subtitles';
-    const assText = buildAssKaraoke(script, OUTLEN, W, H);
-    assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
-    tmpToDelete.push(assPath);
+    // 3) Concat segments into one silent video
+    const listPath = path.join(ensureGeneratedDir(), `${uuidv4()}-concat.txt`);
+    const listBody = segFiles.map(f => `file '${f}'`).join('\n');
+    fs.writeFileSync(listPath, listBody, { encoding: 'utf8' });
 
-    // Video chain
-    const inputs = segs.flatMap(p => ['-i', p]);
-    const vParts = [];
-    for (let i = 0; i < segs.length; i++) {
-      vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
-    }
-    let chain = '[v0]';
-    for (let i = 1; i < segs.length; i++) {
-      const A = (i === 1) ? '[v0]' : chain;
-      const B = `[v${i}]`;
-      chain = `[vx${i}]`;
-      const trans = (['fade','wipeleft','smoothleft','circlecrop','dissolve'])[(variant + i) % 5];
-      vParts.push(`${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(perClip * i - FADE).toFixed(2)}${chain}`);
-    }
-    const finalV = (segs.length === 1) ? '[v0]' : chain;
-
-    // Audio graph
-    const voiceIdx = segs.length;
-    const audioInputs = ['-i', voicePath];
-    let musicArgs = [], musicIdx = null;
-    if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
-
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000,apad=pad_dur=${Math.ceil(tailPadSec)}[vo]`;
-    const audioChain = (musicIdx !== null)
-      ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(OUTLEN)+2}[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
-      : `${voiceFilt};[vo]anull[aout]`;
-
-    const fc = [
-      ...vParts,
-      `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vv]`,
-      audioChain
-    ].join(';');
-
-    // Final mux
-    stage = 'mux';
-    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+    const midVideo = path.join(ensureGeneratedDir(), `${uuidv4()}-noaudio.mp4`);
     await execFile('ffmpeg', [
-      '-y','-nostdin','-loglevel','error',
-      ...inputs,
-      ...audioInputs,
-      ...musicArgs,
-      '-filter_complex', fc,
-      '-map','[vv]','-map','[aout]',
-      '-t', OUTLEN.toFixed(2),
-      '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-      '-x264-params','threads=1',
-      '-threads','1',
+      '-y', '-nostdin', '-loglevel', 'error',
+      '-f', 'concat', '-safe', '0',
+      '-i', listPath,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '27',
+      '-pix_fmt', 'yuv420p',
       '-r', String(FPS),
-      '-c:a','aac','-b:a','128k',
-      '-movflags','+faststart'
+      '-t', OUTLEN.toFixed(2),
+      '-movflags', '+faststart',
+      midVideo
     ], {}, 180000);
 
-    // cleanup all temps (keep only final mp4)
-    cleanupMany(tmpToDelete);
-    maybeGC();
+    // 4) Mux voiceover on top (no fancy filters)
+    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+    await execFile('ffmpeg', [
+      '-y', '-nostdin', '-loglevel', 'error',
+      '-i', midVideo,
+      '-i', voicePath,
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-shortest',
+      '-movflags', '+faststart',
+      outPath
+    ], {}, 120000);
 
+    // 5) Cleanup
+    cleanupMany([...segFiles, listPath, midVideo, voicePath]);
     return { outPath, duration: OUTLEN };
   } catch (e) {
-    console.error('[video] makeVideoVariant failed at stage', stage, 'variant', variant, '-', e?.message || e);
     cleanupMany(tmpToDelete);
     throw e;
   }
 }
 
-/** Photo slideshow fallback (3–4 segments) */
+/** Photo slideshow fallback (3–4 segments, fades, VO only) */
 async function makeSlideshowVariantFromPhotos({
-  photos, script, variant = 0, targetSec = 18.5, tailPadSec = 1.8, musicPath = ''
+  photos,
+  script,
+  variant = 0,
+  targetSec = 18.5,
+  tailPadSec = 1.8,
+  musicPath = ''
 }) {
-  const W = 960, H = 540, FPS = 30, FADE = 0.5;
+  const W = 854, H = 480, FPS = 30;
   const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
-
   const tmpToDelete = [];
-  const segs = [];
-  let assPath = '';
-  let voicePath = '';
-  let stage = 'init';
 
   try {
-    stage = 'tts';
-    const ttsRes = await synthTTS(script);
-    voicePath = ttsRes.path;
+    const { path: voicePath } = await synthTTS(script);
     tmpToDelete.push(voicePath);
 
-    stage = 'tts-duration';
-    let voiceDur = await ffprobeDuration(voicePath);
-    if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-    const ATEMPO = Math.max(0.85, Math.min(1.25, OUTLEN / voiceDur));
+    if (!Array.isArray(photos) || !photos.length) throw new Error('No photos available');
 
-    stage = 'select-photos';
-    const totalPhotos = photos.length || 0;
-    if (!totalPhotos) throw new Error('No stock photos available');
-    const need = Math.max(3, Math.min(4, totalPhotos));
+    const need = Math.max(3, Math.min(4, photos.length || 3));
     const chosen = [];
     for (let i = 0; i < need; i++) {
-      const c = photos[(i + variant) % totalPhotos];
-      if (c?.url) {
-        const img = await downloadToTmp(c.url, '.jpg');
-        chosen.push(img);
-        tmpToDelete.push(img);
-      }
+      const p = photos[(i + variant) % photos.length];
+      if (p?.url) chosen.push(p.url);
     }
-    if (!chosen.length) throw new Error('No usable photo URLs');
+    if (!chosen.length) throw new Error('No stock photos usable');
 
-    stage = 'encode-segments';
-    const perClip = Math.max(3.8, OUTLEN / chosen.length);
+    const segDur = Math.max(3.8, OUTLEN / chosen.length + 0.4);
+    const segFiles = [];
+
     for (let i = 0; i < chosen.length; i++) {
-      const img = chosen[i];
-      const outSeg = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
-      const vf  = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p,fade=t=in:st=0:d=0.25,fade=t=out:st=${Math.max(0, perClip-0.25).toFixed(2)}:d=0.25`;
+      const imgUrl = chosen[i];
+      const imgTmp = await downloadToTmp(imgUrl, '.jpg');
+      tmpToDelete.push(imgTmp);
+
+      const segOut = path.join(ensureGeneratedDir(), `${uuidv4()}-slide.mp4`);
+      const vf = [
+        `scale=${W}:${H}:force_original_aspect_ratio=increase`,
+        `crop=${W}:${H}`,
+        `fps=${FPS}`,
+        'format=yuv420p',
+        'fade=t=in:st=0:d=0.25',
+        `fade=t=out:st=${Math.max(0, segDur - 0.25).toFixed(2)}:d=0.25`
+      ].join(',');
+
       await execFile('ffmpeg', [
-        '-y','-nostdin','-loglevel','error',
-        '-loop','1','-t', perClip.toFixed(2), '-i', img,
+        '-y', '-nostdin', '-loglevel', 'error',
+        '-loop', '1',
+        '-t', segDur.toFixed(2),
+        '-i', imgTmp,
         '-vf', vf,
         '-an',
-        '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-        '-x264-params','threads=1',
-        '-threads','1',
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '27',
+        '-pix_fmt', 'yuv420p',
+        '-x264-params', 'threads=1',
+        '-threads', '1',
         '-r', String(FPS),
-        outSeg
+        segOut
       ], {}, 180000);
-      segs.push(outSeg);
-      tmpToDelete.push(outSeg);
+
+      segFiles.push(segOut);
+      safeUnlink(imgTmp);
     }
 
-    stage = 'subtitles';
-    const assText = buildAssKaraoke(script, OUTLEN, W, H);
-    assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
-    tmpToDelete.push(assPath);
+    const listPath = path.join(ensureGeneratedDir(), `${uuidv4()}-slides.txt`);
+    const listBody = segFiles.map(f => `file '${f}'`).join('\n');
+    fs.writeFileSync(listPath, listBody, { encoding: 'utf8' });
 
-    const inputs = segs.flatMap(p => ['-i', p]);
-    const vParts = [];
-    for (let i = 0; i < segs.length; i++) {
-      vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
-    }
-    let chain = '[v0]';
-    for (let i = 1; i < segs.length; i++) {
-      const A = (i === 1) ? '[v0]' : chain;
-      const B = `[v${i}]`;
-      chain = `[vx${i}]`;
-      const trans = (['fade','wipeleft','smoothleft','circlecrop','dissolve'])[(variant + i) % 5];
-      vParts.push(`${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(perClip * i - FADE).toFixed(2)}${chain}`);
-    }
-    const finalV = (segs.length === 1) ? '[v0]' : chain;
-
-    const voiceIdx = segs.length;
-    const audioInputs = ['-i', voicePath];
-    let musicArgs = [], musicIdx = null;
-    if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
-
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000,apad=pad_dur=${Math.ceil(tailPadSec)}[vo]`;
-    const audioChain = (musicIdx !== null)
-      ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(OUTLEN)+2}[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
-      : `${voiceFilt};[vo]anull[aout]`;
-
-    const fc = [
-      ...vParts,
-      `${finalV}ass=${assPath.replace(/:/g,'\\:')}[vv]`,
-      audioChain
-    ].join(';');
-
-    stage = 'mux';
-    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+    const midVideo = path.join(ensureGeneratedDir(), `${uuidv4()}-slides-noaudio.mp4`);
     await execFile('ffmpeg', [
-      '-y','-nostdin','-loglevel','error',
-      ...inputs,
-      ...audioInputs,
-      ...musicArgs,
-      '-filter_complex', fc,
-      '-map','[vv]','-map','[aout]',
-      '-t', OUTLEN.toFixed(2),
-      '-c:v','libx264','-preset','veryfast','-crf','27','-pix_fmt','yuv420p',
-      '-x264-params','threads=1',
-      '-threads','1',
+      '-y', '-nostdin', '-loglevel', 'error',
+      '-f', 'concat', '-safe', '0',
+      '-i', listPath,
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '27',
+      '-pix_fmt', 'yuv420p',
       '-r', String(FPS),
-      '-c:a','aac','-b:a','128k',
-      '-movflags','+faststart'
+      '-t', OUTLEN.toFixed(2),
+      '-movflags', '+faststart',
+      midVideo
     ], {}, 180000);
 
-    cleanupMany(tmpToDelete);
-    maybeGC();
+    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+    await execFile('ffmpeg', [
+      '-y', '-nostdin', '-loglevel', 'error',
+      '-i', midVideo,
+      '-i', voicePath,
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-shortest',
+      '-movflags', '+faststart',
+      outPath
+    ], {}, 120000);
 
+    cleanupMany([...segFiles, listPath, midVideo, voicePath]);
     return { outPath, duration: OUTLEN };
   } catch (e) {
-    console.error('[video] makeSlideshowVariant failed at stage', stage, 'variant', variant, '-', e?.message || e);
     cleanupMany(tmpToDelete);
     throw e;
   }
 }
+
 
 /* ===================== BACKGROUND VIDEO QUEUE ===================== */
 const VIDEO_QUEUE_CONC = Number(process.env.VIDEO_QUEUE_CONCURRENCY || 1);
@@ -1633,24 +1578,19 @@ async function runVideoJob(job) {
   let clips = await fetchPexelsVideos(keyword, 8);
   if (!clips.length) clips = await fetchPexelsVideos('product shopping', 8);
 
-  const bgm = await prepareBgm();
-  let v1, v2;
+   let v1, v2;
 
-  try {
-    if (clips.length) {
-      v1 = await makeVideoVariant({ clips, script, variant: 0, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-      v2 = await makeVideoVariant({ clips, script, variant: 1, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-    } else {
-      let photos = await fetchPexelsPhotos(keyword, 10);
-      if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 10);
-      if (!photos.length) throw new Error('No stock media available');
-      v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-      v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetSec: targetSec, tailPadSec: 2, musicPath: bgm });
-    }
-  } finally {
-    // bgm is optional and can be reused; if you want to free it per job, uncomment:
-    // if (bgm) safeUnlink(bgm);
+  if (clips.length) {
+    v1 = await makeVideoVariant({ clips, script, variant: 0, targetSec: targetSec });
+    v2 = await makeVideoVariant({ clips, script, variant: 1, targetSec: targetSec });
+  } else {
+    let photos = await fetchPexelsPhotos(keyword, 10);
+    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 10);
+    if (!photos.length) throw new Error('No stock media available');
+    v1 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 0, targetSec: targetSec });
+    v2 = await makeSlideshowVariantFromPhotos({ photos, script, variant: 1, targetSec: targetSec });
   }
+
 
   // Persist two variants
   const rel1 = path.basename(v1.outPath), rel2 = path.basename(v2.outPath);
