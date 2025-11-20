@@ -2073,13 +2073,15 @@ router.post('/assets/clear', async (req, res) => {
 
 // -----------------------------------------------------------------------
 // LATEST GENERATED VIDEO (for frontend poller) -> /api/generated-latest
-// Returns newest video for the current owner. 204 = not ready yet.
+// Returns newest *final* video for the current owner. 204 = not ready yet.
+// Never returns temp -seg / -norm / -tone files.
 // -----------------------------------------------------------------------
 router.get('/generated-latest', async (req, res) => {
   try {
     await purgeExpiredAssets();
     const owner = ownerKeyFromReq(req);
 
+    // 1) Prefer DB assets (what runVideoJob writes)
     const all = (db.data?.generated_assets || [])
       .filter(a => a.owner === owner && a.kind === 'video')
       .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -2089,21 +2091,26 @@ router.get('/generated-latest', async (req, res) => {
     let filename = '';
 
     if (all.length) {
-      url = all[0].url;
+      url = all[0].url; // e.g. /api/media/766a98d8-af1c-4e37-9563-13532d4d5d5b.mp4
       absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
-      filename = (url || '').split('/').pop();
+      filename = (url || '').split('/').pop() || '';
     } else {
-      // Fallback: newest *final* .mp4 in /tmp/generated  (skip interim -norm.mp4)
+      // 2) Fallback: newest *final* .mp4 in /tmp/generated
+      //    Skip any temp segments (-seg), normalize (-norm), or tone files.
       const dir = ensureGeneratedDir();
       const files = fs.readdirSync(dir)
-        .filter(f =>
-          f.toLowerCase().endsWith('.mp4') &&
-          !/-norm\.mp4$/i.test(f) // <-- ignore interim normalized segments
-        )
+        .filter(f => {
+          const lower = f.toLowerCase();
+          if (!lower.endsWith('.mp4')) return false;
+          if (/-norm\.mp4$/i.test(lower)) return false;
+          if (/-seg\.mp4$/i.test(lower)) return false;
+          if (/-tone\.mp4$/i.test(lower)) return false;
+          return true;
+        })
         .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
         .sort((a, b) => b.m - a.m);
 
-      if (!files.length) return res.status(204).end(); // nothing final yet
+      if (!files.length) return res.status(204).end(); // nothing ready yet
 
       filename = files[0].f;
       url = mediaPath(filename); // /api/media/<file>
@@ -2119,16 +2126,17 @@ router.get('/generated-latest', async (req, res) => {
 
     return res.json({
       ok: true,
-      url,
-      absoluteUrl,
+      url,          // relative API path, e.g. /api/media/xxx.mp4
+      absoluteUrl,  // full URL, safe for <video src>
       type: 'video/mp4',
-      filename
+      filename,
     });
   } catch (e) {
     console.error('generated-latest error:', e?.message || e);
     return res.status(500).json({ ok: false, error: 'GEN_LATEST_FAIL' });
   }
 });
+
 
 
 /* -------- Ensure CORS even on errors -------- */
