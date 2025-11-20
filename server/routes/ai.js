@@ -1155,7 +1155,7 @@ const { pipeline } = require('stream');
 const { promisify } = require('util');
 const streamPipeline = promisify(pipeline);
 
-/** Exec a binary without buffering stdout (prevents big memory spikes on Render free) */
+/** Exec a binary without buffering stdout (prevents big memory spikes on Render) */
 async function execFile(bin, args = [], opts = {}, hardKillMs = 180000) {
   return new Promise((resolve, reject) => {
     const p = spawn(bin, args, {
@@ -1164,14 +1164,9 @@ async function execFile(bin, args = [], opts = {}, hardKillMs = 180000) {
       ...opts,
     });
     const killer = setTimeout(() => {
-      try {
-        p.kill('SIGKILL');
-      } catch {}
+      try { p.kill('SIGKILL'); } catch {}
     }, hardKillMs);
-    p.on('error', (e) => {
-      clearTimeout(killer);
-      reject(e);
-    });
+    p.on('error', (e) => { clearTimeout(killer); reject(e); });
     p.on('close', (code) => {
       clearTimeout(killer);
       code === 0 ? resolve() : reject(new Error(`${bin} exited ${code}`));
@@ -1206,26 +1201,16 @@ async function synthTTS(text = '') {
     await fs.promises.writeFile(speechPath, buf);
     return { path: speechPath, ok: true };
   } catch (e) {
-    console.warn(
-      '[tts] OpenAI TTS failed, using low-volume tone fallback:',
-      e?.message || e
-    );
-    const fallback = path.join(
-      ensureGeneratedDir(),
-      `${uuidv4()}-tone.mp3`
-    );
+    console.warn('[tts] OpenAI TTS failed, using low-volume tone fallback:', e?.message || e);
+    const fallback = path.join(ensureGeneratedDir(), `${uuidv4()}-tone.mp3`);
     await execFile(
       'ffmpeg',
       [
         '-y',
-        '-f',
-        'lavfi',
-        '-i',
-        'sine=frequency=400:duration=19:sample_rate=48000',
-        '-filter:a',
-        'volume=0.12',
-        '-c:a',
-        'mp3',
+        '-f', 'lavfi',
+        '-i', 'sine=frequency=400:duration=19:sample_rate=48000',
+        '-filter:a', 'volume=0.12',
+        '-c:a', 'mp3',
         fallback,
       ],
       {},
@@ -1256,12 +1241,9 @@ async function ffprobeDuration(filePath = '') {
         const p = spawn(
           'ffprobe',
           [
-            '-v',
-            'error',
-            '-show_entries',
-            'format=duration',
-            '-of',
-            'default=nw=1:nk=1',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=nw=1:nk=1',
             filePath,
           ],
           { stdio: ['ignore', fd, 'inherit'] }
@@ -1269,18 +1251,12 @@ async function ffprobeDuration(filePath = '') {
         p.on('error', () => resolve());
         p.on('close', () => resolve());
       });
-      const txt = await fs.promises
-        .readFile(outTxt, 'utf8')
-        .catch(() => '0');
+      const txt = await fs.promises.readFile(outTxt, 'utf8').catch(() => '0');
       const d = parseFloat(String(txt).trim());
       return Number.isFinite(d) ? d : 0;
     } finally {
-      try {
-        fs.closeSync(fd);
-      } catch {}
-      try {
-        fs.unlinkSync(outTxt);
-      } catch {}
+      try { fs.closeSync(fd); } catch {}
+      try { fs.unlinkSync(outTxt); } catch {}
     }
   } catch {
     return 0;
@@ -1294,10 +1270,7 @@ function buildAssKaraoke(text, totalSec = 18.5, W = 960, H = 540) {
     .replace(/\s+/g, ' ')
     .trim();
   const words = safe.split(' ').filter(Boolean);
-  const per = Math.max(
-    0.35,
-    Math.min(0.9, totalSec / Math.max(8, words.length))
-  );
+  const per = Math.max(0.35, Math.min(0.9, totalSec / Math.max(8, words.length)));
   const kfCs = Math.max(10, Math.round(per * 100));
   const karaoke = words.map((w) => `{\\kf${kfCs}}${w}`).join(' ');
   return [
@@ -1311,9 +1284,7 @@ function buildAssKaraoke(text, totalSec = 18.5, W = 960, H = 540) {
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-    `Dialogue: 0,0:00:00.00,0:00:${String(
-      Math.max(1, Math.floor(totalSec))
-    ).padStart(2, '0')}.00,Default,,0,0,0,,{\\an2\\bord2\\blur2}${karaoke}`,
+    `Dialogue: 0,0:00:00.00,0:00:${String(Math.max(1, Math.floor(totalSec))).padStart(2, '0')}.00,Default,,0,0,0,,{\\an2\\bord2\\blur2}${karaoke}`,
   ].join('\n');
 }
 /* ================= end helpers ================= */
@@ -1338,11 +1309,9 @@ async function fetchPexelsVideos(keyword, want = 8) {
     for (const v of vids) {
       const files = Array.isArray(v.video_files) ? v.video_files : [];
       const f =
-        files.find(
-          (f) => (f.height || 0) >= 720 && /mp4/i.test(f.file_type || '')
-        ) || files.find((f) => f.link);
-      if (f?.link)
-        pick.push({ url: f.link, id: v.id, dur: v.duration || 0 });
+        files.find((f) => (f.height || 0) >= 720 && /mp4/i.test(f.file_type || '')) ||
+        files.find((f) => f.link);
+      if (f?.link) pick.push({ url: f.link, id: v.id, dur: v.duration || 0 });
       if (pick.length >= want) break;
     }
     console.log('[pexels] videos picked:', pick.length, 'kw=', keyword);
@@ -1368,8 +1337,7 @@ async function fetchPexelsPhotos(keyword, want = 8) {
     const pick = [];
     for (const p of photos) {
       const src = p?.src || {};
-      const u =
-        src.landscape || src.large2x || src.large || src.original;
+      const u = src.landscape || src.large2x || src.large || src.original;
       if (u) pick.push({ url: u, id: p.id });
       if (pick.length >= want) break;
     }
@@ -1387,8 +1355,7 @@ function buildVirtualPlan(rawClips, variant = 0) {
     console.warn('[video] no Pexels clips available for virtual plan');
     return [];
   }
-  const want =
-    baseCount >= 4 ? 4 : Math.max(3, Math.min(4, baseCount));
+  const want = baseCount >= 4 ? 4 : Math.max(3, Math.min(4, baseCount));
   const out = [];
   for (let i = 0; i < want; i++) {
     const base = uniq[i % baseCount];
@@ -1421,10 +1388,7 @@ async function makeVideoVariant({
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-    const ATEMPO = Math.max(
-      0.85,
-      Math.min(1.25, OUTLEN / voiceDur)
-    );
+    const ATEMPO = Math.max(0.85, Math.min(1.25, OUTLEN / voiceDur));
 
     // Plan 3–4 segments
     const plan = buildVirtualPlan(clips || [], variant) || [];
@@ -1443,45 +1407,31 @@ async function makeVideoVariant({
       try {
         const d = await ffprobeDuration(tmpIn);
         const headroom = Math.max(0, d - perClip - 0.8);
-        const frac =
-          (i + 1 + variant * 0.37) / (plan.length + 1);
+        const frac = (i + 1 + variant * 0.37) / (plan.length + 1);
         ss = Math.max(0, Math.min(headroom, headroom * frac));
       } catch {}
 
-      const outSeg = path.join(
-        ensureGeneratedDir(),
-        `${uuidv4()}-seg.mp4`
-      );
+      const outSeg = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
       const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p`;
       await execFile(
         'ffmpeg',
         [
           '-y',
           '-nostdin',
-          '-loglevel',
-          'error',
+          '-loglevel', 'error',
           ...(ss > 0 ? ['-ss', ss.toFixed(2)] : []),
-          '-i',
-          tmpIn,
-          '-t',
-          perClip.toFixed(2),
-          '-vf',
-          vf,
+          '-i', tmpIn,
+          '-t', perClip.toFixed(2),
+          '-vf', vf,
           '-an',
-          '-c:v',
-          'libx264',
-          '-preset',
-          'veryfast',
-          '-crf',
-          '27',
-          '-pix_fmt',
-          'yuv420p',
-          '-x264-params',
-          'threads=1',
-          '-threads',
-          '1',
-          '-r',
-          String(FPS),
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-crf', '27',
+          '-pix_fmt', 'yuv420p',
+          '-x264-params', 'threads=1',
+          '-threads', '1',
+          '-r', String(FPS),
+          outSeg,                 // <-- OUTPUT FILE (fix)
         ],
         {},
         180000
@@ -1494,41 +1444,26 @@ async function makeVideoVariant({
     const inputs = segs.flatMap((p) => ['-i', p]);
     const vParts = [];
     for (let i = 0; i < segs.length; i++) {
-      vParts.push(
-        `[${i}:v]setpts=PTS-STARTPTS[v${i}]`
-      );
+      vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
     }
 
     let chain = '[v0]';
-    const transitions = [
-      'fade',
-      'wipeleft',
-      'smoothleft',
-      'circlecrop',
-      'dissolve',
-    ];
+    const transitions = ['fade', 'wipeleft', 'smoothleft', 'circlecrop', 'dissolve'];
 
     for (let i = 1; i < segs.length; i++) {
       const A = i === 1 ? '[v0]' : chain;
       const B = `[v${i}]`;
       chain = `[vx${i}]`;
-      const trans =
-        transitions[(variant + i) % transitions.length];
+      const trans = transitions[(variant + i) % transitions.length];
       vParts.push(
-        `${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(
-          perClip * i -
-          FADE
-        ).toFixed(2)}${chain}`
+        `${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(perClip * i - FADE).toFixed(2)}${chain}`
       );
     }
 
     const finalV = segs.length === 1 ? '[v0]' : chain;
 
     const assText = buildAssKaraoke(script, OUTLEN, W, H);
-    const assPath = path.join(
-      ensureGeneratedDir(),
-      `${uuidv4()}.ass`
-    );
+    const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
     fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
     tmpToDelete.push(assPath);
 
@@ -1542,16 +1477,14 @@ async function makeVideoVariant({
       musicIdx = voiceIdx + 1;
     }
 
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(
-      3
-    )},aresample=48000,apad=pad_dur=${Math.ceil(
+    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000,apad=pad_dur=${Math.ceil(
       tailPadSec
     )}[vo]`;
     const audioChain =
       musicIdx !== null
-        ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${
-            Math.ceil(OUTLEN) + 2
-          }[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
+        ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(
+            OUTLEN
+          ) + 2}[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
     const fc = [
@@ -1560,48 +1493,31 @@ async function makeVideoVariant({
       audioChain,
     ].join(';');
 
-    const outPath = path.join(
-      ensureGeneratedDir(),
-      `${uuidv4()}.mp4`
-    );
+    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
       'ffmpeg',
       [
         '-y',
         '-nostdin',
-        '-loglevel',
-        'error',
+        '-loglevel', 'error',
         ...inputs,
         ...audioInputs,
         ...musicArgs,
-        '-filter_complex',
-        fc,
-        '-map',
-        '[vv]',
-        '-map',
-        '[aout]',
-        '-t',
-        OUTLEN.toFixed(2),
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-crf',
-        '27',
-        '-pix_fmt',
-        'yuv420p',
-        '-x264-params',
-        'threads=1',
-        '-threads',
-        '1',
-        '-r',
-        String(FPS),
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        '-movflags',
-        '+faststart',
+        '-filter_complex', fc,
+        '-map', '[vv]',
+        '-map', '[aout]',
+        '-t', OUTLEN.toFixed(2),
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '27',
+        '-pix_fmt', 'yuv420p',
+        '-x264-params', 'threads=1',
+        '-threads', '1',
+        '-r', String(FPS),
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-movflags', '+faststart',
+        outPath,                 // <-- OUTPUT FILE (fix)
       ],
       {},
       180000
@@ -1637,10 +1553,7 @@ async function makeSlideshowVariantFromPhotos({
     tmpToDelete.push(voicePath);
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-    const ATEMPO = Math.max(
-      0.85,
-      Math.min(1.25, OUTLEN / voiceDur)
-    );
+    const ATEMPO = Math.max(0.85, Math.min(1.25, OUTLEN / voiceDur));
 
     const need = Math.max(3, Math.min(4, photos.length || 3));
     const chosen = [];
@@ -1658,10 +1571,7 @@ async function makeSlideshowVariantFromPhotos({
     const perClip = Math.max(3.8, OUTLEN / chosen.length);
     for (let i = 0; i < chosen.length; i++) {
       const img = chosen[i];
-      const outSeg = path.join(
-        ensureGeneratedDir(),
-        `${uuidv4()}-seg.mp4`
-      );
+      const outSeg = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
       const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p,fade=t=in:st=0:d=0.25,fade=t=out:st=${Math.max(
         0,
         perClip - 0.25
@@ -1671,31 +1581,20 @@ async function makeSlideshowVariantFromPhotos({
         [
           '-y',
           '-nostdin',
-          '-loglevel',
-          'error',
-          '-loop',
-          '1',
-          '-t',
-          perClip.toFixed(2),
-          '-i',
-          img,
-          '-vf',
-          vf,
+          '-loglevel', 'error',
+          '-loop', '1',
+          '-t', perClip.toFixed(2),
+          '-i', img,
+          '-vf', vf,
           '-an',
-          '-c:v',
-          'libx264',
-          '-preset',
-          'veryfast',
-          '-crf',
-          '27',
-          '-pix_fmt',
-          'yuv420p',
-          '-x264-params',
-          'threads=1',
-          '-threads',
-          '1',
-          '-r',
-          String(FPS),
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-crf', '27',
+          '-pix_fmt', 'yuv420p',
+          '-x264-params', 'threads=1',
+          '-threads', '1',
+          '-r', String(FPS),
+          outSeg,                // <-- OUTPUT FILE (fix)
         ],
         {},
         180000
@@ -1706,39 +1605,25 @@ async function makeSlideshowVariantFromPhotos({
     const inputs = segs.flatMap((p) => ['-i', p]);
     const vParts = [];
     for (let i = 0; i < segs.length; i++) {
-      vParts.push(
-        `[${i}:v]setpts=PTS-STARTPTS[v${i}]`
-      );
+      vParts.push(`[${i}:v]setpts=PTS-STARTPTS[v${i}]`);
     }
     let chain = '[v0]';
-    const transitions = [
-      'fade',
-      'wipeleft',
-      'smoothleft',
-      'circlecrop',
-      'dissolve',
-    ];
+    const transitions = ['fade', 'wipeleft', 'smoothleft', 'circlecrop', 'dissolve'];
     for (let i = 1; i < segs.length; i++) {
       const A = i === 1 ? '[v0]' : chain;
       const B = `[v${i}]`;
       chain = `[vx${i}]`;
-      const trans =
-        transitions[(variant + i) % transitions.length];
+      const trans = transitions[(variant + i) % transitions.length];
       vParts.push(
-        `${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(
-          perClip * i -
-          FADE
-        ).toFixed(2)}${chain}`
+        `${A}${B}xfade=transition=${trans}:duration=${FADE}:offset=${(perClip * i - FADE).toFixed(2)}${chain}`
       );
     }
     const finalV = segs.length === 1 ? '[v0]' : chain;
 
     const assText = buildAssKaraoke(script, OUTLEN, W, H);
-    const assPath = path.join(
-      ensureGeneratedDir(),
-      `${uuidv4()}.ass`
-    );
-    fs.writeFileSync(assPath, { encoding: 'utf8' });
+    const assPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+    fs.writeFileSync(assPath, assText, { encoding: 'utf8' });
+    tmpToDelete.push(assPath);
 
     const voiceIdx = segs.length;
     const audioInputs = ['-i', voicePath];
@@ -1749,16 +1634,14 @@ async function makeSlideshowVariantFromPhotos({
       musicIdx = voiceIdx + 1;
     }
 
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(
-      3
-    )},aresample=48000,apad=pad_dur=${Math.ceil(
+    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000,apad=pad_dur=${Math.ceil(
       tailPadSec
     )}[vo]`;
     const audioChain =
       musicIdx !== null
-        ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${
-            Math.ceil(OUTLEN) + 2
-          }[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
+        ? `[${musicIdx}:a]volume=0.18,apad=pad_dur=${Math.ceil(
+            OUTLEN
+          ) + 2}[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2,volume=1.0[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
     const fc = [
@@ -1767,48 +1650,31 @@ async function makeSlideshowVariantFromPhotos({
       audioChain,
     ].join(';');
 
-    const outPath = path.join(
-      ensureGeneratedDir(),
-      `${uuidv4()}.mp4`
-    );
+    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
       'ffmpeg',
       [
         '-y',
         '-nostdin',
-        '-loglevel',
-        'error',
+        '-loglevel', 'error',
         ...inputs,
         ...audioInputs,
         ...musicArgs,
-        '-filter_complex',
-        fc,
-        '-map',
-        '[vv]',
-        '-map',
-        '[aout]',
-        '-t',
-        OUTLEN.toFixed(2),
-        '-c:v',
-        'libx264',
-        '-preset',
-        'veryfast',
-        '-crf',
-        '27',
-        '-pix_fmt',
-        'yuv420p',
-        '-x264-params',
-        'threads=1',
-        '-threads',
-        '1',
-        '-r',
-        String(FPS),
-        '-c:a',
-        'aac',
-        '-b:a',
-        '128k',
-        '-movflags',
-        '+faststart',
+        '-filter_complex', fc,
+        '-map', '[vv]',
+        '-map', '[aout]',
+        '-t', OUTLEN.toFixed(2),
+        '-c:v', 'libx264',
+        '-preset', 'veryfast',
+        '-crf', '27',
+        '-pix_fmt', 'yuv420p',
+        '-x264-params', 'threads=1',
+        '-threads', '1',
+        '-r', String(FPS),
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-movflags', '+faststart',
+        outPath,                // <-- OUTPUT FILE (fix)
       ],
       {},
       180000
@@ -1823,9 +1689,7 @@ async function makeSlideshowVariantFromPhotos({
 }
 
 /* ===================== BACKGROUND VIDEO QUEUE ===================== */
-const VIDEO_QUEUE_CONC = Number(
-  process.env.VIDEO_QUEUE_CONCURRENCY || 1
-);
+const VIDEO_QUEUE_CONC = Number(process.env.VIDEO_QUEUE_CONCURRENCY || 1);
 let videoQueue = [];
 let videoWorking = 0;
 
@@ -1836,10 +1700,7 @@ async function runVideoJob(job) {
   const industry = answers.industry || top.industry || '';
   const category = resolveCategory(answers || {});
   const keyword = getImageKeyword(industry, url, answers);
-  const targetSec = Math.max(
-    18,
-    Math.min(20, Number(top.targetSeconds || 18.5))
-  );
+  const targetSec = Math.max(18, Math.min(20, Number(top.targetSeconds || 18.5)));
 
   // Script
   let script = (top.adCopy || '').trim();
@@ -1852,23 +1713,16 @@ async function runVideoJob(job) {
         max_tokens: 200,
         temperature: 0.35,
       });
-      script = cleanFinalText(
-        r.choices?.[0]?.message?.content || ''
-      );
-      script = enforceCategoryPresence(
-        stripFashionIfNotApplicable(script, category),
-        category
-      );
+      script = cleanFinalText(r.choices?.[0]?.message?.content || '');
+      script = enforceCategoryPresence(stripFashionIfNotApplicable(script, category), category);
     } catch {
-      script =
-        'A simple way to get started with less hassle and more value. Learn more.';
+      script = 'A simple way to get started with less hassle and more value. Learn more.';
     }
   }
 
   // Media
   let clips = await fetchPexelsVideos(keyword, 8);
-  if (!clips.length)
-    clips = await fetchPexelsVideos('product shopping', 8);
+  if (!clips.length) clips = await fetchPexelsVideos('product shopping', 8);
 
   const bgm = await prepareBgm();
   let v1, v2;
@@ -1878,7 +1732,7 @@ async function runVideoJob(job) {
       clips,
       script,
       variant: 0,
-      targetSec: targetSec,
+      targetSec,
       tailPadSec: 2,
       musicPath: bgm,
     });
@@ -1886,21 +1740,19 @@ async function runVideoJob(job) {
       clips,
       script,
       variant: 1,
-      targetSec: targetSec,
+      targetSec,
       tailPadSec: 2,
       musicPath: bgm,
     });
   } else {
     let photos = await fetchPexelsPhotos(keyword, 10);
-    if (!photos.length)
-      photos = await fetchPexelsPhotos('product shopping', 10);
-    if (!photos.length)
-      throw new Error('No stock media available');
+    if (!photos.length) photos = await fetchPexelsPhotos('product shopping', 10);
+    if (!photos.length) throw new Error('No stock media available');
     v1 = await makeSlideshowVariantFromPhotos({
       photos,
       script,
       variant: 0,
-      targetSec: targetSec,
+      targetSec,
       tailPadSec: 2,
       musicPath: bgm,
     });
@@ -1908,7 +1760,7 @@ async function runVideoJob(job) {
       photos,
       script,
       variant: 1,
-      targetSec: targetSec,
+      targetSec,
       tailPadSec: 2,
       musicPath: bgm,
     });
@@ -1927,26 +1779,14 @@ async function runVideoJob(job) {
     kind: 'video',
     url: url1,
     absoluteUrl: abs1,
-    meta: {
-      variant: 0,
-      category,
-      keyword,
-      hasSubtitles: true,
-      targetSec: v1.duration,
-    },
+    meta: { variant: 0, category, keyword, hasSubtitles: true, targetSec: v1.duration },
   });
   await saveAsset({
     req: reqLike,
     kind: 'video',
     url: url2,
     absoluteUrl: abs2,
-    meta: {
-      variant: 1,
-      category,
-      keyword,
-      hasSubtitles: true,
-      targetSec: v2.duration,
-    },
+    meta: { variant: 1, category, keyword, hasSubtitles: true, targetSec: v2.duration },
   });
 
   console.log('[video] ready:', url1, url2);
@@ -1957,9 +1797,7 @@ async function pumpVideoQueue() {
     const job = videoQueue.shift();
     videoWorking += 1;
     runVideoJob(job)
-      .catch((e) =>
-        console.error('[video] failed:', e?.message || e)
-      )
+      .catch((e) => console.error('[video] failed:', e?.message || e))
       .finally(() => {
         videoWorking = Math.max(0, videoWorking - 1);
         setImmediate(pumpVideoQueue);
@@ -1968,56 +1806,44 @@ async function pumpVideoQueue() {
 }
 
 /* TRIGGER + POLL */
-router.post(
-  '/generate-video-ad',
-  heavyLimiter,
-  async (req, res) => {
-    housekeeping();
-    try {
-      if (typeof res.setTimeout === 'function')
-        res.setTimeout(15000);
-      if (typeof req.setTimeout === 'function')
-        req.setTimeout(15000);
-    } catch {}
+router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
+  housekeeping();
+  try {
+    if (typeof res.setTimeout === 'function') res.setTimeout(15000);
+    if (typeof req.setTimeout === 'function') req.setTimeout(15000);
+  } catch {}
 
-    const MAX_QUEUE = Number(
-      process.env.MAX_VIDEO_QUEUE || 2
-    );
-    if (videoQueue.length + videoWorking >= MAX_QUEUE) {
-      return res.status(429).json({
-        ok: false,
-        error: 'BUSY',
-        message:
-          'Video queue is busy — try again in a minute.',
-      });
-    }
-
-    const reqLike = {
-      headers: req.headers,
-      cookies: req.cookies,
-      ip: req.ip,
-    };
-    const top = req.body || {};
-    videoQueue.push({ reqLike, top });
-    setImmediate(pumpVideoQueue);
-
-    const origin = req.headers && req.headers.origin;
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
-      res.setHeader(
-        'Access-Control-Allow-Credentials',
-        'true'
-      );
-    }
-
-    return res.status(202).json({
-      ok: true,
-      message: 'Video generation started',
-      poll: '/api/generated-latest',
+  const MAX_QUEUE = Number(process.env.MAX_VIDEO_QUEUE || 2);
+  if (videoQueue.length + videoWorking >= MAX_QUEUE) {
+    return res.status(429).json({
+      ok: false,
+      error: 'BUSY',
+      message: 'Video queue is busy — try again in a minute.',
     });
   }
-);
+
+  const reqLike = {
+    headers: req.headers,
+    cookies: req.cookies,
+    ip: req.ip,
+  };
+  const top = req.body || {};
+  videoQueue.push({ reqLike, top });
+  setImmediate(pumpVideoQueue);
+
+  const origin = req.headers && req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+
+  return res.status(202).json({
+    ok: true,
+    message: 'Video generation started',
+    poll: '/api/generated-latest',
+  });
+});
 
 // -----------------------------------------------------------------------
 // NEW: /api/generated-videos?limit=2 — return the most recent N video assets
@@ -2026,24 +1852,15 @@ router.get('/generated-videos', async (req, res) => {
   try {
     await purgeExpiredAssets();
     const owner = ownerKeyFromReq(req);
-    const limit = Math.max(
-      1,
-      Math.min(6, parseInt(req.query.limit, 10) || 2)
-    );
+    const limit = Math.max(1, Math.min(6, parseInt(req.query.limit, 10) || 2));
 
     const vids = (db.data?.generated_assets || [])
-      .filter(
-        (a) => a.owner === owner && a.kind === 'video'
-      )
-      .sort(
-        (a, b) =>
-          (b.createdAt || 0) - (a.createdAt || 0)
-      )
+      .filter((a) => a.owner === owner && a.kind === 'video')
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
       .slice(0, limit)
       .map((v) => ({
         url: v.url,
-        absoluteUrl:
-          v.absoluteUrl || absolutePublicUrl(v.url),
+        absoluteUrl: v.absoluteUrl || absolutePublicUrl(v.url),
         meta: v.meta || {},
         createdAt: v.createdAt,
       }));
@@ -2052,25 +1869,14 @@ router.get('/generated-videos', async (req, res) => {
 
     const origin = req.headers && req.headers.origin;
     if (origin) {
-      res.setHeader(
-        'Access-Control-Allow-Origin',
-        origin
-      );
+      res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
-      res.setHeader(
-        'Access-Control-Allow-Credentials',
-        'true'
-      );
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
     }
     res.json({ ok: true, items: vids });
   } catch (e) {
-    console.error(
-      'generated-videos error:',
-      e?.message || e
-    );
-    res
-      .status(500)
-      .json({ ok: false, error: 'GEN_VIDEOS_FAIL' });
+    console.error('generated-videos error:', e?.message || e);
+    res.status(500).json({ ok: false, error: 'GEN_VIDEOS_FAIL' });
   }
 });
 
