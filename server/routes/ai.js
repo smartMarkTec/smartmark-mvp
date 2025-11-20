@@ -2264,66 +2264,39 @@ router.post('/assets/clear', async (req, res) => {
 // Returns newest *final* video for the current owner. 204 = not ready yet.
 // Never returns temp -seg / -norm / -tone files.
 // -----------------------------------------------------------------------
+// Latest generated VIDEO from the local generated dir, with mtimeMs included
 router.get('/generated-latest', async (req, res) => {
   try {
-    await purgeExpiredAssets();
-    const owner = ownerKeyFromReq(req);
+    // Look at everything in GENERATED_DIR that ends with .mp4
+    const files = fs.readdirSync(GENERATED_DIR)
+      .filter((f) => f.toLowerCase().endsWith('.mp4'))
+      .map((f) => {
+        const full = path.join(GENERATED_DIR, f);
+        const stat = fs.statSync(full);
+        return { file: f, mtimeMs: stat.mtimeMs };
+      })
+      .sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
 
-    // 1) Prefer DB assets (what runVideoJob writes)
-    const all = (db.data?.generated_assets || [])
-      .filter(a => a.owner === owner && a.kind === 'video')
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-
-    let url = '';
-    let absoluteUrl = '';
-    let filename = '';
-
-    if (all.length) {
-      url = all[0].url; // e.g. /api/media/766a98d8-af1c-4e37-9563-13532d4d5d5b.mp4
-      absoluteUrl = all[0].absoluteUrl || absolutePublicUrl(url);
-      filename = (url || '').split('/').pop() || '';
-    } else {
-      // 2) Fallback: newest *final* .mp4 in /tmp/generated
-      //    Skip any temp segments (-seg), normalize (-norm), or tone files.
-      const dir = ensureGeneratedDir();
-      const files = fs.readdirSync(dir)
-        .filter(f => {
-          const lower = f.toLowerCase();
-          if (!lower.endsWith('.mp4')) return false;
-          if (/-norm\.mp4$/i.test(lower)) return false;
-          if (/-seg\.mp4$/i.test(lower)) return false;
-          if (/-tone\.mp4$/i.test(lower)) return false;
-          return true;
-        })
-        .map(f => ({ f, m: fs.statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.m - a.m);
-
-      if (!files.length) return res.status(204).end(); // nothing ready yet
-
-      filename = files[0].f;
-      url = mediaPath(filename); // /api/media/<file>
-      absoluteUrl = absolutePublicUrl(url);
+    if (!files.length) {
+      return res.status(404).json({ error: 'no video found' });
     }
 
-    const origin = req.headers && req.headers.origin;
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
+    const top = files[0];
+    const rel = top.file;
+    const url = `/api/media/${rel}`;
 
     return res.json({
-      ok: true,
-      url,          // relative API path, e.g. /api/media/xxx.mp4
-      absoluteUrl,  // full URL, safe for <video src>
+      url,
+      filename: rel,
       type: 'video/mp4',
-      filename,
+      mtimeMs: top.mtimeMs,
     });
   } catch (e) {
-    console.error('generated-latest error:', e?.message || e);
-    return res.status(500).json({ ok: false, error: 'GEN_LATEST_FAIL' });
+    console.error('/generated-latest error:', e);
+    return res.status(500).json({ error: 'internal', message: e.message });
   }
 });
+
 
 
 

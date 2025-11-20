@@ -625,19 +625,23 @@ export default function FormPage() {
   }
 
     /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
-  async function pollLatestVideo({ tries = 60, intervalMs = 2000 } = {}) {
-    // Poll /generated-latest for up to ~2 minutes
+
+  // Poll /generated-latest until we see a video whose mtimeMs is AFTER we started this job
+  async function pollLatestVideo({ tries = 60, intervalMs = 2000, minMtimeMs = 0 } = {}) {
     for (let i = 0; i < tries; i++) {
       try {
-        const r = await fetchWithTimeout(
+        const res = await fetchWithTimeout(
           `${API_BASE}/generated-latest`,
           { mode: "cors", credentials: "omit" },
           6000
         );
-        if (r.ok) {
-          const j = await r.json();
-          if (j?.url) {
-            const url = j.url.startsWith("http") ? j.url : (BACKEND_URL + j.url);
+        if (res.ok) {
+          const j = await res.json();
+          const hasUrl = j?.url && typeof j.mtimeMs === "number";
+
+          // Only accept if it's NEWER than when we triggered the job
+          if (hasUrl && j.mtimeMs >= minMtimeMs) {
+            const url = j.url.startsWith("http") ? j.url : BACKEND_URL + j.url;
             return url;
           }
         }
@@ -650,7 +654,7 @@ export default function FormPage() {
   }
 
   // Extra safety: don't use the URL until the file actually exists (avoid 404s)
-  async function ensureUrlExists(url, { tries = 10, intervalMs = 1500 } = {}) {
+  async function ensureUrlExists(url, { tries = 40, intervalMs = 1500 } = {}) {
     if (!url) return "";
     for (let i = 0; i < tries; i++) {
       try {
@@ -669,7 +673,10 @@ export default function FormPage() {
   }
 
   async function fetchVideoOnce(token) {
-    // 1) trigger (fast 202 response) — job runs in background
+    // When we triggered this job
+    const triggeredAt = Date.now();
+
+    // 1) Ask backend to start a job (fire-and-forget)
     try {
       await warmBackend();
       await fetchWithTimeout(
@@ -677,22 +684,33 @@ export default function FormPage() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: answers?.url || "", answers, regenerateToken: token }),
+          body: JSON.stringify({
+            url: answers?.url || "",
+            answers,
+            regenerateToken: token,
+          }),
         },
-        8000
+        8000 // we don't wait for ffmpeg here
       ).catch(() => {});
     } catch {
-      // fire-and-forget; even if this throws, job may still be queued
+      // even if this throws, the job may still have been queued
     }
 
-    // 2) poll newest finished video exposed by /api/generated-latest
-    const latestUrl = await pollLatestVideo({ tries: 60, intervalMs: 2000 });
+    // 2) Poll /generated-latest until it returns a video whose mtimeMs is >= triggeredAt
+    const latestUrl = await pollLatestVideo({
+      tries: 60,
+      intervalMs: 2000,
+      minMtimeMs: triggeredAt - 500, // small fudge window
+    });
     if (!latestUrl) {
       return { url: "", script: "", fbVideoId: null };
     }
 
-    // 3) make sure the file is actually there (avoid the 404 race)
-    const confirmedUrl = await ensureUrlExists(latestUrl, { tries: 10, intervalMs: 1500 });
+    // 3) Make sure the file is actually there (avoid 404 race)
+    const confirmedUrl = await ensureUrlExists(latestUrl, {
+      tries: 40,
+      intervalMs: 1500,
+    });
     if (!confirmedUrl) {
       return { url: "", script: "", fbVideoId: null };
     }
