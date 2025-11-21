@@ -294,6 +294,62 @@ async function buildSilentMontage(clipPaths, outPath, totalSeconds = 18) {
   await runFFmpeg(args, "ffmpeg-concat");
 }
 
+async function downloadClipToTmp(url, prefix = "clip") {
+  const id = uuidv4();
+  const outPath = path.join(GENERATED_DIR, `${prefix}-${id}.mp4`);
+  const resp = await ax.get(url, {
+    responseType: "arraybuffer",
+    timeout: 25000,
+  });
+  fs.writeFileSync(outPath, Buffer.from(resp.data));
+  return outPath;
+}
+
+async function generateVideoScriptFromAnswers(answers = {}) {
+  const industry = (answers.industry || "local business").toString();
+  const offer =
+    (answers.offer || answers.mainBenefit || "a limited-time special").toString();
+  const name = (answers.businessName || "your brand").toString();
+
+  const prompt = [
+    {
+      role: "system",
+      content:
+        "You write short, punchy 18-second voiceover scripts for Facebook/Instagram video ads. " +
+        "Use 35–45 words, 3–4 short sentences, present tense, speak directly to the viewer (using 'you'). " +
+        "No hashtags, no emojis, no scene directions – just the spoken words.",
+    },
+    {
+      role: "user",
+      content:
+        `Brand name: ${name}\n` +
+        `Industry: ${industry}\n` +
+        `Offer / main benefit: ${offer}\n\n` +
+        "Write ONE 18-second voiceover script.",
+    },
+  ];
+
+  const resp = await openai.responses.create({
+    model: "gpt-4.1-mini",
+    input: prompt,
+  });
+
+  const text =
+    resp.output?.[0]?.content?.[0]?.text?.trim() ||
+    `Discover ${name}. Enjoy ${offer}. Tap to learn more today.`;
+  return text;
+}
+
+async function synthesizeVoiceToFile(text, outPath) {
+  const speech = await openai.audio.speech.create({
+    model: OPENAI_TTS_MODEL,
+    voice: OPENAI_TTS_VOICE,
+    input: text,
+  });
+  const buf = Buffer.from(await speech.arrayBuffer());
+  fs.writeFileSync(outPath, buf);
+}
+
 
 /* ---------------------- Disk / tmp housekeeping --------------------- */
 const GEN_DIR = '/tmp/generated';
@@ -2065,44 +2121,98 @@ async function pumpVideoQueue() {
 }
 
 /* TRIGGER + POLL */
-router.post('/generate-video-ad', heavyLimiter, async (req, res) => {
-  housekeeping();
+// Synchronous video generation: 3–4 Pexels clips + TTS + subtitles (~18s)
+router.post("/generate-video-ad", async (req, res) => {
   try {
-    if (typeof res.setTimeout === 'function') res.setTimeout(15000);
-    if (typeof req.setTimeout === 'function') req.setTimeout(15000);
-  } catch {}
+    const body = req.body || {};
+    const answers = body.answers || {};
+    const url = body.url || "";
 
-  const MAX_QUEUE = Number(process.env.MAX_VIDEO_QUEUE || 2);
-  if (videoQueue.length + videoWorking >= MAX_QUEUE) {
-    return res.status(429).json({
+    // Pick a keyword for Pexels based on industry
+    const industry = (answers.industry || "").toLowerCase();
+    let keyword = "small business";
+    if (industry.includes("restaurant") || industry.includes("food")) {
+      keyword = "restaurant food";
+    } else if (industry.includes("fashion") || industry.includes("clothing")) {
+      keyword = "fashion model";
+    } else if (industry.includes("beauty") || industry.includes("salon")) {
+      keyword = "beauty spa";
+    }
+
+    // 1) Fetch 3–4 stock clips from Pexels
+    const rawClips = await fetchPexelsVideos(keyword, 6);
+    if (!rawClips || !rawClips.length) {
+      return res
+        .status(500)
+        .json({ ok: false, error: "No stock clips found from Pexels." });
+    }
+
+    const plan = buildVirtualPlan(rawClips, 0); // ensures 3–4 logical clips
+    const clipPaths = [];
+    for (const item of plan) {
+      try {
+        const p = await downloadClipToTmp(item.url, "seg");
+        clipPaths.push(p);
+      } catch (e) {
+        console.warn("[video] clip download failed:", e.message);
+      }
+    }
+    if (!clipPaths.length) {
+      return res
+        .status(500)
+        .json({ ok: false, error: "Failed to download any stock clips." });
+    }
+
+    const jobId = uuidv4();
+
+    // 2) Build silent montage ~18 seconds with quick, hard cuts (no fades)
+    const montagePath = path.join(GENERATED_DIR, `${jobId}-seg.mp4`);
+    await buildSilentMontage(clipPaths, montagePath, 18);
+
+    // 3) Generate a fresh 18-second script from the answers
+    const script = await generateVideoScriptFromAnswers(answers);
+
+    // 4) TTS voiceover
+    const voicePath = path.join(GENERATED_DIR, `${jobId}.mp3`);
+    await synthesizeVoiceToFile(script, voicePath);
+
+    // 5) Combine video + voice + modern subtitles into final <job>.mp4
+    const finalPath = path.join(GENERATED_DIR, `${jobId}.mp4`);
+    await addVoiceAndSubtitles({
+      silentVideoPath: montagePath,
+      audioPath: voicePath,
+      script,
+      outPath: finalPath,
+      targetSeconds: 18,
+    });
+
+    const filename = path.basename(finalPath);
+    const relUrl = `/api/media/${filename}`;
+    const base =
+      (process.env.FRONTEND_URL || process.env.FRONTEND_URL_BASE || "").replace(
+        /\/$/,
+        ""
+      );
+    const absUrl = base ? `${base}${relUrl}` : relUrl;
+
+    console.log("[video] ready (sync):", relUrl);
+
+    return res.json({
+      ok: true,
+      url: relUrl,
+      absoluteUrl: absUrl,
+      filename,
+      script,
+    });
+  } catch (err) {
+    console.error("[generate-video-ad] error:", err);
+    return res.status(500).json({
       ok: false,
-      error: 'BUSY',
-      message: 'Video queue is busy — try again in a minute.',
+      error: err?.message || "Video generation failed",
     });
   }
-
-  const reqLike = {
-    headers: req.headers,
-    cookies: req.cookies,
-    ip: req.ip,
-  };
-  const top = req.body || {};
-  videoQueue.push({ reqLike, top });
-  setImmediate(pumpVideoQueue);
-
-  const origin = req.headers && req.headers.origin;
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-  }
-
-  return res.status(202).json({
-    ok: true,
-    message: 'Video generation started',
-    poll: '/api/generated-latest',
-  });
 });
+
 
 // -----------------------------------------------------------------------
 // NEW: /api/generated-videos?limit=2 — return the most recent N video assets

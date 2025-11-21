@@ -624,28 +624,49 @@ export default function FormPage() {
     }
   }
 
-  /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
+/* ---------- VIDEO helpers: direct sync call to /generate-video-ad ---------- */
 
-  // One-shot: ask backend what the current "latest" video is RIGHT NOW
-  async function getLatestAbsoluteVideoUrlOnce() {
-    try {
-      const res = await fetchWithTimeout(
-        `${API_BASE}/generated-latest`,
-        { mode: "cors", credentials: "omit" },
-        6000
-      );
-      if (!res.ok) {
-        // 404 or other status -> means "no latest" or not ready
-        return "";
-      }
-      const data = await res.json().catch(() => null);
-      if (!data?.url) return "";
-      const raw = data.url;
-      return /^https?:\/\//.test(raw) ? raw : (BACKEND_URL + raw);
-    } catch {
-      return "";
+async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
+  try {
+    await warmBackend();
+
+    const res = await fetchWithTimeout(
+      `${API_BASE}/generate-video-ad`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers?.url || "",
+          answers,
+          regenerateToken: token,
+        }),
+      },
+      120000 // allow up to ~2 minutes for full render on backend
+    );
+
+    const data = await safeJson(res);
+
+    let u = data.url || data.videoUrl || data.absoluteUrl;
+    if (!u && data.filename) {
+      u = `/api/media/${data.filename}`;
     }
+    if (!u) {
+      throw new Error("No video URL in response");
+    }
+
+    const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
+
+    return {
+      url: finalUrl,
+      script: data.script || data.narration || (result?.body ? `Narration: ${result.body}` : ""),
+      fbVideoId: data.fbVideoId || null,
+    };
+  } catch (e) {
+    console.error("fetchVideoOnce failed:", e);
+    return { url: "", script: "", fbVideoId: null };
   }
+}
+
 
   // Poll until we see a DIFFERENT video than previousAbs (the baseline)
   async function pollLatestVideo({ previousAbs, tries = 120, intervalMs = 3000 } = {}) {
@@ -821,13 +842,13 @@ export default function FormPage() {
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
 
-            // 3) video (uses timestamp-safe fetchVideoOnce)
-            const vid1 = await fetchVideoOnce(token);
-            const vids = [vid1].filter((v) => v && v.url);
-            setVideoItems(vids);
-            setActiveVideo(0);
-            setVideoUrl(vids[0]?.url || "");
-            setVideoScript(vids[0]?.script || "");
+            // 3) video (sync: waits for finished 18s ad)
+const vid1 = await fetchVideoOnce(token, newAnswers || answers, data, BACKEND_URL);
+           const vids = [vid1].filter((v) => v && v.url);
+setVideoItems(vids);
+setActiveVideo(0);
+setVideoUrl(vids[0]?.url || "");
+setVideoScript(vids[0]?.script || "");
 
             setChatHistory((ch) => [
               ...ch,
@@ -934,7 +955,7 @@ export default function FormPage() {
 
     try {
       await warmBackend();
-      const vid = await fetchVideoOnce(getRandomString());
+      const vid = await fetchVideoOnce(getRandomString(), answers, result, BACKEND_URL);
       const vids = [vid].filter((v) => v && v.url);
 
       setVideoItems(vids);
