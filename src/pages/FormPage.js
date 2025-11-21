@@ -624,78 +624,72 @@ export default function FormPage() {
     }
   }
 
-  /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
-
-  // Poll /generated-latest until we see a video whose mtimeMs is AFTER we started this job
-  async function pollLatestVideo({ tries = 80, intervalMs = 2000, minMtimeMs = 0 } = {}) {
-    for (let i = 0; i < tries; i++) {
-      try {
-        const res = await fetchWithTimeout(
-          `${API_BASE}/generated-latest`,
-          { mode: "cors", credentials: "omit" },
-          6000
-        );
-        if (res.ok) {
-          const j = await res.json();
-          const hasUrl = j?.url && typeof j.mtimeMs === "number";
-
-          // Only accept if it's NEWER than when we triggered the job
-          if (hasUrl && j.mtimeMs >= minMtimeMs) {
-            const url = j.url.startsWith("http") ? j.url : BACKEND_URL + j.url;
-            return url;
-          }
-        }
-      } catch {
-        // ignore and retry
-      }
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-    return "";
-  }
-
-  async function fetchVideoOnce(token) {
-    // When we triggered this job
-    const triggeredAt = Date.now();
-
-    // 1) Ask backend to start a job (fire-and-forget)
+ /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
+async function pollLatestVideo({ tries = 80, intervalMs = 2000 } = {}) {
+  for (let i = 0; i < tries; i++) {
     try {
-      await warmBackend();
-      await fetchWithTimeout(
-        `${API_BASE}/generate-video-ad`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: answers?.url || "",
-            answers,
-            regenerateToken: token,
-          }),
-        },
-        8000 // we don't wait for ffmpeg here
-      ).catch(() => {});
-    } catch {
-      // even if this throws, the job may still have been queued
-    }
+      const res = await fetchWithTimeout(
+        `${API_BASE}/generated-latest`,
+        { mode: "cors", credentials: "omit" },
+        6000
+      );
 
-    // 2) Poll /generated-latest until it returns a video whose mtimeMs is >= triggeredAt
-    const latestUrl = await pollLatestVideo({
-      tries: 80,
-      intervalMs: 2000,
-      minMtimeMs: triggeredAt - 500, // small fudge window
-    });
-    if (!latestUrl) {
-      return { url: "", script: "", fbVideoId: null };
+      if (!res.ok) {
+        // We return 200 even when nothing is ready, so
+        // any non-OK here is a real error.
+        const text = await res.text().catch(() => "");
+        console.warn("generated-latest non-OK:", res.status, text);
+      } else {
+        const j = await res.json();
+        // When not ready yet, url is null
+        if (j && j.url) {
+          return j.url.startsWith("http") ? j.url : (BACKEND_URL + j.url);
+        }
+      }
+    } catch (e) {
+      console.warn("pollLatestVideo error:", e.message || e);
     }
-
-    // No HEAD check now — /generated-latest only returns files that exist
-    return {
-      url: latestUrl,
-      script: result?.body
-        ? `Narration: ${result.body}`
-        : "Quick intro. Show product. Flash offer. CTA.",
-      fbVideoId: null,
-    };
+    await new Promise((r) => setTimeout(r, intervalMs));
   }
+  return "";
+}
+
+async function fetchVideoOnce(token) {
+  // 1) trigger (fast 202 response) — don’t wait on long ffmpeg
+  try {
+    await warmBackend();
+    await fetchWithTimeout(
+      `${API_BASE}/generate-video-ad`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers?.url || "",
+          answers,
+          regenerateToken: token,
+        }),
+      },
+      8000 // short timeout; job runs in background
+    ).catch(() => {});
+  } catch (e) {
+    console.warn("trigger generate-video-ad failed:", e.message || e);
+  }
+
+  // 2) poll newest finished video exposed by /api/generated-latest
+  const latestUrl = await pollLatestVideo({ tries: 80, intervalMs: 2000 });
+  if (!latestUrl) {
+    return { url: "", script: "", fbVideoId: null };
+  }
+
+  return {
+    url: latestUrl,
+    script: result?.body
+      ? `Narration: ${result.body}`
+      : "Quick intro. Show product. Flash offer. CTA.",
+    fbVideoId: null,
+  };
+}
+
 
 
 /* ---- Chat flow ---- */
