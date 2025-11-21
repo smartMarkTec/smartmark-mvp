@@ -236,39 +236,36 @@ async function addVoiceAndSubtitles({
   outPath,
   targetSeconds = 18,
 }) {
-  // Measure audio; if it fails, fall back to targetSeconds
-  const audioDur = (await getMediaDurationSeconds(audioPath)) || targetSeconds;
-  const totalDur = Math.max(6, Math.min(40, audioDur + 0.4)); // keep it sane
+  // Force a sane video duration window; ignore short audio
+  const totalDur = Math.max(6, Math.min(40, targetSeconds || 18));
 
+  // Build subtitles for the full target duration
   const subFilter = buildSubtitleFilter(script, totalDur);
 
   const args = [
-    "-i",
-    silentVideoPath,
-    "-i",
-    audioPath,
-    "-filter_complex",
-    subFilter,
-    "-map",
-    "[vout]",
-    "-map",
-    "1:a:0",
-    "-c:v",
-    "libx264",
-    "-preset",
-    "veryfast",
-    "-crf",
-    "23",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "128k",
-    "-shortest",
+    "-i", silentVideoPath,
+    "-i", audioPath,
+    "-filter_complex", subFilter,
+    "-map", "[vout]",
+    "-map", "1:a:0",
+    "-c:v", "libx264",
+    "-preset", "veryfast",
+    "-crf", "23",
+    "-c:a", "aac",
+    "-b:a", "128k",
+
+    // pad audio to match desired length (if the voiceover is short)
+    "-af", `apad=pad_dur=${(totalDur + 0.5).toFixed(1)}`,
+
+    // hard cap the final output length to our target
+    "-t", totalDur.toFixed(2),
+
     outPath,
   ];
 
   await runFFmpeg(args, "ffmpeg-subtitled");
 }
+
 
 async function buildSilentMontage(clipPaths, outPath, totalSeconds = 18) {
   const listPath = path.join(GENERATED_DIR, `${uuidv4()}-list.txt`);
