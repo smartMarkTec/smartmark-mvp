@@ -439,10 +439,17 @@ router.get('/media/:file', async (req, res) => {
     const range = req.headers.range;
     if (range && ext === '.mp4') {
       const m = /bytes=(\d+)-(\d*)/.exec(range);
-      const start = m ? parseInt(m[1], 10) : 0;
-      const end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
-      if (start >= stat.size)
+      let start = m ? parseInt(m[1], 10) : 0;
+      let end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
+
+      // Clamp bad values so we don't spam 416s
+      if (!Number.isFinite(start) || start < 0) start = 0;
+      if (!Number.isFinite(end) || end >= stat.size) end = stat.size - 1;
+
+      if (start >= stat.size) {
         return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
+      }
+
       res.status(206);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
       res.setHeader('Content-Length', end - start + 1);
@@ -451,11 +458,78 @@ router.get('/media/:file', async (req, res) => {
       res.setHeader('Content-Length', stat.size);
       fs.createReadStream(full).pipe(res);
     }
-  } catch {
+  } catch (e) {
+    console.error('[media] stream error:', e);
     res.status(500).end();
   }
 });
-function mediaPath(relativeFilename) { return `/api/media/${relativeFilename}`; }
+
+function mediaPath(relativeFilename) {
+  return `/api/media/${relativeFilename}`;
+}
+
+/* ------------------ New: newest generated video helper ------------------ */
+router.get('/generated-latest', (req, res) => {
+  housekeeping();
+  try {
+    const dir = ensureGeneratedDir();
+    let bestFile = null;
+    let bestMtime = 0;
+
+    try {
+      const files = fs.readdirSync(dir);
+      for (const f of files) {
+        if (!f.toLowerCase().endsWith('.mp4')) continue;
+        const full = path.join(dir, f);
+        let st;
+        try {
+          st = fs.statSync(full);
+        } catch {
+          continue;
+        }
+        if (!st.isFile?.()) continue;
+        if (st.mtimeMs > bestMtime) {
+          bestMtime = st.mtimeMs;
+          bestFile = f;
+        }
+      }
+    } catch (e) {
+      console.warn('[generated-latest] readdir failed:', e.message);
+    }
+
+    // Nothing ready yet — this is NOT an error, frontend will keep polling
+    if (!bestFile) {
+      return res.json({
+        url: null,
+        absoluteUrl: null,
+        filename: null,
+        type: null,
+        ready: false,
+      });
+    }
+
+    const url = mediaPath(bestFile);
+    const base =
+      process.env.PUBLIC_BASE_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      '';
+    const absoluteUrl = base ? new URL(url, base).toString() : url;
+
+    return res.json({
+      url,
+      absoluteUrl,
+      filename: bestFile,
+      type: 'video/mp4',
+      ready: true,
+    });
+  } catch (e) {
+    console.error('[generated-latest] error:', e);
+    return res.status(500).json({
+      error: 'internal_error',
+      message: e.message || 'failed',
+    });
+  }
+});
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
