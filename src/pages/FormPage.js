@@ -624,19 +624,23 @@ export default function FormPage() {
     }
   }
 
-    /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
-  async function pollLatestVideo({ tries = 90, intervalMs = 2000 } = {}) {
-    // Total wait window ≈ 90 * 2s = 180s (3 minutes)
+  /* ---------- VIDEO helpers: trigger + poll newest finished ---------- */
+  async function pollLatestVideo({ previousUrl, tries = 90, intervalMs = 2000 } = {}) {
+    // Normalise the “old” URL so we can compare correctly
+    const prevAbs = previousUrl
+      ? (/^https?:\/\//.test(previousUrl) ? previousUrl : (BACKEND_URL + previousUrl))
+      : "";
+
     for (let i = 0; i < tries; i++) {
       try {
         const res = await fetchWithTimeout(
           `${API_BASE}/generated-latest`,
           { mode: "cors", credentials: "omit" },
-          9000 // per-request timeout
+          9000 // per-request timeout for each poll
         );
 
         if (res.status === 404) {
-          // No video asset yet -> keep waiting
+          // No video yet for this service — keep polling
         } else if (res.ok) {
           let j = null;
           try {
@@ -644,23 +648,28 @@ export default function FormPage() {
           } catch {
             j = null;
           }
+
           if (j?.url) {
-            const u = j.url;
-            return /^https?:\/\//.test(u) ? u : (BACKEND_URL + u);
+            const raw = j.url;
+            const absUrl = /^https?:\/\//.test(raw) ? raw : (BACKEND_URL + raw);
+
+            // 🔑 KEY FIX:
+            // If this is the SAME video we already have, ignore it and keep waiting.
+            if (!prevAbs || absUrl !== prevAbs) {
+              return absUrl; // new video is ready
+            }
           }
         } else if ([429, 500, 502, 503, 504].includes(res.status)) {
-          // transient backend issue -> just retry
           console.warn("generated-latest transient status:", res.status);
         } else {
-          // non-retryable error, but don't crash UI: keep polling
           console.warn("generated-latest non-OK status:", res.status);
         }
       } catch (e) {
         console.warn("pollLatestVideo error:", e?.message || String(e));
       }
 
-      // wait before next attempt
-      await new Promise(r => setTimeout(r, intervalMs));
+      // wait before the next attempt
+      await new Promise((r) => setTimeout(r, intervalMs));
     }
 
     // Gave up after full window
@@ -679,7 +688,7 @@ export default function FormPage() {
           body: JSON.stringify({
             url: answers?.url || "",
             answers,
-            regenerateToken: token
+            regenerateToken: token,
           }),
         },
         8000 // only for the trigger call, not the whole render
@@ -688,8 +697,13 @@ export default function FormPage() {
       console.warn("trigger generate-video-ad failed:", e?.message || String(e));
     }
 
-    // 2) poll newest finished video exposed by /api/generated-latest
-    const latestUrl = await pollLatestVideo({ tries: 90, intervalMs: 2000 });
+    // 2) poll newest finished video, but IGNORE the current one
+    const latestUrl = await pollLatestVideo({
+      previousUrl: videoUrl,    // 👈 use whatever is currently showing
+      tries: 90,
+      intervalMs: 2000,
+    });
+
     if (!latestUrl) {
       return { url: "", script: "", fbVideoId: null };
     }
