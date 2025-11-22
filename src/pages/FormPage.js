@@ -668,95 +668,6 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
 }
 
 
-  // Poll until we see a DIFFERENT video than previousAbs (the baseline)
-  async function pollLatestVideo({ previousAbs, tries = 120, intervalMs = 3000 } = {}) {
-    const prev = previousAbs || "";
-
-    for (let i = 0; i < tries; i++) {
-      try {
-        const res = await fetchWithTimeout(
-          `${API_BASE}/generated-latest`,
-          { mode: "cors", credentials: "omit" },
-          9000
-        );
-
-        if (res.status === 404) {
-          // No video yet -> keep waiting
-        } else if (res.ok) {
-          const payload = await res.json().catch(() => null);
-          if (payload?.url) {
-            const raw = payload.url;
-            const absUrl = /^https?:\/\//.test(raw) ? raw : (BACKEND_URL + raw);
-
-            // 🔑 ONLY accept if it's different from the snapshot we took
-            if (!prev || absUrl !== prev) {
-              return absUrl;
-            }
-          }
-        } else if ([429, 500, 502, 503, 504].includes(res.status)) {
-          console.warn("generated-latest transient status:", res.status);
-        } else {
-          console.warn("generated-latest non-OK status:", res.status);
-        }
-      } catch (e) {
-        console.warn("pollLatestVideo error:", e?.message || String(e));
-      }
-
-      // Wait a bit before the next check
-      await new Promise((r) => setTimeout(r, intervalMs));
-    }
-
-    // Timed out after full window with no new video
-    return "";
-  }
-
-  // Full flow for ONE video generation: snapshot -> trigger -> poll for new
-  async function fetchVideoOnce(regenerateToken) {
-    // 0) SNAPSHOT what "latest" video is BEFORE we start the new job
-    const baselineAbs = await getLatestAbsoluteVideoUrlOnce();
-
-    // 1) Trigger the backend job (fire-and-forget)
-    try {
-      await warmBackend();
-      await fetchWithTimeout(
-        `${API_BASE}/generate-video-ad`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            url: answers?.url || "",
-            answers,
-            regenerateToken,
-          }),
-        },
-        10000 // just for the trigger, not the whole render
-      ).catch(() => {});
-    } catch (e) {
-      console.warn("trigger generate-video-ad failed:", e?.message || String(e));
-    }
-
-    // 2) Keep polling until we see a DIFFERENT video than baselineAbs
-    const latestAbs = await pollLatestVideo({
-      previousAbs: baselineAbs,
-      tries: 120,      // 120 * 3s = 360 seconds max wait
-      intervalMs: 3000,
-    });
-
-    if (!latestAbs) {
-      // No new video ever appeared within the window
-      return { url: "", script: "", fbVideoId: null };
-    }
-
-    // Give the UI a direct, playable URL + simple script text
-    return {
-      url: latestAbs,
-      script: result?.body
-        ? `Narration: ${result.body}`
-        : "Quick intro. Show product. Flash offer. CTA.",
-      fbVideoId: null,
-    };
-  }
-
 
 /* ---- Chat flow ---- */
   async function handleUserInput(e) {
@@ -843,7 +754,7 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
             setImageUrl(imgs[0] || "");
 
             // 3) video (sync: waits for finished 18s ad)
-const vid1 = await fetchVideoOnce(token, newAnswers || answers, data, BACKEND_URL);
+const vid1 = await fetchVideoOnce(token, answers, data, BACKEND_URL);
            const vids = [vid1].filter((v) => v && v.url);
 setVideoItems(vids);
 setActiveVideo(0);

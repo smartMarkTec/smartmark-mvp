@@ -97,6 +97,14 @@ const GENERATED_DIR =
 // Make sure the folder exists
 fs.mkdirSync(GENERATED_DIR, { recursive: true });
 
+// ---- Unify temp/output dirs so every feature uses the SAME place ----
+const GEN_DIR = GENERATED_DIR;
+function ensureGeneratedDir() {
+  try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {}
+  return GEN_DIR;
+}
+
+
 
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
@@ -352,8 +360,6 @@ async function synthesizeVoiceToFile(text, outPath) {
 
 
 /* ---------------------- Disk / tmp housekeeping --------------------- */
-const GEN_DIR = '/tmp/generated';
-function ensureGeneratedDir() { try { fs.mkdirSync(GEN_DIR, { recursive: true }); } catch {} return GEN_DIR; }
 function dirStats(p) {
   try {
     const files = fs.readdirSync(p).map((f) => ({ f, full: path.join(p, f) }))
@@ -2128,88 +2134,51 @@ router.post("/generate-video-ad", async (req, res) => {
     const answers = body.answers || {};
     const url = body.url || "";
 
-    // Pick a keyword for Pexels based on industry
+    // keyword by industry (kept from your logic)
     const industry = (answers.industry || "").toLowerCase();
     let keyword = "small business";
-    if (industry.includes("restaurant") || industry.includes("food")) {
-      keyword = "restaurant food";
-    } else if (industry.includes("fashion") || industry.includes("clothing")) {
-      keyword = "fashion model";
-    } else if (industry.includes("beauty") || industry.includes("salon")) {
-      keyword = "beauty spa";
-    }
+    if (industry.includes("restaurant") || industry.includes("food")) keyword = "restaurant food";
+    else if (industry.includes("fashion") || industry.includes("clothing")) keyword = "fashion model";
+    else if (industry.includes("beauty") || industry.includes("salon")) keyword = "beauty spa";
 
-    // 1) Fetch 3–4 stock clips from Pexels
-    const rawClips = await fetchPexelsVideos(keyword, 6);
-    if (!rawClips || !rawClips.length) {
-      return res
-        .status(500)
-        .json({ ok: false, error: "No stock clips found from Pexels." });
-    }
+    // 1) clips (needs PEXELS_API_KEY)
+    let clips = await fetchPexelsVideos(keyword, 8);
+    if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8);
+    if (!clips.length) return res.status(500).json({ ok:false, error:"No stock clips found from Pexels." });
 
-    const plan = buildVirtualPlan(rawClips, 0); // ensures 3–4 logical clips
-    const clipPaths = [];
-    for (const item of plan) {
-      try {
-        const p = await downloadClipToTmp(item.url, "seg");
-        clipPaths.push(p);
-      } catch (e) {
-        console.warn("[video] clip download failed:", e.message);
-      }
-    }
-    if (!clipPaths.length) {
-      return res
-        .status(500)
-        .json({ ok: false, error: "Failed to download any stock clips." });
-    }
-
-    const jobId = uuidv4();
-
-    // 2) Build silent montage ~18 seconds with quick, hard cuts (no fades)
-    const montagePath = path.join(GENERATED_DIR, `${jobId}-seg.mp4`);
-    await buildSilentMontage(clipPaths, montagePath, 18);
-
-    // 3) Generate a fresh 18-second script from the answers
+    // 2) script
     const script = await generateVideoScriptFromAnswers(answers);
 
-    // 4) TTS voiceover
-    const voicePath = path.join(GENERATED_DIR, `${jobId}.mp3`);
-    await synthesizeVoiceToFile(script, voicePath);
+    // 3) optional BGM
+    const bgm = await prepareBgm();
 
-    // 5) Combine video + voice + modern subtitles into final <job>.mp4
-    const finalPath = path.join(GENERATED_DIR, `${jobId}.mp4`);
-    await addVoiceAndSubtitles({
-      silentVideoPath: montagePath,
-      audioPath: voicePath,
+    // 4) build one ~18.5s variant with xfade + ASS karaoke (word-by-word)
+    const v = await makeVideoVariant({
+      clips,
       script,
-      outPath: finalPath,
-      targetSeconds: 18,
+      variant: 0,
+      targetSec: 18.5,
+      tailPadSec: 2,
+      musicPath: bgm,
     });
 
-    const filename = path.basename(finalPath);
-    const relUrl = `/api/media/${filename}`;
-    const base =
-      (process.env.FRONTEND_URL || process.env.FRONTEND_URL_BASE || "").replace(
-        /\/$/,
-        ""
-      );
-    const absUrl = base ? `${base}${relUrl}` : relUrl;
+    const rel = path.basename(v.outPath);
+    const urlRel = `/api/media/${rel}`;
+    const abs = absolutePublicUrl(urlRel);
 
-    console.log("[video] ready (sync):", relUrl);
-
-    return res.json({
-      ok: true,
-      url: relUrl,
-      absoluteUrl: absUrl,
-      filename,
-      script,
+    // persist to recent assets (so your pollers/dashboards can see it)
+    await saveAsset({
+      req,
+      kind: 'video',
+      url: urlRel,
+      absoluteUrl: abs,
+      meta: { variant: 0, keyword, hasSubtitles: true, targetSec: v.duration }
     });
+
+    return res.json({ ok: true, url: urlRel, absoluteUrl: abs, filename: rel, script });
   } catch (err) {
     console.error("[generate-video-ad] error:", err);
-    return res.status(500).json({
-      ok: false,
-      error: err?.message || "Video generation failed",
-    });
+    return res.status(500).json({ ok:false, error: err?.message || "Video generation failed" });
   }
 });
 
@@ -2441,41 +2410,6 @@ router.post('/assets/clear', async (req, res) => {
 });
 
 // -----------------------------------------------------------------------
-// LATEST GENERATED VIDEO (for frontend poller) -> /api/generated-latest
-// Returns newest *final* video for the current owner. 204 = not ready yet.
-// Never returns temp -seg / -norm / -tone files.
-// -----------------------------------------------------------------------
-// Latest generated VIDEO from the local generated dir, with mtimeMs included
-router.get('/generated-latest', async (req, res) => {
-  try {
-    const files = fs.readdirSync(GENERATED_DIR)
-      .filter((f) => f.toLowerCase().endsWith('.mp4'))
-      .map((f) => {
-        const full = path.join(GENERATED_DIR, f);
-        const stat = fs.statSync(full);
-        return { file: f, mtimeMs: stat.mtimeMs };
-      })
-      .sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
-
-    if (!files.length) {
-      return res.status(404).json({ error: 'no video found' });
-    }
-
-    const top = files[0];
-    const rel = top.file;
-    const url = `/api/media/${rel}`;
-
-    return res.json({
-      url,
-      filename: rel,
-      type: 'video/mp4',
-      mtimeMs: top.mtimeMs,
-    });
-  } catch (e) {
-    console.error('/generated-latest error:', e);
-    return res.status(500).json({ error: 'internal', message: e.message });
-  }
-});
 
 
 /* -------- Ensure CORS even on errors -------- */
