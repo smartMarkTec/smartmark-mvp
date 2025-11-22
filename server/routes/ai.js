@@ -227,21 +227,22 @@ async function transcribeWords(voicePath) {
   return [{ start: 0, end: dur, word: "" }];
 }
 
-/* ---------- Build ASS karaoke (boxed, clean aesthetic) from word timings ---------- */
+/* ---------- Build ASS word-by-word (one Dialogue per word) ---------- */
 /** Writes a .ass file and returns its absolute path */
 function buildAssKaraoke(words, opts = {}) {
   const {
     W = 960,
     H = 540,
-    styleName = "SmartSub",
+    styleName = "SmartWord",
     fontName = "DejaVu Sans",
     fontSize = 42,
-    marginV = 64,
+    marginV = 64, // distance from bottom
   } = opts || {};
 
   const safe = (Array.isArray(words) ? words : []).filter(
     (w) => Number.isFinite(w.start) && Number.isFinite(w.end)
   );
+
   const fmt = (t) => {
     if (!Number.isFinite(t) || t < 0) t = 0;
     const h = Math.floor(t / 3600);
@@ -251,57 +252,44 @@ function buildAssKaraoke(words, opts = {}) {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
   };
 
-  if (!safe.length) {
-    const empty = [
-      "[Script Info]","ScriptType: v4.00+",
-      "PlayResX: " + W,"PlayResY: " + H,"",
-      "[V4+ Styles]",
-      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-      `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H60000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
-      "",
-      "[Events]",
-      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    ].join("\n");
-    const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    fs.writeFileSync(p, empty, "utf8");
-    return p;
-  }
-
-  const start = Math.max(0, safe[0].start);
-  const end   = Math.max(start + 0.01, safe[safe.length - 1].end);
-
-  const startCs = Math.round(start * 100);
-  let prevCs = startCs;
-  const chunks = [];
-  for (const w of safe) {
-    const wStartCs = Math.max(prevCs, Math.round(w.start * 100));
-    const wEndCs   = Math.max(wStartCs + 1, Math.round(w.end * 100));
-    const durCs    = Math.max(1, wEndCs - wStartCs);
-    const wordTxt  = String(w.word || "").replace(/[{}]/g, "");
-    chunks.push(`{\\k${durCs}}${wordTxt}`);
-    prevCs = wEndCs;
-  }
-
-  const ass = [
+  // Header + style: bottom-center, white text, soft dark box behind each word
+  const header = [
     "[Script Info]",
     "ScriptType: v4.00+",
-    "PlayResX: " + W,
-    "PlayResY: " + H,
-    "WrapStyle: 2",
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    // BorderStyle=3 -> boxed background per line; Alignment=2 -> bottom center
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00111111,&H88000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-    `Dialogue: 0,${fmt(start)},${fmt(end)},${styleName},,0,0,${marginV},,${chunks.join(" ").trim()}`,
   ].join("\n");
 
+  // If we somehow have no timing data, emit an empty track
+  if (!safe.length) {
+    const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+    fs.writeFileSync(p, header + "\n", "utf8");
+    return p;
+  }
+
+  // One Dialogue per word (no {\k}); only the current word is on screen
+  const lines = [];
+  for (const w of safe) {
+    const start = Math.max(0, w.start - 0.02);
+    const end   = Math.max(start + 0.10, w.end + 0.02);
+    const txt   = String(w.word || "").replace(/[{}]/g, "").trim();
+    if (!txt) continue;
+    lines.push(`Dialogue: 0,${fmt(start)},${fmt(end)},${styleName},,0,0,${marginV},,${txt}`);
+  }
+
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(outPath, ass, "utf8");
+  fs.writeFileSync(outPath, header + "\n" + lines.join("\n"), "utf8");
   return outPath;
 }
+
 
 /** Escape a filesystem path for ffmpeg filter values */
 function escapeFilterPath(p) {
