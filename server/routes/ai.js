@@ -2362,25 +2362,25 @@ async function makeVideoVariant({
     const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-    // --- Word timings → FLOW tiles (no hard word cap), stretch if audio slowed
-    let words = await transcribeWords(voicePath);
-    if (ATEMPO !== 1.0) {
-      // stretch timings so subs stay aligned with slowed (or sped) audio
-      words = stretchWordTimings(words, ATEMPO); // function divides by factor internally
-    }
+    // --- Subtitles built from the ORIGINAL SCRIPT (no dropped words, keeps % and punctuation)
+let displayDur = voiceDur;                   // measured TTS length
+if (ATEMPO !== 1.0) displayDur = voiceDur / ATEMPO;
 
-    // Build width-aware, gapless ASS (no missing words)
-    const ass = buildAssFlow(words, {
-      W, H,
-      fontName: "DejaVu Sans",
-      fontSize: 46,
-      marginV: 68,
-      maxDur: 2.8,        // cap per tile for pace
-      minDur: 0.60,       // avoid blink
-      maxWidthRatio: 0.86, // keep one line, modern look
-      letterSpacing: 0.02
-    });
-    const escAss = escapeFilterPath(ass);
+// Turn the exact script into timed tokens and flex-chunk → ASS
+let words = wordsFromScript(script, displayDur);
+const tiles = chunkWordsFlexible(words, {
+  maxChars: 24,   // visual width limiter (adjust 22–28 if needed)
+  maxDur: 2.4,    // cap on-screen time per tile
+});
+
+const ass = buildAssFromChunks(tiles, {
+  W, H,
+  fontName: "DejaVu Sans",
+  fontSize: 46,
+  marginV: 68,
+});
+const escAss = escapeFilterPath(ass);
+
 
     // --- Audio graph (voice + optional bgm)
     const voiceIdx    = segs.length;
