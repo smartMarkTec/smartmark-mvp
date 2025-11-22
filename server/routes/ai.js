@@ -291,9 +291,10 @@ function buildAssFlow(words, opts = {}) {
   const {
     W = 960, H = 540,
     styleName = 'SmartSub',
-    fontName = 'DejaVu Sans',
-    fontSize = 46,
-    marginV = 68,
+ fontName = 'DejaVu Sans',
+fontSize = 42,     // slightly smaller
+marginV = 72,      // a hair lower from bottom edge
+
     // flow controls:
     maxDur = 2.8,      // hard cap per tile (s)
     minDur = 0.60,     // minimum on-screen time for any tile (s)
@@ -328,7 +329,7 @@ function buildAssFlow(words, opts = {}) {
       'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ' +
         'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, ' +
         'Alignment, MarginL, MarginR, MarginV, Encoding',
-      `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+      `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H88000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
       '',
       '[Events]',
       'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
@@ -2301,7 +2302,9 @@ async function makeVideoVariant({
   musicPath = '',
 }) {
   const W = 960, H = 540, FPS = 30;
-  const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
+// make this mutable so we can set it from the VO duration
+let OUTLEN = Math.max(15, Math.min(20, Number(targetSec || 18.5)));
+
   const tmpToDelete = [];
 
   try {
@@ -2313,6 +2316,13 @@ async function makeVideoVariant({
 
     // Optional slowdown for readability (e.g., TTS_SLOWDOWN=0.92)
     const ATEMPO = (Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0) ? TTS_SLOWDOWN : 1.0;
+
+    // Effective spoken length after slowdown/speedup
+const effVoice = voiceDur / ATEMPO;
+
+// Final video should outlast VO by ~2s (clamped to 15–20s range)
+OUTLEN = Math.max(15, Math.min(20, effVoice + 2));
+
 
     // --- Plan 3–4 segments (hard cuts only)
     const plan = buildVirtualPlan(clips || [], variant);
@@ -2376,9 +2386,10 @@ const tiles = chunkWordsFlexible(words, {
 const ass = buildAssFromChunks(tiles, {
   W, H,
   fontName: "DejaVu Sans",
-  fontSize: 46,
-  marginV: 68,
+  fontSize: 42,
+  marginV: 72,
 });
+
 const escAss = escapeFilterPath(ass);
 
 
@@ -2388,11 +2399,15 @@ const escAss = escapeFilterPath(ass);
     let musicArgs = [], musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
-    const audioMix =
-      musicIdx !== null
-        ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
-        : `${voiceFilt};[vo]anull[aout]`;
+   const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
+const audioMix =
+  musicIdx !== null
+    // stop BGM when VO ends (quiet tail handled by video duration)
+    ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
+    : `${voiceFilt};[vo]anull[aout]`;
+
+
+
 
     // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
     const subs = `[vcat]subtitles='${escAss}'[vsub]`;
@@ -2407,11 +2422,12 @@ const escAss = escapeFilterPath(ass);
         ...audioInputs,
         ...musicArgs,
         '-filter_complex', fc,
-        '-map', '[vsub]',
-        '-map', '[aout]',
-        '-t', OUTLEN.toFixed(2),
-        '-shortest',
-        '-c:v','libx264','-preset','veryfast','-crf','26',
+       '-map', '[vsub]',
+'-map', '[aout]',
+'-t', OUTLEN.toFixed(2),
+// no -shortest: we want the video to outlast audio by ~2s
+'-c:v','libx264','-preset','veryfast','-crf','26',
+
         '-pix_fmt','yuv420p','-r', String(FPS),
         '-c:a','aac','-b:a','128k',
         '-movflags','+faststart',
@@ -2508,9 +2524,10 @@ const tiles = chunkWordsFlexible(words, {
 const ass = buildAssFromChunks(tiles, {
   W, H,
   fontName: "DejaVu Sans",
-  fontSize: 46,
-  marginV: 68,
+  fontSize: 42,  // slightly smaller
+  marginV: 72,   // a hair lower from bottom
 });
+
 const escAss = escapeFilterPath(ass);
 
 // --- Audio graph (voice + optional bgm)
@@ -2522,8 +2539,10 @@ if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
 const audioMix =
   musicIdx !== null
-    ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
+    // mix but end when VO ends; gives ~2s silent tail in final mux
+    ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
     : `${voiceFilt};[vo]anull[aout]`;
+
 
 // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
 const subs = `[vcat]subtitles='${escAss}'[vsub]`;
@@ -2541,8 +2560,8 @@ await execFile(
     '-filter_complex', fc,
     '-map', '[vsub]',
     '-map', '[aout]',
-    '-t', OUTLEN.toFixed(2),
-    '-shortest',
+   '-t', OUTLEN.toFixed(2),
+// no -shortest: we want video to outlast audio by ~2s
     '-c:v','libx264','-preset','veryfast','-crf','26',
     '-pix_fmt','yuv420p','-r', String(FPS),
     '-c:a','aac','-b:a','128k',
