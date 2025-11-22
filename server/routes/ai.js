@@ -2416,9 +2416,10 @@ const audioMix =
     // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
   const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=42,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H33000000,BorderStyle=3,` +
+  `'Fontname=DejaVu Sans,Fontsize=36,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H22000000,BorderStyle=3,` +
   `Outline=3,Shadow=1,Bold=1,Alignment=2,MarginV=68'[vsub]`;
+
 
 
     const fc = [concatChain, subs, audioMix].join(';');
@@ -2555,7 +2556,12 @@ const audioMix =
 
 
 // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
-const subs = `[vcat]subtitles='${escAss}'[vsub]`;
+const subs =
+  `[vcat]subtitles='${escAss}':force_style=` +
+  `'Fontname=DejaVu Sans,Fontsize=36,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H22000000,BorderStyle=3,` +
+  `Outline=3,Shadow=1,Bold=1,Alignment=2,MarginV=68'[vsub]`;
+
 
 const fc = [concatChain, subs, audioMix].join(';');
 
