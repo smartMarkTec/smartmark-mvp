@@ -275,6 +275,184 @@ function buildAssChunks(words, opts = {}) {
   return outPath;
 }
 
+/** Estimate single-line text width in “em” terms (same 0.54 coef you use elsewhere) */
+function estWidthSerifAss(text, fs, letterSpacing = 0) {
+  const t = String(text || ''), n = t.length || 1;
+  return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing;
+}
+
+/**
+ * Build flowing, one-line ASS subtitles with width & duration limits.
+ * - No hard word cap; we pack words until width OR duration would overflow.
+ * - Zero gaps between tiles; short tiles are extended/merged to avoid flicker.
+ * - Always uses EVERY word in order (no drops).
+ */
+function buildAssFlow(words, opts = {}) {
+  const {
+    W = 960, H = 540,
+    styleName = 'SmartSub',
+    fontName = 'DejaVu Sans',
+    fontSize = 46,
+    marginV = 68,
+    // flow controls:
+    maxDur = 2.8,      // hard cap per tile (s)
+    minDur = 0.60,     // minimum on-screen time for any tile (s)
+    maxWidthRatio = 0.86, // tile text must fit within this fraction of W
+    letterSpacing = 0.02  // in “em” for width estimation only
+  } = opts || {};
+
+  const safe = (Array.isArray(words) ? words : [])
+    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start)
+    .map(w => ({ start: +w.start, end: +w.end, word: String(w.word || '').trim() }))
+    .filter(w => w.word);
+
+  // Time formatter for ASS
+  const fmt = (t) => {
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = Math.floor(t % 60);
+    const cs = Math.round((t - Math.floor(t)) * 100);
+    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+  };
+
+  if (!safe.length) {
+    const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+    const header = [
+      '[Script Info]',
+      'ScriptType: v4.00+',
+      `PlayResX: ${W}`,
+      `PlayResY: ${H}`,
+      '',
+      '[V4+ Styles]',
+      'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ' +
+        'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, ' +
+        'Alignment, MarginL, MarginR, MarginV, Encoding',
+      `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+      '',
+      '[Events]',
+      'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
+    ].join('\n');
+    fs.writeFileSync(p, header + '\n', 'utf8');
+    return p;
+  }
+
+  const maxTextW = W * maxWidthRatio;
+  const tiles = [];
+  let cur = [];
+  let curStart = safe[0].start;
+  let curEnd = safe[0].end;
+  let curText = '';
+
+  const flush = (force = false) => {
+    if (!cur.length) return;
+    // finalize current tile
+    tiles.push({
+      start: curStart,
+      end:   curEnd,
+      text:  curText.trim()
+    });
+    cur = [];
+  };
+
+  for (let i = 0; i < safe.length; i++) {
+    const w = safe[i];
+
+    // propose adding word
+    const nextText = (curText ? (curText + ' ' + w.word) : w.word);
+    const nextEnd  = w.end;
+    const durIfAdd = nextEnd - curStart;
+    const widthIfAdd = estWidthSerifAss(nextText, fontSize, letterSpacing);
+
+    const wouldOverflowDur   = durIfAdd > maxDur;
+    const wouldOverflowWidth = widthIfAdd > maxTextW;
+
+    if (!cur.length) {
+      // start a fresh tile with current word even if it alone is wide; we still keep it (rare)
+      cur.push(w);
+      curText = w.word;
+      curStart = w.start;
+      curEnd = w.end;
+      continue;
+    }
+
+    if (wouldOverflowDur || wouldOverflowWidth) {
+      // flush the previous tile, start new from this word
+      flush(true);
+      cur.push(w);
+      curText = w.word;
+      curStart = w.start;
+      curEnd = w.end;
+    } else {
+      // safe to add
+      cur.push(w);
+      curText = nextText;
+      curEnd  = nextEnd;
+    }
+  }
+  flush(true);
+
+  // Normalize timings: zero gaps, enforce minDur, merge ultra-short tiles
+  for (let i = 0; i < tiles.length - 1; i++) {
+    const a = tiles[i], b = tiles[i + 1];
+    // remove gaps
+    if (b.start > a.end) a.end = Math.max(a.end, b.start - 0.01);
+  }
+
+  // Enforce minDur; if we can’t extend (because of next tile), merge forward
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i];
+    let dur = t.end - t.start;
+    if (dur + 1e-6 < minDur) {
+      // try extend into next tile boundary
+      const next = tiles[i + 1];
+      if (next) {
+        const canExtendTo = Math.max(t.end, next.start - 0.02);
+        if (canExtendTo - t.start >= minDur) {
+          t.end = canExtendTo;
+        } else {
+          // merge into next
+          next.start = t.start;
+          next.text = (t.text + ' ' + next.text).replace(/\s+/g, ' ').trim();
+          tiles.splice(i, 1);
+          i -= 1;
+        }
+      }
+    }
+  }
+
+  // ASS header + style (boxed, bottom-center)
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
+    'WrapStyle: 2',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ' +
+      'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, ' +
+      'Alignment, MarginL, MarginR, MarginV, Encoding',
+    // Primary=white, Outline=black, BackColour=semi-black, BorderStyle=3 (boxed), Alignment=2 (bottom-center)
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
+  ];
+
+  const lines = tiles.map(t => {
+    const txt = String(t.text || '').replace(/[{}]/g, ''); // strip braces
+    // bottom-center, slight tracking
+    const assText = `{\\an2\\q2\\fsp2}${txt}`;
+    return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
+  });
+
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
+  return outPath;
+}
+
+
 
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
 /** Returns [{start:number, end:number, word:string}, ...] */
@@ -1996,7 +2174,7 @@ function buildVirtualPlan(rawClips, variant = 0) {
   return out;
 }
 
-/** Compose stitched video with VO, optional bgm, ASS subs (word-synced) */
+/** Compose stitched video with VO, optional bgm, ASS subs (flow, width-aware) */
 async function makeVideoVariant({
   clips,
   script,
@@ -2007,7 +2185,6 @@ async function makeVideoVariant({
 }) {
   const W = 960, H = 540, FPS = 30;
   const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
-
   const tmpToDelete = [];
 
   try {
@@ -2017,9 +2194,8 @@ async function makeVideoVariant({
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-   // Slow voice slightly if TTS_SLOWDOWN < 1 (e.g., 0.92 = ~8% slower)
-const ATEMPO = (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) ? TTS_SLOWDOWN : 1.0;
-
+    // Optional slowdown for readability (e.g., TTS_SLOWDOWN=0.92)
+    const ATEMPO = (Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0) ? TTS_SLOWDOWN : 1.0;
 
     // --- Plan 3–4 segments (hard cuts only)
     const plan = buildVirtualPlan(clips || [], variant);
@@ -2069,29 +2245,29 @@ const ATEMPO = (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) ? TTS_SLOWDOWN : 1.0;
     const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-  // --- Word timings → 4–6 word tiles; stretch if audio slowed
-let words = await transcribeWords(voicePath);
-// If we slowed audio to 0.92x, we must stretch subtitle times by (1/0.92).
-if (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) {
-  words = stretchWordTimings(words, TTS_SLOWDOWN); // function divides by factor → expands timeline
-}
+    // --- Word timings → FLOW tiles (no hard word cap), stretch if audio slowed
+    let words = await transcribeWords(voicePath);
+    if (ATEMPO !== 1.0) {
+      // stretch timings so subs stay aligned with slowed (or sped) audio
+      words = stretchWordTimings(words, ATEMPO); // function divides by factor internally
+    }
 
-const ass = buildAssChunks(words, {
-  W, H,
-  fontName: "DejaVu Sans",
-  fontSize: 46,
-  marginV: 68,
-  minWords: 4,
-  maxWords: 6,
-  maxDur: 3.0  // allow up to ~3s so tiles don’t blink or skip words
-});
-
-
+    // Build width-aware, gapless ASS (no missing words)
+    const ass = buildAssFlow(words, {
+      W, H,
+      fontName: "DejaVu Sans",
+      fontSize: 46,
+      marginV: 68,
+      maxDur: 2.8,        // cap per tile for pace
+      minDur: 0.60,       // avoid blink
+      maxWidthRatio: 0.86, // keep one line, modern look
+      letterSpacing: 0.02
+    });
     const escAss = escapeFilterPath(ass);
 
-    // --- Audio graph (voice + optional bgm), keep atempo=1 for sync
-    const voiceIdx   = segs.length;
-    const audioInputs= ['-i', voicePath];
+    // --- Audio graph (voice + optional bgm)
+    const voiceIdx    = segs.length;
+    const audioInputs = ['-i', voicePath];
     let musicArgs = [], musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
@@ -2103,7 +2279,6 @@ const ass = buildAssChunks(words, {
 
     // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
     const subs = `[vcat]subtitles='${escAss}'[vsub]`;
-
     const fc = [concatChain, subs, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
