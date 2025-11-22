@@ -118,6 +118,9 @@ const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 const BACKGROUND_MUSIC_URL = process.env.BACKGROUND_MUSIC_URL || ''; // optional
 const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
 const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
+// Slow the voice slightly for readability (0.85–1.00). 0.92 ≈ 8% slower.
+const TTS_SLOWDOWN = Number(process.env.TTS_SLOWDOWN || 0.92);
+
 
 /* ---------------------- FFmpeg + subtitle helpers ---------------------- */
 
@@ -168,7 +171,8 @@ async function getMediaDurationSeconds(filePath) {
 }
 
 /** Group word timings into 3–4 word chunks that stay tight to the VO */
-function chunkWords(words = [], { minWords = 3, maxWords = 4, maxDur = 2.2 } = {}) {
+/** Group word timings into 4–6 word chunks, no gaps, tight to VO */
+function chunkWords(words = [], { minWords = 4, maxWords = 6, maxDur = 3.0 } = {}) {
   const safe = (Array.isArray(words) ? words : [])
     .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && (w.end > w.start))
     .map(w => ({ start: +w.start, end: +w.end, word: String(w.word || '').trim() }))
@@ -176,44 +180,45 @@ function chunkWords(words = [], { minWords = 3, maxWords = 4, maxDur = 2.2 } = {
 
   const chunks = [];
   let cur = [];
+
   for (let i = 0; i < safe.length; i++) {
     cur.push(safe[i]);
 
-    // decide if we should close the chunk
     const have = cur.length;
     const dur  = cur[cur.length - 1].end - cur[0].start;
-    const nextWouldBe = safe[i + 1]
-      ? (safe[i + 1].end - cur[0].start)
-      : 0;
+    const next = safe[i + 1];
+    const nextWouldDur = next ? (next.end - cur[0].start) : 0;
 
-    const tooManyWords   = have >= maxWords;
-    const tooLongNow     = dur >= maxDur;
-    const wouldBeTooLong = nextWouldBe > maxDur;
-    const endReached     = i === safe.length - 1;
+    const tooMany   = have >= maxWords;
+    const tooLong   = dur >= maxDur;
+    const wouldLong = next ? (nextWouldDur > maxDur) : false;
+    const lastWord  = i === safe.length - 1;
 
-    if (tooManyWords || tooLongNow || wouldBeTooLong || (endReached && have >= minWords)) {
-      // if we closed too early (< minWords), try to pull one more if it exists
-      if (have < minWords && safe[i + 1]) {
-        cur.push(safe[++i]);
-      }
+    if (tooMany || tooLong || wouldLong || (lastWord && have >= minWords)) {
+      // ensure minimum count
+      if (have < minWords && next) { cur.push(next); i++; }
       const text = cur.map(w => w.word).join(' ');
-      chunks.push({
-        start: cur[0].start,
-        end:   Math.max(cur[cur.length - 1].end, cur[0].start + 0.01),
-        text,
-      });
+      chunks.push({ start: cur[0].start, end: cur[cur.length - 1].end, text });
       cur = [];
     }
   }
+
+  // merge any leftover words (rare)
   if (cur.length) {
-    chunks.push({
-      start: cur[0].start,
-      end:   Math.max(cur[cur.length - 1].end, cur[0].start + 0.01),
-      text:  cur.map(w => w.word).join(' '),
-    });
+    const text = cur.map(w => w.word).join(' ');
+    chunks.push({ start: cur[0].start, end: cur[cur.length - 1].end, text });
+  }
+
+  // make all chunks back-to-back with tiny overlap so there are ZERO gaps
+  for (let i = 0; i < chunks.length - 1; i++) {
+    const a = chunks[i], b = chunks[i + 1];
+    if (b.start > a.end) a.end = Math.max(a.end, b.start - 0.01);
+    // also clamp b.start so it never precedes a.start
+    if (b.start < a.start) b.start = a.start + 0.01;
   }
   return chunks;
 }
+
 
 /** Build boxed, bottom-center ASS from 3–4 word chunks */
 function buildAssChunks(words, opts = {}) {
@@ -262,7 +267,7 @@ function buildAssChunks(words, opts = {}) {
     const txt = String(t.text).replace(/[{}]/g, '');
     // slight tracking for a clean look; keep it single line centered
     const assText = `{\\an2\\q2\\fsp2}${txt}`;
-    return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
+    return `Dialogue: 0,${fmt(Math.max(0, t.start - 0.02))},${fmt(t.end + 0.06)},${styleName},,0,0,${marginV},,${assText}`;
   });
 
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
@@ -399,6 +404,17 @@ function buildAssKaraoke(words, opts = {}) {
 function escapeFilterPath(p) {
   return String(p).replace(/\\/g, "\\\\").replace(/:/g, "\\:");
 }
+
+/** Multiply all word start/end times by a factor (e.g., 1/0.92 when audio slowed to 0.92x). */
+function stretchWordTimings(words = [], factor = 1.0) {
+  if (!Array.isArray(words) || !Number.isFinite(factor) || factor <= 0) return words || [];
+  return words.map(w => ({
+    start: Math.max(0, (w.start ?? 0) / factor),
+    end:   Math.max(0.01, (w.end   ?? 0.01) / factor),
+    word:  String(w.word || ''),
+  }));
+}
+
 
 
 /**
@@ -2001,8 +2017,9 @@ async function makeVideoVariant({
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-    // Keep original VO pace for perfect alignment
-    const ATEMPO = 1.0;
+   // Slow voice slightly if TTS_SLOWDOWN < 1 (e.g., 0.92 = ~8% slower)
+const ATEMPO = (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) ? TTS_SLOWDOWN : 1.0;
+
 
     // --- Plan 3–4 segments (hard cuts only)
     const plan = buildVirtualPlan(clips || [], variant);
@@ -2052,18 +2069,23 @@ async function makeVideoVariant({
     const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-    // --- Word timings → ASS karaoke
-    const words  = await transcribeWords(voicePath);
-    // 3–4-word tiles, tightly synced to VO
+  // --- Word timings → 4–6 word tiles; stretch if audio slowed
+let words = await transcribeWords(voicePath);
+// If we slowed audio to 0.92x, we must stretch subtitle times by (1/0.92).
+if (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) {
+  words = stretchWordTimings(words, TTS_SLOWDOWN); // function divides by factor → expands timeline
+}
+
 const ass = buildAssChunks(words, {
   W, H,
   fontName: "DejaVu Sans",
   fontSize: 46,
   marginV: 68,
-  minWords: 3,
-  maxWords: 4,
-  maxDur: 2.0   // cap a tile to ~2s so it feels punchy
+  minWords: 4,
+  maxWords: 6,
+  maxDur: 3.0  // allow up to ~3s so tiles don’t blink or skip words
 });
+
 
     const escAss = escapeFilterPath(ass);
 
@@ -2135,7 +2157,8 @@ async function makeSlideshowVariantFromPhotos({
     tmpToDelete.push(voicePath);
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-    const ATEMPO = 1.0; // keep exact pace
+    const ATEMPO = (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) ? TTS_SLOWDOWN : 1.0;
+
 
     const need = Math.max(3, Math.min(4, photos.length || 3));
     const chosen = [];
@@ -2176,17 +2199,22 @@ async function makeSlideshowVariantFromPhotos({
     const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-    // Word timestamps → ASS karaoke
-    const words  = await transcribeWords(voicePath);
-    const ass = buildAssChunks(words, {
+   // Word timestamps → 4–6 word tiles; stretch if audio slowed
+let words = await transcribeWords(voicePath);
+if (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) {
+  words = stretchWordTimings(words, TTS_SLOWDOWN);
+}
+
+const ass = buildAssChunks(words, {
   W, H,
   fontName: "DejaVu Sans",
   fontSize: 46,
   marginV: 68,
-  minWords: 3,
-  maxWords: 4,
-  maxDur: 2.0
+  minWords: 4,
+  maxWords: 6,
+  maxDur: 3.0
 });
+
 
     const escAss = escapeFilterPath(ass);
 
