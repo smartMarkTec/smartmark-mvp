@@ -2154,7 +2154,7 @@ async function ffprobeDuration(filePath = '') {
   }
 }
 
-/** Build burger-style timed drawtext subtitles (chunked sentences) — safe, clamped, no outline. */
+/** Build burger-style timed drawtext subtitles (chunked sentences) — smaller font + slightly translucent box */
 function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 960, H = 540) {
   const clean = String(script || '').replace(/\s+/g, ' ').trim();
   if (!clean) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
@@ -2186,7 +2186,7 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
     const end   = Math.min(total, (i + 1) * chunk + 0.25).toFixed(2);
     const outL  = i === sentences.length - 1 ? '[vsub]' : `[v${i+100}]`;
 
-    // NOTE: escape commas in expressions with \,
+    // escape commas in expressions with \,
     const xExpr = `max(${pad}\\, min((w-text_w)/2\\, w-${pad}-text_w))`;
     const yExpr = `min(h-${floorY}\\, h-text_h-36)`;
 
@@ -2195,13 +2195,12 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
       `text='${line}'` +
       `${fontfileArg}` +
       `:fontcolor=white` +
-      `:fontsize=38` +
-`:line_spacing=6` +
-`:borderw=0` +
-`:box=1` +
-`:boxcolor=black@0.82` +
-`:boxborderw=14` +
-
+      `:fontsize=34` +                 // ↓ smaller font (was 38)
+      `:line_spacing=6` +
+      `:borderw=0` +
+      `:box=1` +
+      `:boxcolor=black@0.70` +         // ↓ almost solid, slightly see-through (was 0.82)
+      `:boxborderw=12` +               // a touch lighter frame (was 14)
       `:x=${xExpr}` +
       `:y=${yExpr}` +
       `:shadowcolor=black@0.9` +
@@ -2216,6 +2215,7 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
   if (!parts.length) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
   return { filter: parts.join(';'), out: '[vsub]' };
 }
+
 
 
 
