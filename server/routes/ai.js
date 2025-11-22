@@ -1605,13 +1605,11 @@ async function ffprobeDuration(filePath = '') {
   }
 }
 
-/** Timed drawtext subtitles (no highlight box, safe margins, in-frame) */
 /** Build burger-style timed drawtext subtitles (chunked sentences) — safe, clamped, no outline. */
 function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 960, H = 540) {
   const clean = String(script || '').replace(/\s+/g, ' ').trim();
   if (!clean) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
 
-  // Split into up to 6 short sentences
   const sentences = clean
     .split(/(?<=[.!?])\s+/)
     .map(s => s.trim())
@@ -1622,26 +1620,27 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
   const total = Math.max(6, Math.min(40, totalSec));
   const chunk = total / count;
 
-  const fontfile = pickFontFile(); // may be empty string; that’s fine
+  const fontfile = pickFontFile();
   const fontfileArg = fontfile ? `:fontfile=${fontfile.replace(/:/g, '\\:')}` : '';
 
-  // Keep subs inside a safe frame area (no leaking)
-  const pad = 28;                          // side padding
-  const floorY = Math.max(90, Math.round(H * 0.18)); // keep away from bottom edge
+  const pad = 28;
+  const floorY = Math.max(90, Math.round(H * 0.18));
 
   let inL = inLabel;
   const parts = [];
 
   for (let i = 0; i < sentences.length; i++) {
-    // strip characters that break ffmpeg arg parsing
     const line = sentences[i].replace(/['\\:]/g, '').trim();
     if (!line) continue;
 
     const start = (i * chunk).toFixed(2);
     const end   = Math.min(total, (i + 1) * chunk + 0.25).toFixed(2);
-    const outL  = i === sentences.length - 1 ? '[vsub]' : `[v${i+100}]`; // avoid label clashes
+    const outL  = i === sentences.length - 1 ? '[vsub]' : `[v${i+100}]`;
 
-    // Centered, boxed, no border highlight; keep box margins away from edges
+    // NOTE: escape commas in expressions with \,
+    const xExpr = `max(${pad}\\, min((w-text_w)/2\\, w-${pad}-text_w))`;
+    const yExpr = `min(h-${floorY}\\, h-text_h-36)`;
+
     parts.push(
       `${inL}drawtext=` +
       `text='${line}'` +
@@ -1653,8 +1652,8 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
       `:box=1` +
       `:boxcolor=black@0.55` +
       `:boxborderw=14` +
-      `:x=max(${pad}, min((w-text_w)/2, w-${pad}-text_w))` +
-      `:y=min(h-${floorY}, h-text_h-36)` +
+      `:x=${xExpr}` +
+      `:y=${yExpr}` +
       `:shadowcolor=black@0.9` +
       `:shadowx=0` +
       `:shadowy=0` +
@@ -1667,6 +1666,7 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
   if (!parts.length) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
   return { filter: parts.join(';'), out: '[vsub]' };
 }
+
 
 
 /* ================= end helpers ================= */
