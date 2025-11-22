@@ -167,6 +167,110 @@ async function getMediaDurationSeconds(filePath) {
   }
 }
 
+/** Group word timings into 3–4 word chunks that stay tight to the VO */
+function chunkWords(words = [], { minWords = 3, maxWords = 4, maxDur = 2.2 } = {}) {
+  const safe = (Array.isArray(words) ? words : [])
+    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && (w.end > w.start))
+    .map(w => ({ start: +w.start, end: +w.end, word: String(w.word || '').trim() }))
+    .filter(w => w.word);
+
+  const chunks = [];
+  let cur = [];
+  for (let i = 0; i < safe.length; i++) {
+    cur.push(safe[i]);
+
+    // decide if we should close the chunk
+    const have = cur.length;
+    const dur  = cur[cur.length - 1].end - cur[0].start;
+    const nextWouldBe = safe[i + 1]
+      ? (safe[i + 1].end - cur[0].start)
+      : 0;
+
+    const tooManyWords   = have >= maxWords;
+    const tooLongNow     = dur >= maxDur;
+    const wouldBeTooLong = nextWouldBe > maxDur;
+    const endReached     = i === safe.length - 1;
+
+    if (tooManyWords || tooLongNow || wouldBeTooLong || (endReached && have >= minWords)) {
+      // if we closed too early (< minWords), try to pull one more if it exists
+      if (have < minWords && safe[i + 1]) {
+        cur.push(safe[++i]);
+      }
+      const text = cur.map(w => w.word).join(' ');
+      chunks.push({
+        start: cur[0].start,
+        end:   Math.max(cur[cur.length - 1].end, cur[0].start + 0.01),
+        text,
+      });
+      cur = [];
+    }
+  }
+  if (cur.length) {
+    chunks.push({
+      start: cur[0].start,
+      end:   Math.max(cur[cur.length - 1].end, cur[0].start + 0.01),
+      text:  cur.map(w => w.word).join(' '),
+    });
+  }
+  return chunks;
+}
+
+/** Build boxed, bottom-center ASS from 3–4 word chunks */
+function buildAssChunks(words, opts = {}) {
+  const {
+    W = 960,
+    H = 540,
+    styleName = 'SmartSub',
+    fontName = 'DejaVu Sans',
+    fontSize = 46,
+    marginV = 68,
+    minWords = 3,
+    maxWords = 4,
+    maxDur = 2.2,       // seconds cap per tile
+  } = opts;
+
+  const fmt = (t) => {
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = Math.floor(t % 60);
+    const cs = Math.round((t - Math.floor(t)) * 100);
+    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
+  };
+
+  const tiles = chunkWords(words, { minWords, maxWords, maxDur });
+
+  // ASS boxed style (opaque background; outline=2; shadow=0), bottom-center
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
+    'WrapStyle: 2',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    // Primary=white, Outline=black, BackColour=semi-black, BorderStyle=3 (box), Alignment=2 (bottom-center)
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+
+  const lines = tiles.map(t => {
+    // strip braces that break ASS
+    const txt = String(t.text).replace(/[{}]/g, '');
+    // slight tracking for a clean look; keep it single line centered
+    const assText = `{\\an2\\q2\\fsp2}${txt}`;
+    return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
+  });
+
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
+  return outPath;
+}
+
+
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
 /** Returns [{start:number, end:number, word:string}, ...] */
 async function transcribeWords(voicePath) {
@@ -1950,7 +2054,17 @@ async function makeVideoVariant({
 
     // --- Word timings → ASS karaoke
     const words  = await transcribeWords(voicePath);
-    const ass    = buildAssKaraoke(words, { W, H, fontName: "DejaVu Sans", fontSize: 42, marginV: 64 });
+    // 3–4-word tiles, tightly synced to VO
+const ass = buildAssChunks(words, {
+  W, H,
+  fontName: "DejaVu Sans",
+  fontSize: 46,
+  marginV: 68,
+  minWords: 3,
+  maxWords: 4,
+  maxDur: 2.0   // cap a tile to ~2s so it feels punchy
+});
+
     const escAss = escapeFilterPath(ass);
 
     // --- Audio graph (voice + optional bgm), keep atempo=1 for sync
@@ -2064,7 +2178,16 @@ async function makeSlideshowVariantFromPhotos({
 
     // Word timestamps → ASS karaoke
     const words  = await transcribeWords(voicePath);
-    const ass    = buildAssKaraoke(words, { W, H, fontName: "DejaVu Sans", fontSize: 42, marginV: 64 });
+    const ass = buildAssChunks(words, {
+  W, H,
+  fontName: "DejaVu Sans",
+  fontSize: 46,
+  marginV: 68,
+  minWords: 3,
+  maxWords: 4,
+  maxDur: 2.0
+});
+
     const escAss = escapeFilterPath(ass);
 
     const voiceIdx   = segs.length;
