@@ -453,6 +453,123 @@ function buildAssFlow(words, opts = {}) {
 }
 
 
+function wordsFromScript(script = '', totalSec = 14.0) {
+  const clean = String(script || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return [];
+  // Tokenize but KEEP punctuation tokens; merge % onto the number before it.
+  const raw = clean.match(/[\w’'-]+|[%.,!?;:]/g) || [];
+  // Merge "%" to previous token (e.g., "20" + "%" -> "20%")
+  const tokens = [];
+  for (const t of raw) {
+    if (t === '%' && tokens.length) tokens[tokens.length - 1] = tokens[tokens.length - 1] + '%';
+    else tokens.push(t);
+  }
+  // Distribute timings evenly across tokens (TTS pace is close enough for display)
+  const n = Math.max(1, tokens.length);
+  const step = totalSec / n;
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const s = Math.max(0, i * step);
+    const e = Math.max(s + Math.min(step * 0.9, 0.6), (i + 1) * step); // keep overlap minimal
+    out.push({ start: s, end: e, word: tokens[i] });
+  }
+  return out;
+}
+
+/** Flexible chunker: fills tiles up to maxChars or maxDur, never drops words */
+function chunkWordsFlexible(words = [], {
+  maxChars = 24,   // visual width limiter
+  maxDur   = 2.4,  // cap each tile’s on-screen time
+} = {}) {
+  const safe = (Array.isArray(words) ? words : [])
+    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start && String(w.word || '').trim());
+
+  const chunks = [];
+  let cur = [];
+  let curChars = 0;
+  let curStart = null;
+
+  const pushChunk = () => {
+    if (!cur.length) return;
+    const text = cur.map(w => w.word).join(' ').replace(/\s+([.,!?;:])/g, '$1');
+    const start = curStart;
+    const end = cur[cur.length - 1].end;
+    chunks.push({ start, end, text });
+    cur = [];
+    curChars = 0;
+    curStart = null;
+  };
+
+  for (let i = 0; i < safe.length; i++) {
+    const w = safe[i];
+    const nextDur = (curStart === null ? (w.end - w.start) : (w.end - curStart));
+    const nextChars = (curChars + (curChars ? 1 : 0) + w.word.length); // +1 for space
+
+    // If adding this word would overflow visual/duration constraints, close current tile first
+    if (cur.length && (nextChars > maxChars || nextDur > maxDur)) pushChunk();
+
+    // Start new tile if empty
+    if (!cur.length) { curStart = w.start; }
+
+    cur.push(w);
+    curChars = (curChars ? curChars + 1 : 0) + w.word.length; // +1 space
+  }
+
+  if (cur.length) pushChunk();
+
+  // Make all chunks back-to-back with a tiny overlap so there are zero gaps
+  for (let i = 0; i < chunks.length - 1; i++) {
+    const a = chunks[i], b = chunks[i + 1];
+    if (b.start > a.end) a.end = Math.max(a.end, b.start - 0.01);
+    if (b.start < a.start) b.start = a.start + 0.01;
+  }
+  return chunks;
+}
+
+/** Build boxed bottom-center ASS from chunks (keeps punctuation & symbols) */
+function buildAssFromChunks(chunks, {
+  W = 960, H = 540,
+  styleName = 'SmartSub',
+  fontName = 'DejaVu Sans',
+  fontSize = 46,
+  marginV = 68,
+} = {}) {
+  const fmt = (t) => {
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = Math.floor(t % 60);
+    const cs = Math.round((t - Math.floor(t)) * 100);
+    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
+  };
+
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
+    'WrapStyle: 2',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+
+  const lines = chunks.map(t => {
+    const txt = String(t.text || '').replace(/[{}]/g, ''); // only strip braces (ASS control)
+    const assText = `{\\an2\\q2\\fsp2}${txt}`;
+    return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
+  });
+
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
+  return outPath;
+}
+
+
 
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
 /** Returns [{start:number, end:number, word:string}, ...] */
@@ -2374,68 +2491,77 @@ async function makeSlideshowVariantFromPhotos({
     const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-   // Word timestamps → 4–6 word tiles; stretch if audio slowed
-let words = await transcribeWords(voicePath);
+// --- Subtitles built from the ORIGINAL SCRIPT (no dropped words, keeps % and punctuation)
+let displayDur = voiceDur;                   // base on actual VO length
 if (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) {
-  words = stretchWordTimings(words, TTS_SLOWDOWN);
+  // atempo slows playback, so timeline duration increases
+  displayDur = voiceDur / TTS_SLOWDOWN;
 }
 
-const ass = buildAssChunks(words, {
+// Build exact word list from the script, then flex-chunk → ASS
+let words = wordsFromScript(script, displayDur);
+const tiles = chunkWordsFlexible(words, {
+  maxChars: 24,   // visual width limiter (tweak 22–28 if you want)
+  maxDur: 2.4,    // max on-screen time per tile
+});
+
+const ass = buildAssFromChunks(tiles, {
   W, H,
   fontName: "DejaVu Sans",
   fontSize: 46,
   marginV: 68,
-  minWords: 4,
-  maxWords: 6,
-  maxDur: 3.0
 });
+const escAss = escapeFilterPath(ass);
 
+// --- Audio graph (voice + optional bgm)
+const voiceIdx    = segs.length;
+const audioInputs = ['-i', voicePath];
+let musicArgs = [], musicIdx = null;
+if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
-    const escAss = escapeFilterPath(ass);
+const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
+const audioMix =
+  musicIdx !== null
+    ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
+    : `${voiceFilt};[vo]anull[aout]`;
 
-    const voiceIdx   = segs.length;
-    const audioInputs= ['-i', voicePath];
-    let musicArgs = [], musicIdx = null;
-    if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
+// --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
+const subs = `[vcat]subtitles='${escAss}'[vsub]`;
 
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
-    const audioMix =
-      musicIdx !== null
-        ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
-        : `${voiceFilt};[vo]anull[aout]`;
+const fc = [concatChain, subs, audioMix].join(';');
 
-    const subs = `[vcat]subtitles='${escAss}'[vsub]`;
-    const fc = [concatChain, subs, audioMix].join(';');
+const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+await execFile(
+  'ffmpeg',
+  [
+    '-y','-nostdin','-loglevel','error',
+    ...vParts,
+    ...audioInputs,
+    ...musicArgs,
+    '-filter_complex', fc,
+    '-map', '[vsub]',
+    '-map', '[aout]',
+    '-t', OUTLEN.toFixed(2),
+    '-shortest',
+    '-c:v','libx264','-preset','veryfast','-crf','26',
+    '-pix_fmt','yuv420p','-r', String(FPS),
+    '-c:a','aac','-b:a','128k',
+    '-movflags','+faststart',
+    outPath
+  ],
+  {},
+  180000
+);
 
-    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
-    await execFile(
-      'ffmpeg',
-      [
-        '-y','-nostdin','-loglevel','error',
-        ...vParts,
-        ...audioInputs,
-        ...musicArgs,
-        '-filter_complex', fc,
-        '-map', '[vsub]',
-        '-map', '[aout]',
-        '-t', OUTLEN.toFixed(2),
-        '-shortest',
-        '-c:v','libx264','-preset','veryfast','-crf','26',
-        '-pix_fmt','yuv420p','-r', String(FPS),
-        '-c:a','aac','-b:a','128k',
-        '-movflags','+faststart',
-        outPath
-      ],
-      {},
-      180000
-    );
+ // success cleanup
+cleanupMany([...segs, voicePath, ass]);
+return { outPath, duration: OUTLEN };
+} catch (e) {
+  // best-effort cleanup on failure too
+  cleanupMany([...segs, voicePath, ass, ...tmpToDelete].filter(Boolean));
+  throw e; // important so the caller/Express sees the failure
+}
 
-    cleanupMany([...segs, voicePath, ...chosen, ass]);
-    return { outPath, duration: OUTLEN };
-  } catch (e) {
-    cleanupMany(tmpToDelete);
-    throw e;
-  }
 }
 
 
