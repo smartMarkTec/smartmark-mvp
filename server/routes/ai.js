@@ -167,6 +167,148 @@ async function getMediaDurationSeconds(filePath) {
   }
 }
 
+/* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
+/** Returns [{start:number, end:number, word:string}, ...] */
+async function transcribeWords(voicePath) {
+  try {
+    const model =
+      process.env.OPENAI_TRANSCRIBE_MODEL ||
+      "whisper-1";
+
+    // Prefer verbose JSON with words/segments if available
+    const resp = await openai.audio.transcriptions.create({
+      model,
+      file: fs.createReadStream(voicePath),
+      response_format: "verbose_json",
+      timestamp_granularities: ["word"],
+      temperature: 0.0,
+    });
+
+    const data = resp;
+
+    // 1) Use explicit word timings if present
+    if (Array.isArray(data?.words) && data.words.length) {
+      return data.words
+        .filter((w) => Number.isFinite(w?.start) && Number.isFinite(w?.end) && w?.word)
+        .map((w) => ({ start: +w.start, end: +w.end, word: String(w.word).trim() }))
+        .filter((w) => w.end > w.start);
+    }
+
+    // 2) Interpolate inside segments
+    const out = [];
+    const segs = Array.isArray(data?.segments) ? data.segments : [];
+    for (const s of segs) {
+      const text = String(s?.text || "").trim();
+      const st = +s?.start, et = +s?.end;
+      if (!text || !isFinite(st) || !isFinite(et) || et <= st) continue;
+      const words = text.replace(/\s+/g, " ").split(" ").filter(Boolean);
+      if (!words.length) continue;
+      const per = (et - st) / words.length;
+      for (let i = 0; i < words.length; i++) {
+        const ws = st + i * per;
+        const we = i === words.length - 1 ? et : st + (i + 1) * per;
+        out.push({ start: ws, end: we, word: words[i] });
+      }
+    }
+    if (out.length) return out;
+
+    // 3) Last resort: equal split across full duration
+    const whole = (data?.text || "").trim();
+    if (whole) {
+      const words = whole.replace(/\s+/g, " ").split(" ").filter(Boolean);
+      const dur = (await ffprobeDuration(voicePath)) || 14.0;
+      const per = dur / Math.max(1, words.length);
+      return words.map((w, i) => ({ start: i * per, end: (i + 1) * per, word: w }));
+    }
+  } catch (e) {
+    console.warn("[transcribeWords] failed:", e?.message || e);
+  }
+  const dur = (await ffprobeDuration(voicePath)) || 14.0;
+  return [{ start: 0, end: dur, word: "" }];
+}
+
+/* ---------- Build ASS karaoke (boxed, clean aesthetic) from word timings ---------- */
+/** Writes a .ass file and returns its absolute path */
+function buildAssKaraoke(words, opts = {}) {
+  const {
+    W = 960,
+    H = 540,
+    styleName = "SmartSub",
+    fontName = "DejaVu Sans",
+    fontSize = 42,
+    marginV = 64,
+  } = opts || {};
+
+  const safe = (Array.isArray(words) ? words : []).filter(
+    (w) => Number.isFinite(w.start) && Number.isFinite(w.end)
+  );
+  const fmt = (t) => {
+    if (!Number.isFinite(t) || t < 0) t = 0;
+    const h = Math.floor(t / 3600);
+    const m = Math.floor((t % 3600) / 60);
+    const s = Math.floor(t % 60);
+    const cs = Math.round((t - Math.floor(t)) * 100);
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
+  };
+
+  if (!safe.length) {
+    const empty = [
+      "[Script Info]","ScriptType: v4.00+",
+      "PlayResX: " + W,"PlayResY: " + H,"",
+      "[V4+ Styles]",
+      "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+      `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H60000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+      "",
+      "[Events]",
+      "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ].join("\n");
+    const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+    fs.writeFileSync(p, empty, "utf8");
+    return p;
+  }
+
+  const start = Math.max(0, safe[0].start);
+  const end   = Math.max(start + 0.01, safe[safe.length - 1].end);
+
+  const startCs = Math.round(start * 100);
+  let prevCs = startCs;
+  const chunks = [];
+  for (const w of safe) {
+    const wStartCs = Math.max(prevCs, Math.round(w.start * 100));
+    const wEndCs   = Math.max(wStartCs + 1, Math.round(w.end * 100));
+    const durCs    = Math.max(1, wEndCs - wStartCs);
+    const wordTxt  = String(w.word || "").replace(/[{}]/g, "");
+    chunks.push(`{\\k${durCs}}${wordTxt}`);
+    prevCs = wEndCs;
+  }
+
+  const ass = [
+    "[Script Info]",
+    "ScriptType: v4.00+",
+    "PlayResX: " + W,
+    "PlayResY: " + H,
+    "WrapStyle: 2",
+    "",
+    "[V4+ Styles]",
+    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    "",
+    "[Events]",
+    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    `Dialogue: 0,${fmt(start)},${fmt(end)},${styleName},,0,0,${marginV},,${chunks.join(" ").trim()}`,
+  ].join("\n");
+
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  fs.writeFileSync(outPath, ass, "utf8");
+  return outPath;
+}
+
+/** Escape a filesystem path for ffmpeg filter values */
+function escapeFilterPath(p) {
+  return String(p).replace(/\\/g, "\\\\").replace(/:/g, "\\:");
+}
+
+
 /**
  * Build a modern, timed subtitles filter for ffmpeg.
  * - Splits the script into up to ~6 chunks
@@ -1746,7 +1888,7 @@ function buildVirtualPlan(rawClips, variant = 0) {
   return out;
 }
 
-/** Compose stitched video with VO, optional bgm, ASS subs (safe args) */
+/** Compose stitched video with VO, optional bgm, ASS subs (word-synced) */
 async function makeVideoVariant({
   clips,
   script,
@@ -1767,8 +1909,8 @@ async function makeVideoVariant({
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-    // Stretch/shrink voice slightly so the full read ≈ OUTLEN
-    const ATEMPO = Math.max(0.85, Math.min(1.15, OUTLEN / voiceDur));
+    // Keep original VO pace for perfect alignment
+    const ATEMPO = 1.0;
 
     // --- Plan 3–4 segments (hard cuts only)
     const plan = buildVirtualPlan(clips || [], variant);
@@ -1776,7 +1918,7 @@ async function makeVideoVariant({
 
     const perClip = Math.max(3.6, OUTLEN / plan.length);
 
-    // Build normalized segments (cropped, fixed fps)
+    // Build normalized segments (crop, fps, length)
     const segs = [];
     for (let i = 0; i < plan.length; i++) {
       const srcUrl = plan[i].url;
@@ -1813,25 +1955,20 @@ async function makeVideoVariant({
       safeUnlink(tmpIn);
     }
 
-    // --- Concat (HARD CUTS), subtitles, and audio mix
+    // --- Concat to [vcat]
     const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
-    const vParts = segs.flatMap((p) => ['-i', p]);
-
-    // subtitle chain from [vcat] -> [vsub] (string, not object)
+    const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
-    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
-      script,
-      OUTLEN,
-      '[vcat]',
-      W,
-      H
-    );
 
-    // audio
-    const voiceIdx = segs.length; // after all video inputs
-    const audioInputs = ['-i', voicePath];
-    let musicArgs = [];
-    let musicIdx = null;
+    // --- Word timings → ASS karaoke
+    const words  = await transcribeWords(voicePath);
+    const ass    = buildAssKaraoke(words, { W, H, fontName: "DejaVu Sans", fontSize: 42, marginV: 64 });
+    const escAss = escapeFilterPath(ass);
+
+    // --- Audio graph (voice + optional bgm), keep atempo=1 for sync
+    const voiceIdx   = segs.length;
+    const audioInputs= ['-i', voicePath];
+    let musicArgs = [], musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
     const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
@@ -1840,7 +1977,10 @@ async function makeVideoVariant({
         ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
-    const fc = [concatChain, subFilter, audioMix].join(';');
+    // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
+    const subs = `[vcat]subtitles='${escAss}'[vsub]`;
+
+    const fc = [concatChain, subs, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
@@ -1851,7 +1991,7 @@ async function makeVideoVariant({
         ...audioInputs,
         ...musicArgs,
         '-filter_complex', fc,
-        '-map', vOut,      // <- map the output label we actually produced
+        '-map', '[vsub]',
         '-map', '[aout]',
         '-t', OUTLEN.toFixed(2),
         '-shortest',
@@ -1865,7 +2005,8 @@ async function makeVideoVariant({
       180000
     );
 
-    cleanupMany([...segs, voicePath]);
+    // Clean up
+    cleanupMany([...segs, voicePath, ass]);
     return { outPath, duration: OUTLEN };
   } catch (e) {
     cleanupMany(tmpToDelete);
@@ -1874,7 +2015,7 @@ async function makeVideoVariant({
 }
 
 
-/** Photo slideshow fallback (3–4 segments) */
+/** Photo slideshow fallback (3–4 segments) with word-synced ASS karaoke */
 async function makeSlideshowVariantFromPhotos({
   photos,
   script,
@@ -1892,7 +2033,7 @@ async function makeSlideshowVariantFromPhotos({
     tmpToDelete.push(voicePath);
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-    const ATEMPO = Math.max(0.85, Math.min(1.15, OUTLEN / voiceDur));
+    const ATEMPO = 1.0; // keep exact pace
 
     const need = Math.max(3, Math.min(4, photos.length || 3));
     const chosen = [];
@@ -1930,19 +2071,16 @@ async function makeSlideshowVariantFromPhotos({
     }
 
     const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
-    const vParts = segs.flatMap((p) => ['-i', p]);
-
+    const vParts  = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
-    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
-      script,
-      OUTLEN,
-      '[vcat]',
-      W,
-      H
-    );
 
-    const voiceIdx = segs.length;
-    const audioInputs = ['-i', voicePath];
+    // Word timestamps → ASS karaoke
+    const words  = await transcribeWords(voicePath);
+    const ass    = buildAssKaraoke(words, { W, H, fontName: "DejaVu Sans", fontSize: 42, marginV: 64 });
+    const escAss = escapeFilterPath(ass);
+
+    const voiceIdx   = segs.length;
+    const audioInputs= ['-i', voicePath];
     let musicArgs = [], musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
@@ -1952,7 +2090,8 @@ async function makeSlideshowVariantFromPhotos({
         ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
-    const fc = [concatChain, subFilter, audioMix].join(';');
+    const subs = `[vcat]subtitles='${escAss}'[vsub]`;
+    const fc = [concatChain, subs, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
@@ -1963,7 +2102,7 @@ async function makeSlideshowVariantFromPhotos({
         ...audioInputs,
         ...musicArgs,
         '-filter_complex', fc,
-        '-map', vOut,
+        '-map', '[vsub]',
         '-map', '[aout]',
         '-t', OUTLEN.toFixed(2),
         '-shortest',
@@ -1977,13 +2116,14 @@ async function makeSlideshowVariantFromPhotos({
       180000
     );
 
-    cleanupMany([...segs, voicePath, ...chosen]);
+    cleanupMany([...segs, voicePath, ...chosen, ass]);
     return { outPath, duration: OUTLEN };
   } catch (e) {
     cleanupMany(tmpToDelete);
     throw e;
   }
 }
+
 
 
 /* ===================== BACKGROUND VIDEO QUEUE ===================== */
