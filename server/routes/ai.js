@@ -233,9 +233,9 @@ function buildSubtitleFilter(script, totalDurationSec) {
 }
 
 /**
- * Combine a silent montage + voiceover + modern timed subtitles.
- * - Trims video to roughly the audio length (no freeze frame)
- * - Uses hard cuts (no fades) for transitions (done earlier via concat)
+ * Combine a silent montage + voiceover + timed drawtext subtitles (quick cuts).
+ * - Trims final to targetSeconds
+ * - No xfade here (you already concat’d segments upstream)
  */
 async function addVoiceAndSubtitles({
   silentVideoPath,
@@ -244,35 +244,43 @@ async function addVoiceAndSubtitles({
   outPath,
   targetSeconds = 18,
 }) {
-  // Force a sane video duration window; ignore short audio
   const totalDur = Math.max(6, Math.min(40, targetSeconds || 18));
 
-  // Build subtitles for the full target duration
-  const subFilter = buildSubtitleFilter(script, totalDur);
+  // Normalize base video first → [v0]
+  const pre = `[0:v]scale=960:540:force_original_aspect_ratio=increase,crop=960:540,format=yuv420p[v0]`;
+
+  // Build safe drawtext overlay chain from [v0] → [vsub]
+  const { filter: subF, out: vOut } = buildTimedDrawtextFilter(script, totalDur, '[v0]', 960, 540);
 
   const args = [
-    "-i", silentVideoPath,
-    "-i", audioPath,
-    "-filter_complex", subFilter,
-    "-map", "[vout]",
-    "-map", "1:a:0",
-    "-c:v", "libx264",
-    "-preset", "veryfast",
-    "-crf", "23",
-    "-c:a", "aac",
-    "-b:a", "128k",
+    '-i', silentVideoPath,
+    '-i', audioPath,
 
-    // pad audio to match desired length (if the voiceover is short)
-    "-af", `apad=pad_dur=${(totalDur + 0.5).toFixed(1)}`,
+    // filter graph: pre-normalize, then drawtext subtitles
+    '-filter_complex', `${pre};${subF}`,
+    '-map', vOut,
+    '-map', '1:a:0',
 
-    // hard cap the final output length to our target
-    "-t", totalDur.toFixed(2),
+    // codecs
+    '-c:v', 'libx264',
+    '-preset', 'veryfast',
+    '-crf', '23',
+    '-pix_fmt', 'yuv420p',
+    '-c:a', 'aac',
+    '-b:a', '128k',
 
+    // pad audio if short; hard trim output to targetSeconds
+    '-af', `apad=pad_dur=${(totalDur + 0.5).toFixed(1)}`,
+    '-t', totalDur.toFixed(2),
+
+    // fast start for web playback
+    '-movflags', '+faststart',
     outPath,
   ];
 
-  await runFFmpeg(args, "ffmpeg-subtitled");
+  await runFFmpeg(args, 'ffmpeg-subtitled');
 }
+
 
 
 async function buildSilentMontage(clipPaths, outPath, totalSeconds = 18) {
@@ -469,6 +477,19 @@ async function uploadVideoToAdAccount(
   });
   return resp.data;
 }
+
+// Pick a drawtext-capable font that exists on Render/Debian or fall back.
+function pickFontFile() {
+  const candidates = [
+    '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+    '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf'
+  ];
+  for (const p of candidates) { try { if (fs.existsSync(p)) return p; } catch {} }
+  // last resort: omit fontfile (may still work locally)
+  return '';
+}
+
 
 /* --------------------- Range-enabled media streamer --------------------- */
 router.get('/media/:file', async (req, res) => {
@@ -1585,57 +1606,66 @@ async function ffprobeDuration(filePath = '') {
 }
 
 /** Timed drawtext subtitles (no highlight box, safe margins, in-frame) */
+/** Build burger-style timed drawtext subtitles (chunked sentences) — safe, clamped, no outline. */
 function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 960, H = 540) {
   const clean = String(script || '').replace(/\s+/g, ' ').trim();
   if (!clean) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
 
-  // Split into sentences → then hard-wrap each into <=10-word chunks to prevent overflow
-  const sentences = clean.split(/(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean);
-  const chunks = [];
-  for (const s of sentences) {
-    const words = s.split(' ').filter(Boolean);
-    for (let i = 0; i < words.length; i += 10) {
-      chunks.push(words.slice(i, i + 10).join(' '));
-    }
-  }
+  // Split into up to 6 short sentences
+  const sentences = clean
+    .split(/(?<=[.!?])\s+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .slice(0, 6);
 
-  const parts = chunks.slice(0, 6);        // max 6 captions on screen
-  const n = parts.length || 1;
+  const count = sentences.length || 1;
   const total = Math.max(6, Math.min(40, totalSec));
-  const per = total / n;
+  const chunk = total / count;
 
-  // Safe area + legible but restrained styling
-  const SAFE_X = 40;                        // side padding
-  const SAFE_BOTTOM = 96;                   // bottom padding
-  const FS = 38;                            // font size tuned to avoid leaking out
+  const fontfile = pickFontFile(); // may be empty string; that’s fine
+  const fontfileArg = fontfile ? `:fontfile=${fontfile.replace(/:/g, '\\:')}` : '';
+
+  // Keep subs inside a safe frame area (no leaking)
+  const pad = 28;                          // side padding
+  const floorY = Math.max(90, Math.round(H * 0.18)); // keep away from bottom edge
 
   let inL = inLabel;
-  const fxs = [];
+  const parts = [];
 
-  for (let i = 0; i < n; i++) {
-    const line = parts[i].replace(/[':\\]/g, '');
-    const t0 = (i * per).toFixed(2);
-    const t1 = Math.min(total, (i + 1) * per - 0.10).toFixed(2); // tiny gap to avoid overlap
-    const outL = (i === n - 1) ? '[vsub]' : `[v${i + 100}]`;      // avoid label clashes
+  for (let i = 0; i < sentences.length; i++) {
+    // strip characters that break ffmpeg arg parsing
+    const line = sentences[i].replace(/['\\:]/g, '').trim();
+    if (!line) continue;
 
-    fxs.push(
+    const start = (i * chunk).toFixed(2);
+    const end   = Math.min(total, (i + 1) * chunk + 0.25).toFixed(2);
+    const outL  = i === sentences.length - 1 ? '[vsub]' : `[v${i+100}]`; // avoid label clashes
+
+    // Centered, boxed, no border highlight; keep box margins away from edges
+    parts.push(
       `${inL}drawtext=` +
-      `text='${line}':` +
-      `fontcolor=white:` +
-      `fontsize=${FS}:` +
-      `line_spacing=6:` +
-      `bordercolor=black:` +
-      `borderw=2:` +                     // thin outline only (NO box)
-      `x=max(${SAFE_X}, (w-text_w)/2):` +// ensure never hits left edge
-      `y=h-${SAFE_BOTTOM}:` +            // stay above bottom safe line
-      `enable='between(t,${t0},${t1})'` +
+      `text='${line}'` +
+      `${fontfileArg}` +
+      `:fontcolor=white` +
+      `:fontsize=40` +
+      `:line_spacing=6` +
+      `:borderw=0` +
+      `:box=1` +
+      `:boxcolor=black@0.55` +
+      `:boxborderw=14` +
+      `:x=max(${pad}, min((w-text_w)/2, w-${pad}-text_w))` +
+      `:y=min(h-${floorY}, h-text_h-36)` +
+      `:shadowcolor=black@0.9` +
+      `:shadowx=0` +
+      `:shadowy=0` +
+      `:enable='between(t,${start},${end})'` +
       outL
     );
     inL = outL;
   }
 
-  if (!fxs.length) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
-  return { filter: fxs.join(';'), out: '[vsub]' };
+  if (!parts.length) return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
+  return { filter: parts.join(';'), out: '[vsub]' };
 }
 
 
