@@ -317,26 +317,26 @@ marginV = 72,      // a hair lower from bottom edge
     return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
   };
 
-  if (!safe.length) {
-    const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    const header = [
-      '[Script Info]',
-      'ScriptType: v4.00+',
-      `PlayResX: ${W}`,
-      `PlayResY: ${H}`,
-      '',
-      '[V4+ Styles]',
-      'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ' +
-        'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, ' +
-        'Alignment, MarginL, MarginR, MarginV, Encoding',
-      `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H88000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
-      '',
-      '[Events]',
-      'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
-    ].join('\n');
-    fs.writeFileSync(p, header + '\n', 'utf8');
-    return p;
-  }
+ if (!safe.length) {
+  const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
+  const header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    `PlayResX: ${W}`,
+    `PlayResY: ${H}`,
+    'WrapStyle: 2',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,1,0,0,0,100,100,0.2,0,3,3,1,2,40,40,${marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
+  ].join('\n');
+  fs.writeFileSync(p, header + '\n', 'utf8');
+  return p;
+}
+
 
   const maxTextW = W * maxWidthRatio;
   const tiles = [];
@@ -544,7 +544,7 @@ function buildAssFromChunks(chunks, {
     return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
   };
 
-  const header = [
+   const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
     `PlayResX: ${W}`,
@@ -553,11 +553,13 @@ function buildAssFromChunks(chunks, {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    // Bold white, black outline + soft black box (BorderStyle=3), bottom-center
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,1,0,0,0,100,100,0.2,0,3,3,1,2,40,40,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
+
 
   const lines = chunks.map(t => {
     const txt = String(t.text || '').replace(/[{}]/g, ''); // only strip braces (ASS control)
@@ -658,7 +660,7 @@ function buildAssKaraoke(words, opts = {}) {
   };
 
   // Header + style: bottom-center, white text, soft dark box behind each word
-  const header = [
+   const header = [
     "[Script Info]",
     "ScriptType: v4.00+",
     `PlayResX: ${W}`,
@@ -666,12 +668,12 @@ function buildAssKaraoke(words, opts = {}) {
     "",
     "[V4+ Styles]",
     "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    // BorderStyle=3 -> boxed background per line; Alignment=2 -> bottom center
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00111111,&H88000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,1,0,0,0,100,100,0.2,0,3,3,1,2,40,40,${marginV},1`,
     "",
     "[Events]",
     "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
   ].join("\n");
+
 
   // If we somehow have no timing data, emit an empty track
   if (!safe.length) {
@@ -2410,7 +2412,12 @@ const audioMix =
 
 
     // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
-    const subs = `[vcat]subtitles='${escAss}'[vsub]`;
+   const subs =
+  `[vcat]subtitles='${escAss}':force_style=` +
+  `'Fontname=DejaVu Sans,Fontsize=46,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H77000000,BorderStyle=3,` +
+  `Outline=3,Shadow=1,Bold=1,Alignment=2,MarginV=68'[vsub]`;
+
     const fc = [concatChain, subs, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
