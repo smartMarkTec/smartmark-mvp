@@ -554,7 +554,8 @@ function buildAssFromChunks(chunks, {
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     // Bold white, black outline + soft black box (BorderStyle=3), bottom-center
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,1,0,0,0,100,100,0.2,0,3,3,1,2,40,40,${marginV},1`,
+`Style: ${styleName},${fontName},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H33000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -2194,12 +2195,13 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
       `text='${line}'` +
       `${fontfileArg}` +
       `:fontcolor=white` +
-      `:fontsize=40` +
-      `:line_spacing=6` +
-      `:borderw=0` +
-      `:box=1` +
-      `:boxcolor=black@0.55` +
-      `:boxborderw=14` +
+      `:fontsize=38` +
+`:line_spacing=6` +
+`:borderw=0` +
+`:box=1` +
+`:boxcolor=black@0.82` +
+`:boxborderw=14` +
+
       `:x=${xExpr}` +
       `:y=${yExpr}` +
       `:shadowcolor=black@0.9` +
@@ -2412,11 +2414,12 @@ const audioMix =
 
 
     // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
-   const subs =
+  const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=46,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H77000000,BorderStyle=3,` +
+  `'Fontname=DejaVu Sans,Fontsize=42,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H33000000,BorderStyle=3,` +
   `Outline=3,Shadow=1,Bold=1,Alignment=2,MarginV=68'[vsub]`;
+
 
     const fc = [concatChain, subs, audioMix].join(';');
 
