@@ -1752,7 +1752,7 @@ async function makeVideoVariant({
   script,
   variant = 0,
   targetSec = 18.5,
-  tailPadSec = 1.6,   // not used to pad; we keep it tight
+  tailPadSec = 1.6,
   musicPath = '',
 }) {
   const W = 960, H = 540, FPS = 30;
@@ -1767,7 +1767,7 @@ async function makeVideoVariant({
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-    // Stretch/shrink voice slightly so the full read ≈ OUTLEN (never extreme)
+    // Stretch/shrink voice slightly so the full read ≈ OUTLEN
     const ATEMPO = Math.max(0.85, Math.min(1.15, OUTLEN / voiceDur));
 
     // --- Plan 3–4 segments (hard cuts only)
@@ -1813,28 +1813,34 @@ async function makeVideoVariant({
       safeUnlink(tmpIn);
     }
 
-    // --- Concat (HARD CUTS), then captions, then mix audio
-    // Build concat filter
+    // --- Concat (HARD CUTS), subtitles, and audio mix
     const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
     const vParts = segs.flatMap((p) => ['-i', p]);
 
-    // Optional BGM
-    const voiceIdx = segs.length;
+    // subtitle chain from [vcat] -> [vsub] (string, not object)
+    const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
+    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
+      script,
+      OUTLEN,
+      '[vcat]',
+      W,
+      H
+    );
+
+    // audio
+    const voiceIdx = segs.length; // after all video inputs
     const audioInputs = ['-i', voicePath];
     let musicArgs = [];
     let musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
-    // filter_complex
-    const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
-    const subs = buildTimedDrawtextFilter(script, OUTLEN, '[vcat]', '[vv]');
     const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
     const audioMix =
       musicIdx !== null
         ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
-    const fc = [concatChain, subs, audioMix].join(';');
+    const fc = [concatChain, subFilter, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
@@ -1845,9 +1851,10 @@ async function makeVideoVariant({
         ...audioInputs,
         ...musicArgs,
         '-filter_complex', fc,
-        '-map','[vv]','-map','[aout]',
-        '-t', OUTLEN.toFixed(2),  // fixed length; prevents tail freeze
-        '-shortest',              // just in case
+        '-map', vOut,      // <- map the output label we actually produced
+        '-map', '[aout]',
+        '-t', OUTLEN.toFixed(2),
+        '-shortest',
         '-c:v','libx264','-preset','veryfast','-crf','26',
         '-pix_fmt','yuv420p','-r', String(FPS),
         '-c:a','aac','-b:a','128k',
@@ -1925,19 +1932,27 @@ async function makeSlideshowVariantFromPhotos({
     const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
     const vParts = segs.flatMap((p) => ['-i', p]);
 
+    const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
+    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
+      script,
+      OUTLEN,
+      '[vcat]',
+      W,
+      H
+    );
+
     const voiceIdx = segs.length;
     const audioInputs = ['-i', voicePath];
     let musicArgs = [], musicIdx = null;
     if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
 
-    const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
-    const subs = buildTimedDrawtextFilter(script, OUTLEN, '[vcat]', '[vv]');
     const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
     const audioMix =
       musicIdx !== null
         ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
-    const fc = [concatChain, subs, audioMix].join(';');
+
+    const fc = [concatChain, subFilter, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
@@ -1948,7 +1963,8 @@ async function makeSlideshowVariantFromPhotos({
         ...audioInputs,
         ...musicArgs,
         '-filter_complex', fc,
-        '-map','[vv]','-map','[aout]',
+        '-map', vOut,
+        '-map', '[aout]',
         '-t', OUTLEN.toFixed(2),
         '-shortest',
         '-c:v','libx264','-preset','veryfast','-crf','26',
@@ -1968,7 +1984,6 @@ async function makeSlideshowVariantFromPhotos({
     throw e;
   }
 }
-
 
 
 /* ===================== BACKGROUND VIDEO QUEUE ===================== */
