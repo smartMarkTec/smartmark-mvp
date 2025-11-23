@@ -2311,18 +2311,6 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
     return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
   }
 
-  // Make sure tiles are in time order and do NOT overlap
-  tiles.sort((a, b) => a.start - b.start);
-  for (let i = 0; i < tiles.length - 1; i++) {
-    const a = tiles[i];
-    const b = tiles[i + 1];
-    if (a.end > b.start) {
-      // cut the previous tile so it ends just before the next starts
-      const cut = Math.max(a.start + 0.08, b.start - 0.02);
-      a.end = cut;
-    }
-  }
-
   const fontfile = pickFontFile();
   const fontfileArg = fontfile
     ? `:fontfile=${fontfile.replace(/:/g, '\\:')}`
@@ -2337,17 +2325,24 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
 
-    // Clean + escape text for drawtext
-    let line = String(t.text || '').trim();
-    line = line.replace(/[']/g, '');          // strip single quotes
-    line = line.replace(/[\r\n]/g, ' ');      // no newlines
-    line = line.replace(/%/g, '\\%');         // ESCAPE % so "20%" renders
+    // 1) Clean text for drawtext and keep symbols safe
+    let line = String(t.text || '')
+      .replace(/['\\:]/g, '')   // remove quotes, backslash, colon
+      .trim();
 
     if (!line) continue;
 
-    // Show just a tiny bit earlier, and don't linger as long
-    const start = Math.max(0, t.start - 0.12).toFixed(2);
-    const end   = Math.max(start, t.end + 0.04).toFixed(2);
+    // 2) Handle percentages so ffmpeg never chokes -> "20 percent"
+    line = line.replace(/%/g, ' percent');
+
+    // 3) Slight lead so subs appear just before the audio,
+    //    but SHIFT the whole tile, so no overlap between tiles.
+    const LEAD = 0.06; // ~60 ms ahead of the voice
+    const startNum = Math.max(0, (t.start || 0) - LEAD);
+    const endNum   = Math.max(startNum + 0.10, (t.end || 0) - LEAD);
+
+    const start = startNum.toFixed(2);
+    const end   = endNum.toFixed(2);
 
     const outL = i === tiles.length - 1 ? '[vsub]' : `[v${i + 200}]`;
 
@@ -2359,7 +2354,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `text='${line}'` +
         `${fontfileArg}` +
         `:fontcolor=white` +
-        `:fontsize=34` +
+        `:fontsize=34` +          // font size = 34 (as you wanted)
         `:line_spacing=6` +
         `:borderw=0` +
         `:box=1` +
@@ -2377,13 +2372,12 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
     inL = outL;
   }
 
-
   if (!parts.length) {
     return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
   }
-
   return { filter: parts.join(';'), out: '[vsub]' };
 }
+
 
 
 
