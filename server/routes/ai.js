@@ -2413,9 +2413,10 @@ if (ATEMPO !== 1.0) displayDur = voiceDur / ATEMPO;
 // Turn the exact script into timed tokens and flex-chunk → ASS
 let words = wordsFromScript(script, displayDur);
 const tiles = chunkWordsFlexible(words, {
-  maxChars: 24,   // visual width limiter (adjust 22–28 if needed)
-  maxDur: 2.4,    // cap on-screen time per tile
+  maxChars: 26,
+  maxDur: 2.4,
 });
+
 
 const ass = buildAssFromChunks(tiles, {
   W, H,
@@ -2446,8 +2447,9 @@ const audioMix =
  const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,` +  // ~35% black
-  `Outline=4,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +  // ~33% black
+  `Outline=4,Shadow=0,Bold=0,Alignment=2,MarginV=84'[vsub]`;
+
 
 
 
