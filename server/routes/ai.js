@@ -2418,13 +2418,12 @@ const audioMix =
     ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
     : `${voiceFilt};[vo]anull[aout]`;
 
-
-
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&HE6000000,BorderStyle=3,` + // translucent box
-  `Outline=3,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+  `OutlineColour=&H00000000,BackColour=&H77000000,BorderStyle=3,` +  // glassy, see-through black
+  `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+
 
 
     const fc = [concatChain, subs, audioMix].join(';');
