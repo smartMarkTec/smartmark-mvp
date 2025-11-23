@@ -711,15 +711,23 @@ function escapeFilterPath(p) {
   return String(p).replace(/\\/g, "\\\\").replace(/:/g, "\\:");
 }
 
-/** Multiply all word start/end times by a factor (e.g., 1/0.92 when audio slowed to 0.92x). */
-function stretchWordTimings(words = [], factor = 1.0) {
-  if (!Array.isArray(words) || !Number.isFinite(factor) || factor <= 0) return words || [];
-  return words.map(w => ({
-    start: Math.max(0, (w.start ?? 0) / factor),
-    end:   Math.max(0.01, (w.end   ?? 0.01) / factor),
-    word:  String(w.word || ''),
+/** Multiply all word start/end times by a factor derived from the audio tempo.
+ *  audioTempo = the atempo you use in ffmpeg (e.g. 0.92).
+ *  ffmpeg atempo < 1.0 => slower audio => LONGER timings => factor = 1/audioTempo.
+ */
+function stretchWordTimings(words = [], audioTempo = 1.0) {
+  if (!Array.isArray(words) || !Number.isFinite(audioTempo) || audioTempo <= 0) {
+    return words || [];
+  }
+  const factor = 1 / audioTempo; // e.g. atempo 0.92 -> factor ≈ 1.087
+
+  return words.map((w) => ({
+    start: Math.max(0, (w.start ?? 0) * factor),
+    end:   Math.max(0.01, (w.end ?? 0.01) * factor),
+    word:  String(w.word || '').trim(),
   }));
 }
+
 
 // Build subtitle word timings purely from the script text
 // so NO words are ever dropped (e.g., "At" in "At Test Bistro").
@@ -2260,6 +2268,18 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
     return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
   }
 
+  // Make sure tiles are in time order and do NOT overlap
+  tiles.sort((a, b) => a.start - b.start);
+  for (let i = 0; i < tiles.length - 1; i++) {
+    const a = tiles[i];
+    const b = tiles[i + 1];
+    if (a.end > b.start) {
+      // cut the previous tile so it ends just before the next starts
+      const cut = Math.max(a.start + 0.08, b.start - 0.02);
+      a.end = cut;
+    }
+  }
+
   const fontfile = pickFontFile();
   const fontfileArg = fontfile
     ? `:fontfile=${fontfile.replace(/:/g, '\\:')}`
@@ -2276,8 +2296,10 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
     const line = String(t.text || '').replace(/['\\:]/g, '').trim();
     if (!line) continue;
 
-    const start = Math.max(0, t.start - 0.03).toFixed(2);
-    const end = Math.max(start, t.end + 0.08).toFixed(2);
+    // NO look-behind / look-ahead padding – use the exact tile times
+    const start = Math.max(0, t.start);
+    const end   = Math.max(start + 0.10, t.end); // tiny min duration so nothing blinks
+
     const outL = i === tiles.length - 1 ? '[vsub]' : `[v${i + 200}]`;
 
     const xExpr = `max(${pad}\\, min((w-text_w)/2\\, w-${pad}-text_w))`;
@@ -2288,7 +2310,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `text='${line}'` +
         `${fontfileArg}` +
         `:fontcolor=white` +
-        `:fontsize=32` + // <-- same size as your current box
+        `:fontsize=34` +           // <= font size 34 as you asked
         `:line_spacing=6` +
         `:borderw=0` +
         `:box=1` +
@@ -2299,7 +2321,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `:shadowcolor=black@0.9` +
         `:shadowx=0` +
         `:shadowy=0` +
-        `:enable='between(t,${start},${end})'` +
+        `:enable='between(t,${start.toFixed(2)},${end.toFixed(2)})'` +
         outL
     );
 
@@ -2309,6 +2331,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
   if (!parts.length) {
     return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
   }
+
   return { filter: parts.join(';'), out: '[vsub]' };
 }
 
