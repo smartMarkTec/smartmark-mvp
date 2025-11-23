@@ -2462,12 +2462,6 @@ const subs =
   }
 }
 
-// example: append AFTER your montage step
-const filterComplex = [
-  // ... your existing montage chain that outputs [vFinal] and your audio label e.g. [aMix]
-  `[vFinal]${subFilter}[vOut]`
-].join(";");
-
 
 
 /** Photo slideshow fallback (3–4 segments) with word-synced ASS karaoke */
@@ -2567,13 +2561,12 @@ const audioMix =
     : `${voiceFilt};[vo]anull[aout]`;
 
 
-// --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
-// --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,` +  // ~60% transparent black box
-  `Outline=4,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+  `OutlineColour=&H00000000,BackColour=&HE6000000,BorderStyle=3,` +  // semi-transparent black box
+  `Outline=3,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+
     
   
 
