@@ -2567,8 +2567,8 @@ const audioMix =
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=36,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H22000000,BorderStyle=3,` +
-  `Outline=3,Shadow=1,Bold=1,Alignment=2,MarginV=68'[vsub]`;
+  `OutlineColour=&H00000000,BackColour=&H77000000,BorderStyle=3,` + 
+  `Outline=2,Shadow=0,Bold=0,Alignment=2,MarginV=70'[vsub]`;       
 
 
 const fc = [concatChain, subs, audioMix].join(';');
