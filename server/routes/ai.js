@@ -2313,39 +2313,37 @@ async function makeVideoVariant({
   musicPath = '',
 }) {
   const W = 960, H = 540, FPS = 30;
-// make this mutable so we can set it from the VO duration
-let OUTLEN = Math.max(15, Math.min(20, Number(targetSec || 18.5)));
+  let OUTLEN = Math.max(15, Math.min(20, Number(targetSec || 18.5)));
 
   const tmpToDelete = [];
+  const segs = [];
+  let voicePath = '';
 
   try {
-    // --- Voiceover
-    const { path: voicePath } = await synthTTS(script);
+    // ---------- 1) TTS ----------
+    const tts = await synthTTS(script);
+    voicePath = tts.path;
     tmpToDelete.push(voicePath);
+
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
 
-    // Optional slowdown for readability (e.g., TTS_SLOWDOWN=0.92)
-    const ATEMPO = (Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0) ? TTS_SLOWDOWN : 1.0;
+    const ATEMPO =
+      Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
 
-    // Effective spoken length after slowdown/speedup
-const effVoice = voiceDur / ATEMPO;
+    const effVoice = voiceDur / ATEMPO;
+    OUTLEN = Math.max(15, Math.min(20, effVoice + 2)); // video a bit longer than VO
 
-// Final video should outlast VO by ~2s (clamped to 15–20s range)
-OUTLEN = Math.max(15, Math.min(20, effVoice + 2));
-
-
-    // --- Plan 3–4 segments (hard cuts only)
+    // ---------- 2) Build 3–4 normalized segments ----------
     const plan = buildVirtualPlan(clips || [], variant);
     if (!plan.length) throw new Error('No clips in plan');
 
     const perClip = Math.max(3.6, OUTLEN / plan.length);
 
-    // Build normalized segments (crop, fps, length)
-    const segs = [];
     for (let i = 0; i < plan.length; i++) {
       const srcUrl = plan[i].url;
-      const tmpIn = await downloadToTmp(srcUrl, '.mp4'); tmpToDelete.push(tmpIn);
+      const tmpIn = await downloadToTmp(srcUrl, '.mp4');
+      tmpToDelete.push(tmpIn);
 
       let ss = 0;
       try {
@@ -2357,18 +2355,33 @@ OUTLEN = Math.max(15, Math.min(20, effVoice + 2));
 
       const outSeg = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
       const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p`;
+
       await execFile(
         'ffmpeg',
         [
-          '-y','-nostdin','-loglevel','error',
+          '-y',
+          '-nostdin',
+          '-loglevel',
+          'error',
           ...(ss > 0 ? ['-ss', ss.toFixed(2)] : []),
-          '-i', tmpIn,
-          '-t', perClip.toFixed(2),
-          '-vf', vf,
+          '-i',
+          tmpIn,
+          '-t',
+          perClip.toFixed(2),
+          '-vf',
+          vf,
           '-an',
-          '-c:v','libx264','-preset','veryfast','-crf','27',
-          '-pix_fmt','yuv420p','-r', String(FPS),
-          outSeg
+          '-c:v',
+          'libx264',
+          '-preset',
+          'veryfast',
+          '-crf',
+          '27',
+          '-pix_fmt',
+          'yuv420p',
+          '-r',
+          String(FPS),
+          outSeg,
         ],
         {},
         180000
@@ -2378,91 +2391,90 @@ OUTLEN = Math.max(15, Math.min(20, effVoice + 2));
       safeUnlink(tmpIn);
     }
 
-    // --- Concat to [vcat]
+    // ---------- 3) Concat segments -> [vcat] ----------
     const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
-    const vParts  = segs.flatMap((p) => ['-i', p]);
+    const vParts = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-    // --- Subtitles built from the ORIGINAL SCRIPT (no dropped words, keeps % and punctuation)
-let displayDur = voiceDur;                   // measured TTS length
-if (ATEMPO !== 1.0) displayDur = voiceDur / ATEMPO;
-
-// Turn the exact script into timed tokens and flex-chunk → ASS
-let words = wordsFromScript(script, displayDur);
-const tiles = chunkWordsFlexible(words, {
-  maxChars: 26,
-  maxDur: 2.4,
-});
-
-
-const ass = buildAssFromChunks(tiles, {
-  W, H,
-  fontName: "DejaVu Sans",
-  fontSize: 42,
-  marginV: 72,
-});
-
-const escAss = escapeFilterPath(ass);
-
-
-    // --- Audio graph (voice + optional bgm)
-    const voiceIdx    = segs.length;
+    // ---------- 4) Audio graph (voice + optional BGM) ----------
+    const voiceIdx = segs.length;
     const audioInputs = ['-i', voicePath];
-    let musicArgs = [], musicIdx = null;
-    if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
+    let musicArgs = [];
+    let musicIdx = null;
 
-   const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
-const audioMix =
-  musicIdx !== null
-    // stop BGM when VO ends (quiet tail handled by video duration)
-    ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
-    : `${voiceFilt};[vo]anull[aout]`;
+    if (musicPath) {
+      musicArgs = ['-i', musicPath];
+      musicIdx = voiceIdx + 1;
+    }
 
-const subs =
-  `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +
-  `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72,MarginL=40,MarginR=40'[vsub]`;
+    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(
+      3
+    )},aresample=48000[vo]`;
 
+    const audioMix =
+      musicIdx !== null
+        ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
+        : `${voiceFilt};[vo]anull[aout]`;
 
+    // ---------- 5) Simple black-bar subtitles (like your screenshot) ----------
+    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
+      script,
+      OUTLEN,
+      '[vcat]',
+      W,
+      H
+    );
 
-
-
-    const fc = [concatChain, subs, audioMix].join(';');
+    const fc = [concatChain, subFilter, audioMix].join(';');
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
       'ffmpeg',
       [
-        '-y','-nostdin','-loglevel','error',
+        '-y',
+        '-nostdin',
+        '-loglevel',
+        'error',
         ...vParts,
         ...audioInputs,
         ...musicArgs,
-        '-filter_complex', fc,
-       '-map', '[vsub]',
-'-map', '[aout]',
-'-t', OUTLEN.toFixed(2),
-// no -shortest: we want the video to outlast audio by ~2s
-'-c:v','libx264','-preset','veryfast','-crf','26',
-
-        '-pix_fmt','yuv420p','-r', String(FPS),
-        '-c:a','aac','-b:a','128k',
-        '-movflags','+faststart',
-        outPath
+        '-filter_complex',
+        fc,
+        '-map',
+        vOut, // <- drawtext output
+        '-map',
+        '[aout]',
+        '-t',
+        OUTLEN.toFixed(2),
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '26',
+        '-pix_fmt',
+        'yuv420p',
+        '-r',
+        String(FPS),
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-movflags',
+        '+faststart',
+        outPath,
       ],
       {},
       180000
     );
 
-    // Clean up
-    cleanupMany([...segs, voicePath, ass]);
+    cleanupMany([...segs, voicePath]);
     return { outPath, duration: OUTLEN };
   } catch (e) {
-    cleanupMany(tmpToDelete);
+    cleanupMany([...segs, voicePath, ...tmpToDelete].filter(Boolean));
     throw e;
   }
 }
-
 
 
 /** Photo slideshow fallback (3–4 segments) with word-synced ASS karaoke */
@@ -2475,17 +2487,28 @@ async function makeSlideshowVariantFromPhotos({
   musicPath = '',
 }) {
   const W = 960, H = 540, FPS = 30;
-  const OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
+  let OUTLEN = Math.max(18, Math.min(20, Number(targetSec || 18.5)));
+
   const tmpToDelete = [];
+  const segs = [];
+  let voicePath = '';
 
   try {
-    const { path: voicePath } = await synthTTS(script);
+    // ---------- 1) TTS ----------
+    const tts = await synthTTS(script);
+    voicePath = tts.path;
     tmpToDelete.push(voicePath);
+
     let voiceDur = await ffprobeDuration(voicePath);
     if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-    const ATEMPO = (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) ? TTS_SLOWDOWN : 1.0;
 
+    const ATEMPO =
+      Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
 
+    const effVoice = voiceDur / ATEMPO;
+    OUTLEN = Math.max(18, Math.min(20, effVoice + 2));
+
+    // ---------- 2) Choose 3–4 photos ----------
     const need = Math.max(3, Math.min(4, photos.length || 3));
     const chosen = [];
     for (let i = 0; i < need; i++) {
@@ -2499,21 +2522,39 @@ async function makeSlideshowVariantFromPhotos({
     if (!chosen.length) throw new Error('No stock photos available');
 
     const perClip = Math.max(3.6, OUTLEN / chosen.length);
-    const segs = [];
+
     for (let i = 0; i < chosen.length; i++) {
       const img = chosen[i];
       const outSeg = path.join(ensureGeneratedDir(), `${uuidv4()}-seg.mp4`);
       const vf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},fps=${FPS},format=yuv420p`;
+
       await execFile(
         'ffmpeg',
         [
-          '-y','-nostdin','-loglevel','error',
-          '-loop','1','-t', perClip.toFixed(2), '-i', img,
-          '-vf', vf,
+          '-y',
+          '-nostdin',
+          '-loglevel',
+          'error',
+          '-loop',
+          '1',
+          '-t',
+          perClip.toFixed(2),
+          '-i',
+          img,
+          '-vf',
+          vf,
           '-an',
-          '-c:v','libx264','-preset','veryfast','-crf','27',
-          '-pix_fmt','yuv420p','-r', String(FPS),
-          outSeg
+          '-c:v',
+          'libx264',
+          '-preset',
+          'veryfast',
+          '-crf',
+          '27',
+          '-pix_fmt',
+          'yuv420p',
+          '-r',
+          String(FPS),
+          outSeg,
         ],
         {},
         180000
@@ -2521,95 +2562,90 @@ async function makeSlideshowVariantFromPhotos({
       segs.push(outSeg);
     }
 
+    // ---------- 3) Concat segments -> [vcat] ----------
     const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
-    const vParts  = segs.flatMap((p) => ['-i', p]);
+    const vParts = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-// --- Subtitles built from the ORIGINAL SCRIPT (no dropped words, keeps % and punctuation)
-let displayDur = voiceDur;                   // base on actual VO length
-if (TTS_SLOWDOWN > 0 && TTS_SLOWDOWN < 1) {
-  // atempo slows playback, so timeline duration increases
-  displayDur = voiceDur / TTS_SLOWDOWN;
+    // ---------- 4) Audio graph ----------
+    const voiceIdx = segs.length;
+    const audioInputs = ['-i', voicePath];
+    let musicArgs = [];
+    let musicIdx = null;
+
+    if (musicPath) {
+      musicArgs = ['-i', musicPath];
+      musicIdx = voiceIdx + 1;
+    }
+
+    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(
+      3
+    )},aresample=48000[vo]`;
+
+    const audioMix =
+      musicIdx !== null
+        ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
+        : `${voiceFilt};[vo]anull[aout]`;
+
+    // ---------- 5) Simple black-bar subtitles ----------
+    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
+      script,
+      OUTLEN,
+      '[vcat]',
+      W,
+      H
+    );
+
+    const fc = [concatChain, subFilter, audioMix].join(';');
+
+    const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+    await execFile(
+      'ffmpeg',
+      [
+        '-y',
+        '-nostdin',
+        '-loglevel',
+        'error',
+        ...vParts,
+        ...audioInputs,
+        ...musicArgs,
+        '-filter_complex',
+        fc,
+        '-map',
+        vOut,
+        '-map',
+        '[aout]',
+        '-t',
+        OUTLEN.toFixed(2),
+        '-c:v',
+        'libx264',
+        '-preset',
+        'veryfast',
+        '-crf',
+        '26',
+        '-pix_fmt',
+        'yuv420p',
+        '-r',
+        String(FPS),
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-movflags',
+        '+faststart',
+        outPath,
+      ],
+      {},
+      180000
+    );
+
+    cleanupMany([...segs, voicePath, ...tmpToDelete]);
+    return { outPath, duration: OUTLEN };
+  } catch (e) {
+    cleanupMany([...segs, voicePath, ...tmpToDelete].filter(Boolean));
+    throw e;
+  }
 }
-
-// Build exact word list from the script, then flex-chunk → ASS
-let words = wordsFromScript(script, displayDur);
-const tiles = chunkWordsFlexible(words, {
-  maxChars: 24,   // visual width limiter (tweak 22–28 if you want)
-  maxDur: 2.4,    // max on-screen time per tile
-});
-
-const ass = buildAssFromChunks(tiles, {
-  W, H,
-  fontName: "DejaVu Sans",
-  fontSize: 42,  // slightly smaller
-  marginV: 72,   // a hair lower from bottom
-});
-
-const escAss = escapeFilterPath(ass);
-
-// --- Audio graph (voice + optional bgm)
-const voiceIdx    = segs.length;
-const audioInputs = ['-i', voicePath];
-let musicArgs = [], musicIdx = null;
-if (musicPath) { musicArgs = ['-i', musicPath]; musicIdx = voiceIdx + 1; }
-
-const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
-const audioMix =
-  musicIdx !== null
-    // mix but end when VO ends; gives ~2s silent tail in final mux
-    ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
-    : `${voiceFilt};[vo]anull[aout]`;
-
-
-const subs =
-  `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +
-  `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72,MarginL=40,MarginR=40'[vsub]`;
-
-
-
-    
-  
-
-
-const fc = [concatChain, subs, audioMix].join(';');
-
-const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
-await execFile(
-  'ffmpeg',
-  [
-    '-y','-nostdin','-loglevel','error',
-    ...vParts,
-    ...audioInputs,
-    ...musicArgs,
-    '-filter_complex', fc,
-    '-map', '[vsub]',
-    '-map', '[aout]',
-   '-t', OUTLEN.toFixed(2),
-// no -shortest: we want video to outlast audio by ~2s
-    '-c:v','libx264','-preset','veryfast','-crf','26',
-    '-pix_fmt','yuv420p','-r', String(FPS),
-    '-c:a','aac','-b:a','128k',
-    '-movflags','+faststart',
-    outPath
-  ],
-  {},
-  180000
-);
-
- // success cleanup
-cleanupMany([...segs, voicePath, ass]);
-return { outPath, duration: OUTLEN };
-} catch (e) {
-  // best-effort cleanup on failure too
-  cleanupMany([...segs, voicePath, ass, ...tmpToDelete].filter(Boolean));
-  throw e; // important so the caller/Express sees the failure
-}
-
-}
-
 
 
 /* ===================== BACKGROUND VIDEO QUEUE ===================== */
