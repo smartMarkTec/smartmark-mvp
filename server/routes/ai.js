@@ -721,35 +721,31 @@ function stretchWordTimings(words = [], factor = 1.0) {
   }));
 }
 
-// Build subtitle word timings from audio (Whisper) + slowdown factor
-async function getSubtitleWords(voicePath, script, displayDurSec, atempo = 1.0) {
-  let words = [];
+// Build subtitle word timings purely from the script text
+// so NO words are ever dropped (e.g., "At" in "At Test Bistro").
+async function getSubtitleWords(voicePath, script, displayDurSec, _atempo = 1.0) {
   try {
-    // 1) Transcribe actual TTS audio to get per-word timings
-    words = await transcribeWords(voicePath);
-    if (atempo && atempo !== 1.0) {
-      // atempo < 1.0 slows audio, so we stretch timings so subs still sync
-      words = stretchWordTimings(words, atempo);
+    let dur;
+
+    if (Number.isFinite(displayDurSec) && displayDurSec > 0) {
+      // we already passed in the effective voice length (after slowdown)
+      dur = displayDurSec;
+    } else {
+      // fall back to actual audio duration if needed
+      dur = await ffprobeDuration(voicePath);
+      if (!Number.isFinite(dur) || dur <= 0) dur = 14.0;
     }
+
+    // Evenly distribute timing over the full script
+    return wordsFromScript(script, dur);
   } catch (e) {
-    console.warn('[subtitles] transcribeWords failed:', e?.message || e);
-    words = [];
-  }
-
-  const hasReal =
-    Array.isArray(words) &&
-    words.some((w) => w && String(w.word || '').trim());
-
-  // 2) Fallback: evenly distribute words from the script across display duration
-  if (!hasReal) {
+    console.warn('[subtitles] getSubtitleWords fallback:', e?.message || e);
     const dur =
       Number.isFinite(displayDurSec) && displayDurSec > 0
         ? displayDurSec
         : 14.0;
-    words = wordsFromScript(script, dur);
+    return wordsFromScript(script, dur);
   }
-
-  return words;
 }
 
 
@@ -2232,7 +2228,7 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
       `text='${line}'` +
       `${fontfileArg}` +
       `:fontcolor=white` +
-      `:fontsize=34` +                 // ↓ smaller font (was 38)
+      `:fontsize=32` +                 // ↓ smaller font (was 38)
       `:line_spacing=6` +
       `:borderw=0` +
       `:box=1` +
@@ -2292,7 +2288,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `text='${line}'` +
         `${fontfileArg}` +
         `:fontcolor=white` +
-        `:fontsize=34` + // <-- same size as your current box
+        `:fontsize=32` + // <-- same size as your current box
         `:line_spacing=6` +
         `:borderw=0` +
         `:box=1` +
