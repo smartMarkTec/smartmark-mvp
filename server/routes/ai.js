@@ -580,6 +580,29 @@ function buildAssFromChunks(chunks, {
   return outPath;
 }
 
+// ==== SUBTITLE STYLE (square, translucent box; un-bold; smaller) ====
+function subtitleFilterSquare({
+  fontPath   = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // regular (not bold)
+  fontSize   = 34,   // a bit smaller
+  yPadding   = 42,   // distance from bottom
+  boxBorder  = 18,   // padding around text; keeps text centered inside
+  textAlpha  = 0.98, // white text opacity
+  boxAlpha   = 0.35  // translucent black box
+} = {}) {
+  // square corners are default for drawtext box; no outline; slight shadow
+  return [
+    "format=yuv420p",
+    `drawtext=fontfile='${fontPath}':fontsize=${fontSize}:line_spacing=2:`,
+    `x=(w-text_w)/2:y=h-${yPadding}-text_h:`,
+    `fontcolor=white@${textAlpha}:`,
+    `box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:`,
+    `shadowcolor=black@0.5:shadowx=0:shadowy=0:`,
+    // keep your own dynamic text injection exactly as before; this is a safe placeholder:
+    `text='%{eif\\:n\\:d\\:0}\\ '`
+  ].join("");
+}
+
+
 
 
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
@@ -2420,11 +2443,12 @@ const audioMix =
 
 
 
-  const subs =
+ const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=36,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H66000000,BorderStyle=3,` + // ~40% black box
-  `Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=72'[vsub]`;
+  `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,` +  // ~35% black
+  `Outline=4,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+
 
 
 
@@ -2464,6 +2488,18 @@ const audioMix =
     throw e;
   }
 }
+
+const subFilter = subtitleFilterSquare({
+  fontSize: 34,   // tweak smaller/larger here
+  boxAlpha: 0.35  // 0.25–0.40 looks great
+});
+
+// example: append AFTER your montage step
+const filterComplex = [
+  // ... your existing montage chain that outputs [vFinal] and your audio label e.g. [aMix]
+  `[vFinal]${subFilter}[vOut]`
+].join(";");
+
 
 
 /** Photo slideshow fallback (3–4 segments) with word-synced ASS karaoke */
@@ -2564,11 +2600,14 @@ const audioMix =
 
 
 // --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
+// --- Burn ASS subs: [vcat]subtitles='file.ass' -> [vsub]
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=36,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H77000000,BorderStyle=3,` + 
-  `Outline=2,Shadow=0,Bold=0,Alignment=2,MarginV=70'[vsub]`;       
+  `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H99000000,BorderStyle=3,` +  // ~60% transparent black box
+  `Outline=4,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+    
+  
 
 
 const fc = [concatChain, subs, audioMix].join(';');
