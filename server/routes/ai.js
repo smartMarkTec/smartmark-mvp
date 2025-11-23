@@ -562,7 +562,7 @@ function buildAssFromChunks(chunks, {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HE6000000,0,0,0,0,100,100,0,0,3,3,0,2,40,40,${marginV},1`,
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H55000000,0,0,0,0,100,100,0,0,3,3,0,2,40,40,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -2421,8 +2421,9 @@ const audioMix =
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&HCC000000,BorderStyle=3,` +
+  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +
   `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72,MarginL=40,MarginR=40'[vsub]`;
+
 
 
 
@@ -2564,8 +2565,9 @@ const audioMix =
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&HCC000000,BorderStyle=3,` +
+  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +
   `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72,MarginL=40,MarginR=40'[vsub]`;
+
 
 
     
