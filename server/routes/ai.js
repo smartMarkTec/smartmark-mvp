@@ -526,13 +526,12 @@ function chunkWordsFlexible(words = [], {
   }
   return chunks;
 }
-
 /** Build boxed bottom-center ASS from chunks (keeps punctuation & symbols) */
 function buildAssFromChunks(chunks, {
   W = 960, H = 540,
   styleName = 'SmartSub',
   fontName = 'DejaVu Sans',
-  fontSize = 46,
+  fontSize = 46,      // (kept for compatibility; actual style size set below)
   marginV = 68,
 } = {}) {
   const fmt = (t) => {
@@ -544,7 +543,7 @@ function buildAssFromChunks(chunks, {
     return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
   };
 
-   const header = [
+  const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
     `PlayResX: ${W}`,
@@ -553,14 +552,13 @@ function buildAssFromChunks(chunks, {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // Bold white, black outline + soft black box (BorderStyle=3), bottom-center
-`Style: ${styleName},${fontName},40,&H00FFFFFF,&H00FFFFFF,&H00000000,&H33000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
-
+    // NOTE: font size changed from 40 -> 34 to make subtitles smaller
+    // Primary=white, Outline=none, BackColour=semi-black (see-through box), BorderStyle=3, bottom-center
+    `Style: ${styleName},${fontName},34,&H00FFFFFF,&H00FFFFFF,&H00000000,&H33000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
-
 
   const lines = chunks.map(t => {
     const txt = String(t.text || '').replace(/[{}]/g, ''); // only strip braces (ASS control)
@@ -572,7 +570,6 @@ function buildAssFromChunks(chunks, {
   fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
   return outPath;
 }
-
 
 
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
