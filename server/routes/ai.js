@@ -554,7 +554,7 @@ function buildAssFromChunks(chunks, {
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
     // NOTE: font size changed from 40 -> 34 to make subtitles smaller
     // Primary=white, Outline=none, BackColour=semi-black (see-through box), BorderStyle=3, bottom-center
-    `Style: ${styleName},${fontName},34,&H00FFFFFF,&H00FFFFFF,&H00000000,&H33000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
+    `Style: ${styleName},${fontName},36,&H00FFFFFF,&H00FFFFFF,&H00000000,&H66000000,0,0,0,0,100,100,0,0,3,2,1,2,40,40,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -2410,11 +2410,12 @@ const audioMix =
 
 
 
-   const subs =
+  const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
-  `'Fontname=DejaVu Sans,Fontsize=34,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +
-  `Outline=3,Shadow=1,Bold=1,Alignment=2,MarginV=68'[vsub]`;
+  `'Fontname=DejaVu Sans,Fontsize=36,PrimaryColour=&H00FFFFFF,` +
+  `OutlineColour=&H00000000,BackColour=&H66000000,BorderStyle=3,` + // ~40% black box
+  `Outline=2,Shadow=1,Bold=1,Alignment=2,MarginV=72'[vsub]`;
+
 
 
 
