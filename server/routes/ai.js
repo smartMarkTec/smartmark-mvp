@@ -2421,8 +2421,9 @@ const audioMix =
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H77000000,BorderStyle=3,` +  // glassy, see-through black
-  `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+  `OutlineColour=&H00000000,BackColour=&HCC000000,BorderStyle=3,` +
+  `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72,MarginL=40,MarginR=40'[vsub]`;
+
 
 
 
@@ -2563,8 +2564,9 @@ const audioMix =
 const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&HE6000000,BorderStyle=3,` +  // semi-transparent black box
-  `Outline=3,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
+  `OutlineColour=&H00000000,BackColour=&HCC000000,BorderStyle=3,` +
+  `Outline=0,Shadow=0,Bold=0,Alignment=2,MarginV=72,MarginL=40,MarginR=40'[vsub]`;
+
 
     
   
