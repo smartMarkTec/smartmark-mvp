@@ -562,7 +562,7 @@ function buildAssFromChunks(chunks, {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,0,0,0,0,100,100,0,0,3,4,1,2,40,40,${marginV},1`,
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HE6000000,0,0,0,0,100,100,0,0,3,3,0,2,40,40,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -579,29 +579,6 @@ function buildAssFromChunks(chunks, {
   fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
   return outPath;
 }
-
-// ==== SUBTITLE STYLE (square, translucent box; un-bold; smaller) ====
-function subtitleFilterSquare({
-  fontPath   = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", // regular (not bold)
-  fontSize   = 34,   // a bit smaller
-  yPadding   = 42,   // distance from bottom
-  boxBorder  = 18,   // padding around text; keeps text centered inside
-  textAlpha  = 0.98, // white text opacity
-  boxAlpha   = 0.35  // translucent black box
-} = {}) {
-  // square corners are default for drawtext box; no outline; slight shadow
-  return [
-    "format=yuv420p",
-    `drawtext=fontfile='${fontPath}':fontsize=${fontSize}:line_spacing=2:`,
-    `x=(w-text_w)/2:y=h-${yPadding}-text_h:`,
-    `fontcolor=white@${textAlpha}:`,
-    `box=1:boxcolor=black@${boxAlpha}:boxborderw=${boxBorder}:`,
-    `shadowcolor=black@0.5:shadowx=0:shadowy=0:`,
-    // keep your own dynamic text injection exactly as before; this is a safe placeholder:
-    `text='%{eif\\:n\\:d\\:0}\\ '`
-  ].join("");
-}
-
 
 
 
@@ -2443,17 +2420,11 @@ const audioMix =
 
 
 
-
- const subs =
+const subs =
   `[vcat]subtitles='${escAss}':force_style=` +
   `'Fontname=DejaVu Sans,Fontsize=32,PrimaryColour=&H00FFFFFF,` +
-  `OutlineColour=&H00000000,BackColour=&H55000000,BorderStyle=3,` +  // ~33% black
-  `Outline=4,Shadow=0,Bold=0,Alignment=2,MarginV=84'[vsub]`;
-
-
-
-
-
+  `OutlineColour=&H00000000,BackColour=&HE6000000,BorderStyle=3,` + // translucent box
+  `Outline=3,Shadow=0,Bold=0,Alignment=2,MarginV=72'[vsub]`;
 
 
     const fc = [concatChain, subs, audioMix].join(';');
@@ -2490,11 +2461,6 @@ const audioMix =
     throw e;
   }
 }
-
-const subFilter = subtitleFilterSquare({
-  fontSize: 34,   // tweak smaller/larger here
-  boxAlpha: 0.35  // 0.25–0.40 looks great
-});
 
 // example: append AFTER your montage step
 const filterComplex = [
