@@ -478,12 +478,21 @@ function wordsFromScript(script = '', totalSec = 14.0) {
 }
 
 /** Flexible chunker: fills tiles up to maxChars or maxDur, never drops words */
-function chunkWordsFlexible(words = [], {
-  maxChars = 24,   // visual width limiter
-  maxDur   = 2.4,  // cap each tile’s on-screen time
-} = {}) {
+function chunkWordsFlexible(
+  words = [],
+  {
+    maxChars = 24,   // visual width limiter
+    maxDur   = 2.4,  // cap each tile’s on-screen time
+  } = {}
+) {
   const safe = (Array.isArray(words) ? words : [])
-    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start && String(w.word || '').trim());
+    .filter(
+      (w) =>
+        Number.isFinite(w.start) &&
+        Number.isFinite(w.end) &&
+        w.end > w.start &&
+        String(w.word || '').trim()
+    );
 
   const chunks = [];
   let cur = [];
@@ -492,7 +501,10 @@ function chunkWordsFlexible(words = [], {
 
   const pushChunk = () => {
     if (!cur.length) return;
-    const text = cur.map(w => w.word).join(' ').replace(/\s+([.,!?;:])/g, '$1');
+    const text = cur
+      .map((w) => w.word)
+      .join(' ')
+      .replace(/\s+([.,!?;:])/g, '$1');
     const start = curStart;
     const end = cur[cur.length - 1].end;
     chunks.push({ start, end, text });
@@ -503,14 +515,20 @@ function chunkWordsFlexible(words = [], {
 
   for (let i = 0; i < safe.length; i++) {
     const w = safe[i];
-    const nextDur = (curStart === null ? (w.end - w.start) : (w.end - curStart));
-    const nextChars = (curChars + (curChars ? 1 : 0) + w.word.length); // +1 for space
+    const nextDur =
+      curStart === null ? w.end - w.start : w.end - curStart;
+    const nextChars =
+      curChars + (curChars ? 1 : 0) + w.word.length; // +1 space
 
     // If adding this word would overflow visual/duration constraints, close current tile first
-    if (cur.length && (nextChars > maxChars || nextDur > maxDur)) pushChunk();
+    if (cur.length && (nextChars > maxChars || nextDur > maxDur)) {
+      pushChunk();
+    }
 
     // Start new tile if empty
-    if (!cur.length) { curStart = w.start; }
+    if (!cur.length) {
+      curStart = w.start;
+    }
 
     cur.push(w);
     curChars = (curChars ? curChars + 1 : 0) + w.word.length; // +1 space
@@ -518,14 +536,35 @@ function chunkWordsFlexible(words = [], {
 
   if (cur.length) pushChunk();
 
-  // Make all chunks back-to-back with a tiny overlap so there are zero gaps
+  // === TIMING CLEANUP ===
+  // 1) Remove overlaps between tiles
   for (let i = 0; i < chunks.length - 1; i++) {
-    const a = chunks[i], b = chunks[i + 1];
-    if (b.start > a.end) a.end = Math.max(a.end, b.start - 0.01);
-    if (b.start < a.start) b.start = a.start + 0.01;
+    const a = chunks[i];
+    const b = chunks[i + 1];
+
+    // if next starts before current ends, split the difference
+    if (b.start < a.end) {
+      const mid = (a.end + b.start) / 2;
+      const newEnd = Math.max(a.start + 0.05, mid - 0.02);
+      const newStartNext = newEnd + 0.02;
+      a.end = newEnd;
+      b.start = newStartNext;
+    }
   }
+
+  // 2) Avoid big gaps (> ~0.08s) by slightly stretching previous tile
+  for (let i = 0; i < chunks.length - 1; i++) {
+    const a = chunks[i];
+    const b = chunks[i + 1];
+    if (b.start > a.end + 0.08) {
+      const newEnd = b.start - 0.02;
+      if (newEnd > a.start) a.end = newEnd;
+    }
+  }
+
   return chunks;
 }
+
 /** Build boxed bottom-center ASS from chunks (keeps punctuation & symbols)
  *  – smaller font, unbold text
  *  – translucent black box (&H77000000)
@@ -2220,7 +2259,11 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
   const parts = [];
 
   for (let i = 0; i < sentences.length; i++) {
-    const line = sentences[i].replace(/['\\:]/g, '').trim();
+        let line = sentences[i].trim();
+    line = line.replace(/[']/g, '');
+    line = line.replace(/[\r\n]/g, ' ');
+    line = line.replace(/%/g, '\\%');
+
     if (!line) continue;
 
     const start = (i * chunk).toFixed(2);
@@ -2293,12 +2336,18 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
 
   for (let i = 0; i < tiles.length; i++) {
     const t = tiles[i];
-    const line = String(t.text || '').replace(/['\\:]/g, '').trim();
+
+    // Clean + escape text for drawtext
+    let line = String(t.text || '').trim();
+    line = line.replace(/[']/g, '');          // strip single quotes
+    line = line.replace(/[\r\n]/g, ' ');      // no newlines
+    line = line.replace(/%/g, '\\%');         // ESCAPE % so "20%" renders
+
     if (!line) continue;
 
-    // NO look-behind / look-ahead padding – use the exact tile times
-    const start = Math.max(0, t.start);
-    const end   = Math.max(start + 0.10, t.end); // tiny min duration so nothing blinks
+    // Show just a tiny bit earlier, and don't linger as long
+    const start = Math.max(0, t.start - 0.12).toFixed(2);
+    const end   = Math.max(start, t.end + 0.04).toFixed(2);
 
     const outL = i === tiles.length - 1 ? '[vsub]' : `[v${i + 200}]`;
 
@@ -2310,7 +2359,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `text='${line}'` +
         `${fontfileArg}` +
         `:fontcolor=white` +
-        `:fontsize=34` +           // <= font size 34 as you asked
+        `:fontsize=34` +
         `:line_spacing=6` +
         `:borderw=0` +
         `:box=1` +
@@ -2321,12 +2370,13 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `:shadowcolor=black@0.9` +
         `:shadowx=0` +
         `:shadowy=0` +
-        `:enable='between(t,${start.toFixed(2)},${end.toFixed(2)})'` +
+        `:enable='between(t,${start},${end})'` +
         outL
     );
 
     inL = outL;
   }
+
 
   if (!parts.length) {
     return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
