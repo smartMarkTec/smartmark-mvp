@@ -721,6 +721,36 @@ function stretchWordTimings(words = [], factor = 1.0) {
   }));
 }
 
+// Build subtitle word timings from audio (Whisper) + slowdown factor
+async function getSubtitleWords(voicePath, script, displayDurSec, atempo = 1.0) {
+  let words = [];
+  try {
+    // 1) Transcribe actual TTS audio to get per-word timings
+    words = await transcribeWords(voicePath);
+    if (atempo && atempo !== 1.0) {
+      // atempo < 1.0 slows audio, so we stretch timings so subs still sync
+      words = stretchWordTimings(words, atempo);
+    }
+  } catch (e) {
+    console.warn('[subtitles] transcribeWords failed:', e?.message || e);
+    words = [];
+  }
+
+  const hasReal =
+    Array.isArray(words) &&
+    words.some((w) => w && String(w.word || '').trim());
+
+  // 2) Fallback: evenly distribute words from the script across display duration
+  if (!hasReal) {
+    const dur =
+      Number.isFinite(displayDurSec) && displayDurSec > 0
+        ? displayDurSec
+        : 14.0;
+    words = wordsFromScript(script, dur);
+  }
+
+  return words;
+}
 
 
 /**
@@ -2223,6 +2253,69 @@ function buildTimedDrawtextFilter(script, totalSec = 18, inLabel = '[v0]', W = 9
   return { filter: parts.join(';'), out: '[vsub]' };
 }
 
+// Build black-box drawtext subtitles using word timings (chunks from words)
+function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540) {
+  const tiles = chunkWordsFlexible(words, {
+    maxChars: 26,
+    maxDur: 2.6,
+  });
+
+  if (!tiles.length) {
+    return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
+  }
+
+  const fontfile = pickFontFile();
+  const fontfileArg = fontfile
+    ? `:fontfile=${fontfile.replace(/:/g, '\\:')}`
+    : '';
+
+  const pad = 28;
+  const floorY = Math.max(90, Math.round(H * 0.18));
+
+  let inL = inLabel;
+  const parts = [];
+
+  for (let i = 0; i < tiles.length; i++) {
+    const t = tiles[i];
+    const line = String(t.text || '').replace(/['\\:]/g, '').trim();
+    if (!line) continue;
+
+    const start = Math.max(0, t.start - 0.03).toFixed(2);
+    const end = Math.max(start, t.end + 0.08).toFixed(2);
+    const outL = i === tiles.length - 1 ? '[vsub]' : `[v${i + 200}]`;
+
+    const xExpr = `max(${pad}\\, min((w-text_w)/2\\, w-${pad}-text_w))`;
+    const yExpr = `min(h-${floorY}\\, h-text_h-36)`;
+
+    parts.push(
+      `${inL}drawtext=` +
+        `text='${line}'` +
+        `${fontfileArg}` +
+        `:fontcolor=white` +
+        `:fontsize=34` + // <-- same size as your current box
+        `:line_spacing=6` +
+        `:borderw=0` +
+        `:box=1` +
+        `:boxcolor=black@0.70` +
+        `:boxborderw=12` +
+        `:x=${xExpr}` +
+        `:y=${yExpr}` +
+        `:shadowcolor=black@0.9` +
+        `:shadowx=0` +
+        `:shadowy=0` +
+        `:enable='between(t,${start},${end})'` +
+        outL
+    );
+
+    inL = outL;
+  }
+
+  if (!parts.length) {
+    return { filter: `${inLabel}format=yuv420p[vsub]`, out: '[vsub]' };
+  }
+  return { filter: parts.join(';'), out: '[vsub]' };
+}
+
 
 
 
@@ -2331,8 +2424,17 @@ async function makeVideoVariant({
     const ATEMPO =
       Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
 
+    // effective VO duration after slowdown (atempo < 1 => longer)
     const effVoice = voiceDur / ATEMPO;
-    OUTLEN = Math.max(15, Math.min(20, effVoice + 2)); // video a bit longer than VO
+    OUTLEN = Math.max(15, Math.min(20, effVoice + 2));
+
+    // ---------- 1b) Build subtitle word timings (synced to audio) ----------
+    const subtitleWords = await getSubtitleWords(
+      voicePath,
+      script,
+      effVoice,
+      ATEMPO
+    );
 
     // ---------- 2) Build 3–4 normalized segments ----------
     const plan = buildVirtualPlan(clips || [], variant);
@@ -2416,10 +2518,9 @@ async function makeVideoVariant({
         ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
-    // ---------- 5) Simple black-bar subtitles (like your screenshot) ----------
-    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
-      script,
-      OUTLEN,
+    // ---------- 5) Subtitles: SAME black box, but now word-timed ----------
+    const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
+      subtitleWords,
       '[vcat]',
       W,
       H
@@ -2508,6 +2609,14 @@ async function makeSlideshowVariantFromPhotos({
     const effVoice = voiceDur / ATEMPO;
     OUTLEN = Math.max(18, Math.min(20, effVoice + 2));
 
+    // ---------- 1b) Subtitle words (synced to audio) ----------
+    const subtitleWords = await getSubtitleWords(
+      voicePath,
+      script,
+      effVoice,
+      ATEMPO
+    );
+
     // ---------- 2) Choose 3–4 photos ----------
     const need = Math.max(3, Math.min(4, photos.length || 3));
     const chosen = [];
@@ -2587,10 +2696,9 @@ async function makeSlideshowVariantFromPhotos({
         ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
         : `${voiceFilt};[vo]anull[aout]`;
 
-    // ---------- 5) Simple black-bar subtitles ----------
-    const { filter: subFilter, out: vOut } = buildTimedDrawtextFilter(
-      script,
-      OUTLEN,
+    // ---------- 5) Subtitles: same black box, word-timed ----------
+    const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
+      subtitleWords,
       '[vcat]',
       W,
       H
