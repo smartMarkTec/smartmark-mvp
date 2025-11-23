@@ -621,6 +621,9 @@ function buildAssFromChunks(chunks, {
 
 
 
+
+
+
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
 /** Returns [{start:number, end:number, word:string}, ...] */
 async function transcribeWords(voicePath) {
@@ -2354,7 +2357,7 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
         `text='${line}'` +
         `${fontfileArg}` +
         `:fontcolor=white` +
-        `:fontsize=24` +          // font size = 24 (as you wanted)
+        `:fontsize=18` +          // font size = 24 (as you wanted)
         `:line_spacing=6` +
         `:borderw=0` +
         `:box=1` +
