@@ -526,13 +526,17 @@ function chunkWordsFlexible(words = [], {
   }
   return chunks;
 }
-/** Build boxed bottom-center ASS from chunks (keeps punctuation & symbols) */
+/** Build boxed bottom-center ASS from chunks (keeps punctuation & symbols)
+ *  – smaller font, unbold text
+ *  – translucent black box (&H77000000)
+ *  – extra padding so text isn’t stuffed
+ */
 function buildAssFromChunks(chunks, {
   W = 960, H = 540,
   styleName = 'SmartSub',
   fontName = 'DejaVu Sans',
-  fontSize = 46,      // (kept for compatibility; actual style size set below)
-  marginV = 68,
+  fontSize = 34,       // ↓ smaller than before (was ~40–42)
+  marginV = 76,        // a hair lower from bottom
 } = {}) {
   const fmt = (t) => {
     if (!Number.isFinite(t) || t < 0) t = 0;
@@ -543,6 +547,12 @@ function buildAssFromChunks(chunks, {
     return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
   };
 
+  // ASS header:
+  //  - PrimaryColour = white
+  //  - BackColour = &H77000000  (77 alpha → translucent black)
+  //  - BorderStyle = 3 (boxed)
+  //  - Outline = 4 gives comfy padding inside the box
+  //  - Bold = 0 (unbold)
   const header = [
     '[Script Info]',
     'ScriptType: v4.00+',
@@ -552,17 +562,16 @@ function buildAssFromChunks(chunks, {
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // NOTE: font size changed from 40 -> 34 to make subtitles smaller
-    // Primary=white, Outline=none, BackColour=semi-black (see-through box), BorderStyle=3, bottom-center
-    `Style: ${styleName},${fontName},36,&H00FFFFFF,&H00FFFFFF,&H00000000,&H66000000,0,0,0,0,100,100,0,0,3,2,1,2,40,40,${marginV},1`,
+    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,0,0,0,0,100,100,0,0,3,4,1,2,40,40,${marginV},1`,
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
   ];
 
-  const lines = chunks.map(t => {
-    const txt = String(t.text || '').replace(/[{}]/g, ''); // only strip braces (ASS control)
-    const assText = `{\\an2\\q2\\fsp2}${txt}`;
+  const lines = (chunks || []).map(t => {
+    const txt = String(t.text || '').replace(/[{}]/g, ''); // strip ASS braces
+    // \b0 = make sure it's not bold; \an2 bottom-center; \q2 smart line wrapping
+    const assText = `{\\an2\\q2\\b0}${txt}`;
     return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
   });
 
@@ -570,6 +579,7 @@ function buildAssFromChunks(chunks, {
   fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
   return outPath;
 }
+
 
 
 /* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
