@@ -231,6 +231,44 @@ function Dots({ count, active, onClick }) {
   );
 }
 
+/* --- Abort-safe fetch helpers --- */
+const _controllers = new Map(); // key -> AbortController
+
+function abortKey(key) {
+  const c = _controllers.get(key);
+  if (c) { try { c.abort(); } catch {} }
+  _controllers.delete(key);
+}
+
+function newControllerFor(key) {
+  abortKey(key); // cancel any previous of same kind
+  const c = new AbortController();
+  _controllers.set(key, c);
+  return c;
+}
+
+async function fetchJSON(url, { key = 'GEN', timeoutMs = 15000, opts = {} } = {}) {
+  const c = newControllerFor(key);
+  const t = setTimeout(() => { try { c.abort(); } catch {} }, timeoutMs);
+  try {
+    const res = await fetch(url, { signal: c.signal, ...opts });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json().catch(() => ({}));
+  } finally {
+    clearTimeout(t);
+    // IMPORTANT: keep controller so later abortKey(key) cancels polling if needed
+  }
+}
+
+/* Call when unmounting or when starting a brand new run */
+function abortAllVideoFetches() {
+  for (const [key, c] of _controllers.entries()) {
+    try { c.abort(); } catch {}
+    _controllers.delete(key);
+  }
+}
+
+
 /* ===== helpers ===== */
 // Give the image endpoint enough time to wake the server, fetch stock, and render
 const CONTROLLER_TIMEOUT_MS = 30000;
@@ -624,26 +662,51 @@ export default function FormPage() {
     }
   }
 
+  /* --- Warm a video URL so <video> starts instantly --- */
+async function headRangeWarm(label, url) {
+  if (!url) return false;
+  try {
+    // HEAD: confirm it exists without downloading payload
+    await fetch(url, { method: "HEAD", signal: newControllerFor(`HEAD_${label}`).signal });
+
+    // Small Range GET: fetch first ~1KB so browser can parse moov atom fast
+    const r = await fetch(url, {
+      method: "GET",
+      headers: { Range: "bytes=0-1023" },
+      signal: newControllerFor(`RANGE_${label}`).signal,
+    });
+    if (!r.ok) throw new Error(`RANGE ${r.status}`);
+    return true;
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      console.debug(`headRangeWarm(${label}) aborted due to a newer request`);
+      return false;
+    }
+    console.warn(`headRangeWarm(${label}) failed:`, e?.message || e);
+    return false;
+  }
+}
+
+
 /* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
 
-async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 60000) {
+async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 120000) {
   try {
     await warmBackend();
 
-    const res = await fetchWithTimeout(
-      `${API_BASE}/generate-video-ad`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers?.url || "",
-          answers,
-          regenerateToken: token,
-          abVariant: variant, // harmless hint for backend; ignored if not used
-        }),
-      },
-      timeoutMs // keep per-render under ~60s
-    );
+    // Use our abort map so newer runs don’t kill unrelated steps
+    const triggerKey = `TRIGGER_${variant}_${token}`;
+    const res = await fetch(`${API_BASE}/generate-video-ad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: answers?.url || "",
+        answers,
+        regenerateToken: token,
+        abVariant: variant,
+      }),
+      signal: newControllerFor(triggerKey).signal,
+    });
 
     const data = await safeJson(res);
 
@@ -653,16 +716,24 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
 
     const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
 
+    // 🔥 Warm the MP4 so <video> can mount without “spinning”
+    await headRangeWarm(variant, finalUrl);
+
     return {
       url: finalUrl,
       script: data.script || data.narration || (result?.body ? `Narration: ${result.body}` : ""),
       fbVideoId: data.fbVideoId || null,
     };
   } catch (e) {
+    if (e?.name === "AbortError") {
+      console.debug(`fetchVideoOnce(${variant}) aborted (superseded)`);
+      return { url: "", script: "", fbVideoId: null };
+    }
     console.error(`fetchVideoOnce(${variant}) failed:`, e);
     return { url: "", script: "", fbVideoId: null };
   }
 }
+
 
 async function fetchVideoPair(token, answers, result, BACKEND_URL) {
   // run in parallel to stay under a minute end-to-end
@@ -780,11 +851,21 @@ async function fetchVideoPair(token, answers, result, BACKEND_URL) {
             setImageUrl(imgs[0] || "");
 
             // 3) videos (A/B in parallel: waits for two finished ~18–20s ads)
+abortAllVideoFetches(); // cancel stale polls/warms from previous attempts
+
 const vids = await fetchVideoPair(token, answers, data, BACKEND_URL);
+
+// Proactively warm each URL so UI mounts fast
+await Promise.all([
+  headRangeWarm("A", vids[0]?.url),
+  headRangeWarm("B", vids[1]?.url),
+]);
+
 setVideoItems(vids);
 setActiveVideo(0);
 setVideoUrl(vids[0]?.url || "");
 setVideoScript(vids[0]?.script || "");
+
 
 
             setChatHistory((ch) => [
@@ -868,6 +949,14 @@ setVideoScript(vids[0]?.script || "");
     }
   }
 
+  // Cancel any in-flight fetches when component unmounts (or route changes)
+useEffect(() => {
+  return () => {
+    abortAllVideoFetches();
+  };
+}, []);
+
+
   /* Regenerations (sequential with warmup/backoff) */
   async function handleRegenerateImage() {
     setImageLoading(true);
@@ -882,8 +971,11 @@ setVideoScript(vids[0]?.script || "");
     }
   }
 
-  async function handleRegenerateVideo() {
+async function handleRegenerateVideo() {
   setVideoLoading(true);
+
+  // Kill any in-flight heads/range/trigger from earlier runs
+  abortAllVideoFetches();
 
   // Clear old videos from UI while new ones are cooking
   setVideoItems([]);
@@ -892,7 +984,15 @@ setVideoScript(vids[0]?.script || "");
 
   try {
     await warmBackend();
-    const vids = await fetchVideoPair(getRandomString(), answers, result, BACKEND_URL);
+    const token = getRandomString();
+
+    const vids = await fetchVideoPair(token, answers, result, BACKEND_URL);
+
+    // Warm both candidates
+    await Promise.all([
+      headRangeWarm("A", vids[0]?.url),
+      headRangeWarm("B", vids[1]?.url),
+    ]);
 
     setVideoItems(vids);
     setActiveVideo(0);
@@ -902,9 +1002,6 @@ setVideoScript(vids[0]?.script || "");
     setVideoLoading(false);
   }
 }
-
-
-
 
 
   /* ---------------------- Render ---------------------- */
