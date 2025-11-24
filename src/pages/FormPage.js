@@ -118,7 +118,7 @@ function ImageModal({ open, imageUrl, onClose }) {
           <FaTimes size={20} />
         </button>
         <img
-          src={imageUrl ? (imageUrl.startsWith("http") ? imageUrl : BACKEND_URL + imageUrl) : ""}
+          src={toAbsoluteMedia(imageUrl)}
           alt="Full Ad"
           style={{
             display: "block",
@@ -298,8 +298,6 @@ function abortAllVideoFetches() {
   }
 }
 
-
-
 /* ===== helpers ===== */
 // Give the image endpoint enough time to wake the server, fetch stock, and render
 const CONTROLLER_TIMEOUT_MS = 30000;
@@ -405,6 +403,204 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
+/* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
+function toAbsoluteMedia(u) {
+  if (!u) return "";
+  const s = String(u).trim();
+  if (/^https?:\/\//i.test(s)) return s;        // already absolute
+  if (s.startsWith("/")) return s;               // same-origin absolute path
+  if (s.startsWith("api/")) return "/" + s;      // "api/media/x" -> "/api/media/x"
+  if (s.startsWith("media/")) return "/api/" + s;// "media/x" -> "/api/media/x"
+  return s; // last resort
+}
+
+/* --- headRangeWarm: self-contained, no shared controllers --- */
+async function headRangeWarm(label, url) {
+  if (!url) return false;
+  const finalUrl = toAbsoluteMedia(url);
+  try {
+    const c1 = new AbortController();
+    await fetch(finalUrl, { method: "HEAD", signal: c1.signal });
+
+    const c2 = new AbortController();
+    const r = await fetch(finalUrl, {
+      method: "GET",
+      headers: { Range: "bytes=0-1023" },
+      signal: c2.signal,
+    });
+    if (!r.ok) throw new Error(`RANGE ${r.status}`);
+    return true;
+  } catch (e) {
+    console.warn(`headRangeWarm(${label}) failed:`, e?.message || e);
+    return false;
+  }
+}
+
+/* ---------- IMAGE helpers (prefer baked variations) ---------- */
+const parseImageResults = (data) => {
+  const out = [];
+
+  // Prefer variations (server returns TWO baked images)
+  if (Array.isArray(data?.imageVariations) && data.imageVariations.length) {
+    for (const v of data.imageVariations.slice(0, 2)) {
+      const u = v?.absoluteUrl || v?.url || v?.filename;
+      if (u) out.push(toAbsoluteMedia(u.startsWith("/api/media/") || /^https?:\/\//.test(u) ? u : `/api/media/${u}`));
+    }
+  }
+
+  // Fallback single fields if needed
+  if (out.length === 0) {
+    const u = data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename;
+    if (u) out.push(toAbsoluteMedia(u.startsWith("/api/") || /^https?:\/\//.test(u) ? u : `/api/media/${u}`));
+  }
+
+  // Dedup + clamp to two
+  return Array.from(new Set(out)).slice(0, 2);
+};
+
+async function fetchImagesOnce(token) {
+  const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
+  const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
+  try {
+    await warmBackend(); // nudge the server awake
+    const data = await fetchJsonWithRetry(
+      `${API_BASE}/generate-image-from-prompt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, regenerateToken: token })
+      },
+      { tries: 3, warm: true, timeoutMs: 35000 } // a bit more forgiving
+    );
+    const urls = parseImageResults(data);
+    if (urls.length === 1) urls.push(fallbackB);
+    if (urls.length === 0) return [fallbackA, fallbackB];
+    return urls;
+  } catch (e) {
+    console.warn("image fetch failed:", e?.message || e);
+    // Show *two* placeholders so carousel still has A/B
+    return [fallbackA, fallbackB];
+  }
+}
+
+/* ===== poll latest video (fallback) ===== */
+async function pollLatestVideo({ tries = 6, delayMs = 1000 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const latest = await fetchJsonWithRetry(
+        `${API_BASE}/generated-latest`,
+        { method: "GET" },
+        { tries: 1, warm: false, timeoutMs: 6000 }
+      );
+
+      let u = latest?.absoluteUrl || latest?.url || (latest?.filename ? `/api/media/${latest.filename}` : "");
+      if (u && /\.mp4(\?|$)/i.test(u)) {
+        const finalUrl = toAbsoluteMedia(u);
+        try { await headRangeWarm("LATEST", finalUrl); } catch {}
+        return {
+          url: finalUrl,
+          script: latest?.script || "",
+          fbVideoId: latest?.fbVideoId || null,
+        };
+      }
+    } catch {
+      // ignore and retry
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+/* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
+async function fetchVideoOnce(
+  token,
+  answers,
+  result,
+  BACKEND_URL_UNUSED,
+  variant = "A",
+  timeoutMs = 26000
+) {
+  const triggerKey = `VIDEO_${variant}_${token}`;
+
+  try {
+    await warmBackend();
+
+    const data = await fetchJsonOnceWithAbortKey(
+      `${API_BASE}/generate-video-ad`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers?.url || "",
+          answers,
+          regenerateToken: token,
+          abVariant: variant,
+        }),
+      },
+      { key: triggerKey, timeoutMs }
+    );
+
+    // Normalize URL from response
+    let u = data?.url || data?.videoUrl || data?.absoluteUrl;
+    if (!u && data?.filename) u = `/api/media/${data.filename}`;
+    if (!u) throw new Error("No video URL in response");
+
+    const finalUrl = toAbsoluteMedia(u);
+
+    // Warm the returned MP4 to avoid “produced but not visible”
+    try { await headRangeWarm(variant, finalUrl); } catch {}
+
+    return {
+      url: finalUrl,
+      script:
+        data?.script ||
+        data?.narration ||
+        (result?.body ? `Narration: ${result.body}` : ""),
+      fbVideoId: data?.fbVideoId || null,
+    };
+  } catch (e) {
+    // Try polling the latest generated asset in case POST finished but response/edge lagged
+    try {
+      const recovered = await pollLatestVideo({ tries: 6, delayMs: 1000 });
+      if (recovered?.url) return recovered;
+    } catch {}
+    if (e?.name === "AbortError") {
+      console.debug(`fetchVideoOnce(${variant}) aborted (superseded)`);
+    } else {
+      console.error(`fetchVideoOnce(${variant}) failed:`, e);
+    }
+    return { url: "", script: "", fbVideoId: null };
+  }
+}
+
+async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
+  // run in parallel to stay under a minute end-to-end
+  const [a, b] = await Promise.allSettled([
+    fetchVideoOnce(`${token}-A`, answers, result, null, "A"),
+    fetchVideoOnce(`${token}-B`, answers, result, null, "B"),
+  ]);
+
+  const vids = [];
+  const pushIfGood = (x) => {
+    if (x && x.url) vids.push(x);
+  };
+
+  if (a.status === "fulfilled") pushIfGood(a.value);
+  if (b.status === "fulfilled") pushIfGood(b.value);
+
+  // de-dup by URL just in case
+  const dedup = [];
+  const seen = new Set();
+  for (const v of vids) {
+    if (!seen.has(v.url)) {
+      seen.add(v.url);
+      dedup.push(v);
+    }
+  }
+
+  return dedup.slice(0, 2);
+}
+
 /* ========================= Main Component ========================= */
 export default function FormPage() {
   const navigate = useNavigate();
@@ -452,7 +648,8 @@ export default function FormPage() {
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
 
-  const abs = (u) => (/^https?:\/\//.test(u) ? u : (BACKEND_URL + u));
+  /* Use the robust absolute converter everywhere */
+  const abs = toAbsoluteMedia;
 
   /* Scroll chat to bottom */
   useEffect(() => {
@@ -641,365 +838,136 @@ export default function FormPage() {
     if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
-/* ---------- IMAGE helpers (always prefer composited variations) ---------- */
-const normalizeUrl = (u) => {
-  if (!u) return "";
-  return /^https?:\/\//.test(u) ? u : (BACKEND_URL + u);
-};
+  /* ---- Chat flow ---- */
+  async function handleUserInput(e) {
+    e.preventDefault();
+    if (loading) return;
+    const value = (input || "").trim();
+    if (!value) return;
 
-const parseImageResults = (data) => {
-  const out = [];
+    setChatHistory((ch) => [...ch, { from: "user", text: value }]);
+    setInput("");
 
-  // Prefer variations (server returns TWO baked images)
-  if (Array.isArray(data?.imageVariations) && data.imageVariations.length) {
-    for (const v of data.imageVariations.slice(0, 2)) {
-      const u = normalizeUrl(v?.absoluteUrl || v?.url);
-      if (u) out.push(u);
-    }
-  }
-
-  // Fallback single fields if needed
-  if (out.length === 0) {
-    const u = normalizeUrl(data?.absoluteImageUrl || data?.imageUrl);
-    if (u) out.push(u);
-  }
-
-  // Dedup + clamp to two
-  return Array.from(new Set(out)).slice(0, 2);
-};
-
-/* ===== ADD THIS: pollLatestVideo helper ===== */
-async function pollLatestVideo({ tries = 6, delayMs = 1000 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const latest = await fetchJsonWithRetry(
-        `${API_BASE}/generated-latest`,
-        { method: "GET" },
-        { tries: 1, warm: false, timeoutMs: 6000 }
-      );
-
-      // normalize to a usable MP4 URL
-      let u =
-        latest?.absoluteUrl ||
-        latest?.url ||
-        (latest?.filename ? `/api/media/${latest.filename}` : "");
-
-      if (u && /\.mp4(\?|$)/i.test(u)) {
-        const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
-        try { await headRangeWarm("LATEST", finalUrl); } catch {}
-        return {
-          url: finalUrl,
-          script: latest?.script || "",
-          fbVideoId: latest?.fbVideoId || null,
-        };
+    if (awaitingReady) {
+      if (
+        /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
+          value
+        )
+      ) {
+        setAwaitingReady(false);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: CONVO_QUESTIONS[0].question },
+        ]);
+        setStep(0);
+        return;
+      } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
+        ]);
+        return;
+      } else {
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "Please reply 'yes' when you're ready to start!" },
+        ]);
+        return;
       }
-    } catch {
-      // ignore and retry
     }
-    await new Promise(r => setTimeout(r, delayMs));
-  }
-  return null;
-}
 
+    const currentQ = CONVO_QUESTIONS[step];
 
-async function fetchImagesOnce(token) {
-  const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
-  const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
-  try {
-    await warmBackend(); // nudge the server awake
-    const data = await fetchJsonWithRetry(
-      `${API_BASE}/generate-image-from-prompt`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, regenerateToken: token })
-      },
-      { tries: 2, warm: true, timeoutMs: 20000 } // tighter for < 1 min overall
-    );
-    const urls = parseImageResults(data);
-    if (urls.length === 1) urls.push(fallbackB);
-    if (urls.length === 0) return [fallbackA, fallbackB];
-    return urls;
-  } catch (e) {
-    console.warn("image fetch failed:", e.message);
-    // Show *two* placeholders so carousel still has A/B
-    return [fallbackA, fallbackB];
-  }
-}
+    if (step >= CONVO_QUESTIONS.length) {
+      if (!hasGenerated && isGenerateTrigger(value)) {
+        setLoading(true);
+        setGenerating(true);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "AI generating..." },
+        ]);
 
-/* --- Warm a video URL so <video> starts instantly --- */
-async function headRangeWarm(label, url) {
-  if (!url) return false;
-  try {
-    // HEAD: confirm it exists without downloading payload
-    await fetch(url, { method: "HEAD", signal: newControllerFor(`HEAD_${label}`).signal });
+        // inside handleUserInput, where you currently start generation:
+        setTimeout(async () => {
+          const token = getRandomString();
 
-    // Small Range GET: fetch first ~1KB so browser can parse moov atom fast
-    const r = await fetch(url, {
-      method: "GET",
-      headers: { Range: "bytes=0-1023" },
-      signal: newControllerFor(`RANGE_${label}`).signal,
-    });
-    if (!r.ok) throw new Error(`RANGE ${r.status}`);
-    return true;
-  } catch (e) {
-    if (e?.name === "AbortError") {
-      console.debug(`headRangeWarm(${label}) aborted due to a newer request`);
-      return false;
-    }
-    console.warn(`headRangeWarm(${label}) failed:`, e?.message || e);
-    return false;
-  }
-}
+          // clear old previews
+          setVideoItems([]); setVideoUrl(""); setVideoScript("");
+          setImageUrls([]); setImageUrl("");
 
-
-/* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
-
-async function fetchVideoOnce(
-  token,
-  answers,
-  result,
-  BACKEND_URL,
-  variant = "A",
-  timeoutMs = 26000
-) {
-  // this key lets abortAllVideoFetches() actually kill in-flight video jobs
-  const triggerKey = `VIDEO_${variant}_${token}`;
-
-  try {
-    await warmBackend();
-
-    const data = await fetchJsonOnceWithAbortKey(
-      `${API_BASE}/generate-video-ad`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers?.url || "",
-          answers,
-          regenerateToken: token,
-          abVariant: variant,
-        }),
-      },
-      { key: triggerKey, timeoutMs }
-    );
-
-    // Normalize URL from response
-    let u = data?.url || data?.videoUrl || data?.absoluteUrl;
-    if (!u && data?.filename) u = `/api/media/${data.filename}`;
-    if (!u) throw new Error("No video URL in response");
-
-    const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
-
-    // Warm the returned MP4 to avoid “produced but not visible”
-    try { await headRangeWarm(variant, finalUrl); } catch {}
-
-    return {
-      url: finalUrl,
-      script:
-        data?.script ||
-        data?.narration ||
-        (result?.body ? `Narration: ${result.body}` : ""),
-      fbVideoId: data?.fbVideoId || null,
-    };
-  } catch (e) {
-    // If the POST failed (e.g., 502), try a last-chance recovery:
-    if (e?.name !== "AbortError") {
-      try {
-        const latest = await fetchJsonWithRetry(
-          `${API_BASE}/generated-latest`,
-          { method: "GET" },
-          { tries: 1, warm: false, timeoutMs: 8000 }
-        );
-
-        let u2 = latest?.absoluteUrl || latest?.url;
-        if (!u2 && latest?.filename) u2 = `/api/media/${latest.filename}`;
-
-        if (u2) {
-          const finalUrl2 = /^https?:\/\//.test(u2) ? u2 : BACKEND_URL + u2;
           try {
-            await headRangeWarm(`${variant}_LATEST`, finalUrl2);
-          } catch {}
-          return {
-            url: finalUrl2,
-            script: latest?.script || "",
-            fbVideoId: latest?.fbVideoId || null,
-          };
-        }
-      } catch {
-        // ignore; fall through to failure
+            await warmBackend();
+            abortAllVideoFetches();
+
+            // Kick off all three in parallel, but DO NOT await them together.
+            const assetsPromise = fetchJsonWithRetry(
+              `${API_BASE}/generate-campaign-assets`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ answers }),
+              },
+              { tries: 1, timeoutMs: 15000 } // copy is fast
+            ).catch(() => ({}));
+
+            const imagesPromise = (async () => {
+              const imgs = await fetchImagesOnce(token);
+              setImageUrls(imgs || []);
+              setActiveImage(0);
+              setImageUrl((imgs && imgs[0]) || "");
+            })();
+
+            const videosPromise = (async () => {
+              const vs = await fetchVideoPair(token, answers, null, null);
+              // Warm what we got (if anything)
+              await Promise.all([
+                headRangeWarm("A", vs[0]?.url),
+                headRangeWarm("B", vs[1]?.url),
+              ]);
+              setVideoItems(vs || []);
+              setActiveVideo(0);
+              setVideoUrl(vs[0]?.url || "");
+              setVideoScript(vs[0]?.script || "");
+            })();
+
+            // Copy can land whenever it’s ready (do not block visuals)
+            const data = await assetsPromise;
+            setResult({
+              headline: data?.headline || "",
+              body: data?.body || "",
+              image_overlay_text: data?.image_overlay_text || "",
+            });
+
+            // Let images/videos continue in background; when both done, mark success.
+            await Promise.allSettled([imagesPromise, videosPromise]);
+
+            setChatHistory((ch) => [
+              ...ch,
+              { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
+            ]);
+            setHasGenerated(true);
+          } catch (err) {
+            console.error("generation failed:", err);
+            setError("Generation failed (server cold or busy). Try again in a few seconds.");
+          } finally {
+            setGenerating(false);
+            setLoading(false);
+          }
+        }, 120);
+
+        return;
       }
-    }
 
-    if (e?.name === "AbortError") {
-      console.debug(`fetchVideoOnce(${variant}) aborted (superseded)`);
-    } else {
-      console.error(`fetchVideoOnce(${variant}) failed:`, e);
-    }
-    return { url: "", script: "", fbVideoId: null };
-  }
-}
-
-async function fetchVideoPair(token, answers, result, BACKEND_URL) {
-  // run in parallel to stay under a minute end-to-end
-  const [a, b] = await Promise.allSettled([
-    fetchVideoOnce(`${token}-A`, answers, result, BACKEND_URL, "A"),
-    fetchVideoOnce(`${token}-B`, answers, result, BACKEND_URL, "B"),
-  ]);
-
-  const vids = [];
-  const pushIfGood = (x) => {
-    if (x && x.url) vids.push(x);
-  };
-
-  if (a.status === "fulfilled") pushIfGood(a.value);
-  if (b.status === "fulfilled") pushIfGood(b.value);
-
-  // de-dup by URL just in case
-  const dedup = [];
-  const seen = new Set();
-  for (const v of vids) {
-    if (!seen.has(v.url)) {
-      seen.add(v.url);
-      dedup.push(v);
-    }
-  }
-
-  return dedup.slice(0, 2);
-}
-
-
-/* ---- Chat flow ---- */
-async function handleUserInput(e) {
-  e.preventDefault();
-  if (loading) return;
-  const value = (input || "").trim();
-  if (!value) return;
-
-  setChatHistory((ch) => [...ch, { from: "user", text: value }]);
-  setInput("");
-
-  if (awaitingReady) {
-    if (
-      /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
-        value
-      )
-    ) {
-      setAwaitingReady(false);
-      setChatHistory((ch) => [
-        ...ch,
-        { from: "gpt", text: CONVO_QUESTIONS[0].question },
-      ]);
-      setStep(0);
-      return;
-    } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
-      setChatHistory((ch) => [
-        ...ch,
-        { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
-      ]);
-      return;
-    } else {
-      setChatHistory((ch) => [
-        ...ch,
-        { from: "gpt", text: "Please reply 'yes' when you're ready to start!" },
-      ]);
+      if (hasGenerated) {
+        await handleSideChat(value, null);
+      } else {
+        await handleSideChat(
+          value,
+          "Ready to generate your campaign? (yes/no)"
+        );
+      }
       return;
     }
-  }
-
-  const currentQ = CONVO_QUESTIONS[step];
-
-  if (step >= CONVO_QUESTIONS.length) {
-    if (!hasGenerated && isGenerateTrigger(value)) {
-      setLoading(true);
-      setGenerating(true);
-      setChatHistory((ch) => [
-        ...ch,
-        { from: "gpt", text: "AI generating..." },
-      ]);
-
-     // inside handleUserInput, where you currently start generation:
-setTimeout(async () => {
-  const token = getRandomString();
-
-  // clear old previews
-  setVideoItems([]); setVideoUrl(""); setVideoScript("");
-  setImageUrls([]); setImageUrl("");
-
-  try {
-    await warmBackend();
-    abortAllVideoFetches();
-
-    // Kick off all three in parallel, but DO NOT await them together.
-    const assetsPromise = fetchJsonWithRetry(
-      `${API_BASE}/generate-campaign-assets`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers }),
-      },
-      { tries: 1, timeoutMs: 15000 } // copy is fast
-    ).catch(() => ({}));
-
-    const imagesPromise = (async () => {
-      const imgs = await fetchImagesOnce(token);
-      setImageUrls(imgs || []);
-      setActiveImage(0);
-      setImageUrl((imgs && imgs[0]) || "");
-    })();
-
-    const videosPromise = (async () => {
-      const vs = await fetchVideoPair(token, answers, null, BACKEND_URL);
-      // Warm what we got (if anything)
-      await Promise.all([
-        headRangeWarm("A", vs[0]?.url),
-        headRangeWarm("B", vs[1]?.url),
-      ]);
-      setVideoItems(vs || []);
-      setActiveVideo(0);
-      setVideoUrl(vs[0]?.url || "");
-      setVideoScript(vs[0]?.script || "");
-    })();
-
-    // Copy can land whenever it’s ready (do not block visuals)
-    const data = await assetsPromise;
-    setResult({
-      headline: data?.headline || "",
-      body: data?.body || "",
-      image_overlay_text: data?.image_overlay_text || "",
-    });
-
-    // Let images/videos continue in background; when both done, mark success.
-    await Promise.allSettled([imagesPromise, videosPromise]);
-
-    setChatHistory((ch) => [
-      ...ch,
-      { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
-    ]);
-    setHasGenerated(true);
-  } catch (err) {
-    console.error("generation failed:", err);
-    setError("Generation failed (server cold or busy). Try again in a few seconds.");
-  } finally {
-    setGenerating(false);
-    setLoading(false);
-  }
-}, 120);
-
-      return;
-    }
-
-    if (hasGenerated) {
-      await handleSideChat(value, null);
-    } else {
-      await handleSideChat(
-        value,
-        "Ready to generate your campaign? (yes/no)"
-      );
-    }
-    return;
-  }
-
 
     if (currentQ && isLikelySideChat(value, currentQ)) {
       await handleSideChat(
@@ -1050,12 +1018,11 @@ setTimeout(async () => {
   }
 
   // Cancel any in-flight fetches when component unmounts (or route changes)
-useEffect(() => {
-  return () => {
-    abortAllVideoFetches();
-  };
-}, []);
-
+  useEffect(() => {
+    return () => {
+      abortAllVideoFetches();
+    };
+  }, []);
 
   /* Regenerations (sequential with warmup/backoff) */
   async function handleRegenerateImage() {
@@ -1071,33 +1038,32 @@ useEffect(() => {
     }
   }
 
-async function handleRegenerateVideo() {
-  setVideoLoading(true);
-  abortAllVideoFetches();
-  setVideoItems([]); setVideoUrl(""); setVideoScript("");
+  async function handleRegenerateVideo() {
+    setVideoLoading(true);
+    abortAllVideoFetches();
+    setVideoItems([]); setVideoUrl(""); setVideoScript("");
 
-  try {
-    await warmBackend();
-    const token = getRandomString();
+    try {
+      await warmBackend();
+      const token = getRandomString();
 
-    const vids = await fetchVideoPair(token, answers, result, BACKEND_URL);
+      const vids = await fetchVideoPair(token, answers, result, null);
 
-    await Promise.all([
-      headRangeWarm("A", vids[0]?.url),
-      headRangeWarm("B", vids[1]?.url),
-    ]);
+      await Promise.all([
+        headRangeWarm("A", vids[0]?.url),
+        headRangeWarm("B", vids[1]?.url),
+      ]);
 
-    setVideoItems(vids);
-    setActiveVideo(0);
-    setVideoUrl(vids[0]?.url || "");
-    setVideoScript(vids[0]?.script || "");
-  } catch (e) {
-    console.error("regenerate video failed:", e?.message || e);
-  } finally {
-    setVideoLoading(false);
+      setVideoItems(vids);
+      setActiveVideo(0);
+      setVideoUrl(vids[0]?.url || "");
+      setVideoScript(vids[0]?.script || "");
+    } catch (e) {
+      console.error("regenerate video failed:", e?.message || e);
+    } finally {
+      setVideoLoading(false);
+    }
   }
-}
-
 
   /* ---------------------- Render ---------------------- */
   return (
@@ -1391,7 +1357,7 @@ async function handleRegenerateVideo() {
             ) : imageUrls.length > 0 ? (
               <>
                 <img
-                  src={(imageUrls[activeImage] || "").startsWith("http") ? imageUrls[activeImage] : BACKEND_URL + imageUrls[activeImage]}
+                  src={toAbsoluteMedia(imageUrls[activeImage] || "")}
                   alt="Ad Preview"
                   style={{
                     width: "100%",
@@ -1582,14 +1548,14 @@ async function handleRegenerateVideo() {
             ) : videoItems.length > 0 ? (
               <>
                 <video
-  key={videoItems[activeVideo]?.url || "video"}
-  src={abs(videoItems[activeVideo]?.url || "")}
-  controls
-  playsInline
-  muted
-  preload="metadata"
-  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
-/>
+                  key={`${videoItems[activeVideo]?.url || "video"}-${activeVideo}`}
+                  src={toAbsoluteMedia(videoItems[activeVideo]?.url || "")}
+                  controls
+                  playsInline
+                  muted
+                  preload="metadata"
+                  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
+                />
 
                 <Arrow side="left" onClick={() => {
                   const next = (activeVideo + videoItems.length - 1) % videoItems.length;
