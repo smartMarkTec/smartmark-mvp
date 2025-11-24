@@ -146,27 +146,33 @@ function buildFilterGraph({ clips, targetSec, crossf, w, h, fps }) {
   // For input i: [i:v]scale,setsar,fps,trim,setpts
   // Crossfade 1: [v0][v1] -> [x1]
   // Crossfade 2: [x1][v2] -> [outv]
- const vNorm = (i) => ([
-  `[${i}:v]scale=960:540,setsar=1,fps=24,trim=duration=${per},setpts=PTS-STARTPTS[v${pad(i)}]`
-]);
-const aNorm = (i) => ([
-  `[${i}:a]aresample=async=1:min_comp=0.001:min_hard_comp=0.100:first_pts=0,atrim=duration=${per},asetpts=PTS-STARTPTS[a${pad(i)}]`
-]);
-
+   // For input i: [i:v]scale,setsar,fps,trim,setpts
+  // Crossfade 1: [v0][v1] -> [x1v]
+  // Crossfade 2: [x1v][v2] -> [outv]
+  // Audio: use ONLY TTS mp3 (input #3) as [aout]
+  const vNorm = (i) => ([
+    `[${i}:v]scale=960:540,setsar=1,fps=24,trim=duration=${per},setpts=PTS-STARTPTS[v${pad(i)}]`
+  ]);
 
   const lines = [
-    ...vNorm(0), ...aNorm(0),
-    ...vNorm(1), ...aNorm(1),
-    ...vNorm(2), ...aNorm(2),
-    // crossfade V: xfade with duration=crossf at end of first stream
+    // normalize 3 video clips
+    ...vNorm(0),
+    ...vNorm(1),
+    ...vNorm(2),
+
+    // crossfade V: v0 -> v1
     `[v00][v01]xfade=transition=fade:duration=${crossf}:offset=${per - crossf}[x1v]`,
-    `[a00][a01]acrossfade=d=${crossf}[x1a]`,
-    `[x1v][v02]xfade=transition=fade:duration=${crossf}:offset=${per*2 - 2*crossf}[outv]`,
-    `[x1a][a02]acrossfade=d=${crossf}[outa]`
+
+    // crossfade V: (v0–v1) -> v2
+    `[x1v][v02]xfade=transition=fade:duration=${crossf}:offset=${per * 2 - 2 * crossf}[outv]`,
+
+    // final audio is just the TTS track (input #3)
+    `[3:a]atrim=duration=${(per * 3 - 2 * crossf).toFixed(1)},asetpts=PTS-STARTPTS[aout]`
   ];
 
   return lines.join(";");
 }
+
 
 function runFfmpegFast({ inputs, outPath, voicePath /* optional */ }) {
   return new Promise((resolve, reject) => {
