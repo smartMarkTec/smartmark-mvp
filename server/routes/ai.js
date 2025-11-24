@@ -29,6 +29,19 @@ router.use((req, res, next) => {
   next();
 });
 
+// --- Alias old segment preview URLs to the actual MP4 to avoid 404s ---
+/**
+ * Frontend sometimes tries "<id>-seg.mp4". We redirect that to "<id>.mp4".
+ * Zero visual change; just avoids 404 noise.
+ */
+router.get('/api/media/:idSeg', (req, res, next) => {
+  const m = String(req.params.idSeg || '').match(/^([a-f0-9-]+)-seg\.mp4$/i);
+  if (!m) return next();
+  const id = m[1];
+  return res.redirect(302, `/api/media/${id}.mp4`);
+});
+
+
 /* ---------------- Memory discipline + concurrency gate --------------- */
 const sharp = require('sharp');
 try {
@@ -2286,6 +2299,73 @@ async function buildOverlayImage({
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
 
+async function composeOverlay({
+  imageUrl,
+  title = '',
+  subline = '',
+  cta = '',
+  answers = {},
+  category = 'generic',
+  seed = ''
+}) {
+  const W = 1200, H = 628;
+
+  // 1) Fetch + normalize base image (cover fit)
+  const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
+  const baseBuf = await sharp(imgRes.data)
+    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
+    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
+    .toBuffer();
+
+  // 2) Analyze image to tune glass tint/contrast
+  const metrics = await analyzeImageForPlacement(baseBuf);
+
+  // 3) Resolve headline (title), CTA, and subline
+  const cat = category || resolveCategory(answers || {});
+  let headline = cleanHeadline(title) || cleanHeadline(overlayTitleFromAnswers(answers, cat)) || 'SHOP';
+  if (!headline) headline = 'SHOP';
+
+  let ctaText = cleanCTA(cta || answers?.cta || '', headline || (answers?.businessName || ''));
+  if (!ctaText) ctaText = 'LEARN MORE';
+
+  let sub = String(subline || '').trim();
+  if (!sub) {
+    try { sub = await getCoherentSubline(answers, cat, seed); }
+    catch (e) {
+      try { sub = craftSubline(answers, cat, seed) || 'Made for everyday use with less hassle'; }
+      catch { sub = 'Made for everyday use with less hassle'; }
+    }
+  }
+
+  // 4) Render SVG overlay and composite
+  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
+  const svg = Buffer.from(
+    svgOverlayCreative({
+      W, H,
+      title: headline,
+      subline: sub,
+      cta: ctaText,
+      metrics,
+      baseImage: base64
+    }),
+    'utf8'
+  );
+
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.jpg`;
+  await sharp(baseBuf)
+    .composite([{ input: svg, top: 0, left: 0 }])
+    .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .toFile(path.join(outDir, file));
+
+  const rel = `/api/media/${file}`;
+  return {
+    publicUrl: rel,
+    absoluteUrl: absolutePublicUrl(rel),
+    filename: file,
+  };
+}
+
 /* -------------------- Health check + memory debug -------------------- */
 router.get('/test2', (_req, res) => {
   res.status(200).json({ ok: true, t: Date.now() });
@@ -3465,16 +3545,16 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const headlineHint = overlayTitleFromAnswers(answers, category);
     const ctaHint      = cleanCTA(answers?.cta || '');
 
-    const makeOne = async (imgUrl, seedSuffix) => {
-      const { publicUrl, absoluteUrl } = await buildOverlayImage({
-        imageUrl: imgUrl,
-        headlineHint,
-        ctaHint,
-        seed: (answers?.businessName || keyword) + ':' + seedSuffix,
-        fallbackHeadline: headlineHint,
-        answers,
-        category,
-      });
+  const makeOne = async (imgUrl, seedSuffix) => {
+  const { publicUrl, absoluteUrl } = await composeOverlay({
+    imageUrl: imgUrl,
+    title: headlineHint,
+    subline: '', // leave blank to auto-compose smarter subline
+    cta: ctaHint,
+    answers,
+    category,
+    seed: (answers?.businessName || keyword) + ':' + seedSuffix,
+  });
       await saveAsset({
         req,
         kind: 'image',
