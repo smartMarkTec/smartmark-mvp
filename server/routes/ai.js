@@ -171,10 +171,6 @@ function runFfmpegFast({ inputs, outPath, voicePath /* optional */ }) {
   return new Promise((resolve, reject) => {
     const useVoice = !!voicePath;
 
-    // Put this RIGHT AFTER runFfmpegFast(...)
-
-
-
     // Inputs: 3 video URLs + (optional) 4th audio input (voice-over)
     const ffInputs = [
       ...inputs.flatMap(u => ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "2", "-i", u]),
@@ -206,7 +202,7 @@ function runFfmpegFast({ inputs, outPath, voicePath /* optional */ }) {
             "-map", "[outa]"
           ];
 
-    const args = [
+    const args = [                       // <--- THIS is your "ffmpegArgs"
       // Inputs
       ...ffInputs,
 
@@ -250,6 +246,7 @@ function runFfmpegFast({ inputs, outPath, voicePath /* optional */ }) {
     ff.on("close", () => clearTimeout(killer));
   });
 }
+
 
 async function makeVideoVariantFast({ clipUrls = [], script = '', targetSec = 18.5, voicePath }) {
   const tts = voicePath ? { path: voicePath } : await synthTTS(script);
@@ -3243,7 +3240,13 @@ router.post("/generate-video-ad", async (req, res) => {
     if (!planA.length || !planB.length) throw new Error('No clips in plan');
 
     // FAST toggle: prefer query flag (?fast=1) or env SM_FAST_MODE=1 for speed runs
-const FAST_MODE = String(req.query.fast || process.env.SM_FAST_MODE || '').trim() === '1';
+const FAST_MODE = String(
+  req.body.fast ??
+  req.query.fast ??
+  process.env.SM_FAST_MODE ??
+  '1'               // default to FAST ON
+).trim() === '1';
+
 
 let vA, vB;
 
