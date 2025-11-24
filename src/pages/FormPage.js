@@ -236,27 +236,57 @@ const _controllers = new Map(); // key -> AbortController
 
 function abortKey(key) {
   const c = _controllers.get(key);
-  if (c) { try { c.abort(); } catch {} }
+  if (c) {
+    try { c.abort(); } catch {}
+  }
   _controllers.delete(key);
 }
 
 function newControllerFor(key) {
-  abortKey(key); // cancel any previous of same kind
+  // cancel any previous of same kind
+  abortKey(key);
   const c = new AbortController();
   _controllers.set(key, c);
   return c;
 }
 
-async function fetchJSON(url, { key = 'GEN', timeoutMs = 15000, opts = {} } = {}) {
+// legacy helper (still here in case something else uses it)
+async function fetchJSON(url, { key = "GEN", timeoutMs = 15000, opts = {} } = {}) {
   const c = newControllerFor(key);
-  const t = setTimeout(() => { try { c.abort(); } catch {} }, timeoutMs);
+  const t = setTimeout(() => {
+    try { c.abort(); } catch {}
+  }, timeoutMs);
   try {
     const res = await fetch(url, { signal: c.signal, ...opts });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return await res.json().catch(() => ({}));
   } finally {
     clearTimeout(t);
-    // IMPORTANT: keep controller so later abortKey(key) cancels polling if needed
+    // keep controller so abortKey(key) can still cancel if needed
+  }
+}
+
+/* NEW: single-attempt JSON fetch that *respects* abort keys for big video jobs */
+async function fetchJsonOnceWithAbortKey(
+  url,
+  fetchOpts = {},
+  { key = "GEN", timeoutMs } = {}
+) {
+  const ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 30000;
+  const controller = newControllerFor(key);
+  const timer = setTimeout(() => {
+    try { controller.abort(); } catch {}
+  }, ms);
+
+  try {
+    const res = await fetch(url, { ...fetchOpts, signal: controller.signal });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`${res.status} ${res.statusText} ${text}`.trim());
+    }
+    return await res.json().catch(() => ({}));
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -267,6 +297,7 @@ function abortAllVideoFetches() {
     _controllers.delete(key);
   }
 }
+
 
 
 /* ===== helpers ===== */
@@ -690,12 +721,21 @@ async function headRangeWarm(label, url) {
 
 /* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
 
-async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 26000) {
-  const triggerKey = `TRIGGER_${variant}_${token}`;
+async function fetchVideoOnce(
+  token,
+  answers,
+  result,
+  BACKEND_URL,
+  variant = "A",
+  timeoutMs = 26000
+) {
+  // this key lets abortAllVideoFetches() actually kill in-flight video jobs
+  const triggerKey = `VIDEO_${variant}_${token}`;
+
   try {
     await warmBackend();
 
-    const data = await fetchJsonWithRetry(
+    const data = await fetchJsonOnceWithAbortKey(
       `${API_BASE}/generate-video-ad`,
       {
         method: "POST",
@@ -706,9 +746,8 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
           regenerateToken: token,
           abVariant: variant,
         }),
-        signal: newControllerFor(triggerKey).signal,
       },
-      { tries: 2, warm: true, timeoutMs } // tighter for < 1 min overall
+      { key: triggerKey, timeoutMs }
     );
 
     // Normalize URL from response
@@ -723,7 +762,10 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
 
     return {
       url: finalUrl,
-      script: data?.script || data?.narration || (result?.body ? `Narration: ${result.body}` : ""),
+      script:
+        data?.script ||
+        data?.narration ||
+        (result?.body ? `Narration: ${result.body}` : ""),
       fbVideoId: data?.fbVideoId || null,
     };
   } catch (e) {
@@ -741,14 +783,18 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
 
         if (u2) {
           const finalUrl2 = /^https?:\/\//.test(u2) ? u2 : BACKEND_URL + u2;
-          try { await headRangeWarm(`${variant}_LATEST`, finalUrl2); } catch {}
+          try {
+            await headRangeWarm(`${variant}_LATEST`, finalUrl2);
+          } catch {}
           return {
             url: finalUrl2,
             script: latest?.script || "",
             fbVideoId: latest?.fbVideoId || null,
           };
         }
-      } catch { /* ignore; true failure below */ }
+      } catch {
+        // ignore; fall through to failure
+      }
     }
 
     if (e?.name === "AbortError") {
@@ -787,6 +833,7 @@ async function fetchVideoPair(token, answers, result, BACKEND_URL) {
 
   return dedup.slice(0, 2);
 }
+
 
 /* ---- Chat flow ---- */
 async function handleUserInput(e) {

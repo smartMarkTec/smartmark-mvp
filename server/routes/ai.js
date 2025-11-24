@@ -58,11 +58,14 @@ const heavyRoute = (req, res, next) => {
     return next();
   }
   if (req.method === 'OPTIONS') return res.sendStatus(204);
-  acquire().then(() => {
-    res.on('finish', release);
-    res.on('close', release);
-    next();
-  });
+ acquire().then(() => {
+  let released = false;
+  const done = () => { if (!released) { released = true; release(); } };
+  res.once('finish', done);
+  res.once('close', done);
+  next();
+});
+
 };
 router.use(heavyRoute);
 
@@ -124,151 +127,182 @@ const TTS_SLOWDOWN = Number(process.env.TTS_SLOWDOWN || 0.92);
 // --- FAST VIDEO PROFILE (≤ 75s wall time) -----------------------------
 const { spawn } = require("child_process");
 
+// keep your FAST constants, but tighten timeouts/bitrates a hair
 const FAST = {
   WIDTH: 1280,
   HEIGHT: 720,
   FPS: 30,
-  TARGET_SEC: 18.5,         // ~18s total with 0.5s crossfades
-  CROSSF: 0.5,              // crossfade length
-  PRESET: "superfast",      // speed/quality trade-off
-  CRF: "28",                // visually OK for ads; small & fast
-  GOP: "60",                // keyframe interval
-  AUDIO_BR: "128k",
-  TIMEOUT_MS: 75_000        // hard cap
+  TARGET_SEC: 18.5,
+  CROSSF: 0.5,
+  PRESET: "superfast",
+  CRF: "29",
+  GOP: "60",
+  AUDIO_BR: "112k",
+  TIMEOUT_MS: 70_000, // kill ffmpeg if it lingers
 };
 
-// Build a minimal filter graph: 3 clips trimmed, scaled, fps normalized, 2 crossfades.
-function buildFilterGraph({ clips, targetSec, crossf, w, h, fps }) {
-  // For 3 clips: trim each to ~6.5s so after two 0.5s overlaps we land ~18.5s
-  const per = Math.max(5.8, (targetSec + 2 * crossf) / clips + 0.2);
-  const pad = (n) => `${n}`.padStart(2, "0");
+// minimal xfade graph for three equal-length segments + single audio track
+function buildFilterGraph({ targetSec, crossf }) {
+  // each clip duration BEFORE crossf overlap
+  const per = Math.max(5.8, (targetSec + 2 * crossf) / 3 + 0.2);
 
-  // For input i: [i:v]scale,setsar,fps,trim,setpts
-  // Crossfade 1: [v0][v1] -> [x1]
-  // Crossfade 2: [x1][v2] -> [outv]
-   // For input i: [i:v]scale,setsar,fps,trim,setpts
-  // Crossfade 1: [v0][v1] -> [x1v]
-  // Crossfade 2: [x1v][v2] -> [outv]
-  // Audio: use ONLY TTS mp3 (input #3) as [aout]
-  const vNorm = (i) => ([
-    `[${i}:v]scale=960:540,setsar=1,fps=24,trim=duration=${per},setpts=PTS-STARTPTS[v${pad(i)}]`
-  ]);
+  // normalize to 960x540@24fps (fast) and trim
+  const vNorm = (i) =>
+    `[${i}:v]scale=960:540:flags=bicubic,setsar=1,fps=24,trim=duration=${per.toFixed(
+      2
+    )},setpts=PTS-STARTPTS[v${i}]`;
 
-  const lines = [
-    // normalize 3 video clips
-    ...vNorm(0),
-    ...vNorm(1),
-    ...vNorm(2),
-
-    // crossfade V: v0 -> v1
-    `[v00][v01]xfade=transition=fade:duration=${crossf}:offset=${per - crossf}[x1v]`,
-
-    // crossfade V: (v0–v1) -> v2
-    `[x1v][v02]xfade=transition=fade:duration=${crossf}:offset=${per * 2 - 2 * crossf}[outv]`,
-
-    // final audio is just the TTS track (input #3)
-    `[3:a]atrim=duration=${(per * 3 - 2 * crossf).toFixed(1)},asetpts=PTS-STARTPTS[aout]`
-  ];
-
-  return lines.join(";");
+  return [
+    vNorm(0),
+    vNorm(1),
+    vNorm(2),
+    // xfade 1: v0->v1
+    `[v0][v1]xfade=transition=fade:duration=${crossf}:offset=${(per - crossf).toFixed(
+      2
+    )}[x1]`,
+    // xfade 2: (v0-1)->v2
+    `[x1][v2]xfade=transition=fade:duration=${crossf}:offset=${(
+      per * 2 -
+      2 * crossf
+    ).toFixed(2)}[outv]`,
+    // audio = TTS only (index 3)
+    `[3:a]atrim=duration=${(per * 3 - 2 * crossf).toFixed(
+      2
+    )},asetpts=PTS-STARTPTS[aout]`,
+  ].join(";");
 }
 
-
-function runFfmpegFast({ inputs, outPath, voicePath /* optional */ }) {
+// run ffmpeg with local mp4 parts + local voice mp3
+function runFfmpegFast({ parts, voicePath, outPath }) {
   return new Promise((resolve, reject) => {
-    const useVoice = !!voicePath;
+    const args = [
+      "-y",
+      "-nostdin",
+      "-loglevel",
+      "error",
 
-    // Inputs: 3 video URLs + (optional) 4th audio input (voice-over)
-    const ffInputs = [
-      ...inputs.flatMap(u => ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "2", "-i", u]),
-      ...(useVoice ? ["-i", voicePath] : [])
-    ];
+      // three local video parts
+      "-i",
+      parts[0],
+      "-i",
+      parts[1],
+      "-i",
+      parts[2],
 
-    const filter = buildFilterGraph({
-      clips: 3,
-      targetSec: FAST.TARGET_SEC,
-      crossf: FAST.CROSSF,
-      w: FAST.WIDTH,
-      h: FAST.HEIGHT,
-      fps: FAST.FPS
-    });
+      // voice
+      "-i",
+      voicePath,
 
-    // If we got a separate voice track, mix it under with sidechain ducking (fast)
-    const withVoice =
-      useVoice
-        ? [
-            "-filter_complex",
-            `${filter};` +
-            `[outa][${inputs.length}:a]sidechaincompress=threshold=-18dB:ratio=6:attack=20:release=200:makeup=6[aout]`,
-            "-map", "[outv]",
-            "-map", "[aout]"
-          ]
-        : [
-            "-filter_complex", filter,
-            "-map", "[outv]",
-            "-map", "[outa]"
-          ];
+      "-filter_complex",
+      buildFilterGraph({
+        targetSec: FAST.TARGET_SEC,
+        crossf: FAST.CROSSF,
+      }),
+      "-map",
+      "[outv]",
+      "-map",
+      "[aout]",
 
-    const args = [                       // <--- THIS is your "ffmpegArgs"
-      // Inputs
-      ...ffInputs,
+      "-c:v",
+      "libx264",
+      "-preset",
+      FAST.PRESET,
+      "-tune",
+      "fastdecode,zerolatency",
+      "-crf",
+      FAST.CRF,
+      "-g",
+      FAST.GOP,
+      "-pix_fmt",
+      "yuv420p",
+      "-movflags",
+      "+faststart",
 
-      // Filters & mapping
-      ...withVoice,
-
-      // Encoders — FAST
-      "-c:v", "libx264",
-      "-preset", FAST.PRESET,
-      "-tune", "fastdecode,zerolatency",
-      "-crf", FAST.CRF,
-      "-g", FAST.GOP,
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-
-      "-c:a", "aac",
-      "-b:a", FAST.AUDIO_BR,
-
-      // Guard rails
-      "-max_muxing_queue_size", "1024",
+      "-c:a",
+      "aac",
+      "-b:a",
+      FAST.AUDIO_BR,
       "-shortest",
 
-      // Output
-      outPath
+      outPath,
     ];
 
     const ff = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stderr = "";
-    ff.stderr.on("data", (d) => { stderr += d.toString(); });
-    ff.on("error", reject);
-    ff.on("close", (code) => {
-      if (code === 0) return resolve({ ok: true, stderr });
-      reject(new Error(`ffmpeg exited ${code}\n${stderr}`));
-    });
-
-    // Hard timeout: if we’re nearing 75s, kill and let caller decide fallback
+    let err = "";
+    ff.stderr.on("data", (d) => (err += d.toString()));
     const killer = setTimeout(() => {
-      try { ff.kill("SIGKILL"); } catch {}
+      try {
+        ff.kill("SIGKILL");
+      } catch {}
     }, FAST.TIMEOUT_MS);
 
-    ff.on("close", () => clearTimeout(killer));
+    ff.on("close", (code) => {
+      clearTimeout(killer);
+      if (code === 0) return resolve();
+      reject(new Error(`ffmpeg exited ${code}\n${err}`));
+    });
+
+    ff.on("error", (e) => {
+      clearTimeout(killer);
+      reject(e);
+    });
   });
 }
 
-
-async function makeVideoVariantFast({ clipUrls = [], script = '', targetSec = 18.5, voicePath }) {
-  const tts = voicePath ? { path: voicePath } : await synthTTS(script);
-  const vPath = voicePath || tts.path;
-
-  const inputs = (clipUrls || []).slice(0, 3);
-  if (inputs.length < 3) throw new Error('FAST: need at least 3 video URLs');
-
-  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
-  await runFfmpegFast({ inputs, outPath, voicePath: vPath });
-
-  if (!voicePath) { try { safeUnlink(vPath); } catch {} } // only clean if we created it
-  return { outPath, duration: FAST.TARGET_SEC };
+// local downloader (uses your existing ax + stream pipeline + GEN_DIR)
+async function downloadToTmp(url, ext = ".mp4") {
+  ensureGeneratedDir();
+  const out = path.join(GEN_DIR, `${uuidv4()}${ext}`);
+  const res = await ax.get(url, { responseType: "stream", timeout: 20000 });
+  await new Promise((resolve, reject) => {
+    const ws = fs.createWriteStream(out);
+    res.data.pipe(ws);
+    ws.on("finish", resolve);
+    ws.on("error", reject);
+  });
+  return out;
+}
+function safeUnlink(p) {
+  try {
+    fs.unlinkSync(p);
+  } catch {}
 }
 
+// SUPER-FAST variant: download 3 clips locally → compose with xfade → map TTS
+async function makeVideoVariantFast({ clipUrls = [], script = "" }) {
+  if (!Array.isArray(clipUrls) || clipUrls.length < 3) {
+    throw new Error("FAST: need ≥ 3 clip URLs");
+  }
+
+  // 1) synth voice
+  const tts = await synthTTS(script);
+  const voicePath = tts.path;
+
+  // 2) take first three urls, download locally (robust vs streaming)
+  const locals = [];
+  try {
+    for (let i = 0; i < 3; i++) {
+      locals.push(await downloadToTmp(clipUrls[i], ".mp4"));
+    }
+  } catch (e) {
+    // if any download fails, clean and bail
+    locals.forEach(safeUnlink);
+    safeUnlink(voicePath);
+    throw e;
+  }
+
+  // 3) compose
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+  try {
+    await runFfmpegFast({ parts: locals, voicePath, outPath });
+  } finally {
+    locals.forEach(safeUnlink);
+    // keep voice for debugging only if you want; otherwise delete to save tmp
+    safeUnlink(voicePath);
+  }
+
+  return { outPath, duration: FAST.TARGET_SEC };
+}
 
 
 
@@ -1128,14 +1162,16 @@ async function generateVideoScriptFromAnswers(answers = {}) {
     },
   ];
 
-  const resp = await openai.responses.create({
-    model: "gpt-4.1-mini",
-    input: prompt,
-  });
+  const r = await openai.chat.completions.create({
+  model: "gpt-4o-mini",
+  temperature: 0.35,
+  max_tokens: 220,
+  messages: prompt
+});
+const text =
+  r.choices?.[0]?.message?.content?.trim() ||
+  `Discover ${name}. Enjoy ${offer}. Tap to learn more today.`;
 
-  const text =
-    resp.output?.[0]?.content?.[0]?.text?.trim() ||
-    `Discover ${name}. Enjoy ${offer}. Tap to learn more today.`;
   return text;
 }
 
