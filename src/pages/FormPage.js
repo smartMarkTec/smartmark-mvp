@@ -624,9 +624,9 @@ export default function FormPage() {
     }
   }
 
-/* ---------- VIDEO helpers: direct sync call to /generate-video-ad ---------- */
+/* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
 
-async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
+async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 60000) {
   try {
     await warmBackend();
 
@@ -639,20 +639,17 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
           url: answers?.url || "",
           answers,
           regenerateToken: token,
+          abVariant: variant, // harmless hint for backend; ignored if not used
         }),
       },
-      120000 // allow up to ~2 minutes for full render on backend
+      timeoutMs // keep per-render under ~60s
     );
 
     const data = await safeJson(res);
 
     let u = data.url || data.videoUrl || data.absoluteUrl;
-    if (!u && data.filename) {
-      u = `/api/media/${data.filename}`;
-    }
-    if (!u) {
-      throw new Error("No video URL in response");
-    }
+    if (!u && data.filename) u = `/api/media/${data.filename}`;
+    if (!u) throw new Error("No video URL in response");
 
     const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
 
@@ -662,9 +659,38 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
       fbVideoId: data.fbVideoId || null,
     };
   } catch (e) {
-    console.error("fetchVideoOnce failed:", e);
+    console.error(`fetchVideoOnce(${variant}) failed:`, e);
     return { url: "", script: "", fbVideoId: null };
   }
+}
+
+async function fetchVideoPair(token, answers, result, BACKEND_URL) {
+  // run in parallel to stay under a minute end-to-end
+  const [a, b] = await Promise.allSettled([
+    fetchVideoOnce(`${token}-A`, answers, result, BACKEND_URL, "A"),
+    fetchVideoOnce(`${token}-B`, answers, result, BACKEND_URL, "B"),
+  ]);
+
+  const vids = [];
+  const pushIfGood = (x) => {
+    if (x && x.url) vids.push(x);
+  };
+
+  if (a.status === "fulfilled") pushIfGood(a.value);
+  if (b.status === "fulfilled") pushIfGood(b.value);
+
+  // de-dup by URL just in case
+  const dedup = [];
+  const seen = new Set();
+  for (const v of vids) {
+    if (!seen.has(v.url)) {
+      seen.add(v.url);
+      dedup.push(v);
+    }
+  }
+
+  // If only one came back, return just that one (UI already handles 1–2)
+  return dedup.slice(0, 2);
 }
 
 
@@ -753,13 +779,13 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL) {
             setActiveImage(0);
             setImageUrl(imgs[0] || "");
 
-            // 3) video (sync: waits for finished 18s ad)
-const vid1 = await fetchVideoOnce(token, answers, data, BACKEND_URL);
-           const vids = [vid1].filter((v) => v && v.url);
+            // 3) videos (A/B in parallel: waits for two finished ~18–20s ads)
+const vids = await fetchVideoPair(token, answers, data, BACKEND_URL);
 setVideoItems(vids);
 setActiveVideo(0);
 setVideoUrl(vids[0]?.url || "");
 setVideoScript(vids[0]?.script || "");
+
 
             setChatHistory((ch) => [
               ...ch,
@@ -856,27 +882,27 @@ setVideoScript(vids[0]?.script || "");
     }
   }
 
-    async function handleRegenerateVideo() {
-    setVideoLoading(true);
+  async function handleRegenerateVideo() {
+  setVideoLoading(true);
 
-    // Clear old video from UI while new one is cooking
-    setVideoItems([]);
-    setVideoUrl("");
-    setVideoScript("");
+  // Clear old videos from UI while new ones are cooking
+  setVideoItems([]);
+  setVideoUrl("");
+  setVideoScript("");
 
-    try {
-      await warmBackend();
-      const vid = await fetchVideoOnce(getRandomString(), answers, result, BACKEND_URL);
-      const vids = [vid].filter((v) => v && v.url);
+  try {
+    await warmBackend();
+    const vids = await fetchVideoPair(getRandomString(), answers, result, BACKEND_URL);
 
-      setVideoItems(vids);
-      setActiveVideo(0);
-      setVideoUrl(vids[0]?.url || "");
-      setVideoScript(vids[0]?.script || "");
-    } finally {
-      setVideoLoading(false);
-    }
+    setVideoItems(vids);
+    setActiveVideo(0);
+    setVideoUrl(vids[0]?.url || "");
+    setVideoScript(vids[0]?.script || "");
+  } finally {
+    setVideoLoading(false);
   }
+}
+
 
 
 
