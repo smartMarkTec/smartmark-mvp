@@ -668,6 +668,40 @@ const parseImageResults = (data) => {
   return Array.from(new Set(out)).slice(0, 2);
 };
 
+/* ===== ADD THIS: pollLatestVideo helper ===== */
+async function pollLatestVideo({ tries = 6, delayMs = 1000 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const latest = await fetchJsonWithRetry(
+        `${API_BASE}/generated-latest`,
+        { method: "GET" },
+        { tries: 1, warm: false, timeoutMs: 6000 }
+      );
+
+      // normalize to a usable MP4 URL
+      let u =
+        latest?.absoluteUrl ||
+        latest?.url ||
+        (latest?.filename ? `/api/media/${latest.filename}` : "");
+
+      if (u && /\.mp4(\?|$)/i.test(u)) {
+        const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
+        try { await headRangeWarm("LATEST", finalUrl); } catch {}
+        return {
+          url: finalUrl,
+          script: latest?.script || "",
+          fbVideoId: latest?.fbVideoId || null,
+        };
+      }
+    } catch {
+      // ignore and retry
+    }
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+  return null;
+}
+
+
 async function fetchImagesOnce(token) {
   const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
   const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
@@ -884,80 +918,74 @@ async function handleUserInput(e) {
         { from: "gpt", text: "AI generating..." },
       ]);
 
-      setTimeout(async () => {
-        const token = getRandomString();
+     // inside handleUserInput, where you currently start generation:
+setTimeout(async () => {
+  const token = getRandomString();
 
-        // 🔄 Clear any previous video while we wait for a fresh one
-        setVideoItems([]);
-        setVideoUrl("");
-        setVideoScript("");
+  // clear old previews
+  setVideoItems([]); setVideoUrl(""); setVideoScript("");
+  setImageUrls([]); setImageUrl("");
 
-        try {
-          await warmBackend();
-          abortAllVideoFetches();
+  try {
+    await warmBackend();
+    abortAllVideoFetches();
 
-          const assetsPromise = fetchJsonWithRetry(
-            `${API_BASE}/generate-campaign-assets`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ answers }),
-            },
-            { tries: 2, timeoutMs: 20000 }
-          );
+    // Kick off all three in parallel, but DO NOT await them together.
+    const assetsPromise = fetchJsonWithRetry(
+      `${API_BASE}/generate-campaign-assets`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers }),
+      },
+      { tries: 1, timeoutMs: 15000 } // copy is fast
+    ).catch(() => ({}));
 
-          const imagesPromise = fetchImagesOnce(token);
-          const videosPromise = (async () => {
-            const vs = await fetchVideoPair(token, answers, null, BACKEND_URL);
-            await Promise.all([
-              headRangeWarm("A", vs[0]?.url),
-              headRangeWarm("B", vs[1]?.url),
-            ]);
-            return vs;
-          })();
+    const imagesPromise = (async () => {
+      const imgs = await fetchImagesOnce(token);
+      setImageUrls(imgs || []);
+      setActiveImage(0);
+      setImageUrl((imgs && imgs[0]) || "");
+    })();
 
-          const [data, imgs, vids] = await Promise.all([
-            assetsPromise,
-            imagesPromise,
-            videosPromise,
-          ]);
+    const videosPromise = (async () => {
+      const vs = await fetchVideoPair(token, answers, null, BACKEND_URL);
+      // Warm what we got (if anything)
+      await Promise.all([
+        headRangeWarm("A", vs[0]?.url),
+        headRangeWarm("B", vs[1]?.url),
+      ]);
+      setVideoItems(vs || []);
+      setActiveVideo(0);
+      setVideoUrl(vs[0]?.url || "");
+      setVideoScript(vs[0]?.script || "");
+    })();
 
-          setResult({
-            headline: data?.headline || "",
-            body: data?.body || "",
-            image_overlay_text: data?.image_overlay_text || "",
-          });
+    // Copy can land whenever it’s ready (do not block visuals)
+    const data = await assetsPromise;
+    setResult({
+      headline: data?.headline || "",
+      body: data?.body || "",
+      image_overlay_text: data?.image_overlay_text || "",
+    });
 
-          const safeImgs = imgs || [];
-          setImageUrls(safeImgs);
-          setActiveImage(0);
-          setImageUrl(safeImgs[0] || "");
+    // Let images/videos continue in background; when both done, mark success.
+    await Promise.allSettled([imagesPromise, videosPromise]);
 
-          const safeVids = vids || [];
-          setVideoItems(safeVids);
-          setActiveVideo(0);
-          setVideoUrl(safeVids[0]?.url || "");
-          setVideoScript(safeVids[0]?.script || "");
+    setChatHistory((ch) => [
+      ...ch,
+      { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
+    ]);
+    setHasGenerated(true);
+  } catch (err) {
+    console.error("generation failed:", err);
+    setError("Generation failed (server cold or busy). Try again in a few seconds.");
+  } finally {
+    setGenerating(false);
+    setLoading(false);
+  }
+}, 120);
 
-          setChatHistory((ch) => [
-            ...ch,
-            {
-              from: "gpt",
-              text:
-                "Done! Here are your ad previews. You can regenerate the image or video below.",
-            },
-          ]);
-          setHasGenerated(true);
-        } catch (err) {
-          console.error("generation failed:", err);
-          setError(
-            "Generation failed (server cold or busy). Try again in a few seconds."
-          );
-        } finally {
-          setGenerating(false);
-          setLoading(false);
-        }
-      }, 200);
       return;
     }
 
@@ -1045,14 +1073,8 @@ useEffect(() => {
 
 async function handleRegenerateVideo() {
   setVideoLoading(true);
-
-  // Kill any in-flight heads/range/trigger from earlier runs
   abortAllVideoFetches();
-
-  // Clear old videos from UI while new ones are cooking
-  setVideoItems([]);
-  setVideoUrl("");
-  setVideoScript("");
+  setVideoItems([]); setVideoUrl(""); setVideoScript("");
 
   try {
     await warmBackend();
@@ -1060,7 +1082,6 @@ async function handleRegenerateVideo() {
 
     const vids = await fetchVideoPair(token, answers, result, BACKEND_URL);
 
-    // Warm both candidates
     await Promise.all([
       headRangeWarm("A", vids[0]?.url),
       headRangeWarm("B", vids[1]?.url),
@@ -1070,6 +1091,8 @@ async function handleRegenerateVideo() {
     setActiveVideo(0);
     setVideoUrl(vids[0]?.url || "");
     setVideoScript(vids[0]?.script || "");
+  } catch (e) {
+    console.error("regenerate video failed:", e?.message || e);
   } finally {
     setVideoLoading(false);
   }
