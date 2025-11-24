@@ -3049,18 +3049,26 @@ async function pumpVideoQueue() {
 }
 
 /* TRIGGER + POLL */
-// Synchronous video generation: 3–4 Pexels clips + TTS + subtitles (~18s)
-// Synchronous video generation: 3–4 Pexels clips + TTS + subtitles (~18s)
-// Adds seeded variety so each "regenerate" yields fresh clip sets & order.
+// Synchronous video generation: produce TWO variants (~18–20s) in one call
 router.post("/generate-video-ad", async (req, res) => {
   try {
+    // give ffmpeg time (Render can be slow on first run)
+    try {
+      if (typeof res.setTimeout === 'function') res.setTimeout(180000);
+      if (typeof req.setTimeout === 'function') req.setTimeout(180000);
+    } catch {}
+
     const body = req.body || {};
     const answers = body.answers || {};
     const url = body.url || "";
-    const regenerateToken = String(body.regenerateToken || answers.regenerateToken || answers.businessName || Date.now());
-    const rng = mkRng32(regenerateToken);
+    const regenerateToken = String(
+      body.regenerateToken ||
+      answers.regenerateToken ||
+      answers.businessName ||
+      Date.now()
+    );
 
-    // keyword by industry (kept from your logic, but feed into variants)
+    // keyword by industry (kept from your logic)
     const industry = (answers.industry || "").toLowerCase();
     let baseKeyword = "small business";
     if (industry.includes("restaurant") || industry.includes("food")) baseKeyword = "restaurant";
@@ -3069,61 +3077,104 @@ router.post("/generate-video-ad", async (req, res) => {
     else if (industry.includes("coffee")) baseKeyword = "coffee";
     else if (industry.includes("electronics") || industry.includes("tech")) baseKeyword = "tech gadgets";
 
-    // 1) clips (needs PEXELS_API_KEY) — wide pool + seeded randomness
+    // 1) clips — wide pool + seeded randomness
     let clips = await fetchPexelsVideos(baseKeyword, 14, regenerateToken);
     if (!clips.length) clips = await fetchPexelsVideos("product shopping", 14, regenerateToken + ":fallback");
     if (!clips.length) return res.status(500).json({ ok:false, error:"No stock clips found from Pexels." });
 
-    // 2) script (unchanged)
+    // 2) script
     const script = await generateVideoScriptFromAnswers(answers);
 
-    // 3) optional BGM (unchanged)
+    // 3) optional BGM
     const bgm = await prepareBgm();
 
-    // 4) build one ~18.5s variant with word-timed subtitles
-    //    Use seed in the virtual plan so order/offsets differ each time.
-    const planSeed = regenerateToken;
-    const v = await (async () => {
-      // create a randomized 3–4 clip plan
-      const plan = buildVirtualPlan(clips, 0, planSeed);
-      if (!plan.length) throw new Error('No clips in plan');
-      // makeVideoVariant expects raw clip URLs; we keep its internals unchanged,
-      // but the per-clip starting offset derives from variant + seed downstream.
-      return await makeVideoVariant({
-        clips: plan,        // pass the selected URLs (same shape as before)
-        script,
-        variant: 0,
-        targetSec: 18.5,
-        tailPadSec: 2,
-        musicPath: bgm,
-      });
-    })();
+    // 4) Build TWO variants deterministically from the same pool
+    const targetSec = 18.5;
 
-    const rel = path.basename(v.outPath);
-    const urlRel = `/api/media/${rel}`;
-    const abs = absolutePublicUrl(urlRel);
+    // Plan A / B use different seeds so order/offsets differ
+    const planA = buildVirtualPlan(clips, 0, regenerateToken);
+    const planB = buildVirtualPlan(clips, 1, regenerateToken + ":B");
+    if (!planA.length || !planB.length) throw new Error('No clips in plan');
 
-    // persist to recent assets
+    const vA = await makeVideoVariant({
+      clips: planA,
+      script,
+      variant: 0,
+      targetSec,
+      tailPadSec: 2,
+      musicPath: bgm,
+    });
+
+    const vB = await makeVideoVariant({
+      clips: planB,
+      script,
+      variant: 1,
+      targetSec,
+      tailPadSec: 2,
+      musicPath: bgm,
+    });
+
+    // Persist both variants
+    const relA = path.basename(vA.outPath);
+    const relB = path.basename(vB.outPath);
+    const urlA = `/api/media/${relA}`;
+    const urlB = `/api/media/${relB}`;
+    const absA = absolutePublicUrl(urlA);
+    const absB = absolutePublicUrl(urlB);
+
     await saveAsset({
       req,
       kind: 'video',
-      url: urlRel,
-      absoluteUrl: abs,
+      url: urlA,
+      absoluteUrl: absA,
       meta: {
         variant: 0,
         keyword: baseKeyword,
         hasSubtitles: true,
-        targetSec: v.duration,
+        targetSec: vA.duration,
         seed: regenerateToken
       }
     });
 
-    return res.json({ ok: true, url: urlRel, absoluteUrl: abs, filename: rel, script });
+    await saveAsset({
+      req,
+      kind: 'video',
+      url: urlB,
+      absoluteUrl: absB,
+      meta: {
+        variant: 1,
+        keyword: baseKeyword,
+        hasSubtitles: true,
+        targetSec: vB.duration,
+        seed: regenerateToken + ":B"
+      }
+    });
+
+    console.log('[video] ready (A/B):', urlA, urlB);
+
+    // Back-compat: keep `url` for A, but include urlB and a variants array
+    return res.json({
+      ok: true,
+      // legacy fields
+      url: urlA,
+      absoluteUrl: absA,
+      filename: relA,
+      // new fields (B and array)
+      urlB,
+      absoluteUrlB: absB,
+      filenameB: relB,
+      variants: [
+        { variant: 'A', url: urlA, absoluteUrl: absA, filename: relA, duration: vA.duration },
+        { variant: 'B', url: urlB, absoluteUrl: absB, filename: relB, duration: vB.duration },
+      ],
+      script
+    });
   } catch (err) {
     console.error("[generate-video-ad] error:", err);
     return res.status(500).json({ ok:false, error: err?.message || "Video generation failed" });
   }
 });
+
 
 
 // -----------------------------------------------------------------------
