@@ -146,12 +146,13 @@ function buildFilterGraph({ clips, targetSec, crossf, w, h, fps }) {
   // For input i: [i:v]scale,setsar,fps,trim,setpts
   // Crossfade 1: [v0][v1] -> [x1]
   // Crossfade 2: [x1][v2] -> [outv]
-  const vNorm = (i) => ([
-    `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=cover,setsar=1,fps=${fps},trim=duration=${per},setpts=PTS-STARTPTS[v${pad(i)}]`
-  ]);
-  const aNorm = (i) => ([
-    `[${i}:a]aresample=async=1:min_comp=0.001:min_hard_comp=0.100:first_pts=0,atrim=duration=${per},asetpts=PTS-STARTPTS[a${pad(i)}]`
-  ]);
+ const vNorm = (i) => ([
+  `[${i}:v]scale=960:540,setsar=1,fps=24,trim=duration=${per},setpts=PTS-STARTPTS[v${pad(i)}]`
+]);
+const aNorm = (i) => ([
+  `[${i}:a]aresample=async=1:min_comp=0.001:min_hard_comp=0.100:first_pts=0,atrim=duration=${per},asetpts=PTS-STARTPTS[a${pad(i)}]`
+]);
+
 
   const lines = [
     ...vNorm(0), ...aNorm(0),
