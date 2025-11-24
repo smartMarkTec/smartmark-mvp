@@ -691,48 +691,77 @@ async function headRangeWarm(label, url) {
 /* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
 
 async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 120000) {
+  const triggerKey = `TRIGGER_${variant}_${token}`;
   try {
     await warmBackend();
 
-    // Use our abort map so newer runs don’t kill unrelated steps
-    const triggerKey = `TRIGGER_${variant}_${token}`;
-    const res = await fetch(`${API_BASE}/generate-video-ad`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: answers?.url || "",
-        answers,
-        regenerateToken: token,
-        abVariant: variant,
-      }),
-      signal: newControllerFor(triggerKey).signal,
-    });
+    // Use the existing retry helper you already have (handles 429/50x with backoff)
+    const data = await fetchJsonWithRetry(
+      `${API_BASE}/generate-video-ad`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers?.url || "",
+          answers,
+          regenerateToken: token,
+          abVariant: variant,
+        }),
+        signal: newControllerFor(triggerKey).signal,
+      },
+      { tries: 5, warm: true, timeoutMs } // <- more tolerant of 502/503/504
+    );
 
-    const data = await safeJson(res);
-
-    let u = data.url || data.videoUrl || data.absoluteUrl;
-    if (!u && data.filename) u = `/api/media/${data.filename}`;
+    // Normalize URL from response
+    let u = data?.url || data?.videoUrl || data?.absoluteUrl;
+    if (!u && data?.filename) u = `/api/media/${data.filename}`;
     if (!u) throw new Error("No video URL in response");
 
     const finalUrl = /^https?:\/\//.test(u) ? u : BACKEND_URL + u;
 
-    // 🔥 Warm the MP4 so <video> can mount without “spinning”
-    await headRangeWarm(variant, finalUrl);
+    // Warm the returned MP4 to avoid “produced but not visible”
+    try { await headRangeWarm(variant, finalUrl); } catch {}
 
     return {
       url: finalUrl,
-      script: data.script || data.narration || (result?.body ? `Narration: ${result.body}` : ""),
-      fbVideoId: data.fbVideoId || null,
+      script: data?.script || data?.narration || (result?.body ? `Narration: ${result.body}` : ""),
+      fbVideoId: data?.fbVideoId || null,
     };
   } catch (e) {
+    // If the POST failed (e.g., 502), try a last-chance recovery:
+    if (e?.name !== "AbortError") {
+      try {
+        // Your backend already logs “[video] ready …” and exposes /generated-latest
+        const latest = await fetchJsonWithRetry(
+          `${API_BASE}/generated-latest`,
+          { method: "GET" },
+          { tries: 2, warm: false, timeoutMs: 15000 }
+        );
+
+        let u2 = latest?.absoluteUrl || latest?.url;
+        if (!u2 && latest?.filename) u2 = `/api/media/${latest.filename}`;
+
+        if (u2) {
+          const finalUrl2 = /^https?:\/\//.test(u2) ? u2 : BACKEND_URL + u2;
+          try { await headRangeWarm(`${variant}_LATEST`, finalUrl2); } catch {}
+          return {
+            url: finalUrl2,
+            script: latest?.script || "",
+            fbVideoId: latest?.fbVideoId || null,
+          };
+        }
+      } catch { /* ignore; true failure below */ }
+    }
+
     if (e?.name === "AbortError") {
       console.debug(`fetchVideoOnce(${variant}) aborted (superseded)`);
-      return { url: "", script: "", fbVideoId: null };
+    } else {
+      console.error(`fetchVideoOnce(${variant}) failed:`, e);
     }
-    console.error(`fetchVideoOnce(${variant}) failed:`, e);
     return { url: "", script: "", fbVideoId: null };
   }
 }
+
 
 
 async function fetchVideoPair(token, answers, result, BACKEND_URL) {
@@ -1487,11 +1516,15 @@ async function handleRegenerateVideo() {
             ) : videoItems.length > 0 ? (
               <>
                 <video
-                  key={videoItems[activeVideo]?.url || "video"}
-                    src={abs(videoItems[activeVideo]?.url || "")}
-                  controls
-                  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
-                />
+  key={videoItems[activeVideo]?.url || "video"}
+  src={abs(videoItems[activeVideo]?.url || "")}
+  controls
+  playsInline
+  muted
+  preload="metadata"
+  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
+/>
+
                 <Arrow side="left" onClick={() => {
                   const next = (activeVideo + videoItems.length - 1) % videoItems.length;
                   setActiveVideo(next);
