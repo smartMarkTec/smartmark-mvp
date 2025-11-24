@@ -403,6 +403,8 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
+
+
 /* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
 function toAbsoluteMedia(u) {
   if (!u) return "";
@@ -458,7 +460,7 @@ const parseImageResults = (data) => {
   return Array.from(new Set(out)).slice(0, 2);
 };
 
-async function fetchImagesOnce(token) {
+async function fetchImagesOnce(token, answersParam) {
   const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
   const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
   try {
@@ -468,7 +470,7 @@ async function fetchImagesOnce(token) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, regenerateToken: token })
+        body: JSON.stringify({ answers: answersParam, regenerateToken: token })
       },
       { tries: 3, warm: true, timeoutMs: 35000 } // a bit more forgiving
     );
@@ -911,7 +913,7 @@ export default function FormPage() {
             ).catch(() => ({}));
 
             const imagesPromise = (async () => {
-              const imgs = await fetchImagesOnce(token);
+              const imgs = await fetchImagesOnce(token, answers);
               setImageUrls(imgs || []);
               setActiveImage(0);
               setImageUrl((imgs && imgs[0]) || "");
@@ -1029,7 +1031,7 @@ export default function FormPage() {
     setImageLoading(true);
     try {
       await warmBackend();
-      const imgs = await fetchImagesOnce(getRandomString());
+      const imgs = await fetchImagesOnce(getRandomString(), answers);
       setImageUrls(imgs);
       setActiveImage(0);
       setImageUrl(imgs[0] || "");

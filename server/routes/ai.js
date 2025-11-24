@@ -3287,8 +3287,9 @@ const FAST_MODE = String(
   req.body.fast ??
   req.query.fast ??
   process.env.SM_FAST_MODE ??
-  '1'               // default to FAST ON
+  '0'               // default to FAST OFF (keeps subtitles & full edit)
 ).trim() === '1';
+
 
 
 let vA, vB;
@@ -3426,6 +3427,7 @@ router.get('/generated-videos', async (req, res) => {
 
 
 /* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
+// --------------------- IMAGE: search + overlay (TWO variations) ---------------------
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
 
@@ -3435,7 +3437,6 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   } catch {}
 
   try {
-    const { regenerateToken = '' } = req.body || {};
     const top       = req.body || {};
     const answers   = top.answers || top;
     const url       = answers.url || top.url || '';
@@ -3443,123 +3444,72 @@ router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
     const category  = resolveCategory(answers || {});
     const keyword   = getImageKeyword(industry, url, answers) || 'ecommerce products';
 
-    // Compose one overlay image and persist it
-    const compose = async (imgUrl, seed, meta = {}) => {
-      try {
-        const headlineHint = overlayTitleFromAnswers(answers, category);
-        const ctaHint      = cleanCTA(answers?.cta || '');
-        const { publicUrl, absoluteUrl } = await buildOverlayImage({
-          imageUrl: imgUrl,
-          headlineHint,
-          ctaHint,
-          seed,
-          fallbackHeadline: headlineHint,
-          answers,
-          category,
-        });
-
-        await saveAsset({
-          req, // NOTE: saveAsset expects an object with { req, kind, ... }
-          kind: 'image',
-          url: publicUrl,
-          absoluteUrl,
-          meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true, ...meta },
-        });
-
-        return publicUrl;
-      } catch (err) {
-        // Frame-only fallback
-        try {
-          const W = 1200, H = 628;
-          const imgRes = await ax.get(imgUrl, { responseType: 'arraybuffer', timeout: 12000 });
-          const baseBuf = await sharp(imgRes.data)
-            .resize(W, H, { fit: 'cover' })
-            .jpeg({ quality: 92 })
-            .toBuffer();
-
-          const frameSvg = Buffer.from(
-            `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-              <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="18" fill="none" stroke="rgba(0,0,0,0.12)" stroke-width="8"/>
-              <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="16" fill="none" stroke="rgba(255,255,255,0.24)" stroke-width="2"/>
-            </svg>`
-          );
-
-          const file = `${uuidv4()}.jpg`;
-          await sharp(baseBuf)
-            .composite([{ input: frameSvg, top: 0, left: 0 }])
-            .jpeg({ quality: 90 })
-            .toFile(path.join(ensureGeneratedDir(), file));
-
-          return mediaPath(file);
-        } catch {
-          throw err;
-        }
-      }
-    };
-
-    const urls = [];
-    const absUrls = [];
-
-    if (PEXELS_API_KEY) {
-      let photos = [];
-      try {
-        const r = await ax.get('https://api.pexels.com/v1/search', {
-          headers: { Authorization: PEXELS_API_KEY },
-          params:  { query: keyword, per_page: 12 },
-          timeout: 12000,
-        });
-        photos = Array.isArray(r.data?.photos) ? r.data.photos : [];
-      } catch {
-        photos = [];
-      }
-
-      if (!photos.length) throw new Error('pexels-empty');
-
-      const seed = regenerateToken || answers?.businessName || keyword || Date.now();
-      let idxHash = 0;
-      for (const c of String(seed)) idxHash = (idxHash * 31 + c.charCodeAt(0)) >>> 0;
-
-      const picks = new Set();
-      for (let i = 0; i < photos.length && picks.size < 2; i++) {
-        const idx = (idxHash + i * 7) % photos.length;
-        picks.add(idx);
-      }
-
-      for (const idx of picks) {
-        const img = photos[idx];
-        const baseUrl = img?.src?.original || img?.src?.large2x || img?.src?.large;
-        if (!baseUrl) continue;
-        const u = await compose(baseUrl, `${seed}_${idx}`, { src: 'pexels', idx });
-        urls.push(u);
-        absUrls.push(absolutePublicUrl(u));
-      }
-    } else {
-      const q = encodeURIComponent(keyword || 'ecommerce products');
-      for (let i = 0; i < 2; i++) {
-        const sig = encodeURIComponent((regenerateToken || 'seed') + '_' + i);
-        const baseUrl = `https://source.unsplash.com/1200x628/?${q}&sig=${sig}`;
-        const u = await compose(baseUrl, `${regenerateToken || 'seed'}_${i}`, { src: 'unsplash-keyless', index: i });
-        urls.push(u);
-        absUrls.push(absolutePublicUrl(u));
-      }
+    // small pool quickly
+    let photos = await fetchPexelsPhotos(
+      keyword,
+      8,
+      answers?.regenerateToken || answers?.businessName || Date.now()
+    );
+    if (!photos.length) {
+      photos = await fetchPexelsPhotos('product shopping', 8, Date.now() + ':fallback');
+    }
+    if (!photos.length) {
+      return res.status(500).json({ ok: false, error: 'No stock photos found from Pexels.' });
     }
 
-    // Nothing produced? Return 204 so the client can retry gracefully.
-    if (!urls.length) return res.status(204).end();
+    // two distinct images (duplicate safely if pool tiny)
+    const imgA = photos[0]?.url || photos[1]?.url || photos[0];
+    const imgB = photos[1]?.url || photos[0]?.url || photos[0];
+
+    // SAME overlay renderer you already use — no appearance changes
+    const headlineHint = overlayTitleFromAnswers(answers, category);
+    const ctaHint      = cleanCTA(answers?.cta || '');
+
+    const makeOne = async (imgUrl, seedSuffix) => {
+      const { publicUrl, absoluteUrl } = await buildOverlayImage({
+        imageUrl: imgUrl,
+        headlineHint,
+        ctaHint,
+        seed: (answers?.businessName || keyword) + ':' + seedSuffix,
+        fallbackHeadline: headlineHint,
+        answers,
+        category,
+      });
+      await saveAsset({
+        req,
+        kind: 'image',
+        url: publicUrl,
+        absoluteUrl,
+        meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true },
+      });
+      return publicUrl;
+    };
+
+    const [urlA, urlB] = await Promise.all([
+      makeOne(imgA, 'A'),
+      makeOne(imgB, 'B'),
+    ]);
+
+    const origin = req.headers && req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
 
     return res.json({
-      imageUrl: urls[0] || '',
-      absoluteImageUrl: absUrls[0] || '',
-      keyword,
-      totalResults: urls.length,
-      usedIndex: 0,
-      imageVariations: urls.map((u, idx) => ({ url: u, absoluteUrl: absUrls[idx] || absolutePublicUrl(u) })),
+      ok: true,
+      items: [
+        { variant: 'A', url: urlA, type: 'image/jpeg' },
+        { variant: 'B', url: urlB, type: 'image/jpeg' },
+      ],
     });
-
   } catch (e) {
-    return res.status(500).json({ error: 'Failed to fetch stock image', detail: String(e?.message || e) });
+    console.error('generate-image-from-prompt error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'IMAGE_GEN_FAIL' });
   }
 });
+
 
 /* ------------------------- RECENT (24h window) ------------------------- */
 async function listRecentForOwner(req) {
