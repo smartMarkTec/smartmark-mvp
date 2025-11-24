@@ -2387,32 +2387,123 @@ function buildWordTimedDrawtextFilter(words, inLabel = '[v0]', W = 960, H = 540)
 
 /* ================= end helpers ================= */
 
+// --- Variety helpers (seeded RNG + keyword variants + shuffle) ---
+function mkRng32(seed = '') {
+  // fast, deterministic 32-bit RNG based on seed
+  let h = 2166136261 >>> 0;
+  const s = String(seed || Date.now());
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => {
+    h += 0x6D2B79F5; h >>>= 0;
+    let t = Math.imul(h ^ (h >>> 15), 1 | h);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    t = (t ^ (t >>> 14)) >>> 0;
+    return t / 4294967296;
+  };
+}
+function shuffleInPlace(arr, rng) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+function buildKeywordVariants(base = '') {
+  const k = String(base || '').trim().toLowerCase();
+  if (!k) return ['product shopping', 'small business', 'store broll', 'customers shopping'];
+  // lightweight expansions per common categories
+  if (/\b(restaurant|food|bistro|cafe|coffee|pizza|burger)\b/.test(k)) {
+    return [
+      'restaurant b-roll', 'chef cooking', 'plating food closeup', 'diners at table',
+      'restaurant kitchen action', 'pouring coffee', 'serving dishes', 'restaurant ambience'
+    ];
+  }
+  if (/\b(fashion|clothing|apparel|boutique)\b/.test(k)) {
+    return [
+      'fashion model walk', 'clothes rack boutique', 'trying outfits mirror', 'streetwear b-roll',
+      'studio fashion shoot', 'closeup fabric', 'boutique shopping'
+    ];
+  }
+  if (/\b(beauty|salon|spa|cosmetic|skincare|makeup)\b/.test(k)) {
+    return [
+      'makeup application closeup', 'skincare routine', 'beauty salon b-roll', 'hair salon styling',
+      'spa relaxation', 'cosmetics flat lay'
+    ];
+  }
+  if (/\b(fitness|gym|workout|trainer)\b/.test(k)) {
+    return [
+      'gym workout b-roll', 'weightlifting closeup', 'treadmill runners', 'crossfit training',
+      'yoga class', 'stretching routine'
+    ];
+  }
+  if (/\b(tech|electronics|phone|laptop|gadget)\b/.test(k)) {
+    return [
+      'tech gadgets closeup', 'typing laptop b-roll', 'smartphone usage', 'electronics store',
+      'coding on laptop', 'unboxing tech'
+    ];
+  }
+  if (/\b(coffee)\b/.test(k)) {
+    return [
+      'pour over coffee', 'barista latte art', 'coffee shop ambience', 'espresso shot closeup'
+    ];
+  }
+  // generic expansions
+  return [
+    k, `${k} b-roll`, `${k} closeup`, `${k} people`, `${k} lifestyle`,
+    'product shopping', 'customers shopping', 'small business b-roll'
+  ];
+}
+
+
 /* ============================ VIDEO GENERATION (3–4 clips, ~18s) ============================ */
 
 /* Pexels video + photo fetchers */
-async function fetchPexelsVideos(keyword, want = 8) {
+/* Pexels videos with wide pool + seeded randomness + de-dupe */
+async function fetchPexelsVideos(keyword, want = 8, seed = '') {
   if (!PEXELS_API_KEY) return [];
+  const rng = mkRng32(seed || keyword || Date.now());
+  const variants = buildKeywordVariants(keyword);
+  // Randomly pick up to 3 different query variants and 2 random pages each
+  const chosenQueries = shuffleInPlace([...variants], rng).slice(0, Math.min(3, variants.length));
+  const pages = [1, 2, 3, 4, 5];
+  const results = [];
+  const seen = new Set();
+
   try {
-    const r = await ax.get('https://api.pexels.com/videos/search', {
-      headers: { Authorization: PEXELS_API_KEY },
-      params: {
-        query: keyword || 'product',
-        per_page: Math.max(16, want * 3),
-        orientation: 'landscape',
-      },
-      timeout: 12000,
-    });
-    const vids = r.data?.videos || [];
-    const pick = [];
-    for (const v of vids) {
-      const files = Array.isArray(v.video_files) ? v.video_files : [];
-      const f =
-        files.find((f) => (f.height || 0) >= 720 && /mp4/i.test(f.file_type || '')) ||
-        files.find((f) => f.link);
-      if (f?.link) pick.push({ url: f.link, id: v.id, dur: v.duration || 0 });
-      if (pick.length >= want) break;
+    for (const q of chosenQueries) {
+      const shuffledPages = shuffleInPlace([...pages], rng).slice(0, 2);
+      for (const page of shuffledPages) {
+        const r = await ax.get('https://api.pexels.com/videos/search', {
+          headers: { Authorization: PEXELS_API_KEY },
+          params: {
+            query: q,
+            per_page: 40,      // big page to widen pool
+            page,              // random page => variety
+            orientation: 'landscape',
+          },
+          timeout: 12000,
+        }).catch(() => ({ data: {} }));
+        const vids = Array.isArray(r.data?.videos) ? r.data.videos : [];
+        for (const v of vids) {
+          const id = v?.id;
+          if (id == null || seen.has(id)) continue;
+          const files = Array.isArray(v.video_files) ? v.video_files : [];
+          // prefer >= 720p mp4, else any mp4 link
+          const f =
+            files.find((f) => /mp4/i.test(f.file_type || '') && (f.height || 0) >= 720) ||
+            files.find((f) => /mp4/i.test(f.file_type || '')) ||
+            files[0];
+          if (f?.link) {
+            seen.add(id);
+            results.push({ url: f.link, id, dur: v.duration || 0 });
+          }
+        }
+      }
     }
-    console.log('[pexels] videos picked:', pick.length, 'kw=', keyword);
+    // Shuffle the large pool, then take the top 'want'
+    shuffleInPlace(results, rng);
+    const pick = results.slice(0, Math.max(want, 8)); // keep a generous pool for later slicing
+    console.log('[pexels] videos picked:', pick.length, 'kw=', keyword, 'seed=', seed);
     return pick;
   } catch (e) {
     console.warn('[pexels] video search fail:', e.message);
@@ -2420,47 +2511,65 @@ async function fetchPexelsVideos(keyword, want = 8) {
   }
 }
 
-async function fetchPexelsPhotos(keyword, want = 8) {
+
+/* Pexels photos with seeded randomness + de-dupe */
+async function fetchPexelsPhotos(keyword, want = 8, seed = '') {
   if (!PEXELS_API_KEY) return [];
+  const rng = mkRng32(seed || keyword || Date.now());
+  const variants = buildKeywordVariants(keyword);
+  const chosenQueries = shuffleInPlace([...variants], rng).slice(0, Math.min(3, variants.length));
+  const pages = [1, 2, 3, 4, 5];
+  const results = [];
+  const seen = new Set();
+
   try {
-    const r = await ax.get('https://api.pexels.com/v1/search', {
-      headers: { Authorization: PEXELS_API_KEY },
-      params: {
-        query: keyword || 'product',
-        per_page: Math.max(16, want * 3),
-      },
-      timeout: 12000,
-    });
-    const photos = r.data?.photos || [];
-    const pick = [];
-    for (const p of photos) {
-      const src = p?.src || {};
-      const u = src.landscape || src.large2x || src.large || src.original;
-      if (u) pick.push({ url: u, id: p.id });
-      if (pick.length >= want) break;
+    for (const q of chosenQueries) {
+      const shuffledPages = shuffleInPlace([...pages], rng).slice(0, 2);
+      for (const page of shuffledPages) {
+        const r = await ax.get('https://api.pexels.com/v1/search', {
+          headers: { Authorization: PEXELS_API_KEY },
+          params: { query: q, per_page: 40, page },
+          timeout: 12000,
+        }).catch(() => ({ data: {} }));
+        const photos = Array.isArray(r.data?.photos) ? r.data.photos : [];
+        for (const p of photos) {
+          const id = p?.id;
+          if (id == null || seen.has(id)) continue;
+          const src = p?.src || {};
+          const u = src.landscape || src.large2x || src.large || src.original;
+          if (u) {
+            seen.add(id);
+            results.push({ url: u, id });
+          }
+        }
+      }
     }
-    return pick;
-  } catch {
+    shuffleInPlace(results, rng);
+    return results.slice(0, Math.max(want, 12));
+  } catch (e) {
     return [];
   }
 }
 
-/** Ensure we have 3–4 clips (duplicate with different offsets if needed) */
-function buildVirtualPlan(rawClips, variant = 0) {
-  const uniq = Array.isArray(rawClips) ? rawClips.filter(Boolean) : [];
-  const baseCount = uniq.length;
-  if (!baseCount) {
+
+/** Ensure 3–4 clips with random order/choices per seed */
+function buildVirtualPlan(rawClips, variant = 0, seed = '') {
+  const clips = Array.isArray(rawClips) ? rawClips.filter(Boolean) : [];
+  if (!clips.length) {
     console.warn('[video] no Pexels clips available for virtual plan');
     return [];
   }
-  const want = baseCount >= 4 ? 4 : Math.max(3, Math.min(4, baseCount));
-  const out = [];
-  for (let i = 0; i < want; i++) {
-    const base = uniq[i % baseCount];
-    out.push({ url: base.url, seed: `${variant}-${i}-${Date.now()}` });
-  }
-  return out;
+
+  // Shuffle + slice so each run picks a different subset/order
+  const rng = mkRng32(`${seed}|v${variant}|${clips.length}`);
+  const pool = shuffleInPlace([...clips], rng);
+
+  const wantCount = pool.length >= 4 ? 4 : Math.max(3, Math.min(4, pool.length));
+  const pick = pool.slice(0, wantCount);
+  // Tag seeds so downstream trim offsets vary reproducibly per regenerate
+  return pick.map((c, i) => ({ url: c.url, seed: `${variant}-${i}-${seed}` }));
 }
+
 
 /** Compose stitched video with VO, optional bgm, ASS subs (flow, width-aware) */
 async function makeVideoVariant({
@@ -2941,51 +3050,72 @@ async function pumpVideoQueue() {
 
 /* TRIGGER + POLL */
 // Synchronous video generation: 3–4 Pexels clips + TTS + subtitles (~18s)
+// Synchronous video generation: 3–4 Pexels clips + TTS + subtitles (~18s)
+// Adds seeded variety so each "regenerate" yields fresh clip sets & order.
 router.post("/generate-video-ad", async (req, res) => {
   try {
     const body = req.body || {};
     const answers = body.answers || {};
     const url = body.url || "";
+    const regenerateToken = String(body.regenerateToken || answers.regenerateToken || answers.businessName || Date.now());
+    const rng = mkRng32(regenerateToken);
 
-    // keyword by industry (kept from your logic)
+    // keyword by industry (kept from your logic, but feed into variants)
     const industry = (answers.industry || "").toLowerCase();
-    let keyword = "small business";
-    if (industry.includes("restaurant") || industry.includes("food")) keyword = "restaurant food";
-    else if (industry.includes("fashion") || industry.includes("clothing")) keyword = "fashion model";
-    else if (industry.includes("beauty") || industry.includes("salon")) keyword = "beauty spa";
+    let baseKeyword = "small business";
+    if (industry.includes("restaurant") || industry.includes("food")) baseKeyword = "restaurant";
+    else if (industry.includes("fashion") || industry.includes("clothing")) baseKeyword = "fashion";
+    else if (industry.includes("beauty") || industry.includes("salon")) baseKeyword = "beauty salon";
+    else if (industry.includes("coffee")) baseKeyword = "coffee";
+    else if (industry.includes("electronics") || industry.includes("tech")) baseKeyword = "tech gadgets";
 
-    // 1) clips (needs PEXELS_API_KEY)
-    let clips = await fetchPexelsVideos(keyword, 8);
-    if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8);
+    // 1) clips (needs PEXELS_API_KEY) — wide pool + seeded randomness
+    let clips = await fetchPexelsVideos(baseKeyword, 14, regenerateToken);
+    if (!clips.length) clips = await fetchPexelsVideos("product shopping", 14, regenerateToken + ":fallback");
     if (!clips.length) return res.status(500).json({ ok:false, error:"No stock clips found from Pexels." });
 
-    // 2) script
+    // 2) script (unchanged)
     const script = await generateVideoScriptFromAnswers(answers);
 
-    // 3) optional BGM
+    // 3) optional BGM (unchanged)
     const bgm = await prepareBgm();
 
-    // 4) build one ~18.5s variant with xfade + ASS karaoke (word-by-word)
-    const v = await makeVideoVariant({
-      clips,
-      script,
-      variant: 0,
-      targetSec: 18.5,
-      tailPadSec: 2,
-      musicPath: bgm,
-    });
+    // 4) build one ~18.5s variant with word-timed subtitles
+    //    Use seed in the virtual plan so order/offsets differ each time.
+    const planSeed = regenerateToken;
+    const v = await (async () => {
+      // create a randomized 3–4 clip plan
+      const plan = buildVirtualPlan(clips, 0, planSeed);
+      if (!plan.length) throw new Error('No clips in plan');
+      // makeVideoVariant expects raw clip URLs; we keep its internals unchanged,
+      // but the per-clip starting offset derives from variant + seed downstream.
+      return await makeVideoVariant({
+        clips: plan,        // pass the selected URLs (same shape as before)
+        script,
+        variant: 0,
+        targetSec: 18.5,
+        tailPadSec: 2,
+        musicPath: bgm,
+      });
+    })();
 
     const rel = path.basename(v.outPath);
     const urlRel = `/api/media/${rel}`;
     const abs = absolutePublicUrl(urlRel);
 
-    // persist to recent assets (so your pollers/dashboards can see it)
+    // persist to recent assets
     await saveAsset({
       req,
       kind: 'video',
       url: urlRel,
       absoluteUrl: abs,
-      meta: { variant: 0, keyword, hasSubtitles: true, targetSec: v.duration }
+      meta: {
+        variant: 0,
+        keyword: baseKeyword,
+        hasSubtitles: true,
+        targetSec: v.duration,
+        seed: regenerateToken
+      }
     });
 
     return res.json({ ok: true, url: urlRel, absoluteUrl: abs, filename: rel, script });
