@@ -121,6 +121,153 @@ const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
 // Slow the voice slightly for readability (0.85–1.00). 0.92 ≈ 8% slower.
 const TTS_SLOWDOWN = Number(process.env.TTS_SLOWDOWN || 0.92);
 
+// --- FAST VIDEO PROFILE (≤ 75s wall time) -----------------------------
+const { spawn } = require("child_process");
+
+const FAST = {
+  WIDTH: 1280,
+  HEIGHT: 720,
+  FPS: 30,
+  TARGET_SEC: 18.5,         // ~18s total with 0.5s crossfades
+  CROSSF: 0.5,              // crossfade length
+  PRESET: "superfast",      // speed/quality trade-off
+  CRF: "28",                // visually OK for ads; small & fast
+  GOP: "60",                // keyframe interval
+  AUDIO_BR: "128k",
+  TIMEOUT_MS: 75_000        // hard cap
+};
+
+// Build a minimal filter graph: 3 clips trimmed, scaled, fps normalized, 2 crossfades.
+function buildFilterGraph({ clips, targetSec, crossf, w, h, fps }) {
+  // For 3 clips: trim each to ~6.5s so after two 0.5s overlaps we land ~18.5s
+  const per = Math.max(5.8, (targetSec + 2 * crossf) / clips + 0.2);
+  const pad = (n) => `${n}`.padStart(2, "0");
+
+  // For input i: [i:v]scale,setsar,fps,trim,setpts
+  // Crossfade 1: [v0][v1] -> [x1]
+  // Crossfade 2: [x1][v2] -> [outv]
+  const vNorm = (i) => ([
+    `[${i}:v]scale=${w}:${h}:force_original_aspect_ratio=cover,setsar=1,fps=${fps},trim=duration=${per},setpts=PTS-STARTPTS[v${pad(i)}]`
+  ]);
+  const aNorm = (i) => ([
+    `[${i}:a]aresample=async=1:min_comp=0.001:min_hard_comp=0.100:first_pts=0,atrim=duration=${per},asetpts=PTS-STARTPTS[a${pad(i)}]`
+  ]);
+
+  const lines = [
+    ...vNorm(0), ...aNorm(0),
+    ...vNorm(1), ...aNorm(1),
+    ...vNorm(2), ...aNorm(2),
+    // crossfade V: xfade with duration=crossf at end of first stream
+    `[v00][v01]xfade=transition=fade:duration=${crossf}:offset=${per - crossf}[x1v]`,
+    `[a00][a01]acrossfade=d=${crossf}[x1a]`,
+    `[x1v][v02]xfade=transition=fade:duration=${crossf}:offset=${per*2 - 2*crossf}[outv]`,
+    `[x1a][a02]acrossfade=d=${crossf}[outa]`
+  ];
+
+  return lines.join(";");
+}
+
+function runFfmpegFast({ inputs, outPath, voicePath /* optional */ }) {
+  return new Promise((resolve, reject) => {
+    const useVoice = !!voicePath;
+
+    // Put this RIGHT AFTER runFfmpegFast(...)
+
+
+
+    // Inputs: 3 video URLs + (optional) 4th audio input (voice-over)
+    const ffInputs = [
+      ...inputs.flatMap(u => ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "2", "-i", u]),
+      ...(useVoice ? ["-i", voicePath] : [])
+    ];
+
+    const filter = buildFilterGraph({
+      clips: 3,
+      targetSec: FAST.TARGET_SEC,
+      crossf: FAST.CROSSF,
+      w: FAST.WIDTH,
+      h: FAST.HEIGHT,
+      fps: FAST.FPS
+    });
+
+    // If we got a separate voice track, mix it under with sidechain ducking (fast)
+    const withVoice =
+      useVoice
+        ? [
+            "-filter_complex",
+            `${filter};` +
+            `[outa][${inputs.length}:a]sidechaincompress=threshold=-18dB:ratio=6:attack=20:release=200:makeup=6[aout]`,
+            "-map", "[outv]",
+            "-map", "[aout]"
+          ]
+        : [
+            "-filter_complex", filter,
+            "-map", "[outv]",
+            "-map", "[outa]"
+          ];
+
+    const args = [
+      // Inputs
+      ...ffInputs,
+
+      // Filters & mapping
+      ...withVoice,
+
+      // Encoders — FAST
+      "-c:v", "libx264",
+      "-preset", FAST.PRESET,
+      "-tune", "fastdecode,zerolatency",
+      "-crf", FAST.CRF,
+      "-g", FAST.GOP,
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+
+      "-c:a", "aac",
+      "-b:a", FAST.AUDIO_BR,
+
+      // Guard rails
+      "-max_muxing_queue_size", "1024",
+      "-shortest",
+
+      // Output
+      outPath
+    ];
+
+    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    ff.stderr.on("data", (d) => { stderr += d.toString(); });
+    ff.on("error", reject);
+    ff.on("close", (code) => {
+      if (code === 0) return resolve({ ok: true, stderr });
+      reject(new Error(`ffmpeg exited ${code}\n${stderr}`));
+    });
+
+    // Hard timeout: if we’re nearing 75s, kill and let caller decide fallback
+    const killer = setTimeout(() => {
+      try { ff.kill("SIGKILL"); } catch {}
+    }, FAST.TIMEOUT_MS);
+
+    ff.on("close", () => clearTimeout(killer));
+  });
+}
+
+async function makeVideoVariantFast({ clipUrls = [], script = '', targetSec = 18.5, voicePath }) {
+  const tts = voicePath ? { path: voicePath } : await synthTTS(script);
+  const vPath = voicePath || tts.path;
+
+  const inputs = (clipUrls || []).slice(0, 3);
+  if (inputs.length < 3) throw new Error('FAST: need at least 3 video URLs');
+
+  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+  await runFfmpegFast({ inputs, outPath, voicePath: vPath });
+
+  if (!voicePath) { try { safeUnlink(vPath); } catch {} } // only clean if we created it
+  return { outPath, duration: FAST.TARGET_SEC };
+}
+
+
+
+
 
 /* ---------------------- FFmpeg + subtitle helpers ---------------------- */
 
@@ -2124,7 +2271,6 @@ router.get('/debug/mem', (_req, res) => {
 
 
 /* =================== CORE VIDEO HELPERS (low-mem, stream-to-disk) =================== */
-const { spawn } = require('child_process');
 const { pipeline } = require('stream');
 const { promisify } = require('util');
 const streamPipeline = promisify(pipeline);
@@ -3096,23 +3242,39 @@ router.post("/generate-video-ad", async (req, res) => {
     const planB = buildVirtualPlan(clips, 1, regenerateToken + ":B");
     if (!planA.length || !planB.length) throw new Error('No clips in plan');
 
-    const vA = await makeVideoVariant({
-      clips: planA,
-      script,
-      variant: 0,
-      targetSec,
-      tailPadSec: 2,
-      musicPath: bgm,
-    });
+    // FAST toggle: prefer query flag (?fast=1) or env SM_FAST_MODE=1 for speed runs
+const FAST_MODE = String(req.query.fast || process.env.SM_FAST_MODE || '').trim() === '1';
 
-    const vB = await makeVideoVariant({
-      clips: planB,
-      script,
-      variant: 1,
-      targetSec,
-      tailPadSec: 2,
-      musicPath: bgm,
-    });
+let vA, vB;
+
+if (FAST_MODE) {
+  // Use direct-stream FAST path (no subtitle graph, minimal filters)
+  const planAurls = planA.map(c => c.url);
+  const planBurls = planB.map(c => c.url);
+
+  vA = await makeVideoVariantFast({ clipUrls: planAurls, script, targetSec });
+  vB = await makeVideoVariantFast({ clipUrls: planBurls, script, targetSec });
+} else {
+  // Keep your original, feature-rich path (word-timed subs, etc.)
+  vA = await makeVideoVariant({
+    clips,
+    script,
+    variant: 0,
+    targetSec,
+    tailPadSec: 2,
+    musicPath: bgm,
+  });
+
+  vB = await makeVideoVariant({
+    clips,
+    script,
+    variant: 1,
+    targetSec,
+    tailPadSec: 2,
+    musicPath: bgm,
+  });
+}
+
 
     // Persist both variants
     const relA = path.basename(vA.outPath);
