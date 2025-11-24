@@ -610,59 +610,59 @@ export default function FormPage() {
     if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
-  /* ---------- IMAGE helpers (always prefer composited variations) ---------- */
-  const normalizeUrl = (u) => {
-    if (!u) return "";
-    return /^https?:\/\//.test(u) ? u : (BACKEND_URL + u);
-  };
+/* ---------- IMAGE helpers (always prefer composited variations) ---------- */
+const normalizeUrl = (u) => {
+  if (!u) return "";
+  return /^https?:\/\//.test(u) ? u : (BACKEND_URL + u);
+};
 
-  const parseImageResults = (data) => {
-    const out = [];
+const parseImageResults = (data) => {
+  const out = [];
 
-    // Prefer variations (server returns TWO baked images)
-    if (Array.isArray(data?.imageVariations) && data.imageVariations.length) {
-      for (const v of data.imageVariations.slice(0, 2)) {
-        const u = normalizeUrl(v?.absoluteUrl || v?.url);
-        if (u) out.push(u);
-      }
-    }
-
-    // Fallback single fields if needed
-    if (out.length === 0) {
-      const u = normalizeUrl(data?.absoluteImageUrl || data?.imageUrl);
+  // Prefer variations (server returns TWO baked images)
+  if (Array.isArray(data?.imageVariations) && data.imageVariations.length) {
+    for (const v of data.imageVariations.slice(0, 2)) {
+      const u = normalizeUrl(v?.absoluteUrl || v?.url);
       if (u) out.push(u);
-    }
-
-    // Dedup + clamp to two
-    return Array.from(new Set(out)).slice(0, 2);
-  };
-
-  async function fetchImagesOnce(token) {
-    const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
-    const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
-    try {
-      await warmBackend(); // nudge the server awake
-      const data = await fetchJsonWithRetry(
-        `${API_BASE}/generate-image-from-prompt`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answers, regenerateToken: token })
-        },
-        { tries: 4, warm: true, timeoutMs: 30000 }
-      );
-      const urls = parseImageResults(data);
-      if (urls.length === 1) urls.push(fallbackB);
-      if (urls.length === 0) return [fallbackA, fallbackB];
-      return urls;
-    } catch (e) {
-      console.warn("image fetch failed:", e.message);
-      // Show *two* placeholders so carousel still has A/B
-      return [fallbackA, fallbackB];
     }
   }
 
-  /* --- Warm a video URL so <video> starts instantly --- */
+  // Fallback single fields if needed
+  if (out.length === 0) {
+    const u = normalizeUrl(data?.absoluteImageUrl || data?.imageUrl);
+    if (u) out.push(u);
+  }
+
+  // Dedup + clamp to two
+  return Array.from(new Set(out)).slice(0, 2);
+};
+
+async function fetchImagesOnce(token) {
+  const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
+  const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
+  try {
+    await warmBackend(); // nudge the server awake
+    const data = await fetchJsonWithRetry(
+      `${API_BASE}/generate-image-from-prompt`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ answers, regenerateToken: token })
+      },
+      { tries: 2, warm: true, timeoutMs: 20000 } // tighter for < 1 min overall
+    );
+    const urls = parseImageResults(data);
+    if (urls.length === 1) urls.push(fallbackB);
+    if (urls.length === 0) return [fallbackA, fallbackB];
+    return urls;
+  } catch (e) {
+    console.warn("image fetch failed:", e.message);
+    // Show *two* placeholders so carousel still has A/B
+    return [fallbackA, fallbackB];
+  }
+}
+
+/* --- Warm a video URL so <video> starts instantly --- */
 async function headRangeWarm(label, url) {
   if (!url) return false;
   try {
@@ -690,12 +690,11 @@ async function headRangeWarm(label, url) {
 
 /* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
 
-async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 120000) {
+async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A", timeoutMs = 26000) {
   const triggerKey = `TRIGGER_${variant}_${token}`;
   try {
     await warmBackend();
 
-    // Use the existing retry helper you already have (handles 429/50x with backoff)
     const data = await fetchJsonWithRetry(
       `${API_BASE}/generate-video-ad`,
       {
@@ -709,7 +708,7 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
         }),
         signal: newControllerFor(triggerKey).signal,
       },
-      { tries: 5, warm: true, timeoutMs } // <- more tolerant of 502/503/504
+      { tries: 2, warm: true, timeoutMs } // tighter for < 1 min overall
     );
 
     // Normalize URL from response
@@ -731,11 +730,10 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
     // If the POST failed (e.g., 502), try a last-chance recovery:
     if (e?.name !== "AbortError") {
       try {
-        // Your backend already logs “[video] ready …” and exposes /generated-latest
         const latest = await fetchJsonWithRetry(
           `${API_BASE}/generated-latest`,
           { method: "GET" },
-          { tries: 2, warm: false, timeoutMs: 15000 }
+          { tries: 1, warm: false, timeoutMs: 8000 }
         );
 
         let u2 = latest?.absoluteUrl || latest?.url;
@@ -762,8 +760,6 @@ async function fetchVideoOnce(token, answers, result, BACKEND_URL, variant = "A"
   }
 }
 
-
-
 async function fetchVideoPair(token, answers, result, BACKEND_URL) {
   // run in parallel to stay under a minute end-to-end
   const [a, b] = await Promise.allSettled([
@@ -789,146 +785,146 @@ async function fetchVideoPair(token, answers, result, BACKEND_URL) {
     }
   }
 
-  // If only one came back, return just that one (UI already handles 1–2)
   return dedup.slice(0, 2);
 }
 
-
-
 /* ---- Chat flow ---- */
-  async function handleUserInput(e) {
-    e.preventDefault();
-    if (loading) return;
-    const value = (input || "").trim();
-    if (!value) return;
+async function handleUserInput(e) {
+  e.preventDefault();
+  if (loading) return;
+  const value = (input || "").trim();
+  if (!value) return;
 
-    setChatHistory((ch) => [...ch, { from: "user", text: value }]);
-    setInput("");
+  setChatHistory((ch) => [...ch, { from: "user", text: value }]);
+  setInput("");
 
-    if (awaitingReady) {
-      if (
-        /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
-          value
-        )
-      ) {
-        setAwaitingReady(false);
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: CONVO_QUESTIONS[0].question },
-        ]);
-        setStep(0);
-        return;
-      } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
-        ]);
-        return;
-      } else {
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: "Please reply 'yes' when you're ready to start!" },
-        ]);
-        return;
-      }
-    }
-
-    const currentQ = CONVO_QUESTIONS[step];
-
-    if (step >= CONVO_QUESTIONS.length) {
-      if (!hasGenerated && isGenerateTrigger(value)) {
-        setLoading(true);
-        setGenerating(true);
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: "AI generating..." },
-        ]);
-
-        setTimeout(async () => {
-          const token = getRandomString();
-
-          // 🔄 Clear any previous video while we wait for a fresh one
-          setVideoItems([]);
-          setVideoUrl("");
-          setVideoScript("");
-
-          try {
-            // Pre-warm before heavy work
-            await warmBackend();
-
-            // 1) campaign assets
-            const data = await fetchJsonWithRetry(
-              `${API_BASE}/generate-campaign-assets`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ answers }),
-              },
-              { tries: 4 }
-            );
-
-            setResult({
-              headline: data?.headline || "",
-              body: data?.body || "",
-              image_overlay_text: data?.image_overlay_text || "",
-            });
-
-            // 2) images (now *two* URLs)
-            const imgs = await fetchImagesOnce(token);
-            setImageUrls(imgs);
-            setActiveImage(0);
-            setImageUrl(imgs[0] || "");
-
-            // 3) videos (A/B in parallel: waits for two finished ~18–20s ads)
-abortAllVideoFetches(); // cancel stale polls/warms from previous attempts
-
-const vids = await fetchVideoPair(token, answers, data, BACKEND_URL);
-
-// Proactively warm each URL so UI mounts fast
-await Promise.all([
-  headRangeWarm("A", vids[0]?.url),
-  headRangeWarm("B", vids[1]?.url),
-]);
-
-setVideoItems(vids);
-setActiveVideo(0);
-setVideoUrl(vids[0]?.url || "");
-setVideoScript(vids[0]?.script || "");
-
-
-
-            setChatHistory((ch) => [
-              ...ch,
-              {
-                from: "gpt",
-                text:
-                  "Done! Here are your ad previews. You can regenerate the image or video below.",
-              },
-            ]);
-            setHasGenerated(true);
-          } catch (err) {
-            console.error("generation failed:", err);
-            setError(
-              "Generation failed (server cold or busy). Try again in a few seconds."
-            );
-          } finally {
-            setGenerating(false);
-            setLoading(false);
-          }
-        }, 200);
-        return;
-      }
-
-      if (hasGenerated) {
-        await handleSideChat(value, null);
-      } else {
-        await handleSideChat(
-          value,
-          "Ready to generate your campaign? (yes/no)"
-        );
-      }
+  if (awaitingReady) {
+    if (
+      /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
+        value
+      )
+    ) {
+      setAwaitingReady(false);
+      setChatHistory((ch) => [
+        ...ch,
+        { from: "gpt", text: CONVO_QUESTIONS[0].question },
+      ]);
+      setStep(0);
+      return;
+    } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
+      setChatHistory((ch) => [
+        ...ch,
+        { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
+      ]);
+      return;
+    } else {
+      setChatHistory((ch) => [
+        ...ch,
+        { from: "gpt", text: "Please reply 'yes' when you're ready to start!" },
+      ]);
       return;
     }
+  }
+
+  const currentQ = CONVO_QUESTIONS[step];
+
+  if (step >= CONVO_QUESTIONS.length) {
+    if (!hasGenerated && isGenerateTrigger(value)) {
+      setLoading(true);
+      setGenerating(true);
+      setChatHistory((ch) => [
+        ...ch,
+        { from: "gpt", text: "AI generating..." },
+      ]);
+
+      setTimeout(async () => {
+        const token = getRandomString();
+
+        // 🔄 Clear any previous video while we wait for a fresh one
+        setVideoItems([]);
+        setVideoUrl("");
+        setVideoScript("");
+
+        try {
+          await warmBackend();
+          abortAllVideoFetches();
+
+          const assetsPromise = fetchJsonWithRetry(
+            `${API_BASE}/generate-campaign-assets`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ answers }),
+            },
+            { tries: 2, timeoutMs: 20000 }
+          );
+
+          const imagesPromise = fetchImagesOnce(token);
+          const videosPromise = (async () => {
+            const vs = await fetchVideoPair(token, answers, null, BACKEND_URL);
+            await Promise.all([
+              headRangeWarm("A", vs[0]?.url),
+              headRangeWarm("B", vs[1]?.url),
+            ]);
+            return vs;
+          })();
+
+          const [data, imgs, vids] = await Promise.all([
+            assetsPromise,
+            imagesPromise,
+            videosPromise,
+          ]);
+
+          setResult({
+            headline: data?.headline || "",
+            body: data?.body || "",
+            image_overlay_text: data?.image_overlay_text || "",
+          });
+
+          const safeImgs = imgs || [];
+          setImageUrls(safeImgs);
+          setActiveImage(0);
+          setImageUrl(safeImgs[0] || "");
+
+          const safeVids = vids || [];
+          setVideoItems(safeVids);
+          setActiveVideo(0);
+          setVideoUrl(safeVids[0]?.url || "");
+          setVideoScript(safeVids[0]?.script || "");
+
+          setChatHistory((ch) => [
+            ...ch,
+            {
+              from: "gpt",
+              text:
+                "Done! Here are your ad previews. You can regenerate the image or video below.",
+            },
+          ]);
+          setHasGenerated(true);
+        } catch (err) {
+          console.error("generation failed:", err);
+          setError(
+            "Generation failed (server cold or busy). Try again in a few seconds."
+          );
+        } finally {
+          setGenerating(false);
+          setLoading(false);
+        }
+      }, 200);
+      return;
+    }
+
+    if (hasGenerated) {
+      await handleSideChat(value, null);
+    } else {
+      await handleSideChat(
+        value,
+        "Ready to generate your campaign? (yes/no)"
+      );
+    }
+    return;
+  }
+
 
     if (currentQ && isLikelySideChat(value, currentQ)) {
       await handleSideChat(
