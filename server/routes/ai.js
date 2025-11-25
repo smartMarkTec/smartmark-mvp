@@ -52,6 +52,7 @@ try {
 const GEN_LIMIT = Number(process.env.GEN_CONCURRENCY || 1);
 let active = 0;
 const waiters = [];
+
 function acquire() {
   return new Promise((resolve) => {
     const tryGo = () => {
@@ -66,20 +67,21 @@ function release() {
   const next = waiters.shift();
   if (next) setImmediate(next);
 }
-const heavyRoute = (req, res, next) => {
-  if (!/^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path)) {
-    return next();
-  }
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
- acquire().then(() => {
-  let released = false;
-  const done = () => { if (!released) { released = true; release(); } };
-  res.once('finish', done);
-  res.once('close', done);
-  next();
-});
 
-};
+// Gate only the heavy generation routes; always release on finish/close
+function heavyRoute(req, res, next) {
+  const heavy = /^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path);
+  if (!heavy) return next();
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+
+  acquire().then(() => {
+    let released = false;
+    const done = () => { if (!released) { released = true; release(); } };
+    res.once('finish', done);
+    res.once('close', done);
+    next();
+  });
+}
 router.use(heavyRoute);
 
 
@@ -140,28 +142,25 @@ const TTS_SLOWDOWN = Number(process.env.TTS_SLOWDOWN || 0.92);
 // --- FAST VIDEO PROFILE (≤ 75s wall time) -----------------------------
 const { spawn } = require("child_process");
 
-// keep your FAST constants, but tighten timeouts/bitrates a hair
 const FAST = {
   WIDTH: 1280,
   HEIGHT: 720,
-  FPS: 30,
-  TARGET_SEC: 18.5,
+  FPS: 24,              // 24 saves encode time a bit
   CROSSF: 0.5,
   PRESET: "superfast",
-  CRF: "29",
-  GOP: "60",
+  CRF: "30",            // slightly higher CRF => faster/smaller
+  GOP: "48",
   AUDIO_BR: "112k",
-  TIMEOUT_MS: 70_000, // kill ffmpeg if it lingers
+  TIMEOUT_MS: 65000,    // kill ffmpeg if it lingers (65s)
 };
 
 // minimal xfade graph for three equal-length segments + single audio track
-function buildFilterGraph({ targetSec, crossf }) {
-  // each clip duration BEFORE crossf overlap
-  const per = Math.max(5.8, (targetSec + 2 * crossf) / 3 + 0.2);
+function buildFilterGraphFast({ totalSec, crossf }) {
+  // each clip duration BEFORE overlap; +0.2 keeps safe headroom
+  const per = Math.max(5.6, (totalSec + 2 * crossf) / 3 + 0.2);
 
-  // normalize to 960x540@24fps (fast) and trim
   const vNorm = (i) =>
-    `[${i}:v]scale=960:540:flags=bicubic,setsar=1,fps=24,trim=duration=${per.toFixed(
+    `[${i}:v]scale=960:540:flags=bicubic,setsar=1,fps=${FAST.FPS},trim=duration=${per.toFixed(
       2
     )},setpts=PTS-STARTPTS[v${i}]`;
 
@@ -169,152 +168,101 @@ function buildFilterGraph({ targetSec, crossf }) {
     vNorm(0),
     vNorm(1),
     vNorm(2),
-    // xfade 1: v0->v1
-    `[v0][v1]xfade=transition=fade:duration=${crossf}:offset=${(per - crossf).toFixed(
-      2
-    )}[x1]`,
-    // xfade 2: (v0-1)->v2
-    `[x1][v2]xfade=transition=fade:duration=${crossf}:offset=${(
-      per * 2 -
-      2 * crossf
-    ).toFixed(2)}[outv]`,
-    // audio = TTS only (index 3)
-    `[3:a]atrim=duration=${(per * 3 - 2 * crossf).toFixed(
-      2
-    )},asetpts=PTS-STARTPTS[aout]`,
+
+    // v0 -> v1
+    `[v0][v1]xfade=transition=fade:duration=${crossf}:offset=${(per - crossf).toFixed(2)}[x1]`,
+    // (v0-1) -> v2
+    `[x1][v2]xfade=transition=fade:duration=${crossf}:offset=${(per * 2 - 2 * crossf).toFixed(2)}[outv]`,
+
+    // audio is TTS only at index 3; trim to montage duration
+    `[3:a]atrim=duration=${(per * 3 - 2 * crossf).toFixed(2)},asetpts=PTS-STARTPTS[aout]`,
   ].join(";");
 }
 
-// run ffmpeg with local mp4 parts + local voice mp3
-function runFfmpegFast({ parts, voicePath, outPath }) {
+function runFfmpegFast({ parts, voicePath, outPath, totalSec }) {
   return new Promise((resolve, reject) => {
     const args = [
       "-y",
       "-nostdin",
-      "-loglevel",
-      "error",
+      "-loglevel", "error",
 
-      // three local video parts
-      "-i",
-      parts[0],
-      "-i",
-      parts[1],
-      "-i",
-      parts[2],
-
-      // voice
-      "-i",
-      voicePath,
+      "-i", parts[0],
+      "-i", parts[1],
+      "-i", parts[2],
+      "-i", voicePath,
 
       "-filter_complex",
-      buildFilterGraph({
-        targetSec: FAST.TARGET_SEC,
-        crossf: FAST.CROSSF,
-      }),
-      "-map",
-      "[outv]",
-      "-map",
-      "[aout]",
+      buildFilterGraphFast({ totalSec, crossf: FAST.CROSSF }),
 
-      "-c:v",
-      "libx264",
-      "-preset",
-      FAST.PRESET,
-      "-tune",
-      "fastdecode,zerolatency",
-      "-crf",
-      FAST.CRF,
-      "-g",
-      FAST.GOP,
-      "-pix_fmt",
-      "yuv420p",
-      "-movflags",
-      "+faststart",
+      "-map", "[outv]",
+      "-map", "[aout]",
 
-      "-c:a",
-      "aac",
-      "-b:a",
-      FAST.AUDIO_BR,
+      "-c:v", "libx264",
+      "-preset", FAST.PRESET,
+      "-tune", "fastdecode,zerolatency",
+      "-crf", FAST.CRF,
+      "-g", FAST.GOP,
+      "-pix_fmt", "yuv420p",
+      "-movflags", "+faststart",
+
+      "-c:a", "aac",
+      "-b:a", FAST.AUDIO_BR,
       "-shortest",
 
       outPath,
     ];
 
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
     let err = "";
-    ff.stderr.on("data", (d) => (err += d.toString()));
-    const killer = setTimeout(() => {
-      try {
-        ff.kill("SIGKILL");
-      } catch {}
-    }, FAST.TIMEOUT_MS);
+    const killer = setTimeout(() => { try { ff.kill("SIGKILL"); } catch {} }, FAST.TIMEOUT_MS);
 
+    ff.stderr.on("data", (d) => (err += d.toString()));
     ff.on("close", (code) => {
       clearTimeout(killer);
       if (code === 0) return resolve();
       reject(new Error(`ffmpeg exited ${code}\n${err}`));
     });
-
-    ff.on("error", (e) => {
-      clearTimeout(killer);
-      reject(e);
-    });
+    ff.on("error", (e) => { clearTimeout(killer); reject(e); });
   });
 }
 
-// local downloader (uses your existing ax + stream pipeline + GEN_DIR)
-async function downloadToTmp(url, ext = ".mp4") {
-  ensureGeneratedDir();
-  const out = path.join(GEN_DIR, `${uuidv4()}${ext}`);
-  const res = await ax.get(url, { responseType: "stream", timeout: 20000 });
-  await new Promise((resolve, reject) => {
-    const ws = fs.createWriteStream(out);
-    res.data.pipe(ws);
-    ws.on("finish", resolve);
-    ws.on("error", reject);
-  });
-  return out;
-}
-function safeUnlink(p) {
-  try {
-    fs.unlinkSync(p);
-  } catch {}
-}
-
-// SUPER-FAST variant: download 3 clips locally → compose with xfade → map TTS
-async function makeVideoVariantFast({ clipUrls = [], script = "" }) {
+/**
+ * SUPER-FAST variant
+ * - downloads 3 clips locally
+ * - quick xfade montage
+ * - maps TTS only (no bgm, no ASS/drawtext)
+ * NOTE: honors caller-provided targetSec
+ */
+async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18.5 }) {
   if (!Array.isArray(clipUrls) || clipUrls.length < 3) {
     throw new Error("FAST: need ≥ 3 clip URLs");
   }
 
-  // 1) synth voice
+  // 1) synth voice (reuse your unified synthTTS)
   const tts = await synthTTS(script);
   const voicePath = tts.path;
 
-  // 2) take first three urls, download locally (robust vs streaming)
+  // 2) download first three clips via unified downloadToTmp
   const locals = [];
   try {
     for (let i = 0; i < 3; i++) {
       locals.push(await downloadToTmp(clipUrls[i], ".mp4"));
     }
   } catch (e) {
-    // if any download fails, clean and bail
-    locals.forEach(safeUnlink);
-    safeUnlink(voicePath);
+    locals.forEach((p) => { try { fs.unlinkSync(p); } catch {} });
+    try { fs.unlinkSync(voicePath); } catch {}
     throw e;
   }
 
-  // 3) compose
+  // 3) compose with fast xfade graph using the requested targetSec
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   try {
-    await runFfmpegFast({ parts: locals, voicePath, outPath });
+    await runFfmpegFast({ parts: locals, voicePath, outPath, totalSec: Math.max(15, Math.min(20, Number(targetSec) || 18.5)) });
   } finally {
-    locals.forEach(safeUnlink);
-    // keep voice for debugging only if you want; otherwise delete to save tmp
-    safeUnlink(voicePath);
+    locals.forEach((p) => { try { fs.unlinkSync(p); } catch {} });
+    try { fs.unlinkSync(voicePath); } catch {}
   }
-
-  return { outPath, duration: FAST.TARGET_SEC };
+  return { outPath, duration: Math.max(15, Math.min(20, Number(targetSec) || 18.5)) };
 }
 
 
@@ -3355,55 +3303,36 @@ router.post("/generate-video-ad", async (req, res) => {
     const bgm = await prepareBgm();
 
     // 4) Build TWO variants deterministically from the same pool
-    const targetSec = 18.5;
-
-    // Plan A / B use different seeds so order/offsets differ
     const planA = buildVirtualPlan(clips, 0, regenerateToken);
     const planB = buildVirtualPlan(clips, 1, regenerateToken + ":B");
     if (!planA.length || !planB.length) throw new Error('No clips in plan');
 
-    // FAST toggle: prefer query flag (?fast=1) or env SM_FAST_MODE=1 for speed runs
-const FAST_MODE = String(
-  req.body.fast ??
-  req.query.fast ??
-  process.env.SM_FAST_MODE ??
-  '0'               // default to FAST OFF (keeps subtitles & full edit)
-).trim() === '1';
+    // FAST toggle: prefer body/query flag (?fast=1) or env SM_FAST_MODE=1
+    const FAST_MODE = String(
+      body.fast ?? req.query.fast ?? process.env.SM_FAST_MODE ?? '0'
+    ).trim() === '1';
 
+    // Single, non-duplicated targetSec definition (clamped 18–20s)
+    const rawTarget = Number(body.targetSeconds ?? answers.targetSeconds);
+    const targetSec = Math.max(18, Math.min(20, Number.isFinite(rawTarget) ? rawTarget : 18.5));
 
+    // --- build both variants ---
+    let vA, vB;
+    if (FAST_MODE) {
+      const planAurls = planA.map(c => c.url);
+      const planBurls = planB.map(c => c.url);
+      vA = await makeVideoVariantFast({ clipUrls: planAurls, script, targetSec });
+      vB = await makeVideoVariantFast({ clipUrls: planBurls, script, targetSec });
+    } else {
+      vA = await makeVideoVariant({
+        clips, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm,
+      });
+      vB = await makeVideoVariant({
+        clips, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm,
+      });
+    }
 
-let vA, vB;
-
-if (FAST_MODE) {
-  // Use direct-stream FAST path (no subtitle graph, minimal filters)
-  const planAurls = planA.map(c => c.url);
-  const planBurls = planB.map(c => c.url);
-
-  vA = await makeVideoVariantFast({ clipUrls: planAurls, script, targetSec });
-  vB = await makeVideoVariantFast({ clipUrls: planBurls, script, targetSec });
-} else {
-  // Keep your original, feature-rich path (word-timed subs, etc.)
-  vA = await makeVideoVariant({
-    clips,
-    script,
-    variant: 0,
-    targetSec,
-    tailPadSec: 2,
-    musicPath: bgm,
-  });
-
-  vB = await makeVideoVariant({
-    clips,
-    script,
-    variant: 1,
-    targetSec,
-    tailPadSec: 2,
-    musicPath: bgm,
-  });
-}
-
-
-    // Persist both variants
+    // --- persist both variants BEFORE responding ---
     const relA = path.basename(vA.outPath);
     const relB = path.basename(vB.outPath);
     const urlA = `/api/media/${relA}`;
@@ -3420,7 +3349,8 @@ if (FAST_MODE) {
         variant: 0,
         keyword: baseKeyword,
         hasSubtitles: true,
-        targetSec: vA.duration,
+        targetSec,              // requested target
+        duration: vA.duration,  // actual result
         seed: regenerateToken
       }
     });
@@ -3434,21 +3364,22 @@ if (FAST_MODE) {
         variant: 1,
         keyword: baseKeyword,
         hasSubtitles: true,
-        targetSec: vB.duration,
+        targetSec,              // requested target
+        duration: vB.duration,  // actual result
         seed: regenerateToken + ":B"
       }
     });
 
     console.log('[video] ready (A/B):', urlA, urlB);
 
-    // Back-compat: keep `url` for A, but include urlB and a variants array
+    // --- single response ---
     return res.json({
       ok: true,
       // legacy fields
       url: urlA,
       absoluteUrl: absA,
       filename: relA,
-      // new fields (B and array)
+      // new fields
       urlB,
       absoluteUrlB: absB,
       filenameB: relB,
@@ -3458,12 +3389,12 @@ if (FAST_MODE) {
       ],
       script
     });
+
   } catch (err) {
     console.error("[generate-video-ad] error:", err);
     return res.status(500).json({ ok:false, error: err?.message || "Video generation failed" });
   }
 });
-
 
 
 // -----------------------------------------------------------------------
