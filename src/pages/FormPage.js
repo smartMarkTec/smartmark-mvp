@@ -293,17 +293,17 @@ function abortAllVideoFetches() {
 
 
 /* ===== helpers ===== */
-// Keep UX under ~90s but allow a short background grace-finalize
-const CONTROLLER_TIMEOUT_MS = 20000;          // generic per-call guard
-const VIDEO_FETCH_TIMEOUT_MS = 55000;         // give each A/B variant a bit more room
-const GENERATION_SOFT_CAP_MS = 90000;         // show message at ~90s
-const GENERATION_HARD_ABORT_MS = 105000;      // actually abort at ~105s
-const FINALIZE_GRACE_POLL_MS = 20000;         // after abort, quietly poll for finished asset
 
-const VIDEO_TARGET_SECONDS = 19;
+const CONTROLLER_TIMEOUT_MS = 22000;         // single-call guard
+const IMAGE_FETCH_TIMEOUT_MS = 38000;        // image job (retry-safe)
+const VIDEO_FETCH_TIMEOUT_MS = 56000;        // per-variant POST /generate-video-ad
+const GENERATION_HARD_CAP_MS = 100000;       // global cap per run (~1m40s)
+const VIDEO_TARGET_SECONDS = 19;             // server still targets ~19s
 const USE_FAST_MODE = true;
-const FORCE_HARD_CUTS = true;
-const FORCE_SUBTITLES = true;
+
+const FORCE_HARD_CUTS = true;                // straight cuts (no xfade)
+const FORCE_SUBTITLES = true;                // on (burn if possible)
+
 
 
 function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
@@ -450,29 +450,31 @@ async function headRangeWarm(label, url) {
 const parseImageResults = (data) => {
   const out = [];
 
-  // Prefer variations (server returns TWO baked images)
-  if (Array.isArray(data?.imageVariations) && data.imageVariations.length) {
-    for (const v of data.imageVariations.slice(0, 2)) {
+  // Prefer server-baked variations (we clamp to exactly TWO)
+  if (Array.isArray(data?.imageVariations)) {
+    for (const v of data.imageVariations) {
       const u = v?.absoluteUrl || v?.url || v?.filename;
-      if (u) out.push(toAbsoluteMedia(u.startsWith("/api/media/") || /^https?:\/\//.test(u) ? u : `/api/media/${u}`));
+      if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || u.startsWith("/api/") ? u : `/api/media/${u}`));
     }
   }
 
-  // Fallback single fields if needed
+  // Fallback single fields
   if (out.length === 0) {
     const u = data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename;
-    if (u) out.push(toAbsoluteMedia(u.startsWith("/api/") || /^https?:\/\//.test(u) ? u : `/api/media/${u}`));
+    if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || u.startsWith("/api/") ? u : `/api/media/${u}`));
   }
 
-  // Dedup + clamp to two
-  return Array.from(new Set(out)).slice(0, 2);
+  // Ensure two items for carousel experience
+  const uniq = Array.from(new Set(out));
+  return uniq.slice(0, 2);
 };
 
 async function fetchImagesOnce(token, answersParam) {
   const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
   const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
   try {
-    await warmBackend(); // nudge the server awake
+    await warmBackend();
+
     const data = await fetchJsonWithRetry(
       `${API_BASE}/generate-image-from-prompt`,
       {
@@ -480,18 +482,24 @@ async function fetchImagesOnce(token, answersParam) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers: answersParam, regenerateToken: token })
       },
-      { tries: 3, warm: true, timeoutMs: 35000 } // a bit more forgiving
-    );
-    const urls = parseImageResults(data);
-    if (urls.length === 1) urls.push(fallbackB);
-    if (urls.length === 0) return [fallbackA, fallbackB];
+      { tries: 3, warm: true, timeoutMs: IMAGE_FETCH_TIMEOUT_MS }
+    ).catch(() => ({}));
+
+    let urls = parseImageResults(data);
+
+    // if server gave only 1, pad with placeholder B
+    if (urls.length === 1) urls = [urls[0], fallbackB];
+    if (urls.length === 0) urls = [fallbackA, fallbackB];
+
+    // warm both so they appear instantly
+    await Promise.allSettled(urls.map((u, i) => headRangeWarm(`IMG${i}`, u)));
     return urls;
   } catch (e) {
     console.warn("image fetch failed:", e?.message || e);
-    // Show *two* placeholders so carousel still has A/B
     return [fallbackA, fallbackB];
   }
 }
+
 
 /* ===== poll latest video (fallback) ===== */
 async function pollLatestVideo({ tries = 5, delayMs = 900 } = {}) {
@@ -1058,29 +1066,27 @@ export default function FormPage() {
 setTimeout(async () => {
   const token = getRandomString();
 
-  // --- soft cap (message only) ---
-  const softCapTimer = setTimeout(() => {
-    setError("Taking too long. We’ll keep checking for the finished files for a moment…");
-  }, GENERATION_SOFT_CAP_MS);
+  // Abort any stale in-flight jobs first
+  abortAllVideoFetches();
 
-  // --- hard abort (stop active network), then grace poll in background ---
-  const hardAbortTimer = setTimeout(async () => {
-    console.warn("Hard abort reached; aborting video fetches, entering grace finalize.");
-    abortAllVideoFetches();              // stop long POSTs
-    await finalizeGracePeriod();         // quietly try to pull finished MP4 if it just landed
+  // Global hard cap
+  const hardCap = setTimeout(() => {
+    console.warn("Hard cap reached; aborting video fetches");
+    abortAllVideoFetches();
     setGenerating(false);
     setLoading(false);
-  }, GENERATION_HARD_ABORT_MS);
+    setError("Taking too long. Please try again (we limit generation to ~100 seconds).");
+  }, GENERATION_HARD_CAP_MS);
 
-  // clear any old previews
-  setVideoItems([]); setVideoUrl(""); setVideoScript("");
-  setImageUrls([]); setImageUrl("");
+  // clear old previews
+  try { setVideoItems([]); } catch {}
+  try { setVideoUrl(""); setVideoScript(""); } catch {}
+  try { setImageUrls([]); setImageUrl(""); } catch {}
 
   try {
     await warmBackend();
-    abortAllVideoFetches(); // ensure clean slate for new controllers
 
-    // Run copy (fast), images, and videos in parallel
+    // Kick off copy, images, and A/B videos in parallel
     const assetsPromise = fetchJsonWithRetry(
       `${API_BASE}/generate-campaign-assets`,
       {
@@ -1091,38 +1097,31 @@ setTimeout(async () => {
       { tries: 1, timeoutMs: 12000 }
     ).catch(() => ({}));
 
-    // Images with a built-in 2nd-shot if nothing arrives quickly
     const imagesPromise = (async () => {
       const imgs = await fetchImagesOnce(token, answers);
-      if (!imgs || imgs.length === 0) {
-        // try once more without blocking; different token to avoid cache
-        try {
-          const retryImgs = await fetchImagesOnce(getRandomString(), answers);
-          if (retryImgs && retryImgs.length) {
-            setImageUrls(retryImgs); setActiveImage(0); setImageUrl(retryImgs[0] || "");
-            return;
-          }
-        } catch {}
-      }
-      setImageUrls(imgs || []);
-      setActiveImage(0);
-      setImageUrl((imgs && imgs[0]) || "");
+      try {
+        setImageUrls(imgs || []);
+        setActiveImage(0);
+        setImageUrl((imgs && imgs[0]) || "");
+      } catch {}
     })();
 
-    // Videos: strict A/B only, warm returned files
     const videosPromise = (async () => {
       const vs = await fetchVideoPair(token, answers, null, null);
-      await Promise.all([
-        headRangeWarm("A", vs[0]?.url),
-        headRangeWarm("B", vs[1]?.url),
+      // warm (no throw on fail)
+      await Promise.allSettled([
+        headRangeWarm("VA", vs?.[0]?.url),
+        headRangeWarm("VB", vs?.[1]?.url),
       ]);
-      setVideoItems(vs || []);
-      setActiveVideo(0);
-      setVideoUrl(vs[0]?.url || "");
-      setVideoScript(vs[0]?.script || "");
+      try {
+        setVideoItems(vs || []);
+        setActiveVideo(0);
+        setVideoUrl(vs?.[0]?.url || "");
+        setVideoScript(vs?.[0]?.script || "");
+      } catch {}
     })();
 
-    // Copy can land whenever
+    // Apply copy when it’s back (don’t block media)
     const data = await assetsPromise;
     setResult({
       headline: data?.headline || "",
@@ -1130,31 +1129,25 @@ setTimeout(async () => {
       image_overlay_text: data?.image_overlay_text || "",
     });
 
-    // When images+videos settle, we’re done
+    // Consider generation “done” as soon as at least one media set finishes
+    await Promise.any([imagesPromise, videosPromise]).catch(() => {});
     await Promise.allSettled([imagesPromise, videosPromise]);
-
-    // If we still have no videos (e.g., aborted late), attempt grace finalize once
-    setVideoItems((prev) => prev && prev.length ? prev : prev);
-    if (!videoItems.length) {
-      await finalizeGracePeriod();
-    }
 
     setChatHistory((ch) => [
       ...ch,
       { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
     ]);
     setHasGenerated(true);
-    setError(""); // clear any soft-cap message if we succeeded
   } catch (err) {
     console.error("generation failed:", err);
     setError("Generation failed (server cold or busy). Try again in a few seconds.");
   } finally {
-    clearTimeout(softCapTimer);
-    clearTimeout(hardAbortTimer);
+    clearTimeout(hardCap);
     setGenerating(false);
     setLoading(false);
   }
-}, 100);
+}, 80);
+
 
 
 
@@ -1244,18 +1237,14 @@ setTimeout(async () => {
 async function handleRegenerateVideo() {
   setVideoLoading(true);
   abortAllVideoFetches();
-  setVideoItems([]); setVideoUrl(""); setVideoScript("");
+  try { setVideoItems([]); setVideoUrl(""); setVideoScript(""); } catch {}
 
-  const softCapTimer = setTimeout(() => {
-    setError("Taking too long. We’ll keep checking for the finished files for a moment…");
-  }, GENERATION_SOFT_CAP_MS);
-
-  const hardAbortTimer = setTimeout(async () => {
-    console.warn("Hard abort reached (regen); aborting video fetches, entering grace finalize.");
+  const hardCap = setTimeout(() => {
+    console.warn("Hard cap reached; aborting regen video fetches");
     abortAllVideoFetches();
-    await finalizeGracePeriod();
     setVideoLoading(false);
-  }, GENERATION_HARD_ABORT_MS);
+    setError("Video regeneration took too long. Try again.");
+  }, GENERATION_HARD_CAP_MS);
 
   try {
     await warmBackend();
@@ -1263,28 +1252,25 @@ async function handleRegenerateVideo() {
 
     const vids = await fetchVideoPair(token, answers, result, null);
 
-    await Promise.all([
-      headRangeWarm("A", vids[0]?.url),
-      headRangeWarm("B", vids[1]?.url),
+    await Promise.allSettled([
+      headRangeWarm("VA", vids?.[0]?.url),
+      headRangeWarm("VB", vids?.[1]?.url),
     ]);
 
-    setVideoItems(vids);
-    setActiveVideo(0);
-    setVideoUrl(vids[0]?.url || "");
-    setVideoScript(vids[0]?.script || "");
-    setError("");
+    try {
+      setVideoItems(vids || []);
+      setActiveVideo(0);
+      setVideoUrl(vids?.[0]?.url || "");
+      setVideoScript(vids?.[0]?.script || "");
+    } catch {}
   } catch (e) {
     console.error("regenerate video failed:", e?.message || e);
     setError("Video regeneration failed. Please try again.");
   } finally {
-    clearTimeout(softCapTimer);
-    clearTimeout(hardAbortTimer);
+    clearTimeout(hardCap);
     setVideoLoading(false);
   }
 }
-
-
-
 
   /* ---------------------- Render ---------------------- */
   return (
