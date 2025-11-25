@@ -2284,20 +2284,21 @@ async function buildOverlayImage({
   try { subline = await getCoherentSubline(answers, category); }
   catch (e) { try { subline = craftSubline(answers, category, seed) || subline; } catch {} }
 
-  // 4) Render SVG overlay at the ACTUAL base size
+  // 4) Render SVG overlay, then rasterize to PNG before compositing (fixes dropped-SVG bug)
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svg = Buffer.from(
-    svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
-    'utf8'
-  );
+  const svgStr = svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 });
+  const overlayPng = await sharp(Buffer.from(svgStr, 'utf8'), { density: 180 })
+    .png() // rasterize the SVG (keeps blur/clip paths)
+    .toBuffer();
 
-  // 5) Composite (overlay is <= base dims, so Sharp won't error)
+  // 5) Composite
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await sharp(baseBuf)
-    .composite([{ input: svg, top: 0, left: 0 }])
+    .composite([{ input: overlayPng, top: 0, left: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
+
 
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
@@ -2343,26 +2344,26 @@ async function composeOverlay({
     }
   }
 
-  // 4) SVG overlay sized to base
-  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svg = Buffer.from(
-    svgOverlayCreative({
-      W, H,
-      title: headline,
-      subline: sub,
-      cta: ctaText,
-      metrics,
-      baseImage: base64
-    }),
-    'utf8'
-  );
+   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
+  const svgStr = svgOverlayCreative({
+    W, H,
+    title: headline,
+    subline: sub,
+    cta: ctaText,
+    metrics,
+    baseImage: base64
+  });
+  const overlayPng = await sharp(Buffer.from(svgStr, 'utf8'), { density: 180 })
+    .png()
+    .toBuffer();
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await sharp(baseBuf)
-    .composite([{ input: svg, top: 0, left: 0 }])
+    .composite([{ input: overlayPng, top: 0, left: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
+
 
   const rel = `/api/media/${file}`;
   return {
