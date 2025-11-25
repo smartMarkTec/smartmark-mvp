@@ -2259,16 +2259,21 @@ async function buildOverlayImage({
   imageUrl, headlineHint = '', ctaHint = '', seed = '',
   fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
 }) {
-  const W = 1200, H = 628;
+  // Target canvas; we will upscale small sources to avoid composite dimension errors
+  const TARGET_W = 1200, TARGET_H = 628;
 
+  // 1) Fetch + normalize base image (COVER fit, allow enlarge)
   const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseBuf = await sharp(imgRes.data)
-    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
-    .toBuffer();
+  const baseSharp = sharp(imgRes.data).resize(TARGET_W, TARGET_H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
+  const baseBuf   = await baseSharp.jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
+  const meta      = await sharp(baseBuf).metadata();
+  const W = meta.width  || TARGET_W;
+  const H = meta.height || TARGET_H;
 
+  // 2) Analyze for tint/contrast
   const analysis = await analyzeImageForPlacement(baseBuf);
 
+  // 3) Resolve text
   let title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
   if (!title.trim()) title = 'SHOP';
   const titleSeed = title || category || '';
@@ -2279,20 +2284,25 @@ async function buildOverlayImage({
   try { subline = await getCoherentSubline(answers, category); }
   catch (e) { try { subline = craftSubline(answers, category, seed) || subline; } catch {} }
 
+  // 4) Render SVG overlay at the ACTUAL base size
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
   const svg = Buffer.from(
     svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 }),
     'utf8'
   );
 
+  // 5) Composite (overlay is <= base dims, so Sharp won't error)
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
-  await sharp(baseBuf).composite([{ input: svg, top: 0, left: 0 }])
+  await sharp(baseBuf)
+    .composite([{ input: svg, top: 0, left: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
+
   maybeGC();
   return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
 }
+
 
 async function composeOverlay({
   imageUrl,
@@ -2303,14 +2313,15 @@ async function composeOverlay({
   category = 'generic',
   seed = ''
 }) {
-  const W = 1200, H = 628;
+  const TARGET_W = 1200, TARGET_H = 628;
 
-  // 1) Fetch + normalize base image (cover fit)
+  // 1) Fetch + normalize base (allow enlargement so overlay is never bigger)
   const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseBuf = await sharp(imgRes.data)
-    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3, withoutEnlargement: true })
-    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
-    .toBuffer();
+  const baseSharp = sharp(imgRes.data).resize(TARGET_W, TARGET_H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
+  const baseBuf   = await baseSharp.jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
+  const meta      = await sharp(baseBuf).metadata();
+  const W = meta.width  || TARGET_W;
+  const H = meta.height || TARGET_H;
 
   // 2) Analyze image to tune glass tint/contrast
   const metrics = await analyzeImageForPlacement(baseBuf);
@@ -2332,7 +2343,7 @@ async function composeOverlay({
     }
   }
 
-  // 4) Render SVG overlay and composite
+  // 4) SVG overlay sized to base
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
   const svg = Buffer.from(
     svgOverlayCreative({
@@ -2360,6 +2371,7 @@ async function composeOverlay({
     filename: file,
   };
 }
+
 
 /* -------------------- Health check + memory debug -------------------- */
 router.get('/test2', (_req, res) => {
@@ -3310,26 +3322,26 @@ async function pumpVideoQueue() {
 }
 
 /* TRIGGER + POLL */
-// Synchronous video generation: produce TWO variants (~18–20s) in one call
+// Synchronous video generation: produce TWO variants (~18–20s) in one call (ONLY TWO)
 router.post("/generate-video-ad", async (req, res) => {
   try {
-    // give ffmpeg time (Render can be slow on first run)
+    // long-running safety (Render cold start)
     try {
-      if (typeof res.setTimeout === 'function') res.setTimeout(180000);
-      if (typeof req.setTimeout === 'function') req.setTimeout(180000);
+      if (typeof res.setTimeout === "function") res.setTimeout(180000);
+      if (typeof req.setTimeout === "function") req.setTimeout(180000);
     } catch {}
 
-    const body = req.body || {};
-    const answers = body.answers || {};
-    const url = body.url || "";
-    const regenerateToken = String(
+    const body     = req.body || {};
+    const answers  = body.answers || {};
+    const url      = body.url || "";
+    const seedBase = String(
       body.regenerateToken ||
       answers.regenerateToken ||
       answers.businessName ||
       Date.now()
     );
 
-    // keyword by industry (kept from your logic)
+    // One keyword for this request ONLY (prevents double-runs)
     const industry = (answers.industry || "").toLowerCase();
     let baseKeyword = "small business";
     if (industry.includes("restaurant") || industry.includes("food")) baseKeyword = "restaurant";
@@ -3338,110 +3350,80 @@ router.post("/generate-video-ad", async (req, res) => {
     else if (industry.includes("coffee")) baseKeyword = "coffee";
     else if (industry.includes("electronics") || industry.includes("tech")) baseKeyword = "tech gadgets";
 
-    // 1) clips — wide pool + seeded randomness
-    let clips = await fetchPexelsVideos(baseKeyword, 14, regenerateToken);
-    if (!clips.length) clips = await fetchPexelsVideos("product shopping", 14, regenerateToken + ":fallback");
-    if (!clips.length) return res.status(500).json({ ok:false, error:"No stock clips found from Pexels." });
+    const targetSec = Math.max(18, Math.min(20, Number(body.targetSeconds || 18.5)));
 
-    // 2) script
-    const script = await generateVideoScriptFromAnswers(answers);
+    // ---- script (single time) ----
+    let script = (body.adCopy || "").trim();
+    if (!script) script = await generateVideoScriptFromAnswers(answers);
 
-    // 3) optional BGM
+    // ---- stock videos (single pool) ----
+    let clips = await fetchPexelsVideos(baseKeyword, 14, `${seedBase}|${baseKeyword}`);
+    if (!clips.length) clips = await fetchPexelsVideos("product shopping", 14, `${seedBase}|fallback`);
+    if (!clips.length) return res.status(500).json({ ok: false, error: "No stock clips found from Pexels." });
+
+    // ---- fast toggle: ONLY one mode executes ----
+    const FAST_MODE = String(body.fast ?? req.query.fast ?? process.env.SM_FAST_MODE ?? "0").trim() === "1";
+
+    // Build two deterministic clip plans (A/B) from the SAME pool
+    const planA = buildVirtualPlan(clips, 0, `${seedBase}|A`);
+    const planB = buildVirtualPlan(clips, 1, `${seedBase}|B`);
+    if (!planA.length || !planB.length) return res.status(500).json({ ok: false, error: "No clips in plan." });
+
     const bgm = await prepareBgm();
 
-    // 4) Build TWO variants deterministically from the same pool
-    const planA = buildVirtualPlan(clips, 0, regenerateToken);
-    const planB = buildVirtualPlan(clips, 1, regenerateToken + ":B");
-    if (!planA.length || !planB.length) throw new Error('No clips in plan');
-
-    // FAST toggle: prefer body/query flag (?fast=1) or env SM_FAST_MODE=1
-    const FAST_MODE = String(
-      body.fast ?? req.query.fast ?? process.env.SM_FAST_MODE ?? '0'
-    ).trim() === '1';
-
-    // Single, non-duplicated targetSec definition (clamped 18–20s)
-    const rawTarget = Number(body.targetSeconds ?? answers.targetSeconds);
-    const targetSec = Math.max(18, Math.min(20, Number.isFinite(rawTarget) ? rawTarget : 18.5));
-
-    // --- build both variants ---
-    let vA, vB;
+    // ---- RENDER EXACTLY TWO VARIANTS ----
+    let v1, v2;
     if (FAST_MODE) {
-      const planAurls = planA.map(c => c.url);
-      const planBurls = planB.map(c => c.url);
-      vA = await makeVideoVariantFast({ clipUrls: planAurls, script, targetSec });
-      vB = await makeVideoVariantFast({ clipUrls: planBurls, script, targetSec });
+      // Fast path (quick cuts + active subs). Use first few URLs from plans.
+      const urlsA = planA.map(p => p.url).slice(0, 4);
+      const urlsB = planB.map(p => p.url).slice(0, 4);
+      v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec });
+      v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec });
     } else {
-      vA = await makeVideoVariant({
-        clips, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm,
-      });
-      vB = await makeVideoVariant({
-        clips, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm,
-      });
+      // Standard path (xfade/concat + subs)
+      v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm });
+      v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm });
     }
 
-    // --- persist both variants BEFORE responding ---
-    const relA = path.basename(vA.outPath);
-    const relB = path.basename(vB.outPath);
-    const urlA = `/api/media/${relA}`;
-    const urlB = `/api/media/${relB}`;
-    const absA = absolutePublicUrl(urlA);
-    const absB = absolutePublicUrl(urlB);
+    // ---- save exactly two assets ----
+    const rel1 = path.basename(v1.outPath);
+    const rel2 = path.basename(v2.outPath);
+    const url1 = mediaPath(rel1);
+    const url2 = mediaPath(rel2);
+    const abs1 = absolutePublicUrl(url1);
+    const abs2 = absolutePublicUrl(url2);
 
+    const category = resolveCategory(answers || {});
     await saveAsset({
       req,
-      kind: 'video',
-      url: urlA,
-      absoluteUrl: absA,
-      meta: {
-        variant: 0,
-        keyword: baseKeyword,
-        hasSubtitles: true,
-        targetSec,              // requested target
-        duration: vA.duration,  // actual result
-        seed: regenerateToken
-      }
+      kind: "video",
+      url: url1,
+      absoluteUrl: abs1,
+      meta: { variant: 0, category, keyword: baseKeyword, hasSubtitles: true, targetSec: v1.duration, fast: FAST_MODE ? 1 : 0 },
     });
-
     await saveAsset({
       req,
-      kind: 'video',
-      url: urlB,
-      absoluteUrl: absB,
-      meta: {
-        variant: 1,
-        keyword: baseKeyword,
-        hasSubtitles: true,
-        targetSec,              // requested target
-        duration: vB.duration,  // actual result
-        seed: regenerateToken + ":B"
-      }
+      kind: "video",
+      url: url2,
+      absoluteUrl: abs2,
+      meta: { variant: 1, category, keyword: baseKeyword, hasSubtitles: true, targetSec: v2.duration, fast: FAST_MODE ? 1 : 0 },
     });
 
-    console.log('[video] ready (A/B):', urlA, urlB);
+    console.log("[video] ready (A/B):", url1, url2);
 
-    // --- single response ---
     return res.json({
       ok: true,
-      // legacy fields
-      url: urlA,
-      absoluteUrl: absA,
-      filename: relA,
-      // new fields
-      urlB,
-      absoluteUrlB: absB,
-      filenameB: relB,
-      variants: [
-        { variant: 'A', url: urlA, absoluteUrl: absA, filename: relA, duration: vA.duration },
-        { variant: 'B', url: urlB, absoluteUrl: absB, filename: relB, duration: vB.duration },
+      videos: [
+        { url: url1, absoluteUrl: abs1, variant: "A", fast: FAST_MODE ? 1 : 0 },
+        { url: url2, absoluteUrl: abs2, variant: "B", fast: FAST_MODE ? 1 : 0 },
       ],
-      script
     });
-
-  } catch (err) {
-    console.error("[generate-video-ad] error:", err);
-    return res.status(500).json({ ok:false, error: err?.message || "Video generation failed" });
+  } catch (e) {
+    console.error("[/generate-video-ad] error:", e?.message || e);
+    return res.status(500).json({ ok: false, error: e.message || "failed" });
   }
 });
+
 
 
 // -----------------------------------------------------------------------

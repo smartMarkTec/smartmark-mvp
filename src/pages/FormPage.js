@@ -529,7 +529,89 @@ async function pollLatestVideo({ tries = 5, delayMs = 900 } = {}) {
 }
 
 
-/* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B) ---------- */
+/* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B or single-call pair) ---------- */
+
+// Try a single-call request that returns BOTH variants in one response.
+// If backend doesn't support it, we fall back to the two-call (A/B) method.
+async function fetchVideoPairSingleCall(token, answers, result, timeoutMs = VIDEO_FETCH_TIMEOUT_MS) {
+  const triggerKey = `VIDEO_PAIR_${token}`;
+
+  try {
+    await warmBackend();
+
+    const data = await fetchJsonOnceWithAbortKey(
+      `${API_BASE}/generate-video-ad`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: answers?.url || "",
+          answers: { ...answers, targetSeconds: VIDEO_TARGET_SECONDS },
+          regenerateToken: token,
+
+          // Hints — backend can safely ignore unknown fields
+          fast: USE_FAST_MODE ? 1 : 0,
+          targetSeconds: VIDEO_TARGET_SECONDS,
+          hardCuts: FORCE_HARD_CUTS ? 1 : 0,
+          xfade: 0,
+          subtitles: FORCE_SUBTITLES ? 1 : 0,
+          burnSubtitles: 1,
+
+          // NEW: tell backend we only want a single call that returns exactly two
+          expectPair: 1
+        }),
+      },
+      { key: triggerKey, timeoutMs }
+    );
+
+    // Normalize two returned videos if available
+    let pair = [];
+    if (Array.isArray(data?.videos) && data.videos.length) {
+      pair = data.videos
+        .map(v => {
+          let u = v?.absoluteUrl || v?.url || (v?.filename ? `/api/media/${v.filename}` : "");
+          if (!u) return null;
+          const captionsVtt =
+            v?.captionsVtt ||
+            v?.vtt ||
+            v?.captionsUrl ||
+            (v?.captionsFilename ? `/api/media/${v.captionsFilename}` : "");
+          return {
+            url: toAbsoluteMedia(u),
+            script: v?.script || data?.script || "",
+            fbVideoId: v?.fbVideoId || null,
+            captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null
+          };
+        })
+        .filter(Boolean)
+        .slice(0, 2);
+    } else {
+      // Some servers return a single object; normalize if so
+      const maybeSingle =
+        data?.absoluteUrl || data?.url || (data?.filename ? `/api/media/${data.filename}` : "");
+      if (maybeSingle) {
+        pair = [{
+          url: toAbsoluteMedia(maybeSingle),
+          script: data?.script || "",
+          fbVideoId: data?.fbVideoId || null,
+          captionsVtt: data?.captionsVtt ? toAbsoluteMedia(data.captionsVtt) : null
+        }];
+      }
+    }
+
+    // Warm whatever URLs we have so the <video> starts instantly
+    await Promise.allSettled(pair.map((p, i) => headRangeWarm(i === 0 ? "A" : "B", p?.url)));
+
+    // Return up to two videos from the single call (no more)
+    return pair.slice(0, 2);
+  } catch (e) {
+    // If we timeout/abort or server can't do pair, fall through to A/B path
+    if (e?.name !== "AbortError") console.warn("fetchVideoPairSingleCall fallback:", e?.message || e);
+    return [];
+  }
+}
+
+// Old single-variant call remains for fallback
 async function fetchVideoOnce(
   token,
   answers,
@@ -554,22 +636,18 @@ async function fetchVideoOnce(
           regenerateToken: token,
           abVariant: variant,
 
-          // SPEED + STYLE HINTS FOR BACKEND
+          // SPEED + STYLE HINTS
           fast: USE_FAST_MODE ? 1 : 0,
           targetSeconds: VIDEO_TARGET_SECONDS,
-          // *** NEW control knobs (backend can ignore safely if unknown) ***
-          hardCuts: FORCE_HARD_CUTS ? 1 : 0,           // enforce quick cuts (no transitions)
-          xfade: 0,                                    // force-disable crossfades
-          subtitles: FORCE_SUBTITLES ? 1 : 0,          // turn captions on
-          burnSubtitles: 1,                             // prefer burned-in to keep the same look
-          // if your server prefers a single field:
-          // style: "hard_cuts", captions: "on"
+          hardCuts: FORCE_HARD_CUTS ? 1 : 0,
+          xfade: 0,
+          subtitles: FORCE_SUBTITLES ? 1 : 0,
+          burnSubtitles: 1
         }),
       },
       { key: triggerKey, timeoutMs }
     );
 
-    // Normalize URL from response
     let u =
       data?.url ||
       data?.videoUrl ||
@@ -582,7 +660,6 @@ async function fetchVideoOnce(
     }
     if (!u) throw new Error("No video URL in response");
 
-    // Optional captions (if backend returns sidecar VTT in case it doesn't burn-in)
     const captionsVtt =
       data?.captionsVtt ||
       data?.vtt ||
@@ -590,8 +667,6 @@ async function fetchVideoOnce(
       (data?.captionsFilename ? `/api/media/${data.captionsFilename}` : "");
 
     const finalUrl = toAbsoluteMedia(u);
-
-    // Warm returned MP4 so it renders immediately in <video>
     try { await headRangeWarm(variant, finalUrl); } catch {}
 
     return {
@@ -604,7 +679,7 @@ async function fetchVideoOnce(
       captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null
     };
   } catch (e) {
-    // Recovery path: maybe the backend finished but edge/network dropped
+    // Try to recover from a completed job
     try {
       const recovered = await pollLatestVideo({ tries: 5, delayMs: 900 });
       if (recovered?.url) return recovered;
@@ -618,9 +693,25 @@ async function fetchVideoOnce(
   }
 }
 
+// Public entry: returns EXACTLY up to two videos.
+// 1) Try single-call pair (preferred — guarantees we never spawn 4)
+// 2) If not supported, fall back to A & B (two separate calls)
+//    and still clamp to two.
 async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
-  // Per-variant POSTs in parallel, each with its own 45s cap;
-  // overall run is guarded elsewhere with GENERATION_HARD_CAP_MS
+  // First attempt: single-call pair
+  const pair = await fetchVideoPairSingleCall(token, answers, result, VIDEO_FETCH_TIMEOUT_MS);
+  if (pair.length >= 2) {
+    // De-dup (defensive) and clamp to two
+    const seen = new Set();
+    const dedup = [];
+    for (const v of pair) {
+      if (v?.url && !seen.has(v.url)) { seen.add(v.url); dedup.push(v); }
+      if (dedup.length === 2) break;
+    }
+    return dedup;
+  }
+
+  // Fallback path: explicit A/B (still returns at most two)
   const [a, b] = await Promise.allSettled([
     fetchVideoOnce(`${token}-A`, answers, result, null, "A", VIDEO_FETCH_TIMEOUT_MS),
     fetchVideoOnce(`${token}-B`, answers, result, null, "B", VIDEO_FETCH_TIMEOUT_MS),
@@ -632,14 +723,15 @@ async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
   if (a.status === "fulfilled") pushIfGood(a.value);
   if (b.status === "fulfilled") pushIfGood(b.value);
 
-  // de-dup by URL just in case
+  // de-dup + clamp to two
   const dedup = [];
   const seen = new Set();
   for (const v of vids) {
-    if (!seen.has(v.url)) { seen.add(v.url); dedup.push(v); }
+    if (v?.url && !seen.has(v.url)) { seen.add(v.url); dedup.push(v); }
+    if (dedup.length === 2) break;
   }
 
-  return dedup.slice(0, 2);
+  return dedup;
 }
 
 
@@ -1108,6 +1200,7 @@ async function handleRegenerateVideo() {
     await warmBackend();
     const token = getRandomString();
 
+    // NEW: first tries single-call pair, then falls back to A/B if needed
     const vids = await fetchVideoPair(token, answers, result, null);
 
     await Promise.all([
@@ -1127,6 +1220,7 @@ async function handleRegenerateVideo() {
     setVideoLoading(false);
   }
 }
+
 
 
   /* ---------------------- Render ---------------------- */
