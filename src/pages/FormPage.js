@@ -411,6 +411,29 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
+/* === buildImagePrompt (images) === */
+function buildImagePrompt(answers = {}, overlay = {}) {
+  const parts = [];
+
+  if (answers.industry) parts.push(`Industry: ${answers.industry}`);
+  if (answers.businessName) parts.push(`Brand: ${answers.businessName}`);
+  if (answers.mainBenefit) parts.push(`Main benefit: ${answers.mainBenefit}`);
+  if (answers.offer) parts.push(`Offer: ${answers.offer}`);
+  if (answers.idealCustomer) parts.push(`Audience: ${answers.idealCustomer}`);
+
+  // Mild guidance to avoid random, irrelevant shots:
+  parts.push("Style: clean commercial photo, centered subject, ad-friendly composition, ample negative space, high contrast, uncluttered background");
+
+  // If you later want illustration mode, change "clean commercial photo" to "flat vector illustration" (kept photo here per your request).
+
+  // Include overlay keywords to bias content toward copy
+  if (overlay?.headline) parts.push(`Headline theme: ${overlay.headline}`);
+  if (overlay?.cta) parts.push(`CTA: ${overlay.cta}`);
+
+  return parts.filter(Boolean).join(" | ");
+}
+
+
 
 
 /* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
@@ -450,48 +473,69 @@ async function headRangeWarm(label, url) {
 const parseImageResults = (data) => {
   const out = [];
 
-  // Prefer server-baked variations (we clamp to exactly TWO)
+  // Accept several possible shapes from the server
   if (Array.isArray(data?.imageVariations)) {
     for (const v of data.imageVariations) {
       const u = v?.absoluteUrl || v?.url || v?.filename;
       if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || u.startsWith("/api/") ? u : `/api/media/${u}`));
     }
   }
-
-  // Fallback single fields
+  if (Array.isArray(data?.images)) {
+    for (const u0 of data.images) {
+      const u = typeof u0 === "string" ? u0 : (u0?.absoluteUrl || u0?.url || u0?.filename);
+      if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || String(u).startsWith("/api/") ? u : `/api/media/${u}`));
+    }
+  }
   if (out.length === 0) {
     const u = data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename;
-    if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || u.startsWith("/api/") ? u : `/api/media/${u}`));
+    if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || String(u).startsWith("/api/") ? u : `/api/media/${u}`));
   }
 
-  // Ensure two items for carousel experience
   const uniq = Array.from(new Set(out));
-  return uniq.slice(0, 2);
+  return uniq.slice(0, 2); // clamp to exactly two
 };
 
-async function fetchImagesOnce(token, answersParam) {
+async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
   const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
   const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
+
   try {
     await warmBackend();
+
+    const payload = {
+      answers: answersParam || {},
+      regenerateToken: token,
+      // Strong guidance so backend doesn’t choose a random category
+      prompt: prompt || buildImagePrompt(answersParam, overlay),
+
+      // Ask backend to actually COMPOSE the overlay onto the image it returns
+      composeOverlay: 1,
+      overlayHeadline: overlay?.headline || "",
+      overlayBody: overlay?.body || "",
+      overlayCTA: overlay?.cta || "",
+
+      // Optional hints many servers accept (ignored safely if unknown)
+      count: 2,
+      width: 1200,
+      height: 628,
+      styleHint: "photo",           // keep as 'photo' (you can switch to 'illustration' later)
+      negative: "busy cluttered background, low-contrast, text cut-off"
+    };
 
     const data = await fetchJsonWithRetry(
       `${API_BASE}/generate-image-from-prompt`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: answersParam, regenerateToken: token })
+        body: JSON.stringify(payload)
       },
       { tries: 3, warm: true, timeoutMs: IMAGE_FETCH_TIMEOUT_MS }
     ).catch(() => ({}));
 
     let urls = parseImageResults(data);
-
-    // if server gave only 1, pad with placeholder B
     if (urls.length === 1) urls = [urls[0], fallbackB];
     if (urls.length === 0) urls = [fallbackA, fallbackB];
 
-    // warm both so they appear instantly
     await Promise.allSettled(urls.map((u, i) => headRangeWarm(`IMG${i}`, u)));
     return urls;
   } catch (e) {
@@ -1097,14 +1141,20 @@ setTimeout(async () => {
       { tries: 1, timeoutMs: 12000 }
     ).catch(() => ({}));
 
-    const imagesPromise = (async () => {
-      const imgs = await fetchImagesOnce(token, answers);
-      try {
-        setImageUrls(imgs || []);
-        setActiveImage(0);
-        setImageUrl((imgs && imgs[0]) || "");
-      } catch {}
-    })();
+  const imagesPromise = (async () => {
+  const overlay = {
+    headline: displayHeadline,
+    body: displayBody,
+    cta: displayCTA
+  };
+  const prompt = buildImagePrompt(answers, overlay);
+
+  const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
+  setImageUrls(imgs || []);
+  setActiveImage(0);
+  setImageUrl((imgs && imgs[0]) || "");
+})();
+
 
     const videosPromise = (async () => {
       const vs = await fetchVideoPair(token, answers, null, null);
@@ -1225,7 +1275,10 @@ setTimeout(async () => {
     setImageLoading(true);
     try {
       await warmBackend();
-      const imgs = await fetchImagesOnce(getRandomString(), answers);
+      const overlay = { headline: displayHeadline, body: displayBody, cta: displayCTA };
+const prompt = buildImagePrompt(answers, overlay);
+const imgs = await fetchImagesOnce(getRandomString(), answers, overlay, prompt);
+
       setImageUrls(imgs);
       setActiveImage(0);
       setImageUrl(imgs[0] || "");
