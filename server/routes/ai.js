@@ -3358,12 +3358,14 @@ router.post("/generate-video-ad", async (req, res) => {
     if (!script) script = await generateVideoScriptFromAnswers(answers);
 
     // ---- stock videos (single pool) ----
-    let clips = await fetchPexelsVideos(baseKeyword, 14, `${seedBase}|${baseKeyword}`);
-    if (!clips.length) clips = await fetchPexelsVideos("product shopping", 14, `${seedBase}|fallback`);
+   let clips = await fetchPexelsVideos(baseKeyword, 8, `${seedBase}|${baseKeyword}`);
+if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8, `${seedBase}|fallback`);
+
     if (!clips.length) return res.status(500).json({ ok: false, error: "No stock clips found from Pexels." });
 
     // ---- fast toggle: ONLY one mode executes ----
     const FAST_MODE = String(body.fast ?? req.query.fast ?? process.env.SM_FAST_MODE ?? "0").trim() === "1";
+const WANT_VARIANTS = Math.max(1, Math.min(2, Number(body.variants || req.query.variants || 2)));
 
     // Build two deterministic clip plans (A/B) from the SAME pool
     const planA = buildVirtualPlan(clips, 0, `${seedBase}|A`);
@@ -3373,18 +3375,21 @@ router.post("/generate-video-ad", async (req, res) => {
     const bgm = await prepareBgm();
 
     // ---- RENDER EXACTLY TWO VARIANTS ----
-    let v1, v2;
-    if (FAST_MODE) {
-      // Fast path (quick cuts + active subs). Use first few URLs from plans.
-      const urlsA = planA.map(p => p.url).slice(0, 4);
-      const urlsB = planB.map(p => p.url).slice(0, 4);
-      v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec });
-      v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec });
-    } else {
-      // Standard path (xfade/concat + subs)
-      v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm });
-      v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm });
-    }
+  let v1, v2;
+if (FAST_MODE) {
+  const urlsA = planA.map(p => p.url).slice(0, 4);
+  const urlsB = planB.map(p => p.url).slice(0, 4);
+
+  v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec: targetSec });
+  if (WANT_VARIANTS === 2) {
+    v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec: targetSec });
+  }
+} else {
+  // (keep your existing standard path)
+  v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm });
+  v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm });
+}
+
 
     // ---- save exactly two assets ----
     const rel1 = path.basename(v1.outPath);

@@ -1325,6 +1325,35 @@ async function handleRegenerateVideo() {
   }
 }
 
+// somewhere near your other handlers
+async function handleGenerateStaticAd() {
+  const payload = {
+    industry: "cleaning",
+    size: "1080x1080",
+    inputs: {
+      businessName: form.businessName || "Sparkle & Shine",
+      phone: form.phone || "(210) 555-0147",
+      website: form.website || "",
+      location: form.city ? `${form.city}, ${form.state || ""}`.trim() : "San Antonio, TX",
+      offer: form.offer || "20% OFF first clean",
+      primaryColor: "#0d3b66",
+      accentColor: "#ffc857",
+      bgColor: "#0a1922"
+    }
+  };
+
+  const res = await fetch(`${process.env.REACT_APP_API_BASE || ''}/api/generate-static-ad`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  if (!data.ok) { alert('Static ad failed: ' + data.error); return; }
+  // You can show the PNG in the UI:
+  setGeneratedImageUrl(data.pngUrl);
+}
+
+
   /* ---------------------- Render ---------------------- */
   return (
     <div
