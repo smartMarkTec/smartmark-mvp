@@ -139,62 +139,90 @@ const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
 // Slow the voice slightly for readability (0.85–1.00). 0.92 ≈ 8% slower.
 const TTS_SLOWDOWN = Number(process.env.TTS_SLOWDOWN || 0.92);
 
-// --- FAST VIDEO PROFILE (≤ 75s wall time) -----------------------------
+// --- FAST VIDEO PROFILE (≤ 75s wall time) — quick cuts + active subs ---
 const { spawn } = require("child_process");
 
 const FAST = {
-  WIDTH: 1280,
-  HEIGHT: 720,
-  FPS: 24,              // 24 saves encode time a bit
-  CROSSF: 0.5,
+  WIDTH: 960,          // match your non-FAST pipeline (960x540)
+  HEIGHT: 540,
+  FPS: 24,             // keeps encode light
   PRESET: "superfast",
-  CRF: "30",            // slightly higher CRF => faster/smaller
+  CRF: "30",           // slightly higher CRF => faster/smaller
   GOP: "48",
   AUDIO_BR: "112k",
-  TIMEOUT_MS: 65000,    // kill ffmpeg if it lingers (65s)
+  TIMEOUT_MS: 65000,   // kill ffmpeg if it lingers (65s)
 };
 
-// minimal xfade graph for three equal-length segments + single audio track
-function buildFilterGraphFast({ totalSec, crossf }) {
-  // each clip duration BEFORE overlap; +0.2 keeps safe headroom
-  const per = Math.max(5.6, (totalSec + 2 * crossf) / 3 + 0.2);
-
-  const vNorm = (i) =>
-    `[${i}:v]scale=960:540:flags=bicubic,setsar=1,fps=${FAST.FPS},trim=duration=${per.toFixed(
+/**
+ * Build the concat part of the filter (no transitions) and normalize each clip.
+ * Input streams mapping:
+ *   - Inputs 0..N-1: video clips
+ *   - Input N: voice (audio)
+ * Returns a filter string that:
+ *   1) normalizes each clip to FAST.WIDTH x FAST.HEIGHT @ FAST.FPS with a fixed duration 'per'
+ *   2) concatenates them to [vcat]
+ */
+function buildQuickCutConcatFilter({ clipCount, per }) {
+  const norm = (i) =>
+    `[${i}:v]scale=${FAST.WIDTH}:${FAST.HEIGHT}:force_original_aspect_ratio=increase,` +
+    `crop=${FAST.WIDTH}:${FAST.HEIGHT},fps=${FAST.FPS},trim=duration=${per.toFixed(
       2
     )},setpts=PTS-STARTPTS[v${i}]`;
 
-  return [
-    vNorm(0),
-    vNorm(1),
-    vNorm(2),
+  const labels = Array.from({ length: clipCount }, (_, i) => `[v${i}]`).join("");
+  const concat = `${labels}concat=n=${clipCount}:v=1:a=0[vcat]`;
 
-    // v0 -> v1
-    `[v0][v1]xfade=transition=fade:duration=${crossf}:offset=${(per - crossf).toFixed(2)}[x1]`,
-    // (v0-1) -> v2
-    `[x1][v2]xfade=transition=fade:duration=${crossf}:offset=${(per * 2 - 2 * crossf).toFixed(2)}[outv]`,
-
-    // audio is TTS only at index 3; trim to montage duration
-    `[3:a]atrim=duration=${(per * 3 - 2 * crossf).toFixed(2)},asetpts=PTS-STARTPTS[aout]`,
-  ].join(";");
+  return Array.from({ length: clipCount }, (_, i) => norm(i)).concat(concat).join(";");
 }
 
-function runFfmpegFast({ parts, voicePath, outPath, totalSec }) {
+/** Run ffmpeg with a single pass graph:
+ *  - normalize & concat N clips -> [vcat]
+ *  - overlay word-timed drawtext subs over [vcat] -> [vsub]
+ *  - map audio (voice), trim/pad to target duration
+ */
+function runFfmpegFastQuickCutsWithSubs({
+  parts,
+  voicePath,
+  words,          // word timings for subs
+  outPath,
+  totalSec,
+}) {
   return new Promise((resolve, reject) => {
+    const clipCount = parts.length;
+    const per = Math.max(4.8, (totalSec / clipCount)); // ~3 clips → ~6.1s each @18.5s total
+
+    // 1) concat section (no transitions) -> [vcat]
+    const concatSection = buildQuickCutConcatFilter({ clipCount, per });
+
+    // 2) subs section over [vcat] -> [vsub]
+    //    Reuse your existing appearance via buildWordTimedDrawtextFilter
+    const { filter: subsSection, out: subOutLabel } = buildWordTimedDrawtextFilter(
+      words,
+      '[vcat]',
+      FAST.WIDTH,
+      FAST.HEIGHT
+    );
+
+    // 3) audio: trim/pad voice to totalSec -> [aout]
+    const voiceIdx = clipCount; // after N video inputs, the voice is next input
+    const audioSection = `[${voiceIdx}:a]atrim=duration=${totalSec.toFixed(
+      2
+    )},asetpts=PTS-STARTPTS[aout]`;
+
+    // 4) full graph
+    const filterComplex = [concatSection, subsSection, audioSection].join(";");
+
     const args = [
       "-y",
       "-nostdin",
       "-loglevel", "error",
 
-      "-i", parts[0],
-      "-i", parts[1],
-      "-i", parts[2],
+      // inputs: N video clips + voice
+      ...parts.flatMap((p) => ["-i", p]),
       "-i", voicePath,
 
-      "-filter_complex",
-      buildFilterGraphFast({ totalSec, crossf: FAST.CROSSF }),
-
-      "-map", "[outv]",
+      "-filter_complex", filterComplex,
+      "-map", subOutLabel,
       "-map", "[aout]",
 
       "-c:v", "libx264",
@@ -207,8 +235,8 @@ function runFfmpegFast({ parts, voicePath, outPath, totalSec }) {
 
       "-c:a", "aac",
       "-b:a", FAST.AUDIO_BR,
-      "-shortest",
 
+      "-t", totalSec.toFixed(2),  // hard bound
       outPath,
     ];
 
@@ -227,22 +255,35 @@ function runFfmpegFast({ parts, voicePath, outPath, totalSec }) {
 }
 
 /**
- * SUPER-FAST variant
+ * FAST variant (now with QUICK CUTS + ACTIVE SUBS)
  * - downloads 3 clips locally
- * - quick xfade montage
- * - maps TTS only (no bgm, no ASS/drawtext)
- * NOTE: honors caller-provided targetSec
+ * - quick concat montage (no xfade)
+ * - TTS audio mapped
+ * - word-chunked drawtext subtitles (same look as your main path)
+ * - keeps ~18–20s bound
  */
 async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18.5 }) {
   if (!Array.isArray(clipUrls) || clipUrls.length < 3) {
     throw new Error("FAST: need ≥ 3 clip URLs");
   }
 
-  // 1) synth voice (reuse your unified synthTTS)
+  // 0) clamp target
+  const TOTAL = Math.max(18, Math.min(20, Number(targetSec) || 18.5));
+
+  // 1) synth voice
   const tts = await synthTTS(script);
   const voicePath = tts.path;
 
-  // 2) download first three clips via unified downloadToTmp
+  // 2) derive effective voice duration (respect slowdown) for better sub timing
+  let voiceDur = await ffprobeDuration(voicePath);
+  if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = TOTAL - 2;
+  const ATEMPO = Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
+  const effVoice = voiceDur / ATEMPO;
+
+  // 3) subtitle word timings from script text (no Whisper roundtrip)
+  const subtitleWords = await getSubtitleWords(voicePath, script, effVoice, ATEMPO);
+
+  // 4) download first three clips
   const locals = [];
   try {
     for (let i = 0; i < 3; i++) {
@@ -254,17 +295,23 @@ async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18
     throw e;
   }
 
-  // 3) compose with fast xfade graph using the requested targetSec
+  // 5) compose with quick cuts + active subs
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
   try {
-    await runFfmpegFast({ parts: locals, voicePath, outPath, totalSec: Math.max(15, Math.min(20, Number(targetSec) || 18.5)) });
+    await runFfmpegFastQuickCutsWithSubs({
+      parts: locals,
+      voicePath,
+      words: subtitleWords,
+      outPath,
+      totalSec: TOTAL,
+    });
   } finally {
     locals.forEach((p) => { try { fs.unlinkSync(p); } catch {} });
     try { fs.unlinkSync(voicePath); } catch {}
   }
-  return { outPath, duration: Math.max(15, Math.min(20, Number(targetSec) || 18.5)) };
-}
 
+  return { outPath, duration: TOTAL };
+}
 
 
 

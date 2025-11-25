@@ -300,6 +300,10 @@ const GENERATION_HARD_CAP_MS = 90000;         // global cap per run (1m30s max)
 const VIDEO_TARGET_SECONDS = 19;              // ask backend to target ~19s
 const USE_FAST_MODE = true;                   // prefer backend fast path when available
 
+// NEW: explicit flags so backend knows to do smash/quick cuts and burn captions
+const FORCE_HARD_CUTS = true;                 // request straight cuts (no xfade)
+const FORCE_SUBTITLES = true;                 // request subtitles on (burn or VTT)
+
 function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), ms);
@@ -356,6 +360,7 @@ async function warmBackend() {
     return false;
   }
 }
+
 
 
 function getRandomString() {
@@ -548,9 +553,17 @@ async function fetchVideoOnce(
           answers: { ...answers, targetSeconds: VIDEO_TARGET_SECONDS },
           regenerateToken: token,
           abVariant: variant,
-          // tell backend to use fast path & clamp duration ~19s
+
+          // SPEED + STYLE HINTS FOR BACKEND
           fast: USE_FAST_MODE ? 1 : 0,
-          targetSeconds: VIDEO_TARGET_SECONDS
+          targetSeconds: VIDEO_TARGET_SECONDS,
+          // *** NEW control knobs (backend can ignore safely if unknown) ***
+          hardCuts: FORCE_HARD_CUTS ? 1 : 0,           // enforce quick cuts (no transitions)
+          xfade: 0,                                    // force-disable crossfades
+          subtitles: FORCE_SUBTITLES ? 1 : 0,          // turn captions on
+          burnSubtitles: 1,                             // prefer burned-in to keep the same look
+          // if your server prefers a single field:
+          // style: "hard_cuts", captions: "on"
         }),
       },
       { key: triggerKey, timeoutMs }
@@ -567,8 +580,14 @@ async function fetchVideoOnce(
       const pick = data.variants.find(v => v?.absoluteUrl || v?.url || v?.filename);
       if (pick) u = pick.absoluteUrl || pick.url || (pick.filename ? `/api/media/${pick.filename}` : "");
     }
-
     if (!u) throw new Error("No video URL in response");
+
+    // Optional captions (if backend returns sidecar VTT in case it doesn't burn-in)
+    const captionsVtt =
+      data?.captionsVtt ||
+      data?.vtt ||
+      data?.captionsUrl ||
+      (data?.captionsFilename ? `/api/media/${data.captionsFilename}` : "");
 
     const finalUrl = toAbsoluteMedia(u);
 
@@ -582,6 +601,7 @@ async function fetchVideoOnce(
         data?.narration ||
         (result?.body ? `Narration: ${result.body}` : ""),
       fbVideoId: data?.fbVideoId || null,
+      captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null
     };
   } catch (e) {
     // Recovery path: maybe the backend finished but edge/network dropped
@@ -594,7 +614,7 @@ async function fetchVideoOnce(
     } else {
       console.error(`fetchVideoOnce(${variant}) failed:`, e);
     }
-    return { url: "", script: "", fbVideoId: null };
+    return { url: "", script: "", fbVideoId: null, captionsVtt: null };
   }
 }
 
@@ -1583,56 +1603,68 @@ async function handleRegenerateVideo() {
             </button>
           </div>
 
-          {/* Carousel body */}
-          <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
-            {videoLoading || generating ? (
-              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Dotty />
-              </div>
-            ) : videoItems.length > 0 ? (
-              <>
-                <video
-                  key={`${videoItems[activeVideo]?.url || "video"}-${activeVideo}`}
-                  src={toAbsoluteMedia(videoItems[activeVideo]?.url || "")}
-                  controls
-                  playsInline
-                  muted
-                  preload="metadata"
-                  style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
-                />
+      {/* Carousel body */}
+<div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
+  {videoLoading || generating ? (
+    <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <Dotty />
+    </div>
+  ) : videoItems.length > 0 ? (
+    <>
+      <video
+        key={`${videoItems[activeVideo]?.url || "video"}-${activeVideo}`}
+        src={toAbsoluteMedia(videoItems[activeVideo]?.url || "")}
+        controls
+        playsInline
+        muted
+        preload="metadata"
+        style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
+      >
+        {/* If backend provided a sidecar VTT (when not burned-in), attach it */}
+        {videoItems[activeVideo]?.captionsVtt && (
+          <track
+            src={toAbsoluteMedia(videoItems[activeVideo].captionsVtt)}
+            kind="captions"
+            srcLang="en"
+            label="English"
+            default
+          />
+        )}
+      </video>
 
-                <Arrow side="left" onClick={() => {
-                  const next = (activeVideo + videoItems.length - 1) % videoItems.length;
-                  setActiveVideo(next);
-                  setVideoUrl(videoItems[next]?.url || "");
-                  setVideoScript(videoItems[next]?.script || "");
-                }} disabled={videoItems.length <= 1} />
-                <Arrow side="right" onClick={() => {
-                  const next = (activeVideo + 1) % videoItems.length;
-                  setActiveVideo(next);
-                  setVideoUrl(videoItems[next]?.url || "");
-                  setVideoScript(videoItems[next]?.script || "");
-                }} disabled={videoItems.length <= 1} />
-                <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
-                  setActiveVideo(i);
-                  setVideoUrl(videoItems[i]?.url || "");
-                  setVideoScript(videoItems[i]?.script || "");
-                }} />
-              </>
-            ) : (
-              <div style={{
-                height: 220,
-                width: "100%",
-                background: "#e9ecef",
-                color: "#a9abb0",
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22
-              }}>Video goes here</div>
-            )}
-          </div>
+      <Arrow side="left" onClick={() => {
+        const next = (activeVideo + videoItems.length - 1) % videoItems.length;
+        setActiveVideo(next);
+        setVideoUrl(videoItems[next]?.url || "");
+        setVideoScript(videoItems[next]?.script || "");
+      }} disabled={videoItems.length <= 1} />
+      <Arrow side="right" onClick={() => {
+        const next = (activeVideo + 1) % videoItems.length;
+        setActiveVideo(next);
+        setVideoUrl(videoItems[next]?.url || "");
+        setVideoScript(videoItems[next]?.script || "");
+      }} disabled={videoItems.length <= 1} />
+      <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
+        setActiveVideo(i);
+        setVideoUrl(videoItems[i]?.url || "");
+        setVideoScript(videoItems[i]?.script || "");
+      }} />
+    </>
+  ) : (
+    <div style={{
+      height: 220,
+      width: "100%",
+      background: "#e9ecef",
+      color: "#a9abb0",
+      fontWeight: 700,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      fontSize: 22
+    }}>Video goes here</div>
+  )}
+</div>
+
 
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
