@@ -10,6 +10,23 @@
 
 const express = require('express');
 const router = express.Router();
+
+/* --- CORS for all routes in this router --- */
+router.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
+  } else {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+  }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 const fs = require('fs');
 const path = require('path');
 const mustache = require('mustache');
@@ -341,6 +358,33 @@ async function buildPosterBackground({
   return await base.composite(layers).png().toBuffer();
 }
 
+// GET /api/proxy-img?u=<encoded URL>
+// Fetch a remote image and re-serve it with permissive CORS
+router.get('/proxy-img', async (req, res) => {
+  try {
+    const u = req.query.u;
+    if (!u || typeof u !== 'string') return res.status(400).send('missing u');
+    const buf = await fetchBuffer(u);
+
+    // Try to guess content-type from image metadata
+    let ct = 'image/jpeg';
+    try {
+      const meta = await sharp(buf).metadata();
+      if (meta.format === 'png')  ct = 'image/png';
+      if (meta.format === 'webp') ct = 'image/webp';
+      if (meta.format === 'gif')  ct = 'image/gif';
+    } catch {}
+
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
+    res.send(buf);
+  } catch (e) {
+    console.error('[proxy-img]', e);
+    res.status(502).send('bad upstream');
+  }
+});
+
+
 /* ------------------------ Validation Schemas ------------------------ */
 
 const flyerSchema = {
@@ -555,5 +599,44 @@ router.post('/generate-static-ad', async (req, res) => {
     res.status(400).json({ ok: false, error: String(err?.message || err) });
   }
 });
+
+// ---- Back-compat for older frontend: POST /api/generate-image-from-prompt ----
+router.post('/generate-image-from-prompt', async (req, res) => {
+  try {
+    // Expecting { prompt, industry, businessName, location, backgroundUrl? }
+    const { prompt = '', industry = 'retail', businessName = 'Your Brand',
+            location = 'Your City', backgroundUrl = '' } = req.body || {};
+
+    const kind = classifyIndustry(industry);
+    const template = ['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(kind)
+      ? 'poster_b' : 'flyer_a';
+
+    // Rebuild body to reuse the new route
+    req.body = {
+      template,
+      inputs: {
+        industry, businessName, location,
+        // required only for flyer_a validation:
+        phone: '(000) 000-0000', headline: ' ', subline: ' ', cta: ' '
+      },
+      knobs: {
+        // sensible defaults; your new route will merge profile text anyway
+        eventTitle: 'NEW ARRIVALS',
+        dateRange: 'LIMITED TIME',
+        saveAmount: 'BIG SAVINGS',
+        financingLine: '',
+        qualifiers: '',
+        backgroundUrl
+      }
+    };
+
+    // Internally dispatch to the new handler
+    return router.handle({ ...req, url: '/generate-static-ad', method: 'POST' }, res);
+  } catch (e) {
+    console.error('[generate-image-from-prompt shim]', e);
+    res.status(400).json({ ok:false, error:String(e?.message||e) });
+  }
+});
+
 
 module.exports = router;
