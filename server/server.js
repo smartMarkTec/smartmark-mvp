@@ -136,6 +136,10 @@ app.get('/api/test', (_req, res) => {
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
+/* IMPORTANT: mount staticAds BEFORE ai so /api/generate-static-ad hits the new templates */
+const staticAdsRoutes = require('./routes/staticAds');
+app.use('/api', staticAdsRoutes);
+
 const aiRoutes = require('./routes/ai');
 app.use('/api', aiRoutes);
 
@@ -144,9 +148,6 @@ app.use('/api', campaignRoutes);
 
 const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
-
-const staticAdsRoutes = require('./routes/staticAds');
-app.use('/api', staticAdsRoutes);
 
 // Simple ping that echoes headers (debug CORS quickly)
 app.all('/api/ping', (req, res) => {
