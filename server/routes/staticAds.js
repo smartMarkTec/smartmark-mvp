@@ -2,10 +2,11 @@
 'use strict';
 
 /**
- * Static Ad Generator (industry-aware → SVG → PNG)
- * - Two templates: flyer_a (services) and poster_b (retail/promo)
- * - Auto industry profiles for any vertical (fallbacks if unknown)
- * - Writes to GENERATED_DIR and serves via /generated and /api/media
+ * Static Ad Generator (industry-aware → SVG/PNG)
+ * - flyer_a (services) : SVG → PNG (as before)
+ * - poster_b (retail)  : background photo baked via Sharp → card SVG composited on top
+ * - Optional knobs.backgroundUrl to force a specific bg image
+ * - If no backgroundUrl is given, falls back to /__fallback/1200.jpg on this server
  */
 
 const express = require('express');
@@ -15,17 +16,26 @@ const path = require('path');
 const mustache = require('mustache');
 const Ajv = require('ajv');
 const sharp = require('sharp');
+const http = require('http');
+const https = require('https');
 
 const ajv = new Ajv({ allErrors: true });
 
-const GEN_DIR = process.env.GENERATED_DIR ||
+/* ------------------------ Paths / URLs ------------------------ */
+const GEN_DIR =
+  process.env.GENERATED_DIR ||
   path.join(process.cwd(), 'server', 'public', 'generated');
 fs.mkdirSync(GEN_DIR, { recursive: true });
 
 function makeMediaUrl(req, filename) {
   const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
-  // We expose under /generated and /api/media; use the /api/media alias for frontend helpers.
+  // We expose /generated also via /api/media; return the latter for frontend helpers.
   return `${base}/api/media/${filename}`;
+}
+
+function selfUrl(req, p = '') {
+  const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
+  return `${base}${p.startsWith('/') ? p : `/${p}`}`;
 }
 
 /* ------------------------ Industry Profiles ------------------------ */
@@ -51,7 +61,7 @@ function classifyIndustry(s = "") {
 
 function profileForIndustry(industry = "") {
   const kind = classifyIndustry(industry);
-  // palettes lean dark header / light body by default
+
   const PALETTES = {
     base:   { header: '#0d3b66', body: '#dff3f4', accent: '#ff8b4a', textOnDark: '#ffffff', textOnLight: '#2b3a44' },
     teal:   { header: '#0b5563', body: '#e7f6f2', accent: '#16a085', textOnDark: '#ffffff', textOnLight: '#23343d' },
@@ -61,7 +71,7 @@ function profileForIndustry(industry = "") {
     slate:  { header: '#213043', body: '#eaf2fb', accent: '#f59e0b', textOnDark: '#ffffff', textOnLight: '#182435' }
   };
 
-  // Default buckets
+  // Default bullets for services
   const serviceLists = {
     left:  ["One Time","Weekly","Bi-Weekly","Monthly"],
     right: ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"]
@@ -82,16 +92,7 @@ function profileForIndustry(industry = "") {
     left:  ["Oil Change","Brakes","Tires","Alignment"],
     right: ["Diagnostics","AC Service","Batteries","Inspections"]
   };
-  const salonLists = {
-    left:  ["Haircuts","Color","Blowouts","Treatments"],
-    right: ["Nails","Lashes","Waxing","Makeup"]
-  };
-  const fitnessLists = {
-    left:  ["Personal Training","Group Classes","Open Gym","Nutrition"],
-    right: ["HIIT","Strength","Mobility","Yoga","Pilates","Cardio"]
-  };
 
-  // Per-kind defaults
   const MAP = {
     home_cleaning: {
       template: 'flyer_a',
@@ -184,7 +185,7 @@ function profileForIndustry(industry = "") {
       subline: 'Install • Repair • Maintenance',
       cta: 'SCHEDULE NOW',
       palette: PALETTES.teal,
-      lists: hvacLists, // plumbingLists swapped in below if we detect “plumb”
+      lists: hvacLists, // plumbingLists swapped below if "plumb"
       coverage: 'Emergency service available',
       bgHint: 'hvac plumbing'
     },
@@ -248,7 +249,6 @@ function profileForIndustry(industry = "") {
   };
 
   let prof = MAP[kind];
-  // Small tweak: if text includes "plumb" prefer plumbing lists
   if (kind === 'hvac_plumbing' && /plumb/i.test(industry)) {
     prof = { ...prof, lists: plumbingLists };
   }
@@ -326,29 +326,13 @@ function tplFlyerA({ W=1080, H=1080 }) {
 </svg>`;
 }
 
-// Poster B (retail/promo) — lifestyle bg + centered card
-// Poster B (retail/promo) — lifestyle bg + centered card, nicer hierarchy
-function tplPosterB({ W = 1080, H = 1080 }) {
+/* Poster B — card only (transparent). The photographic background is built with Sharp. */
+function tplPosterBCard({ cardW = 760, cardH = 520, padX = 48, padY = 56 }) {
   return `
-<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- soft drop shadow for the card -->
     <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity="0.25"/>
-    </filter>
-    <!-- soft vignette -->
-    <radialGradient id="bgVignette" cx="50%" cy="40%" r="70%">
-      <stop offset="0%"  stop-color="#121a22"/>
-      <stop offset="70%" stop-color="#0e151c"/>
-      <stop offset="100%" stop-color="#0b1116"/>
-    </radialGradient>
-    <!-- subtle noise mask -->
-    <filter id="noise">
-      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
-      <feColorMatrix type="saturate" values="0"/>
-      <feComponentTransfer>
-        <feFuncA type="linear" slope="0.035"/>
-      </feComponentTransfer>
+      <feDropShadow dx="0" dy="20" stdDeviation="20" flood-color="#000" flood-opacity="0.28"/>
     </filter>
     <style>
       .t-h0{font:900 78px/1.05 Inter,system-ui; letter-spacing:-1px}
@@ -359,48 +343,29 @@ function tplPosterB({ W = 1080, H = 1080 }) {
     </style>
   </defs>
 
-  <!-- Background -->
-  <rect width="${W}" height="${H}" fill="url(#bgVignette)"/>
-  <rect width="${W}" height="${H}" filter="url(#noise)"/>
-
-  <!-- Framed stage -->
-  <rect x="42" y="42" width="${W-84}" height="${H-84}" rx="40" fill="#ffffff" opacity="0.04"/>
-
-  <!-- Decorative soft blobs in brand colors -->
-  <circle cx="${W*0.18}" cy="${H*0.22}" r="120" fill="{{palette.accent}}" opacity="0.12"/>
-  <circle cx="${W*0.86}" cy="${H*0.78}" r="140" fill="{{palette.header}}" opacity="0.10"/>
-
-  <!-- Center card -->
+  <!-- Card -->
   <g filter="url(#cardShadow)">
-    <rect x="${(W-760)/2}" y="${(H-520)/2}" width="760" height="520" rx="28" fill="#ffffff"/>
+    <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="28" fill="#ffffff"/>
   </g>
 
-  <!-- Card content -->
-  <g transform="translate(${(W-760)/2 + 48}, ${(H-520)/2 + 56})">
-    <!-- Brand pill (top right inside card) -->
-    <g transform="translate(540, -12)">
+  <!-- Content -->
+  <g transform="translate(${padX}, ${padY})">
+    <!-- Brand pill (top right) -->
+    <g transform="translate(${cardW - padX - 170}, -12)">
       <rect width="170" height="42" rx="21" fill="#0f1a22" opacity="0.08"/>
       <text class="t-b1" x="85" y="30" text-anchor="middle" fill="#334554">{{brandName}}</text>
     </g>
 
-    <!-- Headline / date / save -->
-    <text class="t-h0" x="0" y="0" dy="0.9em" fill="#0f1a22">{{eventTitle}}</text>
+    <text class="t-h0" x="0" y="0" dy="0.95em" fill="#0f1a22">{{eventTitle}}</text>
     <text class="t-h2" x="0" y="82" dy="1.2em" fill="#334554">{{dateRange}}</text>
-
-    <!-- Big savings line in accent -->
-    <text class="t-h1" x="0" y="162" dy="1.25em" fill="{{palette.accent}}">{{saveAmount}}</text>
-
-    <!-- Financing/subline -->
+    <text class="t-h1" x="0" y="162" dy="1.25em" fill="{{accent}}">{{saveAmount}}</text>
     <text class="t-h2" x="0" y="260" dy="1.1em" fill="#334554">{{financingLine}}</text>
-
-    <!-- Small qualifiers -->
     <text class="t-b1" x="0" y="318" dy="1.2em" fill="#66798a">{{qualifiers}}</text>
   </g>
 
-  <!-- Footer legal (outside card, bottom-left) -->
   {{#legal}}
-  <g transform="translate(80, ${H-44})">
-    <text class="t-meta" fill="#94a8b8">{{legal}}</text>
+  <g transform="translate(0, ${cardH - 18})">
+    <text class="t-meta" x="0" y="-6" fill="#9eb2c3">{{legal}}</text>
   </g>
   {{/legal}}
 </svg>`;
@@ -412,12 +377,85 @@ function layoutList(items) {
   const startY = 56, step = 54;
   return (items || []).slice(0, 6).map((t, i) => ({ y: startY + i * step, text: t }));
 }
-
 function withListLayout(lists = {}) {
   return {
     left: layoutList(lists.left || []),
     right: layoutList(lists.right || [])
   };
+}
+
+/* tiny fetch to buffer (no extra deps) */
+function fetchBuffer(url) {
+  return new Promise((resolve, reject) => {
+    try {
+      const lib = url.startsWith('https') ? https : http;
+      lib
+        .get(url, { timeout: 12000 }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            // follow one redirect
+            return fetchBuffer(res.headers.location).then(resolve).catch(reject);
+          }
+          if (res.statusCode !== 200) {
+            return reject(new Error(`HTTP ${res.statusCode}`));
+          }
+          const chunks = [];
+          res.on('data', (d) => chunks.push(d));
+          res.on('end', () => resolve(Buffer.concat(chunks)));
+        })
+        .on('error', reject);
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+/* Build photographic background: (1) optional fetched image → cover → blur → darken vignette
+   Returns a 1080x1080 PNG Buffer. */
+async function buildPosterBackground({ width = 1080, height = 1080, bgUrl = "", accent = "#ff7b41" }) {
+  // Base dark canvas
+  let base = sharp({
+    create: { width, height, channels: 3, background: { r: 12, g: 18, b: 24 } }
+  }).png();
+
+  let layers = [];
+
+  if (bgUrl) {
+    try {
+      const buf = await fetchBuffer(bgUrl);
+      // Cover-fit the background, then blur a bit
+      const photo = await sharp(buf)
+        .resize(width, height, { fit: 'cover', position: 'center' })
+        .modulate({ saturation: 0.8, brightness: 1.0 })
+        .blur(8)
+        .png()
+        .toBuffer();
+      layers.push({ input: photo, gravity: 'centre', blend: 'over' });
+    } catch {
+      // ignore; we'll just keep the dark canvas + vignette
+    }
+  }
+
+  // Add subtle vignette and soft blobs to hint brand colors
+  const vignetteSvg = Buffer.from(`
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <radialGradient id="v" cx="50%" cy="45%" r="70%">
+          <stop offset="0%" stop-color="#0d131a" stop-opacity="0.0"/>
+          <stop offset="70%" stop-color="#0d131a" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#0d131a" stop-opacity="0.75"/>
+        </radialGradient>
+        <filter id="soft"><feGaussianBlur stdDeviation="22"/></filter>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#v)"/>
+      <circle cx="${width*0.2}" cy="${height*0.25}" r="120" fill="${accent}" opacity="0.14" filter="url(#soft)"/>
+      <circle cx="${width*0.85}" cy="${height*0.80}" r="140" fill="#1a2936" opacity="0.18" filter="url(#soft)"/>
+      <!-- inner framed stage -->
+      <rect x="42" y="42" width="${width-84}" height="${height-84}" rx="40" fill="#fff" opacity="0.04"/>
+    </svg>
+  `);
+  layers.push({ input: vignetteSvg, blend: 'over' });
+
+  return await base.composite(layers).png().toBuffer();
 }
 
 /* ------------------------ Validation Schemas ------------------------ */
@@ -475,13 +513,13 @@ router.post('/generate-static-ad', async (req, res) => {
     const industry = inputs.industry || 'Local Services';
     const prof = profileForIndustry(industry);
 
-    // Decide template if 'auto'
+    // Decide template for 'auto'
     const template =
       templateReq !== 'auto'
         ? templateReq
         : (['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(prof.kind) ? 'poster_b' : 'flyer_a');
 
-    // Merge inputs with profile defaults (user input wins)
+    /* ------------------- FLYER A (unchanged pipeline) ------------------- */
     if (template === 'flyer_a') {
       const mergedInputs = {
         industry,
@@ -510,7 +548,6 @@ router.post('/generate-static-ad', async (req, res) => {
         throw new Error('validation failed: ' + JSON.stringify(validate.errors));
       }
 
-      // Build render vars
       const listsLaidOut = withListLayout(mergedKnobs.lists || {});
       const vars = {
         headline: mergedInputs.headline,
@@ -532,6 +569,7 @@ router.post('/generate-static-ad', async (req, res) => {
       const pngName = `${base}.png`;
       const svgPath = path.join(GEN_DIR, svgName);
       const pngPath = path.join(GEN_DIR, pngName);
+
       fs.writeFileSync(svgPath, svg, 'utf8');
       await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(pngPath);
 
@@ -552,7 +590,7 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    // poster_b
+    /* ------------------- POSTER B (photo baked + card) ------------------- */
     const mergedInputsB = {
       industry,
       businessName: inputs.businessName || 'Your Brand',
@@ -560,16 +598,17 @@ router.post('/generate-static-ad', async (req, res) => {
     };
     const mergedKnobsB = {
       size: (knobs.size || '1080x1080'),
-      frame: knobs.frame || { outerWhite: true, softShadow: true },
-      card: knobs.card || { widthPct: 70, heightPct: 55, shadow: true },
+      // Background image hint/url
+      backgroundHint: knobs.backgroundHint || prof.bgHint || 'retail',
+      backgroundUrl: knobs.backgroundUrl || "", // NEW
+      // Card text parts
       eventTitle: knobs.eventTitle || prof.eventTitle || 'SEASONAL EVENT',
       dateRange: knobs.dateRange || prof.dateRange || 'LIMITED TIME ONLY',
       saveAmount: knobs.saveAmount || prof.saveAmount || 'BIG SAVINGS',
       financingLine: knobs.financingLine || prof.financingLine || '',
       qualifiers: knobs.qualifiers || prof.qualifiers || '',
       legal: knobs.legal || prof.legal || '',
-      seasonalLeaves: knobs.seasonalLeaves !== undefined ? knobs.seasonalLeaves : true,
-      backgroundHint: knobs.backgroundHint || prof.bgHint || 'retail',
+      // Palette
       palette: knobs.palette || prof.palette
     };
 
@@ -578,45 +617,67 @@ router.post('/generate-static-ad', async (req, res) => {
       throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
-  const varsB = {
-  palette: mergedKnobsB.palette,
-  brandName: mergedInputsB.businessName, // NEW: brand pill text
-  location: mergedInputsB.location,      // NEW: kept for future use
-  eventTitle: mergedKnobsB.eventTitle,
-  dateRange: mergedKnobsB.dateRange,
-  saveAmount: mergedKnobsB.saveAmount,
-  financingLine: mergedKnobsB.financingLine,
-  qualifiers: mergedKnobsB.qualifiers,
-  legal: mergedKnobsB.legal
-};
+    // Choose a background URL: explicit knob wins; otherwise fall back to a local generated solid
+    let bgUrl = mergedKnobsB.backgroundUrl;
+    if (!bgUrl) {
+      // Always valid fallback on this same server
+      bgUrl = selfUrl(req, '/__fallback/1200.jpg');
+    }
 
+    // Build photographic background layer
+    const bgPng = await buildPosterBackground({
+      width: 1080,
+      height: 1080,
+      bgUrl,
+      accent: mergedKnobsB.palette.accent || '#ff7b41'
+    });
 
-    const svgTplB = tplPosterB({ W:1080, H:1080 });
-    const svgB = mustache.render(svgTplB, varsB);
+    // Render card-only SVG
+    const cardVars = {
+      brandName: mergedInputsB.businessName,
+      eventTitle: mergedKnobsB.eventTitle,
+      dateRange: mergedKnobsB.dateRange,
+      saveAmount: mergedKnobsB.saveAmount,
+      financingLine: mergedKnobsB.financingLine,
+      qualifiers: mergedKnobsB.qualifiers,
+      legal: mergedKnobsB.legal,
+      accent: mergedKnobsB.palette.accent || '#ff7b41'
+    };
+    const cardSvg = mustache.render(tplPosterBCard({}), cardVars);
+    const cardPng = await sharp(Buffer.from(cardSvg))
+      .png()
+      .toBuffer();
 
+    // Composite: center the card on the 1080 background
+    const cardW = 760, cardH = 520;
+    const left = Math.round((1080 - cardW) / 2);
+    const top  = Math.round((1080 - cardH) / 2);
+
+    const finalPng = await sharp(bgPng)
+      .composite([{ input: cardPng, left, top }])
+      .png({ quality: 92 })
+      .toBuffer();
+
+    // Persist
     const baseB = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const svgNameB = `${baseB}.svg`;
     const pngNameB = `${baseB}.png`;
-    const svgPathB = path.join(GEN_DIR, svgNameB);
     const pngPathB = path.join(GEN_DIR, pngNameB);
-    fs.writeFileSync(svgPathB, svgB, 'utf8');
-    await sharp(Buffer.from(svgB)).png({ quality: 92 }).toFile(pngPathB);
+    await fs.promises.writeFile(pngPathB, finalPng);
 
     const mediaPngB = makeMediaUrl(req, pngNameB);
-    const mediaSvgB = makeMediaUrl(req, svgNameB);
 
     return res.json({
       ok: true,
       type: 'image',
       template,
-      svgUrl: mediaSvgB,
-      pngUrl: mediaPngB,
       url: mediaPngB,
       absoluteUrl: mediaPngB,
+      pngUrl: mediaPngB,
       filename: pngNameB,
       asset: { id: baseB, createdAt: Date.now() },
       ready: true
     });
+
   } catch (err) {
     console.error('[generate-static-ad]', err);
     res.status(400).json({ ok: false, error: String(err?.message || err) });
