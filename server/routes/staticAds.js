@@ -22,10 +22,9 @@ const GEN_DIR = process.env.GENERATED_DIR ||
   path.join(process.cwd(), 'server', 'public', 'generated');
 fs.mkdirSync(GEN_DIR, { recursive: true });
 
-function makeUrl(req, absPath) {
-  const filename = path.basename(absPath);
+function makeMediaUrl(req, filename) {
   const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
-  // We expose under /generated and /api/media; return /api/media for frontend helpers
+  // We expose under /generated and /api/media; use the /api/media alias for frontend helpers.
   return `${base}/api/media/${filename}`;
 }
 
@@ -257,7 +256,6 @@ function profileForIndustry(industry = "") {
 }
 
 /* ------------------------ Templates ------------------------ */
-/* Minimal mustache-driven versions (SVG -> PNG via sharp) */
 
 // Flyer A (services) — header bar + diagonal split + two columns + CTA bar
 function tplFlyerA({ W=1080, H=1080 }) {
@@ -486,18 +484,27 @@ router.post('/generate-static-ad', async (req, res) => {
       const svg = mustache.render(svgTpl, vars);
 
       const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      const svgPath = path.join(GEN_DIR, `${base}.svg`);
-      const pngPath = path.join(GEN_DIR, `${base}.png`);
+      const svgName = `${base}.svg`;
+      const pngName = `${base}.png`;
+      const svgPath = path.join(GEN_DIR, svgName);
+      const pngPath = path.join(GEN_DIR, pngName);
       fs.writeFileSync(svgPath, svg, 'utf8');
       await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(pngPath);
+
+      const mediaPng = makeMediaUrl(req, pngName);
+      const mediaSvg = makeMediaUrl(req, svgName);
 
       return res.json({
         ok: true,
         type: 'image',
         template,
-        absoluteUrl: makeUrl(req, pngPath),
-        url: makeUrl(req, pngPath),
-        filename: `${base}.png`
+        svgUrl: mediaSvg,
+        pngUrl: mediaPng,
+        url: mediaPng,
+        absoluteUrl: mediaPng,
+        filename: pngName,
+        asset: { id: base, createdAt: Date.now() },
+        ready: true
       });
     }
 
@@ -541,18 +548,27 @@ router.post('/generate-static-ad', async (req, res) => {
     const svgB = mustache.render(svgTplB, varsB);
 
     const baseB = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const svgPathB = path.join(GEN_DIR, `${baseB}.svg`);
-    const pngPathB = path.join(GEN_DIR, `${baseB}.png`);
+    const svgNameB = `${baseB}.svg`;
+    const pngNameB = `${baseB}.png`;
+    const svgPathB = path.join(GEN_DIR, svgNameB);
+    const pngPathB = path.join(GEN_DIR, pngNameB);
     fs.writeFileSync(svgPathB, svgB, 'utf8');
     await sharp(Buffer.from(svgB)).png({ quality: 92 }).toFile(pngPathB);
+
+    const mediaPngB = makeMediaUrl(req, pngNameB);
+    const mediaSvgB = makeMediaUrl(req, svgNameB);
 
     return res.json({
       ok: true,
       type: 'image',
       template,
-      absoluteUrl: makeUrl(req, pngPathB),
-      url: makeUrl(req, pngPathB),
-      filename: `${baseB}.png`
+      svgUrl: mediaSvgB,
+      pngUrl: mediaPngB,
+      url: mediaPngB,
+      absoluteUrl: mediaPngB,
+      filename: pngNameB,
+      asset: { id: baseB, createdAt: Date.now() },
+      ready: true
     });
   } catch (err) {
     console.error('[generate-static-ad]', err);
