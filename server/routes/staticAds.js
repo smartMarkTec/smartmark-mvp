@@ -2,24 +2,23 @@
 'use strict';
 
 /**
- * Static Ad Generator (industry-agnostic → SVG → PNG)
- * Supports new payload:
- *   { template: "flyer_a" | "poster_b", inputs: {...}, knobs: {...} }
- * Also backward-compatible with legacy:
- *   { size, style, brand, headline, subline, cta, offer, bullets, disclaimers }
+ * Static Ad Generator — exact layout templates
+ *   - flyer_a  : Home Cleaning flyer (header bar, diagonal split, lists, phone CTA)
+ *   - poster_b : Fall Flooring event (center white card, save $, financing, leaves)
+ *
+ * Writes SVG → PNG into GENERATED_DIR and returns pngUrl + svgUrl.
  */
 
 const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
-const mustache = require('mustache');
 const Ajv = require('ajv');
 const sharp = require('sharp');
 
-const ajv = new Ajv({ allErrors: true, removeAdditional: 'failing' });
+const ajv = new Ajv({ allErrors: true });
 
-/* ------------------------ Paths ------------------------ */
+/* ------------------------ Storage ------------------------ */
 const GEN_DIR = process.env.GENERATED_DIR ||
   path.join(process.cwd(), 'server', 'public', 'generated');
 fs.mkdirSync(GEN_DIR, { recursive: true });
@@ -30,479 +29,333 @@ function makeUrl(req, absPath) {
   return `${base}/generated/${filename}`;
 }
 
-/* ------------------------ Schemas (relaxed) ------------------------ */
-const schemaNew = {
+/* ------------------------ Schema ------------------------ */
+const schema = {
   type: "object",
-  required: ["template", "inputs"],
+  required: ["template","inputs","knobs"],
   properties: {
     template: { enum: ["flyer_a","poster_b"] },
     inputs: {
       type: "object",
+      required: ["businessName","headline","subline","cta"],
       properties: {
-        industry: { type: "string" },
-        businessName: { type: "string" },
-        website: { type: "string" },
-        location: { type: "string" },
-        offer: { type: "string" },
-        mainBenefit: { type: "string" },
-        idealCustomer: { type: "string" },
-        phone: { type: "string" },
-        headline: { type: "string" },
-        subline: { type: "string" },
-        cta: { type: "string" }
-      },
-      additionalProperties: true
+        industry: { type: "string", maxLength: 48 },
+        businessName: { type: "string", maxLength: 64 },
+        website: { type: "string", maxLength: 120 },
+        location: { type: "string", maxLength: 64 },
+        phone: { type: "string", maxLength: 32 },
+        headline: { type: "string", maxLength: 64 },
+        subline: { type: "string", maxLength: 140 },
+        cta: { type: "string", maxLength: 28 },
+        offer: { type: "string", maxLength: 48 }
+      }
     },
-    knobs: { type: "object", additionalProperties: true }
-  },
-  additionalProperties: true
+    knobs: { type: "object" }
+  }
 };
 
-const schemaLegacy = {
-  type: "object",
-  properties: {
-    size: { enum: ["1080x1080","1200x1500","1080x1920"] },
-    style: { enum: ["promo","services"] },
-    brand: {
-      type: "object",
-      properties: {
-        businessName: { type: "string" },
-        phone: { type: "string" },
-        website: { type: "string" },
-        location: { type: "string" },
-        primary: { type: "string" },
-        accent: { type: "string" },
-        bg: { type: "string" }
-      },
-      additionalProperties: true
-    },
-    industry: { type: "string" },
-    headline: { type: "string" },
-    subline: { type: "string" },
-    cta: { type: "string" },
-    offer: { type: "string" },
-    bullets: { type: "array", items: { type: "string" } },
-    disclaimers: { type: "string" }
-  },
-  additionalProperties: true
-};
-
-/* ------------------------ Helpers ------------------------ */
-function clampStr(s, max) {
-  const t = (s || "").toString();
-  return t.length > max ? t.slice(0, max - 1) + "…" : t;
+/* ------------------------ Utility ------------------------ */
+function esc(t="") {
+  return String(t)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+function listToRows(arr = [], max = 6) {
+  return (Array.isArray(arr) ? arr : []).slice(0, max).map((text, i) => ({
+    y: 40 + i * 42,
+    text: esc(text)
+  }));
 }
 
-function layoutBullets(items) {
-  const startY = 56, step = 54;
-  return (items || []).slice(0, 6).map((t,i)=>({ y: startY + i*step, text: t }));
-}
+/* ------------------------ Template: flyer_a ------------------------ */
+/**
+ * Visual targets:
+ * - Dark teal header strip
+ * - Body has diagonal split (light aqua)
+ * - Left column: frequencies list with check marks (orange)
+ * - Right column: services list with bullet dots
+ * - Bottom CTA bar (orange) with CALL NOW + phone
+ */
+function tplFlyerA(opts) {
+  const W = 1080, H = 1080;
+  const {
+    brand = {},
+    lists = {},
+    coverage = "Coverage area 25 Miles around your city",
+    inputs = {}
+  } = opts;
 
-function parseSize(size = "1080x1080") {
-  const m = String(size).match(/^(\d+)x(\d+)$/);
-  if (!m) return { W:1080, H:1080 };
-  return { W: parseInt(m[1],10), H: parseInt(m[2],10) };
-}
+  const primary = brand.primary || "#0d3b66";   // dark teal
+  const accent  = brand.accent  || "#ff8b4a";   // orange
+  const bodyBg  = "#dff3f4";                     // light aqua
+  const textDark= "#2b3a44";
 
-function safePalette(knobs = {}, fallback = {}) {
-  const p = knobs.palette || {};
-  return {
-    header: p.header || fallback.header || "#0d3b66",
-    body: p.body || fallback.body || "#dff3f4",
-    accent: p.accent || fallback.accent || "#ff8b4a",
-    textOnDark: p.textOnDark || fallback.textOnDark || "#ffffff",
-    textOnLight: p.textOnLight || fallback.textOnLight || "#2b3a44"
-  };
-}
+  const left = listToRows(lists.left || ["One Time","Weekly","Bi-Weekly","Monthly"]);
+  const right= listToRows(lists.right|| ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"]);
 
-/* ------------------------ Templates ------------------------ */
-/** Legacy universal card (kept for backward compatibility) */
-function tplUniversal1080({ W=1080, H=1080 }) {
+  const phone = brand.phone || inputs.phone || "(210) 555-0147";
+  const biz   = brand.businessName || inputs.businessName || "Your Business";
+
+  // Check icon path
+  const checkPath = `M8 14.5l-4.5-4.6L1 12l7 7L23 4.9 20.6 3z`;
+
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="soft"><feGaussianBlur stdDeviation="18"/></filter>
+    <linearGradient id="diag" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${bodyBg}"/>
+      <stop offset="1" stop-color="#e9fbfb"/>
+    </linearGradient>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
     <style>
-      .h0{font:900 64px/1 Inter,system-ui}
-      .h1{font:900 86px/1 Inter,system-ui}
-      .h2{font:800 44px/1.1 Inter,system-ui}
-      .b1{font:700 34px/1.2 Inter,system-ui}
-      .meta{font:600 26px/1.2 Inter,system-ui}
-      .chip{font:900 34px/1 Inter,system-ui}
+      .h0{font:900 96px/1 Inter,system-ui,Arial}
+      .h1{font:900 64px/1 Inter,system-ui,Arial}
+      .b1{font:700 38px/1.2 Inter,system-ui,Arial}
+      .b2{font:700 34px/1.2 Inter,system-ui,Arial}
+      .small{font:600 28px/1.2 Inter,system-ui,Arial}
+      .chip{font:900 44px/1 Inter,system-ui,Arial; letter-spacing: .5px}
     </style>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="{{brand.bg}}"/>
-  <circle cx="160" cy="140" r="120" fill="{{brand.accent}}" opacity=".18" filter="url(#soft)"/>
-  <circle cx="${W-160}" cy="260" r="170" fill="{{brand.primary}}" opacity=".14" filter="url(#soft)"/>
+  <!-- background -->
+  <rect width="${W}" height="${H}" fill="#ffffff"/>
+  <rect x="0" y="0" width="${W}" height="260" fill="${primary}"/>
+  <rect x="0" y="260" width="${W}" height="${H-260}" fill="url(#diag)"/>
+  <!-- diagonal split overlay -->
+  <path d="M0,420 L1080,260 L1080,1080 L0,1080 Z" fill="#bfe9ea" opacity=".45"/>
 
-  <!-- Card -->
-  <g transform="translate(80,120)">
-    <rect width="${W-160}" height="${H-240}" rx="30" fill="#ffffff" opacity=".06"/>
-    <rect width="${W-160}" height="${H-240}" rx="30" fill="#0b1720" opacity=".18"/>
+  <!-- Header -->
+  <g transform="translate(60,140)">
+    <text class="h0" fill="#ffffff">HOME CLEANING</text>
+    <text class="h0" y="110" fill="#ffffff" opacity=".98">SERVICES</text>
+    <text class="b1" y="170" fill="#e6f5ff" opacity=".9">APARTMENT • HOME • OFFICE</text>
+  </g>
 
-    <!-- Header -->
-    <g transform="translate(30,40)">
-      <text class="h0" fill="#d7e9ff">{{brand.businessName}} • {{brand.location}}</text>
-      <text class="h1" y="110" fill="#fff">{{headline}}</text>
-      <text class="b1" y="170" fill="#eaf6ff">{{subline}}</text>
-    </g>
+  <!-- Mascot placeholder (soft blob) -->
+  <ellipse cx="280" cy="620" rx="120" ry="160" fill="${accent}" opacity=".16" filter="url(#soft)"/>
 
-    <!-- Body -->
-    <g transform="translate(30,260)">
-      {{#offer}}<text class="h2" fill="{{brand.accent}}">{{offer}}</text>{{/offer}}
-      {{#bullets}}
-        <g transform="translate(0, {{y}})">
-          <circle cx="0" cy="10" r="10" fill="{{brand.accent}}"/>
-          <text class="b1" x="24" y="18" fill="#eaf6ff">{{text}}</text>
-        </g>
-      {{/bullets}}
-    </g>
+  <!-- Left list -->
+  <g transform="translate(120, 560)">
+    <text class="h1" fill="${primary}" y="-30">FREQUENCY</text>
+    ${left.map(r => `
+      <g transform="translate(0, ${r.y})">
+        <path d="${checkPath}" transform="scale(1.2)" fill="${accent}"/>
+        <text class="b2" x="40" y="18" fill="${textDark}">${r.text}</text>
+      </g>
+    `).join('')}
+  </g>
+
+  <!-- Right list -->
+  <g transform="translate(620, 560)">
+    <text class="h1" fill="${primary}" y="-30">SERVICES</text>
+    ${right.map(r => `
+      <g transform="translate(0, ${r.y})">
+        <circle cx="10" cy="10" r="10" fill="${primary}"/>
+        <text class="b2" x="40" y="18" fill="${textDark}">${r.text}</text>
+      </g>
+    `).join('')}
+  </g>
+
+  <!-- Coverage -->
+  <g transform="translate(120, 930)">
+    <text class="small" fill="${primary}" opacity=".9">
+      <tspan dx="0">📍</tspan>
+      <tspan dx="10">${esc(coverage)}</tspan>
+    </text>
   </g>
 
   <!-- CTA bar -->
-  <g transform="translate(80, ${H-170})">
-    <rect width="${W-160}" height="92" rx="18" fill="{{brand.accent}}"/>
-    <text class="chip" x="28" y="60" fill="#071018">{{cta}}</text>
-    <text class="chip" x="${W-80-28}" y="60" text-anchor="end" fill="#071018">{{brand.phone}}</text>
+  <g transform="translate(60, 970)">
+    <rect width="${W-120}" height="90" rx="18" fill="${accent}" />
+    <text class="chip" x="40" y="60" fill="#071018">CALL NOW! ${esc(phone)}</text>
   </g>
 
-  {{#disclaimers}}
-  <g transform="translate(80, ${H-26})">
-    <text class="meta" x="${W-200}" text-anchor="end" fill="#9ab6cc" font-size="18">{{disclaimers}}</text>
+  <!-- Top-left badge -->
+  <g transform="translate(820,40)">
+    <rect width="220" height="80" rx="14" fill="#ffffff22" stroke="#ffffff55"/>
+    <text class="b2" x="110" y="50" text-anchor="middle" fill="#fff">${esc(biz)}</text>
   </g>
-  {{/disclaimers}}
 </svg>`;
 }
 
-/** New: Flyer A (square flyer with top header, diagonal split, lists, CTA row) */
-function tplFlyerA({ W=1080, H=1080 }) {
+/* ------------------------ Template: poster_b ------------------------ */
+/**
+ * Visual targets:
+ * - Dark room/lifestyle vibe background (simulated with gradient + vignette)
+ * - Center white card with soft shadow
+ * - Big FALL FLOORING SALE! headline
+ * - Save up to $1000 + SPECIAL FINANCING line
+ * - Maple leaves in the corners
+ * - Fine-print legal on bottom
+ */
+function tplPosterB(opts) {
+  const W = 1080, H = 1080;
+  const {
+    inputs = {},
+    knobs = {}
+  } = opts;
+
+  const eventTitle   = esc(knobs.eventTitle || "FALL FLOORING SALE!");
+  const dateRange    = esc(knobs.dateRange || "AUGUST 15 – SEPTEMBER 30");
+  const saveAmount   = esc(knobs.saveAmount || "SAVE up to $1000");
+  const financing    = esc(knobs.financingLine || "PLUS SPECIAL FINANCING*");
+  const qualifiers   = esc(knobs.qualifiers || "On select flooring products and services");
+  const legal        = esc(knobs.legal || "*With approved credit. Ask for details.");
+  const brandName    = esc(inputs.businessName || "Your Brand");
+
+  // Simple maple leaf path (stylized)
+  const leaf = "M50 0 C65 20, 70 40, 60 60 C85 55, 100 70, 100 90 C80 85, 70 95, 60 110 C80 110, 95 120, 90 140 C70 130, 60 140, 50 150 C40 140, 30 130, 10 140 C5 120, 20 110, 40 110 C30 95, 20 85, 0 90 C0 70, 15 55, 40 60 C30 40, 35 20, 50 0 Z";
+
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
+    <radialGradient id="room" cx="50%" cy="35%">
+      <stop offset="0" stop-color="#27313a"/>
+      <stop offset="1" stop-color="#0f151c"/>
+    </radialGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".36"/>
+    </filter>
     <style>
-      .hdr{font:900 40px/1 Inter,system-ui}
-      .h1{font:900 72px/1.05 Inter,system-ui}
-      .sub{font:800 34px/1.25 Inter,system-ui}
-      .lbl{font:800 28px/1.2 Inter,system-ui}
-      .li{font:700 30px/1.2 Inter,system-ui}
-      .cta{font:900 34px/1 Inter,system-ui}
-      .small{font:600 22px/1.2 Inter,system-ui}
+      .title{font:900 84px/1.04 Inter,system-ui,Arial; letter-spacing:1px}
+      .sale{font:900 92px/1.02 Inter,system-ui,Arial}
+      .meta{font:800 28px/1.2 Inter,system-ui,Arial; letter-spacing:.6px}
+      .save{font:900 78px/1 Inter,system-ui,Arial}
+      .fin{font:900 38px/1 Inter,system-ui,Arial}
+      .fine{font:600 24px/1.2 Inter,system-ui,Arial}
+      .brand{font:900 34px/1 Inter,system-ui,Arial}
     </style>
-    <clipPath id="diag">
-      <path d="M0 0 H${W} V${H*0.58} L0 ${H*0.72} Z"/>
-    </clipPath>
   </defs>
 
-  <!-- header area -->
-  <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
-  <g clip-path="url(#diag)">
-    <rect width="${W}" height="${H}" fill="{{palette.header}}"/>
-  </g>
+  <!-- background room + vignette -->
+  <rect width="${W}" height="${H}" fill="url(#room)"/>
+  <rect x="40" y="40" width="${W-80}" height="${H-80}" rx="36" fill="none" stroke="#ffffff" opacity=".14"/>
 
-  <!-- header text -->
-  <g transform="translate(56,70)">
-    <text class="hdr" fill="{{palette.textOnDark}}">{{businessName}}</text>
-    <text class="small" y="48" fill="{{palette.textOnDark}}">{{location}}</text>
-  </g>
-
-  <!-- main copy -->
-  <g transform="translate(56,220)">
-    <text class="h1" fill="{{palette.textOnDark}}">{{headline}}</text>
-    <text class="sub" y="90" fill="{{palette.textOnDark}}" opacity=".9">{{subline}}</text>
-  </g>
-
-  <!-- left list -->
-  <g transform="translate(56,420)">
-    <text class="lbl" fill="{{palette.textOnLight}}">Options</text>
-    {{#listLeft}}
-      <g transform="translate(0, {{y}})">
-        <circle cx="6" cy="10" r="6" fill="{{palette.accent}}"/>
-        <text class="li" x="22" y="18" fill="{{palette.textOnLight}}">{{text}}</text>
-      </g>
-    {{/listLeft}}
-  </g>
-
-  <!-- right list -->
-  <g transform="translate(${W/2+20},420)">
-    <text class="lbl" fill="{{palette.textOnLight}}">Services</text>
-    {{#listRight}}
-      <g transform="translate(0, {{y}})">
-        <circle cx="6" cy="10" r="6" fill="{{palette.accent}}"/>
-        <text class="li" x="22" y="18" fill="{{palette.textOnLight}}">{{text}}</text>
-      </g>
-    {{/listRight}}
-  </g>
-
-  <!-- CTA bar -->
-  <g transform="translate(56, ${H-140})">
-    <rect width="${W-112}" height="84" rx="16" fill="{{palette.accent}}"/>
-    <text class="cta" x="28" y="54" fill="#071018">{{cta}}</text>
-    <text class="cta" x="${W-140}" y="54" text-anchor="end" fill="#071018">{{phone}}</text>
-  </g>
-
-  <!-- footer -->
-  {{#coverage}}
-  <g transform="translate(56, ${H-28})">
-    <text class="small" fill="#5b6a75">{{coverage}}</text>
-  </g>
-  {{/coverage}}
-</svg>`;
-}
-
-/** New: Poster B (lifestyle background + centered card + frame + event meta) */
-function tplPosterB({ W=1080, H=1080 }) {
-  return `
-<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <style>
-      .brand{font:900 34px/1 Inter,system-ui}
-      .h1{font:900 70px/1.08 Inter,system-ui}
-      .sub{font:800 32px/1.25 Inter,system-ui}
-      .meta{font:800 28px/1.2 Inter,system-ui}
-      .cta{font:900 34px/1 Inter,system-ui}
-      .fine{font:600 20px/1.2 Inter,system-ui}
-    </style>
-    <filter id="blur"><feGaussianBlur stdDeviation="30"/></filter>
-  </defs>
-
-  <!-- soft bg gradient -->
-  <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
-    <stop offset="0%" stop-color="{{bgStart}}"/>
-    <stop offset="100%" stop-color="{{bgEnd}}"/>
-  </linearGradient>
-  <rect width="${W}" height="${H}" fill="url(#g)"/>
-  <circle cx="${W*0.18}" cy="${H*0.22}" r="${W*0.22}" fill="{{accent}}" opacity=".14" filter="url(#blur)"/>
-  <circle cx="${W*0.84}" cy="${H*0.30}" r="${W*0.28}" fill="{{primary}}" opacity=".12" filter="url(#blur)"/>
-
-  <!-- frame -->
-  {{#frame.outerWhite}}
-  <rect x="26" y="26" width="${W-52}" height="${H-52}" rx="28" fill="none" stroke="#ffffff" opacity=".65" stroke-width="4"/>
-  {{/frame.outerWhite}}
-
-  <!-- centered card -->
-  <g transform="translate(${(W*0.15).toFixed(0)}, ${(H*0.22).toFixed(0)})">
-    <rect width="${(W*0.70).toFixed(0)}" height="${(H*0.56).toFixed(0)}" rx="28" fill="#ffffff" opacity=".92"/>
-    {{#card.shadow}}
-    <rect width="${(W*0.70).toFixed(0)}" height="${(H*0.56).toFixed(0)}" rx="28" fill="#000000" opacity=".08"/>
-    {{/card.shadow}}
-
-    <!-- text -->
-    <g transform="translate(40,48)">
-      <text class="brand" fill="#2a3a44">{{businessName}} • {{location}}</text>
-      <text class="h1" y="98" fill="#0c1520">{{headline}}</text>
-      <text class="sub" y="150" fill="#2f3d47" opacity=".9">{{subline}}</text>
-      <text class="meta" y="205" fill="{{primary}}">{{eventTitle}} • {{dateRange}}</text>
-      <text class="meta" y="245" fill="{{accent}}">SAVE {{saveAmount}} • {{financingLine}}</text>
-      <text class="fine" y="288" fill="#6d7a84">{{qualifiers}}</text>
+  <!-- leaves -->
+  <g opacity=".85">
+    <g transform="translate(120,110) scale(1.6) rotate(-18)">
+      <path d="${leaf}" fill="#c54e2f"/>
     </g>
-
-    <!-- CTA row -->
-    <g transform="translate(40, ${(H*0.56 - 40 - 66).toFixed(0)})">
-      <rect width="${(W*0.70 - 80).toFixed(0)}" height="66" rx="16" fill="{{accent}}"/>
-      <text class="cta" x="24" y="44" fill="#071018">{{cta}}</text>
-      <text class="cta" x="${(W*0.70 - 104).toFixed(0)}" y="44" text-anchor="end" fill="#071018">{{phone}}</text>
+    <g transform="translate(${W-220},160) scale(1.3) rotate(22)">
+      <path d="${leaf}" fill="#d58a2a"/>
     </g>
+  </g>
 
-    <!-- legal -->
-    {{#legal}}
-    <g transform="translate(40, ${(H*0.56 - 14).toFixed(0)})">
-      <text class="fine" x="${(W*0.70 - 80).toFixed(0)}" text-anchor="end" fill="#6b7785">{{legal}}</text>
+  <!-- central card -->
+  <g transform="translate(150,180)">
+    <rect width="${W-300}" height="${H-360}" rx="26" fill="#ffffff" filter="url(#shadow)"/>
+    <g transform="translate(60,60)">
+      <text class="brand" fill="#3a4450">${brandName}</text>
+      <text class="title" y="100" fill="#bf2b2b">${eventTitle}</text>
+      <text class="meta" y="150" fill="#3a4450">${dateRange}</text>
+
+      <text class="save" y="280" fill="#0f151c">${saveAmount}</text>
+      <text class="fin"  y="340" fill="#0f151c">${financing}</text>
+      <text class="meta" y="386" fill="#6d7782">${qualifiers}</text>
+
+      <text class="fine" y="${H-360-60-26-60}" fill="#8a96a3" text-anchor="end" x="${W-300-120}">
+        ${legal}
+      </text>
     </g>
-    {{/legal}}
   </g>
 </svg>`;
 }
 
-/* ------------------------ Main route ------------------------ */
+/* ------------------------ Route ------------------------ */
 router.post('/generate-static-ad', async (req, res) => {
   try {
     const body = req.body || {};
+    // Accept both the new shape (template/inputs/knobs) and the older ai.js proxy shape:
+    const template = body.template || (body?.templateKey) || (body?.templateName) || "poster_b";
 
-    /* ---------- Normalize to new model ---------- */
-    let isNewShape = false;
-    const validateNew = ajv.compile(schemaNew);
-    if (validateNew(body)) {
-      isNewShape = true;
-    } else {
-      // try legacy
-      const validateLegacy = ajv.compile(schemaLegacy);
-      if (!validateLegacy(body)) {
-        // We still proceed, but we’ll coerce into new shape with best-effort defaults
-      }
-    }
+    // If the request came from your FormPage proxy:
+    // { template, inputs, knobs }
+    const inputs = body.inputs || {};
+    const knobs  = body.knobs  || {};
 
-    // Defaults (work for any industry)
-    const FALLBACKS = {
-      industry: "Local Services",
-      businessName: "Your Business",
-      location: "Your City",
-      website: "",
-      offer: "",
-      mainBenefit: "",
-      idealCustomer: "",
-      phone: "(000) 000-0000",
-      headline: "Limited-Time Offer",
-      subline: "Trusted local pros • Fast scheduling",
-      cta: "Learn more"
+    // Also accept the previous "brand/lists/..." flat shape
+    const brand = body.brand || {
+      businessName: inputs.businessName || body?.brandName || "Your Brand",
+      phone: inputs.phone || body?.phone || "(210) 555-0147",
+      location: body?.location || inputs.location || "",
+      website: inputs.website || "",
+      primary: body?.palette?.header || "#0d3b66",
+      accent: body?.palette?.accent || "#ff8b4a",
+      bg: body?.palette?.bg || "#0a1922"
     };
 
-    let template = "flyer_a";
-    let inputs = {};
-    let knobs = {};
-
-    if (isNewShape) {
-      template = body.template || "flyer_a";
-      inputs = { ...FALLBACKS, ...(body.inputs || {}) };
-      knobs = body.knobs || {};
-    } else {
-      // Legacy → map to new
-      const brand = body.brand || {};
-      inputs = {
-        industry: body.industry || FALLBACKS.industry,
-        businessName: brand.businessName || FALLBACKS.businessName,
-        location: brand.location || FALLBACKS.location,
-        website: brand.website || FALLBACKS.website,
-        offer: body.offer || FALLBACKS.offer,
-        mainBenefit: body.mainBenefit || FALLBACKS.mainBenefit,
-        idealCustomer: body.idealCustomer || FALLBACKS.idealCustomer,
-        phone: brand.phone || FALLBACKS.phone,
-        headline: body.headline || FALLBACKS.headline,
-        subline: body.subline || FALLBACKS.subline,
-        cta: body.cta || FALLBACKS.cta
-      };
-      // palette fallback from brand
-      knobs = {
-        size: body.size || "1080x1080",
-        palette: {
-          header: (brand.primary || "#0d3b66"),
-          body: "#dff3f4",
-          accent: (brand.accent || "#ff8b4a"),
-          textOnDark: "#ffffff",
-          textOnLight: "#2b3a44"
-        },
-        frame: { outerWhite: true, softShadow: true },
-        card: { shadow: true },
-        eventTitle: body.eventTitle || `${(inputs.industry || "LOCAL").toUpperCase()} EVENT`,
-        dateRange: body.dateRange || "LIMITED TIME ONLY",
-        saveAmount: body.saveAmount || "up to $1000",
-        financingLine: body.financingLine || "PLUS SPECIAL FINANCING*",
-        qualifiers: body.qualifiers || `On select ${inputs.industry} products and services`,
-        legal: body.disclaimers || body.legal || ""
-      };
-      template = "flyer_a";
-    }
-
-    // Clamp a few fields for safety
-    inputs.businessName = clampStr(inputs.businessName, 48);
-    inputs.headline = clampStr(inputs.headline, 60);
-    inputs.subline = clampStr(inputs.subline, 160);
-    inputs.cta = clampStr(inputs.cta, 28);
-    inputs.phone = clampStr(inputs.phone, 28);
-
-    const size = (knobs.size || "1080x1080");
-    const { W, H } = parseSize(size);
-
-    // Build render context shared by templates
-    const palette = safePalette(knobs, {
-      header: "#0d3b66",
-      body: "#dff3f4",
-      accent: "#ff8b4a",
-      textOnDark: "#ffffff",
-      textOnLight: "#2b3a44"
-    });
-
-    const frame = knobs.frame || { outerWhite: true, softShadow: true };
-    const card  = knobs.card  || { widthPct: 70, heightPct: 55, shadow: true };
-
-    const contextBase = {
-      W, H,
-      palette,
-      primary: palette.header,
-      accent: palette.accent,
-      bgStart: "#0a1922",
-      bgEnd: "#0e2230",
-      businessName: inputs.businessName || "Your Business",
-      location: inputs.location || "Your City",
-      headline: inputs.headline || "Limited-Time Offer",
-      subline: inputs.subline || "",
-      cta: inputs.cta || "Learn more",
-      phone: inputs.phone || "(000) 000-0000",
-      // Poster meta:
-      eventTitle: knobs.eventTitle || `${(inputs.industry || "Local").toUpperCase()} EVENT`,
-      dateRange: knobs.dateRange || "LIMITED TIME ONLY",
-      saveAmount: knobs.saveAmount || "up to $1000",
-      financingLine: knobs.financingLine || "PLUS SPECIAL FINANCING*",
-      qualifiers: knobs.qualifiers || `On select ${(inputs.industry || "Local Services")} products and services`,
-      legal: knobs.legal || "",
-      frame,
-      card
+    const lists = body.lists || {
+      left: (body.frequencyList || ["One Time","Weekly","Bi-Weekly","Monthly"]),
+      right: (body.servicesList || ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"])
     };
 
-    // Flyer lists
-    const listLeft = layoutBullets(
-      (knobs.lists && knobs.lists.left) ||
-      inputs.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]
-    );
-    const listRight = layoutBullets(
-      (knobs.lists && knobs.lists.right) ||
-      inputs.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"]
-    );
-    const coverage = knobs.coverage || inputs.coverage || "Coverage area ~25 miles around your city";
+    const payload = {
+      template,
+      inputs: {
+        industry: inputs.industry || body.industry || "",
+        businessName: inputs.businessName || brand.businessName || "Your Brand",
+        website: inputs.website || "",
+        location: inputs.location || brand.location || "",
+        phone: inputs.phone || brand.phone || "(210) 555-0147",
+        headline: inputs.headline || body.headline || "",
+        subline: inputs.subline || body.subline || "",
+        cta: inputs.cta || body.cta || "CALL NOW!",
+        offer: inputs.offer || body.offer || ""
+      },
+      knobs: {
+        ...knobs,
+        // defaults for poster_b
+        eventTitle: knobs.eventTitle || body.eventTitle || "FALL FLOORING SALE!",
+        dateRange: knobs.dateRange || body.dateRange || "LIMITED TIME ONLY",
+        saveAmount: knobs.saveAmount || body.saveAmount || "SAVE up to $1000",
+        financingLine: knobs.financingLine || body.financingLine || "PLUS SPECIAL FINANCING*",
+        qualifiers: knobs.qualifiers || body.qualifiers || "On select flooring products and services",
+        legal: knobs.legal || body.legal || "*With approved credit. Ask for details."
+      },
+      brand,
+      lists,
+      coverage: body.coverage || "Coverage area 25 Miles around your city"
+    };
 
-    // Legacy bullets (for universal template fallback)
-    const legacyBullets = layoutBullets(
-      Array.isArray(body?.bullets) && body.bullets.length
-        ? body.bullets
-        : ["Quality Service", "Fast Response", "Great Prices", "Locally Owned"]
-    );
-
-    /* ---------- Render SVG ---------- */
-    let svgTpl;
-    let vars;
-
-    if (template === "flyer_a") {
-      svgTpl = tplFlyerA({ W, H });
-      vars = { ...contextBase, listLeft, listRight, coverage };
-    } else if (template === "poster_b") {
-      svgTpl = tplPosterB({ W, H });
-      vars = { ...contextBase };
-    } else {
-      // Fallback to legacy universal card
-      svgTpl = tplUniversal1080({ W, H });
-      vars = {
-        brand: {
-          businessName: contextBase.businessName,
-          location: contextBase.location,
-          phone: contextBase.phone,
-          primary: palette.header,
-          accent: palette.accent,
-          bg: "#0a1922"
-        },
-        headline: contextBase.headline,
-        subline: contextBase.subline,
-        cta: contextBase.cta,
-        offer: inputs.offer || "",
-        bullets: legacyBullets,
-        disclaimers: contextBase.legal
-      };
+    // Validate minimal envelope (template/inputs/knobs)
+    const ok = ajv.validate(schema, { template: payload.template, inputs: payload.inputs, knobs: payload.knobs });
+    if (!ok) {
+      throw new Error('validation failed: ' + JSON.stringify(ajv.errors));
     }
 
-    const svg = mustache.render(svgTpl, vars);
+    // Render SVG by template
+    let svg;
+    if (payload.template === "flyer_a") {
+      svg = tplFlyerA({
+        brand: payload.brand,
+        lists: payload.lists,
+        coverage: payload.coverage,
+        inputs: payload.inputs
+      });
+    } else {
+      svg = tplPosterB({
+        inputs: payload.inputs,
+        knobs: payload.knobs
+      });
+    }
 
-    // Persist
+    // Write files
     const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const svgPath = path.join(GEN_DIR, `${base}.svg`);
     const pngPath = path.join(GEN_DIR, `${base}.png`);
     fs.writeFileSync(svgPath, svg, 'utf8');
 
-    await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(pngPath);
+    await sharp(Buffer.from(svg))
+      .png({ quality: 92 })
+      .toFile(pngPath);
 
     res.json({
       ok: true,
       type: 'image',
-      size,
-      meta: { template, inputs, knobs },
+      template: payload.template,
       svgUrl: makeUrl(req, svgPath),
       pngUrl: makeUrl(req, pngPath),
       filename: `${base}.png`
