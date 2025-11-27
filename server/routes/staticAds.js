@@ -2,23 +2,22 @@
 'use strict';
 
 /**
- * Static Ad Generator — exact layout templates
- *   - flyer_a  : Home Cleaning flyer (header bar, diagonal split, lists, phone CTA)
- *   - poster_b : Fall Flooring event (center white card, save $, financing, leaves)
- *
- * Writes SVG → PNG into GENERATED_DIR and returns pngUrl + svgUrl.
+ * Static Ad Generator (industry-aware → SVG → PNG)
+ * - Two templates: flyer_a (services) and poster_b (retail/promo)
+ * - Auto industry profiles for any vertical (fallbacks if unknown)
+ * - Writes to GENERATED_DIR and serves via /generated and /api/media
  */
 
 const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
+const mustache = require('mustache');
 const Ajv = require('ajv');
 const sharp = require('sharp');
 
 const ajv = new Ajv({ allErrors: true });
 
-/* ------------------------ Storage ------------------------ */
 const GEN_DIR = process.env.GENERATED_DIR ||
   path.join(process.cwd(), 'server', 'public', 'generated');
 fs.mkdirSync(GEN_DIR, { recursive: true });
@@ -26,339 +25,534 @@ fs.mkdirSync(GEN_DIR, { recursive: true });
 function makeUrl(req, absPath) {
   const filename = path.basename(absPath);
   const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
-  return `${base}/generated/${filename}`;
+  // We expose under /generated and /api/media; return /api/media for frontend helpers
+  return `${base}/api/media/${filename}`;
 }
 
-/* ------------------------ Schema ------------------------ */
-const schema = {
+/* ------------------------ Industry Profiles ------------------------ */
+
+function classifyIndustry(s = "") {
+  const t = String(s).toLowerCase();
+  const has = (rx) => rx.test(t);
+  if (has(/clean|maid|janitor|housekeep/)) return 'home_cleaning';
+  if (has(/floor|carpet|tile|vinyl|hardwood/)) return 'flooring';
+  if (has(/restaurant|food|pizza|burger|cafe|bar|grill|taqueria|eat|diner/)) return 'restaurant';
+  if (has(/gym|fitness|trainer|yoga|crossfit|pilates/)) return 'fitness';
+  if (has(/salon|spa|barber|nail|lash|beauty/)) return 'salon_spa';
+  if (has(/real\s?estate|realtor|broker|homes?|listings?/)) return 'real_estate';
+  if (has(/auto|mechanic|tire|oil|detailing|car wash/)) return 'auto';
+  if (has(/landscap|lawn|tree|garden|yard/)) return 'landscaping';
+  if (has(/plumb|hvac|heating|cooling|air|electric/)) return 'hvac_plumbing';
+  if (has(/fashion|apparel|clothing|boutique|shoe|jewel/)) return 'fashion';
+  if (has(/electronics?|gadgets?|tech/)) return 'electronics';
+  if (has(/pet|groom|vet|animal/)) return 'pets';
+  if (has(/coffee|bakery|dessert|boba|tea/)) return 'coffee';
+  return 'generic';
+}
+
+function profileForIndustry(industry = "") {
+  const kind = classifyIndustry(industry);
+  // palettes lean dark header / light body by default
+  const PALETTES = {
+    base:   { header: '#0d3b66', body: '#dff3f4', accent: '#ff8b4a', textOnDark: '#ffffff', textOnLight: '#2b3a44' },
+    teal:   { header: '#0b5563', body: '#e7f6f2', accent: '#16a085', textOnDark: '#ffffff', textOnLight: '#23343d' },
+    navy:   { header: '#113a5d', body: '#e8f0f6', accent: '#ff7b41', textOnDark: '#ffffff', textOnLight: '#213547' },
+    wine:   { header: '#3a2740', body: '#f2ecf7', accent: '#e76f51', textOnDark: '#ffffff', textOnLight: '#2d283a' },
+    forest: { header: '#1d3b2a', body: '#e9f5ee', accent: '#f4a261', textOnDark: '#ffffff', textOnLight: '#273b33' },
+    slate:  { header: '#213043', body: '#eaf2fb', accent: '#f59e0b', textOnDark: '#ffffff', textOnLight: '#182435' }
+  };
+
+  // Default buckets
+  const serviceLists = {
+    left:  ["One Time","Weekly","Bi-Weekly","Monthly"],
+    right: ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"]
+  };
+  const hvacLists = {
+    left:  ["Install","Repair","Tune-Up","Maintenance"],
+    right: ["AC Units","Furnaces","Ductwork","Thermostats","Heat Pumps","Filters"]
+  };
+  const plumbingLists = {
+    left:  ["Leaks","Clogs","Installs","Repairs"],
+    right: ["Water Heaters","Toilets","Sinks","Showers","Garbage Disposal","Piping"]
+  };
+  const landscapingLists = {
+    left:  ["Mowing","Edging","Trimming","Cleanup"],
+    right: ["Mulch","Hedges","Tree Care","Fertilize","Weed Control","Irrigation"]
+  };
+  const autoLists = {
+    left:  ["Oil Change","Brakes","Tires","Alignment"],
+    right: ["Diagnostics","AC Service","Batteries","Inspections"]
+  };
+  const salonLists = {
+    left:  ["Haircuts","Color","Blowouts","Treatments"],
+    right: ["Nails","Lashes","Waxing","Makeup"]
+  };
+  const fitnessLists = {
+    left:  ["Personal Training","Group Classes","Open Gym","Nutrition"],
+    right: ["HIIT","Strength","Mobility","Yoga","Pilates","Cardio"]
+  };
+
+  // Per-kind defaults
+  const MAP = {
+    home_cleaning: {
+      template: 'flyer_a',
+      headline: 'HOME CLEANING SERVICES',
+      subline: 'Apartment • Home • Office',
+      cta: 'CALL NOW!',
+      palette: PALETTES.navy,
+      lists: serviceLists,
+      coverage: 'Coverage area 25 Miles around your city',
+      bgHint: 'home cleaning'
+    },
+    flooring: {
+      template: 'poster_b',
+      eventTitle: 'FALL FLOORING EVENT',
+      dateRange: 'LIMITED TIME ONLY',
+      saveAmount: 'up to $1000',
+      financingLine: 'PLUS SPECIAL FINANCING*',
+      qualifiers: 'On select flooring products and services',
+      legal: '*With approved credit. Ask for details.',
+      palette: PALETTES.forest,
+      bgHint: 'flooring'
+    },
+    restaurant: {
+      template: 'poster_b',
+      eventTitle: 'TASTE THE NEW SPECIALS',
+      dateRange: 'THIS WEEK ONLY',
+      saveAmount: '2 for $20',
+      financingLine: 'ORDER ONLINE • PICKUP',
+      qualifiers: 'Fresh & local ingredients',
+      legal: '',
+      palette: PALETTES.wine,
+      bgHint: 'restaurant'
+    },
+    salon_spa: {
+      template: 'poster_b',
+      eventTitle: 'SELF-CARE EVENT',
+      dateRange: 'LIMITED TIME • 15% OFF',
+      saveAmount: 'glow packages',
+      financingLine: 'BOOK TODAY',
+      qualifiers: 'Hair • Nails • Lashes • Skin',
+      legal: '',
+      palette: PALETTES.wine,
+      bgHint: 'salon spa'
+    },
+    fitness: {
+      template: 'poster_b',
+      eventTitle: 'JOIN & SAVE',
+      dateRange: 'MEMBERSHIP DEALS THIS MONTH',
+      saveAmount: 'NO ENROLLMENT',
+      financingLine: 'FIRST WEEK FREE',
+      qualifiers: 'Classes • Coaching • 24/7 Access',
+      legal: '',
+      palette: PALETTES.slate,
+      bgHint: 'gym fitness'
+    },
+    real_estate: {
+      template: 'poster_b',
+      eventTitle: 'OPEN HOUSE',
+      dateRange: 'SAT–SUN • 12–4PM',
+      saveAmount: 'NEW LISTING',
+      financingLine: 'ASK ABOUT FINANCING',
+      qualifiers: '3 Bed • 2 Bath • 2,100 sq ft',
+      legal: '',
+      palette: PALETTES.teal,
+      bgHint: 'real estate'
+    },
+    auto: {
+      template: 'flyer_a',
+      headline: 'AUTO REPAIR & SERVICE',
+      subline: 'Reliable • Fast • Affordable',
+      cta: 'CALL NOW!',
+      palette: PALETTES.slate,
+      lists: autoLists,
+      coverage: 'Same-day appointments available',
+      bgHint: 'auto repair'
+    },
+    landscaping: {
+      template: 'flyer_a',
+      headline: 'LANDSCAPING & LAWN CARE',
+      subline: 'Clean-ups • Maintenance • Installs',
+      cta: 'GET A QUOTE',
+      palette: PALETTES.forest,
+      lists: landscapingLists,
+      coverage: 'Serving your area',
+      bgHint: 'landscaping'
+    },
+    hvac_plumbing: {
+      template: 'flyer_a',
+      headline: 'HVAC & PLUMBING',
+      subline: 'Install • Repair • Maintenance',
+      cta: 'SCHEDULE NOW',
+      palette: PALETTES.teal,
+      lists: hvacLists, // plumbingLists swapped in below if we detect “plumb”
+      coverage: 'Emergency service available',
+      bgHint: 'hvac plumbing'
+    },
+    fashion: {
+      template: 'poster_b',
+      eventTitle: 'NEW ARRIVALS',
+      dateRange: 'SEASONAL DROP',
+      saveAmount: 'FREE SHIPPING',
+      financingLine: 'EASY RETURNS',
+      qualifiers: 'Mens • Womens • Accessories',
+      legal: '',
+      palette: PALETTES.wine,
+      bgHint: 'fashion'
+    },
+    electronics: {
+      template: 'poster_b',
+      eventTitle: 'TECH DEALS',
+      dateRange: 'LIMITED TIME SAVINGS',
+      saveAmount: 'UP TO 40% OFF',
+      financingLine: '0% APR PROMO*',
+      qualifiers: 'Laptops • Tablets • Headphones',
+      legal: '*OAC. Limited time.',
+      palette: PALETTES.slate,
+      bgHint: 'electronics'
+    },
+    pets: {
+      template: 'poster_b',
+      eventTitle: 'PET CARE & TREATS',
+      dateRange: 'THIS WEEK ONLY',
+      saveAmount: 'BUY 2 GET 1',
+      financingLine: 'GROOMING • VET • SUPPLIES',
+      qualifiers: 'Everything for happy pets',
+      legal: '',
+      palette: PALETTES.forest,
+      bgHint: 'pets'
+    },
+    coffee: {
+      template: 'poster_b',
+      eventTitle: 'FRESH ROASTS DAILY',
+      dateRange: 'TRY NEW SEASONALS',
+      saveAmount: '2 FOR $5',
+      financingLine: 'ORDER AHEAD',
+      qualifiers: 'Espresso • Cold Brew • Tea',
+      legal: '',
+      palette: PALETTES.wine,
+      bgHint: 'coffee'
+    },
+    generic: {
+      template: 'flyer_a',
+      headline: 'LOCAL SERVICES',
+      subline: 'Reliable • Friendly • On Time',
+      cta: 'CONTACT US',
+      palette: PALETTES.base,
+      lists: {
+        left:  ["Free Quote","Same-Day","Licensed","Insured"],
+        right: ["Great Reviews","Family Owned","Fair Prices","Guaranteed"]
+      },
+      coverage: 'Serving your area',
+      bgHint: 'generic'
+    }
+  };
+
+  let prof = MAP[kind];
+  // Small tweak: if text includes "plumb" prefer plumbing lists
+  if (kind === 'hvac_plumbing' && /plumb/i.test(industry)) {
+    prof = { ...prof, lists: plumbingLists };
+  }
+  return { kind, ...prof };
+}
+
+/* ------------------------ Templates ------------------------ */
+/* Minimal mustache-driven versions (SVG -> PNG via sharp) */
+
+// Flyer A (services) — header bar + diagonal split + two columns + CTA bar
+function tplFlyerA({ W=1080, H=1080 }) {
+  return `
+<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="soft"><feGaussianBlur stdDeviation="28"/></filter>
+    <style>
+      .h0{font:900 110px/1 Inter,system-ui}
+      .h1{font:900 64px/1 Inter,system-ui}
+      .h2{font:800 44px/1 Inter,system-ui}
+      .b1{font:700 34px/1.28 Inter,system-ui}
+      .chip{font:900 44px/1 Inter,system-ui;letter-spacing:.5px}
+      .meta{font:600 26px/1.2 Inter,system-ui}
+    </style>
+  </defs>
+
+  <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
+  <rect width="${W}" height="220" fill="{{palette.header}}"/>
+
+  <!-- Header text -->
+  <g transform="translate(60, 85)">
+    <text class="h0" fill="#ffffff">{{headline}}</text>
+  </g>
+
+  <!-- subtle diagonal and soft blob -->
+  <path d="M0,220 L${W},160 L${W},${H} L0,${H} Z" fill="#ffffff" opacity=".16"/>
+  <circle cx="${W/2}" cy="${H/2+20}" r="120" fill="{{palette.accent}}" opacity=".15" filter="url(#soft)"/>
+
+  <!-- Columns -->
+  <g transform="translate(80, 440)">
+    <text class="h1" fill="{{palette.header}}">FREQUENCY</text>
+    {{#lists.left}}
+      <g transform="translate(0, {{y}})">
+        <circle cx="14" cy="10" r="10" fill="{{accentLeft}}"/>
+        <text class="b1" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+      </g>
+    {{/lists.left}}
+  </g>
+
+  <g transform="translate(${W-520}, 440)">
+    <text class="h1" fill="{{palette.header}}">SERVICES</text>
+    {{#lists.right}}
+      <g transform="translate(0, {{y}})">
+        <circle cx="14" cy="10" r="10" fill="{{accentRight}}"/>
+        <text class="b1" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+      </g>
+    {{/lists.right}}
+  </g>
+
+  <!-- Subline under header -->
+  <g transform="translate(80, 350)">
+    <text class="b1" fill="#113a5d" opacity=".65">{{subline}}</text>
+  </g>
+
+  <!-- Coverage -->
+  {{#coverage}}
+  <g transform="translate(80, ${H-210})">
+    <text class="meta" fill="#2b3a44" opacity=".7">📍 {{coverage}}</text>
+  </g>
+  {{/coverage}}
+
+  <!-- CTA bar -->
+  <g transform="translate(80, ${H-160})">
+    <rect width="${W-160}" height="96" rx="22" fill="{{palette.accent}}"/>
+    <text class="chip" x="${(W-160)/2}" y="62" text-anchor="middle" fill="#0b1115">{{cta}} {{phone}}</text>
+  </g>
+</svg>`;
+}
+
+// Poster B (retail/promo) — lifestyle bg + centered card
+function tplPosterB({ W=1080, H=1080 }) {
+  return `
+<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="soft"><feGaussianBlur stdDeviation="30"/></filter>
+    <style>
+      .h0{font:900 84px/1 Inter,system-ui}
+      .h1{font:900 66px/1.02 Inter,system-ui}
+      .b1{font:800 34px/1.2 Inter,system-ui}
+      .meta{font:700 24px/1.2 Inter,system-ui}
+    </style>
+  </defs>
+
+  <rect width="${W}" height="${H}" fill="#0e151c"/>
+  <rect x="40" y="40" width="${W-80}" height="${H-80}" rx="34" fill="#fff" opacity=".05" />
+  <rect x="80" y="120" width="${W*0.7}" height="${H*0.55}" rx="28" fill="#ffffff" />
+
+  <!-- Headline card -->
+  <g transform="translate(120, 180)">
+    <text class="h0" fill="#0f1a22">{{eventTitle}}</text>
+    <text class="b1" y="90" fill="#334554">{{dateRange}}</text>
+    <text class="h1" y="180" fill="{{palette.header}}">{{saveAmount}}</text>
+    <text class="b1" y="250" fill="#334554">{{financingLine}}</text>
+    <text class="meta" y="310" fill="#66798a">{{qualifiers}}</text>
+  </g>
+
+  <!-- Footer legal -->
+  {{#legal}}
+  <g transform="translate(80, ${H-40})">
+    <text class="meta" fill="#9eb2c3">{{legal}}</text>
+  </g>
+  {{/legal}}
+</svg>`;
+}
+
+/* ------------------------ Helpers ------------------------ */
+
+function layoutList(items) {
+  const startY = 56, step = 54;
+  return (items || []).slice(0, 6).map((t, i) => ({ y: startY + i * step, text: t }));
+}
+
+function withListLayout(lists = {}) {
+  return {
+    left: layoutList(lists.left || []),
+    right: layoutList(lists.right || [])
+  };
+}
+
+/* ------------------------ Validation Schemas ------------------------ */
+
+const flyerSchema = {
   type: "object",
-  required: ["template","inputs","knobs"],
+  required: ["inputs","knobs"],
   properties: {
-    template: { enum: ["flyer_a","poster_b"] },
+    template: { enum: ["flyer_a","poster_b","auto"] },
     inputs: {
       type: "object",
-      required: ["businessName","headline","subline","cta"],
+      required: ["industry","businessName","phone","location","headline","subline","cta"],
       properties: {
-        industry: { type: "string", maxLength: 48 },
-        businessName: { type: "string", maxLength: 64 },
-        website: { type: "string", maxLength: 120 },
-        location: { type: "string", maxLength: 64 },
+        industry: { type: "string", maxLength: 60 },
+        businessName: { type: "string", maxLength: 60 },
         phone: { type: "string", maxLength: 32 },
-        headline: { type: "string", maxLength: 64 },
-        subline: { type: "string", maxLength: 140 },
-        cta: { type: "string", maxLength: 28 },
-        offer: { type: "string", maxLength: 48 }
+        website: { type: "string", maxLength: 120 },
+        location: { type: "string", maxLength: 60 },
+        headline: { type: "string", maxLength: 60 },
+        subline: { type: "string", maxLength: 120 },
+        cta: { type: "string", maxLength: 32 }
       }
     },
     knobs: { type: "object" }
   }
 };
 
-/* ------------------------ Utility ------------------------ */
-function esc(t="") {
-  return String(t)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-function listToRows(arr = [], max = 6) {
-  return (Array.isArray(arr) ? arr : []).slice(0, max).map((text, i) => ({
-    y: 40 + i * 42,
-    text: esc(text)
-  }));
-}
-
-/* ------------------------ Template: flyer_a ------------------------ */
-/**
- * Visual targets:
- * - Dark teal header strip
- * - Body has diagonal split (light aqua)
- * - Left column: frequencies list with check marks (orange)
- * - Right column: services list with bullet dots
- * - Bottom CTA bar (orange) with CALL NOW + phone
- */
-function tplFlyerA(opts) {
-  const W = 1080, H = 1080;
-  const {
-    brand = {},
-    lists = {},
-    coverage = "Coverage area 25 Miles around your city",
-    inputs = {}
-  } = opts;
-
-  const primary = brand.primary || "#0d3b66";   // dark teal
-  const accent  = brand.accent  || "#ff8b4a";   // orange
-  const bodyBg  = "#dff3f4";                     // light aqua
-  const textDark= "#2b3a44";
-
-  const left = listToRows(lists.left || ["One Time","Weekly","Bi-Weekly","Monthly"]);
-  const right= listToRows(lists.right|| ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"]);
-
-  const phone = brand.phone || inputs.phone || "(210) 555-0147";
-  const biz   = brand.businessName || inputs.businessName || "Your Business";
-
-  // Check icon path
-  const checkPath = `M8 14.5l-4.5-4.6L1 12l7 7L23 4.9 20.6 3z`;
-
-  return `
-<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="diag" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="${bodyBg}"/>
-      <stop offset="1" stop-color="#e9fbfb"/>
-    </linearGradient>
-    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="18"/>
-    </filter>
-    <style>
-      .h0{font:900 96px/1 Inter,system-ui,Arial}
-      .h1{font:900 64px/1 Inter,system-ui,Arial}
-      .b1{font:700 38px/1.2 Inter,system-ui,Arial}
-      .b2{font:700 34px/1.2 Inter,system-ui,Arial}
-      .small{font:600 28px/1.2 Inter,system-ui,Arial}
-      .chip{font:900 44px/1 Inter,system-ui,Arial; letter-spacing: .5px}
-    </style>
-  </defs>
-
-  <!-- background -->
-  <rect width="${W}" height="${H}" fill="#ffffff"/>
-  <rect x="0" y="0" width="${W}" height="260" fill="${primary}"/>
-  <rect x="0" y="260" width="${W}" height="${H-260}" fill="url(#diag)"/>
-  <!-- diagonal split overlay -->
-  <path d="M0,420 L1080,260 L1080,1080 L0,1080 Z" fill="#bfe9ea" opacity=".45"/>
-
-  <!-- Header -->
-  <g transform="translate(60,140)">
-    <text class="h0" fill="#ffffff">HOME CLEANING</text>
-    <text class="h0" y="110" fill="#ffffff" opacity=".98">SERVICES</text>
-    <text class="b1" y="170" fill="#e6f5ff" opacity=".9">APARTMENT • HOME • OFFICE</text>
-  </g>
-
-  <!-- Mascot placeholder (soft blob) -->
-  <ellipse cx="280" cy="620" rx="120" ry="160" fill="${accent}" opacity=".16" filter="url(#soft)"/>
-
-  <!-- Left list -->
-  <g transform="translate(120, 560)">
-    <text class="h1" fill="${primary}" y="-30">FREQUENCY</text>
-    ${left.map(r => `
-      <g transform="translate(0, ${r.y})">
-        <path d="${checkPath}" transform="scale(1.2)" fill="${accent}"/>
-        <text class="b2" x="40" y="18" fill="${textDark}">${r.text}</text>
-      </g>
-    `).join('')}
-  </g>
-
-  <!-- Right list -->
-  <g transform="translate(620, 560)">
-    <text class="h1" fill="${primary}" y="-30">SERVICES</text>
-    ${right.map(r => `
-      <g transform="translate(0, ${r.y})">
-        <circle cx="10" cy="10" r="10" fill="${primary}"/>
-        <text class="b2" x="40" y="18" fill="${textDark}">${r.text}</text>
-      </g>
-    `).join('')}
-  </g>
-
-  <!-- Coverage -->
-  <g transform="translate(120, 930)">
-    <text class="small" fill="${primary}" opacity=".9">
-      <tspan dx="0">📍</tspan>
-      <tspan dx="10">${esc(coverage)}</tspan>
-    </text>
-  </g>
-
-  <!-- CTA bar -->
-  <g transform="translate(60, 970)">
-    <rect width="${W-120}" height="90" rx="18" fill="${accent}" />
-    <text class="chip" x="40" y="60" fill="#071018">CALL NOW! ${esc(phone)}</text>
-  </g>
-
-  <!-- Top-left badge -->
-  <g transform="translate(820,40)">
-    <rect width="220" height="80" rx="14" fill="#ffffff22" stroke="#ffffff55"/>
-    <text class="b2" x="110" y="50" text-anchor="middle" fill="#fff">${esc(biz)}</text>
-  </g>
-</svg>`;
-}
-
-/* ------------------------ Template: poster_b ------------------------ */
-/**
- * Visual targets:
- * - Dark room/lifestyle vibe background (simulated with gradient + vignette)
- * - Center white card with soft shadow
- * - Big FALL FLOORING SALE! headline
- * - Save up to $1000 + SPECIAL FINANCING line
- * - Maple leaves in the corners
- * - Fine-print legal on bottom
- */
-function tplPosterB(opts) {
-  const W = 1080, H = 1080;
-  const {
-    inputs = {},
-    knobs = {}
-  } = opts;
-
-  const eventTitle   = esc(knobs.eventTitle || "FALL FLOORING SALE!");
-  const dateRange    = esc(knobs.dateRange || "AUGUST 15 – SEPTEMBER 30");
-  const saveAmount   = esc(knobs.saveAmount || "SAVE up to $1000");
-  const financing    = esc(knobs.financingLine || "PLUS SPECIAL FINANCING*");
-  const qualifiers   = esc(knobs.qualifiers || "On select flooring products and services");
-  const legal        = esc(knobs.legal || "*With approved credit. Ask for details.");
-  const brandName    = esc(inputs.businessName || "Your Brand");
-
-  // Simple maple leaf path (stylized)
-  const leaf = "M50 0 C65 20, 70 40, 60 60 C85 55, 100 70, 100 90 C80 85, 70 95, 60 110 C80 110, 95 120, 90 140 C70 130, 60 140, 50 150 C40 140, 30 130, 10 140 C5 120, 20 110, 40 110 C30 95, 20 85, 0 90 C0 70, 15 55, 40 60 C30 40, 35 20, 50 0 Z";
-
-  return `
-<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <radialGradient id="room" cx="50%" cy="35%">
-      <stop offset="0" stop-color="#27313a"/>
-      <stop offset="1" stop-color="#0f151c"/>
-    </radialGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity=".36"/>
-    </filter>
-    <style>
-      .title{font:900 84px/1.04 Inter,system-ui,Arial; letter-spacing:1px}
-      .sale{font:900 92px/1.02 Inter,system-ui,Arial}
-      .meta{font:800 28px/1.2 Inter,system-ui,Arial; letter-spacing:.6px}
-      .save{font:900 78px/1 Inter,system-ui,Arial}
-      .fin{font:900 38px/1 Inter,system-ui,Arial}
-      .fine{font:600 24px/1.2 Inter,system-ui,Arial}
-      .brand{font:900 34px/1 Inter,system-ui,Arial}
-    </style>
-  </defs>
-
-  <!-- background room + vignette -->
-  <rect width="${W}" height="${H}" fill="url(#room)"/>
-  <rect x="40" y="40" width="${W-80}" height="${H-80}" rx="36" fill="none" stroke="#ffffff" opacity=".14"/>
-
-  <!-- leaves -->
-  <g opacity=".85">
-    <g transform="translate(120,110) scale(1.6) rotate(-18)">
-      <path d="${leaf}" fill="#c54e2f"/>
-    </g>
-    <g transform="translate(${W-220},160) scale(1.3) rotate(22)">
-      <path d="${leaf}" fill="#d58a2a"/>
-    </g>
-  </g>
-
-  <!-- central card -->
-  <g transform="translate(150,180)">
-    <rect width="${W-300}" height="${H-360}" rx="26" fill="#ffffff" filter="url(#shadow)"/>
-    <g transform="translate(60,60)">
-      <text class="brand" fill="#3a4450">${brandName}</text>
-      <text class="title" y="100" fill="#bf2b2b">${eventTitle}</text>
-      <text class="meta" y="150" fill="#3a4450">${dateRange}</text>
-
-      <text class="save" y="280" fill="#0f151c">${saveAmount}</text>
-      <text class="fin"  y="340" fill="#0f151c">${financing}</text>
-      <text class="meta" y="386" fill="#6d7782">${qualifiers}</text>
-
-      <text class="fine" y="${H-360-60-26-60}" fill="#8a96a3" text-anchor="end" x="${W-300-120}">
-        ${legal}
-      </text>
-    </g>
-  </g>
-</svg>`;
-}
+const posterSchema = {
+  type: "object",
+  required: ["inputs","knobs"],
+  properties: {
+    template: { enum: ["flyer_a","poster_b","auto"] },
+    inputs: {
+      type: "object",
+      required: ["industry","businessName","location"],
+      properties: {
+        industry: { type: "string", maxLength: 60 },
+        businessName: { type: "string", maxLength: 60 },
+        location: { type: "string", maxLength: 60 }
+      }
+    },
+    knobs: { type: "object" }
+  }
+};
 
 /* ------------------------ Route ------------------------ */
+
 router.post('/generate-static-ad', async (req, res) => {
   try {
     const body = req.body || {};
-    // Accept both the new shape (template/inputs/knobs) and the older ai.js proxy shape:
-    const template = body.template || (body?.templateKey) || (body?.templateName) || "poster_b";
-
-    // If the request came from your FormPage proxy:
-    // { template, inputs, knobs }
+    const templateReq = (body.template || 'auto').toString();
     const inputs = body.inputs || {};
-    const knobs  = body.knobs  || {};
+    const knobs = body.knobs || {};
 
-    // Also accept the previous "brand/lists/..." flat shape
-    const brand = body.brand || {
-      businessName: inputs.businessName || body?.brandName || "Your Brand",
-      phone: inputs.phone || body?.phone || "(210) 555-0147",
-      location: body?.location || inputs.location || "",
-      website: inputs.website || "",
-      primary: body?.palette?.header || "#0d3b66",
-      accent: body?.palette?.accent || "#ff8b4a",
-      bg: body?.palette?.bg || "#0a1922"
-    };
+    const industry = inputs.industry || 'Local Services';
+    const prof = profileForIndustry(industry);
 
-    const lists = body.lists || {
-      left: (body.frequencyList || ["One Time","Weekly","Bi-Weekly","Monthly"]),
-      right: (body.servicesList || ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"])
-    };
+    // Decide template if 'auto'
+    const template =
+      templateReq !== 'auto'
+        ? templateReq
+        : (['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(prof.kind) ? 'poster_b' : 'flyer_a');
 
-    const payload = {
-      template,
-      inputs: {
-        industry: inputs.industry || body.industry || "",
-        businessName: inputs.businessName || brand.businessName || "Your Brand",
-        website: inputs.website || "",
-        location: inputs.location || brand.location || "",
-        phone: inputs.phone || brand.phone || "(210) 555-0147",
-        headline: inputs.headline || body.headline || "",
-        subline: inputs.subline || body.subline || "",
-        cta: inputs.cta || body.cta || "CALL NOW!",
-        offer: inputs.offer || body.offer || ""
-      },
-      knobs: {
-        ...knobs,
-        // defaults for poster_b
-        eventTitle: knobs.eventTitle || body.eventTitle || "FALL FLOORING SALE!",
-        dateRange: knobs.dateRange || body.dateRange || "LIMITED TIME ONLY",
-        saveAmount: knobs.saveAmount || body.saveAmount || "SAVE up to $1000",
-        financingLine: knobs.financingLine || body.financingLine || "PLUS SPECIAL FINANCING*",
-        qualifiers: knobs.qualifiers || body.qualifiers || "On select flooring products and services",
-        legal: knobs.legal || body.legal || "*With approved credit. Ask for details."
-      },
-      brand,
-      lists,
-      coverage: body.coverage || "Coverage area 25 Miles around your city"
-    };
+    // Merge inputs with profile defaults (user input wins)
+    if (template === 'flyer_a') {
+      const mergedInputs = {
+        industry,
+        businessName: inputs.businessName || 'Your Brand',
+        phone: inputs.phone || '(000) 000-0000',
+        location: inputs.location || 'Your City',
+        website: inputs.website || '',
+        headline: inputs.headline || prof.headline,
+        subline: inputs.subline || prof.subline,
+        cta: inputs.cta || prof.cta
+      };
 
-    // Validate minimal envelope (template/inputs/knobs)
-    const ok = ajv.validate(schema, { template: payload.template, inputs: payload.inputs, knobs: payload.knobs });
-    if (!ok) {
-      throw new Error('validation failed: ' + JSON.stringify(ajv.errors));
+      const mergedKnobs = {
+        size: (knobs.size || '1080x1080'),
+        palette: knobs.palette || prof.palette,
+        lists: (knobs.lists || prof.lists),
+        coverage: (knobs.coverage || prof.coverage || ''),
+        showIcons: (knobs.showIcons !== undefined ? knobs.showIcons : true),
+        headerSplitDiagonal: (knobs.headerSplitDiagonal !== undefined ? knobs.headerSplitDiagonal : true),
+        roundedOuter: (knobs.roundedOuter !== undefined ? knobs.roundedOuter : true),
+        backgroundHint: (knobs.backgroundHint || prof.bgHint || 'generic')
+      };
+
+      const validate = ajv.compile(flyerSchema);
+      if (!validate({ template, inputs: mergedInputs, knobs: mergedKnobs })) {
+        throw new Error('validation failed: ' + JSON.stringify(validate.errors));
+      }
+
+      // Build render vars
+      const listsLaidOut = withListLayout(mergedKnobs.lists || {});
+      const vars = {
+        headline: mergedInputs.headline,
+        subline: mergedInputs.subline,
+        phone: mergedInputs.phone,
+        cta: mergedInputs.cta,
+        coverage: mergedKnobs.coverage,
+        palette: mergedKnobs.palette,
+        accentLeft: mergedKnobs.palette.accent,
+        accentRight: '#1f3b58',
+        lists: listsLaidOut
+      };
+
+      const svgTpl = tplFlyerA({ W:1080, H:1080 });
+      const svg = mustache.render(svgTpl, vars);
+
+      const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const svgPath = path.join(GEN_DIR, `${base}.svg`);
+      const pngPath = path.join(GEN_DIR, `${base}.png`);
+      fs.writeFileSync(svgPath, svg, 'utf8');
+      await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(pngPath);
+
+      return res.json({
+        ok: true,
+        type: 'image',
+        template,
+        absoluteUrl: makeUrl(req, pngPath),
+        url: makeUrl(req, pngPath),
+        filename: `${base}.png`
+      });
     }
 
-    // Render SVG by template
-    let svg;
-    if (payload.template === "flyer_a") {
-      svg = tplFlyerA({
-        brand: payload.brand,
-        lists: payload.lists,
-        coverage: payload.coverage,
-        inputs: payload.inputs
-      });
-    } else {
-      svg = tplPosterB({
-        inputs: payload.inputs,
-        knobs: payload.knobs
-      });
+    // poster_b
+    const mergedInputsB = {
+      industry,
+      businessName: inputs.businessName || 'Your Brand',
+      location: inputs.location || 'Your City'
+    };
+    const mergedKnobsB = {
+      size: (knobs.size || '1080x1080'),
+      frame: knobs.frame || { outerWhite: true, softShadow: true },
+      card: knobs.card || { widthPct: 70, heightPct: 55, shadow: true },
+      eventTitle: knobs.eventTitle || prof.eventTitle || 'SEASONAL EVENT',
+      dateRange: knobs.dateRange || prof.dateRange || 'LIMITED TIME ONLY',
+      saveAmount: knobs.saveAmount || prof.saveAmount || 'BIG SAVINGS',
+      financingLine: knobs.financingLine || prof.financingLine || '',
+      qualifiers: knobs.qualifiers || prof.qualifiers || '',
+      legal: knobs.legal || prof.legal || '',
+      seasonalLeaves: knobs.seasonalLeaves !== undefined ? knobs.seasonalLeaves : true,
+      backgroundHint: knobs.backgroundHint || prof.bgHint || 'retail',
+      palette: knobs.palette || prof.palette
+    };
+
+    const validateB = ajv.compile(posterSchema);
+    if (!validateB({ template, inputs: mergedInputsB, knobs: mergedKnobsB })) {
+      throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
-    // Write files
-    const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const svgPath = path.join(GEN_DIR, `${base}.svg`);
-    const pngPath = path.join(GEN_DIR, `${base}.png`);
-    fs.writeFileSync(svgPath, svg, 'utf8');
+    const varsB = {
+      palette: mergedKnobsB.palette,
+      eventTitle: mergedKnobsB.eventTitle,
+      dateRange: mergedKnobsB.dateRange,
+      saveAmount: mergedKnobsB.saveAmount,
+      financingLine: mergedKnobsB.financingLine,
+      qualifiers: mergedKnobsB.qualifiers,
+      legal: mergedKnobsB.legal
+    };
 
-    await sharp(Buffer.from(svg))
-      .png({ quality: 92 })
-      .toFile(pngPath);
+    const svgTplB = tplPosterB({ W:1080, H:1080 });
+    const svgB = mustache.render(svgTplB, varsB);
 
-    res.json({
+    const baseB = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const svgPathB = path.join(GEN_DIR, `${baseB}.svg`);
+    const pngPathB = path.join(GEN_DIR, `${baseB}.png`);
+    fs.writeFileSync(svgPathB, svgB, 'utf8');
+    await sharp(Buffer.from(svgB)).png({ quality: 92 }).toFile(pngPathB);
+
+    return res.json({
       ok: true,
       type: 'image',
-      template: payload.template,
-      svgUrl: makeUrl(req, svgPath),
-      pngUrl: makeUrl(req, pngPath),
-      filename: `${base}.png`
+      template,
+      absoluteUrl: makeUrl(req, pngPathB),
+      url: makeUrl(req, pngPathB),
+      filename: `${baseB}.png`
     });
   } catch (err) {
     console.error('[generate-static-ad]', err);
