@@ -327,36 +327,80 @@ function tplFlyerA({ W=1080, H=1080 }) {
 }
 
 // Poster B (retail/promo) — lifestyle bg + centered card
-function tplPosterB({ W=1080, H=1080 }) {
+// Poster B (retail/promo) — lifestyle bg + centered card, nicer hierarchy
+function tplPosterB({ W = 1080, H = 1080 }) {
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="soft"><feGaussianBlur stdDeviation="30"/></filter>
+    <!-- soft drop shadow for the card -->
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
+    <!-- soft vignette -->
+    <radialGradient id="bgVignette" cx="50%" cy="40%" r="70%">
+      <stop offset="0%"  stop-color="#121a22"/>
+      <stop offset="70%" stop-color="#0e151c"/>
+      <stop offset="100%" stop-color="#0b1116"/>
+    </radialGradient>
+    <!-- subtle noise mask -->
+    <filter id="noise">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" stitchTiles="stitch"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.035"/>
+      </feComponentTransfer>
+    </filter>
     <style>
-      .h0{font:900 84px/1 Inter,system-ui}
-      .h1{font:900 66px/1.02 Inter,system-ui}
-      .b1{font:800 34px/1.2 Inter,system-ui}
-      .meta{font:700 24px/1.2 Inter,system-ui}
+      .t-h0{font:900 78px/1.05 Inter,system-ui; letter-spacing:-1px}
+      .t-h1{font:900 60px/1.05 Inter,system-ui}
+      .t-h2{font:800 38px/1.2  Inter,system-ui}
+      .t-b1{font:700 28px/1.25 Inter,system-ui}
+      .t-meta{font:700 22px/1.2  Inter,system-ui}
     </style>
   </defs>
 
-  <rect width="${W}" height="${H}" fill="#0e151c"/>
-  <rect x="40" y="40" width="${W-80}" height="${H-80}" rx="34" fill="#fff" opacity=".05" />
-  <rect x="80" y="120" width="${W*0.7}" height="${H*0.55}" rx="28" fill="#ffffff" />
+  <!-- Background -->
+  <rect width="${W}" height="${H}" fill="url(#bgVignette)"/>
+  <rect width="${W}" height="${H}" filter="url(#noise)"/>
 
-  <!-- Headline card -->
-  <g transform="translate(120, 180)">
-    <text class="h0" fill="#0f1a22">{{eventTitle}}</text>
-    <text class="b1" y="90" fill="#334554">{{dateRange}}</text>
-    <text class="h1" y="180" fill="{{palette.header}}">{{saveAmount}}</text>
-    <text class="b1" y="250" fill="#334554">{{financingLine}}</text>
-    <text class="meta" y="310" fill="#66798a">{{qualifiers}}</text>
+  <!-- Framed stage -->
+  <rect x="42" y="42" width="${W-84}" height="${H-84}" rx="40" fill="#ffffff" opacity="0.04"/>
+
+  <!-- Decorative soft blobs in brand colors -->
+  <circle cx="${W*0.18}" cy="${H*0.22}" r="120" fill="{{palette.accent}}" opacity="0.12"/>
+  <circle cx="${W*0.86}" cy="${H*0.78}" r="140" fill="{{palette.header}}" opacity="0.10"/>
+
+  <!-- Center card -->
+  <g filter="url(#cardShadow)">
+    <rect x="${(W-760)/2}" y="${(H-520)/2}" width="760" height="520" rx="28" fill="#ffffff"/>
   </g>
 
-  <!-- Footer legal -->
+  <!-- Card content -->
+  <g transform="translate(${(W-760)/2 + 48}, ${(H-520)/2 + 56})">
+    <!-- Brand pill (top right inside card) -->
+    <g transform="translate(540, -12)">
+      <rect width="170" height="42" rx="21" fill="#0f1a22" opacity="0.08"/>
+      <text class="t-b1" x="85" y="30" text-anchor="middle" fill="#334554">{{brandName}}</text>
+    </g>
+
+    <!-- Headline / date / save -->
+    <text class="t-h0" x="0" y="0" dy="0.9em" fill="#0f1a22">{{eventTitle}}</text>
+    <text class="t-h2" x="0" y="82" dy="1.2em" fill="#334554">{{dateRange}}</text>
+
+    <!-- Big savings line in accent -->
+    <text class="t-h1" x="0" y="162" dy="1.25em" fill="{{palette.accent}}">{{saveAmount}}</text>
+
+    <!-- Financing/subline -->
+    <text class="t-h2" x="0" y="260" dy="1.1em" fill="#334554">{{financingLine}}</text>
+
+    <!-- Small qualifiers -->
+    <text class="t-b1" x="0" y="318" dy="1.2em" fill="#66798a">{{qualifiers}}</text>
+  </g>
+
+  <!-- Footer legal (outside card, bottom-left) -->
   {{#legal}}
-  <g transform="translate(80, ${H-40})">
-    <text class="meta" fill="#9eb2c3">{{legal}}</text>
+  <g transform="translate(80, ${H-44})">
+    <text class="t-meta" fill="#94a8b8">{{legal}}</text>
   </g>
   {{/legal}}
 </svg>`;
@@ -534,15 +578,18 @@ router.post('/generate-static-ad', async (req, res) => {
       throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
-    const varsB = {
-      palette: mergedKnobsB.palette,
-      eventTitle: mergedKnobsB.eventTitle,
-      dateRange: mergedKnobsB.dateRange,
-      saveAmount: mergedKnobsB.saveAmount,
-      financingLine: mergedKnobsB.financingLine,
-      qualifiers: mergedKnobsB.qualifiers,
-      legal: mergedKnobsB.legal
-    };
+  const varsB = {
+  palette: mergedKnobsB.palette,
+  brandName: mergedInputsB.businessName, // NEW: brand pill text
+  location: mergedInputsB.location,      // NEW: kept for future use
+  eventTitle: mergedKnobsB.eventTitle,
+  dateRange: mergedKnobsB.dateRange,
+  saveAmount: mergedKnobsB.saveAmount,
+  financingLine: mergedKnobsB.financingLine,
+  qualifiers: mergedKnobsB.qualifiers,
+  legal: mergedKnobsB.legal
+};
+
 
     const svgTplB = tplPosterB({ W:1080, H:1080 });
     const svgB = mustache.render(svgTplB, varsB);
