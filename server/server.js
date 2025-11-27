@@ -56,7 +56,7 @@ app.use((req, res, next) => {
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// Prevent long image jobs from being killed by idle timeouts
+// Prevent long image/video jobs from being killed by idle timeouts
 app.use((req, res, next) => {
   try {
     if (typeof req.setTimeout === 'function') req.setTimeout(180000); // 3 min
@@ -75,6 +75,7 @@ if (morgan) app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 
 let generatedPath;
 if (process.env.RENDER) {
   generatedPath = '/tmp/generated';
+  try { fs.mkdirSync(generatedPath, { recursive: true }); } catch {}
   console.log('Serving /generated from:', generatedPath);
 } else {
   generatedPath = path.join(__dirname, 'public/generated');
@@ -84,7 +85,7 @@ if (process.env.RENDER) {
 process.env.GENERATED_DIR = generatedPath;
 
 // Serve generated files (images/videos) with friendly headers
-app.use('/generated', express.static(generatedPath, {
+const staticOpts = {
   maxAge: '1y',
   immutable: true,
   setHeaders(res, filePath) {
@@ -92,8 +93,14 @@ app.use('/generated', express.static(generatedPath, {
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
     if (filePath.endsWith('.mp4')) res.setHeader('Content-Type', 'video/mp4');
   }
-}));
+};
 
+// Primary path
+app.use('/generated', express.static(generatedPath, staticOpts));
+// Alias used by the frontend’s toAbsoluteMedia() normalizer
+app.use('/api/media', express.static(generatedPath, staticOpts));
+// Optional extra alias if needed anywhere else
+app.use('/media', express.static(generatedPath, staticOpts));
 
 /** Local fallback image for testing */
 app.get('/__fallback/1200.jpg', async (_req, res) => {
@@ -120,6 +127,12 @@ app.use((req, res, next) => {
 });
 
 /* --------------------------------- ROUTES --------------------------------- */
+// Minimal warmup route used by frontend warmBackend() -> `${API_BASE}/test`
+app.get('/api/test', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ ok: true, ts: Date.now() });
+});
+
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
@@ -131,6 +144,9 @@ app.use('/api', campaignRoutes);
 
 const gptChatRoutes = require('./routes/gpt');
 app.use('/api', gptChatRoutes);
+
+const staticAdsRoutes = require('./routes/staticAds');
+app.use('/api', staticAdsRoutes);
 
 // Simple ping that echoes headers (debug CORS quickly)
 app.all('/api/ping', (req, res) => {

@@ -153,6 +153,95 @@ const FAST = {
   TIMEOUT_MS: 65000,   // kill ffmpeg if it lingers (65s)
 };
 
+/* ---------- Template Compatibility Shim (non-overwriting) ---------- */
+(() => {
+  const G = (typeof globalThis !== 'undefined') ? globalThis : global;
+
+  // escSVG2 alias (your code calls escSVG2; many files already have escSVG)
+  if (typeof G.escSVG2 === 'undefined') {
+    G.escSVG2 = (s) => {
+      if (typeof G.escSVG === 'function') return G.escSVG(s);
+      // minimal escape if escSVG isn't present
+      return String(s || '')
+        .replace(/&/g,'&amp;')
+        .replace(/</g,'&lt;')
+        .replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;');
+    };
+  }
+
+  // CTA normalizer used by _ctaNormFromAnswers
+  if (typeof G.cleanCTA === 'undefined') {
+    G.cleanCTA = (ctaRaw = '', context = '') => {
+      let c = String(ctaRaw || '').trim().toUpperCase();
+      if (!c) {
+        const ctx = String(context || '').toUpperCase();
+        if (/\b(CALL|PHONE|QUOTE)\b/.test(ctx)) c = 'CALL NOW';
+        else if (/\b(BOOK|RESERVE|APPOINT)\b/.test(ctx)) c = 'BOOK NOW';
+        else if (/\b(FOOD|RESTAURANT|ORDER)\b/.test(ctx)) c = 'ORDER NOW';
+        else c = 'LEARN MORE';
+      }
+      c = c.replace(/\s+/g, ' ').trim();
+      if (c.length > 18) c = c.slice(0, 18);
+      return c;
+    };
+  }
+
+  // Solid dark CTA pill that your SVG calls via btnSolidDark(...)
+  if (typeof G.btnSolidDark === 'undefined') {
+    G.btnSolidDark = (cx = 0, cy = 0, label = 'LEARN MORE', fs = 28) => {
+      const padX = Math.round(fs * 0.8);
+      const padY = Math.round(fs * 0.55);
+      const text = (typeof G.escSVG2 === 'function' ? G.escSVG2 : (x=>String(x||'')))(String(label || '').toUpperCase());
+      const textW = Math.ceil(text.length * (fs * 0.6)); // rough, consistent
+      const w = textW + padX * 2;
+      const h = fs + padY * 2;
+      const rx = Math.round(h / 2);
+      const x = Math.round(cx - w / 2);
+      const y = Math.round(cy - h / 2);
+      const tx = x + Math.round(w / 2);
+      const ty = y + Math.round(h / 2) + Math.round(fs * 0.35);
+      return `
+        <g>
+          <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${rx}" fill="#0d3b66"/>
+          <text x="${tx}" y="${ty}" text-anchor="middle"
+                font-family="Inter,Segoe UI,Arial" font-size="${fs}"
+                font-weight="800" fill="#ffffff" letter-spacing="0.04em">${text}</text>
+        </g>
+      `;
+    };
+  }
+
+  // ensureGeneratedDir used by PNG writers (safe: local requires inside)
+  if (typeof G.ensureGeneratedDir === 'undefined') {
+    G.ensureGeneratedDir = () => {
+      const fs = require('fs');
+      const path = require('path');
+      const outDir = path.join(process.cwd(), 'generated');
+      if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+      return outDir;
+    };
+  }
+
+  // absolutePublicUrl used to return absolute URLs
+  if (typeof G.absolutePublicUrl === 'undefined') {
+    G.absolutePublicUrl = (rel = '') => {
+      const base =
+        process.env.BASE_URL ||
+        process.env.VERCEL_URL ||
+        process.env.RENDER_EXTERNAL_URL ||
+        '';
+      if (!base) return rel; // fallback to relative if unknown
+      const norm = base.startsWith('http') ? base : `https://${base}`;
+      return `${norm.replace(/\/+$/,'')}${rel.startsWith('/') ? '' : '/'}${rel}`;
+    };
+  }
+
+
+})();
+
+
+
 /**
  * Build the concat part of the filter (no transitions) and normalize each clip.
  * Input streams mapping:
@@ -1318,6 +1407,48 @@ function pickFontFile() {
 }
 
 
+/* ---------- IMAGE TEMPLATE RESOLVER (no more Pexels for images) ---------- */
+/**
+ * You can point these to local files, S3, or CDN. Examples:
+ *  - Local file served by /api/media: absolutePublicUrl('/api/media/yourfile.jpg')
+ *  - External CDN/URL: 'https://cdn.example.com/templates/fashion-01.jpg'
+ */
+const TEMPLATE_MAP = {
+  generic: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Generic+Template',
+  fashion: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Fashion',
+  fitness: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Fitness',
+  cosmetics: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Beauty',
+  hair: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Hair+Care',
+  food: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Food',
+  pets: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Pets',
+  electronics: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Tech',
+  home: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Home',
+  coffee: 'https://dummyimage.com/1200x628/1b1f24/ffffff&text=Coffee',
+};
+
+/**
+ * Priority:
+ *  1) body.imageUrl
+ *  2) answers.imageUrl
+ *  3) body.templateKey (matches TEMPLATE_MAP key)
+ *  4) answers.industry/category → TEMPLATE_MAP
+ *  5) TEMPLATE_MAP.generic
+ */
+function resolveTemplateUrl({ body = {}, answers = {} } = {}) {
+  const direct = (body.imageUrl || answers.imageUrl || '').trim();
+  if (direct) return direct;
+
+  const keyRaw = (body.templateKey || answers.templateKey || '').trim().toLowerCase();
+  if (keyRaw && TEMPLATE_MAP[keyRaw]) return TEMPLATE_MAP[keyRaw];
+
+  const cat = resolveCategory(answers || {}) || 'generic';
+  if (TEMPLATE_MAP[cat]) return TEMPLATE_MAP[cat];
+
+  return TEMPLATE_MAP.generic;
+}
+
+
+
 /* --------------------- Range-enabled media streamer --------------------- */
 router.get('/media/:file', async (req, res) => {
   housekeeping();
@@ -1785,6 +1916,52 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
+/* === ROUTE: /api/generate-static-ad (templates: flyer_a, poster_b) ======================= */
+router.post('/generate-static-ad', async (req, res) => {
+  try {
+    const { template = '', answers = {}, imageUrl = '' } = req.body || {};
+    if (!template || !/^(flyer_a|poster_b)$/i.test(template)) {
+      return res.status(400).json({ error: 'invalid_template', message: 'Use template: flyer_a or poster_b' });
+    }
+
+    // Make the asset
+    let out;
+    if (/^flyer_a$/i.test(template)) {
+      out = await renderTemplateA_FlyerPNG({ answers });
+    } else {
+      out = await renderTemplateB_PosterPNG({ answers, imageUrl });
+    }
+
+    // Persist so your carousel picks it up first
+    const rec = await saveAsset({
+      req,
+      kind: 'image',
+      url: out.publicUrl,
+      absoluteUrl: out.absoluteUrl,
+      meta: {
+        template: template.toLowerCase(),
+        businessName: answers?.businessName || '',
+        industry: answers?.industry || '',
+        phone: answers?.phone || answers?.phoneNumber || '',
+      },
+    });
+
+    return res.json({
+      ok: true,
+      url: out.publicUrl,
+      absoluteUrl: out.absoluteUrl,
+      filename: out.filename,
+      type: 'image/png',
+      asset: { id: rec.id, createdAt: rec.createdAt },
+      ready: true,
+    });
+  } catch (e) {
+    console.error('[generate-static-ad] error:', e?.message || e);
+    return res.status(500).json({ error: 'internal_error', message: e?.message || 'failed' });
+  }
+});
+
+
 /* ---------------------- IMAGE OVERLAYS (fit-to-box + coherent copy) ---------------------- */
 function escSVG(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function estWidthSerif(text, fs, letterSpacing = 0) { const t = String(text || ''), n = t.length || 1; return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing; }
@@ -1798,32 +1975,429 @@ function cleanHeadline(h) {
 }
 const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
 
-/* ---------- CTA normalization + variants ---------- */
-const CTA_VARIANTS = [
-  'LEARN MORE','SEE MORE','VIEW MORE','EXPLORE','DISCOVER',
-  'SHOP NOW','BUY NOW','GET STARTED','TRY IT','SEE DETAILS',
-  'SEE COLLECTION','BROWSE NOW','CHECK IT OUT','VISIT US','TAKE A LOOK','CHECK US OUT'
-];
-const ALLOWED_CTAS = new Set(CTA_VARIANTS);
-function normalizeCTA(s='') {
+/* === STATIC IMAGE TEMPLATES (A: Flyer, B: Poster) =========================================
+   Locked visual templates for static PNG ads.
+   - Template A ("flyer_a"): teal header bar, diagonal split, left checklist, right bullets,
+     coverage strip w/ location pin, bottom CTA + phone; rounded corners.
+   - Template B ("poster_b"): full-bleed lifestyle photo, centered white card w/ stacked headline,
+     save % / limited time line / small legal, white frame + shadow; optional seasonal accent.
+   Wiring:
+     call via POST /api/generate-static-ad { template: "flyer_a"|"poster_b", answers, imageUrl? }
+     returns a PNG saved into /api/media, persisted to DB via saveAsset().
+*/
+
+function _normPhone(p='') {
+  const s = String(p).replace(/[^\d]/g,'');
+  if (s.length === 11 && s.startsWith('1')) return `(${s.slice(1,4)}) ${s.slice(4,7)}-${s.slice(7)}`;
+  if (s.length === 10) return `(${s.slice(0,3)}) ${s.slice(3,6)}-${s.slice(6)}`;
+  if (!p) return '';
+  return String(p).replace(/\s+/g,' ').trim();
+}
+function _titleCaps(s='') {
+  s = String(s).trim();
+  if (!s) return '';
+  return s.replace(/\w\S*/g, w => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
+function _upperSafe(s='', max=42) {
+  return String(s).replace(/\s+/g,' ').trim().toUpperCase().slice(0, max);
+}
+function _fallback(val, fallback) {
+  const s = String(val || '').trim();
+  return s ? s : fallback;
+}
+function _listFromAnswers(answers={}, keys=[], fallbackList=[]) {
+  const got = [];
+  for (const k of keys) {
+    const v = answers[k];
+    if (Array.isArray(v)) got.push(...v);
+    else if (typeof v === 'string' && v.trim()) got.push(v.trim());
+  }
+  const uniq = Array.from(new Set(got.map(x => String(x).trim()).filter(Boolean)));
+  return uniq.length ? uniq : fallbackList;
+}
+function _ctaNormFromAnswers(answers={}) {
+  return cleanCTA(answers?.cta || '', answers?.businessName || answers?.industry || '');
+}
+function _industryLabel(answers={}) {
+  const raw = String(answers.industry || answers.category || '').trim();
+  if (!raw) return 'SALE';
+  // “FALL FLOORING SALE!” style
+  return `${_upperSafe(raw, 18)} SALE!`;
+}
+function _offerLine(answers={}) {
+  // e.g., "Up to 30% Off" or fallback
+  const offer = String(answers.offer || answers.mainBenefit || '').trim();
+  if (offer) return _titleCaps(offer).replace(/\s+/g,' ').slice(0, 36);
+  return 'Limited Time Offer';
+}
+function _legalLine(answers={}) {
+  return String(answers.disclaimers || answers.legal || '*OAC. Limited time.').slice(0, 80);
+}
+function _cityLine(answers={}) {
+  const city = answers.location || answers.city || answers.region || '';
+  return _titleCaps(city).slice(0, 22);
+}
+function _brandText(answers={}) {
+  return _titleCaps(answers.businessName || 'Your Brand').slice(0, 28);
+}
+function _savePercentFromText(s='') {
+  const m = String(s).match(/\b(\d{1,2})\s*%/);
+  return m ? `${m[1]}%` : '';
+}
+function _seasonAccentLeaves() {
+  // very light corner accent (optional)
+  return `
+  <g opacity="0.20">
+    <path d="M60,70 C90,20 130,18 170,50 C140,52 120,72 110,96 C94,92 78,82 60,70 Z" fill="#F29F05"/>
+    <path d="M170,50 C220,60 240,90 220,130 C210,100 190,80 160,78 C165,68 168,58 170,50 Z" fill="#E85D04"/>
+  </g>`;
+}
+
+/* ---------------- Template A: Flyer (teal header, diagonal split) ---------------- */
+async function renderTemplateA_FlyerPNG({ answers = {} }) {
+  const W = 1200, H = 628, R = 28;
+
+  // Palette & type
+  const colors = {
+    teal: '#0d3b66',       // header
+    aqua: '#e6f3f8',       // light body panel
+    accent: '#ffc857',     // accent
+    textDark: '#0f141a',
+    textLight: '#ffffff',
+    pinRed: '#e63946',
+    grid: '#d8e2eb'
+  };
+  const brand = _brandText(answers);
+  const headline = _fallback(answers.title, brand);
+  const offerLine = _offerLine(answers);
+  const city = _cityLine(answers);
+  const phone = _normPhone(answers.phone || answers.phoneNumber || '');
+  const cta = _ctaNormFromAnswers(answers) || 'CALL NOW';
+
+  const leftList = _listFromAnswers(
+    answers,
+    ['frequencies','scheduling','scheduleOptions'],
+    ['One-Time', 'Weekly', 'Bi-Weekly', 'Monthly']
+  );
+  const rightList = _listFromAnswers(
+    answers,
+    ['services','serviceList','offerings'],
+    ['Deep Clean', 'Standard Clean', 'Move-In/Out', 'Windows', 'Carpet']
+  );
+
+  // Build SVG
+  const svg = `
+  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <clipPath id="card"><rect x="0" y="0" width="${W}" height="${H}" rx="${R}"/></clipPath>
+      <linearGradient id="diag" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="100%" stop-color="${colors.aqua}"/>
+      </linearGradient>
+    </defs>
+
+    <rect x="0" y="0" width="${W}" height="${H}" rx="${R}" fill="#ffffff" />
+    <g clip-path="url(#card)">
+      <!-- Header bar -->
+      <rect x="0" y="0" width="${W}" height="132" fill="${colors.teal}"/>
+      <text x="36" y="86" font-family="Inter,Segoe UI,Arial" font-size="46" font-weight="800" fill="${colors.textLight}">
+        ${escSVG2(headline)}
+      </text>
+      <text x="${W-36}" y="86" font-family="Inter,Segoe UI,Arial" font-size="32" font-weight="700" fill="${colors.textLight}" text-anchor="end">
+        ${escSVG2(offerLine)}
+      </text>
+
+      <!-- Diagonal split panel -->
+      <path d="M0,132 L${W},132 L${W},${H} L0,${H-90} Z" fill="url(#diag)"/>
+
+      <!-- Left column: checklist -->
+      <g transform="translate(48, 190)">
+        <text x="0" y="0" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="${colors.textDark}">
+          ${escSVG2('Plans')}
+        </text>
+        ${leftList.map((t, i) => `
+          <g transform="translate(0, ${34 + i*42})">
+            <circle cx="12" cy="12" r="12" fill="${colors.teal}"/>
+            <path d="M7,12 l5,5 l10,-12" fill="none" stroke="#fff" stroke-width="3"/>
+            <text x="36" y="16" font-family="Inter,Segoe UI,Arial" font-size="24" font-weight="600" fill="${colors.textDark}">
+              ${escSVG2(t)}
+            </text>
+          </g>
+        `).join('')}
+      </g>
+
+      <!-- Right column: services -->
+      <g transform="translate(${W-520}, 190)">
+        <text x="0" y="0" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="${colors.textDark}">
+          ${escSVG2('Services Offered')}
+        </text>
+        ${rightList.map((t, i) => `
+          <g transform="translate(0, ${34 + i*40})">
+            <rect x="0" y="2" width="10" height="10" fill="${colors.accent}" rx="2"/>
+            <text x="22" y="16" font-family="Inter,Segoe UI,Arial" font-size="24" font-weight="600" fill="${colors.textDark}">
+              ${escSVG2(t)}
+            </text>
+          </g>
+        `).join('')}
+      </g>
+
+      <!-- Coverage strip -->
+      <g transform="translate(0, ${H-160})">
+        <rect x="0" y="0" width="${W}" height="70" fill="#ffffff" />
+        <rect x="0" y="70" width="${W}" height="2" fill="${colors.grid}"/>
+        <g transform="translate(36, 18)">
+          <circle cx="12" cy="12" r="12" fill="${colors.pinRed}"/>
+          <path d="M12,6 C8,6 6,9 6,12 c0,5 6,10 6,10 s6,-5 6,-10 c0,-3 -2,-6 -6,-6 z" fill="#fff" opacity="0.9"/>
+          <text x="36" y="18" font-family="Inter,Segoe UI,Arial" font-size="24" font-weight="700" fill="${colors.textDark}">
+            ${escSVG2(city || 'Local Coverage')}
+          </text>
+        </g>
+      </g>
+
+      <!-- Bottom CTA row -->
+      <g transform="translate(0, ${H-86})">
+        <rect x="0" y="0" width="${W}" height="86" fill="${colors.teal}" />
+        <rect x="0" y="-2" width="${W}" height="2" fill="rgba(0,0,0,0.12)"/>
+        <!-- CTA pill -->
+        <g transform="translate(${W-260}, 43)">
+          ${btnSolidDark(0, 0, cta || 'CALL NOW', 26)}
+        </g>
+        <text x="36" y="54" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#ffffff">
+          ${escSVG2(phone || 'Call Today')}
+        </text>
+      </g>
+    </g>
+  </svg>`;
+
+  // Rasterize SVG straight to PNG
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.png`;
+  await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
+    .png()
+    .toFile(path.join(outDir, file));
+  return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
+}
+
+/* ---------------- Template B: Poster (photo bg + centered white card) --------------- */
+async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
+  const W = 1200, H = 628, R = 28;
+
+  // background photo (industry lifestyle)
+  const bgUrl = imageUrl || resolveTemplateUrl({ answers });
+
+  const imgRes = await ax.get(bgUrl, { responseType: 'arraybuffer', timeout: 12000 });
+  const bgBuf = await sharp(imgRes.data)
+    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 })
+    .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
+    .toBuffer();
+
+  const savePct = _savePercentFromText(answers.offer || '');
+  const bigHeadline = _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
+  const secondary1 = _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
+  const secondary2 = savePct ? `Save up to ${savePct}` : _offerLine(answers);
+  const legal = _legalLine(answers);
+  const brand = _brandText(answers);
+
+  const cta = _ctaNormFromAnswers(answers) || 'LEARN MORE';
+
+  // white framed card over photo
+  const CARD_W = 760, CARD_H = 380;
+  const CX = Math.round(W/2), CY = Math.round(H/2) + 8;
+  const cardX = Math.round(CX - CARD_W/2), cardY = Math.round(CY - CARD_H/2);
+
+  const svg = `
+  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <image id="bg" href="data:image/jpeg;base64,${bgBuf.toString('base64')}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/></filter>
+    </defs>
+
+    <!-- full-bleed bg + subtle vignette -->
+    <use href="#bg"/>
+    <radialGradient id="vig" cx="50%" cy="50%" r="70%">
+      <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.55"/>
+    </radialGradient>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
+
+    <!-- white frame -->
+    <rect x="12" y="12" width="${W-24}" height="${H-24}" rx="${R}" fill="none" stroke="#ffffff" stroke-opacity="0.92" stroke-width="3"/>
+
+    ${_seasonAccentLeaves()}
+
+    <!-- centered white card -->
+    <g filter="url(#shadow)">
+      <rect x="${cardX}" y="${cardY}" width="${CARD_W}" height="${CARD_H}" rx="18" fill="#ffffff"/>
+    </g>
+
+    <!-- content: brand small, big headline, lines, legal -->
+    <text x="${CX}" y="${cardY + 58}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="22" font-weight="800" fill="#0f141a" opacity="0.85">
+      ${escSVG2(brand)}
+    </text>
+
+    <text x="${CX}" y="${cardY + 130}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="54" font-weight="900" fill="#0f141a" letter-spacing="0.04em">
+      ${escSVG2(bigHeadline)}
+    </text>
+
+    <text x="${CX}" y="${cardY + 180}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="26" font-weight="700" fill="#0f141a">
+      ${escSVG2(secondary1)}
+    </text>
+
+    <text x="${CX}" y="${cardY + 214}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#0d3b66">
+      ${escSVG2(secondary2)}
+    </text>
+
+    <!-- CTA pill under the card -->
+    ${btnSolidDark(CX, cardY + CARD_H + 56, cta, 28)}
+
+
+    <!-- legal -->
+    <text x="${CX}" y="${cardY + CARD_H - 18}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="16" font-weight="600" fill="#4b5563" opacity="0.95">
+      ${escSVG2(legal)}
+    </text>
+  </svg>`;
+
+  // Rasterize to PNG
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.png`;
+  await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
+    .png()
+    .toFile(path.join(outDir, file));
+  return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
+}
+
+
+/* ---------------- Template B: Poster (photo bg + centered white card) --------------- */
+async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
+  const W = 1200, H = 628, R = 28;
+
+  // background photo (industry lifestyle)
+  const bgUrl = imageUrl || resolveTemplateUrl({ answers });
+
+  const imgRes = await ax.get(bgUrl, { responseType: 'arraybuffer', timeout: 12000 });
+  const bgBuf = await sharp(imgRes.data)
+    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 })
+    .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
+    .toBuffer();
+
+  const savePct = _savePercentFromText(answers.offer || '');
+  const bigHeadline = _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
+  const secondary1 = _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
+  const secondary2 = savePct ? `Save up to ${savePct}` : _offerLine(answers);
+  const legal = _legalLine(answers);
+  const brand = _brandText(answers);
+
+  const cta = _ctaNormFromAnswers(answers) || 'LEARN MORE';
+
+  // white framed card over photo
+  const CARD_W = 760, CARD_H = 380;
+  const CX = Math.round(W/2), CY = Math.round(H/2) + 8;
+  const cardX = Math.round(CX - CARD_W/2), cardY = Math.round(CY - CARD_H/2);
+
+  const svg = `
+  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <image id="bg" href="data:image/jpeg;base64,${bgBuf.toString('base64')}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/></filter>
+    </defs>
+
+    <!-- full-bleed bg + subtle vignette -->
+    <use href="#bg"/>
+    <radialGradient id="vig" cx="50%" cy="50%" r="70%">
+      <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.55"/>
+    </radialGradient>
+    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
+
+    <!-- white frame -->
+    <rect x="12" y="12" width="${W-24}" height="${H-24}" rx="${R}" fill="none" stroke="#ffffff" stroke-opacity="0.92" stroke-width="3"/>
+
+    ${_seasonAccentLeaves()}
+
+    <!-- centered white card -->
+    <g filter="url(#shadow)">
+      <rect x="${cardX}" y="${cardY}" width="${CARD_W}" height="${CARD_H}" rx="18" fill="#ffffff"/>
+    </g>
+
+    <!-- content: brand small, big headline, lines, legal -->
+    <text x="${CX}" y="${cardY + 58}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="22" font-weight="800" fill="#0f141a" opacity="0.85">
+      ${escSVG(brand)}
+    </text>
+
+    <text x="${CX}" y="${cardY + 130}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="54" font-weight="900" fill="#0f141a" letter-spacing="0.04em">
+      ${escSVG(bigHeadline)}
+    </text>
+
+    <text x="${CX}" y="${cardY + 180}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="26" font-weight="700" fill="#0f141a">
+      ${escSVG(secondary1)}
+    </text>
+
+    <text x="${CX}" y="${cardY + 214}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#0d3b66">
+      ${escSVG(secondary2)}
+    </text>
+
+    <!-- CTA pill under the card -->
+    ${pillBtn(CX, cardY + CARD_H + 56, cta, 28)}
+
+    <!-- legal -->
+    <text x="${CX}" y="${cardY + CARD_H - 18}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="16" font-weight="600" fill="#4b5563" opacity="0.95">
+      ${escSVG(legal)}
+    </text>
+  </svg>`;
+
+  // Rasterize to PNG
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.png`;
+  await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
+    .png()
+    .toFile(path.join(outDir, file));
+  return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
+}
+
+
+/* ---------- CTA normalization + variants (single source of truth) ---------- */
+const CTA = Object.freeze({
+  VARIANTS: [
+    'LEARN MORE','SEE MORE','VIEW MORE','EXPLORE','DISCOVER',
+    'SHOP NOW','BUY NOW','GET STARTED','TRY IT','SEE DETAILS',
+    'SEE COLLECTION','BROWSE NOW','CHECK IT OUT','VISIT US','TAKE A LOOK','CHECK US OUT'
+  ]
+});
+
+const ALLOWED_CTAS = new Set(CTA.VARIANTS);
+
+function normalizeCTA(s = '') {
   return String(s)
     .toUpperCase()
-    .replace(/[’']/g, '')
-    .replace(/[^A-Z0-9 ]/g, ' ')
+    .replace(/[\u2019']/g, '')      // normalize apostrophes
+    .replace(/[^A-Z0-9 ]+/g, ' ')   // strip non-alphanumerics
     .replace(/\s+/g, ' ')
     .trim();
 }
-function pickCtaVariant(seed='') {
+
+function pickCtaVariant(seed = '') {
   if (!seed) return 'LEARN MORE';
-  let h = 0;
-  for (let i=0;i<seed.length;i++) h=(h*31+seed.charCodeAt(i))>>>0;
-  return CTA_VARIANTS[h % CTA_VARIANTS.length];
+  let h = 0 >>> 0;
+  for (let i = 0; i < seed.length; i++) h = ((h * 31) + seed.charCodeAt(i)) >>> 0;
+  return CTA.VARIANTS[h % CTA.VARIANTS.length];
 }
-function cleanCTA(c, seed='') {
+
+function cleanCTA(c, seed = '') {
   const norm = normalizeCTA(c);
   if (norm && ALLOWED_CTAS.has(norm) && norm !== 'LEARN MORE') return norm;
   return pickCtaVariant(seed);
 }
+
 
 /* ---------- Coherent subline (7–9 words) via GPT, with fallbacks ---------- */
 async function getCoherentSubline(answers = {}, category = 'generic', seed = '') {
@@ -1940,7 +2514,7 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
 }
 
 /* ---------- required helpers for subline + SVG ---------- */
-function escSVG2(s='') {
+function escSVG(s='') {
   return String(s)
     .replace(/&/g,'&amp;')
     .replace(/</g,'&lt;')
@@ -1948,35 +2522,23 @@ function escSVG2(s='') {
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
-function estWidthSerif2(text, fs, letterSpacing = 0) {
-  const t = String(text || ''), n = t.length || 1;
-  return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing * fs;
+function cleanHeadline(s='') {
+  return String(s).replace(/\s+/g,' ').trim().toUpperCase();
 }
-function _hash32(str = '') {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
-  return h >>> 0;
+function ensureGeneratedDir() {
+  const out = path.join(process.cwd(), 'generated');
+  if (!fs.existsSync(out)) fs.mkdirSync(out, { recursive: true });
+  return out;
 }
-function _rng(seed = '') {
-  let h = _hash32(String(seed));
-  return function () {
-    h = (h + 0x6D2B79F5) >>> 0;
-    let t = Math.imul(h ^ (h >>> 15), 1 | h);
-    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
-    t = (t ^ (t >>> 14)) >>> 0;
-    return t / 4294967296;
-  };
+function mediaPath(file) { return `/api/media/${file}`; }
+function absolutePublicUrl(rel) {
+  const base = process.env.PUBLIC_BASE_URL || '';
+  return base ? (new URL(rel, base)).toString() : rel;
 }
-function _pick(rng, arr) {
-  if (!arr || !arr.length) return '';
-  return arr[Math.floor(rng() * arr.length)] ?? arr[0];
-}
-function safeUnlink(p) { try { fs.unlinkSync(p); } catch {} }
-function cleanupMany(paths = []) { for (const p of paths) safeUnlink(p); }
-
+function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
 
 /* --- CTA pill (pure black, white text; same geometry) --- */
-function pillBtn(cx, cy, label, fs = 34, _glowRGB = '0,0,0', _glowOpacity = 0.28, _midLum = 140) {
+function pillBtn(cx, cy, label, fs = 34) {
   const txt = normalizeCTA(label || 'LEARN MORE');
   const padX = 32;
   const estTextW = Math.round(txt.length * fs * 0.60);
@@ -2000,378 +2562,275 @@ function pillBtn(cx, cy, label, fs = 34, _glowRGB = '0,0,0', _glowOpacity = 0.28
             font-family='Times New Roman, Times, serif' font-size="${fs}" font-weight="700"
             fill="#FFFFFF"
             style="paint-order: stroke; stroke:#000; stroke-width:0.8; letter-spacing:0.10em">
-        ${escSVG2(txt)}
+        ${escSVG(txt)}
       </text>
     </g>`;
 }
 
-/* === GLASS (real blur) + serif text — matches your screenshot === */
-
-const SERIF = `'Times New Roman', Times, serif`;
-
-/* ---------- SOLID BLACK CTA (modern rounded-square) ---------- */
-function btnSolidDark(cx, cy, label, fs = 32) {
-  const txt = normalizeCTA(label || 'LEARN MORE');
-  const padX = 28;
-  const estTextW = Math.round(txt.length * fs * 0.60);
-  const w = Math.max(200, Math.min(estTextW + padX * 2, 980));
-  const h = Math.max(56, fs + 22);
-  const r = Math.min(14, Math.round(h * 0.22));
-  const x = Math.round(cx - w / 2), y = Math.round(cy - h / 2);
-
-  return `
-    <g>
-      <rect x="${x-2}" y="${y-2}" width="${w+4}" height="${h+4}" rx="${r+2}" fill="#000000" opacity="0.30"/>
-      <rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" fill="#000000" opacity="0.92" />
-      <rect x="${x+0.5}" y="${y+0.5}" width="${w-1}" height="${h-1}" rx="${r-1}" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="1" />
-      <text x="${cx}" y="${y + h/2}" text-anchor="middle" dominant-baseline="middle"
-            font-family=${JSON.stringify(SERIF)} font-size="${fs}" font-weight="700"
-            fill="#FFFFFF" style="letter-spacing:0.10em">${escSVG2(txt)}</text>
-    </g>`;
-}
-
-/* === REAL-GLASS overlay — slightly smaller type, extended subline, solid CTA === */
-function svgOverlayCreative({ W, H, title, subline, cta, metrics, baseImage }) {
-  const SAFE_PAD = 24;
-  const maxW = W - SAFE_PAD * 2;
-  const R = 18;
-
-  const FUDGE = 1.18, MIN_INNER_GAP = 12;
-  function measureSerifWidth(txt, fs, tracking = 0.06) {
-    return Math.max(1, estWidthSerif(txt, fs, tracking) * FUDGE);
-  }
-  function settleBlock({ text, fsStart, fsMin, tracking, padXFactor, padYFactor }) {
-    let fs = fsStart, padX, padY, textW, w, h;
-    const recompute = () => {
-      padX = Math.round(Math.max(26, fs * padXFactor));
-      padY = Math.round(Math.max(10, fs * padYFactor));
-      textW = measureSerifWidth(text, fs, tracking);
-      w = textW + padX * 2 + MIN_INNER_GAP * 2;
-      h = Math.max(48, fs + padY * 2);
-    };
-    recompute();
-    while (w > maxW && fs > fsMin) { fs -= 2; recompute(); }
-    const x = Math.round((W - Math.min(w, maxW)) / 2);
-    return { fs, padX, padY, textW, w: Math.min(w, maxW), h, x };
-  }
-
-  title = String(title || '').toUpperCase();
-  const headline = settleBlock({
-    text: title, fsStart: 72, fsMin: 34, tracking: 0.06, padXFactor: 0.66, padYFactor: 0.20
-  });
-  const hlCenterY = 148;
-  const hlRectY   = Math.round(hlCenterY - headline.h/2);
-
-  let sub = settleBlock({
-    text: String(subline || ''), fsStart: 58, fsMin: 28, tracking: 0.03, padXFactor: 0.62, padYFactor: 0.20
-  });
-  const SUB_MIN_W = Math.round(maxW * 0.86);
-  if (sub.w < SUB_MIN_W) { sub.w = SUB_MIN_W; sub.x = Math.round((W - sub.w) / 2); }
-  const subRectY   = Math.round(hlRectY + headline.h + 58);
-  const subCenterY = subRectY + Math.round(sub.h/2);
-
-  const ctaY = Math.round(subCenterY + sub.fs + 92);
-
-  const midLum = metrics?.midLum ?? 140;
-  const avg    = metrics?.avgRGB || { r: 64, g: 64, b: 64 };
-  const useDark     = midLum >= 188;
-  const textFill    = useDark ? '#111111' : '#FFFFFF';
-  const textOutline = useDark ? '#FFFFFF' : '#000000';
-  const tintRGB     = `rgb(${avg.r},${avg.g},${avg.b})`;
-
-  const chosenCTA = cleanCTA(cta, `${title}|${subline}`);
-
-  const CHIP_TINT = useDark ? 0.08 : 0.12;
-  const BLUR_H = 10, BLUR_S = 9;
-  const RIM_LIGHT = 0.18;
-  const RIM_DARK  = 0.12;
-
-  return `
-  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <image id="bg" href="${baseImage}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-      <clipPath id="clipHl"><rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"/></clipPath>
-      <clipPath id="clipSub"><rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"/></clipPath>
-      <filter id="blurHl" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_H}"/></filter>
-      <filter id="blurSub" x="-20%" y="-20%" width="140%" height="140%"><feGaussianBlur stdDeviation="${BLUR_S}"/></filter>
-      <linearGradient id="chipHi" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.78"/>
-        <stop offset="58%"  stop-color="#FFFFFF" stop-opacity="0.06"/>
-        <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.00"/>
-      </linearGradient>
-      <linearGradient id="spec" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.60"/>
-        <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
-      </linearGradient>
-      <radialGradient id="vig" cx="50%" cy="50%" r="70%">
-        <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
-        <stop offset="100%" stop-color="#000000" stop-opacity="0.85"/>
-      </radialGradient>
-    </defs>
-
-    <rect x="0" y="0" width="${W}" height="${H}" fill="rgba(0,0,0,0.10)"/>
-
-    <g pointer-events="none">
-      <rect x="10" y="10" width="${W-20}" height="${H-20}" rx="24" fill="none" stroke="#000" stroke-opacity="0.14" stroke-width="8"/>
-      <rect x="14" y="14" width="${W-28}" height="${H-28}" rx="20" fill="none" stroke="#fff" stroke-opacity="0.25" stroke-width="2"/>
-      <rect x="22" y="22" width="${W-44}" height="${H-44}" rx="18" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="1"/>
-    </g>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
-
-    <g clip-path="url(#clipHl)">
-      <use href="#bg" filter="url(#blurHl)"/>
-      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${headline.h}" rx="${R}"
-            fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${headline.x}" y="${hlRectY}" width="${headline.w}" height="${Math.max(12, Math.round(headline.h*0.42))}" rx="${R}"
-            fill="url(#chipHi)" opacity="0.96"/>
-      <rect x="${headline.x+9}" y="${hlRectY+6}" width="${headline.w-18}" height="${Math.max(2, Math.round(headline.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
-            fill="url(#spec)" opacity="0.50"/>
-    </g>
-    <rect x="${headline.x+0.5}" y="${hlRectY+0.5}" width="${headline.w-1}" height="${headline.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
-    <rect x="${headline.x+1}" y="${hlRectY+1}" width="${headline.w-2}" height="${headline.h-2}" rx="${R-1}"
-          fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
-
-    <text x="${W/2}" y="${hlRectY + Math.round(headline.h/2)}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family=${JSON.stringify(SERIF)} font-size="${headline.fs}" font-weight="700"
-          fill="${useDark ? '#111' : '#fff'}" style="paint-order: stroke; stroke:${useDark ? '#fff' : '#000'}; stroke-width:1.30; letter-spacing:0.10em">
-      ${escSVG2(title)}
-    </text>
-
-    <g clip-path="url(#clipSub)">
-      <use href="#bg" filter="url(#blurSub)"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${sub.h}" rx="${R}"
-            fill="${tintRGB}" opacity="${CHIP_TINT}"/>
-      <rect x="${sub.x}" y="${subRectY}" width="${sub.w}" height="${Math.max(10, Math.round(sub.h*0.40))}" rx="${R}" fill="url(#chipHi)"/>
-      <rect x="${sub.x+9}" y="${subRectY+6}" width="${sub.w-18}" height="${Math.max(2, Math.round(sub.h*0.08))}" rx="${Math.max(2, Math.round(R*0.35))}"
-            fill="url(#spec)" opacity="0.50"/>
-    </g>
-    <rect x="${sub.x+0.5}" y="${subRectY+0.5}" width="${sub.w-1}" height="${sub.h-1}" rx="${R-0.5}"
-          fill="none" stroke="rgba(255,255,255,${RIM_LIGHT})" stroke-width="0.6"/>
-    <rect x="${sub.x+1}" y="${subRectY+1}" width="${sub.w-2}" height="${sub.h-2}" rx="${R-1}"
-          fill="none" stroke="rgba(0,0,0,${RIM_DARK})" stroke-width="0.5" opacity="0.28"/>
-
-    <text x="${W/2}" y="${subRectY + Math.round(sub.h/2)}"
-          text-anchor="middle" dominant-baseline="middle"
-          font-family=${JSON.stringify(SERIF)} font-size="${sub.fs}" font-weight="700"
-          fill="${useDark ? '#111' : '#fff'}"
-          style="paint-order: stroke; stroke:${useDark ? '#000' : '#fff'}; stroke-width:1.10; letter-spacing:0.03em">
-      ${escSVG2(subline)}
-    </text>
-
-    ${btnSolidDark(W/2, Math.round(subCenterY + sub.fs + 92), cleanCTA('LEARN MORE'), 30)}
-  </svg>`;
-} // <-- corrected/closed brace
-
-
-/* ---------- Local craftSubline (fallback) ---------- */
-function craftSubline(answers = {}, category = 'generic', seed = '') {
-  function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,16777619);} return h>>>0; }
-  function _rng(s=''){ let h=_hash32(s); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),61|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
-  const rnd = _rng(`${seed}|${category}|${answers.businessName||''}|${answers.mainBenefit||''}|${answers.description||''}`);
-  const sentenceCase = (s='') => { s=String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
-  const clean = (s='') => String(s).replace(/https?:\/\/\S+/g,' ').replace(/[^\w\s'-]/g,' ').replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate|our|we)\b/gi,' ').replace(/\s+/g,' ').trim().toLowerCase();
-  const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
-  const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
-  const trimEnd = (arr)=>{ while(arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
-  const takeTerms = (src='', max=3) => {
-    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
-    return words.slice(0, Math.max(1, Math.min(max, words.length)));
-  };
-
-  const productTerms = takeTerms(answers.productType || answers.topic || answers.title || '');
-  const benefitTerms = takeTerms(answers.mainBenefit || answers.description || '');
-  const audienceTerms= takeTerms(answers.audience || answers.target || answers.customer || '', 2);
-  const diffTerms    = takeTerms(answers.differentiator || answers.whyUs || '', 3);
-  const locationTerm = takeTerms(answers.location || answers.city || answers.region || '', 1)[0] || '';
-  const timeClaimRaw = String(answers.timeClaim || answers.promise || '').match(/\b\d+\s*(minutes?|hours?|days?)\b/i);
-  const timeClaim    = timeClaimRaw ? timeClaimRaw[0].toLowerCase() : '';
-
-  let productHead = productTerms[0] || '';
-  if (category === 'fashion') {
-    if (!/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) productHead = 'clothing';
-  }
-  if (productHead === 'quality') productHead = 'products';
-  const benefitPhrase = benefitTerms.join(' ').replace(/\bquality\b/gi,'').trim();
-  const audiencePhrase= audienceTerms.join(' ').trim();
-  const diffPhrase    = diffTerms.join(' ').trim();
-
-  const T = [
-    () => (benefitPhrase && audiencePhrase) && `${benefitPhrase} for ${audiencePhrase} every day`,
-    () => (benefitPhrase && locationTerm)  && `${benefitPhrase} for ${locationTerm} locals daily`,
-    () => (productHead && benefitPhrase)   && `${benefitPhrase} built into ${productHead} essentials`,
-    () => (productHead && diffPhrase)      && `${productHead} with ${diffPhrase} for daily use`,
-    () => (productHead && timeClaim)       && `${productHead} set up in just ${timeClaim}`,
-    () =>  benefitPhrase                    && `${benefitPhrase} made simple for everyday use`,
-    () =>  productHead                      && `${productHead} made simple for everyday wear`,
-  ];
-  let line = '';
-  for (const f of T) { const c = f(); if (c && /\S/.test(c)) { line = c; break; } }
-  if (!line) {
-    const FALL = {
-      fashion: ['Natural materials for everyday wear made simple','Simple pieces built to last every day','Comfortable fits with clean easy style'],
-      books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
-      cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
-      hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
-      food: ['Great taste with less hassle every day','Fresh flavor made easy for busy nights'],
-      pets: ['Everyday care for happy pets made simple','Simple treats your pet will love daily'],
-      electronics: ['Reliable tech for everyday use and value','Simple design with solid performance daily'],
-      home: ['Upgrade your space the simple practical way','Clean looks with everyday useful function'],
-      coffee: ['Balanced flavor for better breaks each day','Smooth finish in every cup every day'],
-      fitness: ['Made for daily training sessions that stick','Durable gear built for consistent workouts'],
-      generic: ['Made for everyday use with less hassle','Simple design that is built to last']
-    }[category] || ['Made for everyday use with less hassle'];
-    line = FALL[Math.floor(rnd() * FALL.length)];
-  }
-  let words = clean(line).split(' ').filter(Boolean);
-  const tails = [['every','day'],['made','simple'],['with','less','hassle'],['for','busy','days'],['built','to','last']];
-  while (words.length > 9) words.pop();
-  words = trimEnd(words);
-  while (words.length < 7) {
-    const tail = tails[Math.floor(rnd()*tails.length)];
-    for (const w of tail) if (words.length < 9) words.push(w);
-    words = trimEnd(words);
-  }
-  return sentenceCase(words.join(' '));
-}
-
-/* ---------- Placement analysis ---------- */
-async function analyzeImageForPlacement(imgBuf) {
-  try {
-    const W = 72, H = 72;
-    const { data } = await sharp(imgBuf).resize(W, H, { fit: 'cover' }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
-    let rSum=0,gSum=0,bSum=0, rTop=0,gTop=0,bTop=0,cTop=0, rMid=0,gMid=0,bMid=0,cMid=0;
-    for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
-      const i=(y*W+x)*3, r=data[i], g=data[i+1], b=data[i+2];
-      rSum+=r; gSum+=g; bSum+=b;
-      if (y < Math.floor(H*0.28)) { rTop+=r; gTop+=g; bTop+=b; cTop++; }
-      if (y >= Math.floor(H*0.38) && y < Math.floor(H*0.62)) { rMid+=r; gMid+=g; bMid+=b; cMid++; }
-    }
-    const px=W*H, avgR=rSum/px, avgG=gSum/px, avgB=bSum/px;
-    const lum=(r,g,b)=> Math.round(0.2126*r + 0.7152*g + 0.0722*b);
-    return { topLum: lum(rTop/cTop,gTop/cTop,bTop/cTop), midLum: lum(rMid/cMid,gMid/cMid,bMid/cMid), avgRGB: { r:Math.round(avgR), g:Math.round(avgG), b:Math.round(avgB) } };
-  } catch { return { topLum:150, midLum:140, avgRGB:{ r:64,g:64,b:64 } }; }
-}
-
-/* ---------- Overlay builder ---------- */
-async function buildOverlayImage({
-  imageUrl, headlineHint = '', ctaHint = '', seed = '',
-  fallbackHeadline = 'SHOP', answers = {}, category = 'generic',
-}) {
-  // Target canvas; we will upscale small sources to avoid composite dimension errors
-  const TARGET_W = 1200, TARGET_H = 628;
-
-  // 1) Fetch + normalize base image (COVER fit, allow enlarge)
-  const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseSharp = sharp(imgRes.data).resize(TARGET_W, TARGET_H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
-  const baseBuf   = await baseSharp.jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
-  const meta      = await sharp(baseBuf).metadata();
-  const W = meta.width  || TARGET_W;
-  const H = meta.height || TARGET_H;
-
-  // 2) Analyze for tint/contrast
-  const analysis = await analyzeImageForPlacement(baseBuf);
-
-  // 3) Resolve text
-  let title = cleanHeadline(headlineHint) || cleanHeadline(fallbackHeadline) || 'SHOP';
-  if (!title.trim()) title = 'SHOP';
-  const titleSeed = title || category || '';
-  let cta = cleanCTA(ctaHint, titleSeed);
-  if (!cta.trim()) cta = 'LEARN MORE';
-
-  let subline = 'Made for everyday use with less hassle';
-  try { subline = await getCoherentSubline(answers, category); }
-  catch (e) { try { subline = craftSubline(answers, category, seed) || subline; } catch {} }
-
-  // 4) Render SVG overlay, then rasterize to PNG before compositing (fixes dropped-SVG bug)
-  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svgStr = svgOverlayCreative({ W, H, title, subline, cta, metrics: analysis, baseImage: base64 });
-  const overlayPng = await sharp(Buffer.from(svgStr, 'utf8'), { density: 180 })
-    .png() // rasterize the SVG (keeps blur/clip paths)
+/* =========================================
+   IMAGE NORMALIZATION (bake as background)
+   ========================================= */
+async function loadAndCover(imageUrl, W, H) {
+  const res = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 20000 });
+  const buf = await sharp(res.data)
+    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 })
+    .jpeg({ quality: 94, chromaSubsampling: '4:4:4' })
     .toBuffer();
+  const meta = await sharp(buf).metadata();
+  return { baseBuf: buf, W: meta.width || W, H: meta.height || H };
+}
 
-  // 5) Composite
-  const outDir = ensureGeneratedDir();
-  const file = `${uuidv4()}.jpg`;
-  await sharp(baseBuf)
-    .composite([{ input: overlayPng, top: 0, left: 0 }])
-    .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
-    .toFile(path.join(outDir, file));
+/* ======================================================
+   TEMPLATE A — PHOTO POSTER (industry-agnostic version)
+   Structure: baked photo bg + centered white card + big
+   headline + date range + value line + supporting lines.
+   ====================================================== */
+function svgPhotoPoster({
+  W, H, baseImageDataURL,
+  brandLogos = [], // [{href, x, y, w, h}]
+  headline = 'BIG SALE',
+  dateRange = '',
+  valueLine = 'SAVE $500',
+  supportTop = 'PLUS SPECIAL FINANCING*',
+  supportMid = 'ON SELECT PRODUCTS',
+  supportBot = 'SEE STORE FOR DETAILS',
+  leafBadges = [], // [{href,x,y,w,h}] optional decorative
+}) {
+  const CARD_W = Math.round(W * 0.66);
+  const CARD_H = Math.round(H * 0.26);
+  const CARD_X = Math.round((W - CARD_W)/2);
+  const CARD_Y = Math.round(H * 0.16);
 
+  const VALUE_Y = Math.round(CARD_Y + CARD_H + H*0.12);
+  const SUPPORT_Y1 = VALUE_Y + 56;
+  const SUPPORT_Y2 = SUPPORT_Y1 + 34;
+  const SUPPORT_Y3 = SUPPORT_Y2 + 28;
 
-  maybeGC();
-  return { publicUrl: mediaPath(file), absoluteUrl: absolutePublicUrl(mediaPath(file)), filename: file };
+  return `
+<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <image id="bg" href="${baseImageDataURL}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
+  </defs>
+
+  <!-- baked background -->
+  <use href="#bg"/>
+
+  <!-- outer soft card shadow -->
+  <g opacity="0.35">
+    <rect x="${CARD_X-8}" y="${CARD_Y-8}" width="${CARD_W+16}" height="${CARD_H+16}" rx="14" fill="#000000" />
+  </g>
+
+  <!-- white headline card -->
+  <rect x="${CARD_X}" y="${CARD_Y}" width="${CARD_W}" height="${CARD_H}" rx="12" fill="#FFFFFF" />
+  ${leafBadges.map(b=>`<image href="${b.href}" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" />`).join('')}
+
+  <!-- tiny brand row (optional) -->
+  ${brandLogos.map(l=>`<image href="${l.href}" x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}" />`).join('')}
+
+  <!-- headline -->
+  <text x="${W/2}" y="${CARD_Y + CARD_H/2 - 8}" text-anchor="middle" dominant-baseline="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.065)}" font-weight="900" fill="#CC2C2C" letter-spacing="1.5">
+    ${escSVG(headline.toUpperCase())}
+  </text>
+
+  <!-- date range -->
+  <text x="${W/2}" y="${CARD_Y + CARD_H - 18}" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.022)}" font-weight="700" fill="#BB4D3A" letter-spacing="1">
+    ${escSVG(dateRange.toUpperCase())}
+  </text>
+
+  <!-- BIG value line over photo -->
+  <text x="${W*0.14}" y="${VALUE_Y}" text-anchor="start"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.095)}" font-weight="900" fill="#FFFFFF" letter-spacing="1.5">
+    ${escSVG(valueLine.toUpperCase())}
+  </text>
+
+  <!-- supporting lines -->
+  <text x="${W/2}" y="${SUPPORT_Y1}" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.034)}" font-weight="800" fill="#FFFFFF" letter-spacing="1">
+    ${escSVG(supportTop.toUpperCase())}
+  </text>
+  <text x="${W/2}" y="${SUPPORT_Y2}" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.024)}" font-weight="700" fill="#FFFFFF" letter-spacing="0.8">
+    ${escSVG(supportMid.toUpperCase())}
+  </text>
+  <text x="${W/2}" y="${SUPPORT_Y3}" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.018)}" font-weight="600" fill="#FFFFFF" letter-spacing="0.6">
+    ${escSVG(supportBot.toUpperCase())}
+  </text>
+
+  <!-- tiny legal at bottom -->
+  <text x="${W/2}" y="${H-18}" text-anchor="middle"
+        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.016)}" font-weight="500" fill="rgba(255,255,255,0.85)">
+    *With approved credit. Ask for details.
+  </text>
+</svg>`;
 }
 
 
-async function composeOverlay({
+/* ===================================================
+   TEMPLATE B — ILLUSTRATED FLYER (industry-agnostic)
+   Structure: dark top banner + diagonal split + ticks,
+   services list, coverage line, and big phone CTA row.
+   =================================================== */
+function svgIllustratedFlyer({
+  W, H, illustrationDataURL,
+  headline = 'HOME CLEANING SERVICES',
+  subHead = 'APARTMENT • HOME • OFFICE',
+  leftChecks = ['ONE TIME','WEEKLY','BI-WEEKLY','MONTHLY'],
+  rightServices = ['Kitchen','Bathrooms','Offices','Dusting','Mopping','Vacuuming'],
+  coverage = 'Coverage area ~25 miles around city',
+  callNow = 'CALL NOW!',
+  phone = '1300-135-1616'
+}) {
+  const TOP_H = Math.round(H*0.28);
+
+  return `
+<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <image id="illustr" href="${illustrationDataURL}" x="0" y="${TOP_H-10}" width="${W}" height="${H-TOP_H+10}" preserveAspectRatio="xMidYMid meet"/>
+    <linearGradient id="btnGradient" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#ff8a00"/><stop offset="100%" stop-color="#ffb84d"/>
+    </linearGradient>
+  </defs>
+
+  <!-- top banner -->
+  <rect x="0" y="0" width="${W}" height="${TOP_H}" fill="#0C4A5B"/>
+  <text x="${W/2}" y="${Math.round(TOP_H*0.46)}" text-anchor="middle"
+        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.072)}" font-weight="900" fill="#FFFFFF" letter-spacing="1.2">
+    ${escSVG(headline.toUpperCase())}
+  </text>
+  <text x="${W/2}" y="${Math.round(TOP_H*0.78)}" text-anchor="middle"
+        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.028)}" font-weight="700" fill="#CDEBF2" letter-spacing="2.5">
+    ${escSVG(subHead.toUpperCase())}
+  </text>
+
+  <!-- diagonal split bg -->
+  <path d="M0 ${TOP_H} L ${W} ${Math.round(TOP_H*0.85)} L ${W} ${H} L 0 ${H} Z" fill="#E8F6FA"/>
+  <use href="#illustr"/>
+
+  <!-- left checks -->
+  ${leftChecks.map((t,i)=>{
+    const y = TOP_H + 70 + i*44;
+    return `
+      <circle cx="${Math.round(W*0.10)}" cy="${y}" r="10" fill="none" stroke="#11A37F" stroke-width="3"/>
+      <path d="M ${Math.round(W*0.10)-6} ${y} l 4 4 l 7 -9" stroke="#11A37F" stroke-width="3" fill="none" />
+      <text x="${Math.round(W*0.10)+26}" y="${y+6}" font-family="Poppins, Helvetica, Arial, sans-serif"
+            font-size="${Math.round(H*0.028)}" font-weight="700" fill="#0B3B4A">${escSVG(t)}</text>`;
+  }).join('')}
+
+  <!-- right services -->
+  <text x="${Math.round(W*0.58)}" y="${TOP_H + 52}" font-family="Poppins, Helvetica, Arial, sans-serif"
+        font-size="${Math.round(H*0.032)}" font-weight="800" fill="#0B3B4A">Services Offered</text>
+  ${rightServices.map((t,i)=>{
+    const y = TOP_H + 88 + i*36;
+    return `
+      <circle cx="${Math.round(W*0.56)}" cy="${y-12}" r="5" fill="#11A37F"/>
+      <text x="${Math.round(W*0.58)}" y="${y}" font-family="Poppins, Helvetica, Arial, sans-serif"
+            font-size="${Math.round(H*0.026)}" font-weight="600" fill="#1C5A6B">${escSVG(t)}</text>`;
+  }).join('')}
+
+  <!-- coverage line -->
+  <g opacity="0.85">
+    <path d="M ${Math.round(W*0.08)} ${H-112} h 14" stroke="#F59E0B" stroke-width="4"/>
+    <text x="${Math.round(W*0.12)}" y="${H-105}" font-family="Poppins, Helvetica, Arial, sans-serif"
+          font-size="${Math.round(H*0.022)}" font-weight="600" fill="#1C5A6B">${escSVG(coverage)}</text>
+  </g>
+
+  <!-- call now row -->
+  <rect x="${Math.round(W*0.06)}" y="${H-88}" width="${Math.round(W*0.88)}" height="58" rx="12" fill="url(#btnGradient)"/>
+  <text x="${Math.round(W*0.12)}" y="${H-50}" text-anchor="start"
+        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.030)}" font-weight="900" fill="#1B2838">
+    ${escSVG(callNow)}
+  </text>
+  <text x="${Math.round(W*0.50)}" y="${H-50}" text-anchor="start"
+        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.036)}" font-weight="900" fill="#1B2838">
+    ${escSVG(phone)}
+  </text>
+</svg>`;
+}
+
+/* ==========================================================
+   COMPOSERS — bake background + render SVG → raster → save
+   ========================================================== */
+async function composePhotoPoster({
   imageUrl,
-  title = '',
-  subline = '',
-  cta = '',
   answers = {},
-  category = 'generic',
-  seed = ''
+  dims = { W: 1080, H: 1080 },
 }) {
-  const TARGET_W = 1200, TARGET_H = 628;
+  const { W, H } = dims;
+  const { baseBuf } = await loadAndCover(imageUrl, W, H);
+  const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
 
-  // 1) Fetch + normalize base (allow enlargement so overlay is never bigger)
-  const imgRes = await ax.get(imageUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const baseSharp = sharp(imgRes.data).resize(TARGET_W, TARGET_H, { fit: 'cover', kernel: sharp.kernel.lanczos3 });
-  const baseBuf   = await baseSharp.jpeg({ quality: 94, chromaSubsampling: '4:4:4' }).toBuffer();
-  const meta      = await sharp(baseBuf).metadata();
-  const W = meta.width  || TARGET_W;
-  const H = meta.height || TARGET_H;
+  const title = (answers.headline || answers.promoTitle || answers.offerTitle || 'Fall Sale').toString();
+  const dateRange = (answers.dateRange || answers.eventDates || '').toString();
+  const valueLine = (answers.valueLine || answers.savings || answers.offer || 'Save $1000').toString();
+  const supportTop = (answers.supportTop || 'Plus special financing*').toString();
+  const supportMid = (answers.supportMid || answers.supportingLine || 'On select products').toString();
+  const supportBot = (answers.supportBot || 'See store for details').toString();
 
-  // 2) Analyze image to tune glass tint/contrast
-  const metrics = await analyzeImageForPlacement(baseBuf);
-
-  // 3) Resolve headline (title), CTA, and subline
-  const cat = category || resolveCategory(answers || {});
-  let headline = cleanHeadline(title) || cleanHeadline(overlayTitleFromAnswers(answers, cat)) || 'SHOP';
-  if (!headline) headline = 'SHOP';
-
-  let ctaText = cleanCTA(cta || answers?.cta || '', headline || (answers?.businessName || ''));
-  if (!ctaText) ctaText = 'LEARN MORE';
-
-  let sub = String(subline || '').trim();
-  if (!sub) {
-    try { sub = await getCoherentSubline(answers, cat, seed); }
-    catch (e) {
-      try { sub = craftSubline(answers, cat, seed) || 'Made for everyday use with less hassle'; }
-      catch { sub = 'Made for everyday use with less hassle'; }
-    }
-  }
-
-   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
-  const svgStr = svgOverlayCreative({
-    W, H,
-    title: headline,
-    subline: sub,
-    cta: ctaText,
-    metrics,
-    baseImage: base64
+  const svg = svgPhotoPoster({
+    W, H, baseImageDataURL: base64,
+    headline: title,
+    dateRange: dateRange,
+    valueLine: valueLine,
+    supportTop: supportTop,
+    supportMid: supportMid,
+    supportBot: supportBot,
+    brandLogos: [] /* pass brand marks here if you have them */,
+    leafBadges: [] /* decorative elements optional */
   });
-  const overlayPng = await sharp(Buffer.from(svgStr, 'utf8'), { density: 180 })
-    .png()
-    .toBuffer();
+
+  const overlayPng = await sharp(Buffer.from(svg)).png().toBuffer();
 
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.jpg`;
   await sharp(baseBuf)
-    .composite([{ input: overlayPng, top: 0, left: 0 }])
+    .composite([{ input: overlayPng, left: 0, top: 0 }])
     .jpeg({ quality: 91, chromaSubsampling: '4:4:4', mozjpeg: true })
     .toFile(path.join(outDir, file));
 
-
-  const rel = `/api/media/${file}`;
-  return {
-    publicUrl: rel,
-    absoluteUrl: absolutePublicUrl(rel),
-    filename: file,
-  };
+  const rel = mediaPath(file);
+  return { publicUrl: rel, absoluteUrl: absolutePublicUrl(rel), filename: file };
 }
+
+async function composeIllustratedFlyer({
+  illustrationUrl,
+  answers = {},
+  dims = { W: 1200, H: 628 },
+}) {
+  const { W, H } = dims;
+  const { baseBuf } = await loadAndCover(illustrationUrl, W, H - Math.round(H*0.28) + 10);
+  const illBase64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
+
+  const headline = (answers.headline || `${(answers.industry||'Home')} Services`).toString();
+  const subHead  = (answers.subHead  || (answers.tags ? answers.tags.join(' • ') : 'APARTMENT • HOME • OFFICE')).toString();
+  const checks   = Array.isArray(answers.checks) ? answers.checks : ['ONE TIME','WEEKLY','BI-WEEKLY','MONTHLY'];
+  const services = Array.isArray(answers.services) ? answers.services : (answers.features || ['Kitchen','Bathrooms','Offices','Dusting','Mopping','Vacuuming']);
+  const coverage = (answers.coverage || `Coverage area ~25 miles around ${answers.city || 'your area'}`).toString();
+  const phone    = (answers.phone || '1300-135-1616').toString();
+
+  const svg = svgIllustratedFlyer({
+    W, H, illustrationDataURL: illBase64,
+    headline, subHead,
+    leftChecks: checks.slice(0,4),
+    rightServices: services.slice(0,6),
+    coverage,
+    callNow: (answers.callNow || 'CALL NOW!').toString(),
+    phone
+  });
+
+  const outDir = ensureGeneratedDir();
+  const file = `${uuidv4()}.jpg`;
+  await sharp(Buffer.from(svg))
+    .jpeg({ quality: 92, chromaSubsampling: '4:4:4', mozjpeg: true })
+    .toFile(path.join(outDir, file));
+
+  const rel = mediaPath(file);
+  return { publicUrl: rel, absoluteUrl: absolutePublicUrl(rel), filename: file };
+}
+
+
 
 
 /* -------------------- Health check + memory debug -------------------- */
@@ -3472,87 +3931,61 @@ router.get('/generated-videos', async (req, res) => {
 
 
 
-/* --------------------- IMAGE: search + overlay (TWO variations) --------------------- */
-// --------------------- IMAGE: search + overlay (TWO variations) ---------------------
+// --------------------- IMAGE: template + overlay (TWO variations, NO PEXELS) ---------------------
 router.post('/generate-image-from-prompt', heavyLimiter, async (req, res) => {
   housekeeping();
-
   try {
     if (typeof res.setTimeout === 'function') res.setTimeout(65000);
     if (typeof req.setTimeout === 'function') req.setTimeout(65000);
   } catch {}
 
   try {
-    const top       = req.body || {};
-    const answers   = top.answers || top;
-    const url       = answers.url || top.url || '';
-    const industry  = answers.industry || top.industry || '';
-    const category  = resolveCategory(answers || {});
-    const keyword   = getImageKeyword(industry, url, answers) || 'ecommerce products';
+    const top      = req.body || {};
+    const answers  = top.answers || top;
+    const category = resolveCategory(answers || {}) || 'generic';
 
-    // small pool quickly
-    let photos = await fetchPexelsPhotos(
-      keyword,
-      8,
-      answers?.regenerateToken || answers?.businessName || Date.now()
-    );
-    if (!photos.length) {
-      photos = await fetchPexelsPhotos('product shopping', 8, Date.now() + ':fallback');
-    }
-    if (!photos.length) {
-      return res.status(500).json({ ok: false, error: 'No stock photos found from Pexels.' });
-    }
+    // 1) pick base image strictly from provided URL / template key / category (NO PEXELS)
+    const baseImageUrl = resolveTemplateUrl({ body: top, answers });
 
-    // two distinct images (duplicate safely if pool tiny)
-    const imgA = photos[0]?.url || photos[1]?.url || photos[0];
-    const imgB = photos[1]?.url || photos[0]?.url || photos[0];
-
-    // SAME overlay renderer you already use — no appearance changes
+    // 2) headline + CTA
     const headlineHint = overlayTitleFromAnswers(answers, category);
-    const ctaHint      = cleanCTA(answers?.cta || '');
+    const ctaHint      = cleanCTA(answers?.cta || '', headlineHint || (answers?.businessName || ''));
 
-  const makeOne = async (imgUrl, seedSuffix) => {
-  const { publicUrl, absoluteUrl } = await composeOverlay({
-    imageUrl: imgUrl,
-    title: headlineHint,
-    subline: '', // leave blank to auto-compose smarter subline
-    cta: ctaHint,
-    answers,
-    category,
-    seed: (answers?.businessName || keyword) + ':' + seedSuffix,
-  });
+    // 3) build two variations using the SAME base image but different seeds (subline varies)
+    const makeOne = async (seedSuffix) => {
+      const { publicUrl, absoluteUrl } = await composeOverlay({
+        imageUrl: baseImageUrl,
+        title: headlineHint,
+        subline: '', // let getCoherentSubline/craftSubline generate from answers
+        cta: ctaHint,
+        answers,
+        category,
+        seed: (answers?.businessName || category || 'generic') + ':' + seedSuffix,
+      });
+      // persist
       await saveAsset({
         req,
         kind: 'image',
         url: publicUrl,
         absoluteUrl,
-        meta: { keyword, overlayText: ctaHint, headlineHint, category, glass: true },
+        meta: { category, base: baseImageUrl, headlineHint, cta: ctaHint, template: true },
       });
-      return publicUrl;
+      return { url: publicUrl, absoluteUrl };
     };
 
-    const [urlA, urlB] = await Promise.all([
-      makeOne(imgA, 'A'),
-      makeOne(imgB, 'B'),
-    ]);
-
-    const origin = req.headers && req.headers.origin;
-    if (origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Allow-Credentials', 'true');
-    }
+    const vA = await makeOne('A');
+    const vB = await makeOne('B');
 
     return res.json({
       ok: true,
       items: [
-        { variant: 'A', url: urlA, type: 'image/jpeg' },
-        { variant: 'B', url: urlB, type: 'image/jpeg' },
+        { ...vA, variant: 'A', templateBase: baseImageUrl },
+        { ...vB, variant: 'B', templateBase: baseImageUrl },
       ],
     });
   } catch (e) {
-    console.error('generate-image-from-prompt error:', e?.message || e);
-    return res.status(500).json({ ok: false, error: 'IMAGE_GEN_FAIL' });
+    console.error('[generate-image-from-prompt:no-pexels] error:', e?.message || e);
+    return res.status(500).json({ ok: false, error: 'IMAGE_GEN_FAIL', message: e.message || 'failed' });
   }
 });
 

@@ -411,28 +411,33 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
-/* === buildImagePrompt (images) === */
+/* === buildImagePrompt (images) — REPLACE ENTIRE BLOCK === */
 function buildImagePrompt(answers = {}, overlay = {}) {
+  // Generic prompt that works for ANY industry. We only use this to bias
+  // background photography when you also choose to render image-only ads.
   const parts = [];
 
-  if (answers.industry) parts.push(`Industry: ${answers.industry}`);
-  if (answers.businessName) parts.push(`Brand: ${answers.businessName}`);
-  if (answers.mainBenefit) parts.push(`Main benefit: ${answers.mainBenefit}`);
-  if (answers.offer) parts.push(`Offer: ${answers.offer}`);
-  if (answers.idealCustomer) parts.push(`Audience: ${answers.idealCustomer}`);
+  const industry = (answers.industry || "local services").toString().trim();
+  const biz = (answers.businessName || "").toString().trim();
+  const benefit = (answers.mainBenefit || "").toString().trim();
+  const offer = (answers.offer || "").toString().trim();
+  const audience = (answers.idealCustomer || "").toString().trim();
 
-  // Mild guidance to avoid random, irrelevant shots:
-  parts.push("Style: clean commercial photo, centered subject, ad-friendly composition, ample negative space, high contrast, uncluttered background");
+  if (industry) parts.push(`Industry: ${industry}`);
+  if (biz) parts.push(`Brand: ${biz}`);
+  if (benefit) parts.push(`Main benefit: ${benefit}`);
+  if (offer) parts.push(`Offer: ${offer}`);
+  if (audience) parts.push(`Audience: ${audience}`);
 
-  // If you later want illustration mode, change "clean commercial photo" to "flat vector illustration" (kept photo here per your request).
+  // Keep photo guidance simple and ad-safe.
+  parts.push("Style: clean commercial photo, centered subject, negative space for text, uncluttered background");
 
-  // Include overlay keywords to bias content toward copy
+  // Nudge toward the overlay copy you’re previewing
   if (overlay?.headline) parts.push(`Headline theme: ${overlay.headline}`);
   if (overlay?.cta) parts.push(`CTA: ${overlay.cta}`);
 
   return parts.filter(Boolean).join(" | ");
 }
-
 
 
 
@@ -1171,6 +1176,12 @@ setTimeout(async () => {
       } catch {}
     })();
 
+    // ****** NEW: also generate a static PNG using your template (poster_b or flyer_a) ******
+    const staticPromise = (async () => {
+      await handleGenerateStaticAd("poster_b"); // change to "flyer_a" if you prefer that first
+    })();
+    // **************************************************************************************
+
     // Apply copy when it’s back (don’t block media)
     const data = await assetsPromise;
     setResult({
@@ -1180,8 +1191,8 @@ setTimeout(async () => {
     });
 
     // Consider generation “done” as soon as at least one media set finishes
-    await Promise.any([imagesPromise, videosPromise]).catch(() => {});
-    await Promise.allSettled([imagesPromise, videosPromise]);
+    await Promise.any([imagesPromise, videosPromise, staticPromise]).catch(() => {});
+    await Promise.allSettled([imagesPromise, videosPromise, staticPromise]);
 
     setChatHistory((ch) => [
       ...ch,
@@ -1325,33 +1336,122 @@ async function handleRegenerateVideo() {
   }
 }
 
-// somewhere near your other handlers
-async function handleGenerateStaticAd() {
-  const payload = {
-    industry: "cleaning",
-    size: "1080x1080",
-    inputs: {
-      businessName: form.businessName || "Sparkle & Shine",
-      phone: form.phone || "(210) 555-0147",
-      website: form.website || "",
-      location: form.city ? `${form.city}, ${form.state || ""}`.trim() : "San Antonio, TX",
-      offer: form.offer || "20% OFF first clean",
-      primaryColor: "#0d3b66",
-      accentColor: "#ffc857",
-      bgColor: "#0a1922"
+// --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
+async function handleGenerateStaticAd(template = "flyer_a") {
+  // template keys:
+  //  - "flyer_a": square flyer with top header, diagonal split, lists, CTA row (Template A)
+  //  - "poster_b": lifestyle background + centered white card + frame + leaves (Template B)
+
+  // Pull what we already have from the chat flow
+  const a = answers || {};
+
+  // Safe defaults (work for any industry)
+  const fallbackPhone = "(210) 555-0147";
+  const fallbackCity = "San Antonio, TX";
+  const saveAmount = "up to $1000";
+
+  // Common inputs every template can use
+  const common = {
+    industry: (a.industry || "Local Services").toString(),
+    businessName: (a.businessName || "Your Business").toString(),
+    website: (a.url || "").toString(),
+    location: a.city ? `${a.city}${a.state ? ", " + a.state : ""}` : (a.location || fallbackCity),
+    offer: (a.offer || "").toString(),
+    mainBenefit: (a.mainBenefit || "").toString(),
+    idealCustomer: (a.idealCustomer || "").toString(),
+    phone: (a.phone || fallbackPhone).toString(),
+    headline: (displayHeadline || "Limited-Time Offer").toString(),
+    subline: (displayBody || "").toString(),
+    cta: (normalizeOverlayCTA(displayCTA || "Learn more")).toString()
+  };
+
+  // Template-specific knobs, but still industry-agnostic
+  const templatePayloads = {
+    flyer_a: {
+      // Template A — “Home Cleaning” style flyer (works for any industry)
+      size: "1080x1080",
+      palette: {
+        header: "#0d3b66",     // dark teal header
+        body: "#dff3f4",       // light aqua body
+        accent: "#ff8b4a",     // orange for checkmarks/phone
+        textOnDark: "#ffffff",
+        textOnLight: "#2b3a44"
+      },
+      lists: {
+        // Use defaults if user didn’t provide; you can wire these from extra questions later
+        left: (a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]),
+        right: (a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"])
+      },
+      coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
+      showIcons: true,
+      headerSplitDiagonal: true,
+      roundedOuter: true
+    },
+    poster_b: {
+      // Template B — “Fall Flooring Sale” style poster (works for any industry)
+      size: "1080x1080",
+      frame: { outerWhite: true, softShadow: true },
+      card: { widthPct: 70, heightPct: 55, shadow: true },
+      // If you gathered dates/seasonal copy, pass them; otherwise we map generically
+      eventTitle: (a.eventTitle || `${common.industry} EVENT`).toString(),
+      dateRange: (a.dateRange || "LIMITED TIME ONLY").toString(),
+      saveAmount: (a.saveAmount || saveAmount).toString(),
+      financingLine: (a.financingLine || "PLUS SPECIAL FINANCING*").toString(),
+      qualifiers: (a.qualifiers || `On select ${common.industry} products and services`).toString(),
+      legal: (a.legal || "*With approved credit. Ask for details.").toString(),
+      seasonalLeaves: true,
+      backgroundHint: common.industry // backend can pick a relevant lifestyle photo
     }
   };
 
-  const res = await fetch(`${process.env.REACT_APP_API_BASE || ''}/api/generate-static-ad`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const data = await res.json();
-  if (!data.ok) { alert('Static ad failed: ' + data.error); return; }
-  // You can show the PNG in the UI:
-  setGeneratedImageUrl(data.pngUrl);
+  const payload = {
+    template,                // "flyer_a" or "poster_b"
+    inputs: common,          // text + CTA + brand basics
+    knobs: templatePayloads[template] || templatePayloads.flyer_a
+  };
+
+  try {
+    // Use same-origin API (Vercel rewrite → Render)
+    const res = await fetch(`${API_BASE}/generate-static-ad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data?.ok) {
+      const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
+      setError(msg);
+      alert(msg);
+      return;
+    }
+
+    // Normalize URL and preview it in the existing Image card
+    const png = toAbsoluteMedia(data.pngUrl || data.absoluteUrl || data.url || data.filename || "");
+    if (!png) {
+      setError("Static ad returned without a URL.");
+      alert("Static ad returned without a URL.");
+      return;
+    }
+
+    // Put the generated static PNG at the front of the carousel
+    setImageUrls([png, ...imageUrls.slice(0, 1)]);
+    setActiveImage(0);
+    setImageUrl(png);
+    setMediaType((prev) => (prev === "video" ? "both" : prev)); // make sure user can see it
+
+    // Optional: small toast in chat history
+    setChatHistory((ch) => [
+      ...ch,
+      { from: "gpt", text: `Static ad generated with template "${template}". Open the image to view at full size.` }
+    ]);
+  } catch (e) {
+    console.error("Static ad error:", e);
+    setError("Static ad failed. Please try again.");
+    alert("Static ad failed. Please try again.");
+  }
 }
+
 
 
   /* ---------------------- Render ---------------------- */
