@@ -4,8 +4,8 @@
 /**
  * Static Ad Generator (industry-aware → SVG/PNG)
  * - flyer_a (services) : SVG → PNG (unchanged)
- * - poster_b (retail)  : optional photo baked with Sharp OR randomized gradient bg
- *   + larger, cleaner card, auto-fit typography, brand pill clamp, industry spot icon
+ * - poster_b (retail)  : photo baked w/ Sharp OR randomized gradient bg
+ *   (bigger card, inline font sizes, brand pill clamp, no overlap)
  */
 
 const express = require('express');
@@ -177,8 +177,8 @@ function tplFlyerA({ W=1080, H=1080 }) {
 </svg>`;
 }
 
-/* ---- poster_b card (transparent) with size/typography knobs ---- */
-function tplPosterBCard({ cardW, cardH, padX, padY }) {
+/* ---- poster_b card (transparent) with numeric font sizes ---- */
+function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }) {
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -192,17 +192,17 @@ function tplPosterBCard({ cardW, cardH, padX, padY }) {
   </g>
 
   <g transform="translate(${padX}, ${padY})">
-    <!-- brand pill -->
-    <g transform="translate(${cardW - padX - 180}, -8)">
-      <rect width="180" height="42" rx="21" fill="#0f1a22" opacity="0.08"/>
-      <text style="font:700 26px Inter,system-ui; fill:#334554;" x="90" y="30" text-anchor="middle">{{brandName}}</text>
+    <!-- brand pill (clamped) -->
+    <g transform="translate(${Math.max(0, cardW - padX - 190)}, -6)">
+      <rect width="190" height="44" rx="22" fill="#0f1a22" opacity="0.08"/>
+      <text style="font:700 26px Inter,system-ui; fill:#334554;" x="95" y="30" text-anchor="middle">{{brandName}}</text>
     </g>
 
-    <text style="font:900 var(--fsTitle,78px)/1.05 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22;" x="0" y="0" dy="0.95em">{{eventTitle}}</text>
-    <text style="font:800 var(--fsH2,36px)/1.2 Inter,system-ui; fill:#334554;" x="0" y="82" dy="1.2em">{{dateRange}}</text>
-    <text style="font:900 var(--fsSave,62px)/1.05 Inter,system-ui; fill:{{accent}};" x="0" y="162" dy="1.25em">{{saveAmount}}</text>
-    <text style="font:800 var(--fsH2,36px)/1.2 Inter,system-ui; fill:#334554;" x="0" y="260" dy="1.1em">{{financingLine}}</text>
-    <text style="font:700 var(--fsBody,28px)/1.25 Inter,system-ui; fill:#66798a;" x="0" y="318" dy="1.2em">{{qualifiers}}</text>
+    <text style="font:900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22;" x="0" y="${fsTitle*0.05}">{{eventTitle}}</text>
+    <text style="font:800 ${fsH2}px/1.2 Inter,system-ui; fill:#334554;" x="0" y="${fsTitle + fsH2*1.3}">{{dateRange}}</text>
+    <text style="font:900 ${fsSave}px/1.05 Inter,system-ui; fill:{{accent}};" x="0" y="${fsTitle + fsH2*1.3 + fsSave*1.25}">{{saveAmount}}</text>
+    <text style="font:800 ${fsH2}px/1.2 Inter,system-ui; fill:#334554;" x="0" y="${fsTitle + fsH2*1.3 + fsSave*1.25 + fsH2*1.2}">{{financingLine}}</text>
+    <text style="font:700 ${fsBody}px/1.25 Inter,system-ui; fill:#66798a;" x="0" y="${fsTitle + fsH2*1.3 + fsSave*1.25 + fsH2*1.2 + fsBody*1.25}">{{qualifiers}}</text>
   </g>
 
   {{#legal}}
@@ -253,20 +253,15 @@ function fetchBuffer(url) {
 function industrySpotSVG(kind, width, height, color = '#ffffff') {
   const o = 0.12; // opacity
   switch (kind) {
-    case 'home_cleaning':
-      return `<g opacity="${o}" transform="translate(${width*0.62}, ${height*0.18}) scale(2)">
-        <path d="M10 30 h40 l5 40 h-50 z" fill="${color}"/>
-        <rect x="5" y="70" width="60" height="10" rx="5" fill="${color}"/>
-      </g>`;
-    case 'fashion':
-      return `<g opacity="${o}" transform="translate(${width*0.65}, ${height*0.2}) scale(2)">
-        <path d="M20 20 h40 l-10 20 h-20 z" fill="${color}"/>
-        <rect x="15" y="20" width="6" height="30" rx="3" fill="${color}"/>
-      </g>`;
     case 'electronics':
-      return `<g opacity="${o}" transform="translate(${width*0.60}, ${height*0.2}) scale(2)">
+      return `<g opacity="${o}" transform="translate(${width*0.58}, ${height*0.18}) scale(2)">
         <rect x="10" y="20" width="60" height="40" rx="6" fill="${color}"/>
         <rect x="25" y="62" width="30" height="6" rx="3" fill="${color}"/>
+      </g>`;
+    case 'fashion':
+      return `<g opacity="${o}" transform="translate(${width*0.62}, ${height*0.2}) scale(2)">
+        <path d="M20 20 h40 l-10 20 h-20 z" fill="${color}"/>
+        <rect x="15" y="20" width="6" height="30" rx="3" fill="${color}"/>
       </g>`;
     default:
       return `<circle cx="${width*0.18}" cy="${height*0.25}" r="120" fill="${color}" opacity="${o}"/>`;
@@ -275,9 +270,7 @@ function industrySpotSVG(kind, width, height, color = '#ffffff') {
 
 /* Randomized gradient + noise + vignette (used when no photo). */
 function randomGradientSVG({ width, height, accent, seed }) {
-  // seed influences hue rotation & angle
-  const r = (min, max) => min + (seed % 997) / 997 * (max - min);
-  const angle = Math.floor(r(20, 340));
+  const angle = 20 + (seed % 320);
   return `
   <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -338,7 +331,6 @@ async function buildPosterBackground({
     layers.push({ input: grad, blend: 'over' });
   }
 
-  // industry spot
   const spot = Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       ${industrySpotSVG(industryKind, width, height, '#ffffff')}
@@ -404,7 +396,6 @@ router.post('/generate-static-ad', async (req, res) => {
     const industry = inputs.industry || 'Local Services';
     const prof = profileForIndustry(industry);
 
-    // Decide template for 'auto'
     const template =
       templateReq !== 'auto'
         ? templateReq
@@ -498,15 +489,15 @@ router.post('/generate-static-ad', async (req, res) => {
       throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
-    // compute typography sizes based on content length (keeps text inside card)
+    // font sizes (inline → no CSS vars; avoids tiny text)
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave  = String(mergedKnobsB.saveAmount || "").length;
-    const fsTitle = clamp(88 - Math.max(0, lenTitle - 16) * 2.2, 60, 88);
-    const fsSave  = clamp(70 - Math.max(0, lenSave  - 14) * 2.0, 48, 72);
-    const fsH2    = 36;
-    const fsBody  = 28;
+    const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 60, 92);
+    const fsSave  = clamp(76 - Math.max(0, lenSave  - 12) * 2.2, 48, 76);
+    const fsH2    = 38;
+    const fsBody  = 30;
 
-    // choose background
+    // choose background (photo if provided, else gradient)
     let bgUrl = mergedKnobsB.backgroundUrl || "";
     if (!bgUrl) bgUrl = selfUrl(req, '/__fallback/1200.jpg');
 
@@ -520,7 +511,7 @@ router.post('/generate-static-ad', async (req, res) => {
     });
 
     // render card SVG (bigger card + paddings)
-    const cardW = 820, cardH = 560, padX = 56, padY = 64;
+    const cardW = 860, cardH = 580, padX = 60, padY = 68;
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitle: mergedKnobsB.eventTitle,
@@ -532,18 +523,10 @@ router.post('/generate-static-ad', async (req, res) => {
       accent: mergedKnobsB.palette.accent || '#ff7b41'
     };
 
-    // inject CSS custom props for font sizes
-    const cardSvg = mustache.render(tplPosterBCard({ cardW, cardH, padX, padY }), cardVars)
-      .replace('</svg>', `
-        <style>
-          :root{
-            --fsTitle:${fsTitle}px;
-            --fsSave:${fsSave}px;
-            --fsH2:${fsH2}px;
-            --fsBody:${fsBody}px;
-          }
-        </style>
-      </svg>`);
+    const cardSvg = mustache.render(
+      tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }),
+      cardVars
+    );
 
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
