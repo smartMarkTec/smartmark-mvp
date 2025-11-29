@@ -452,6 +452,20 @@ function toAbsoluteMedia(u) {
   return s; // last resort
 }
 
+/* Route any external IMAGE url through our server proxy to avoid CORS */
+function proxyImg(u = "") {
+  if (!u) return "";
+  const s = String(u).trim();
+  // Already same-origin or already proxied
+  if (s.startsWith("/")) return s;
+  if (s.startsWith(`${API_BASE}/proxy-img?u=`)) return s;
+  if (/^https?:\/\//i.test(s)) {
+    return `${API_BASE}/proxy-img?u=${encodeURIComponent(s)}`;
+  }
+  // relative like "media/x" (server will serve it), leave as-is but normalize later
+  return s;
+}
+
 /* --- headRangeWarm: self-contained, no shared controllers --- */
 async function headRangeWarm(label, url) {
   if (!url) return false;
@@ -478,31 +492,35 @@ async function headRangeWarm(label, url) {
 const parseImageResults = (data) => {
   const out = [];
 
-  // Accept several possible shapes from the server
+  const push = (u0) => {
+    if (!u0) return;
+    const raw = typeof u0 === "string" ? u0 : (u0?.absoluteUrl || u0?.url || u0?.filename);
+    if (!raw) return;
+    // If it’s absolute http(s), send through our proxy to avoid CORS in <img/> and warmers
+    const maybeProxied = /^https?:\/\//i.test(raw) ? proxyImg(raw) : raw;
+    // Normalize to same-origin (/api/media/.. etc.)
+    out.push(toAbsoluteMedia(maybeProxied.startsWith("/api/") ? maybeProxied : maybeProxied));
+  };
+
   if (Array.isArray(data?.imageVariations)) {
-    for (const v of data.imageVariations) {
-      const u = v?.absoluteUrl || v?.url || v?.filename;
-      if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || u.startsWith("/api/") ? u : `/api/media/${u}`));
-    }
+    for (const v of data.imageVariations) push(v);
   }
   if (Array.isArray(data?.images)) {
-    for (const u0 of data.images) {
-      const u = typeof u0 === "string" ? u0 : (u0?.absoluteUrl || u0?.url || u0?.filename);
-      if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || String(u).startsWith("/api/") ? u : `/api/media/${u}`));
-    }
+    for (const u0 of data.images) push(u0);
   }
   if (out.length === 0) {
-    const u = data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename;
-    if (u) out.push(toAbsoluteMedia(/^https?:\/\//.test(u) || String(u).startsWith("/api/") ? u : `/api/media/${u}`));
+    push(data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename);
   }
 
   const uniq = Array.from(new Set(out));
-  return uniq.slice(0, 2); // clamp to exactly two
+  return uniq.slice(0, 2);
 };
 
+
 async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
-  const fallbackA = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`;
-  const fallbackB = `https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`;
+  const fallbackA = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`);
+const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`);
+
 
   try {
     await warmBackend();
