@@ -3,7 +3,7 @@
 
 /**
  * Static Ad Generator (industry-aware → SVG/PNG)
- * - flyer_a (services) : SVG → PNG (unchanged)
+ * - flyer_a (services) : SVG → PNG
  * - poster_b (retail)  : photo baked w/ Sharp OR randomized gradient bg
  *   (bigger card, inline font sizes, brand pill clamp, no overlap)
  */
@@ -359,7 +359,6 @@ async function buildPosterBackground({
 }
 
 // GET /api/proxy-img?u=<encoded URL>
-// Fetch a remote image and re-serve it with permissive CORS
 router.get('/proxy-img', async (req, res) => {
   try {
     const u = req.query.u;
@@ -428,7 +427,7 @@ const posterSchema = {
   }
 };
 
-/* ------------------------ Route ------------------------ */
+/* ------------------------ Route: /generate-static-ad ------------------------ */
 
 router.post('/generate-static-ad', async (req, res) => {
   try {
@@ -600,43 +599,114 @@ router.post('/generate-static-ad', async (req, res) => {
   }
 });
 
-// ---- Back-compat for older frontend: POST /api/generate-image-from-prompt ----
+/* ------------------------ NEW: /generate-image-from-prompt ------------------------
+   Direct implementation that returns TWO image variants (A/B) without
+   forwarding into the router (avoids Express “apply” crash).
+   Accepts both the new payload (with `answers`, overlay fields) and the
+   old payload (industry/businessName/etc. at top level).
+-----------------------------------------------------------------------------------*/
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
-    // Expecting { prompt, industry, businessName, location, backgroundUrl? }
-    const { prompt = '', industry = 'retail', businessName = 'Your Brand',
-            location = 'Your City', backgroundUrl = '' } = req.body || {};
+    const b = req.body || {};
+    const a = b.answers || {};
+    // Accept both shapes
+    const industry = a.industry || b.industry || 'Local Services';
+    const businessName = a.businessName || b.businessName || 'Your Brand';
+    const location = a.location || b.location || 'Your City';
+    const backgroundUrl = a.backgroundUrl || b.backgroundUrl || '';
 
-    const kind = classifyIndustry(industry);
-    const template = ['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(kind)
-      ? 'poster_b' : 'flyer_a';
-
-    // Rebuild body to reuse the new route
-    req.body = {
-      template,
-      inputs: {
-        industry, businessName, location,
-        // required only for flyer_a validation:
-        phone: '(000) 000-0000', headline: ' ', subline: ' ', cta: ' '
-      },
-      knobs: {
-        // sensible defaults; your new route will merge profile text anyway
-        eventTitle: 'NEW ARRIVALS',
-        dateRange: 'LIMITED TIME',
-        saveAmount: 'BIG SAVINGS',
-        financingLine: '',
-        qualifiers: '',
-        backgroundUrl
-      }
+    const overlay = {
+      headline: ((b.overlayHeadline || a.overlayHeadline || '') + '').slice(0, 55),
+      body: b.overlayBody || a.overlayBody || '',
+      cta: b.overlayCTA || a.overlayCTA || 'Learn more',
     };
 
-    // Internally dispatch to the new handler
-    return router.handle({ ...req, url: '/generate-static-ad', method: 'POST' }, res);
-  } catch (e) {
-    console.error('[generate-image-from-prompt shim]', e);
-    res.status(400).json({ ok:false, error:String(e?.message||e) });
+    const prof = profileForIndustry(industry);
+    const isPoster = ['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(prof.kind);
+
+    const files = [];
+    const W = 1080, H = 1080;
+
+    if (isPoster) {
+      // Two Poster B variants: one with provided BG (if any), one forced gradient
+      const variants = [ backgroundUrl || selfUrl(req, '/__fallback/1200.jpg'), '' ];
+      for (const bgUrl of variants) {
+        const bgPng = await buildPosterBackground({
+          width: W, height: H, bgUrl,
+          accent: (prof.palette && prof.palette.accent) || '#ff7b41',
+          industryKind: prof.kind,
+          seed: Date.now() + Math.floor(Math.random() * 9999)
+        });
+
+        // font sizes tuned to typical copy
+        const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
+
+        const cardW = 860, cardH = 580, padX = 60, padY = 68;
+        const cardVars = {
+          brandName: ellipsize(businessName, 22),
+          eventTitle: overlay.headline || prof.eventTitle || 'SEASONAL EVENT',
+          dateRange: prof.dateRange || 'LIMITED TIME ONLY',
+          saveAmount: prof.saveAmount || 'BIG SAVINGS',
+          financingLine: prof.financingLine || '',
+          qualifiers: overlay.body || prof.qualifiers || '',
+          legal: prof.legal || '',
+          accent: (prof.palette && prof.palette.accent) || '#ff7b41'
+        };
+
+        const cardSvg = mustache.render(
+          tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }),
+          cardVars
+        );
+        const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
+
+        const left = Math.round((W - cardW) / 2);
+        const top  = Math.round((H - cardH) / 2);
+
+        const finalPng = await sharp(bgPng)
+          .composite([{ input: cardPng, left, top }])
+          .png({ quality: 92 })
+          .toBuffer();
+
+        const fname = `static-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+        await fs.promises.writeFile(path.join(GEN_DIR, fname), finalPng);
+        files.push(makeMediaUrl(req, fname));
+      }
+    } else {
+      // Flyer A: generate once (with overlay text if provided) and duplicate for A/B
+      const palette = prof.palette || { header: '#0d3b66', body: '#dff3f4', accent: '#ff8b4a', textOnDark: '#ffffff', textOnLight: '#2b3a44' };
+      const lists = withListLayout(prof.lists || { left:["Free Quote","Same-Day","Licensed","Insured"], right:["Great Reviews","Family Owned","Fair Prices","Guaranteed"] });
+
+      const vars = {
+        headline: overlay.headline || prof.headline || 'LOCAL SERVICES',
+        subline: overlay.body || prof.subline || 'Reliable • Friendly • On Time',
+        phone: a.phone || '(000) 000-0000',
+        cta: overlay.cta || prof.cta || 'Contact Us',
+        coverage: prof.coverage || 'Serving your area',
+        palette,
+        accentLeft: palette.accent,
+        accentRight: '#1f3b58',
+        lists
+      };
+
+      const svg = mustache.render(tplFlyerA({ W, H }), vars);
+      const pngBuf = await sharp(Buffer.from(svg)).png({ quality: 92 }).toBuffer();
+
+      for (let i = 0; i < 2; i++) {
+        const fname = `static-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+        await fs.promises.writeFile(path.join(GEN_DIR, fname), pngBuf);
+        files.push(makeMediaUrl(req, fname));
+      }
+    }
+
+    return res.json({
+      ok: true,
+      images: files.map(u => ({ absoluteUrl: u })) // frontend parseImageResults accepts this
+    });
+
+  } catch (err) {
+    console.error('[generate-image-from-prompt]', err);
+    res.status(400).json({ ok:false, error:String(err?.message||err) });
   }
 });
-
 
 module.exports = router;
