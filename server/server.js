@@ -43,11 +43,15 @@ app.use((req, res, next) => {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS,HEAD');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID, Range'
+  );
   res.setHeader('Access-Control-Max-Age', '86400');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // media can be embedded
+  // expose size/range so your headRangeWarm() can read them
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
 });
@@ -140,6 +144,12 @@ app.use('/auth', authRoutes);
 const staticAdsRoutes = require('./routes/staticAds');
 app.use('/api', staticAdsRoutes);
 
+// 👉 Root-level alias for legacy clients calling `/proxy-img`
+// (handlers are exported from staticAds.js)
+const { proxyImgHandler, proxyHeadHandler } = require('./routes/staticAds');
+app.get('/proxy-img', proxyImgHandler);
+app.head('/proxy-img', proxyHeadHandler);
+
 const aiRoutes = require('./routes/ai');
 app.use('/api', aiRoutes);
 
@@ -171,7 +181,7 @@ app.use('/smart', smartRoutes);
 /* --------------------------------- HEALTH -------------------------------- */
 app.get(['/healthz', '/api/health', '/health'], (_req, res) => {
   res.set('Cache-Control', 'no-store');
-  res.json({ status: 'OK', uptime: process.uptime(), ts: Date.now() });
+  res.json({ status: 'OK', uptime: Math.round(process.uptime()), ts: Date.now() });
 });
 
 /* ---------------------------------- ROOT --------------------------------- */

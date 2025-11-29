@@ -13,22 +13,6 @@
 const express = require('express');
 const router = express.Router();
 
-/* --- CORS for all routes in this router --- */
-router.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-  } else {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-  if (req.method === 'OPTIONS') return res.sendStatus(204);
-  next();
-});
-
 const fs = require('fs');
 const path = require('path');
 const mustache = require('mustache');
@@ -57,7 +41,35 @@ function selfUrl(req, p = '') {
   return `${base}${p.startsWith('/') ? p : `/${p}`}`;
 }
 
-/* ------------------------ Helpers: HTTP fetch ------------------------ */
+/* ------------------------ CORS (for this router) ------------------------ */
+router.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
+  else { res.setHeader('Access-Control-Allow-Origin', '*'); }
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,HEAD');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Range');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
+/* ------------------------ HTTP helpers ------------------------ */
+function fetchUpstream(method, url, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      const lib = url.startsWith('https') ? https : http;
+      const req = lib.request(url, { method, timeout: 15000, headers: extraHeaders }, (res) => {
+        const chunks = [];
+        res.on('data', d => chunks.push(d));
+        res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(new Error('HTTP timeout')); });
+      req.end();
+    } catch (e) { reject(e); }
+  });
+}
 
 function fetchBuffer(url, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
@@ -157,7 +169,6 @@ function profileForIndustry(industry = "") {
 
 /* ------------------------ Templates ------------------------ */
 
-// ---- flyer_a (unchanged) ----
 function tplFlyerA({ W=1080, H=1080 }) {
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -220,7 +231,6 @@ function tplFlyerA({ W=1080, H=1080 }) {
 </svg>`;
 }
 
-/* ---- poster_b card (transparent) with numeric font sizes ---- */
 function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }) {
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -235,7 +245,6 @@ function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBod
   </g>
 
   <g transform="translate(${padX}, ${padY})">
-    <!-- brand pill (clamped) -->
     <g transform="translate(${Math.max(0, cardW - padX - 190)}, -6)">
       <rect width="190" height="44" rx="22" fill="#0f1a22" opacity="0.08"/>
       <text style="font:700 26px Inter,system-ui; fill:#334554;" x="95" y="30" text-anchor="middle">{{brandName}}</text>
@@ -267,7 +276,6 @@ function pickLocalStockPath(kind, seed = Date.now()) {
       return path.join(dir, files[idx]);
     }
   } catch {}
-  // fallback to generic bucket
   try {
     const gdir = path.join(STOCK_DIR, 'generic');
     const gfiles = fs.readdirSync(gdir).filter(f => /\.(jpe?g|png|webp)$/i.test(f));
@@ -279,19 +287,19 @@ function pickLocalStockPath(kind, seed = Date.now()) {
   return null;
 }
 
-/* ------------------------ Pexels fetch (photo buffer) ------------------------ */
+/* ------------------------ Pexels fetch ------------------------ */
 
 async function fetchPexelsPhotoBuffer(query, seed = Date.now()) {
   const key = process.env.PEXELS_API_KEY;
   if (!key) throw new Error('PEXELS_API_KEY missing');
 
-  const page = 1 + (seed % 5); // light variation
+  const page = 1 + (seed % 5);
   const perPage = 15;
   const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${perPage}&page=${page}&orientation=square`;
 
-  const jsonBuf = await fetchBuffer(url, { Authorization: key });
+  const json = await fetchBuffer(url, { Authorization: key });
   let data;
-  try { data = JSON.parse(jsonBuf.toString('utf8')); } catch { throw new Error('pexels JSON parse error'); }
+  try { data = JSON.parse(json.toString('utf8')); } catch { throw new Error('pexels JSON parse error'); }
 
   const arr = Array.isArray(data?.photos) ? data.photos : [];
   if (!arr.length) throw new Error('pexels: no results');
@@ -324,7 +332,7 @@ function pexelsQueryForKind(kind, hint = '') {
   return map[kind] || map.generic;
 }
 
-/* ------------------------ Image background (photo only) ------------------------ */
+/* ------------------------ Photo background (baked) ------------------------ */
 
 async function buildPosterBackgroundFromPhotoBuffer({
   width = 1080,
@@ -406,7 +414,7 @@ function withListLayout(lists = {}) {
   };
 }
 
-/* ------------------------ Route: /generate-static-ad ------------------------ */
+/* ------------------------ ROUTE: /generate-static-ad ------------------------ */
 
 router.post('/generate-static-ad', async (req, res) => {
   try {
@@ -493,7 +501,6 @@ router.post('/generate-static-ad', async (req, res) => {
     };
     const mergedKnobsB = {
       size: (knobs.size || '1080x1080'),
-      // optional override from client
       backgroundUrl: knobs.backgroundUrl || "",
       backgroundHint: knobs.backgroundHint || prof.bgHint || '',
       eventTitle: knobs.eventTitle || prof.eventTitle || 'SEASONAL EVENT',
@@ -510,48 +517,28 @@ router.post('/generate-static-ad', async (req, res) => {
       throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
-    // Decide the photo buffer (URL override -> Pexels -> local stock -> fallback)
     let photoBuf = null;
     const seed = Date.now();
 
     if (mergedKnobsB.backgroundUrl) {
-      try {
-        photoBuf = await fetchBuffer(mergedKnobsB.backgroundUrl);
-      } catch (e) {
-        console.warn('[poster_b] backgroundUrl fetch failed, will try Pexels/local fallback:', e.message);
-      }
+      try { photoBuf = await fetchBuffer(mergedKnobsB.backgroundUrl); }
+      catch (e) { console.warn('[poster_b] backgroundUrl fetch failed → try Pexels/local:', e.message); }
     }
-
     if (!photoBuf) {
       try {
         const q = pexelsQueryForKind(classifyIndustry(industry), mergedKnobsB.backgroundHint);
         photoBuf = await fetchPexelsPhotoBuffer(q, seed);
-      } catch (e) {
-        console.warn('[poster_b] Pexels fetch failed:', e.message);
-      }
+      } catch (e) { console.warn('[poster_b] Pexels fetch failed:', e.message); }
     }
-
     if (!photoBuf) {
       const localPath = pickLocalStockPath(classifyIndustry(industry), seed);
-      if (localPath) {
-        try { photoBuf = fs.readFileSync(localPath); } catch {}
-      }
+      if (localPath) { try { photoBuf = fs.readFileSync(localPath); } catch {} }
     }
-
-    if (!photoBuf) {
-      // Last resort: baked fallback (still a real image file)
-      try { photoBuf = await fetchBuffer(selfUrl(req, '/__fallback/1200.jpg')); } catch {}
-    }
-
+    if (!photoBuf) { try { photoBuf = await fetchBuffer(selfUrl(req, '/__fallback/1200.jpg')); } catch {} }
     if (!photoBuf) throw new Error('no background photo available');
 
-    const bgPng = await buildPosterBackgroundFromPhotoBuffer({
-      width: 1080,
-      height: 1080,
-      photoBuffer: photoBuf
-    });
+    const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width:1080, height:1080, photoBuffer: photoBuf });
 
-    // font sizes (inline → avoids tiny text)
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave  = String(mergedKnobsB.saveAmount || "").length;
     const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 60, 92);
@@ -559,7 +546,6 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsH2    = 38;
     const fsBody  = 30;
 
-    // render card SVG (bigger card + paddings)
     const cardW = 860, cardH = 580, padX = 60, padY = 68;
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
@@ -578,7 +564,6 @@ router.post('/generate-static-ad', async (req, res) => {
     );
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
-    // center composite
     const left = Math.round((1080 - cardW) / 2);
     const top  = Math.round((1080 - cardH) / 2);
 
@@ -604,10 +589,70 @@ router.post('/generate-static-ad', async (req, res) => {
   }
 });
 
-/* ------------------------ /generate-image-from-prompt (no recursion) ------------------------
-   Returns TWO baked poster images for retail-like industries for A/B variation,
-   each pulling a different Pexels photo (seeded variation).
----------------------------------------------------------------------------------------------*/
+/* ------------------------ PROXY (GET + HEAD with Range) ------------------------ */
+
+async function proxyImgHandler(req, res) {
+  try {
+    const u = req.query.u;
+    if (!u || typeof u !== 'string') return res.status(400).send('missing u');
+
+    const passHeaders = {};
+    if (req.headers['range']) passHeaders['Range'] = req.headers['range'];
+
+    const { status, headers, body } = await fetchUpstream('GET', u, passHeaders);
+
+    // Mirror upstream status/headers; ensure permissive CORS + range
+    res.status(status || 200);
+    Object.entries(headers || {}).forEach(([k, v]) => {
+      if (!k) return;
+      const key = k.toLowerCase();
+      if (['transfer-encoding', 'connection'].includes(key)) return;
+      res.setHeader(k, v);
+    });
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Accept-Ranges', headers?.['accept-ranges'] || 'bytes');
+
+    return res.end(body);
+  } catch (e) {
+    console.error('[proxy-img GET]', e);
+    res.status(502).send('bad upstream');
+  }
+}
+
+async function proxyHeadHandler(req, res) {
+  try {
+    const u = req.query.u;
+    if (!u || typeof u !== 'string') return res.status(400).end();
+
+    const passHeaders = {};
+    if (req.headers['range']) passHeaders['Range'] = req.headers['range'];
+
+    const { status, headers } = await fetchUpstream('HEAD', u, passHeaders);
+
+    res.status(status || 200);
+    Object.entries(headers || {}).forEach(([k, v]) => {
+      if (!k) return;
+      const key = k.toLowerCase();
+      if (['transfer-encoding', 'connection'].includes(key)) return;
+      res.setHeader(k, v);
+    });
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Vary', 'Origin');
+    res.setHeader('Accept-Ranges', headers?.['accept-ranges'] || 'bytes');
+
+    return res.end();
+  } catch (e) {
+    console.error('[proxy-img HEAD]', e);
+    res.status(502).end();
+  }
+}
+
+// Mount on router (will be visible at /api/proxy-img once router is mounted at /api)
+router.get('/proxy-img', proxyImgHandler);
+router.head('/proxy-img', proxyHeadHandler);
+
+/* ------------------------ /generate-image-from-prompt (standalone) ------------------------ */
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const b = req.body || {};
@@ -630,20 +675,15 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const files = [];
 
     if (isPoster) {
-      const seeds = [Date.now(), Date.now() + 7777]; // two different picks for variety
+      const seeds = [Date.now(), Date.now() + 7777];
       for (const seed of seeds) {
-        // priority: explicit URL → Pexels → local stock → fallback
         let photoBuf = null;
-        if (backgroundUrl) {
-          try { photoBuf = await fetchBuffer(backgroundUrl); } catch {}
-        }
+        if (backgroundUrl) { try { photoBuf = await fetchBuffer(backgroundUrl); } catch {} }
         if (!photoBuf) {
           try {
             const q = pexelsQueryForKind(prof.kind, prof.bgHint);
             photoBuf = await fetchPexelsPhotoBuffer(q, seed);
-          } catch (e) {
-            console.warn('[generate-image-from-prompt] Pexels failed:', e.message);
-          }
+          } catch (e) { console.warn('[generate-image-from-prompt] Pexels failed:', e.message); }
         }
         if (!photoBuf) {
           const localPath = pickLocalStockPath(prof.kind, seed);
@@ -652,11 +692,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         if (!photoBuf) { try { photoBuf = await fetchBuffer(selfUrl(req, '/__fallback/1200.jpg')); } catch {} }
         if (!photoBuf) throw new Error('no background photo');
 
-        const bgPng = await buildPosterBackgroundFromPhotoBuffer({
-          width: W, height: H, photoBuffer: photoBuf
-        });
+        const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width: W, height: H, photoBuffer: photoBuf });
 
-        // copy from profile + overlay
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
         const cardW = 860, cardH = 580, padX = 60, padY = 68;
         const cardVars = {
@@ -688,7 +725,6 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
     } else {
-      // Fallback to flyer A (services) – single render duplicated to A/B
       const palette = prof.palette || { header: '#0d3b66', body: '#dff3f4', accent: '#ff8b4a', textOnDark: '#ffffff', textOnLight: '#2b3a44' };
       const lists = withListLayout(prof.lists || { left:["Free Quote","Same-Day","Licensed","Insured"], right:["Great Reviews","Family Owned","Fair Prices","Guaranteed"] });
       const vars = {
@@ -719,4 +755,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
   }
 });
 
+/* ------------------------ Exports ------------------------ */
 module.exports = router;
+module.exports.proxyImgHandler = proxyImgHandler;
+module.exports.proxyHeadHandler = proxyHeadHandler;
