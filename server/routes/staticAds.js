@@ -4,8 +4,10 @@
 /**
  * Static Ad Generator (industry-aware → SVG/PNG)
  * - flyer_a (services) : SVG → PNG
- * - poster_b (retail)  : photo baked w/ Sharp OR randomized gradient bg
- *   (bigger card, inline font sizes, brand pill clamp, no overlap)
+ * - poster_b (retail)  : photo baked w/ Sharp (ALWAYS a photo; Pexels → local stock → fallback)
+ *   - No gradients.
+ *   - Uses PEXELS_API_KEY if present to fetch industry-relevant images.
+ *   - Variation: picks a random result each request (seeded).
  */
 
 const express = require('express');
@@ -43,6 +45,9 @@ const GEN_DIR =
   path.join(process.cwd(), 'server', 'public', 'generated');
 fs.mkdirSync(GEN_DIR, { recursive: true });
 
+const STOCK_DIR = path.join(process.cwd(), 'server', 'public', 'stock'); // local baked photos
+try { fs.mkdirSync(STOCK_DIR, { recursive: true }); } catch {}
+
 function makeMediaUrl(req, filename) {
   const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
   return `${base}/api/media/${filename}`;
@@ -50,6 +55,27 @@ function makeMediaUrl(req, filename) {
 function selfUrl(req, p = '') {
   const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
   return `${base}${p.startsWith('/') ? p : `/${p}`}`;
+}
+
+/* ------------------------ Helpers: HTTP fetch ------------------------ */
+
+function fetchBuffer(url, extraHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      const lib = url.startsWith('https') ? https : http;
+      const req = lib.get(url, { timeout: 15000, headers: extraHeaders }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          return fetchBuffer(res.headers.location, extraHeaders).then(resolve).catch(reject);
+        }
+        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+        const chunks = [];
+        res.on('data', (d) => chunks.push(d));
+        res.on('end', () => resolve(Buffer.concat(chunks)));
+      });
+      req.on('error', reject);
+      req.on('timeout', () => { req.destroy(new Error('HTTP timeout')); });
+    } catch (e) { reject(e); }
+  });
 }
 
 /* ------------------------ Industry Profiles ------------------------ */
@@ -230,159 +256,96 @@ function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBod
 </svg>`;
 }
 
-/* ------------------------ Helpers ------------------------ */
+/* ------------------------ Utility: local stock picker ------------------------ */
 
-function layoutList(items) {
-  const startY = 56, step = 54;
-  return (items || []).slice(0, 6).map((t, i) => ({ y: startY + i * step, text: t }));
+function pickLocalStockPath(kind, seed = Date.now()) {
+  const dir = path.join(STOCK_DIR, kind);
+  try {
+    const files = fs.readdirSync(dir).filter(f => /\.(jpe?g|png|webp)$/i.test(f));
+    if (files.length) {
+      const idx = Math.floor((typeof seed === 'number' ? seed : Date.now()) % files.length);
+      return path.join(dir, files[idx]);
+    }
+  } catch {}
+  // fallback to generic bucket
+  try {
+    const gdir = path.join(STOCK_DIR, 'generic');
+    const gfiles = fs.readdirSync(gdir).filter(f => /\.(jpe?g|png|webp)$/i.test(f));
+    if (gfiles.length) {
+      const idx = Math.floor((typeof seed === 'number' ? seed : Date.now()) % gfiles.length);
+      return path.join(gdir, gfiles[idx]);
+    }
+  } catch {}
+  return null;
 }
-function withListLayout(lists = {}) {
-  return {
-    left: layoutList(lists.left || []),
-    right: layoutList(lists.right || [])
+
+/* ------------------------ Pexels fetch (photo buffer) ------------------------ */
+
+async function fetchPexelsPhotoBuffer(query, seed = Date.now()) {
+  const key = process.env.PEXELS_API_KEY;
+  if (!key) throw new Error('PEXELS_API_KEY missing');
+
+  const page = 1 + (seed % 5); // light variation
+  const perPage = 15;
+  const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(query)}&per_page=${perPage}&page=${page}&orientation=square`;
+
+  const jsonBuf = await fetchBuffer(url, { Authorization: key });
+  let data;
+  try { data = JSON.parse(jsonBuf.toString('utf8')); } catch { throw new Error('pexels JSON parse error'); }
+
+  const arr = Array.isArray(data?.photos) ? data.photos : [];
+  if (!arr.length) throw new Error('pexels: no results');
+
+  const pick = arr[Math.floor((seed * 13) % arr.length)];
+  const src = pick?.src?.large2x || pick?.src?.large || pick?.src?.original || pick?.src?.medium;
+  if (!src) throw new Error('pexels: no src');
+
+  return await fetchBuffer(src);
+}
+
+function pexelsQueryForKind(kind, hint = '') {
+  const h = (hint || '').trim();
+  const map = {
+    fashion:      h || 'fashion clothing rack apparel boutique models streetwear',
+    electronics:  h || 'electronics gadgets laptop smartphone tech workspace',
+    restaurant:   h || 'restaurant food dining table dishes gourmet chef',
+    coffee:       h || 'coffee shop cafe espresso cappuccino latte barista',
+    pets:         h || 'pets dogs cats pet care grooming',
+    real_estate:  h || 'modern home interior living room kitchen real estate',
+    flooring:     h || 'hardwood floor vinyl tile flooring interior',
+    fitness:      h || 'gym fitness workout training weights',
+    salon_spa:    h || 'salon spa beauty hair nails skin care',
+    auto:         h || 'auto repair car garage mechanic workshop',
+    landscaping:  h || 'landscaping lawn garden yard mowing',
+    hvac_plumbing:h || 'plumbing hvac air conditioner furnace repair',
+    home_cleaning:h || 'cleaning service home cleaning tidy house',
+    generic:      h || 'small business storefront local shop'
   };
-}
-const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-function ellipsize(s = "", max = 22) {
-  s = String(s).trim();
-  return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+  return map[kind] || map.generic;
 }
 
-/* tiny fetch to buffer */
-function fetchBuffer(url) {
-  return new Promise((resolve, reject) => {
-    try {
-      const lib = url.startsWith('https') ? https : http;
-      lib.get(url, { timeout: 12000 }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return fetchBuffer(res.headers.location).then(resolve).catch(reject);
-        }
-        if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
-        const chunks = [];
-        res.on('data', (d) => chunks.push(d));
-        res.on('end', () => resolve(Buffer.concat(chunks)));
-      }).on('error', reject);
-    } catch (e) { reject(e); }
-  });
-}
+/* ------------------------ Image background (photo only) ------------------------ */
 
-/* subtle industry “spot” icon (vector) */
-function industrySpotSVG(kind, width, height, color = '#ffffff') {
-  const o = 0.12; // opacity
-  switch (kind) {
-    case 'electronics':
-      return `<g opacity="${o}" transform="translate(${width*0.58}, ${height*0.18}) scale(2)">
-        <rect x="10" y="20" width="60" height="40" rx="6" fill="${color}"/>
-        <rect x="25" y="62" width="30" height="6" rx="3" fill="${color}"/>
-      </g>`;
-    case 'fashion':
-      return `<g opacity="${o}" transform="translate(${width*0.62}, ${height*0.2}) scale(2)">
-        <path d="M20 20 h40 l-10 20 h-20 z" fill="${color}"/>
-        <rect x="15" y="20" width="6" height="30" rx="3" fill="${color}"/>
-      </g>`;
-    default:
-      return `<circle cx="${width*0.18}" cy="${height*0.25}" r="120" fill="${color}" opacity="${o}"/>`;
-  }
-}
-
-/* Randomized gradient + noise + vignette (used when no photo). */
-function randomGradientSVG({ width, height, accent, seed }) {
-  const angle = 20 + (seed % 320);
-  return `
-  <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="g" gradientTransform="rotate(${angle})">
-        <stop offset="0%" stop-color="${accent}" stop-opacity="0.95"/>
-        <stop offset="100%" stop-color="#0e151c" stop-opacity="1"/>
-      </linearGradient>
-      <radialGradient id="v" cx="50%" cy="45%" r="70%">
-        <stop offset="0%" stop-color="#0d131a" stop-opacity="0.0"/>
-        <stop offset="70%" stop-color="#0d131a" stop-opacity="0.35"/>
-        <stop offset="100%" stop-color="#0d131a" stop-opacity="0.75"/>
-      </radialGradient>
-      <filter id="noise">
-        <feTurbulence type="fractalNoise" baseFrequency="0.8" numOctaves="2" stitchTiles="stitch"/>
-        <feColorMatrix type="saturate" values="0"/>
-        <feComponentTransfer><feFuncA type="linear" slope="0.025"/></feComponentTransfer>
-      </filter>
-    </defs>
-    <rect width="100%" height="100%" fill="url(#g)"/>
-    <rect width="100%" height="100%" filter="url(#noise)"/>
-    <rect x="42" y="42" width="${width-84}" height="${height-84}" rx="40" fill="#fff" opacity="0.04"/>
-    <rect width="100%" height="100%" fill="url(#v)"/>
-  </svg>`;
-}
-
-/* Build photographic/gradient background and add industry spot */
-async function buildPosterBackground({
+async function buildPosterBackgroundFromPhotoBuffer({
   width = 1080,
   height = 1080,
-  bgUrl = "",
-  accent = "#ff7b41",
-  industryKind = "generic",
-  seed = Date.now()
+  photoBuffer
 }) {
-  let base = sharp({
+  if (!photoBuffer) throw new Error('no photo buffer provided');
+
+  const base = sharp({
     create: { width, height, channels: 3, background: { r: 12, g: 18, b: 24 } }
   }).png();
 
-  const layers = [];
+  const photo = await sharp(photoBuffer)
+    .resize(width, height, { fit: 'cover', position: 'centre' })
+    .modulate({ saturation: 0.9, brightness: 1.02 })
+    .blur(6)
+    .png()
+    .toBuffer();
 
-  if (bgUrl) {
-    try {
-      const buf = await fetchBuffer(bgUrl);
-      const photo = await sharp(buf)
-        .resize(width, height, { fit: 'cover', position: 'centre' })
-        .modulate({ saturation: 0.9, brightness: 1.02 })
-        .blur(6)
-        .png()
-        .toBuffer();
-      layers.push({ input: photo, gravity: 'centre', blend: 'over' });
-    } catch {
-      // ignore; fall back to gradient
-    }
-  }
-
-  if (!bgUrl || layers.length === 0) {
-    const grad = Buffer.from(randomGradientSVG({ width, height, accent, seed }));
-    layers.push({ input: grad, blend: 'over' });
-  }
-
-  const spot = Buffer.from(`
-    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
-      ${industrySpotSVG(industryKind, width, height, '#ffffff')}
-    </svg>
-  `);
-  layers.push({ input: spot, blend: 'over' });
-
-  return await base.composite(layers).png().toBuffer();
+  return await base.composite([{ input: photo, gravity: 'centre', blend: 'over' }]).png().toBuffer();
 }
-
-// GET /api/proxy-img?u=<encoded URL>
-router.get('/proxy-img', async (req, res) => {
-  try {
-    const u = req.query.u;
-    if (!u || typeof u !== 'string') return res.status(400).send('missing u');
-    const buf = await fetchBuffer(u);
-
-    // Try to guess content-type from image metadata
-    let ct = 'image/jpeg';
-    try {
-      const meta = await sharp(buf).metadata();
-      if (meta.format === 'png')  ct = 'image/png';
-      if (meta.format === 'webp') ct = 'image/webp';
-      if (meta.format === 'gif')  ct = 'image/gif';
-    } catch {}
-
-    res.setHeader('Content-Type', ct);
-    res.setHeader('Cache-Control', 'public, max-age=3600, s-maxage=3600');
-    res.send(buf);
-  } catch (e) {
-    console.error('[proxy-img]', e);
-    res.status(502).send('bad upstream');
-  }
-});
-
 
 /* ------------------------ Validation Schemas ------------------------ */
 
@@ -427,6 +390,22 @@ const posterSchema = {
   }
 };
 
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+function ellipsize(s = "", max = 22) {
+  s = String(s).trim();
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
+}
+function layoutList(items) {
+  const startY = 56, step = 54;
+  return (items || []).slice(0, 6).map((t, i) => ({ y: startY + i * step, text: t }));
+}
+function withListLayout(lists = {}) {
+  return {
+    left: layoutList(lists.left || []),
+    right: layoutList(lists.right || [])
+  };
+}
+
 /* ------------------------ Route: /generate-static-ad ------------------------ */
 
 router.post('/generate-static-ad', async (req, res) => {
@@ -442,7 +421,7 @@ router.post('/generate-static-ad', async (req, res) => {
     const template =
       templateReq !== 'auto'
         ? templateReq
-        : (['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(prof.kind) ? 'poster_b' : 'flyer_a');
+        : (['fashion','electronics','pets','coffee','restaurant','real_estate','flooring'].includes(prof.kind) ? 'poster_b' : 'flyer_a');
 
     /* ------------------- FLYER A ------------------- */
     if (template === 'flyer_a') {
@@ -492,11 +471,9 @@ router.post('/generate-static-ad', async (req, res) => {
       const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const svgName = `${base}.svg`;
       const pngName = `${base}.png`;
-      const svgPath = path.join(GEN_DIR, svgName);
-      const pngPath = path.join(GEN_DIR, pngName);
 
-      fs.writeFileSync(svgPath, svg, 'utf8');
-      await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(pngPath);
+      fs.writeFileSync(path.join(GEN_DIR, svgName), svg, 'utf8');
+      await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(path.join(GEN_DIR, pngName));
 
       const mediaPng = makeMediaUrl(req, pngName);
       const mediaSvg = makeMediaUrl(req, svgName);
@@ -508,7 +485,7 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    /* ------------------- POSTER B ------------------- */
+    /* ------------------- POSTER B (ALWAYS photo) ------------------- */
     const mergedInputsB = {
       industry,
       businessName: inputs.businessName || 'Your Brand',
@@ -516,8 +493,9 @@ router.post('/generate-static-ad', async (req, res) => {
     };
     const mergedKnobsB = {
       size: (knobs.size || '1080x1080'),
-      backgroundHint: knobs.backgroundHint || prof.bgHint || 'retail',
+      // optional override from client
       backgroundUrl: knobs.backgroundUrl || "",
+      backgroundHint: knobs.backgroundHint || prof.bgHint || '',
       eventTitle: knobs.eventTitle || prof.eventTitle || 'SEASONAL EVENT',
       dateRange: knobs.dateRange || prof.dateRange || 'LIMITED TIME ONLY',
       saveAmount: knobs.saveAmount || prof.saveAmount || 'BIG SAVINGS',
@@ -532,26 +510,54 @@ router.post('/generate-static-ad', async (req, res) => {
       throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
-    // font sizes (inline → no CSS vars; avoids tiny text)
+    // Decide the photo buffer (URL override -> Pexels -> local stock -> fallback)
+    let photoBuf = null;
+    const seed = Date.now();
+
+    if (mergedKnobsB.backgroundUrl) {
+      try {
+        photoBuf = await fetchBuffer(mergedKnobsB.backgroundUrl);
+      } catch (e) {
+        console.warn('[poster_b] backgroundUrl fetch failed, will try Pexels/local fallback:', e.message);
+      }
+    }
+
+    if (!photoBuf) {
+      try {
+        const q = pexelsQueryForKind(classifyIndustry(industry), mergedKnobsB.backgroundHint);
+        photoBuf = await fetchPexelsPhotoBuffer(q, seed);
+      } catch (e) {
+        console.warn('[poster_b] Pexels fetch failed:', e.message);
+      }
+    }
+
+    if (!photoBuf) {
+      const localPath = pickLocalStockPath(classifyIndustry(industry), seed);
+      if (localPath) {
+        try { photoBuf = fs.readFileSync(localPath); } catch {}
+      }
+    }
+
+    if (!photoBuf) {
+      // Last resort: baked fallback (still a real image file)
+      try { photoBuf = await fetchBuffer(selfUrl(req, '/__fallback/1200.jpg')); } catch {}
+    }
+
+    if (!photoBuf) throw new Error('no background photo available');
+
+    const bgPng = await buildPosterBackgroundFromPhotoBuffer({
+      width: 1080,
+      height: 1080,
+      photoBuffer: photoBuf
+    });
+
+    // font sizes (inline → avoids tiny text)
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave  = String(mergedKnobsB.saveAmount || "").length;
     const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 60, 92);
     const fsSave  = clamp(76 - Math.max(0, lenSave  - 12) * 2.2, 48, 76);
     const fsH2    = 38;
     const fsBody  = 30;
-
-    // choose background (photo if provided, else gradient)
-    let bgUrl = mergedKnobsB.backgroundUrl || "";
-    if (!bgUrl) bgUrl = selfUrl(req, '/__fallback/1200.jpg');
-
-    const bgPng = await buildPosterBackground({
-      width: 1080,
-      height: 1080,
-      bgUrl,
-      accent: mergedKnobsB.palette.accent || '#ff7b41',
-      industryKind: classifyIndustry(industry),
-      seed: Date.now()
-    });
 
     // render card SVG (bigger card + paddings)
     const cardW = 860, cardH = 580, padX = 60, padY = 68;
@@ -570,7 +576,6 @@ router.post('/generate-static-ad', async (req, res) => {
       tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }),
       cardVars
     );
-
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
     // center composite
@@ -599,17 +604,14 @@ router.post('/generate-static-ad', async (req, res) => {
   }
 });
 
-/* ------------------------ NEW: /generate-image-from-prompt ------------------------
-   Direct implementation that returns TWO image variants (A/B) without
-   forwarding into the router (avoids Express “apply” crash).
-   Accepts both the new payload (with `answers`, overlay fields) and the
-   old payload (industry/businessName/etc. at top level).
------------------------------------------------------------------------------------*/
+/* ------------------------ /generate-image-from-prompt (no recursion) ------------------------
+   Returns TWO baked poster images for retail-like industries for A/B variation,
+   each pulling a different Pexels photo (seeded variation).
+---------------------------------------------------------------------------------------------*/
 router.post('/generate-image-from-prompt', async (req, res) => {
   try {
     const b = req.body || {};
     const a = b.answers || {};
-    // Accept both shapes
     const industry = a.industry || b.industry || 'Local Services';
     const businessName = a.businessName || b.businessName || 'Your Brand';
     const location = a.location || b.location || 'Your City';
@@ -622,25 +624,40 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     };
 
     const prof = profileForIndustry(industry);
-    const isPoster = ['fashion','electronics','pets','coffee','restaurant','real_estate'].includes(prof.kind);
+    const isPoster = ['fashion','electronics','pets','coffee','restaurant','real_estate','flooring'].includes(prof.kind);
 
-    const files = [];
     const W = 1080, H = 1080;
+    const files = [];
 
     if (isPoster) {
-      // Two Poster B variants: one with provided BG (if any), one forced gradient
-      const variants = [ backgroundUrl || selfUrl(req, '/__fallback/1200.jpg'), '' ];
-      for (const bgUrl of variants) {
-        const bgPng = await buildPosterBackground({
-          width: W, height: H, bgUrl,
-          accent: (prof.palette && prof.palette.accent) || '#ff7b41',
-          industryKind: prof.kind,
-          seed: Date.now() + Math.floor(Math.random() * 9999)
+      const seeds = [Date.now(), Date.now() + 7777]; // two different picks for variety
+      for (const seed of seeds) {
+        // priority: explicit URL → Pexels → local stock → fallback
+        let photoBuf = null;
+        if (backgroundUrl) {
+          try { photoBuf = await fetchBuffer(backgroundUrl); } catch {}
+        }
+        if (!photoBuf) {
+          try {
+            const q = pexelsQueryForKind(prof.kind, prof.bgHint);
+            photoBuf = await fetchPexelsPhotoBuffer(q, seed);
+          } catch (e) {
+            console.warn('[generate-image-from-prompt] Pexels failed:', e.message);
+          }
+        }
+        if (!photoBuf) {
+          const localPath = pickLocalStockPath(prof.kind, seed);
+          if (localPath) { try { photoBuf = fs.readFileSync(localPath); } catch {} }
+        }
+        if (!photoBuf) { try { photoBuf = await fetchBuffer(selfUrl(req, '/__fallback/1200.jpg')); } catch {} }
+        if (!photoBuf) throw new Error('no background photo');
+
+        const bgPng = await buildPosterBackgroundFromPhotoBuffer({
+          width: W, height: H, photoBuffer: photoBuf
         });
 
-        // font sizes tuned to typical copy
+        // copy from profile + overlay
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
-
         const cardW = 860, cardH = 580, padX = 60, padY = 68;
         const cardVars = {
           brandName: ellipsize(businessName, 22),
@@ -652,7 +669,6 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           legal: prof.legal || '',
           accent: (prof.palette && prof.palette.accent) || '#ff7b41'
         };
-
         const cardSvg = mustache.render(
           tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }),
           cardVars
@@ -669,13 +685,12 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 
         const fname = `static-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
         await fs.promises.writeFile(path.join(GEN_DIR, fname), finalPng);
-        files.push(makeMediaUrl(req, fname));
+        files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
     } else {
-      // Flyer A: generate once (with overlay text if provided) and duplicate for A/B
+      // Fallback to flyer A (services) – single render duplicated to A/B
       const palette = prof.palette || { header: '#0d3b66', body: '#dff3f4', accent: '#ff8b4a', textOnDark: '#ffffff', textOnLight: '#2b3a44' };
       const lists = withListLayout(prof.lists || { left:["Free Quote","Same-Day","Licensed","Insured"], right:["Great Reviews","Family Owned","Fair Prices","Guaranteed"] });
-
       const vars = {
         headline: overlay.headline || prof.headline || 'LOCAL SERVICES',
         subline: overlay.body || prof.subline || 'Reliable • Friendly • On Time',
@@ -687,21 +702,16 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         accentRight: '#1f3b58',
         lists
       };
-
       const svg = mustache.render(tplFlyerA({ W, H }), vars);
       const pngBuf = await sharp(Buffer.from(svg)).png({ quality: 92 }).toBuffer();
-
       for (let i = 0; i < 2; i++) {
         const fname = `static-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
         await fs.promises.writeFile(path.join(GEN_DIR, fname), pngBuf);
-        files.push(makeMediaUrl(req, fname));
+        files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
     }
 
-    return res.json({
-      ok: true,
-      images: files.map(u => ({ absoluteUrl: u })) // frontend parseImageResults accepts this
-    });
+    return res.json({ ok: true, images: files });
 
   } catch (err) {
     console.error('[generate-image-from-prompt]', err);
