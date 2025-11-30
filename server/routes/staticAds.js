@@ -231,8 +231,9 @@ function tplFlyerA({ W=1080, H=1080 }) {
 </svg>`;
 }
 
-/* -------- NEW: Poster B – centered, wrapped, clean retail layout -------- */
-function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }) {
+/* -------- Poster B – centered, wrapped, measured rhythm -------- */
+function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody, metrics }) {
+  const { titleY, dateY, dividerY, saveY, financeY, qualY } = metrics;
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -261,30 +262,30 @@ function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBod
   </g>
 
   <!-- Content, centered column -->
-  <g transform="translate(0, ${padY + 30})">
-    <!-- Headline (wrapped 2 lines max) -->
-    <text class="title t-center" x="${cardW/2}">
+  <g>
+    <!-- Headline (wrapped) -->
+    <text class="title t-center" x="${cardW/2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW/2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
     <!-- Date range -->
-    <text class="h2 t-center" x="${cardW/2}" y="${fsTitle*2.0 + 26}">{{dateRange}}</text>
+    <text class="h2 t-center" x="${cardW/2}" y="${dateY}">{{dateRange}}</text>
 
     <!-- Divider -->
-    <g transform="translate(${padX}, ${fsTitle*2.0 + 54})">
+    <g transform="translate(${padX}, ${dividerY})">
       <rect width="${cardW - padX*2}" height="2" fill="#e8eef3"/>
     </g>
 
     <!-- BIG SAVE line -->
-    <text class="save t-center" x="${cardW/2}" y="${fsTitle*2.0 + 54 + fsSave*1.05 + 18}">{{saveAmount}}</text>
+    <text class="save t-center" x="${cardW/2}" y="${saveY}">{{saveAmount}}</text>
 
     <!-- Financing line -->
-    <text class="h2 t-center" x="${cardW/2}" y="${fsTitle*2.0 + 54 + fsSave*1.05 + 18 + fsH2*1.25}">{{financingLine}}</text>
+    <text class="h2 t-center" x="${cardW/2}" y="${financeY}">{{financingLine}}</text>
 
-    <!-- Qualifiers (wrapped 2 lines) -->
-    <text class="body t-center" x="${cardW/2}" y="${fsTitle*2.0 + 54 + fsSave*1.05 + 18 + fsH2*1.25 + 36}">
+    <!-- Qualifiers (wrapped) -->
+    <text class="body t-center" x="${cardW/2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW/2}" dy="{{dy}}">{{line}}</tspan>
       {{/qualifierLines}}
@@ -449,11 +450,10 @@ function withListLayout(lists = {}) {
   };
 }
 
-/* ---- NEW: simple character-based text wrapper for SVG tspans ---- */
+/* ---- wrapper for SVG tspans + measured layout ---- */
 function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines = 2) {
   const s = String(str || "").trim().replace(/\s+/g, ' ');
   if (!s) return [];
-  // crude estimate: average glyph width ≈ 0.58 of font size
   const pxWidth = cardW - padX * 2;
   const maxChars = Math.max(6, Math.floor(pxWidth / (fsPx * 0.58)));
   const words = s.split(' ');
@@ -470,12 +470,10 @@ function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines =
   }
   if (lines.length < maxLines && cur) lines.push(cur);
   if (lines.length > maxLines) lines.length = maxLines;
-  // If we still have remaining words, ellipsize the last line
   const used = lines.join(' ').length;
   if (used < s.length) {
     lines[lines.length - 1] = ellipsize(lines[lines.length - 1], Math.max(6, maxChars));
   }
-  // return with dy offsets for tspans
   return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : (fsPx * 1.08) }));
 }
 
@@ -564,17 +562,29 @@ router.post('/generate-static-ad', async (req, res) => {
       businessName: inputs.businessName || 'Your Brand',
       location: inputs.location || 'Your City'
     };
+
+    // NEW: auto-copy from inputs/overlay before profile defaults
+    const auto = {
+      eventTitle: knobs.eventTitle || inputs.headline || body.overlayHeadline || prof.eventTitle || 'SEASONAL EVENT',
+      dateRange:  knobs.dateRange  || inputs.promoLine || inputs.subline || prof.dateRange || 'LIMITED TIME ONLY',
+      saveAmount: knobs.saveAmount || inputs.offer || inputs.cta || prof.saveAmount || 'BIG SAVINGS',
+      financing:  knobs.financingLine || inputs.secondary || prof.financingLine || '',
+      qualifiers: knobs.qualifiers || inputs.adCopy || inputs.details || inputs.subline || '' || prof.qualifiers,
+      legal:      knobs.legal || prof.legal || '',
+      palette:    knobs.palette || prof.palette
+    };
+
     const mergedKnobsB = {
-      size: (knobs.size || '1080x1080'),
+      size: knobs.size || '1080x1080',
       backgroundUrl: knobs.backgroundUrl || "",
       backgroundHint: knobs.backgroundHint || prof.bgHint || '',
-      eventTitle: knobs.eventTitle || prof.eventTitle || 'SEASONAL EVENT',
-      dateRange: knobs.dateRange || prof.dateRange || 'LIMITED TIME ONLY',
-      saveAmount: knobs.saveAmount || prof.saveAmount || 'BIG SAVINGS',
-      financingLine: knobs.financingLine || prof.financingLine || '',
-      qualifiers: knobs.qualifiers || prof.qualifiers || '',
-      legal: knobs.legal || prof.legal || '',
-      palette: knobs.palette || prof.palette
+      eventTitle: auto.eventTitle,
+      dateRange: auto.dateRange,
+      saveAmount: auto.saveAmount,
+      financingLine: auto.financing,
+      qualifiers: auto.qualifiers,
+      legal: auto.legal,
+      palette: auto.palette
     };
 
     const validateB = ajv.compile(posterSchema);
@@ -604,20 +614,29 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width:1080, height:1080, photoBuffer: photoBuf });
 
-    // dynamic font sizes based on text length (kept)
+    // dynamic font sizes based on text length
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave  = String(mergedKnobsB.saveAmount || "").length;
-    const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 60, 92);
-    const fsSave  = clamp(76 - Math.max(0, lenSave  - 12) * 2.2, 48, 76);
+    const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 56, 92);
+    const fsSave  = clamp(76 - Math.max(0, lenSave  - 12) * 2.2, 46, 76);
     const fsH2    = 38;
     const fsBody  = 30;
 
-    // Slightly taller card for breathing room
-    const cardW = 860, cardH = 640, padX = 60, padY = 56;
+    // measured layout
+    const cardW = 860, cardH = 660, padX = 60, padY = 56;
 
-    // NEW: wrapped lines for title & qualifiers
     const eventTitleLines = wrapTextToWidth(mergedKnobsB.eventTitle, fsTitle, cardW, padX, 2);
     const qualifierLines  = wrapTextToWidth(mergedKnobsB.qualifiers, fsBody, cardW, padX, 2);
+
+    const titleBlock = Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
+    const titleTop   = padY + fsTitle; // baseline for first line
+    const dateY      = titleTop + titleBlock + 20;
+    const dividerY   = dateY + 28;
+    const saveY      = dividerY + 22 + (fsSave * 1.05);
+    const financeY   = saveY + (fsH2 * 1.25);
+    const qualY      = financeY + 36; // first tspan baseline
+
+    const metrics = { titleY: titleTop, dateY, dividerY, saveY, financeY, qualY };
 
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
@@ -627,11 +646,12 @@ router.post('/generate-static-ad', async (req, res) => {
       saveAmount: mergedKnobsB.saveAmount,
       financingLine: mergedKnobsB.financingLine,
       legal: mergedKnobsB.legal,
-      accent: mergedKnobsB.palette.accent || '#ff7b41'
+      accent: mergedKnobsB.palette.accent || '#ff7b41',
+      metrics
     };
 
     const cardSvg = mustache.render(
-      tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }),
+      tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody, metrics }),
       cardVars
     );
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
@@ -767,10 +787,19 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width: W, height: H, photoBuffer: photoBuf });
 
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
-        const cardW = 860, cardH = 640, padX = 60, padY = 56;
+        const cardW = 860, cardH = 660, padX = 60, padY = 56;
 
         const eventTitleLines = wrapTextToWidth(overlay.headline || prof.eventTitle || 'SEASONAL EVENT', fsTitle, cardW, padX, 2);
         const qualifierLines  = wrapTextToWidth(overlay.body || prof.qualifiers || '', fsBody, cardW, padX, 2);
+
+        const titleBlock = Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
+        const titleTop   = padY + fsTitle;
+        const dateY      = titleTop + titleBlock + 20;
+        const dividerY   = dateY + 28;
+        const saveY      = dividerY + 22 + (fsSave * 1.05);
+        const financeY   = saveY + (fsH2 * 1.25);
+        const qualY      = financeY + 36;
+        const metrics    = { titleY: titleTop, dateY, dividerY, saveY, financeY, qualY };
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
@@ -780,10 +809,11 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           saveAmount: prof.saveAmount || 'BIG SAVINGS',
           financingLine: prof.financingLine || '',
           legal: prof.legal || '',
-          accent: (prof.palette && prof.palette.accent) || '#ff7b41'
+          accent: (prof.palette && prof.palette.accent) || '#ff7b41',
+          metrics
         };
         const cardSvg = mustache.render(
-          tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }),
+          tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody, metrics }),
           cardVars
         );
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
