@@ -1919,7 +1919,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 /* === ROUTE: /api/generate-static-ad (templates: flyer_a, poster_b) ======================= */
 router.post('/generate-static-ad', async (req, res) => {
   try {
-    const { template = '', answers = {}, imageUrl = '' } = req.body || {};
+    const { template = '', answers = {}, imageUrl = '', strict = false, copy = {} } = req.body || {};
     if (!template || !/^(flyer_a|poster_b)$/i.test(template)) {
       return res.status(400).json({ error: 'invalid_template', message: 'Use template: flyer_a or poster_b' });
     }
@@ -1927,9 +1927,9 @@ router.post('/generate-static-ad', async (req, res) => {
     // Make the asset
     let out;
     if (/^flyer_a$/i.test(template)) {
-      out = await renderTemplateA_FlyerPNG({ answers });
+      out = await renderTemplateA_FlyerPNG({ answers, strict, copy });
     } else {
-      out = await renderTemplateB_PosterPNG({ answers, imageUrl });
+      out = await renderTemplateB_PosterPNG({ answers, imageUrl, strict, copy });
     }
 
     // Persist so your carousel picks it up first
@@ -2178,8 +2178,9 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
   return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
 }
 
+
 /* ---------------- Template B: Poster (photo bg + centered white card) --------------- */
-async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
+async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict = false, copy = {} }) {
   const W = 1200, H = 628, R = 28;
 
   // background photo (industry lifestyle)
@@ -2191,16 +2192,32 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
     .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
     .toBuffer();
 
-  const savePct = _savePercentFromText(answers.offer || '');
-  const bigHeadline = _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
-  const secondary1 = _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
-  const secondary2 = savePct ? `Save up to ${savePct}` : _offerLine(answers);
-  const legal = _legalLine(answers);
+  // Brand & CTA
   const brand = _brandText(answers);
 
-  const cta = _ctaNormFromAnswers(answers) || 'LEARN MORE';
+  // Dynamic CTA (no hardcoded fallback; button hides if empty)
+  const cta = cleanCTA(
+    copy.cta || answers.cta || _ctaNormFromAnswers(answers) || '',
+    brand
+  );
 
-  // white framed card over photo
+  // Headline & lines
+  const savePct = _savePercentFromText(answers.offer || '');
+  const bigHeadline = strict
+    ? _upperSafe(copy.headline || copy.posterHeadline || brand, 34)
+    : _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
+
+  const secondary1 = strict
+    ? (copy.subhead || copy.dateRange || '')
+    : _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
+
+  const secondary2 = strict
+    ? (copy.valueLine || copy.offer || '')
+    : (savePct ? `Save up to ${savePct}` : _offerLine(answers));
+
+  const legal = strict ? (copy.legal || '') : _legalLine(answers);
+
+  // centered white card
   const CARD_W = 760, CARD_H = 380;
   const CX = Math.round(W/2), CY = Math.round(H/2) + 8;
   const cardX = Math.round(CX - CARD_W/2), cardY = Math.round(CY - CARD_H/2);
@@ -2209,7 +2226,9 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <image id="bg" href="data:image/jpeg;base64,${bgBuf.toString('base64')}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/></filter>
+      <filter id="shadow" x="-20%" y="-20%" width="140%">
+        <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
+      </filter>
     </defs>
 
     <!-- full-bleed bg + subtle vignette -->
@@ -2230,129 +2249,42 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
       <rect x="${cardX}" y="${cardY}" width="${CARD_W}" height="${CARD_H}" rx="18" fill="#ffffff"/>
     </g>
 
-    <!-- content: brand small, big headline, lines, legal -->
-    <text x="${CX}" y="${cardY + 58}" text-anchor="middle"
-          font-family="Inter,Segoe UI,Arial" font-size="22" font-weight="800" fill="#0f141a" opacity="0.85">
-      ${escSVG2(brand)}
-    </text>
-
-    <text x="${CX}" y="${cardY + 130}" text-anchor="middle"
-          font-family="Inter,Segoe UI,Arial" font-size="54" font-weight="900" fill="#0f141a" letter-spacing="0.04em">
-      ${escSVG2(bigHeadline)}
-    </text>
-
-    <text x="${CX}" y="${cardY + 180}" text-anchor="middle"
-          font-family="Inter,Segoe UI,Arial" font-size="26" font-weight="700" fill="#0f141a">
-      ${escSVG2(secondary1)}
-    </text>
-
-    <text x="${CX}" y="${cardY + 214}" text-anchor="middle"
-          font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#0d3b66">
-      ${escSVG2(secondary2)}
-    </text>
-
-    <!-- CTA pill under the card -->
-    ${btnSolidDark(CX, cardY + CARD_H + 56, cta, 28)}
-
-
-    <!-- legal -->
-    <text x="${CX}" y="${cardY + CARD_H - 18}" text-anchor="middle"
-          font-family="Inter,Segoe UI,Arial" font-size="16" font-weight="600" fill="#4b5563" opacity="0.95">
-      ${escSVG2(legal)}
-    </text>
-  </svg>`;
-
-  // Rasterize to PNG
-  const outDir = ensureGeneratedDir();
-  const file = `${uuidv4()}.png`;
-  await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
-    .png()
-    .toFile(path.join(outDir, file));
-  return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
-}
-
-
-/* ---------------- Template B: Poster (photo bg + centered white card) --------------- */
-async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
-  const W = 1200, H = 628, R = 28;
-
-  // background photo (industry lifestyle)
-  const bgUrl = imageUrl || resolveTemplateUrl({ answers });
-
-  const imgRes = await ax.get(bgUrl, { responseType: 'arraybuffer', timeout: 12000 });
-  const bgBuf = await sharp(imgRes.data)
-    .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 })
-    .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
-    .toBuffer();
-
-  const savePct = _savePercentFromText(answers.offer || '');
-  const bigHeadline = _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
-  const secondary1 = _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
-  const secondary2 = savePct ? `Save up to ${savePct}` : _offerLine(answers);
-  const legal = _legalLine(answers);
-  const brand = _brandText(answers);
-
-  const cta = _ctaNormFromAnswers(answers) || 'LEARN MORE';
-
-  // white framed card over photo
-  const CARD_W = 760, CARD_H = 380;
-  const CX = Math.round(W/2), CY = Math.round(H/2) + 8;
-  const cardX = Math.round(CX - CARD_W/2), cardY = Math.round(CY - CARD_H/2);
-
-  const svg = `
-  <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <image id="bg" href="data:image/jpeg;base64,${bgBuf.toString('base64')}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/></filter>
-    </defs>
-
-    <!-- full-bleed bg + subtle vignette -->
-    <use href="#bg"/>
-    <radialGradient id="vig" cx="50%" cy="50%" r="70%">
-      <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.55"/>
-    </radialGradient>
-    <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
-
-    <!-- white frame -->
-    <rect x="12" y="12" width="${W-24}" height="${H-24}" rx="${R}" fill="none" stroke="#ffffff" stroke-opacity="0.92" stroke-width="3"/>
-
-    ${_seasonAccentLeaves()}
-
-    <!-- centered white card -->
-    <g filter="url(#shadow)">
-      <rect x="${cardX}" y="${cardY}" width="${CARD_W}" height="${CARD_H}" rx="18" fill="#ffffff"/>
-    </g>
-
-    <!-- content: brand small, big headline, lines, legal -->
+    <!-- brand -->
     <text x="${CX}" y="${cardY + 58}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="22" font-weight="800" fill="#0f141a" opacity="0.85">
       ${escSVG(brand)}
     </text>
 
+    <!-- big headline (centered) -->
+    ${_maybe(bigHeadline, `
     <text x="${CX}" y="${cardY + 130}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="54" font-weight="900" fill="#0f141a" letter-spacing="0.04em">
       ${escSVG(bigHeadline)}
-    </text>
+    </text>`)}
 
+    <!-- secondary line 1 -->
+    ${_maybe(secondary1, `
     <text x="${CX}" y="${cardY + 180}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="26" font-weight="700" fill="#0f141a">
       ${escSVG(secondary1)}
-    </text>
+    </text>`)}
 
+    <!-- secondary line 2 (value/offer) -->
+    ${_maybe(secondary2, `
     <text x="${CX}" y="${cardY + 214}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#0d3b66">
       ${escSVG(secondary2)}
-    </text>
+    </text>`)}
 
-    <!-- CTA pill under the card -->
-    ${pillBtn(CX, cardY + CARD_H + 56, cta, 28)}
+    <!-- CTA pill under the card (only if cta exists) -->
+    ${_maybe(cta, pillBtn(CX, cardY + CARD_H + 56, cta, 28))}
 
     <!-- legal -->
+    ${_maybe(legal, `
     <text x="${CX}" y="${cardY + CARD_H - 18}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="16" font-weight="600" fill="#4b5563" opacity="0.95">
       ${escSVG(legal)}
-    </text>
+    </text>`)}
   </svg>`;
 
   // Rasterize to PNG
@@ -2361,7 +2293,12 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '' }) {
   await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
     .png()
     .toFile(path.join(outDir, file));
-  return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
+
+  return {
+    publicUrl: `/api/media/${file}`,
+    absoluteUrl: absolutePublicUrl(`/api/media/${file}`),
+    filename: file
+  };
 }
 
 
@@ -2536,6 +2473,34 @@ function absolutePublicUrl(rel) {
   return base ? (new URL(rel, base)).toString() : rel;
 }
 function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
+
+// ------------------------------ UTILS: conditional SVG helpers ------------------------------
+function _nonEmpty(s) {
+  return !!String(s || '').trim();
+}
+function _maybe(line, svg) {
+  // Only emit the provided SVG snippet if a non-empty line exists.
+  return _nonEmpty(line) ? svg : '';
+}
+
+// (Optional) if you reference _seasonAccentLeaves() but don't define it elsewhere:
+function _seasonAccentLeaves() { return ''; }
+
+// --- CTA normalizers used by pillBtn and strict mode ---
+function normalizeCTA(s = '') {
+  const base = String(s).trim();
+  if (!base) return 'LEARN MORE';
+  // collapse spaces, cap length, upper-case
+  return base.replace(/\s+/g, ' ').trim().slice(0, 28).toUpperCase();
+}
+
+function cleanCTA(s = '', brand = '') {
+  // remove brand repeats and punctuation noise, then normalize
+  let t = String(s || '').replace(new RegExp(brand, 'i'), '').replace(/[^\w\s]/g, ' ').trim();
+  if (!t) t = 'LEARN MORE';
+  return normalizeCTA(t);
+}
+
 
 /* --- CTA pill (pure black, white text; same geometry) --- */
 function pillBtn(cx, cy, label, fs = 34) {
