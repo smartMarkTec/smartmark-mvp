@@ -231,35 +231,70 @@ function tplFlyerA({ W=1080, H=1080 }) {
 </svg>`;
 }
 
+/* -------- NEW: Poster B – centered, wrapped, clean retail layout -------- */
 function tplPosterBCard({ cardW, cardH, padX, padY, fsTitle, fsH2, fsSave, fsBody }) {
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#000" flood-opacity="0.28"/>
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000" flood-opacity="0.25"/>
     </filter>
+    <style>
+      .t-center { text-anchor: middle; }
+      .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22; }
+      .h2      { font: 800 ${fsH2}px/1.22  Inter,system-ui; fill:#3b4b59; }
+      .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
+      .body    { font: 700 ${fsBody}px/1.28 Inter,system-ui; fill:#5f7182; }
+      .legal   { font: 700 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
+      .brand   { font: 800 24px/1 Inter,system-ui; fill:#334554; }
+    </style>
   </defs>
 
   <g filter="url(#cardShadow)">
     <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="30" fill="#ffffff"/>
   </g>
 
-  <g transform="translate(${padX}, ${padY})">
-    <g transform="translate(${Math.max(0, cardW - padX - 190)}, -6)">
-      <rect width="190" height="44" rx="22" fill="#0f1a22" opacity="0.08"/>
-      <text style="font:700 26px Inter,system-ui; fill:#334554;" x="95" y="30" text-anchor="middle">{{brandName}}</text>
-    </g>
-
-    <text style="font:900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22;" x="0" y="${fsTitle*0.05}">{{eventTitle}}</text>
-    <text style="font:800 ${fsH2}px/1.2 Inter,system-ui; fill:#334554;" x="0" y="${fsTitle + fsH2*1.3}">{{dateRange}}</text>
-    <text style="font:900 ${fsSave}px/1.05 Inter,system-ui; fill:{{accent}};" x="0" y="${fsTitle + fsH2*1.3 + fsSave*1.25}">{{saveAmount}}</text>
-    <text style="font:800 ${fsH2}px/1.2 Inter,system-ui; fill:#334554;" x="0" y="${fsTitle + fsH2*1.3 + fsSave*1.25 + fsH2*1.2}">{{financingLine}}</text>
-    <text style="font:700 ${fsBody}px/1.25 Inter,system-ui; fill:#66798a;" x="0" y="${fsTitle + fsH2*1.3 + fsSave*1.25 + fsH2*1.2 + fsBody*1.25}">{{qualifiers}}</text>
+  <!-- Brand chip (top center) -->
+  <g transform="translate(${cardW/2 - 140}, ${Math.max(10, padY - 40)})">
+    <rect width="280" height="44" rx="22" fill="#0f1a22" opacity="0.06"/>
+    <text class="brand t-center" x="140" y="30">{{brandName}}</text>
   </g>
 
+  <!-- Content, centered column -->
+  <g transform="translate(0, ${padY + 30})">
+    <!-- Headline (wrapped 2 lines max) -->
+    <text class="title t-center" x="${cardW/2}">
+      {{#eventTitleLines}}
+        <tspan x="${cardW/2}" dy="{{dy}}">{{line}}</tspan>
+      {{/eventTitleLines}}
+    </text>
+
+    <!-- Date range -->
+    <text class="h2 t-center" x="${cardW/2}" y="${fsTitle*2.0 + 26}">{{dateRange}}</text>
+
+    <!-- Divider -->
+    <g transform="translate(${padX}, ${fsTitle*2.0 + 54})">
+      <rect width="${cardW - padX*2}" height="2" fill="#e8eef3"/>
+    </g>
+
+    <!-- BIG SAVE line -->
+    <text class="save t-center" x="${cardW/2}" y="${fsTitle*2.0 + 54 + fsSave*1.05 + 18}">{{saveAmount}}</text>
+
+    <!-- Financing line -->
+    <text class="h2 t-center" x="${cardW/2}" y="${fsTitle*2.0 + 54 + fsSave*1.05 + 18 + fsH2*1.25}">{{financingLine}}</text>
+
+    <!-- Qualifiers (wrapped 2 lines) -->
+    <text class="body t-center" x="${cardW/2}" y="${fsTitle*2.0 + 54 + fsSave*1.05 + 18 + fsH2*1.25 + 36}">
+      {{#qualifierLines}}
+        <tspan x="${cardW/2}" dy="{{dy}}">{{line}}</tspan>
+      {{/qualifierLines}}
+    </text>
+  </g>
+
+  <!-- Legal footer -->
   {{#legal}}
   <g transform="translate(${padX}, ${cardH - 18})">
-    <text style="font:700 22px/1.2 Inter,system-ui; fill:#9eb2c3;" x="0" y="-6">{{legal}}</text>
+    <text class="legal" x="0" y="-6">{{legal}}</text>
   </g>
   {{/legal}}
 </svg>`;
@@ -414,6 +449,36 @@ function withListLayout(lists = {}) {
   };
 }
 
+/* ---- NEW: simple character-based text wrapper for SVG tspans ---- */
+function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines = 2) {
+  const s = String(str || "").trim().replace(/\s+/g, ' ');
+  if (!s) return [];
+  // crude estimate: average glyph width ≈ 0.58 of font size
+  const pxWidth = cardW - padX * 2;
+  const maxChars = Math.max(6, Math.floor(pxWidth / (fsPx * 0.58)));
+  const words = s.split(' ');
+  const lines = [];
+  let cur = '';
+  for (const w of words) {
+    const next = cur ? cur + ' ' + w : w;
+    if (next.length <= maxChars) cur = next;
+    else {
+      if (cur) lines.push(cur);
+      cur = w;
+      if (lines.length >= maxLines - 1) break;
+    }
+  }
+  if (lines.length < maxLines && cur) lines.push(cur);
+  if (lines.length > maxLines) lines.length = maxLines;
+  // If we still have remaining words, ellipsize the last line
+  const used = lines.join(' ').length;
+  if (used < s.length) {
+    lines[lines.length - 1] = ellipsize(lines[lines.length - 1], Math.max(6, maxChars));
+  }
+  // return with dy offsets for tspans
+  return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : (fsPx * 1.08) }));
+}
+
 /* ------------------------ ROUTE: /generate-static-ad ------------------------ */
 
 router.post('/generate-static-ad', async (req, res) => {
@@ -539,6 +604,7 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width:1080, height:1080, photoBuffer: photoBuf });
 
+    // dynamic font sizes based on text length (kept)
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave  = String(mergedKnobsB.saveAmount || "").length;
     const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 60, 92);
@@ -546,14 +612,20 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsH2    = 38;
     const fsBody  = 30;
 
-    const cardW = 860, cardH = 580, padX = 60, padY = 68;
+    // Slightly taller card for breathing room
+    const cardW = 860, cardH = 640, padX = 60, padY = 56;
+
+    // NEW: wrapped lines for title & qualifiers
+    const eventTitleLines = wrapTextToWidth(mergedKnobsB.eventTitle, fsTitle, cardW, padX, 2);
+    const qualifierLines  = wrapTextToWidth(mergedKnobsB.qualifiers, fsBody, cardW, padX, 2);
+
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
-      eventTitle: mergedKnobsB.eventTitle,
+      eventTitleLines,
+      qualifierLines,
       dateRange: mergedKnobsB.dateRange,
       saveAmount: mergedKnobsB.saveAmount,
       financingLine: mergedKnobsB.financingLine,
-      qualifiers: mergedKnobsB.qualifiers,
       legal: mergedKnobsB.legal,
       accent: mergedKnobsB.palette.accent || '#ff7b41'
     };
@@ -695,14 +767,18 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width: W, height: H, photoBuffer: photoBuf });
 
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
-        const cardW = 860, cardH = 580, padX = 60, padY = 68;
+        const cardW = 860, cardH = 640, padX = 60, padY = 56;
+
+        const eventTitleLines = wrapTextToWidth(overlay.headline || prof.eventTitle || 'SEASONAL EVENT', fsTitle, cardW, padX, 2);
+        const qualifierLines  = wrapTextToWidth(overlay.body || prof.qualifiers || '', fsBody, cardW, padX, 2);
+
         const cardVars = {
           brandName: ellipsize(businessName, 22),
-          eventTitle: overlay.headline || prof.eventTitle || 'SEASONAL EVENT',
+          eventTitleLines,
+          qualifierLines,
           dateRange: prof.dateRange || 'LIMITED TIME ONLY',
           saveAmount: prof.saveAmount || 'BIG SAVINGS',
           financingLine: prof.financingLine || '',
-          qualifiers: overlay.body || prof.qualifiers || '',
           legal: prof.legal || '',
           accent: (prof.palette && prof.palette.accent) || '#ff7b41'
         };
