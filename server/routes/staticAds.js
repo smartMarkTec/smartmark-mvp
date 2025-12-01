@@ -570,46 +570,47 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', inputs.location || 'Your City'),
     };
 
-    // 2) Map all headline/body fields to Poster-B with strict priority
-    //    eventTitle ← answers.headline | answers.eventTitle | inputs.headline | profile.eventTitle
-       // 2) Prefer crafted GPT copy (if present) to prevent echoing user text
+    // 2) Map all headline/body fields to Poster-B with COPY-FIRST priority
+    //    We DO NOT echo raw user a.headline; prefer crafted GPT copy or profile defaults.
+    const pick = (...vals) => vals.find(v => typeof v === 'string' && v.trim());
+
+    // Prefer answers.copy (from buildStaticAdPayload) then body.copy if present
     const fromCopy = crafted ? {
-      eventTitle: (crafted.headline || '').toString(),
-      // subline is short; good fit for dateRange if relevant, else we also include in qualifiers
-      dateRange: (crafted.subline || '').toString(),
-      saveAmount: (crafted.offer || '').toString(),
-      financing: "", // keep empty unless you have business logic to populate
-      qualifiers: [
-        crafted.subline,
-        ...(Array.isArray(crafted.bullets) ? crafted.bullets : [])
-      ].filter(Boolean).join(' • ').slice(0, 120),
-      legal: (crafted.disclaimers || '').toString()
+      eventTitle : (crafted.eventTitle || crafted.headline || '').toString(),
+      dateRange  : (crafted.dateRange  || crafted.subline  || '').toString(),
+      saveAmount : (crafted.saveAmount || crafted.offer    || '').toString(),
+      financing  : (crafted.financingLine || crafted.secondary || '').toString(),
+      qualifiers : (crafted.qualifiers ||
+                   [crafted.subline, ...(Array.isArray(crafted.bullets) ? crafted.bullets : [])]
+                     .filter(Boolean).join(' • ')).toString(),
+      legal      : (crafted.disclaimers || crafted.legal || '').toString()
     } : null;
 
     const auto = {
-      eventTitle: (fromCopy?.eventTitle) || get('headline', get('eventTitle', inputs.headline || prof.eventTitle || 'SEASONAL EVENT')),
-      dateRange:  (fromCopy?.dateRange)  || get('promoLine', get('dateRange', inputs.promoLine || inputs.subline || prof.dateRange || 'LIMITED TIME ONLY')),
-      saveAmount: (fromCopy?.saveAmount) || get('offer', get('saveAmount', inputs.offer || inputs.cta || prof.saveAmount || 'BIG SAVINGS')),
-      financing:  (fromCopy?.financing)  || get('secondary', get('financingLine', prof.financingLine || '')),
-      qualifiers: (fromCopy?.qualifiers) || get('adCopy', get('qualifiers', inputs.adCopy || inputs.details || inputs.subline || prof.qualifiers || '')),
-      legal:      (fromCopy?.legal)      || get('legal', prof.legal || ''),
-      palette:    knobs.palette || prof.palette
+      // IMPORTANT: no raw a.headline fallback here (prevents echo)
+      eventTitle: pick(fromCopy?.eventTitle,  prof.eventTitle, 'SEASONAL EVENT'),
+      dateRange : pick(fromCopy?.dateRange,   prof.dateRange,  'LIMITED TIME ONLY'),
+      saveAmount: pick(fromCopy?.saveAmount,  prof.saveAmount, 'BIG SAVINGS'),
+      financing : pick(fromCopy?.financing,   prof.financingLine, ''),
+      qualifiers: pick(fromCopy?.qualifiers,  prof.qualifiers, ''),
+      legal     : pick(fromCopy?.legal,       prof.legal, ''),
+      palette   : (knobs.palette || prof.palette)
     };
 
-
-    // 3) Allow backgroundUrl from answers as well
+    // 3) Knobs (send chosen text to renderer)
     const mergedKnobsB = {
       size: get('size', knobs.size || '1080x1080'),
       backgroundUrl: get('backgroundUrl', knobs.backgroundUrl || ''),
       backgroundHint: get('backgroundHint', knobs.backgroundHint || prof.bgHint || ''),
       eventTitle: auto.eventTitle,
-      dateRange: auto.dateRange,
+      dateRange:  auto.dateRange,
       saveAmount: auto.saveAmount,
       financingLine: auto.financing,
       qualifiers: auto.qualifiers,
       legal: auto.legal,
       palette: auto.palette
     };
+
 
     const validateB = ajv.compile(posterSchema);
     if (!validateB({ template, inputs: mergedInputsB, knobs: mergedKnobsB })) {

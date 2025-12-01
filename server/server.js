@@ -137,6 +137,77 @@ app.get('/api/test', (_req, res) => {
   res.json({ ok: true, ts: Date.now() });
 });
 
+/**
+ * Lightweight copy-crafting route to avoid verbatim echo.
+ * (Rule-based so it works instantly; you can later swap in your OpenAI version.)
+ */
+app.post('/api/craft-ad-copy', (req, res) => {
+  try {
+    const b = req.body || {};
+    const a = b.answers || {};
+    const industry = (b.industry || a.industry || 'Local Services').toString().toLowerCase();
+    const businessName = (b.businessName || a.businessName || 'Your Brand').toString();
+
+    // Simple industry presets
+    const presets = {
+      fashion: {
+        headline: "Fresh Styles, Just Dropped",
+        subline: "Seasonal picks curated for you",
+        offer: "FREE SHIPPING",
+        bullets: ["Easy returns", "New arrivals weekly"]
+      },
+      electronics: {
+        headline: "Upgrade Your Tech",
+        subline: "Trending gadgets & smart deals",
+        offer: "UP TO 40% OFF",
+        bullets: ["Laptops • Tablets • Audio", "0% APR Promo*"]
+      },
+      restaurant: {
+        headline: "Taste What’s New",
+        subline: "Fresh flavors this week",
+        offer: "2 FOR $20",
+        bullets: ["Order online • Pickup", "Local ingredients"]
+      },
+      flooring: {
+        headline: "Fall Flooring Event",
+        subline: "Make your home shine",
+        offer: "SAVE UP TO $1000",
+        bullets: ["Hardwood • Vinyl • Tile", "Free in-home estimates"]
+      },
+      default: {
+        headline: "New Offers Inside",
+        subline: "Quality you can count on",
+        offer: "BIG SAVINGS",
+        bullets: ["Trusted service", "Great reviews"]
+      }
+    };
+
+    const p =
+      presets[industry] ||
+      (industry.includes('fashion') ? presets.fashion :
+       industry.includes('floor') ? presets.flooring :
+       industry.includes('restaurant') ? presets.restaurant :
+       industry.includes('electr') ? presets.electronics :
+       presets.default);
+
+    // Build copy, ensuring we don't echo raw user sentence
+    const copy = {
+      headline: p.headline,
+      subline: p.subline,
+      offer: p.offer,
+      bullets: p.bullets,
+      disclaimers: a.legal || "",
+      cta: a.cta || "Shop Now",
+      brand: { businessName }
+    };
+
+    res.json({ ok: true, copy });
+  } catch (e) {
+    console.error('craft-ad-copy error:', e);
+    res.status(500).json({ ok: false, error: 'craft-ad-copy failed' });
+  }
+});
+
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 

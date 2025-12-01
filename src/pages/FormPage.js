@@ -1530,12 +1530,12 @@ async function handleGenerateStaticAd(template = "poster_b") {
         backgroundUrl: poster.backgroundUrl || ""
       };
 
-  // IMPORTANT: include raw user *answers* for context, but also include the crafted copy
+  // IMPORTANT: include crafted copy so backend won’t echo raw user text
   const payload = {
     template,
     inputs: common,
     knobs,
-    copy: craftedCopy || null, // <— NEW: backend will prefer this over answers
+    copy: craftedCopy || null, // backend will prefer this over answers
     answers: {
       ...a,
       // Keep these for legacy fallback, but Poster-B will ignore them if copy exists
@@ -1586,9 +1586,6 @@ async function handleGenerateStaticAd(template = "poster_b") {
     alert("Static ad failed. Please try again.");
   }
 }
-
-
-
 
 
   /* ---------------------- Render ---------------------- */
