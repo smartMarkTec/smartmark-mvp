@@ -143,22 +143,25 @@ function profileForIndustry(industry = "") {
     right: ["Diagnostics","AC Service","Batteries","Inspections"]
   };
 
+  /* ==== REPLACE THIS WHOLE BLOCK in server/routes/staticAds.js (the MAP inside profileForIndustry) ==== */
   const MAP = {
     home_cleaning: { template:'flyer_a', headline:'HOME CLEANING SERVICES', subline:'Apartment • Home • Office', cta:'CALL NOW!', palette:PALETTES.navy, lists:serviceLists, coverage:'Coverage area 25 Miles around your city', bgHint:'home cleaning' },
-    flooring:      { template:'poster_b', eventTitle:'FALL FLOORING EVENT', dateRange:'LIMITED TIME ONLY', saveAmount:'up to $1000', financingLine:'PLUS SPECIAL FINANCING*', qualifiers:'On select flooring products and services', legal:'*With approved credit. Ask for details.', palette:PALETTES.forest, bgHint:'flooring' },
-    restaurant:    { template:'poster_b', eventTitle:'TASTE THE NEW SPECIALS', dateRange:'THIS WEEK ONLY', saveAmount:'2 for $20', financingLine:'ORDER ONLINE • PICKUP', qualifiers:'Fresh & local ingredients', legal:'', palette:PALETTES.wine, bgHint:'restaurant' },
-    salon_spa:     { template:'poster_b', eventTitle:'SELF-CARE EVENT', dateRange:'LIMITED TIME • 15% OFF', saveAmount:'glow packages', financingLine:'BOOK TODAY', qualifiers:'Hair • Nails • Lashes • Skin', legal:'', palette:PALETTES.wine, bgHint:'salon spa' },
-    fitness:       { template:'poster_b', eventTitle:'JOIN & SAVE', dateRange:'MEMBERSHIP DEALS THIS MONTH', saveAmount:'NO ENROLLMENT', financingLine:'FIRST WEEK FREE', qualifiers:'Classes • Coaching • 24/7 Access', legal:'', palette:PALETTES.slate, bgHint:'gym fitness' },
-    real_estate:   { template:'poster_b', eventTitle:'OPEN HOUSE', dateRange:'SAT–SUN • 12–4PM', saveAmount:'NEW LISTING', financingLine:'ASK ABOUT FINANCING', qualifiers:'3 Bed • 2 Bath • 2,100 sq ft', legal:'', palette:PALETTES.teal, bgHint:'real estate' },
+    flooring:      { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.forest, bgHint:'flooring' },
+    restaurant:    { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.wine, bgHint:'restaurant' },
+    salon_spa:     { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.wine, bgHint:'salon spa' },
+    fitness:       { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.slate, bgHint:'gym fitness' },
+    real_estate:   { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.teal, bgHint:'real estate' },
     auto:          { template:'flyer_a', headline:'AUTO REPAIR & SERVICE', subline:'Reliable • Fast • Affordable', cta:'CALL NOW!', palette:PALETTES.slate, lists:autoLists, coverage:'Same-day appointments available', bgHint:'auto repair' },
     landscaping:   { template:'flyer_a', headline:'LANDSCAPING & LAWN CARE', subline:'Clean-ups • Maintenance • Installs', cta:'GET A QUOTE', palette:PALETTES.forest, lists:landscapingLists, coverage:'Serving your area', bgHint:'landscaping' },
     hvac_plumbing: { template:'flyer_a', headline:'HVAC & PLUMBING', subline:'Install • Repair • Maintenance', cta:'SCHEDULE NOW', palette:PALETTES.teal, lists:hvacLists, coverage:'Emergency service available', bgHint:'hvac plumbing' },
-    fashion:       { template:'poster_b', eventTitle:'NEW ARRIVALS', dateRange:'SEASONAL DROP', saveAmount:'FREE SHIPPING', financingLine:'EASY RETURNS', qualifiers:'Mens • Womens • Accessories', legal:'', palette:PALETTES.wine, bgHint:'fashion' },
-    electronics:   { template:'poster_b', eventTitle:'TECH DEALS', dateRange:'LIMITED TIME SAVINGS', saveAmount:'UP TO 40% OFF', financingLine:'0% APR PROMO*', qualifiers:'Laptops • Tablets • Headphones', legal:'*OAC. Limited time.', palette:PALETTES.slate, bgHint:'electronics' },
-    pets:          { template:'poster_b', eventTitle:'PET CARE & TREATS', dateRange:'THIS WEEK ONLY', saveAmount:'BUY 2 GET 1', financingLine:'GROOMING • VET • SUPPLIES', qualifiers:'Everything for happy pets', legal:'', palette:PALETTES.forest, bgHint:'pets' },
-    coffee:        { template:'poster_b', eventTitle:'FRESH ROASTS DAILY', dateRange:'TRY NEW SEASONALS', saveAmount:'2 FOR $5', financingLine:'ORDER AHEAD', qualifiers:'Espresso • Cold Brew • Tea', legal:'', palette:PALETTES.wine, bgHint:'coffee' },
+    fashion:       { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.wine, bgHint:'fashion' },
+    electronics:   { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.slate, bgHint:'electronics' },
+    pets:          { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.forest, bgHint:'pets' },
+    coffee:        { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.wine, bgHint:'coffee' },
     generic:       { template:'flyer_a', headline:'LOCAL SERVICES', subline:'Reliable • Friendly • On Time', cta:'CONTACT US', palette:PALETTES.base, lists:{ left:["Free Quote","Same-Day","Licensed","Insured"], right:["Great Reviews","Family Owned","Fair Prices","Guaranteed"] }, coverage:'Serving your area', bgHint:'generic' }
   };
+/* ==== END REPLACE BLOCK ==== */
+
 
   let prof = MAP[kind];
   if (kind === 'hvac_plumbing' && /plumb/i.test(industry)) {
@@ -570,11 +573,10 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', inputs.location || 'Your City'),
     };
 
-    // 2) Map all headline/body fields to Poster-B with COPY-FIRST priority
-    //    We DO NOT echo raw user a.headline; prefer crafted GPT copy or profile defaults.
+// 2) Map all headline/body fields to Poster-B with COPY-FIRST priority
     const pick = (...vals) => vals.find(v => typeof v === 'string' && v.trim());
 
-    // Prefer answers.copy (from buildStaticAdPayload) then body.copy if present
+    // Prefer crafted GPT copy if present (body.copy), else fall back to user answers (a.*), NEVER to profile defaults.
     const fromCopy = crafted ? {
       eventTitle : (crafted.eventTitle || crafted.headline || '').toString(),
       dateRange  : (crafted.dateRange  || crafted.subline  || '').toString(),
@@ -586,14 +588,22 @@ router.post('/generate-static-ad', async (req, res) => {
       legal      : (crafted.disclaimers || crafted.legal || '').toString()
     } : null;
 
+    const fromAnswers = {
+      eventTitle : (a.headline || a.eventTitle || '').toString(),
+      dateRange  : (a.promoLine || a.dateRange || a.subline || '').toString(),
+      saveAmount : (a.offer || a.saveAmount || '').toString(),
+      financing  : (a.secondary || a.financingLine || '').toString(),
+      qualifiers : (a.adCopy || (Array.isArray(a.bullets) ? a.bullets.join(' • ') : '')).toString(),
+      legal      : (a.legal || a.disclaimers || '').toString()
+    };
+
     const auto = {
-      // IMPORTANT: no raw a.headline fallback here (prevents echo)
-      eventTitle: pick(fromCopy?.eventTitle,  prof.eventTitle, 'SEASONAL EVENT'),
-      dateRange : pick(fromCopy?.dateRange,   prof.dateRange,  'LIMITED TIME ONLY'),
-      saveAmount: pick(fromCopy?.saveAmount,  prof.saveAmount, 'BIG SAVINGS'),
-      financing : pick(fromCopy?.financing,   prof.financingLine, ''),
-      qualifiers: pick(fromCopy?.qualifiers,  prof.qualifiers, ''),
-      legal     : pick(fromCopy?.legal,       prof.legal, ''),
+      eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ''),
+      dateRange : pick(fromCopy?.dateRange,  fromAnswers.dateRange,  ''),
+      saveAmount: pick(fromCopy?.saveAmount, fromAnswers.saveAmount, ''),
+      financing : pick(fromCopy?.financing,  fromAnswers.financing,  ''),
+      qualifiers: pick(fromCopy?.qualifiers, fromAnswers.qualifiers, ''),
+      legal     : pick(fromCopy?.legal,      fromAnswers.legal,      ''),
       palette   : (knobs.palette || prof.palette)
     };
 

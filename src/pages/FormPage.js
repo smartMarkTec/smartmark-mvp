@@ -1434,7 +1434,14 @@ async function handleRegenerateVideo() {
 async function handleGenerateStaticAd(template = "poster_b") {
   const a = answers || {};
 
-  // 0) Ask backend to craft paraphrased ad copy (no verbatim echo)
+  // Stop any video pipeline for this run (prevents "Hard cap reached; aborting video fetches")
+  try {
+    if (typeof setMediaType === "function") setMediaType("image");
+    if (typeof setIsGeneratingVideo === "function") setIsGeneratingVideo(false);
+    if (typeof cancelVideoJobs === "function") cancelVideoJobs(); // no-op if not defined
+  } catch (_) {}
+
+  // 0) Ask backend to craft paraphrased ad copy (never echo user text)
   let craftedCopy = null;
   try {
     const craftRes = await fetch(`${API_BASE}/craft-ad-copy`, {
@@ -1452,20 +1459,20 @@ async function handleGenerateStaticAd(template = "poster_b") {
       craftedCopy = craftJson.copy;
     }
   } catch (e) {
-    console.warn("craft-ad-copy failed, will proceed with defaults:", e);
+    console.warn("craft-ad-copy failed, using defaults:", e);
   }
 
-  // Overlay text to display (from edits or crafted copy)
+  // Overlay text (only used by Flyer-A); Poster-B uses crafted copy below
   const display = {
     headline: (displayHeadline || craftedCopy?.headline || "").slice(0, 55),
     body: displayBody || craftedCopy?.subline || "",
     cta: normalizeOverlayCTA(displayCTA || craftedCopy?.cta || a?.cta || "")
   };
 
-  // Build a reasonable mapping for Poster B from the chat answers (will be overridden by copy)
+  // Build Poster-B defaults (will be overridden by craftedCopy if present)
   const poster = derivePosterFieldsFromAnswers(a, { saveAmount: "BIG SAVINGS" });
 
-  // Common inputs every template can use
+  // Common inputs
   const common = {
     industry: (a.industry || "Local Services").toString(),
     businessName: (a.businessName || "Your Business").toString(),
@@ -1476,69 +1483,62 @@ async function handleGenerateStaticAd(template = "poster_b") {
     idealCustomer: (a.idealCustomer || "").toString(),
     phone: (a.phone || "(210) 555-0147").toString(),
 
-    // Also send the visible overlay values for Flyer-A
+    // Flyer-A only
     headline: display.headline,
     subline: display.body,
     cta: display.cta
   };
 
-  // Knobs (template-specific)
-  const knobs = template === "flyer_a"
-    ? {
-        size: "1080x1080",
-        palette: {
-          header: "#0d3b66",
-          body: "#dff3f4",
-          accent: "#ff8b4a",
-          textOnDark: "#ffffff",
-          textOnLight: "#2b3a44"
-        },
-        lists: {
-          left: (a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]),
-          right: (a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"])
-        },
-        coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
-        showIcons: true,
-        headerSplitDiagonal: true,
-        roundedOuter: true
-      }
-    : {
-        size: "1080x1080",
-        frame: { outerWhite: true, softShadow: true },
-        card: { widthPct: 70, heightPct: 55, shadow: true },
+  const knobs =
+    template === "flyer_a"
+      ? {
+          size: "1080x1080",
+          palette: {
+            header: "#0d3b66",
+            body: "#dff3f4",
+            accent: "#ff8b4a",
+            textOnDark: "#ffffff",
+            textOnLight: "#2b3a44"
+          },
+          lists: {
+            left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+            right: a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"]
+          },
+          coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
+          showIcons: true,
+          headerSplitDiagonal: true,
+          roundedOuter: true
+        }
+      : {
+          size: "1080x1080",
+          frame: { outerWhite: true, softShadow: true },
+          card: { widthPct: 70, heightPct: 55, shadow: true },
 
-        // Prefer crafted copy FIRST for Poster-B fields
-        eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 55),
-        dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 60),
-        saveAmount: (craftedCopy?.offer || poster.offer || "BIG SAVINGS").slice(0, 40),
+          // Prefer crafted GPT copy FIRST (prevents echo like "our quality of fashion")
+          eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 55),
+          dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 60),
+          saveAmount: (craftedCopy?.offer || poster.offer || "BIG SAVINGS").slice(0, 40),
+          financingLine: poster.secondary || "",
+          qualifiers: (craftedCopy
+            ? [craftedCopy.subline, ...(Array.isArray(craftedCopy.bullets) ? craftedCopy.bullets : [])]
+                .filter(Boolean)
+                .join(" • ")
+                .slice(0, 120)
+            : (poster.adCopy || "")),
+          legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 160),
 
-        // We generally keep financing empty unless the business supplied a real one
-        financingLine: poster.secondary || "",
+          seasonalLeaves: true,
+          backgroundHint: common.industry,
+          backgroundUrl: poster.backgroundUrl || "" // leave empty to let backend pick fast local/pexels
+        };
 
-        // Qualifiers become bullets/subline from crafted copy (joined)
-        qualifiers: (craftedCopy
-          ? [craftedCopy.subline, ...(Array.isArray(craftedCopy.bullets) ? craftedCopy.bullets : [])]
-              .filter(Boolean)
-              .join(" • ")
-              .slice(0, 120)
-          : (poster.adCopy || "")
-        ),
-        legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 160),
-
-        seasonalLeaves: true,
-        backgroundHint: common.industry,
-        backgroundUrl: poster.backgroundUrl || ""
-      };
-
-  // IMPORTANT: include crafted copy so backend won’t echo raw user text
   const payload = {
     template,
     inputs: common,
     knobs,
-    copy: craftedCopy || null, // backend will prefer this over answers
+    copy: craftedCopy || null, // backend prioritizes this over raw answers
     answers: {
       ...a,
-      // Keep these for legacy fallback, but Poster-B will ignore them if copy exists
       headline: poster.headline,
       promoLine: poster.promoLine,
       offer: poster.offer,
@@ -1574,12 +1574,9 @@ async function handleGenerateStaticAd(template = "poster_b") {
     setImageUrls([png, ...imageUrls.slice(0, 1)]);
     setActiveImage(0);
     setImageUrl(png);
-    setMediaType(prev => (prev === "video" ? "both" : prev));
+    setMediaType((prev) => (prev === "video" ? "both" : "image"));
 
-    setChatHistory(ch => [
-      ...ch,
-      { from: "gpt", text: `Static ad generated with template "${template}".` }
-    ]);
+    setChatHistory((ch) => [...ch, { from: "gpt", text: `Static ad generated with template "${template}".` }]);
   } catch (e) {
     console.error("Static ad error:", e);
     setError("Static ad failed. Please try again.");
