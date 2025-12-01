@@ -1919,17 +1919,37 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 /* === ROUTE: /api/generate-static-ad (templates: flyer_a, poster_b) ======================= */
 router.post('/generate-static-ad', async (req, res) => {
   try {
-    const { template = '', answers = {}, imageUrl = '', strict = false, copy = {} } = req.body || {};
+    const { template = '', answers = {}, imageUrl = '' } = req.body || {};
     if (!template || !/^(flyer_a|poster_b)$/i.test(template)) {
       return res.status(400).json({ error: 'invalid_template', message: 'Use template: flyer_a or poster_b' });
     }
 
-    // Make the asset
+    // Build a strict "copy" map — ONLY user-provided fields, no defaults.
+    const copy = {
+      brand:      answers.brand || answers.businessName || '',
+      headline:   answers.posterHeadline || answers.headline || '',
+      subhead:    answers.subhead || answers.tagline || '',
+      valueLine:  answers.valueLine || answers.offer || '',
+      dateRange:  answers.dateRange || '',
+      legal:      answers.legal || answers.disclaimers || '',
+      cta:        answers.cta || '',
+      body:       answers.body || answers.bodyCopy || answers.adCopy || answers.copy || ''
+    };
+
+    // Pick image source (if the user supplied one, use it)
+    const photoUrl = answers.imageUrl || imageUrl || '';
+
+    // Generate
     let out;
     if (/^flyer_a$/i.test(template)) {
-      out = await renderTemplateA_FlyerPNG({ answers, strict, copy });
+      out = await renderTemplateA_FlyerPNG({ answers });
     } else {
-      out = await renderTemplateB_PosterPNG({ answers, imageUrl, strict, copy });
+      out = await renderTemplateB_PosterPNG({
+        answers,
+        imageUrl: photoUrl,
+        strict: true,
+        copy
+      });
     }
 
     // Persist so your carousel picks it up first
@@ -1960,6 +1980,7 @@ router.post('/generate-static-ad', async (req, res) => {
     return res.status(500).json({ error: 'internal_error', message: e?.message || 'failed' });
   }
 });
+
 
 
 /* ---------------------- IMAGE OVERLAYS (fit-to-box + coherent copy) ---------------------- */
@@ -2183,42 +2204,34 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
 async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict = false, copy = {} }) {
   const W = 1200, H = 628, R = 28;
 
-  // background photo (industry lifestyle)
+  // background photo
   const bgUrl = imageUrl || resolveTemplateUrl({ answers });
-
   const imgRes = await ax.get(bgUrl, { responseType: 'arraybuffer', timeout: 12000 });
   const bgBuf = await sharp(imgRes.data)
     .resize(W, H, { fit: 'cover', kernel: sharp.kernel.lanczos3 })
     .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
     .toBuffer();
 
-  // Brand & CTA
-  const brand = _brandText(answers);
+  // Strict = only user text; non-strict = legacy fallbacks
+  const brand = strict ? (copy.brand || '') : _brandText(answers);
+  const cta   = strict ? cleanCTA(copy.cta || '', brand)
+                       : (_ctaNormFromAnswers(answers) || '');
 
-  // Dynamic CTA (no hardcoded fallback; button hides if empty)
-  const cta = cleanCTA(
-    copy.cta || answers.cta || _ctaNormFromAnswers(answers) || '',
-    brand
-  );
+  const savePct     = _savePercentFromText(answers.offer || '');
+  const bigHeadline = strict ? _upperSafe(copy.headline || copy.posterHeadline || '', 34)
+                             : _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
 
-  // Headline & lines
-  const savePct = _savePercentFromText(answers.offer || '');
-  const bigHeadline = strict
-    ? _upperSafe(copy.headline || copy.posterHeadline || brand, 34)
-    : _upperSafe(answers?.posterHeadline || _industryLabel(answers), 34);
+  const secondary1  = strict ? (copy.subhead || copy.dateRange || '')
+                             : _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
 
-  const secondary1 = strict
-    ? (copy.subhead || copy.dateRange || '')
-    : _fallback(answers?.dateRange || 'Limited Time', 'Limited Time');
+  const secondary2  = strict ? (copy.valueLine || copy.offer || '')
+                             : (savePct ? `Save up to ${savePct}` : _offerLine(answers));
 
-  const secondary2 = strict
-    ? (copy.valueLine || copy.offer || '')
-    : (savePct ? `Save up to ${savePct}` : _offerLine(answers));
-
-  const legal = strict ? (copy.legal || '') : _legalLine(answers);
+  const legal       = strict ? (copy.legal || '') : _legalLine(answers);
+  const body        = strict ? (copy.body || '')  : (answers.body || '');
 
   // centered white card
-  const CARD_W = 760, CARD_H = 380;
+  const CARD_W = 760, CARD_H = 400; // +20 to make room for body copy
   const CX = Math.round(W/2), CY = Math.round(H/2) + 8;
   const cardX = Math.round(CX - CARD_W/2), cardY = Math.round(CY - CARD_H/2);
 
@@ -2226,7 +2239,7 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <image id="bg" href="data:image/jpeg;base64,${bgBuf.toString('base64')}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-      <filter id="shadow" x="-20%" y="-20%" width="140%">
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
         <feDropShadow dx="0" dy="8" stdDeviation="16" flood-color="#000000" flood-opacity="0.28"/>
       </filter>
     </defs>
@@ -2242,20 +2255,21 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
     <!-- white frame -->
     <rect x="12" y="12" width="${W-24}" height="${H-24}" rx="${R}" fill="none" stroke="#ffffff" stroke-opacity="0.92" stroke-width="3"/>
 
-    ${_seasonAccentLeaves()}
+    ${strict ? '' : _seasonAccentLeaves()}
 
     <!-- centered white card -->
     <g filter="url(#shadow)">
       <rect x="${cardX}" y="${cardY}" width="${CARD_W}" height="${CARD_H}" rx="18" fill="#ffffff"/>
     </g>
 
-    <!-- brand -->
+    <!-- brand (optional) -->
+    ${_maybe(brand, `
     <text x="${CX}" y="${cardY + 58}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="22" font-weight="800" fill="#0f141a" opacity="0.85">
       ${escSVG(brand)}
-    </text>
+    </text>`)}
 
-    <!-- big headline (centered) -->
+    <!-- big headline -->
     ${_maybe(bigHeadline, `
     <text x="${CX}" y="${cardY + 130}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="54" font-weight="900" fill="#0f141a" letter-spacing="0.04em">
@@ -2269,15 +2283,23 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
       ${escSVG(secondary1)}
     </text>`)}
 
-    <!-- secondary line 2 (value/offer) -->
+    <!-- secondary line 2 -->
     ${_maybe(secondary2, `
     <text x="${CX}" y="${cardY + 214}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#0d3b66">
       ${escSVG(secondary2)}
     </text>`)}
 
-    <!-- CTA pill under the card (only if cta exists) -->
+    <!-- body/ad copy -->
+    ${_maybe(body, `
+    <text x="${CX}" y="${cardY + 250}" text-anchor="middle"
+          font-family="Inter,Segoe UI,Arial" font-size="18" font-weight="600" fill="#6b7280" opacity="0.95">
+      ${escSVG(body)}
+    </text>`)}
+
+        <!-- CTA (only if present) -->
     ${_maybe(cta, pillBtn(CX, cardY + CARD_H + 56, cta, 28))}
+
 
     <!-- legal -->
     ${_maybe(legal, `
@@ -2459,14 +2481,21 @@ function escSVG(s='') {
     .replace(/"/g,'&quot;')
     .replace(/'/g,'&#39;');
 }
+
+function escRegExp(s='') {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function cleanHeadline(s='') {
   return String(s).replace(/\s+/g,' ').trim().toUpperCase();
 }
+
 function ensureGeneratedDir() {
   const out = path.join(process.cwd(), 'generated');
   if (!fs.existsSync(out)) fs.mkdirSync(out, { recursive: true });
   return out;
 }
+
 function mediaPath(file) { return `/api/media/${file}`; }
 function absolutePublicUrl(rel) {
   const base = process.env.PUBLIC_BASE_URL || '';
@@ -2475,36 +2504,28 @@ function absolutePublicUrl(rel) {
 function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
 
 // ------------------------------ UTILS: conditional SVG helpers ------------------------------
-function _nonEmpty(s) {
-  return !!String(s || '').trim();
-}
-function _maybe(line, svg) {
-  // Only emit the provided SVG snippet if a non-empty line exists.
-  return _nonEmpty(line) ? svg : '';
-}
+function _nonEmpty(s) { return !!String(s || '').trim(); }
+function _maybe(line, svg) { return _nonEmpty(line) ? svg : ''; }
 
-// (Optional) if you reference _seasonAccentLeaves() but don't define it elsewhere:
+// Optional seasonal garnish (disabled in strict flow)
 function _seasonAccentLeaves() { return ''; }
 
-// --- CTA normalizers used by pillBtn and strict mode ---
+// --- CTA normalizers — NO DEFAULTS ---
 function normalizeCTA(s = '') {
-  const base = String(s).trim();
-  if (!base) return 'LEARN MORE';
-  // collapse spaces, cap length, upper-case
-  return base.replace(/\s+/g, ' ').trim().slice(0, 28).toUpperCase();
+  const base = String(s).replace(/\s+/g, ' ').trim();
+  return base ? base.slice(0, 28).toUpperCase() : '';
 }
-
 function cleanCTA(s = '', brand = '') {
-  // remove brand repeats and punctuation noise, then normalize
-  let t = String(s || '').replace(new RegExp(brand, 'i'), '').replace(/[^\w\s]/g, ' ').trim();
-  if (!t) t = 'LEARN MORE';
-  return normalizeCTA(t);
+  let t = String(s || '');
+  if (brand) t = t.replace(new RegExp(escRegExp(brand), 'i'), '');
+  t = t.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  return normalizeCTA(t); // returns '' when empty
 }
-
 
 /* --- CTA pill (pure black, white text; same geometry) --- */
 function pillBtn(cx, cy, label, fs = 34) {
-  const txt = normalizeCTA(label || 'LEARN MORE');
+  const txt = normalizeCTA(label || '');
+  if (!txt) return ''; // do not draw when no CTA
   const padX = 32;
   const estTextW = Math.round(txt.length * fs * 0.60);
   const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
@@ -2531,6 +2552,7 @@ function pillBtn(cx, cy, label, fs = 34) {
       </text>
     </g>`;
 }
+
 
 /* =========================================
    IMAGE NORMALIZATION (bake as background)
