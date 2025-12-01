@@ -1944,13 +1944,21 @@ router.post('/generate-static-ad', async (req, res) => {
     if (/^flyer_a$/i.test(template)) {
       out = await renderTemplateA_FlyerPNG({ answers });
     } else {
-      out = await renderTemplateB_PosterPNG({
-        answers,
-        imageUrl: photoUrl,
-        strict: true,
-        copy
-      });
+  // STRICT: only use what the user typed. No defaults.
+  out = await renderTemplateB_PosterPNG({
+    answers,
+    imageUrl,
+    strict: true,
+    copy: {
+      headline: answers.posterHeadline || answers.headline || '',
+      subhead:  answers.subhead || answers.dateRange || '',
+      valueLine: answers.valueLine || answers.offer || '',
+      legal:    answers.legal || '',
+      cta:      answers.cta || ''
     }
+  });
+}
+
 
     // Persist so your carousel picks it up first
     const rec = await saveAsset({
