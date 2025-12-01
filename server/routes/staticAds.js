@@ -556,28 +556,35 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    /* ------------------- POSTER B (ALWAYS photo) ------------------- */
+  /* ------------------- POSTER B (ALWAYS photo) ------------------- */
+    // 1) Gather user answers with highest priority (answers > inputs > knobs > profile)
+    const a = (body.answers && typeof body.answers === 'object') ? body.answers : {};
+    const get = (k, def='') =>
+      (a[k] ?? inputs[k] ?? knobs[k] ?? def);
+
     const mergedInputsB = {
       industry,
-      businessName: inputs.businessName || 'Your Brand',
-      location: inputs.location || 'Your City'
+      businessName: get('businessName', inputs.businessName || 'Your Brand'),
+      location: get('location', inputs.location || 'Your City'),
     };
 
-    // NEW: auto-copy from inputs/overlay before profile defaults
+    // 2) Map all headline/body fields to Poster-B with strict priority
+    //    eventTitle ← answers.headline | answers.eventTitle | inputs.headline | profile.eventTitle
     const auto = {
-      eventTitle: knobs.eventTitle || inputs.headline || body.overlayHeadline || prof.eventTitle || 'SEASONAL EVENT',
-      dateRange:  knobs.dateRange  || inputs.promoLine || inputs.subline || prof.dateRange || 'LIMITED TIME ONLY',
-      saveAmount: knobs.saveAmount || inputs.offer || inputs.cta || prof.saveAmount || 'BIG SAVINGS',
-      financing:  knobs.financingLine || inputs.secondary || prof.financingLine || '',
-      qualifiers: knobs.qualifiers || inputs.adCopy || inputs.details || inputs.subline || '' || prof.qualifiers,
-      legal:      knobs.legal || prof.legal || '',
+      eventTitle: get('headline', get('eventTitle', inputs.headline || prof.eventTitle || 'SEASONAL EVENT')),
+      dateRange:  get('promoLine', get('dateRange', inputs.promoLine || inputs.subline || prof.dateRange || 'LIMITED TIME ONLY')),
+      saveAmount: get('offer', get('saveAmount', inputs.offer || inputs.cta || prof.saveAmount || 'BIG SAVINGS')),
+      financing:  get('secondary', get('financingLine', prof.financingLine || '')),
+      qualifiers: get('adCopy', get('qualifiers', inputs.adCopy || inputs.details || inputs.subline || prof.qualifiers || '')),
+      legal:      get('legal', prof.legal || ''),
       palette:    knobs.palette || prof.palette
     };
 
+    // 3) Allow backgroundUrl from answers as well
     const mergedKnobsB = {
-      size: knobs.size || '1080x1080',
-      backgroundUrl: knobs.backgroundUrl || "",
-      backgroundHint: knobs.backgroundHint || prof.bgHint || '',
+      size: get('size', knobs.size || '1080x1080'),
+      backgroundUrl: get('backgroundUrl', knobs.backgroundUrl || ''),
+      backgroundHint: get('backgroundHint', knobs.backgroundHint || prof.bgHint || ''),
       eventTitle: auto.eventTitle,
       dateRange: auto.dateRange,
       saveAmount: auto.saveAmount,
@@ -592,6 +599,7 @@ router.post('/generate-static-ad', async (req, res) => {
       throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
     }
 
+    // 4) Resolve a background (answers > knobs > pexels > local > fallback)
     let photoBuf = null;
     const seed = Date.now();
 
@@ -614,7 +622,7 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width:1080, height:1080, photoBuffer: photoBuf });
 
-    // dynamic font sizes based on text length
+    // 5) Dynamic font sizes based on actual user text
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave  = String(mergedKnobsB.saveAmount || "").length;
     const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 56, 92);
@@ -622,7 +630,7 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsH2    = 38;
     const fsBody  = 30;
 
-    // measured layout
+    // 6) Measured centered layout
     const cardW = 860, cardH = 660, padX = 60, padY = 56;
 
     const eventTitleLines = wrapTextToWidth(mergedKnobsB.eventTitle, fsTitle, cardW, padX, 2);
@@ -754,10 +762,15 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const location = a.location || b.location || 'Your City';
     const backgroundUrl = a.backgroundUrl || b.backgroundUrl || '';
 
+    // Map user intent → Poster-B keys (answers win)
     const overlay = {
-      headline: ((b.overlayHeadline || a.overlayHeadline || '') + '').slice(0, 55),
-      body: b.overlayBody || a.overlayBody || '',
-      cta: b.overlayCTA || a.overlayCTA || 'Learn more',
+      headline: (a.headline || b.overlayHeadline || '').toString().slice(0, 55),
+      body: a.adCopy || b.overlayBody || '',
+      offer: a.offer || '',
+      promoLine: a.promoLine || '',
+      secondary: a.secondary || '',
+      cta: a.cta || b.overlayCTA || 'Learn more',
+      legal: a.legal || ''
     };
 
     const prof = profileForIndustry(industry);
@@ -786,11 +799,19 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 
         const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width: W, height: H, photoBuffer: photoBuf });
 
+        // User-first mapping for Poster-B
+        const eventTitle  = overlay.headline || prof.eventTitle || 'SEASONAL EVENT';
+        const dateRange   = overlay.promoLine || prof.dateRange || 'LIMITED TIME ONLY';
+        const saveAmount  = overlay.offer || prof.saveAmount || 'BIG SAVINGS';
+        const financingLn = overlay.secondary || prof.financingLine || '';
+        const qualifiers  = overlay.body || prof.qualifiers || '';
+        const legal       = overlay.legal || prof.legal || '';
+
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
         const cardW = 860, cardH = 660, padX = 60, padY = 56;
 
-        const eventTitleLines = wrapTextToWidth(overlay.headline || prof.eventTitle || 'SEASONAL EVENT', fsTitle, cardW, padX, 2);
-        const qualifierLines  = wrapTextToWidth(overlay.body || prof.qualifiers || '', fsBody, cardW, padX, 2);
+        const eventTitleLines = wrapTextToWidth(eventTitle, fsTitle, cardW, padX, 2);
+        const qualifierLines  = wrapTextToWidth(qualifiers, fsBody, cardW, padX, 2);
 
         const titleBlock = Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
         const titleTop   = padY + fsTitle;
@@ -805,10 +826,10 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
           qualifierLines,
-          dateRange: prof.dateRange || 'LIMITED TIME ONLY',
-          saveAmount: prof.saveAmount || 'BIG SAVINGS',
-          financingLine: prof.financingLine || '',
-          legal: prof.legal || '',
+          dateRange,
+          saveAmount,
+          financingLine: financingLn,
+          legal,
           accent: (prof.palette && prof.palette.accent) || '#ff7b41',
           metrics
         };
@@ -831,6 +852,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
     } else {
+      // Flyer-A path (kept intact, but answers win)
       const palette = prof.palette || { header: '#0d3b66', body: '#dff3f4', accent: '#ff8b4a', textOnDark: '#ffffff', textOnLight: '#2b3a44' };
       const lists = withListLayout(prof.lists || { left:["Free Quote","Same-Day","Licensed","Insured"], right:["Great Reviews","Family Owned","Fair Prices","Guaranteed"] });
       const vars = {
@@ -860,6 +882,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     res.status(400).json({ ok:false, error:String(err?.message||err) });
   }
 });
+
 
 /* ------------------------ Exports ------------------------ */
 module.exports = router;

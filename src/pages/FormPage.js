@@ -62,12 +62,13 @@ function saveImageDraftById(id, patch) {
 }
 function normalizeOverlayCTA(s = "") {
   const raw = String(s).trim();
-  if (!raw) return "Learn more";
+  if (!raw) return ""; // no default CTA
   const plain = raw.replace(/[!?.]+$/g, "").toLowerCase();
   const match = ALLOWED_CTAS.find(c => c.toLowerCase() === plain);
   const chosen = match || plain;
   return chosen.replace(/\b\w/g, c => c.toUpperCase());
 }
+
 function creativeIdFromUrl(url = "") {
   return `img:${url}`;
 }
@@ -294,6 +295,57 @@ function abortAllVideoFetches() {
 
 /* ===== helpers ===== */
 
+/* ===== derivePosterFieldsFromAnswers ===== */
+
+function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
+  const ind = (a.industry || "").toString();
+
+  const headline =
+    a.headline ||
+    a.eventTitle ||
+    (a.mainBenefit ? a.mainBenefit : "") ||
+    (a.offer ? "Limited-Time Offer" : `${ind || "Your"} Brand`).toString();
+
+  const tc = (s) => String(s || "").trim().replace(/\b\w/g, c => c.toUpperCase());
+
+  const promoLine =
+    a.promoLine ||
+    a.subline ||
+    (a.idealCustomer ? tc(a.idealCustomer.slice(0, 30)) : "") ||
+    "LIMITED TIME ONLY";
+
+  const offer =
+    a.offer ||
+    a.saveAmount ||
+    a.cta ||
+    (fallback.saveAmount || "BIG SAVINGS");
+
+  const secondary =
+    a.secondary ||
+    a.financingLine ||
+    "";
+
+  const adCopy =
+    a.adCopy ||
+    a.details ||
+    a.mainBenefit ||
+    "";
+
+  const legal = a.legal || "";
+  const backgroundUrl = a.backgroundUrl || "";
+
+  return {
+    headline: String(headline || "").slice(0, 55),
+    promoLine: String(promoLine || ""),
+    offer: String(offer || ""),
+    secondary: String(secondary || ""),
+    adCopy: String(adCopy || ""),
+    legal: String(legal || ""),
+    backgroundUrl
+  };
+}
+
+
 const CONTROLLER_TIMEOUT_MS = 22000;         // single-call guard
 const IMAGE_FETCH_TIMEOUT_MS = 38000;        // image job (retry-safe)
 const VIDEO_FETCH_TIMEOUT_MS = 56000;        // per-variant POST /generate-video-ad
@@ -411,10 +463,8 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
-/* === buildImagePrompt (images) — REPLACE ENTIRE BLOCK === */
+/* === buildImagePrompt (images) — UPDATED === */
 function buildImagePrompt(answers = {}, overlay = {}) {
-  // Generic prompt that works for ANY industry. We only use this to bias
-  // background photography when you also choose to render image-only ads.
   const parts = [];
 
   const industry = (answers.industry || "local services").toString().trim();
@@ -429,15 +479,16 @@ function buildImagePrompt(answers = {}, overlay = {}) {
   if (offer) parts.push(`Offer: ${offer}`);
   if (audience) parts.push(`Audience: ${audience}`);
 
-  // Keep photo guidance simple and ad-safe.
-  parts.push("Style: clean commercial photo, centered subject, negative space for text, uncluttered background");
-
-  // Nudge toward the overlay copy you’re previewing
+  // Nudge toward your overlay copy so the image fits your text
   if (overlay?.headline) parts.push(`Headline theme: ${overlay.headline}`);
   if (overlay?.cta) parts.push(`CTA: ${overlay.cta}`);
 
+  // Photo guidance
+  parts.push("Style: clean commercial photo, centered subject, negative space for text, uncluttered background");
+
   return parts.filter(Boolean).join(" | ");
 }
+
 
 
 
@@ -931,30 +982,43 @@ export default function FormPage() {
     // eslint-disable-next-line
   }, []);
 
-  /* Hydrate edit fields on active image/result change */
   useEffect(() => {
-    const draft = currentImageId ? getImageDraftById(currentImageId) : null;
-    setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
-    setEditBody(draft?.body ?? result?.body ?? "");
-    setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? "Learn more"));
-  }, [currentImageId, result]);
+  const draft = currentImageId ? getImageDraftById(currentImageId) : null;
+  setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
+  setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? answers?.mainBenefit ?? "");
+  setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
+}, [currentImageId, result, answers]);
 
-  /* Debounced autosave of image edits */
-  useEffect(() => {
-    if (!currentImageId) return;
-    const t = setTimeout(() => {
-      saveImageDraftById(currentImageId, {
-        headline: (editHeadline || "").trim(),
-        body: (editBody || "").trim(),
-        overlay: normalizeOverlayCTA(editCTA || "Learn more")
-      });
-    }, 400);
-    return () => clearTimeout(t);
-  }, [currentImageId, editHeadline, editBody, editCTA]);
 
-  const displayHeadline = (editHeadline || result?.headline || "Don't Miss Our Limited-Time Offer").slice(0, 55);
-  const displayBody = (editBody || result?.body || "Ad copy goes here...");
-  const displayCTA = normalizeOverlayCTA(editCTA || result?.image_overlay_text || "Learn more");
+ /* Debounced autosave of image edits */
+useEffect(() => {
+  if (!currentImageId) return;
+  const t = setTimeout(() => {
+    saveImageDraftById(currentImageId, {
+      headline: (editHeadline || "").trim(),
+      body: (editBody || "").trim(),
+      overlay: normalizeOverlayCTA(editCTA || "")
+    });
+  }, 400);
+  return () => clearTimeout(t);
+}, [currentImageId, editHeadline, editBody, editCTA]);
+
+
+  const displayHeadline = (
+  editHeadline ||
+  result?.headline ||
+  answers?.mainBenefit ||
+  answers?.businessName ||
+  ""
+).slice(0, 55);
+
+  const displayBody =
+  (editBody || result?.body || answers?.details || answers?.adCopy || answers?.mainBenefit || "").trim();
+
+  const displayCTA = normalizeOverlayCTA(
+  editCTA || result?.image_overlay_text || answers?.cta || ""
+);
+
 
   /* Hard reset chat + draft */
   function hardResetChat() {
@@ -1026,7 +1090,7 @@ export default function FormPage() {
         fbVideoIds: fbIds,
         headline: mergedHeadline,
         body: mergedBody,
-        imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || "Learn more"),
+        imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
         videoScript: (videoItems[activeVideo]?.script || ""),
         answers,
         mediaSelection: mediaType,
@@ -1164,12 +1228,15 @@ setTimeout(async () => {
       { tries: 1, timeoutMs: 12000 }
     ).catch(() => ({}));
 
-  const imagesPromise = (async () => {
-  const overlay = {
-    headline: displayHeadline,
-    body: displayBody,
-    cta: displayCTA
-  };
+const imagesPromise = (async () => {
+  // Use answers-first mapping so the image matches what the user typed
+  const poster = derivePosterFieldsFromAnswers(answers, { saveAmount: "BIG SAVINGS" });
+const overlay = {
+  headline: (displayHeadline || poster.headline || "").slice(0, 55),
+  body: displayBody || poster.adCopy || "",
+  cta: normalizeOverlayCTA(displayCTA || answers?.cta || "")
+};
+
   const prompt = buildImagePrompt(answers, overlay);
 
   const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
@@ -1177,6 +1244,7 @@ setTimeout(async () => {
   setActiveImage(0);
   setImageUrl((imgs && imgs[0]) || "");
 })();
+
 
 
     const videosPromise = (async () => {
@@ -1300,21 +1368,29 @@ setTimeout(async () => {
   }, []);
 
   /* Regenerations (sequential with warmup/backoff) */
-  async function handleRegenerateImage() {
-    setImageLoading(true);
-    try {
-      await warmBackend();
-      const overlay = { headline: displayHeadline, body: displayBody, cta: displayCTA };
-const prompt = buildImagePrompt(answers, overlay);
-const imgs = await fetchImagesOnce(getRandomString(), answers, overlay, prompt);
+async function handleRegenerateImage() {
+  setImageLoading(true);
+  try {
+    await warmBackend();
 
-      setImageUrls(imgs);
-      setActiveImage(0);
-      setImageUrl(imgs[0] || "");
-    } finally {
-      setImageLoading(false);
-    }
+    const poster = derivePosterFieldsFromAnswers(answers, { saveAmount: "BIG SAVINGS" });
+    const overlay = {
+  headline: (displayHeadline || poster.headline || "").slice(0, 55),
+  body: displayBody || poster.adCopy || "",
+  cta: normalizeOverlayCTA(displayCTA || answers?.cta || "")
+};
+
+    const prompt = buildImagePrompt(answers, overlay);
+
+    const imgs = await fetchImagesOnce(getRandomString(), answers, overlay, prompt);
+    setImageUrls(imgs);
+    setActiveImage(0);
+    setImageUrl(imgs[0] || "");
+  } finally {
+    setImageLoading(false);
   }
+}
+
 
 async function handleRegenerateVideo() {
   setVideoLoading(true);
@@ -1355,81 +1431,91 @@ async function handleRegenerateVideo() {
 }
 
 // --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
-async function handleGenerateStaticAd(template = "flyer_a") {
-  // template keys:
-  //  - "flyer_a": square flyer with top header, diagonal split, lists, CTA row (Template A)
-  //  - "poster_b": lifestyle background + centered white card + frame + leaves (Template B)
-
-  // Pull what we already have from the chat flow
+// --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
+async function handleGenerateStaticAd(template = "poster_b") {
   const a = answers || {};
 
-  // Safe defaults (work for any industry)
-  const fallbackPhone = "(210) 555-0147";
-  const fallbackCity = "San Antonio, TX";
-  const saveAmount = "up to $1000";
+  // Overlay text to display (from edits or generated copy)
+  const display = {
+    headline: (displayHeadline || "").slice(0, 55),
+    body: displayBody || "",
+    cta: normalizeOverlayCTA(displayCTA || a?.cta || "")
+  };
+
+  // Build a reasonable mapping for Poster B from the chat answers
+  const poster = derivePosterFieldsFromAnswers(a, { saveAmount: "BIG SAVINGS" });
 
   // Common inputs every template can use
   const common = {
     industry: (a.industry || "Local Services").toString(),
     businessName: (a.businessName || "Your Business").toString(),
     website: (a.url || "").toString(),
-    location: a.city ? `${a.city}${a.state ? ", " + a.state : ""}` : (a.location || fallbackCity),
+    location: a.city ? `${a.city}${a.state ? ", " + a.state : ""}` : (a.location || "Your City"),
     offer: (a.offer || "").toString(),
     mainBenefit: (a.mainBenefit || "").toString(),
     idealCustomer: (a.idealCustomer || "").toString(),
-    phone: (a.phone || fallbackPhone).toString(),
-    headline: (displayHeadline || "Limited-Time Offer").toString(),
-    subline: (displayBody || "").toString(),
-    cta: (normalizeOverlayCTA(displayCTA || "Learn more")).toString()
+    phone: (a.phone || "(210) 555-0147").toString(),
+
+    // Also send the visible overlay values
+    headline: display.headline,
+    subline: display.body,
+    cta: display.cta
   };
 
-  // Template-specific knobs, but still industry-agnostic
-  const templatePayloads = {
-    flyer_a: {
-      // Template A — “Home Cleaning” style flyer (works for any industry)
-      size: "1080x1080",
-      palette: {
-        header: "#0d3b66",     // dark teal header
-        body: "#dff3f4",       // light aqua body
-        accent: "#ff8b4a",     // orange for checkmarks/phone
-        textOnDark: "#ffffff",
-        textOnLight: "#2b3a44"
-      },
-      lists: {
-        // Use defaults if user didn’t provide; you can wire these from extra questions later
-        left: (a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]),
-        right: (a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"])
-      },
-      coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
-      showIcons: true,
-      headerSplitDiagonal: true,
-      roundedOuter: true
-    },
-    poster_b: {
-      // Template B — “Fall Flooring Sale” style poster (works for any industry)
-      size: "1080x1080",
-      frame: { outerWhite: true, softShadow: true },
-      card: { widthPct: 70, heightPct: 55, shadow: true },
-      // If you gathered dates/seasonal copy, pass them; otherwise we map generically
-      eventTitle: (a.eventTitle || `${common.industry} EVENT`).toString(),
-      dateRange: (a.dateRange || "LIMITED TIME ONLY").toString(),
-      saveAmount: (a.saveAmount || saveAmount).toString(),
-      financingLine: (a.financingLine || "PLUS SPECIAL FINANCING*").toString(),
-      qualifiers: (a.qualifiers || `On select ${common.industry} products and services`).toString(),
-      legal: (a.legal || "*With approved credit. Ask for details.").toString(),
-      seasonalLeaves: true,
-      backgroundHint: common.industry // backend can pick a relevant lifestyle photo
+
+  // Knobs (template-specific)
+  const knobs = template === "flyer_a"
+    ? {
+        size: "1080x1080",
+        palette: {
+          header: "#0d3b66",
+          body: "#dff3f4",
+          accent: "#ff8b4a",
+          textOnDark: "#ffffff",
+          textOnLight: "#2b3a44"
+        },
+        lists: {
+          left: (a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]),
+          right: (a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"])
+        },
+        coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
+        showIcons: true,
+        headerSplitDiagonal: true,
+        roundedOuter: true
+      }
+    : {
+        size: "1080x1080",
+        frame: { outerWhite: true, softShadow: true },
+        card: { widthPct: 70, heightPct: 55, shadow: true },
+        eventTitle: poster.headline || `${common.industry} EVENT`,
+        dateRange: poster.promoLine || "LIMITED TIME ONLY",
+        saveAmount: poster.offer || "BIG SAVINGS",
+        financingLine: poster.secondary || "",
+        qualifiers: poster.adCopy || "",
+        legal: poster.legal || "",
+        seasonalLeaves: true,
+        backgroundHint: common.industry,
+        backgroundUrl: poster.backgroundUrl || ""
+      };
+
+  // IMPORTANT: include raw user *answers* so the backend prioritizes them
+  const payload = {
+    template,
+    inputs: common,
+    knobs,
+    answers: {
+      ...a,
+      headline: poster.headline,    // eventTitle
+      promoLine: poster.promoLine,  // dateRange
+      offer: poster.offer,          // saveAmount
+      secondary: poster.secondary,  // financingLine
+      adCopy: poster.adCopy,        // qualifiers
+      legal: poster.legal,
+      backgroundUrl: poster.backgroundUrl
     }
   };
 
-  const payload = {
-    template,                // "flyer_a" or "poster_b"
-    inputs: common,          // text + CTA + brand basics
-    knobs: templatePayloads[template] || templatePayloads.flyer_a
-  };
-
   try {
-    // Use same-origin API (Vercel rewrite → Render)
     const res = await fetch(`${API_BASE}/generate-static-ad`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1444,7 +1530,6 @@ async function handleGenerateStaticAd(template = "flyer_a") {
       return;
     }
 
-    // Normalize URL and preview it in the existing Image card
     const png = toAbsoluteMedia(data.pngUrl || data.absoluteUrl || data.url || data.filename || "");
     if (!png) {
       setError("Static ad returned without a URL.");
@@ -1452,16 +1537,14 @@ async function handleGenerateStaticAd(template = "flyer_a") {
       return;
     }
 
-    // Put the generated static PNG at the front of the carousel
     setImageUrls([png, ...imageUrls.slice(0, 1)]);
     setActiveImage(0);
     setImageUrl(png);
-    setMediaType((prev) => (prev === "video" ? "both" : prev)); // make sure user can see it
+    setMediaType(prev => (prev === "video" ? "both" : prev));
 
-    // Optional: small toast in chat history
-    setChatHistory((ch) => [
+    setChatHistory(ch => [
       ...ch,
-      { from: "gpt", text: `Static ad generated with template "${template}". Open the image to view at full size.` }
+      { from: "gpt", text: `Static ad generated with template "${template}".` }
     ]);
   } catch (e) {
     console.error("Static ad error:", e);
@@ -1469,6 +1552,7 @@ async function handleGenerateStaticAd(template = "flyer_a") {
     alert("Static ad failed. Please try again.");
   }
 }
+
 
 
 
@@ -2055,7 +2139,8 @@ async function handleGenerateStaticAd(template = "flyer_a") {
             const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
             const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
             const mergedBody = activeDraft?.body || result?.body || "";
-            const mergedCTA = normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || "Learn more");
+            const mergedCTA = normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || "");
+
 
             let imgA = imageUrls.map(abs).slice(0, 2);
             let vidA = videoItems.map(v => abs(v.url)).slice(0, 2);
