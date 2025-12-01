@@ -1921,22 +1921,24 @@ router.post('/generate-static-ad', async (req, res) => {
   try {
     const { template = '', answers = {}, imageUrl = '' } = req.body || {};
     if (!template || !/^(flyer_a|poster_b)$/i.test(template)) {
-      return res.status(400).json({ error: 'invalid_template', message: 'Use template: flyer_a or poster_b' });
+      return res.status(400).json({
+        error: 'invalid_template',
+        message: 'Use template: flyer_a or poster_b'
+      });
     }
 
     // Build a strict "copy" map — ONLY user-provided fields, no defaults.
     const copy = {
-      brand:      answers.brand || answers.businessName || '',
-      headline:   answers.posterHeadline || answers.headline || '',
-      subhead:    answers.subhead || answers.tagline || '',
-      valueLine:  answers.valueLine || answers.offer || '',
-      dateRange:  answers.dateRange || '',
-      legal:      answers.legal || answers.disclaimers || '',
-      cta:        answers.cta || '',
-      body:       answers.body || answers.bodyCopy || answers.adCopy || answers.copy || ''
+      brand:     answers.brand || answers.businessName || '',
+      headline:  answers.posterHeadline || answers.headline || '',
+      subhead:   answers.subhead || answers.tagline || answers.dateRange || '',
+      valueLine: answers.valueLine || answers.offer || '',
+      body:      answers.body || answers.bodyCopy || answers.adCopy || answers.copy || '',
+      legal:     answers.legal || answers.disclaimers || '',
+      cta:       answers.cta || ''
     };
 
-    // Pick image source (if the user supplied one, use it)
+    // Prefer a user-supplied image if provided.
     const photoUrl = answers.imageUrl || imageUrl || '';
 
     // Generate
@@ -1944,21 +1946,14 @@ router.post('/generate-static-ad', async (req, res) => {
     if (/^flyer_a$/i.test(template)) {
       out = await renderTemplateA_FlyerPNG({ answers });
     } else {
-  // STRICT: only use what the user typed. No defaults.
-  out = await renderTemplateB_PosterPNG({
-    answers,
-    imageUrl,
-    strict: true,
-    copy: {
-      headline: answers.posterHeadline || answers.headline || '',
-      subhead:  answers.subhead || answers.dateRange || '',
-      valueLine: answers.valueLine || answers.offer || '',
-      legal:    answers.legal || '',
-      cta:      answers.cta || ''
+      // STRICT: only use what the user typed. No defaults or auto text.
+      out = await renderTemplateB_PosterPNG({
+        answers,
+        imageUrl: photoUrl,
+        strict: true,
+        copy
+      });
     }
-  });
-}
-
 
     // Persist so your carousel picks it up first
     const rec = await saveAsset({
@@ -1970,8 +1965,8 @@ router.post('/generate-static-ad', async (req, res) => {
         template: template.toLowerCase(),
         businessName: answers?.businessName || '',
         industry: answers?.industry || '',
-        phone: answers?.phone || answers?.phoneNumber || '',
-      },
+        phone: answers?.phone || answers?.phoneNumber || ''
+      }
     });
 
     return res.json({
@@ -1981,14 +1976,13 @@ router.post('/generate-static-ad', async (req, res) => {
       filename: out.filename,
       type: 'image/png',
       asset: { id: rec.id, createdAt: rec.createdAt },
-      ready: true,
+      ready: true
     });
   } catch (e) {
     console.error('[generate-static-ad] error:', e?.message || e);
     return res.status(500).json({ error: 'internal_error', message: e?.message || 'failed' });
   }
 });
-
 
 
 /* ---------------------- IMAGE OVERLAYS (fit-to-box + coherent copy) ---------------------- */
