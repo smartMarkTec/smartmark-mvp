@@ -559,6 +559,8 @@ router.post('/generate-static-ad', async (req, res) => {
   /* ------------------- POSTER B (ALWAYS photo) ------------------- */
     // 1) Gather user answers with highest priority (answers > inputs > knobs > profile)
     const a = (body.answers && typeof body.answers === 'object') ? body.answers : {};
+        const crafted = (body.copy && typeof body.copy === 'object') ? body.copy : null;
+
     const get = (k, def='') =>
       (a[k] ?? inputs[k] ?? knobs[k] ?? def);
 
@@ -570,15 +572,30 @@ router.post('/generate-static-ad', async (req, res) => {
 
     // 2) Map all headline/body fields to Poster-B with strict priority
     //    eventTitle ← answers.headline | answers.eventTitle | inputs.headline | profile.eventTitle
+       // 2) Prefer crafted GPT copy (if present) to prevent echoing user text
+    const fromCopy = crafted ? {
+      eventTitle: (crafted.headline || '').toString(),
+      // subline is short; good fit for dateRange if relevant, else we also include in qualifiers
+      dateRange: (crafted.subline || '').toString(),
+      saveAmount: (crafted.offer || '').toString(),
+      financing: "", // keep empty unless you have business logic to populate
+      qualifiers: [
+        crafted.subline,
+        ...(Array.isArray(crafted.bullets) ? crafted.bullets : [])
+      ].filter(Boolean).join(' • ').slice(0, 120),
+      legal: (crafted.disclaimers || '').toString()
+    } : null;
+
     const auto = {
-      eventTitle: get('headline', get('eventTitle', inputs.headline || prof.eventTitle || 'SEASONAL EVENT')),
-      dateRange:  get('promoLine', get('dateRange', inputs.promoLine || inputs.subline || prof.dateRange || 'LIMITED TIME ONLY')),
-      saveAmount: get('offer', get('saveAmount', inputs.offer || inputs.cta || prof.saveAmount || 'BIG SAVINGS')),
-      financing:  get('secondary', get('financingLine', prof.financingLine || '')),
-      qualifiers: get('adCopy', get('qualifiers', inputs.adCopy || inputs.details || inputs.subline || prof.qualifiers || '')),
-      legal:      get('legal', prof.legal || ''),
+      eventTitle: (fromCopy?.eventTitle) || get('headline', get('eventTitle', inputs.headline || prof.eventTitle || 'SEASONAL EVENT')),
+      dateRange:  (fromCopy?.dateRange)  || get('promoLine', get('dateRange', inputs.promoLine || inputs.subline || prof.dateRange || 'LIMITED TIME ONLY')),
+      saveAmount: (fromCopy?.saveAmount) || get('offer', get('saveAmount', inputs.offer || inputs.cta || prof.saveAmount || 'BIG SAVINGS')),
+      financing:  (fromCopy?.financing)  || get('secondary', get('financingLine', prof.financingLine || '')),
+      qualifiers: (fromCopy?.qualifiers) || get('adCopy', get('qualifiers', inputs.adCopy || inputs.details || inputs.subline || prof.qualifiers || '')),
+      legal:      (fromCopy?.legal)      || get('legal', prof.legal || ''),
       palette:    knobs.palette || prof.palette
     };
+
 
     // 3) Allow backgroundUrl from answers as well
     const mergedKnobsB = {

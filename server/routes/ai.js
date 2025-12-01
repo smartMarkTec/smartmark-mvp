@@ -1916,6 +1916,103 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
   }
 });
 
+/* === GPT: craftAdCopyFromAnswers === */
+async function craftAdCopyFromAnswers({ industry, businessName, brand = {}, answers = {} }, openai) {
+  const brandName = businessName || answers.businessName || "Your Business";
+  const details = {
+    industry: (industry || answers.industry || "").toString(),
+    city: answers.city || answers.location || "",
+    valueProps: answers.valueProps || answers.benefits || answers.features || "",
+    offer: answers.offer || "",
+    tone: answers.tone || "confident, benefit-first, concise",
+    audience: answers.audience || "",
+  };
+
+  const sys = [
+    "You write on-ad copy for a static social ad.",
+    "Never quote user text verbatim; always paraphrase.",
+    "Keep it short, bold, and skimmable. No hashtags. No emojis.",
+    "Conform to the JSON schema exactly. Do not add extra keys.",
+  ].join(" ");
+
+  const schema = {
+    headline: "≤ 5 words, punchy, no punctuation unless needed",
+    subline: "≤ 12 words, clarifies benefit for the audience",
+    cta: "2–3 words action phrase (e.g., Get Quote, Shop Now)",
+    offer: "Short promo if provided; else empty string",
+    bullets: "3 short bullets; sentence fragments only",
+    disclaimers: "One short line or empty string",
+  };
+
+  const userPrompt = `
+Brand: ${brandName}
+Industry: ${details.industry}
+City/Area: ${details.city}
+Audience: ${details.audience}
+Value Props: ${details.valueProps}
+Offer: ${details.offer}
+Tone: ${details.tone}
+
+Write ad copy that fits the schema below. Do NOT copy user phrases ≥3 words. Paraphrase everything.
+
+Return JSON only:
+{
+  "headline": "...",
+  "subline": "...",
+  "cta": "...",
+  "offer": "...",
+  "bullets": ["...", "...", "..."],
+  "disclaimers": "..."
+}
+`;
+
+  const resp = await openai.chat.completions.create({
+    model: "gpt-5.1",
+    temperature: 0.7,
+    messages: [
+      { role: "system", content: sys },
+      { role: "user", content: userPrompt },
+    ],
+    response_format: { type: "json_object" },
+  });
+
+  let parsed;
+  try {
+    parsed = JSON.parse(resp.choices[0].message.content);
+  } catch {
+    parsed = {
+      headline: "Quality You Can See",
+      subline: "Premium results, fast turnaround",
+      cta: "Get Quote",
+      offer: details.offer || "",
+      bullets: ["Expert service", "Honest pricing", "Local & trusted"],
+      disclaimers: "",
+    };
+  }
+
+  // Trim + guardrails
+  if (!Array.isArray(parsed.bullets)) parsed.bullets = [];
+  parsed.bullets = parsed.bullets.slice(0, 3);
+
+  return parsed;
+}
+
+/* === buildStaticAdPayload (uses crafted copy) === */
+async function buildStaticAdPayload({ answers = {}, brand = {}, industry = "" }) {
+  // If your craftAdCopyFromAnswers helper signature expects (.., openai) like we added earlier, keep the second arg:
+  const copy = await craftAdCopyFromAnswers(
+    { industry: industry || answers.industry, businessName: answers.businessName, brand, answers },
+    openai
+  );
+
+  return {
+    copy,          // <-- this is what staticads.js will prefer
+    brand,
+    meta: { industry: industry || answers.industry || "" }
+  };
+}
+
+
 /* === ROUTE: /api/generate-static-ad (templates: flyer_a, poster_b) ======================= */
 router.post('/generate-static-ad', async (req, res) => {
   try {
@@ -1983,6 +2080,8 @@ router.post('/generate-static-ad', async (req, res) => {
     return res.status(500).json({ error: 'internal_error', message: e?.message || 'failed' });
   }
 });
+
+
 
 
 /* ---------------------- IMAGE OVERLAYS (fit-to-box + coherent copy) ---------------------- */
@@ -3930,6 +4029,19 @@ if (FAST_MODE) {
     return res.status(500).json({ ok: false, error: e.message || "failed" });
   }
 });
+
+/* === Route: POST /api/craft-ad-copy === */
+router.post("/api/craft-ad-copy", async (req, res) => {
+  try {
+    const { industry, businessName, brand, answers } = req.body || {};
+    const copy = await craftAdCopyFromAnswers({ industry, businessName, brand, answers }, openai);
+    res.json({ ok: true, copy });
+  } catch (err) {
+    console.error("[craft-ad-copy] error:", err);
+    res.status(500).json({ ok: false, error: "COPY_GENERATION_FAILED" });
+  }
+});
+
 
 
 

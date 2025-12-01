@@ -1431,18 +1431,38 @@ async function handleRegenerateVideo() {
 }
 
 // --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
-// --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
 async function handleGenerateStaticAd(template = "poster_b") {
   const a = answers || {};
 
-  // Overlay text to display (from edits or generated copy)
+  // 0) Ask backend to craft paraphrased ad copy (no verbatim echo)
+  let craftedCopy = null;
+  try {
+    const craftRes = await fetch(`${API_BASE}/craft-ad-copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        industry: (a.industry || "Local Services").toString(),
+        businessName: (a.businessName || "Your Business").toString(),
+        brand: a.brand || {},
+        answers: a
+      })
+    });
+    const craftJson = await craftRes.json().catch(() => ({}));
+    if (craftRes.ok && craftJson?.ok && craftJson.copy) {
+      craftedCopy = craftJson.copy;
+    }
+  } catch (e) {
+    console.warn("craft-ad-copy failed, will proceed with defaults:", e);
+  }
+
+  // Overlay text to display (from edits or crafted copy)
   const display = {
-    headline: (displayHeadline || "").slice(0, 55),
-    body: displayBody || "",
-    cta: normalizeOverlayCTA(displayCTA || a?.cta || "")
+    headline: (displayHeadline || craftedCopy?.headline || "").slice(0, 55),
+    body: displayBody || craftedCopy?.subline || "",
+    cta: normalizeOverlayCTA(displayCTA || craftedCopy?.cta || a?.cta || "")
   };
 
-  // Build a reasonable mapping for Poster B from the chat answers
+  // Build a reasonable mapping for Poster B from the chat answers (will be overridden by copy)
   const poster = derivePosterFieldsFromAnswers(a, { saveAmount: "BIG SAVINGS" });
 
   // Common inputs every template can use
@@ -1456,12 +1476,11 @@ async function handleGenerateStaticAd(template = "poster_b") {
     idealCustomer: (a.idealCustomer || "").toString(),
     phone: (a.phone || "(210) 555-0147").toString(),
 
-    // Also send the visible overlay values
+    // Also send the visible overlay values for Flyer-A
     headline: display.headline,
     subline: display.body,
     cta: display.cta
   };
-
 
   // Knobs (template-specific)
   const knobs = template === "flyer_a"
@@ -1487,29 +1506,44 @@ async function handleGenerateStaticAd(template = "poster_b") {
         size: "1080x1080",
         frame: { outerWhite: true, softShadow: true },
         card: { widthPct: 70, heightPct: 55, shadow: true },
-        eventTitle: poster.headline || `${common.industry} EVENT`,
-        dateRange: poster.promoLine || "LIMITED TIME ONLY",
-        saveAmount: poster.offer || "BIG SAVINGS",
+
+        // Prefer crafted copy FIRST for Poster-B fields
+        eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 55),
+        dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 60),
+        saveAmount: (craftedCopy?.offer || poster.offer || "BIG SAVINGS").slice(0, 40),
+
+        // We generally keep financing empty unless the business supplied a real one
         financingLine: poster.secondary || "",
-        qualifiers: poster.adCopy || "",
-        legal: poster.legal || "",
+
+        // Qualifiers become bullets/subline from crafted copy (joined)
+        qualifiers: (craftedCopy
+          ? [craftedCopy.subline, ...(Array.isArray(craftedCopy.bullets) ? craftedCopy.bullets : [])]
+              .filter(Boolean)
+              .join(" • ")
+              .slice(0, 120)
+          : (poster.adCopy || "")
+        ),
+        legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 160),
+
         seasonalLeaves: true,
         backgroundHint: common.industry,
         backgroundUrl: poster.backgroundUrl || ""
       };
 
-  // IMPORTANT: include raw user *answers* so the backend prioritizes them
+  // IMPORTANT: include raw user *answers* for context, but also include the crafted copy
   const payload = {
     template,
     inputs: common,
     knobs,
+    copy: craftedCopy || null, // <— NEW: backend will prefer this over answers
     answers: {
       ...a,
-      headline: poster.headline,    // eventTitle
-      promoLine: poster.promoLine,  // dateRange
-      offer: poster.offer,          // saveAmount
-      secondary: poster.secondary,  // financingLine
-      adCopy: poster.adCopy,        // qualifiers
+      // Keep these for legacy fallback, but Poster-B will ignore them if copy exists
+      headline: poster.headline,
+      promoLine: poster.promoLine,
+      offer: poster.offer,
+      secondary: poster.secondary,
+      adCopy: poster.adCopy,
       legal: poster.legal,
       backgroundUrl: poster.backgroundUrl
     }
@@ -1552,6 +1586,7 @@ async function handleGenerateStaticAd(template = "poster_b") {
     alert("Static ad failed. Please try again.");
   }
 }
+
 
 
 
