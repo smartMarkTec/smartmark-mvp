@@ -2474,45 +2474,93 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
   return sentenceCase(line);
 }
 
-/* ---------- required helpers for subline + SVG ---------- */
-function escSVG(s='') {
+/* ---------- required helpers for subline + SVG (UPDATED) ---------- */
+function escSVG(s = '') {
   return String(s)
-    .replace(/&/g,'&amp;')
-    .replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;')
-    .replace(/"/g,'&quot;')
-    .replace(/'/g,'&#39;');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
-function escRegExp(s='') {
+function escRegExp(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function cleanHeadline(s='') {
-  return String(s).replace(/\s+/g,' ').trim().toUpperCase();
+/* Headline/Subline cleaning */
+function cleanHeadline(s = '') {
+  return String(s).replace(/\s+/g, ' ').trim().toUpperCase();
+}
+function cleanSubline(s = '') {
+  return String(s).replace(/\s+/g, ' ').trim();
 }
 
+/* General clamps for consistent layout */
+function clampChars(s = '', max = 42) {
+  const t = String(s);
+  return t.length <= max ? t : t.slice(0, max);
+}
+function ellipsize(s = '', max = 42) {
+  const t = String(s);
+  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)) + '…';
+}
+
+/* FS + paths */
 function ensureGeneratedDir() {
   const out = path.join(process.cwd(), 'generated');
   if (!fs.existsSync(out)) fs.mkdirSync(out, { recursive: true });
   return out;
 }
-
 function mediaPath(file) { return `/api/media/${file}`; }
 function absolutePublicUrl(rel) {
   const base = process.env.PUBLIC_BASE_URL || '';
   return base ? (new URL(rel, base)).toString() : rel;
 }
-function maybeGC() { if (global.gc) try { global.gc(); } catch {} }
+function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
-// ------------------------------ UTILS: conditional SVG helpers ------------------------------
+/* ------------------------------ UTILS: conditional SVG helpers ------------------------------ */
 function _nonEmpty(s) { return !!String(s || '').trim(); }
 function _maybe(line, svg) { return _nonEmpty(line) ? svg : ''; }
 
-// Optional seasonal garnish (disabled in strict flow)
+/* Optional seasonal garnish (disabled in strict flow) */
 function _seasonAccentLeaves() { return ''; }
 
-// --- CTA normalizers — NO DEFAULTS ---
+/* --- Color utils for contrast-safe text on chips/cards --- */
+function _hexToRgb(hex = '') {
+  const m = String(hex).replace('#', '').trim();
+  if (m.length === 3) {
+    const r = m[0] + m[0], g = m[1] + m[1], b = m[2] + m[2];
+    return { r: parseInt(r, 16), g: parseInt(g, 16), b: parseInt(b, 16) };
+  }
+  if (m.length === 6) {
+    return { r: parseInt(m.slice(0, 2), 16), g: parseInt(m.slice(2, 4), 16), b: parseInt(m.slice(4, 6), 16) };
+  }
+  return { r: 0, g: 0, b: 0 };
+}
+function _relLuminance(hex = '#000000') {
+  const { r, g, b } = _hexToRgb(hex);
+  const srgb = [r, g, b].map(v => v / 255);
+  const lin = srgb.map(c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
+  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
+}
+function contrastRatio(bg = '#000000', fg = '#ffffff') {
+  const L1 = _relLuminance(bg);
+  const L2 = _relLuminance(fg);
+  const hi = Math.max(L1, L2), lo = Math.min(L1, L2);
+  return (hi + 0.05) / (lo + 0.05);
+}
+function pickTextColor(bg = '#000000') {
+  // choose black or white for best contrast on bg
+  const cBlack = contrastRatio(bg, '#000000');
+  const cWhite = contrastRatio(bg, '#ffffff');
+  return cBlack > cWhite ? '#000000' : '#ffffff';
+}
+function safeHex(hex = '', fallback = '#111111') {
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(hex).trim()) ? hex : fallback;
+}
+
+/* --- CTA normalizers — NO DEFAULTS --- */
 function normalizeCTA(s = '') {
   const base = String(s).replace(/\s+/g, ' ').trim();
   return base ? base.slice(0, 28).toUpperCase() : '';
@@ -2522,6 +2570,11 @@ function cleanCTA(s = '', brand = '') {
   if (brand) t = t.replace(new RegExp(escRegExp(brand), 'i'), '');
   t = t.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
   return normalizeCTA(t); // returns '' when empty
+}
+
+/* --- Centering helpers for SVG text alignment (use with text-anchor="middle") --- */
+function centerAnchorAttrs() {
+  return { 'text-anchor': 'middle', 'dominant-baseline': 'middle' };
 }
 
 /* --- CTA pill (pure black, white text; same geometry) --- */
@@ -3917,6 +3970,38 @@ router.get('/generated-videos', async (req, res) => {
 
 /* ========================== END DROP-IN VIDEO SECTION ========================== */
 
+// --- DROP-IN: composeOverlay (place above /generate-image-from-prompt route) ---
+async function composeOverlay({ imageUrl, title, subline, cta, answers = {}, category = 'generic', seed = '' }) {
+  const cat = (category || resolveCategory?.(answers) || 'generic').toLowerCase();
+  const posterish = ['fashion','fitness','cosmetics','hair','food','pets','electronics','home','coffee','generic'];
+  const flyerish  = ['services','cleaning','plumbing','moving','repair','home services'];
+
+  const wantPoster = posterish.includes(cat) || (!flyerish.includes(cat) && !answers.services);
+
+  if (wantPoster) {
+    return await composePhotoPoster({
+      imageUrl,
+      answers: {
+        ...answers,
+        headline: title || overlayTitleFromAnswers?.(answers, category),
+        valueLine: subline || await getCoherentSubline?.(answers, category, seed),
+        supportTop: cta || cleanCTA(answers?.cta || '', answers?.businessName || ''),
+      },
+      dims: { W: 1200, H: 628 },
+    });
+  } else {
+    return await composeIllustratedFlyer({
+      illustrationUrl: imageUrl,
+      answers: {
+        ...answers,
+        headline: title || overlayTitleFromAnswers?.(answers, category),
+        subHead: subline || await getCoherentSubline?.(answers, category, seed),
+        callNow: cta || cleanCTA(answers?.cta || '', answers?.businessName || ''),
+      },
+      dims: { W: 1200, H: 628 },
+    });
+  }
+}
 
 
 
