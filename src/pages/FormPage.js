@@ -1226,24 +1226,22 @@ setTimeout(async () => {
       { tries: 1, timeoutMs: 12000 }
     ).catch(() => ({}));
 
-const imagesPromise = (async () => {
-  // Use answers-first mapping so the image matches what the user typed
-  const poster = derivePosterFieldsFromAnswers(answers);
-const overlay = {
-  headline: (displayHeadline || poster.headline || "").slice(0, 55),
-  body: displayBody || poster.adCopy || "",
-  cta: normalizeOverlayCTA(displayCTA || answers?.cta || "")
-};
+    const imagesPromise = (async () => {
+      // Use answers-first mapping so the image matches what the user typed
+      const poster = derivePosterFieldsFromAnswers(answers);
+      const overlay = {
+        headline: (displayHeadline || poster.headline || "").slice(0, 55),
+        body: displayBody || poster.adCopy || "",
+        cta: normalizeOverlayCTA(displayCTA || answers?.cta || "")
+      };
 
-  const prompt = buildImagePrompt(answers, overlay);
+      const prompt = buildImagePrompt(answers, overlay);
 
-  const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
-  setImageUrls(imgs || []);
-  setActiveImage(0);
-  setImageUrl((imgs && imgs[0]) || "");
-})();
-
-
+      const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
+      setImageUrls(imgs || []);
+      setActiveImage(0);
+      setImageUrl((imgs && imgs[0]) || "");
+    })();
 
     const videosPromise = (async () => {
       const vs = await fetchVideoPair(token, answers, null, null);
@@ -1260,19 +1258,16 @@ const overlay = {
       } catch {}
     })();
 
-    // ****** NEW: also generate a static PNG using your template (poster_b or flyer_a) ******
-    const staticPromise = (async () => {
-      await handleGenerateStaticAd("poster_b"); // change to "flyer_a" if you prefer that first
-    })();
-    // **************************************************************************************
-
-    // Apply copy when it’s back (don’t block media)
+    // Get GPT-crafted copy
     const data = await assetsPromise;
     setResult({
       headline: data?.headline || "",
       body: data?.body || "",
       image_overlay_text: data?.image_overlay_text || "",
     });
+
+    // Use that GPT copy for the static poster
+    const staticPromise = handleGenerateStaticAd("poster_b", data);
 
     // Consider generation “done” as soon as at least one media set finishes
     await Promise.any([imagesPromise, videosPromise, staticPromise]).catch(() => {});
@@ -1292,8 +1287,6 @@ const overlay = {
     setLoading(false);
   }
 }, 80);
-
-
 
 
         return;
@@ -1429,48 +1422,44 @@ async function handleRegenerateVideo() {
 }
 
 // --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
-async function handleGenerateStaticAd(template = "poster_b") {
+// --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
+async function handleGenerateStaticAd(template = "poster_b", assetsData = null) {
   const a = answers || {};
+
+  // Prefer GPT-crafted campaign assets (never raw user sentences)
+  const gpt = assetsData || result || null;
+
+  const craftedCopy = gpt
+    ? {
+        headline: (gpt.headline || "").toString(),
+        subline: (gpt.body || "").toString(),
+        offer: (gpt.offer || "").toString(),
+        bullets: Array.isArray(gpt.ad_bullets || gpt.bullets)
+          ? (gpt.ad_bullets || gpt.bullets)
+          : [],
+        disclaimers: (gpt.legal || gpt.disclaimers || "").toString(),
+        cta: (gpt.image_overlay_text || gpt.cta || a.cta || "").toString()
+      }
+    : null;
 
   // Stop any video pipeline for this run (prevents "Hard cap reached; aborting video fetches")
   try {
     if (typeof setMediaType === "function") setMediaType("image");
     if (typeof setIsGeneratingVideo === "function") setIsGeneratingVideo(false);
-    if (typeof cancelVideoJobs === "function") cancelVideoJobs(); // no-op if not defined
+    if (typeof cancelVideoJobs === "function") cancelVideoJobs();
   } catch (_) {}
 
-  // 0) Ask backend to craft paraphrased ad copy (never echo user text)
-  let craftedCopy = null;
-  try {
-    const craftRes = await fetch(`${API_BASE}/craft-ad-copy`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        industry: (a.industry || "Local Services").toString(),
-        businessName: (a.businessName || "Your Business").toString(),
-        brand: a.brand || {},
-        answers: a
-      })
-    });
-    const craftJson = await craftRes.json().catch(() => ({}));
-    if (craftRes.ok && craftJson?.ok && craftJson.copy) {
-      craftedCopy = craftJson.copy;
-    }
-  } catch (e) {
-    console.warn("craft-ad-copy failed, using defaults:", e);
-  }
-
-  // Overlay text (only used by Flyer-A); Poster-B uses crafted copy below
-  const display = {
-    headline: (displayHeadline || craftedCopy?.headline || "").slice(0, 55),
-    body: displayBody || craftedCopy?.subline || "",
-    cta: normalizeOverlayCTA(displayCTA || craftedCopy?.cta || a?.cta || "")
-  };
-
-  // Build Poster-B defaults (will be overridden by craftedCopy if present)
+  // Build Poster-B defaults from answers (backup only)
   const poster = derivePosterFieldsFromAnswers(a);
 
-  // Common inputs
+  // What we show in the copy panel + what flyer_a uses
+  const display = {
+    headline: (craftedCopy?.headline || displayHeadline || poster.headline || "").slice(0, 55),
+    body: (craftedCopy?.subline || displayBody || poster.adCopy || "").trim(),
+    cta: normalizeOverlayCTA(craftedCopy?.cta || displayCTA || a?.cta || "")
+  };
+
+  // Common inputs (shared)
   const common = {
     industry: (a.industry || "Local Services").toString(),
     businessName: (a.businessName || "Your Business").toString(),
@@ -1481,7 +1470,7 @@ async function handleGenerateStaticAd(template = "poster_b") {
     idealCustomer: (a.idealCustomer || "").toString(),
     phone: (a.phone || "(210) 555-0147").toString(),
 
-    // Flyer-A only
+    // Flyer-A text
     headline: display.headline,
     subline: display.body,
     cta: display.cta
@@ -1507,35 +1496,38 @@ async function handleGenerateStaticAd(template = "poster_b") {
           headerSplitDiagonal: true,
           roundedOuter: true
         }
-      : {
-          size: "1080x1080",
-          frame: { outerWhite: true, softShadow: true },
-          card: { widthPct: 70, heightPct: 55, shadow: true },
+      : (() => {
+          const craftedQualifiers =
+            craftedCopy && (craftedCopy.subline || (craftedCopy.bullets && craftedCopy.bullets.length))
+              ? [craftedCopy.subline, ...(craftedCopy.bullets || [])]
+                  .filter(Boolean)
+                  .join(" • ")
+              : "";
 
-          // Only AI/user copy – no hard-coded phrases
-          eventTitle: (craftedCopy?.headline || poster.headline || "").slice(0, 55),
-          dateRange: (craftedCopy?.subline || poster.promoLine || "").slice(0, 60),
-          saveAmount: (craftedCopy?.offer || poster.offer || "").slice(0, 40),
-          financingLine: poster.secondary || "",
-          qualifiers: (craftedCopy
-            ? [craftedCopy.subline, ...(Array.isArray(craftedCopy.bullets) ? craftedCopy.bullets : [])]
-                .filter(Boolean)
-                .join(" • ")
-                .slice(0, 120)
-            : (poster.adCopy || "")),
-          legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 160),
+          return {
+            size: "1080x1080",
+            frame: { outerWhite: true, softShadow: true },
+            card: { widthPct: 70, heightPct: 55, shadow: true },
 
-          seasonalLeaves: true,
-          backgroundHint: common.industry,
-          backgroundUrl: poster.backgroundUrl || ""
-        };
+            // Poster-B text: AI copy first, answers only as backup
+            eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 55),
+            dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 60),
+            saveAmount: (craftedCopy?.offer || poster.offer || "BIG SAVINGS").slice(0, 40),
+            financingLine: poster.secondary || "",
+            qualifiers: (craftedQualifiers || poster.adCopy || "").slice(0, 120),
+            legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 160),
 
+            seasonalLeaves: true,
+            backgroundHint: common.industry,
+            backgroundUrl: poster.backgroundUrl || ""
+          };
+        })();
 
   const payload = {
     template,
     inputs: common,
     knobs,
-    copy: craftedCopy || null, // backend prioritizes this over raw answers
+    copy: craftedCopy || null, // backend uses this first
     answers: {
       ...a,
       headline: poster.headline,
@@ -1563,25 +1555,31 @@ async function handleGenerateStaticAd(template = "poster_b") {
       return;
     }
 
-    const png = toAbsoluteMedia(data.pngUrl || data.absoluteUrl || data.url || data.filename || "");
+    const png = toAbsoluteMedia(
+      data.pngUrl || data.absoluteUrl || data.url || data.filename || ""
+    );
     if (!png) {
       setError("Static ad returned without a URL.");
       alert("Static ad returned without a URL.");
       return;
     }
 
-    setImageUrls([png, ...imageUrls.slice(0, 1)]);
+    setImageUrls((prev) => [png, ...prev.slice(0, 1)]);
     setActiveImage(0);
     setImageUrl(png);
     setMediaType((prev) => (prev === "video" ? "both" : "image"));
 
-    setChatHistory((ch) => [...ch, { from: "gpt", text: `Static ad generated with template "${template}".` }]);
+    setChatHistory((ch) => [
+      ...ch,
+      { from: "gpt", text: `Static ad generated with template "${template}".` }
+    ]);
   } catch (e) {
     console.error("Static ad error:", e);
     setError("Static ad failed. Please try again.");
     alert("Static ad failed. Please try again.");
   }
 }
+
 
 
   /* ---------------------- Render ---------------------- */
