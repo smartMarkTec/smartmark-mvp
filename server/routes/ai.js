@@ -1917,6 +1917,7 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 });
 
 /* === GPT: craftAdCopyFromAnswers === */
+/* === GPT: craftAdCopyFromAnswers === */
 async function craftAdCopyFromAnswers({ industry, businessName, brand = {}, answers = {} }, openai) {
   const brandName = businessName || answers.businessName || "Your Business";
   const details = {
@@ -1933,6 +1934,10 @@ async function craftAdCopyFromAnswers({ industry, businessName, brand = {}, answ
     "Never quote user text verbatim; always paraphrase.",
     "Keep it short, bold, and skimmable. No hashtags. No emojis.",
     "Conform to the JSON schema exactly. Do not add extra keys.",
+    // 🔒 NEW: no hallucinated promos
+    "Do NOT invent offers, discounts, shipping, returns, guarantees, or inventory claims that were not clearly provided in the inputs.",
+    "If the user did not mention shipping, returns, guarantees, or inventory, you must NOT mention them at all.",
+    "If no explicit promo/discount is mentioned, keep the 'offer' short and generic or empty, but do not invent percentages or 'free' anything.",
   ].join(" ");
 
   const schema = {
@@ -1950,8 +1955,12 @@ Industry: ${details.industry}
 City/Area: ${details.city}
 Audience: ${details.audience}
 Value Props: ${details.valueProps}
-Offer: ${details.offer}
+Offer (verbatim from user, if any): ${details.offer}
 Tone: ${details.tone}
+
+Rules:
+- Stay strictly within the information above.
+- Do NOT add 'free shipping', 'fast shipping', 'money-back guarantee', 'lifetime warranty', 'limited inventory', or any similar promises unless they appear in the Offer line above.
 
 Write ad copy that fits the schema below. Do NOT copy user phrases ≥3 words. Paraphrase everything.
 
@@ -1976,6 +1985,28 @@ Return JSON only:
     response_format: { type: "json_object" },
   });
 
+  // scrub helper to remove any sneaky hallucinated promises
+  const scrubAssumptive = (s = "") => {
+    let out = String(s || "");
+    const banned = [
+      /free shipping/gi,
+      /fast shipping/gi,
+      /two[-\s]?day shipping/gi,
+      /same[-\s]?day shipping/gi,
+      /money[-\s]?back guarantee/gi,
+      /risk[-\s]?free/gi,
+      /guaranteed results?/gi,
+      /lifetime warranty/gi,
+      /always in stock/gi,
+      /limited inventory/gi,
+      /ships? today/gi,
+      /free returns?/gi,
+      /hassle[-\s]?free returns?/gi,
+    ];
+    for (const re of banned) out = out.replace(re, "");
+    return out.replace(/\s+/g, " ").trim();
+  };
+
   let parsed;
   try {
     parsed = JSON.parse(resp.choices[0].message.content);
@@ -1990,9 +2021,15 @@ Return JSON only:
     };
   }
 
-  // Trim + guardrails
+  // Normalization + scrub
   if (!Array.isArray(parsed.bullets)) parsed.bullets = [];
-  parsed.bullets = parsed.bullets.slice(0, 3);
+
+  parsed.headline     = scrubAssumptive(parsed.headline || "");
+  parsed.subline      = scrubAssumptive(parsed.subline || "");
+  parsed.cta          = scrubAssumptive(parsed.cta || "");
+  parsed.offer        = scrubAssumptive(parsed.offer || details.offer || "");
+  parsed.disclaimers  = scrubAssumptive(parsed.disclaimers || "");
+  parsed.bullets      = parsed.bullets.map(b => scrubAssumptive(b || "")).filter(Boolean).slice(0, 3);
 
   return parsed;
 }

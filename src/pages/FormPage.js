@@ -298,27 +298,25 @@ function abortAllVideoFetches() {
 /* ===== derivePosterFieldsFromAnswers ===== */
 
 function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
-  const ind = (a.industry || "").toString();
+  const safe = (s) => String(s || "").trim();
 
   const headline =
     a.headline ||
     a.eventTitle ||
-    (a.mainBenefit ? a.mainBenefit : "") ||
-    (a.offer ? "Limited-Time Offer" : `${ind || "Your"} Brand`).toString();
-
-  const tc = (s) => String(s || "").trim().replace(/\b\w/g, c => c.toUpperCase());
+    a.mainBenefit ||
+    a.businessName ||
+    "";
 
   const promoLine =
     a.promoLine ||
     a.subline ||
-    (a.idealCustomer ? tc(a.idealCustomer.slice(0, 30)) : "") ||
-    "LIMITED TIME ONLY";
+    a.idealCustomer ||
+    "";
 
   const offer =
     a.offer ||
     a.saveAmount ||
-    a.cta ||
-    (fallback.saveAmount || "BIG SAVINGS");
+    "";
 
   const secondary =
     a.secondary ||
@@ -332,15 +330,15 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
     "";
 
   const legal = a.legal || "";
-  const backgroundUrl = a.backgroundUrl || "";
+  const backgroundUrl = a.backgroundUrl || fallback.backgroundUrl || "";
 
   return {
-    headline: String(headline || "").slice(0, 55),
-    promoLine: String(promoLine || ""),
-    offer: String(offer || ""),
-    secondary: String(secondary || ""),
-    adCopy: String(adCopy || ""),
-    legal: String(legal || ""),
+    headline: safe(headline).slice(0, 55),
+    promoLine: safe(promoLine),
+    offer: safe(offer),
+    secondary: safe(secondary),
+    adCopy: safe(adCopy),
+    legal: safe(legal),
     backgroundUrl
   };
 }
@@ -1230,7 +1228,7 @@ setTimeout(async () => {
 
 const imagesPromise = (async () => {
   // Use answers-first mapping so the image matches what the user typed
-  const poster = derivePosterFieldsFromAnswers(answers, { saveAmount: "BIG SAVINGS" });
+  const poster = derivePosterFieldsFromAnswers(answers);
 const overlay = {
   headline: (displayHeadline || poster.headline || "").slice(0, 55),
   body: displayBody || poster.adCopy || "",
@@ -1373,7 +1371,7 @@ async function handleRegenerateImage() {
   try {
     await warmBackend();
 
-    const poster = derivePosterFieldsFromAnswers(answers, { saveAmount: "BIG SAVINGS" });
+    const poster = derivePosterFieldsFromAnswers(answers);
     const overlay = {
   headline: (displayHeadline || poster.headline || "").slice(0, 55),
   body: displayBody || poster.adCopy || "",
@@ -1470,7 +1468,7 @@ async function handleGenerateStaticAd(template = "poster_b") {
   };
 
   // Build Poster-B defaults (will be overridden by craftedCopy if present)
-  const poster = derivePosterFieldsFromAnswers(a, { saveAmount: "BIG SAVINGS" });
+  const poster = derivePosterFieldsFromAnswers(a);
 
   // Common inputs
   const common = {
@@ -1514,10 +1512,10 @@ async function handleGenerateStaticAd(template = "poster_b") {
           frame: { outerWhite: true, softShadow: true },
           card: { widthPct: 70, heightPct: 55, shadow: true },
 
-          // Prefer crafted GPT copy FIRST (prevents echo like "our quality of fashion")
-          eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 55),
-          dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 60),
-          saveAmount: (craftedCopy?.offer || poster.offer || "BIG SAVINGS").slice(0, 40),
+          // Only AI/user copy – no hard-coded phrases
+          eventTitle: (craftedCopy?.headline || poster.headline || "").slice(0, 55),
+          dateRange: (craftedCopy?.subline || poster.promoLine || "").slice(0, 60),
+          saveAmount: (craftedCopy?.offer || poster.offer || "").slice(0, 40),
           financingLine: poster.secondary || "",
           qualifiers: (craftedCopy
             ? [craftedCopy.subline, ...(Array.isArray(craftedCopy.bullets) ? craftedCopy.bullets : [])]
@@ -1529,8 +1527,9 @@ async function handleGenerateStaticAd(template = "poster_b") {
 
           seasonalLeaves: true,
           backgroundHint: common.industry,
-          backgroundUrl: poster.backgroundUrl || "" // leave empty to let backend pick fast local/pexels
+          backgroundUrl: poster.backgroundUrl || ""
         };
+
 
   const payload = {
     template,

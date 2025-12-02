@@ -827,13 +827,14 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 
         const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width: W, height: H, photoBuffer: photoBuf });
 
-        // User-first mapping for Poster-B
-        const eventTitle  = overlay.headline || prof.eventTitle || 'SEASONAL EVENT';
-        const dateRange   = overlay.promoLine || prof.dateRange || 'LIMITED TIME ONLY';
-        const saveAmount  = overlay.offer || prof.saveAmount || 'BIG SAVINGS';
-        const financingLn = overlay.secondary || prof.financingLine || '';
-        const qualifiers  = overlay.body || prof.qualifiers || '';
-        const legal       = overlay.legal || prof.legal || '';
+        // User-first mapping for Poster-B (ONLY user/AI text, no hard-coded copy)
+const eventTitle  = (overlay.headline  || '').trim();
+const dateRange   = (overlay.promoLine || '').trim();
+const saveAmount  = (overlay.offer     || '').trim();
+const financingLn = (overlay.secondary || '').trim();
+const qualifiers  = (overlay.body      || '').trim();
+const legal       = (overlay.legal     || '').trim();
+
 
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
         const cardW = 860, cardH = 660, padX = 60, padY = 56;
