@@ -9,7 +9,7 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// ---------- Small helpers shared by both routes ----------
+// ---------- Small helpers shared by routes ----------
 const FALLBACK_CHAT =
   "I'm your AI Ad Manager—ask me anything about launching ads, creatives, or budgets.";
 
@@ -55,26 +55,69 @@ function ensure7to9Words(line = "") {
   }
   return sentenceCase(words.join(" "));
 }
-function categoryFallback(category = "generic") {
-  const MAP = {
-    fashion: [
-      "Modern fashion built for everyday wear",
-      "Natural materials for everyday wear made simple",
-      "Simple pieces built to last every day"
-    ],
-    books: ["New stories and classic runs to explore","Graphic novels and comics for quiet nights"],
-    cosmetics: ["Gentle formulas for daily care and glow","A simple routine for better skin daily"],
-    hair: ["Better hair care with less effort daily","Clean formulas for easy styling each day"],
-    food: ["Great taste with less hassle every day","Fresh flavor made easy for busy nights"],
-    pets: ["Everyday care for happy pets made simple","Simple treats your pet will love daily"],
-    electronics: ["Reliable tech for everyday use and value","Simple design with solid performance daily"],
-    home: ["Upgrade your space the simple practical way","Clean looks with everyday useful function"],
-    coffee: ["Balanced flavor for better breaks each day","Smooth finish in every cup every day"],
-    fitness: ["Made for daily training sessions that stick","Durable gear built for consistent workouts"],
-    generic: ["Made for everyday use with less hassle","Simple design that is built to last"]
+
+// Soft rewrite to avoid echoing raw user lines
+function softRewrite(line = "") {
+  let s = String(line).replace(/\s+/g, " ").trim();
+  s = s.replace(/\b(our|we|my|I)\b/gi, "").replace(/\s{2,}/g, " ").trim();
+  // drop trailing punctuation/commas
+  s = s.replace(/[.,;:!?-]+$/g, "");
+  return s;
+}
+
+// Jaccard similarity over word sets (very crude)
+function similarity(a = "", b = "") {
+  const A = new Set(clean(a).split(" ").filter(Boolean));
+  const B = new Set(clean(b).split(" ").filter(Boolean));
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  A.forEach(w => { if (B.has(w)) inter++; });
+  return inter / (A.size + B.size - inter);
+}
+
+// Clamp to max words (rough, keeps meaning)
+function clampWords(s = "", max = 10) {
+  const w = String(s).trim().split(/\s+/).filter(Boolean);
+  return w.length > max ? w.slice(0, max).join(" ") : s.trim();
+}
+
+// ---------- Simple rule-based fallback composer ----------
+function fallbackCopy(answers = {}) {
+  const ind = (answers.industry || "").toLowerCase();
+  const brand = (answers.businessName || "Your Brand").toString();
+  const city = (answers.location || answers.city || "").toString();
+  const benefit = (answers.mainBenefit || answers.details || answers.valueProp || "").toString();
+  const offer = (answers.offer || answers.saveAmount || "").toString();
+
+  let headline;
+  if (/fashion|apparel|clothing|boutique|shoe|jewel/.test(ind)) {
+    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "New Season Essentials";
+  } else if (/restaurant|food|cafe|pizza|burger|grill|bar/.test(ind)) {
+    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "Fresh. Fast. Crave Worthy";
+  } else if (/floor|carpet|tile|vinyl|hardwood/.test(ind)) {
+    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "Upgrade Your Floors";
+  } else {
+    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "Quality You Can Feel";
+  }
+
+  const subParts = [];
+  if (answers.idealCustomer) subParts.push(`Made for ${answers.idealCustomer}`);
+  if (city) subParts.push(city);
+  if (!subParts.length) subParts.push("Easy returns • Fast shipping");
+
+  const bullets = [];
+  if (offer) bullets.push(offer);
+  bullets.push("Simple choices • Great value");
+  bullets.push("Hassle free setup");
+
+  return {
+    headline: softRewrite(headline),
+    subline: softRewrite(subParts.join(" • ")),
+    offer: offer || "",
+    secondary: "",
+    bullets,
+    disclaimers: ""
   };
-  const arr = MAP[category] || MAP.generic;
-  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 // ---------- Route: chat (unchanged) ----------
@@ -127,15 +170,13 @@ router.post("/gpt-chat", async (req, res) => {
 
 // ---------- NEW: coherent 7–9 word subline generator ----------
 router.post("/coherent-subline", async (req, res) => {
-  const { answers = {}, category = "generic", seed = "" } = req.body || {};
+  const { answers = {}, category = "generic" } = req.body || {};
 
-  // Extract facts for the prompt and for fallback validation
   const productTerms = takeTerms(answers.productType || answers.topic || answers.title || "");
   const benefitTerms = takeTerms(answers.mainBenefit || answers.description || "");
   const audienceTerms = takeTerms(answers.audience || answers.target || answers.customer || "", 2);
   const locationTerm = takeTerms(answers.location || answers.city || answers.region || "", 1)[0] || "";
 
-  // Gentle normalization to prevent “clothing quality …” glitches
   let productHead = productTerms[0] || "";
   if ((category || "").toLowerCase() === "fashion") {
     if (!/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear/i.test(productHead)) {
@@ -146,11 +187,9 @@ router.post("/coherent-subline", async (req, res) => {
 
   const system = [
     "You are SmartMark's subline composer.",
-    "Write ONE short ad subline of 7–9 words, plain language, sentence case.",
-    "Must be coherent English and read naturally.",
-    "No buzzwords, no claims you can't infer from inputs, no website/domain.",
-    "Do NOT end on a preposition (to, for, with, of, in, on, at, by).",
-    "Keep it brand-safe and factual; avoid 'our', 'we', 'best', 'premium', 'luxury'.",
+    "Write ONE short ad subline of 7–9 words, sentence case.",
+    "No buzzwords, no unverifiable claims, no website/domain.",
+    "Do NOT end on a preposition (to, for, with, of, in, on, at, by)."
   ].join(" ");
 
   const user = [
@@ -181,21 +220,118 @@ router.post("/coherent-subline", async (req, res) => {
     console.warn("coherent-subline API error:", e?.message);
   }
 
-  // Validate and fix server-side (always)
-  if (!line) line = categoryFallback(category);
-  // strip quotes/extra punctuation etc.
+  if (!line) line = "Modern fashion built for everyday wear";
   line = line.replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "");
   line = ensure7to9Words(line);
 
-  // Extra guard: simple “modern fashion …” style fix for fashion category
-  if (category.toLowerCase() === "fashion") {
+  if ((category || "").toLowerCase() === "fashion") {
     const badCombo = /\b(fashion)\s+modern\b/i.test(line) || /\bmodern\s+built\b/i.test(line);
     if (badCombo) line = "Modern fashion built for everyday wear";
-    // also prevent “fashion modern built into clothing essentials …”
     line = line.replace(/\bfashion modern built into\b/i, "Modern fashion built for");
   }
 
   return res.json({ subline: line });
+});
+
+/* ========= NEW: summarize answers → structured ad copy (JSON) =========
+   Input:  { answers: {...}, industry?: string }
+   Output: { ok:true, copy:{ headline, subline, offer, secondary, bullets[], disclaimers } }
+*/
+router.post("/summarize-ad-copy", async (req, res) => {
+  const { answers = {}, industry = answers.industry || "generic" } = (req.body || {});
+  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+  // Build a compact fact sheet for the prompt (keep it lean for low latency)
+  const facts = {
+    businessName: answers.businessName || "",
+    industry: industry || "",
+    location: answers.location || answers.city || "",
+    idealCustomer: answers.idealCustomer || answers.audience || "",
+    mainBenefit: answers.mainBenefit || answers.benefit || answers.details || "",
+    offer: answers.offer || answers.saveAmount || "",
+    tone: answers.tone || "",
+  };
+
+  const sys = [
+    "You are SmartMark's ad copy composer for static square ads.",
+    "Return only STRICT JSON with these fields:",
+    `{"headline":"","subline":"","offer":"","secondary":"","bullets":[],"disclaimers":""}`,
+    "Rules:",
+    "- DO NOT repeat user sentences verbatim; paraphrase into crisp copy.",
+    "- Headline: max 6 words, sentence case, no ending punctuation.",
+    "- Subline: 7–12 words, may include '•' separators.",
+    "- Bullets: 2–4 items, each 3–5 words, no periods.",
+    "- Keep it brand-safe, avoid hard claims, no URLs or hashtags.",
+  ].join(" ");
+
+  let aiCopy = null;
+  try {
+    const resp = await client.chat.completions.create({
+      model,
+      temperature: 0.5,
+      response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: `Summarize into ad copy from:\n${JSON.stringify(facts)}` }
+      ],
+      max_tokens: 240
+    });
+    const raw = resp.choices?.[0]?.message?.content || "{}";
+    const parsed = JSON.parse(raw);
+    aiCopy = {
+      headline: parsed.headline || "",
+      subline: parsed.subline || "",
+      offer: parsed.offer || "",
+      secondary: parsed.secondary || "",
+      bullets: Array.isArray(parsed.bullets) ? parsed.bullets : [],
+      disclaimers: parsed.disclaimers || ""
+    };
+  } catch (e) {
+    console.warn("summarize-ad-copy OpenAI error:", e?.message || e);
+  }
+
+  // Fallback if GPT failed
+  if (!aiCopy || !aiCopy.headline) {
+    aiCopy = fallbackCopy({ ...answers, industry });
+  }
+
+  // ---- Server-side guards (no-echo, formatting, lengths) ----
+  const rawInputs = [
+    answers.headline, answers.subline, answers.details, answers.mainBenefit,
+    answers.offer, answers.adCopy, answers.secondary
+  ].filter(Boolean).map(String);
+
+  // If headline too similar to any input, rewrite
+  for (const inp of rawInputs) {
+    if (similarity(aiCopy.headline, inp) >= 0.7) {
+      aiCopy.headline = softRewrite(aiCopy.headline);
+      break;
+    }
+  }
+  // Enforce headline ≤ 6 words
+  aiCopy.headline = sentenceCase(clampWords(aiCopy.headline, 6)).replace(/[.,!?]+$/,"");
+
+  // Subline: keep 7–12 words, coherent
+  if (!aiCopy.subline) aiCopy.subline = ensure7to9Words(aiCopy.headline);
+  const subW = aiCopy.subline.split(/\s+/).filter(Boolean);
+  if (subW.length < 7 || subW.length > 12) aiCopy.subline = ensure7to9Words(aiCopy.subline);
+
+  // Bullets: clean and cap length
+  aiCopy.bullets = (aiCopy.bullets || [])
+    .map(b => sentenceCase(clampWords(softRewrite(String(b || "")), 5)))
+    .filter(Boolean)
+    .slice(0, 4);
+  if (aiCopy.bullets.length < 2) {
+    aiCopy.bullets.push("Simple choices", "Great value");
+    aiCopy.bullets = aiCopy.bullets.slice(0, 4);
+  }
+
+  // Offer/secondary/disclaimers: keep tidy
+  aiCopy.offer = softRewrite(aiCopy.offer || "");
+  aiCopy.secondary = softRewrite(aiCopy.secondary || "");
+  aiCopy.disclaimers = (aiCopy.disclaimers || "").toString().trim();
+
+  return res.json({ ok: true, copy: aiCopy });
 });
 
 module.exports = router;

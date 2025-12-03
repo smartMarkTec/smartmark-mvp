@@ -487,6 +487,21 @@ function buildImagePrompt(answers = {}, overlay = {}) {
   return parts.filter(Boolean).join(" | ");
 }
 
+// --- GPT copy summarizer ---
+async function summarizeAdCopy(answers = {}) {
+  try {
+    const res = await fetch(`${API_BASE}/gpt/summarize-ad-copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ answers })
+    });
+    const data = await res.json().catch(() => ({}));
+    return data?.copy || null; // {headline, subline, offer, bullets[], disclaimers, cta}
+  } catch {
+    return null;
+  }
+}
+
 
 
 
@@ -1215,6 +1230,9 @@ setTimeout(async () => {
   try {
     await warmBackend();
 
+     // 2A) Get GPT-crafted copy FIRST  ⬅️  INSERT THIS LINE
+    const copy = await summarizeAdCopy(answers);
+
     // Kick off copy, images, and A/B videos in parallel
     const assetsPromise = fetchJsonWithRetry(
       `${API_BASE}/generate-campaign-assets`,
@@ -1267,7 +1285,8 @@ setTimeout(async () => {
     });
 
     // Use that GPT copy for the static poster
-    const staticPromise = handleGenerateStaticAd("poster_b", data);
+    const staticPromise = handleGenerateStaticAd("poster_b", copy);
+
 
     // Consider generation “done” as soon as at least one media set finishes
     await Promise.any([imagesPromise, videosPromise, staticPromise]).catch(() => {});
@@ -1427,20 +1446,28 @@ async function handleGenerateStaticAd(template = "poster_b", assetsData = null) 
   const a = answers || {};
 
   // Prefer GPT-crafted campaign assets (never raw user sentences)
-  const gpt = assetsData || result || null;
+// Prefer explicit GPT summary copy passed in; else fall back to prior result
+let craftedCopy = null;
+if (assetsData && assetsData.headline) {
+  craftedCopy = {
+    headline: (assetsData.headline || "").toString(),
+    subline: (assetsData.subline || "").toString(),
+    offer: (assetsData.offer || "").toString(),
+    bullets: Array.isArray(assetsData.bullets) ? assetsData.bullets : [],
+    disclaimers: (assetsData.disclaimers || "").toString(),
+    cta: (assetsData.cta || "").toString()
+  };
+} else if (result) {
+  craftedCopy = {
+    headline: (result.headline || "").toString(),
+    subline: (result.body || "").toString(),
+    offer: (result.offer || "").toString(),
+    bullets: Array.isArray(result.ad_bullets || result.bullets) ? (result.ad_bullets || result.bullets) : [],
+    disclaimers: (result.legal || result.disclaimers || "").toString(),
+    cta: (result.image_overlay_text || result.cta || answers?.cta || "").toString()
+  };
+}
 
-  const craftedCopy = gpt
-    ? {
-        headline: (gpt.headline || "").toString(),
-        subline: (gpt.body || "").toString(),
-        offer: (gpt.offer || "").toString(),
-        bullets: Array.isArray(gpt.ad_bullets || gpt.bullets)
-          ? (gpt.ad_bullets || gpt.bullets)
-          : [],
-        disclaimers: (gpt.legal || gpt.disclaimers || "").toString(),
-        cta: (gpt.image_overlay_text || gpt.cta || a.cta || "").toString()
-      }
-    : null;
 
   // Stop any video pipeline for this run (prevents "Hard cap reached; aborting video fetches")
   try {
