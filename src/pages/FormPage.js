@@ -1564,7 +1564,11 @@ if (assetsData && assetsData.headline) {
     template,
     inputs: common,
     knobs,
-    copy: craftedCopy || null, // backend uses this first
+    copy: craftedCopy || null, // backend should prefer this
+
+    // IMPORTANT: override answers so any old server code that still
+    // uses answers.mainBenefit / answers.details also sees GPT copy,
+    // not the user's raw sentences.
     answers: {
       ...a,
       headline: poster.headline,
@@ -1573,9 +1577,25 @@ if (assetsData && assetsData.headline) {
       secondary: poster.secondary,
       adCopy: poster.adCopy,
       legal: poster.legal,
-      backgroundUrl: poster.backgroundUrl
-    }
+      backgroundUrl: poster.backgroundUrl,
+
+      // 🔥 NEW: force backend to use GPT copy
+      mainBenefit: (
+        craftedCopy?.headline ||
+        craftedCopy?.subline ||
+        a.mainBenefit ||
+        ""
+      ).toString(),
+
+      details: (
+        craftedCopy?.subline ||
+        craftedCopy?.secondary ||
+        a.details ||
+        ""
+      ).toString(),
+    },
   };
+
   console.debug("[SM][static-ad:payload]", payload);
 
 

@@ -713,63 +713,95 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    /* ------------------- POSTER B (ALWAYS photo) ------------------- */
+/* ------------------- POSTER B (ALWAYS photo) ------------------- */
 
-    // 1) Prefer crafted GPT copy if present; else try to generate via OpenAI; else rule-based fallback.
-    let crafted = (body.copy && typeof body.copy === 'object') ? body.copy : null;
+    // 1) Prefer GPT-crafted copy coming from the frontend (body.copy).
+    //    Only fall back to our rule-based copy if nothing was provided.
+    let crafted = (body.copy && typeof body.copy === "object") ? body.copy : null;
 
-    if (!crafted) {
-      try {
-        const gpt = await generateSmartCopyWithOpenAI({ ...a, industry }, prof);
-        if (gpt && gpt.headline) crafted = gpt;
-      } catch (e) {
-        console.warn('[poster_b] OpenAI copy gen failed:', e.message || e);
-      }
-    }
-    if (!crafted) {
+    if (crafted) {
+      // Normalize + guard against echo and weird formatting
+      const safeHeadline   = clampWords(cleanLine(crafted.headline || ""), 6);
+      const safeSubline    = clampWords(cleanLine(crafted.subline || ""), 14);
+      const safeOffer      = tightenOfferText(crafted.offer || "");
+      const safeSecondary  = clampWords(cleanLine(crafted.secondary || ""), 10);
+      const safeBullets    = Array.isArray(crafted.bullets)
+        ? crafted.bullets.map(b => clampWords(cleanLine(b || ""), 5)).slice(0, 4)
+        : [];
+
+      crafted = {
+        headline: safeHeadline,
+        subline: safeSubline,
+        offer: safeOffer,
+        secondary: safeSecondary,
+        bullets: safeBullets,
+        disclaimers: (crafted.disclaimers || "").toString().trim()
+      };
+    } else {
+      // 🔁 Fallback: internal rule-based copy if no GPT copy provided at all
       const rb = craftCopyFromAnswers({ ...a, industry }, prof);
-      crafted = rb?.copy || null;
+      crafted = rb?.copy || {
+        headline: "",
+        subline: "",
+        offer: "",
+        secondary: "",
+        bullets: [],
+        disclaimers: ""
+      };
     }
 
-    const get = (k, def='') => (a[k] ?? inputs[k] ?? knobs[k] ?? def);
+    // Debug log so you can see EXACTLY what copy Poster B is using
+    console.log("[poster_b] using copy:", crafted);
+
+    const get = (k, def = "") => (a[k] ?? inputs[k] ?? knobs[k] ?? def);
 
     const mergedInputsB = {
       industry,
-      businessName: get('businessName', 'Your Brand'),
-      location: get('location', 'Your City'),
+      businessName: get("businessName", "Your Brand"),
+      location: get("location", "Your City")
     };
 
-    const pick = (...vals) => vals.find(v => typeof v === 'string' && v.trim());
+    const pick = (...vals) => vals.find(v => typeof v === "string" && v.trim());
 
-    const fromCopy = crafted ? {
-      eventTitle : (crafted.eventTitle || crafted.headline || '').toString(),
-      dateRange  : (crafted.dateRange  || crafted.subline  || '').toString(),
-      saveAmount : (crafted.saveAmount || crafted.offer    || '').toString(),
-      financing  : (crafted.financingLine || crafted.secondary || '').toString(),
-      qualifiers : (crafted.qualifiers ||
-                   [crafted.subline, ...(Array.isArray(crafted.bullets) ? crafted.bullets : [])]
-                     .filter(Boolean).join(' • ')).toString(),
-      legal      : (crafted.disclaimers || crafted.legal || '').toString()
-    } : null;
+    const fromCopy = crafted
+      ? {
+          eventTitle: (crafted.eventTitle || crafted.headline || "").toString(),
+          dateRange: (crafted.dateRange || crafted.subline || "").toString(),
+          saveAmount: (crafted.saveAmount || crafted.offer || "").toString(),
+          financing: (crafted.financingLine || crafted.secondary || "").toString(),
+          qualifiers: (
+            crafted.qualifiers ||
+            [crafted.subline, ...(Array.isArray(crafted.bullets) ? crafted.bullets : [])]
+              .filter(Boolean)
+              .join(" • ")
+          ).toString(),
+          legal: (crafted.disclaimers || crafted.legal || "").toString()
+        }
+      : null;
 
     const fromAnswers = {
-      eventTitle : (a.headline || a.eventTitle || '').toString(),
-      dateRange  : (a.promoLine || a.dateRange || a.subline || '').toString(),
-      saveAmount : (a.offer || a.saveAmount || '').toString(),
-      financing  : (a.secondary || a.financingLine || '').toString(),
-      qualifiers : (a.adCopy || (Array.isArray(a.bullets) ? a.bullets.join(' • ') : '')).toString(),
-      legal      : (a.legal || a.disclaimers || '').toString()
+      eventTitle: (a.headline || a.eventTitle || "").toString(),
+      dateRange: (a.promoLine || a.dateRange || a.subline || "").toString(),
+      saveAmount: (a.offer || a.saveAmount || "").toString(),
+      financing: (a.secondary || a.financingLine || "").toString(),
+      qualifiers: (
+        a.adCopy ||
+        (Array.isArray(a.bullets) ? a.bullets.join(" • ") : "")
+      ).toString(),
+      legal: (a.legal || a.disclaimers || "").toString()
     };
 
-  const autoFields = {
-  eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ''),
-  dateRange : pick(fromCopy?.dateRange,  fromAnswers.dateRange,  ''),
-  saveAmount: tightenOfferText(pick(fromCopy?.saveAmount, fromAnswers.saveAmount, '')),
-  financing : pick(fromCopy?.financing,  fromAnswers.financing,  ''),
-  qualifiers: pick(fromCopy?.qualifiers, fromAnswers.qualifiers, ''),
-  legal     : pick(fromCopy?.legal,      fromAnswers.legal,      ''),
-  palette   : (knobs.palette || prof.palette)
-};
+    const autoFields = {
+      eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ""),
+      dateRange: pick(fromCopy?.dateRange, fromAnswers.dateRange, ""),
+      saveAmount: tightenOfferText(
+        pick(fromCopy?.saveAmount, fromAnswers.saveAmount, "")
+      ),
+      financing: pick(fromCopy?.financing, fromAnswers.financing, ""),
+      qualifiers: pick(fromCopy?.qualifiers, fromAnswers.qualifiers, ""),
+      legal: pick(fromCopy?.legal, fromAnswers.legal, ""),
+      palette: knobs.palette || prof.palette
+    };
 
 
     const mergedKnobsB = {
