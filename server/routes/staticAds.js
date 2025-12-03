@@ -55,17 +55,18 @@ router.use((req, res, next) => {
 });
 
 /* ------------------------ HTTP helpers ------------------------ */
-function fetchUpstream(method, url, extraHeaders = {}) {
+function fetchUpstream(method, url, extraHeaders = {}, bodyBuf = null) {
   return new Promise((resolve, reject) => {
     try {
       const lib = url.startsWith('https') ? https : http;
-      const req = lib.request(url, { method, timeout: 15000, headers: extraHeaders }, (res) => {
+      const req = lib.request(url, { method, timeout: 25000, headers: extraHeaders }, (res) => {
         const chunks = [];
         res.on('data', d => chunks.push(d));
         res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
       });
       req.on('error', reject);
       req.on('timeout', () => { req.destroy(new Error('HTTP timeout')); });
+      if (bodyBuf) req.write(bodyBuf);
       req.end();
     } catch (e) { reject(e); }
   });
@@ -238,6 +239,64 @@ function craftCopyFromAnswers(a = {}, prof = {}) {
       disclaimers: ""
     }
   };
+}
+
+/* ------------------------ OPENAI: JSON copywriter ------------------------ */
+
+async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) return null;
+
+  const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+  const sys = `You are a marketing copywriter for square social ads. 
+Return only strict JSON for these fields:
+{ "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
+Rules:
+- Do NOT repeat user's sentences verbatim; paraphrase into crisp ad copy.
+- Headline: max 6 words, punchy, no punctuation at end.
+- Subline: max 12 words; may include separators "•".
+- Bullets: 2–4 micro-phrases, 3–5 words each, no periods.
+- Keep it brand-safe and generic.`;
+
+  const user = {
+    businessName: answers.businessName || '',
+    industry: answers.industry || '',
+    location: answers.location || answers.city || '',
+    idealCustomer: answers.idealCustomer || '',
+    offer: answers.offer || '',
+    mainBenefit: answers.mainBenefit || answers.benefit || '',
+    website: answers.website || ''
+  };
+
+  const body = JSON.stringify({
+    model,
+    messages: [
+      { role: 'system', content: sys },
+      { role: 'user', content: `Make ad copy for:\n${JSON.stringify(user, null, 2)}` }
+    ],
+    temperature: 0.7,
+    response_format: { type: 'json_object' }
+  });
+
+  const { status, body: respBuf } = await fetchUpstream(
+    'POST',
+    'https://api.openai.com/v1/chat/completions',
+    {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json'
+    },
+    Buffer.from(body)
+  );
+
+  if (status !== 200) return null;
+
+  try {
+    const parsed = JSON.parse(respBuf.toString('utf8'));
+    const content = parsed?.choices?.[0]?.message?.content || '{}';
+    const j = JSON.parse(content);
+    if (j && j.headline) return j;
+  } catch (_) {}
+  return null;
 }
 
 /* ------------------------ Templates ------------------------ */
@@ -558,8 +617,9 @@ router.post('/generate-static-ad', async (req, res) => {
     const templateReq = (body.template || 'auto').toString();
     const inputs = body.inputs || {};
     const knobs = body.knobs || {};
+    const a = (body.answers && typeof body.answers === 'object') ? body.answers : {};
 
-    const industry = inputs.industry || 'Local Services';
+    const industry = inputs.industry || a.industry || 'Local Services';
     const prof = profileForIndustry(industry);
 
     const template =
@@ -571,10 +631,10 @@ router.post('/generate-static-ad', async (req, res) => {
     if (template === 'flyer_a') {
       const mergedInputs = {
         industry,
-        businessName: inputs.businessName || 'Your Brand',
-        phone: inputs.phone || '(000) 000-0000',
-        location: inputs.location || 'Your City',
-        website: inputs.website || '',
+        businessName: inputs.businessName || a.businessName || 'Your Brand',
+        phone: inputs.phone || a.phone || '(000) 000-0000',
+        location: inputs.location || a.location || 'Your City',
+        website: inputs.website || a.website || '',
         headline: inputs.headline || prof.headline,
         subline: inputs.subline || prof.subline,
         cta: inputs.cta || prof.cta
@@ -630,26 +690,31 @@ router.post('/generate-static-ad', async (req, res) => {
     }
 
     /* ------------------- POSTER B (ALWAYS photo) ------------------- */
-    // 1) Gather user answers with highest priority (answers > inputs > knobs > profile)
-    const a = (body.answers && typeof body.answers === 'object') ? body.answers : {};
 
-    // Either use provided crafted copy (body.copy) or auto-craft (no echo)
+    // 1) Prefer crafted GPT copy if present; else try to generate via OpenAI; else rule-based fallback.
     let crafted = (body.copy && typeof body.copy === 'object') ? body.copy : null;
+
     if (!crafted) {
-      const auto = craftCopyFromAnswers({ ...a, industry }, prof);
-      if (auto?.ok && auto.copy) crafted = auto.copy;
+      try {
+        const gpt = await generateSmartCopyWithOpenAI({ ...a, industry }, prof);
+        if (gpt && gpt.headline) crafted = gpt;
+      } catch (e) {
+        console.warn('[poster_b] OpenAI copy gen failed:', e.message || e);
+      }
+    }
+    if (!crafted) {
+      const rb = craftCopyFromAnswers({ ...a, industry }, prof);
+      crafted = rb?.copy || null;
     }
 
-    const get = (k, def='') =>
-      (a[k] ?? inputs[k] ?? knobs[k] ?? def);
+    const get = (k, def='') => (a[k] ?? inputs[k] ?? knobs[k] ?? def);
 
     const mergedInputsB = {
       industry,
-      businessName: get('businessName', inputs.businessName || 'Your Brand'),
-      location: get('location', inputs.location || 'Your City'),
+      businessName: get('businessName', 'Your Brand'),
+      location: get('location', 'Your City'),
     };
 
-    // 2) Map all headline/body fields to Poster-B with COPY-FIRST priority
     const pick = (...vals) => vals.find(v => typeof v === 'string' && v.trim());
 
     const fromCopy = crafted ? {
@@ -682,7 +747,6 @@ router.post('/generate-static-ad', async (req, res) => {
       palette   : (knobs.palette || prof.palette)
     };
 
-    // 3) Knobs (send chosen text to renderer)
     const mergedKnobsB = {
       size: get('size', knobs.size || '1080x1080'),
       backgroundUrl: get('backgroundUrl', knobs.backgroundUrl || ''),
@@ -991,9 +1055,14 @@ router.post('/craft-ad-copy', async (req, res) => {
     const b = req.body || {};
     const a = b.answers || b || {};
     const prof = profileForIndustry(a.industry || "");
-    const r = craftCopyFromAnswers(a, prof);
-    if (!r?.ok || !r.copy) return res.status(400).json({ ok:false, error:'copy failed' });
-    return res.json({ ok:true, copy:r.copy });
+    // Try OpenAI first; fallback to rule-based
+    let copy = await generateSmartCopyWithOpenAI(a, prof);
+    if (!copy) {
+      const rb = craftCopyFromAnswers(a, prof);
+      copy = rb?.copy || null;
+    }
+    if (!copy) return res.status(400).json({ ok:false, error:'copy failed' });
+    return res.json({ ok:true, copy });
   } catch (e) {
     console.error('[craft-ad-copy]', e);
     return res.status(400).json({ ok:false, error:String(e?.message||e) });
