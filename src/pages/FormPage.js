@@ -488,19 +488,25 @@ function buildImagePrompt(answers = {}, overlay = {}) {
 }
 
 // --- GPT copy summarizer ---
-async function summarizeAdCopy(answers = {}) {
+async function summarizeAdCopy(answers) {
+  const url = `${API_BASE}/gpt/summarize-ad-copy`;
+  console.debug("[SM][summarizeAdCopy:POST]", url, { answers });
   try {
-    const res = await fetch(`${API_BASE}/gpt/summarize-ad-copy`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers })
     });
-    const data = await res.json().catch(() => ({}));
-    return data?.copy || null; // {headline, subline, offer, bullets[], disclaimers, cta}
-  } catch {
-    return null;
+    const json = await res.json().catch(() => ({}));
+    console.debug("[SM][summarizeAdCopy:RES]", res.status, json);
+    if (!res.ok || !json?.ok) throw new Error(`summarize failed ${res.status}`);
+    return json.copy || {};
+  } catch (e) {
+    console.error("[SM][summarizeAdCopy:ERR]", e?.message || e);
+    return {};
   }
 }
+
 
 
 
@@ -1570,6 +1576,8 @@ if (assetsData && assetsData.headline) {
       backgroundUrl: poster.backgroundUrl
     }
   };
+  console.debug("[SM][static-ad:payload]", payload);
+
 
   try {
     const res = await fetch(`${API_BASE}/generate-static-ad`, {
@@ -1578,7 +1586,9 @@ if (assetsData && assetsData.headline) {
       body: JSON.stringify(payload)
     });
 
-    const data = await res.json().catch(() => ({}));
+        const data = await res.json().catch(() => ({}));
+    console.debug("[SM][static-ad:status]", res.status, data);
+
     if (!res.ok || !data?.ok) {
       const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
       setError(msg);
@@ -1605,10 +1615,11 @@ if (assetsData && assetsData.headline) {
       { from: "gpt", text: `Static ad generated with template "${template}".` }
     ]);
   } catch (e) {
-    console.error("Static ad error:", e);
+    console.error("[SM][static-ad:ERR]", e?.message || e);
     setError("Static ad failed. Please try again.");
     alert("Static ad failed. Please try again.");
   }
+
 }
 
 

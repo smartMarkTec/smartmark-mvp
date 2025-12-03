@@ -299,7 +299,15 @@ router.post("/summarize-ad-copy", async (req, res) => {
   const { answers = {}, industry = answers.industry || "generic" } = (req.body || {});
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  // ---- facts for prompting ----
+  // DEBUG IN: request facts
+  console.log("[SM][summarize-ad-copy:req]", {
+    industry,
+    businessName: answers.businessName,
+    offer: answers.offer,
+    mainBenefit: answers.mainBenefit,
+    idealCustomer: answers.idealCustomer
+  });
+
   const facts = {
     businessName: answers.businessName || "",
     industry: (industry || "").toString(),
@@ -308,6 +316,7 @@ router.post("/summarize-ad-copy", async (req, res) => {
     mainBenefit: answers.mainBenefit || answers.benefit || answers.details || "",
     offer: answers.offer || answers.saveAmount || "",
   };
+
 
   // ---- local helpers (self-contained) ----
   const titleCase = (s="") =>
@@ -401,6 +410,8 @@ router.post("/summarize-ad-copy", async (req, res) => {
     disclaimers: ""
   };
 
+    // DEBUG OUT: final copy
+  console.log("[SM][summarize-ad-copy:out]", copy);
   return res.json({ ok: true, copy });
 });
 
