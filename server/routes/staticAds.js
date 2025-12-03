@@ -143,7 +143,6 @@ function profileForIndustry(industry = "") {
     right: ["Diagnostics","AC Service","Batteries","Inspections"]
   };
 
-  /* ==== REPLACE THIS WHOLE BLOCK in server/routes/staticAds.js (the MAP inside profileForIndustry) ==== */
   const MAP = {
     home_cleaning: { template:'flyer_a', headline:'HOME CLEANING SERVICES', subline:'Apartment • Home • Office', cta:'CALL NOW!', palette:PALETTES.navy, lists:serviceLists, coverage:'Coverage area 25 Miles around your city', bgHint:'home cleaning' },
     flooring:      { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.forest, bgHint:'flooring' },
@@ -160,14 +159,85 @@ function profileForIndustry(industry = "") {
     coffee:        { template:'poster_b', eventTitle:'', dateRange:'', saveAmount:'', financingLine:'', qualifiers:'', legal:'', palette:PALETTES.wine, bgHint:'coffee' },
     generic:       { template:'flyer_a', headline:'LOCAL SERVICES', subline:'Reliable • Friendly • On Time', cta:'CONTACT US', palette:PALETTES.base, lists:{ left:["Free Quote","Same-Day","Licensed","Insured"], right:["Great Reviews","Family Owned","Fair Prices","Guaranteed"] }, coverage:'Serving your area', bgHint:'generic' }
   };
-/* ==== END REPLACE BLOCK ==== */
-
 
   let prof = MAP[kind];
   if (kind === 'hvac_plumbing' && /plumb/i.test(industry)) {
     prof = { ...prof, lists: plumbingLists };
   }
   return { kind, ...prof };
+}
+
+/* ==================== Smart Copywriter (no-echo) ==================== */
+function titleCase(s=""){
+  return String(s).toLowerCase()
+    .replace(/\b([a-z])/g, (m,c)=>c.toUpperCase())
+    .replace(/\s+/g," ").trim();
+}
+function cleanLine(s="") {
+  const noUrl = String(s).replace(/https?:\/\/\S+|www\.\S+/gi,"");
+  const noFiller = noUrl.replace(/\b(our|we|my|the|very|really)\b/gi,"").replace(/\s+/g," ").trim();
+  return noFiller;
+}
+function clampWords(s="", max=16){
+  const w = String(s).trim().split(/\s+/).filter(Boolean);
+  return w.length>max ? w.slice(0,max).join(" ") + "…" : String(s).trim();
+}
+
+const INDUSTRY_TEMPLATES = {
+  fashion: {
+    headline: (brand, benefit) => benefit
+      ? `${titleCase(benefit)}`
+      : `${brand ? titleCase(brand)+": " : ""}New Season, New Essentials`,
+    subline: (aud, city) => [
+      aud ? `Made for ${aud}` : `Everyday quality. Statement looks.`,
+      city ? `Available in ${city}` : `Limited run • Free returns`
+    ].filter(Boolean).join(" • "),
+    bullets: (offer) => [
+      offer ? offer : "Premium fabrics • Tailored fit",
+      "Ships fast • Easy exchanges"
+    ]
+  },
+  restaurant: {
+    headline: (brand, benefit) => benefit || `${brand ? titleCase(brand)+": " : ""}Fresh. Fast. Crave-worthy.`,
+    subline: (aud, city) => [aud?`Perfect for ${aud}`:"Chef-crafted flavors", city?`In ${city}`:null].filter(Boolean).join(" • "),
+    bullets: (offer) => [offer || "Lunch specials daily", "Order online • Pickup or delivery"]
+  },
+  flooring: {
+    headline: (brand, benefit) => benefit || `${brand ? titleCase(brand)+": " : ""}Upgrade Your Floors`,
+    subline: (aud, city) => [aud?`Designed for ${aud}`:"Hardwood • Vinyl • Tile", city?`${city}`:null].filter(Boolean).join(" • "),
+    bullets: (offer) => [offer || "Free in-home estimate", "Install by licensed pros"]
+  }
+};
+
+function craftCopyFromAnswers(a = {}, prof = {}) {
+  const kind = prof?.kind || classifyIndustry(a.industry||"");
+  const t = INDUSTRY_TEMPLATES[kind] || {
+    headline:(brand,benefit)=> benefit || `${brand?titleCase(brand)+": ":""}Quality You Can Feel`,
+    subline:(aud,city)=> [aud?`Built for ${aud}`:"Trusted local service", city?`Serving ${city}`:null].filter(Boolean).join(" • "),
+    bullets:(offer)=> [offer || "Fast scheduling", "Great reviews • Fair pricing"]
+  };
+
+  const brand = cleanLine(a.businessName||a.brand?.businessName||"");
+  const city  = cleanLine(a.city ? (a.state?`${a.city}, ${a.state}`:a.city) : (a.location||""));
+  const benefit = clampWords(cleanLine(a.mainBenefit||a.details||""), 10);
+  const audience = clampWords(cleanLine(a.idealCustomer||""), 8);
+  const offer = cleanLine(a.offer||a.saveAmount||"");
+
+  const headline = clampWords(cleanLine(t.headline(brand, benefit)), 10);
+  const subline  = clampWords(cleanLine(t.subline(audience, city)), 14);
+  const bullets  = (t.bullets(offer)||[]).map(b=>clampWords(cleanLine(b),7)).slice(0,3);
+
+  return {
+    ok:true,
+    copy:{
+      headline,
+      subline,
+      offer: offer || "",
+      secondary: "",
+      bullets,
+      disclaimers: ""
+    }
+  };
 }
 
 /* ------------------------ Templates ------------------------ */
@@ -559,10 +629,16 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-  /* ------------------- POSTER B (ALWAYS photo) ------------------- */
+    /* ------------------- POSTER B (ALWAYS photo) ------------------- */
     // 1) Gather user answers with highest priority (answers > inputs > knobs > profile)
     const a = (body.answers && typeof body.answers === 'object') ? body.answers : {};
-        const crafted = (body.copy && typeof body.copy === 'object') ? body.copy : null;
+
+    // Either use provided crafted copy (body.copy) or auto-craft (no echo)
+    let crafted = (body.copy && typeof body.copy === 'object') ? body.copy : null;
+    if (!crafted) {
+      const auto = craftCopyFromAnswers({ ...a, industry }, prof);
+      if (auto?.ok && auto.copy) crafted = auto.copy;
+    }
 
     const get = (k, def='') =>
       (a[k] ?? inputs[k] ?? knobs[k] ?? def);
@@ -573,10 +649,9 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', inputs.location || 'Your City'),
     };
 
-// 2) Map all headline/body fields to Poster-B with COPY-FIRST priority
+    // 2) Map all headline/body fields to Poster-B with COPY-FIRST priority
     const pick = (...vals) => vals.find(v => typeof v === 'string' && v.trim());
 
-    // Prefer crafted GPT copy if present (body.copy), else fall back to user answers (a.*), NEVER to profile defaults.
     const fromCopy = crafted ? {
       eventTitle : (crafted.eventTitle || crafted.headline || '').toString(),
       dateRange  : (crafted.dateRange  || crafted.subline  || '').toString(),
@@ -597,7 +672,7 @@ router.post('/generate-static-ad', async (req, res) => {
       legal      : (a.legal || a.disclaimers || '').toString()
     };
 
-    const auto = {
+    const autoFields = {
       eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ''),
       dateRange : pick(fromCopy?.dateRange,  fromAnswers.dateRange,  ''),
       saveAmount: pick(fromCopy?.saveAmount, fromAnswers.saveAmount, ''),
@@ -612,15 +687,14 @@ router.post('/generate-static-ad', async (req, res) => {
       size: get('size', knobs.size || '1080x1080'),
       backgroundUrl: get('backgroundUrl', knobs.backgroundUrl || ''),
       backgroundHint: get('backgroundHint', knobs.backgroundHint || prof.bgHint || ''),
-      eventTitle: auto.eventTitle,
-      dateRange:  auto.dateRange,
-      saveAmount: auto.saveAmount,
-      financingLine: auto.financing,
-      qualifiers: auto.qualifiers,
-      legal: auto.legal,
-      palette: auto.palette
+      eventTitle: autoFields.eventTitle,
+      dateRange:  autoFields.dateRange,
+      saveAmount: autoFields.saveAmount,
+      financingLine: autoFields.financing,
+      qualifiers: autoFields.qualifiers,
+      legal: autoFields.legal,
+      palette: autoFields.palette
     };
-
 
     const validateB = ajv.compile(posterSchema);
     if (!validateB({ template, inputs: mergedInputsB, knobs: mergedKnobsB })) {
@@ -828,13 +902,12 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const bgPng = await buildPosterBackgroundFromPhotoBuffer({ width: W, height: H, photoBuffer: photoBuf });
 
         // User-first mapping for Poster-B (ONLY user/AI text, no hard-coded copy)
-const eventTitle  = (overlay.headline  || '').trim();
-const dateRange   = (overlay.promoLine || '').trim();
-const saveAmount  = (overlay.offer     || '').trim();
-const financingLn = (overlay.secondary || '').trim();
-const qualifiers  = (overlay.body      || '').trim();
-const legal       = (overlay.legal     || '').trim();
-
+        const eventTitle  = (overlay.headline  || '').trim();
+        const dateRange   = (overlay.promoLine || '').trim();
+        const saveAmount  = (overlay.offer     || '').trim();
+        const financingLn = (overlay.secondary || '').trim();
+        const qualifiers  = (overlay.body      || '').trim();
+        const legal       = (overlay.legal     || '').trim();
 
         const fsTitle = 88, fsH2 = 36, fsSave = 72, fsBody = 28;
         const cardW = 860, cardH = 660, padX = 60, padY = 56;
@@ -912,6 +985,20 @@ const legal       = (overlay.legal     || '').trim();
   }
 });
 
+/* ------------------------ /craft-ad-copy (no-echo) ------------------------ */
+router.post('/craft-ad-copy', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const a = b.answers || b || {};
+    const prof = profileForIndustry(a.industry || "");
+    const r = craftCopyFromAnswers(a, prof);
+    if (!r?.ok || !r.copy) return res.status(400).json({ ok:false, error:'copy failed' });
+    return res.json({ ok:true, copy:r.copy });
+  } catch (e) {
+    console.error('[craft-ad-copy]', e);
+    return res.status(400).json({ ok:false, error:String(e?.message||e) });
+  }
+});
 
 /* ------------------------ Exports ------------------------ */
 module.exports = router;
