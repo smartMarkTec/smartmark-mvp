@@ -299,97 +299,109 @@ router.post("/summarize-ad-copy", async (req, res) => {
   const { answers = {}, industry = answers.industry || "generic" } = (req.body || {});
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-  // Build a compact fact sheet for the prompt (keep it lean for low latency)
+  // ---- facts for prompting ----
   const facts = {
     businessName: answers.businessName || "",
-    industry: industry || "",
+    industry: (industry || "").toString(),
     location: answers.location || answers.city || "",
     idealCustomer: answers.idealCustomer || answers.audience || "",
     mainBenefit: answers.mainBenefit || answers.benefit || answers.details || "",
     offer: answers.offer || answers.saveAmount || "",
-    tone: answers.tone || "",
   };
 
-  const sys = [
-    "You are SmartMark's ad copy composer for static square ads.",
-    "Return only STRICT JSON with these fields:",
-    `{"headline":"","subline":"","offer":"","secondary":"","bullets":[],"disclaimers":""}`,
-    "Rules:",
-    "- DO NOT repeat user sentences verbatim; paraphrase into crisp copy.",
-    "- Headline: max 6 words, sentence case, no ending punctuation.",
-    "- Subline: 7–12 words, may include '•' separators.",
-    "- Bullets: 2–4 items, each 3–5 words, no periods.",
-    "- Keep it brand-safe, avoid hard claims, no URLs or hashtags.",
-  ].join(" ");
+  // ---- local helpers (self-contained) ----
+  const titleCase = (s="") =>
+    s.toLowerCase().replace(/\s+/g," ").trim().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase());
 
-  let aiCopy = null;
-  try {
-    const resp = await client.chat.completions.create({
-      model,
-      temperature: 0.5,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: sys },
-        { role: "user", content: `Summarize into ad copy from:\n${JSON.stringify(facts)}` }
-      ],
-      max_tokens: 240
-    });
-    const raw = resp.choices?.[0]?.message?.content || "{}";
-    const parsed = JSON.parse(raw);
-    aiCopy = {
-      headline: parsed.headline || "",
-      subline: parsed.subline || "",
-      offer: parsed.offer || "",
-      secondary: parsed.secondary || "",
-      bullets: Array.isArray(parsed.bullets) ? parsed.bullets : [],
-      disclaimers: parsed.disclaimers || ""
-    };
-  } catch (e) {
-    console.warn("summarize-ad-copy OpenAI error:", e?.message || e);
-  }
+  const sanitizeHeadline = (s="") => {
+    let t = String(s)
+      .replace(/https?:\/\/\S+/g," ")
+      .toLowerCase()
+      .replace(/\b(we|our|my|your|they|their|i|promise|guarantee|best|premium|luxury|perfect|cheap)\b/g," ")
+      .replace(/[^\w\s%]/g," ")
+      .replace(/\s+/g," ")
+      .trim();
+    const words = t.split(" ").filter(Boolean).slice(0,6);
+    if (!words.length) return "New Season Essentials";
+    return titleCase(words.join(" "));
+  };
 
-  // Fallback if GPT failed
-  if (!aiCopy || !aiCopy.headline) {
-    aiCopy = fallbackCopy({ ...answers, industry });
-  }
+  const tightenOfferText = (s = "") => {
+    let t = String(s || "").toLowerCase()
+      .replace(/https?:\/\/\S+/g," ")
+      .replace(/[^\w\s%$]/g," ")
+      .replace(/\s+/g," ")
+      .trim();
+    if (!t) return "";
 
-  // ---- Server-side guards (no-echo, formatting, lengths) ----
-  const rawInputs = [
-    answers.headline, answers.subline, answers.details, answers.mainBenefit,
-    answers.offer, answers.adCopy, answers.secondary
-  ].filter(Boolean).map(String);
-
-  // If headline too similar to any input, rewrite
-  for (const inp of rawInputs) {
-    if (similarity(aiCopy.headline, inp) >= 0.7) {
-      aiCopy.headline = softRewrite(aiCopy.headline);
-      break;
+    const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
+    const upTo = /up to/.test(t);
+    if (pct) {
+      let out = (upTo ? `UP TO ${pct[1]}%` : `${pct[1]}%`) + " OFF";
+      if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) out += " FIRST ORDER";
+      return out;
     }
+    const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
+    if (dol) return `$${dol[1]} OFF`;
+    if (/buy\s*1\s*get\s*1/i.test(t)) return "BUY 1 GET 1";
+
+    return t
+      .replace(/\b(we|our|you|your|they|their|will|get|receive|customers)\b/g,"")
+      .replace(/\s+/g," ")
+      .trim()
+      .toUpperCase();
+  };
+
+  // ---- HEADLINE (3–6 words, no we/our) ----
+  let aiHeadline = "";
+  try {
+    const sysHead = "Write a short, brand-safe AD HEADLINE of 3–6 words. No 'we/our/my/your'. No punctuation at end. Return only the headline.";
+    const userHead = [
+      `Category: ${facts.industry || "generic"}`,
+      facts.businessName ? `Brand: ${facts.businessName}` : "",
+      facts.mainBenefit ? `Benefit: ${facts.mainBenefit}` : "",
+      facts.idealCustomer ? `Audience: ${facts.idealCustomer}` : "",
+      facts.location ? `Location: ${facts.location}` : ""
+    ].filter(Boolean).join("\n");
+
+    const r = await client.chat.completions.create({
+      model, temperature: 0.2, max_tokens: 20,
+      messages: [{ role: "system", content: sysHead }, { role: "user", content: userHead }]
+    });
+    aiHeadline = (r.choices?.[0]?.message?.content || "").trim();
+  } catch (e) {
+    console.warn("summarize-ad-copy(headline) error:", e?.message);
   }
-  // Enforce headline ≤ 6 words
-  aiCopy.headline = sentenceCase(clampWords(aiCopy.headline, 6)).replace(/[.,!?]+$/,"");
 
-  // Subline: keep 7–12 words, coherent
-  if (!aiCopy.subline) aiCopy.subline = ensure7to9Words(aiCopy.headline);
-  const subW = aiCopy.subline.split(/\s+/).filter(Boolean);
-  if (subW.length < 7 || subW.length > 12) aiCopy.subline = ensure7to9Words(aiCopy.subline);
-
-  // Bullets: clean and cap length
-  aiCopy.bullets = (aiCopy.bullets || [])
-    .map(b => sentenceCase(clampWords(softRewrite(String(b || "")), 5)))
-    .filter(Boolean)
-    .slice(0, 4);
-  if (aiCopy.bullets.length < 2) {
-    aiCopy.bullets.push("Simple choices", "Great value");
-    aiCopy.bullets = aiCopy.bullets.slice(0, 4);
+  // ---- SUBLINE (7–9 words, sentence case, coherent) ----
+  let aiSubline = "";
+  try {
+    const sysSub = "Write ONE ad subline of 7–9 words, sentence case, no 'we/our', no hype, no website. Return only the subline.";
+    const r = await client.chat.completions.create({
+      model, temperature: 0.2, max_tokens: 24,
+      messages: [{ role: "system", content: sysSub }, { role: "user", content: JSON.stringify(facts) }]
+    });
+    aiSubline = (r.choices?.[0]?.message?.content || "").trim();
+  } catch (e) {
+    console.warn("summarize-ad-copy(subline) error:", e?.message);
   }
 
-  // Offer/secondary/disclaimers: keep tidy
-  aiCopy.offer = softRewrite(aiCopy.offer || "");
-  aiCopy.secondary = softRewrite(aiCopy.secondary || "");
-  aiCopy.disclaimers = (aiCopy.disclaimers || "").toString().trim();
+  // ---- Post-process + fallbacks ----
+  const cleanHeadline = sanitizeHeadline(aiHeadline || facts.mainBenefit || facts.businessName || "New Season Essentials")
+    .replace(/[.,!?]+$/,"");
+  const finalSub = sentenceCase(aiSubline || ensure7to9Words(cleanHeadline));
+  const compactOffer = tightenOfferText(facts.offer);
 
-  return res.json({ ok: true, copy: aiCopy });
+  const copy = {
+    headline: cleanHeadline,
+    subline: finalSub,
+    offer: compactOffer,
+    secondary: "",
+    bullets: [],
+    disclaimers: ""
+  };
+
+  return res.json({ ok: true, copy });
 });
 
 module.exports = router;

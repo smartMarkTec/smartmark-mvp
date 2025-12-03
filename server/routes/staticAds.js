@@ -299,6 +299,30 @@ Rules:
   return null;
 }
 
+/* ---- Offer normalizer (keeps orange line compact) ---- */
+function tightenOfferText(s = "") {
+  let t = String(s || "").toLowerCase().replace(/https?:\/\/\S+/g," ").replace(/[^\w\s%$]/g," ").replace(/\s+/g," ").trim();
+  if (!t) return "";
+
+  const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
+  const upTo = /up to/.test(t);
+  if (pct) {
+    let out = (upTo ? `UP TO ${pct[1]}%` : `${pct[1]}%`) + " OFF";
+    if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) out += " FIRST ORDER";
+    return out;
+  }
+  const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
+  if (dol) return `$${dol[1]} OFF`;
+  if (/buy\s*1\s*get\s*1/i.test(t)) return "BUY 1 GET 1";
+
+  return t
+    .replace(/\b(we|our|you|your|they|their|will|get|receive|customers)\b/g,"")
+    .replace(/\s+/g," ")
+    .trim()
+    .toUpperCase();
+}
+
+
 /* ------------------------ Templates ------------------------ */
 
 function tplFlyerA({ W=1080, H=1080 }) {
@@ -737,15 +761,16 @@ router.post('/generate-static-ad', async (req, res) => {
       legal      : (a.legal || a.disclaimers || '').toString()
     };
 
-    const autoFields = {
-      eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ''),
-      dateRange : pick(fromCopy?.dateRange,  fromAnswers.dateRange,  ''),
-      saveAmount: pick(fromCopy?.saveAmount, fromAnswers.saveAmount, ''),
-      financing : pick(fromCopy?.financing,  fromAnswers.financing,  ''),
-      qualifiers: pick(fromCopy?.qualifiers, fromAnswers.qualifiers, ''),
-      legal     : pick(fromCopy?.legal,      fromAnswers.legal,      ''),
-      palette   : (knobs.palette || prof.palette)
-    };
+  const autoFields = {
+  eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ''),
+  dateRange : pick(fromCopy?.dateRange,  fromAnswers.dateRange,  ''),
+  saveAmount: tightenOfferText(pick(fromCopy?.saveAmount, fromAnswers.saveAmount, '')),
+  financing : pick(fromCopy?.financing,  fromAnswers.financing,  ''),
+  qualifiers: pick(fromCopy?.qualifiers, fromAnswers.qualifiers, ''),
+  legal     : pick(fromCopy?.legal,      fromAnswers.legal,      ''),
+  palette   : (knobs.palette || prof.palette)
+};
+
 
     const mergedKnobsB = {
       size: get('size', knobs.size || '1080x1080'),
