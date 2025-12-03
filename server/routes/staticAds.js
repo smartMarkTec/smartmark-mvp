@@ -763,21 +763,21 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const pick = (...vals) => vals.find(v => typeof v === "string" && v.trim());
 
-    const fromCopy = crafted
-      ? {
-          eventTitle: (crafted.eventTitle || crafted.headline || "").toString(),
-          dateRange: (crafted.dateRange || crafted.subline || "").toString(),
-          saveAmount: (crafted.saveAmount || crafted.offer || "").toString(),
-          financing: (crafted.financingLine || crafted.secondary || "").toString(),
-          qualifiers: (
-            crafted.qualifiers ||
-            [crafted.subline, ...(Array.isArray(crafted.bullets) ? crafted.bullets : [])]
-              .filter(Boolean)
-              .join(" • ")
-          ).toString(),
-          legal: (crafted.disclaimers || crafted.legal || "").toString()
-        }
-      : null;
+  const fromCopy = crafted
+  ? {
+      eventTitle: (crafted.headline || "").toString(),
+      dateRange: (crafted.subline || "").toString(),
+      saveAmount: (crafted.offer || "").toString(),
+      financing: (crafted.secondary || "").toString(),
+      qualifiers: (
+        [crafted.subline, ...(crafted.bullets || [])]
+          .filter(Boolean)
+          .join(" • ")
+      ).toString(),
+      legal: (crafted.disclaimers || "").toString()
+    }
+  : null;
+
 
     const fromAnswers = {
       eventTitle: (a.headline || a.eventTitle || "").toString(),

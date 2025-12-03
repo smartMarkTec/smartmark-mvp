@@ -489,7 +489,7 @@ function buildImagePrompt(answers = {}, overlay = {}) {
 
 // --- GPT copy summarizer ---
 async function summarizeAdCopy(answers) {
-  const url = `${API_BASE}/gpt/summarize-ad-copy`;
+ const url = `${API_BASE}/summarize-ad-copy`;
   console.debug("[SM][summarizeAdCopy:POST]", url, { answers });
   try {
     const res = await fetch(url, {
@@ -1023,16 +1023,15 @@ useEffect(() => {
 }, [currentImageId, editHeadline, editBody, editCTA]);
 
 
-  const displayHeadline = (
+const displayHeadline = (
   editHeadline ||
   result?.headline ||
-  answers?.mainBenefit ||
-  answers?.businessName ||
   ""
-).slice(0, 55);
+).slice(0,55);
 
-  const displayBody =
-  (editBody || result?.body || answers?.details || answers?.adCopy || answers?.mainBenefit || "").trim();
+
+ const displayBody =
+  (editBody || result?.body || "").trim();
 
   const displayCTA = normalizeOverlayCTA(
   editCTA || result?.image_overlay_text || answers?.cta || ""
@@ -1152,15 +1151,6 @@ useEffect(() => {
     }
   }
 
-  async function summarizeAdCopy(answers = {}) {
-  const res = await fetch(`${API_BASE}/summarize-ad-copy`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers })
-  });
-  const j = await res.json().catch(() => ({}));
-  return j.copy || {};
-}
 
 
   async function handleSideChat(userText, followUpPrompt) {
@@ -1287,12 +1277,17 @@ setTimeout(async () => {
     })();
 
     // Get GPT-crafted copy
-   const data = copy;
-    setResult({
-      headline: data?.headline || "",
-      body: data?.body || "",
-      image_overlay_text: data?.image_overlay_text || "",
-    });
+// 2B) Store GPT-crafted copy directly (not waiting for static ad)
+setResult({
+  headline: copy?.headline || "",
+  body: copy?.subline || "",
+  offer: copy?.offer || "",
+  bullets: copy?.bullets || [],
+  disclaimers: copy?.disclaimers || "",
+  image_overlay_text: copy?.cta || ""
+});
+
+
 
     // Use that GPT copy for the static poster
     const staticPromise = handleGenerateStaticAd("poster_b", copy);
@@ -1457,41 +1452,20 @@ async function handleGenerateStaticAd(template = "poster_b", assetsData = null) 
 
   // 1) Prefer GPT summary copy that we already showed in the preview
   //    (displayHeadline/displayBody/displayCTA are what /summarize-ad-copy returned)
-  let craftedCopy = null;
 
-  if (displayHeadline || displayBody || displayCTA) {
-    craftedCopy = {
-      headline: (displayHeadline || "").toString(),
-      subline: (displayBody || "").toString(),
-      offer: (a.offer || "").toString(),
-      bullets: [],
-      disclaimers: "",
-      cta: (displayCTA || a?.cta || "").toString()
-    };
-  }
-
-  // 2) Fallback: use older campaign-assets result only if GPT summary is missing
-  if (!craftedCopy && assetsData && assetsData.headline) {
-    craftedCopy = {
+// Prefer GPT-crafted copy only
+let craftedCopy = assetsData && Object.keys(assetsData).length
+  ? {
       headline: (assetsData.headline || "").toString(),
       subline: (assetsData.subline || "").toString(),
       offer: (assetsData.offer || "").toString(),
       bullets: Array.isArray(assetsData.bullets) ? assetsData.bullets : [],
       disclaimers: (assetsData.disclaimers || "").toString(),
       cta: (assetsData.cta || "").toString()
-    };
-  } else if (!craftedCopy && result) {
-    craftedCopy = {
-      headline: (result.headline || "").toString(),
-      subline: (result.body || "").toString(),
-      offer: (result.offer || "").toString(),
-      bullets: Array.isArray(result.ad_bullets || result.bullets)
-        ? (result.ad_bullets || result.bullets)
-        : [],
-      disclaimers: (result.legal || result.disclaimers || "").toString(),
-      cta: (result.image_overlay_text || result.cta || answers?.cta || "").toString()
-    };
-  }
+    }
+  : null;
+
+
 
 
 
