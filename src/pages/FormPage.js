@@ -1455,28 +1455,44 @@ async function handleRegenerateVideo() {
 async function handleGenerateStaticAd(template = "poster_b", assetsData = null) {
   const a = answers || {};
 
-  // Prefer GPT-crafted campaign assets (never raw user sentences)
-// Prefer explicit GPT summary copy passed in; else fall back to prior result
-let craftedCopy = null;
-if (assetsData && assetsData.headline) {
-  craftedCopy = {
-    headline: (assetsData.headline || "").toString(),
-    subline: (assetsData.subline || "").toString(),
-    offer: (assetsData.offer || "").toString(),
-    bullets: Array.isArray(assetsData.bullets) ? assetsData.bullets : [],
-    disclaimers: (assetsData.disclaimers || "").toString(),
-    cta: (assetsData.cta || "").toString()
-  };
-} else if (result) {
-  craftedCopy = {
-    headline: (result.headline || "").toString(),
-    subline: (result.body || "").toString(),
-    offer: (result.offer || "").toString(),
-    bullets: Array.isArray(result.ad_bullets || result.bullets) ? (result.ad_bullets || result.bullets) : [],
-    disclaimers: (result.legal || result.disclaimers || "").toString(),
-    cta: (result.image_overlay_text || result.cta || answers?.cta || "").toString()
-  };
-}
+  // 1) Prefer GPT summary copy that we already showed in the preview
+  //    (displayHeadline/displayBody/displayCTA are what /summarize-ad-copy returned)
+  let craftedCopy = null;
+
+  if (displayHeadline || displayBody || displayCTA) {
+    craftedCopy = {
+      headline: (displayHeadline || "").toString(),
+      subline: (displayBody || "").toString(),
+      offer: (a.offer || "").toString(),
+      bullets: [],
+      disclaimers: "",
+      cta: (displayCTA || a?.cta || "").toString()
+    };
+  }
+
+  // 2) Fallback: use older campaign-assets result only if GPT summary is missing
+  if (!craftedCopy && assetsData && assetsData.headline) {
+    craftedCopy = {
+      headline: (assetsData.headline || "").toString(),
+      subline: (assetsData.subline || "").toString(),
+      offer: (assetsData.offer || "").toString(),
+      bullets: Array.isArray(assetsData.bullets) ? assetsData.bullets : [],
+      disclaimers: (assetsData.disclaimers || "").toString(),
+      cta: (assetsData.cta || "").toString()
+    };
+  } else if (!craftedCopy && result) {
+    craftedCopy = {
+      headline: (result.headline || "").toString(),
+      subline: (result.body || "").toString(),
+      offer: (result.offer || "").toString(),
+      bullets: Array.isArray(result.ad_bullets || result.bullets)
+        ? (result.ad_bullets || result.bullets)
+        : [],
+      disclaimers: (result.legal || result.disclaimers || "").toString(),
+      cta: (result.image_overlay_text || result.cta || answers?.cta || "").toString()
+    };
+  }
+
 
 
   // Stop any video pipeline for this run (prevents "Hard cap reached; aborting video fetches")
