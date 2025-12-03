@@ -233,6 +233,64 @@ router.post("/coherent-subline", async (req, res) => {
   return res.json({ subline: line });
 });
 
+// ---------- NEW: summarize-ad-copy (JSON) ----------
+router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], async (req, res) => {
+  try {
+    const a = (req.body && req.body.answers) || {};
+    const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+
+    const system =
+      "You write concise ad copy. Return strict JSON with keys: " +
+      "headline (<=8 words), subline (7–14 words), offer (short, optional), " +
+      "bullets (array of up to 3 short items), disclaimers (short, optional), cta (2–3 words). " +
+      "No brand-superlatives (best, #1, premium, luxury). No URLs. No 'our/we' language.";
+
+    const user = [
+      `Industry: ${a.industry || ""}`,
+      `Business: ${a.businessName || ""}`,
+      `Location: ${a.city ? (a.state ? `${a.city}, ${a.state}` : a.city) : (a.location || "")}`,
+      `Audience: ${a.idealCustomer || ""}`,
+      `Main benefit: ${a.mainBenefit || a.details || ""}`,
+      `Offer: ${a.offer || a.saveAmount || ""}`,
+      `Secondary: ${a.secondary || a.financingLine || ""}`,
+    ].join("\n");
+
+    const completion = await client.chat.completions.create({
+      model,
+      temperature: 0.2,
+      max_tokens: 220,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+        { role: "user", content: "Return ONLY compact JSON object with those keys." }
+      ]
+    });
+
+    let txt = completion.choices?.[0]?.message?.content?.trim() || "{}";
+    txt = txt.replace(/^```json\s*|\s*```$/g, "");
+    let parsed = {};
+    try { parsed = JSON.parse(txt); } catch { parsed = {}; }
+
+    const clamp = (s, n) => String(s || "").trim().slice(0, n);
+    const arr = (x) => Array.isArray(x) ? x : (x ? [String(x)] : []);
+
+    const copy = {
+      headline: clamp(parsed.headline || "", 55),
+      subline: clamp(parsed.subline || "", 140),
+      offer: clamp(parsed.offer || "", 40),
+      bullets: arr(parsed.bullets || []).slice(0, 3).map(b => clamp(b, 40)),
+      disclaimers: clamp(parsed.disclaimers || "", 160),
+      cta: clamp(parsed.cta || "Learn more", 24)
+    };
+
+    return res.json({ ok: true, copy });
+  } catch (e) {
+    console.error("summarize-ad-copy error:", e?.message || e);
+    return res.status(400).json({ ok: false, error: "copy_failed" });
+  }
+});
+
+
 /* ========= NEW: summarize answers → structured ad copy (JSON) =========
    Input:  { answers: {...}, industry?: string }
    Output: { ok:true, copy:{ headline, subline, offer, secondary, bullets[], disclaimers } }

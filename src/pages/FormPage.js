@@ -1146,6 +1146,17 @@ useEffect(() => {
     }
   }
 
+  async function summarizeAdCopy(answers = {}) {
+  const res = await fetch(`${API_BASE}/summarize-ad-copy`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ answers })
+  });
+  const j = await res.json().catch(() => ({}));
+  return j.copy || {};
+}
+
+
   async function handleSideChat(userText, followUpPrompt) {
     if (sideChatCount >= SIDE_CHAT_LIMIT) {
       if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
@@ -1206,6 +1217,8 @@ useEffect(() => {
           { from: "gpt", text: "AI generating..." },
         ]);
 
+
+
         // inside handleUserInput, where you currently start generation:
 setTimeout(async () => {
   const token = getRandomString();
@@ -1233,16 +1246,7 @@ setTimeout(async () => {
      // 2A) Get GPT-crafted copy FIRST  ⬅️  INSERT THIS LINE
     const copy = await summarizeAdCopy(answers);
 
-    // Kick off copy, images, and A/B videos in parallel
-    const assetsPromise = fetchJsonWithRetry(
-      `${API_BASE}/generate-campaign-assets`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers }),
-      },
-      { tries: 1, timeoutMs: 12000 }
-    ).catch(() => ({}));
+
 
     const imagesPromise = (async () => {
       // Use answers-first mapping so the image matches what the user typed
@@ -1277,7 +1281,7 @@ setTimeout(async () => {
     })();
 
     // Get GPT-crafted copy
-    const data = await assetsPromise;
+   const data = copy;
     setResult({
       headline: data?.headline || "",
       body: data?.body || "",
