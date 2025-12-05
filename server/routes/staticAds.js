@@ -186,16 +186,21 @@ function clampWords(s="", max=16){
 
 const INDUSTRY_TEMPLATES = {
   fashion: {
-    headline: (brand, benefit) => benefit
-      ? `${titleCase(benefit)}`
-      : `${brand ? titleCase(brand)+": " : ""}New Season, New Essentials`,
-    subline: (aud, city) => [
-      aud ? `Made for ${aud}` : `Everyday quality. Statement looks.`,
-      city ? `Available in ${city}` : `Limited run • Free returns`
-    ].filter(Boolean).join(" • "),
+    // Never just echo the raw benefit; always use a clean, brand-style line.
+    headline: (brand, benefit) =>
+      brand
+        ? `${titleCase(brand)} New Collection`
+        : "Effortless Everyday Style",
+    subline: (aud, city) => {
+      const parts = [];
+      if (aud) parts.push(`Style for ${aud}`);
+      else parts.push("Everyday quality. Statement looks.");
+      if (city) parts.push(`Available in ${city}`);
+      return parts.join(" • ");
+    },
     bullets: (offer) => [
-      offer ? offer : "Premium fabrics • Tailored fit",
-      "Ships fast • Easy exchanges"
+      offer ? clampWords(cleanLine(offer), 6) : "Premium fabrics",
+      "Modern fits • New drops"
     ]
   },
   restaurant: {
@@ -256,6 +261,8 @@ Rules:
 - Headline: max 6 words, punchy, no punctuation at end.
 - Subline: max 12 words; may include separators "•".
 - Bullets: 2–4 micro-phrases, 3–5 words each, no periods.
+- Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
+- Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
 - Keep it brand-safe and generic.`;
 
   const user = {
@@ -723,6 +730,7 @@ router.post('/generate-static-ad', async (req, res) => {
       // Normalize + guard against echo and weird formatting
       const safeHeadline   = clampWords(cleanLine(crafted.headline || ""), 6);
       const safeSubline    = clampWords(cleanLine(crafted.subline || ""), 14);
+      // Offer will later be forced from user answers; still clean what we get
       const safeOffer      = tightenOfferText(crafted.offer || "");
       const safeSecondary  = clampWords(cleanLine(crafted.secondary || ""), 10);
       const safeBullets    = Array.isArray(crafted.bullets)
@@ -763,21 +771,20 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const pick = (...vals) => vals.find(v => typeof v === "string" && v.trim());
 
-  const fromCopy = crafted
-  ? {
-      eventTitle: (crafted.headline || "").toString(),
-      dateRange: (crafted.subline || "").toString(),
-      saveAmount: (crafted.offer || "").toString(),
-      financing: (crafted.secondary || "").toString(),
-      qualifiers: (
-        [crafted.subline, ...(crafted.bullets || [])]
-          .filter(Boolean)
-          .join(" • ")
-      ).toString(),
-      legal: (crafted.disclaimers || "").toString()
-    }
-  : null;
-
+    const fromCopy = crafted
+      ? {
+          eventTitle: (crafted.headline || "").toString(),
+          dateRange: (crafted.subline || "").toString(),
+          saveAmount: (crafted.offer || "").toString(),
+          financing: (crafted.secondary || "").toString(),
+          qualifiers: (
+            [crafted.subline, ...(crafted.bullets || [])]
+              .filter(Boolean)
+              .join(" • ")
+          ).toString(),
+          legal: (crafted.disclaimers || "").toString()
+        }
+      : null;
 
     const fromAnswers = {
       eventTitle: (a.headline || a.eventTitle || "").toString(),
@@ -794,15 +801,15 @@ router.post('/generate-static-ad', async (req, res) => {
     const autoFields = {
       eventTitle: pick(fromCopy?.eventTitle, fromAnswers.eventTitle, ""),
       dateRange: pick(fromCopy?.dateRange, fromAnswers.dateRange, ""),
+      // Offer line MUST come from the user's own offer text, not GPT.
       saveAmount: tightenOfferText(
-        pick(fromCopy?.saveAmount, fromAnswers.saveAmount, "")
+        pick(fromAnswers.saveAmount, a.offer || a.saveAmount || "")
       ),
       financing: pick(fromCopy?.financing, fromAnswers.financing, ""),
       qualifiers: pick(fromCopy?.qualifiers, fromAnswers.qualifiers, ""),
       legal: pick(fromCopy?.legal, fromAnswers.legal, ""),
       palette: knobs.palette || prof.palette
     };
-
 
     const mergedKnobsB = {
       size: get('size', knobs.size || '1080x1080'),
@@ -1112,13 +1119,30 @@ router.post('/craft-ad-copy', async (req, res) => {
     const b = req.body || {};
     const a = b.answers || b || {};
     const prof = profileForIndustry(a.industry || "");
+
     // Try OpenAI first; fallback to rule-based
-    let copy = await generateSmartCopyWithOpenAI(a, prof);
-    if (!copy) {
+    let rawCopy = await generateSmartCopyWithOpenAI(a, prof);
+    if (!rawCopy) {
       const rb = craftCopyFromAnswers(a, prof);
-      copy = rb?.copy || null;
+      rawCopy = rb?.copy || null;
     }
-    if (!copy) return res.status(400).json({ ok:false, error:'copy failed' });
+    if (!rawCopy) return res.status(400).json({ ok:false, error:'copy failed' });
+
+    // Final sanitation: enforce word limits and force offer from user
+    const safeOffer = tightenOfferText(a.offer || a.saveAmount || "");
+
+    const copy = {
+      headline: clampWords(cleanLine(rawCopy.headline || ""), 6),
+      subline: clampWords(cleanLine(rawCopy.subline || ""), 14),
+      // Offer only from user-provided offer text
+      offer: safeOffer,
+      secondary: clampWords(cleanLine(rawCopy.secondary || ""), 10),
+      bullets: Array.isArray(rawCopy.bullets)
+        ? rawCopy.bullets.map(b => clampWords(cleanLine(b || ""), 5)).slice(0, 4)
+        : [],
+      disclaimers: (rawCopy.disclaimers || "").toString().trim()
+    };
+
     return res.json({ ok:true, copy });
   } catch (e) {
     console.error('[craft-ad-copy]', e);
