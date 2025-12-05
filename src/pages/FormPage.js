@@ -1410,24 +1410,51 @@ async function handleRegenerateImage() {
   setImageLoading(true);
   try {
     await warmBackend();
+    const token = getRandomString();
 
-    const poster = derivePosterFieldsFromAnswers(answers);
+    // Fresh GPT copy for a brand-new variation
+    const rawCopy = (await summarizeAdCopy(answers)) || {};
+    const copy = {
+      headline: (rawCopy.headline || "").toString(),
+      subline: (rawCopy.subline || "").toString(),
+      offer: (rawCopy.offer || "").toString(),
+      secondary: (rawCopy.secondary || "").toString(),
+      bullets: Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [],
+      disclaimers: (rawCopy.disclaimers || "").toString(),
+      cta: (rawCopy.cta || "").toString()
+    };
+
+    // Update preview state so the user sees the new words
+    setResult({
+      headline: copy.headline,
+      body: copy.subline,
+      offer: copy.offer,
+      bullets: copy.bullets,
+      disclaimers: copy.disclaimers,
+      image_overlay_text: copy.cta || answers?.cta || "Shop now"
+    });
+
+    // Overlay for the rendered image (uses fresh GPT copy)
     const overlay = {
-  headline: (displayHeadline || poster.headline || "").slice(0, 55),
-  body: displayBody || poster.adCopy || "",
-  cta: normalizeOverlayCTA(displayCTA || answers?.cta || "")
-};
+      headline: (copy.headline || "").slice(0, 55),
+      body: copy.subline || "",
+      cta: normalizeOverlayCTA(copy.cta || answers?.cta || "")
+    };
 
     const prompt = buildImagePrompt(answers, overlay);
 
-    const imgs = await fetchImagesOnce(getRandomString(), answers, overlay, prompt);
-    setImageUrls(imgs);
+    const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
+    setImageUrls(imgs || []);
     setActiveImage(0);
-    setImageUrl(imgs[0] || "");
+    setImageUrl((imgs && imgs[0]) || "");
+
+    // Also regenerate static Poster B to mirror this variation
+    handleGenerateStaticAd("poster_b", copy);
   } finally {
     setImageLoading(false);
   }
 }
+
 
 
 async function handleRegenerateVideo() {
@@ -1980,14 +2007,52 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           </div>
 
           {/* Copy block */}
-          <div style={{ padding: "17px 18px 4px 18px" }}>
-            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
-              {displayHeadline}
-            </div>
-            <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
-              {displayBody}
-            </div>
-          </div>
+      <div style={{ padding: "17px 18px 4px 18px" }}>
+  <div
+    style={{
+      color: "#191c1e",
+      fontWeight: 800,
+      fontSize: 17,
+      marginBottom: 5,
+      fontFamily: AD_FONT
+    }}
+  >
+    {displayHeadline}
+  </div>
+
+  <div
+    style={{
+      color: "#3a4149",
+      fontSize: 15,
+      fontWeight: 600,
+      marginBottom: 3,
+      minHeight: 18
+    }}
+  >
+    {displayBody}
+  </div>
+
+  {Array.isArray(result?.bullets) && result.bullets.length > 0 && (
+    <ul
+      style={{
+        margin: "6px 0 0 16px",
+        padding: 0,
+        listStyleType: "disc",
+        color: "#4b5563",
+        fontSize: 14,
+        fontWeight: 600,
+        lineHeight: 1.4
+      }}
+    >
+      {result.bullets.map((b, idx) => (
+        <li key={idx} style={{ marginBottom: 2 }}>
+          {b}
+        </li>
+      ))}
+    </ul>
+  )}
+</div>
+
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
             <button style={{
               background: "#14e7b9",
