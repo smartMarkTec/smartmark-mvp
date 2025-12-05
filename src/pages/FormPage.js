@@ -1213,108 +1213,131 @@ const displayHeadline = (
           { from: "gpt", text: "AI generating..." },
         ]);
 
+        setTimeout(async () => {
+          const token = getRandomString();
 
+          // Abort any stale in-flight jobs first
+          abortAllVideoFetches();
 
-        // inside handleUserInput, where you currently start generation:
-setTimeout(async () => {
-  const token = getRandomString();
+          // Global hard cap
+          const hardCap = setTimeout(() => {
+            console.warn("Hard cap reached; aborting video fetches");
+            abortAllVideoFetches();
+            setGenerating(false);
+            setLoading(false);
+            setError(
+              "Taking too long. Please try again (we limit generation to ~100 seconds)."
+            );
+          }, GENERATION_HARD_CAP_MS);
 
-  // Abort any stale in-flight jobs first
-  abortAllVideoFetches();
+          // Clear old previews
+          try { setVideoItems([]); } catch {}
+          try { setVideoUrl(""); setVideoScript(""); } catch {}
+          try { setImageUrls([]); setImageUrl(""); } catch {}
 
-  // Global hard cap
-  const hardCap = setTimeout(() => {
-    console.warn("Hard cap reached; aborting video fetches");
-    abortAllVideoFetches();
-    setGenerating(false);
-    setLoading(false);
-    setError("Taking too long. Please try again (we limit generation to ~100 seconds).");
-  }, GENERATION_HARD_CAP_MS);
+          try {
+            await warmBackend();
 
-  // clear old previews
-  try { setVideoItems([]); } catch {}
-  try { setVideoUrl(""); setVideoScript(""); } catch {}
-  try { setImageUrls([]); setImageUrl(""); } catch {}
+            // 1) Get fresh GPT-crafted copy for THIS run
+            const rawCopy = (await summarizeAdCopy(answers)) || {};
+            const copy = {
+              headline: (rawCopy.headline || "").toString(),
+              subline: (rawCopy.subline || "").toString(),
+              offer: (rawCopy.offer || "").toString(),
+              secondary: (rawCopy.secondary || "").toString(),
+              bullets: Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [],
+              disclaimers: (rawCopy.disclaimers || "").toString(),
+              cta: (rawCopy.cta || "").toString()
+            };
 
-  try {
-    await warmBackend();
+            // 2) Store GPT copy in state for the preview card
+            setResult({
+              headline: copy.headline,
+              body: copy.subline,
+              offer: copy.offer,
+              bullets: copy.bullets,
+              disclaimers: copy.disclaimers,
+              image_overlay_text: copy.cta || answers?.cta || "Shop now"
+            });
 
-     // 2A) Get GPT-crafted copy FIRST  ⬅️  INSERT THIS LINE
-    const copy = await summarizeAdCopy(answers);
+            // 3) IMAGE: use GPT copy directly for the overlay
+            const imagesPromise = (async () => {
+              const poster = derivePosterFieldsFromAnswers(answers);
+              const overlay = {
+                headline: (copy.headline || poster.headline || "").slice(0, 55),
+                body: copy.subline || poster.adCopy || "",
+                cta: normalizeOverlayCTA(
+                  copy.cta || answers?.cta || ""
+                )
+              };
 
+              const prompt = buildImagePrompt(answers, overlay);
 
+              const imgs = await fetchImagesOnce(
+                token,
+                answers,
+                overlay,
+                prompt
+              );
+              setImageUrls(imgs || []);
+              setActiveImage(0);
+              setImageUrl((imgs && imgs[0]) || "");
+            })();
 
-    const imagesPromise = (async () => {
-      // Use answers-first mapping so the image matches what the user typed
-      const poster = derivePosterFieldsFromAnswers(answers);
-      const overlay = {
-        headline: (displayHeadline || poster.headline || "").slice(0, 55),
-        body: displayBody || poster.adCopy || "",
-        cta: normalizeOverlayCTA(displayCTA || answers?.cta || "")
-      };
+            // 4) VIDEO: unchanged
+            const videosPromise = (async () => {
+              const vs = await fetchVideoPair(token, answers, null, null);
+              await Promise.allSettled([
+                headRangeWarm("VA", vs?.[0]?.url),
+                headRangeWarm("VB", vs?.[1]?.url),
+              ]);
+              try {
+                setVideoItems(vs || []);
+                setActiveVideo(0);
+                setVideoUrl(vs?.[0]?.url || "");
+                setVideoScript(vs?.[0]?.script || "");
+              } catch {}
+            })();
 
-      const prompt = buildImagePrompt(answers, overlay);
+            // 5) Static Poster B: also gets the same GPT copy
+            const staticPromise = handleGenerateStaticAd("poster_b", copy);
 
-      const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
-      setImageUrls(imgs || []);
-      setActiveImage(0);
-      setImageUrl((imgs && imgs[0]) || "");
-    })();
+            // 6) Mark as “done” once any media completes
+            await Promise.any([
+              imagesPromise,
+              videosPromise,
+              staticPromise
+            ]).catch(() => {});
+            await Promise.allSettled([
+              imagesPromise,
+              videosPromise,
+              staticPromise
+            ]);
 
-    const videosPromise = (async () => {
-      const vs = await fetchVideoPair(token, answers, null, null);
-      // warm (no throw on fail)
-      await Promise.allSettled([
-        headRangeWarm("VA", vs?.[0]?.url),
-        headRangeWarm("VB", vs?.[1]?.url),
-      ]);
-      try {
-        setVideoItems(vs || []);
-        setActiveVideo(0);
-        setVideoUrl(vs?.[0]?.url || "");
-        setVideoScript(vs?.[0]?.script || "");
-      } catch {}
-    })();
-
-    // Get GPT-crafted copy
-// 2B) Store GPT-crafted copy directly (not waiting for static ad)
-setResult({
-  headline: copy?.headline || "",
-  body: copy?.subline || "",
-  offer: copy?.offer || "",
-  bullets: copy?.bullets || [],
-  disclaimers: copy?.disclaimers || "",
-  image_overlay_text: copy?.cta || ""
-});
-
-
-
-    // Use that GPT copy for the static poster
-    const staticPromise = handleGenerateStaticAd("poster_b", copy);
-
-
-    // Consider generation “done” as soon as at least one media set finishes
-    await Promise.any([imagesPromise, videosPromise, staticPromise]).catch(() => {});
-    await Promise.allSettled([imagesPromise, videosPromise, staticPromise]);
-
-    setChatHistory((ch) => [
-      ...ch,
-      { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
-    ]);
-    setHasGenerated(true);
-  } catch (err) {
-    console.error("generation failed:", err);
-    setError("Generation failed (server cold or busy). Try again in a few seconds.");
-  } finally {
-    clearTimeout(hardCap);
-    setGenerating(false);
-    setLoading(false);
-  }
-}, 80);
-
+            setChatHistory((ch) => [
+              ...ch,
+              {
+                from: "gpt",
+                text:
+                  "Done! Here are your ad previews. You can regenerate the image or video below.",
+              },
+            ]);
+            setHasGenerated(true);
+          } catch (err) {
+            console.error("generation failed:", err);
+            setError(
+              "Generation failed (server cold or busy). Try again in a few seconds."
+            );
+          } finally {
+            clearTimeout(hardCap);
+            setGenerating(false);
+            setLoading(false);
+          }
+        }, 80);
 
         return;
       }
+
 
       if (hasGenerated) {
         await handleSideChat(value, null);
