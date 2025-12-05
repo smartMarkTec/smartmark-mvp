@@ -1574,31 +1574,45 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           roundedOuter: true
         }
       : (() => {
-          const craftedQualifiers =
-            craftedCopy && (craftedCopy.subline || (craftedCopy.bullets && craftedCopy.bullets.length))
-              ? [craftedCopy.subline, ...(craftedCopy.bullets || [])]
-                  .filter(Boolean)
-                  .join(" • ")
-              : "";
+          // Take up to 3 bullets from GPT
+          const bulletLines = (craftedCopy?.bullets || [])
+            .map(b => (b || "").toString().trim())
+            .filter(Boolean)
+            .slice(0, 3);
+
+          // Lines 2–3 compressed as a qualifier string
+          const qualifiersFromBullets =
+            bulletLines.length > 1 ? bulletLines.slice(1).join(" • ") : "";
 
           return {
             size: "1080x1080",
             frame: { outerWhite: true, softShadow: true },
             card: { widthPct: 70, heightPct: 55, shadow: true },
 
-            // Poster-B text: AI copy first, answers only as backup
-            eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 55),
-            dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 60),
-            saveAmount: (craftedCopy?.offer || poster.offer || "BIG SAVINGS").slice(0, 40),
-            financingLine: poster.secondary || "",
-            qualifiers: (craftedQualifiers || poster.adCopy || "").slice(0, 120),
-            legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 160),
+            // Poster-B text: AI copy first, answers only as backup.
+            // Loosen length caps so the sentence doesn't get cut off.
+            eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 70),
+            dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 140),
+            saveAmount: (craftedCopy?.offer || poster.offer || "").slice(0, 40),
+
+            // Use first bullet as the "PLUS SPECIAL FINANCING..." style line
+            financingLine: (bulletLines[0] || poster.secondary || "").slice(0, 90),
+
+            // Remaining bullets as qualifiers under that
+            qualifiers: (qualifiersFromBullets || poster.adCopy || "").slice(0, 180),
+
+            // Legal/disclaimer at the very bottom
+            legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 200),
+
+            // Expose full bullets array to the server template
+            bullets: bulletLines,
 
             seasonalLeaves: true,
             backgroundHint: common.industry,
             backgroundUrl: poster.backgroundUrl || ""
           };
         })();
+
 
   const payload = {
     template,
@@ -2007,7 +2021,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           </div>
 
           {/* Copy block */}
-      <div style={{ padding: "17px 18px 4px 18px" }}>
+<div style={{ padding: "17px 18px 4px 18px" }}>
   <div
     style={{
       color: "#191c1e",
@@ -2031,27 +2045,8 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
   >
     {displayBody}
   </div>
-
-  {Array.isArray(result?.bullets) && result.bullets.length > 0 && (
-    <ul
-      style={{
-        margin: "6px 0 0 16px",
-        padding: 0,
-        listStyleType: "disc",
-        color: "#4b5563",
-        fontSize: 14,
-        fontWeight: 600,
-        lineHeight: 1.4
-      }}
-    >
-      {result.bullets.map((b, idx) => (
-        <li key={idx} style={{ marginBottom: 2 }}>
-          {b}
-        </li>
-      ))}
-    </ul>
-  )}
 </div>
+
 
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
             <button style={{
