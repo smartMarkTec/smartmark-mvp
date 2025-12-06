@@ -389,7 +389,6 @@ function titleCase(s = '') {
 function cleanLine(s = '') {
   const noUrl = String(s).replace(/https?:\/\/\S+|www\.\S+/gi, '');
   const noFiller = noUrl
-    .replace(/\b(our|we|my|the|very|really)\b/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
   return noFiller;
@@ -463,9 +462,9 @@ function craftCopyFromAnswers(a = {}, prof = {}) {
   const offer = cleanLine(a.offer || a.saveAmount || '');
 
   const headline = clampWords(cleanLine(t.headline(brand, benefit)), 10);
-  const subline = clampWords(cleanLine(t.subline(audience, city)), 14);
-  const bullets = (t.bullets(offer) || [])
-    .map((b) => clampWords(cleanLine(b), 7))
+  const subline = clampWords(cleanLine(t.subline(audience, city)), 12);
+  let bullets = (t.bullets(offer) || [])
+    .map((b) => clampWords(cleanLine(b), 6))
     .slice(0, 3);
 
   return {
@@ -488,18 +487,17 @@ async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   if (!key) return null;
 
   const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
-  const sys = `You are a marketing copywriter for square social ads. 
+  const sys = `You are a marketing copywriter for square social ads.
 Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
+
 Rules:
-- Do NOT repeat user's sentences verbatim; paraphrase into crisp ad copy.
-- Headline: max 6 words, punchy, no punctuation at end.
-- Subline: max 12 words; may include separators "•".
+- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Use varied wording.
+- Subline: one short complete thought, max 12 words. Do not end with a dangling word like "of" or "for".
 - Bullets: 2–4 micro-phrases, 3–5 words each, no periods.
-- Bullets should NOT restate the offer; focus on features/benefits.
 - Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
 - Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
-- Keep it brand-safe and generic.`;
+- Keep copy coherent, brand-safe, and specific to the business.`;
 
   const user = {
     businessName: answers.businessName || '',
@@ -517,7 +515,7 @@ Rules:
       { role: 'system', content: sys },
       { role: 'user', content: `Make ad copy for:\n${JSON.stringify(user, null, 2)}` },
     ],
-    temperature: 0.7,
+    temperature: 0.8,
     response_format: { type: 'json_object' },
   });
 
@@ -545,7 +543,6 @@ Rules:
 /* ------------------------ Offer normalizer ------------------------ */
 
 function tightenOfferText(s = '') {
-  // Normalize raw string
   let t = String(s || '')
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, ' ')
@@ -560,7 +557,6 @@ function tightenOfferText(s = '') {
     return words.slice(0, maxWords).join(' ').toUpperCase();
   };
 
-  // % OFF patterns → "50% OFF" or "UP TO 50% OFF"
   const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
   const upTo = /up to/.test(t);
   if (pct) {
@@ -571,17 +567,14 @@ function tightenOfferText(s = '') {
     return shortenWords(out, 4);
   }
 
-  // $ OFF patterns → "$100 OFF"
   const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
   if (dol) {
     const out = `$${dol[1]} off`;
     return shortenWords(out, 3);
   }
 
-  // BOGO
   if (/buy\s*1\s*get\s*1/i.test(t)) return 'BUY 1 GET 1';
 
-  // Fallback: strip filler words & cap to a few words
   const cleaned = t
     .replace(/\b(we|our|you|your|they|their|will|get|receive|customers)\b/g, '')
     .replace(/\s+/g, ' ')
@@ -677,7 +670,7 @@ function tplPosterBCard({
     <style>
       .t-center { text-anchor: middle; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22; }
-      .h2      { font: 800 ${fsH2}px/1.2  Inter,system-ui; fill:#3b4b59; }
+      .h2      { font: 800 ${fsH2}px/1.25 Inter,system-ui; fill:#3b4b59; }
       .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
       .body    { font: 700 ${fsBody}px/1.26 Inter,system-ui; fill:#5f7182; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
@@ -707,7 +700,7 @@ function tplPosterBCard({
       {{/eventTitleLines}}
     </text>
 
-    <!-- SUBLINE / TAGLINE (multi-line) -->
+    <!-- SUBLINE (multi-line) -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
       {{#dateRangeLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
@@ -722,15 +715,19 @@ function tplPosterBCard({
     <!-- OFFER -->
     <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
 
-    <!-- SECONDARY LINE -->
+    <!-- FINANCING / SECONDARY -->
+    {{#financingLine}}
     <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
+    {{/financingLine}}
 
-    <!-- SMALL QUALIFIER (usually empty / subtle) -->
+    <!-- SMALL QUALIFIER (multi-line) -->
+    {{#qualifierLines.length}}
     <text class="body t-center" x="${cardW / 2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/qualifierLines}}
     </text>
+    {{/qualifierLines.length}}
   </g>
 
   <!-- BULLET LIST -->
@@ -738,8 +735,8 @@ function tplPosterBCard({
   <g transform="translate(${padX}, ${bulletStartY})">
     {{#bulletLines}}
       <g transform="translate(0, {{dy}})">
-        <text class="bullet-dot" x="0" y="0">•</text>
-        <text class="bullet-text" x="30" y="0">{{line}}</text>
+        <text class="bullet-dot" x="0" y="${fsBody}">•</text>
+        <text class="bullet-text" x="30" y="${fsBody}">{{line}}</text>
       </g>
     {{/bulletLines}}
   </g>
@@ -967,7 +964,8 @@ router.post('/generate-static-ad', async (req, res) => {
     const templateReq = (body.template || 'auto').toString();
     const inputs = body.inputs || {};
     const knobs = body.knobs || {};
-    const a = body.answers && typeof body.answers === 'object' ? body.answers : {};
+    const a =
+      body.answers && typeof body.answers === 'object' ? body.answers : {};
 
     const industry = inputs.industry || a.industry || 'Local Services';
     const prof = profileForIndustry(industry);
@@ -1060,26 +1058,7 @@ router.post('/generate-static-ad', async (req, res) => {
     let crafted =
       body.copy && typeof body.copy === 'object' ? body.copy : null;
 
-    if (crafted) {
-      const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
-      const safeSubline = clampWords(cleanLine(crafted.subline || ''), 14);
-      const safeOffer = tightenOfferText(crafted.offer || '');
-      const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
-      const safeBullets = Array.isArray(crafted.bullets)
-        ? crafted.bullets
-            .map((b) => clampWords(cleanLine(b || ''), 5))
-            .slice(0, 4)
-        : [];
-
-      crafted = {
-        headline: safeHeadline,
-        subline: safeSubline,
-        offer: safeOffer,
-        secondary: safeSecondary,
-        bullets: safeBullets,
-        disclaimers: (crafted.disclaimers || '').toString().trim(),
-      };
-    } else {
+    if (!crafted) {
       const rb = craftCopyFromAnswers({ ...a, industry }, prof);
       crafted =
         rb?.copy || {
@@ -1092,6 +1071,57 @@ router.post('/generate-static-ad', async (req, res) => {
         };
     }
 
+    // Normalize copy
+    const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
+    const safeSubline = clampWords(cleanLine(crafted.subline || ''), 12);
+    const safeOffer = tightenOfferText(crafted.offer || a.offer || a.saveAmount || '');
+    const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
+
+    let rawBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
+    rawBullets = rawBullets.map((b) =>
+      clampWords(cleanLine(b || ''), 6)
+    );
+
+    const subLower = safeSubline.toLowerCase();
+    const offerLower = (safeOffer || '').toLowerCase();
+
+    // Filter out bullets that duplicate subline or offer-ish phrases
+    let safeBullets = rawBullets.filter((b) => {
+      const low = (b || '').toLowerCase();
+      if (!low) return false;
+      if (subLower && low === subLower) return false;
+      if (offerLower && low.includes(offerLower)) return false;
+      if (/%\s*off|\$[\d]+.*off|discount|rebate|deal/.test(low)) return false;
+      return true;
+    });
+
+    // Fallback: make sure we always have at least one bullet
+    if (!safeBullets.length) {
+      safeBullets = rawBullets.filter(Boolean);
+    }
+    if (!safeBullets.length) {
+      // ultimate fallback by industry
+      const tmpl = INDUSTRY_TEMPLATES[prof.kind];
+      if (tmpl) {
+        safeBullets =
+          tmpl
+            .bullets('')
+            .map((b) => clampWords(cleanLine(b), 6))
+            .slice(0, 3) || [];
+      } else {
+        safeBullets = ['Modern styles', 'Quality you can feel'];
+      }
+    }
+
+    crafted = {
+      headline: safeHeadline,
+      subline: safeSubline,
+      offer: safeOffer,
+      secondary: safeSecondary,
+      bullets: safeBullets,
+      disclaimers: (crafted.disclaimers || '').toString().trim(),
+    };
+
     console.log('[poster_b] using copy:', crafted);
 
     const get = (k, def = '') => a[k] ?? inputs[k] ?? knobs[k] ?? def;
@@ -1102,33 +1132,15 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', 'Your City'),
     };
 
-    // Build final fields ONLY from crafted copy (for text)
-    const userOfferRaw = (a.offer || a.saveAmount || '').toString();
-    const normalizedOffer = tightenOfferText(userOfferRaw || crafted.offer || '');
-
-    // Filter bullets so they do NOT just repeat the promo line
-    const baseBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
-    const promoCore = normalizedOffer.replace(/[^A-Z0-9%]/gi, '').toUpperCase();
-    const filteredBullets = baseBullets.filter((b) => {
-      const t = cleanLine(b || '').replace(/[^A-Z0-9%]/gi, '').toUpperCase();
-      if (!t) return false;
-      if (!promoCore) return true;
-      return !t.includes(promoCore) && !promoCore.includes(t);
-    });
-
     const autoFields = {
       eventTitle: (crafted.headline || '').toString(),
-      // tagline / audience line under the big headline
       dateRange: (crafted.subline || '').toString(),
-      // big promo line
-      saveAmount: normalizedOffer,
-      // smaller line under promo (optional)
+      saveAmount: crafted.offer || '',
       financing: (crafted.secondary || '').toString(),
-      // keep qualifiers empty to avoid repeating subline/bullets
-      qualifiers: '',
+      qualifiers: (crafted.subline || '').toString(),
       legal: (crafted.disclaimers || '').toString(),
       palette: knobs.palette || prof.palette,
-      bullets: filteredBullets,
+      bullets: Array.isArray(crafted.bullets) ? crafted.bullets : [],
     };
 
     const mergedKnobsB = {
@@ -1213,7 +1225,7 @@ router.post('/generate-static-ad', async (req, res) => {
     const lenSave = String(mergedKnobsB.saveAmount || '').length;
     const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 56, 92);
     const fsSave = clamp(76 - Math.max(0, lenSave - 12) * 2.2, 46, 76);
-    const fsH2 = 38;
+    const fsH2 = 36;
     const fsBody = 30;
 
     const cardW = 860;
@@ -1233,7 +1245,7 @@ router.post('/generate-static-ad', async (req, res) => {
       fsH2,
       cardW,
       padX,
-      2
+      3
     );
     const qualifierLines = wrapTextToWidth(
       mergedKnobsB.qualifiers,
@@ -1243,16 +1255,17 @@ router.post('/generate-static-ad', async (req, res) => {
       2
     );
 
-    const bulletLines = Array.isArray(mergedKnobsB.bullets)
+    const baseBulletLines = Array.isArray(mergedKnobsB.bullets)
       ? mergedKnobsB.bullets
           .map((b) => cleanLine(String(b || '')))
           .filter(Boolean)
           .slice(0, 3)
-          .map((line, i) => ({
-            line,
-            dy: i === 0 ? 0 : fsBody * 1.28,
-          }))
       : [];
+
+    const bulletLines = baseBulletLines.map((line, i) => ({
+      line,
+      dy: i === 0 ? 0 : fsBody * 1.28,
+    }));
 
     const titleBlock =
       Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
@@ -1260,18 +1273,31 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const dateY = titleTop + titleBlock + 20;
     const dateBlock =
-      Math.max(1, dateRangeLines.length) * (fsH2 * 1.2);
+      Math.max(1, dateRangeLines.length) * (fsH2 * 1.25);
 
     const dividerY = dateY + dateBlock + 18;
     const saveY = dividerY + 22 + fsSave * 1.05;
-    const financeY = saveY + fsH2 * 1.25;
+    const financeY = mergedKnobsB.financingLine
+      ? saveY + fsH2 * 1.25
+      : saveY;
+
     const qualY = financeY + 32;
 
     const hasBullets = bulletLines.length > 0;
+    const bulletHeight = hasBullets
+      ? fsBody + (bulletLines.length - 1) * fsBody * 1.28
+      : 0;
+
+    const bulletStartRaw = qualY +
+      (qualifierLines.length > 0 ? fsBody * 1.6 : fsBody * 1.2);
+
     const bulletStartY = hasBullets
-      ? qualY +
-        (qualifierLines.length > 0 ? fsBody * 1.8 : fsBody * 1.4)
-      : qualY;
+      ? clamp(
+          bulletStartRaw,
+          qualY + fsBody * 0.8,
+          cardH - bulletHeight - 32
+        )
+      : 0;
 
     const metrics = {
       titleY: titleTop,
@@ -1638,18 +1664,37 @@ router.post('/craft-ad-copy', async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: 'copy failed' });
 
-    const safeOffer = tightenOfferText(a.offer || a.saveAmount || '');
+    const safeOffer = tightenOfferText(a.offer || a.saveAmount || rawCopy.offer || '');
+
+    const safeHeadline = clampWords(cleanLine(rawCopy.headline || ''), 6);
+    const safeSubline = clampWords(cleanLine(rawCopy.subline || ''), 12);
+    const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 10);
+
+    let bulletsRaw = Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [];
+    bulletsRaw = bulletsRaw.map((b) =>
+      clampWords(cleanLine(b || ''), 6)
+    );
+
+    const subLower = safeSubline.toLowerCase();
+    const offerLower = (safeOffer || '').toLowerCase();
+
+    let bullets = bulletsRaw.filter((b) => {
+      const low = (b || '').toLowerCase();
+      if (!low) return false;
+      if (subLower && low === subLower) return false;
+      if (offerLower && low.includes(offerLower)) return false;
+      if (/%\s*off|\$[\d]+.*off|discount|rebate|deal/.test(low)) return false;
+      return true;
+    });
+    if (!bullets.length) bullets = bulletsRaw.filter(Boolean);
+    if (!bullets.length) bullets = ['Quality you can feel', 'Modern, clean design'];
 
     const copy = {
-      headline: clampWords(cleanLine(rawCopy.headline || ''), 6),
-      subline: clampWords(cleanLine(rawCopy.subline || ''), 14),
+      headline: safeHeadline,
+      subline: safeSubline,
       offer: safeOffer,
-      secondary: clampWords(cleanLine(rawCopy.secondary || ''), 10),
-      bullets: Array.isArray(rawCopy.bullets)
-        ? rawCopy.bullets
-            .map((b) => clampWords(cleanLine(b || ''), 7))
-            .slice(0, 4)
-        : [],
+      secondary: safeSecondary,
+      bullets,
       disclaimers: (rawCopy.disclaimers || '').toString().trim(),
     };
 
