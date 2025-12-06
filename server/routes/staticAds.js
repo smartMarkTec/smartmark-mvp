@@ -596,7 +596,7 @@ function compactBullet(s = '') {
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return '';
 
-  const kept = words.slice(0, 3);
+  const kept = words.slice(0, 6); // allow slightly longer for sentences
   return kept.join(' ');
 }
 
@@ -681,6 +681,11 @@ function tplPosterBCard({
 }) {
   const { titleY, dateY, saveY, financeY, qualY } = metrics;
 
+  // Soft accent band behind the SAVE + paragraph region
+  const bandTop = saveY - fsSave * 1.4;
+  const bandBottom = Math.max(qualY + fsBody * 1.4, saveY + fsSave * 2.0);
+  const bandH = Math.max(220, bandBottom - bandTop);
+
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -693,7 +698,6 @@ function tplPosterBCard({
       .title   { font: 900 ${fsTitle}px/1.06 Inter,system-ui; letter-spacing:-0.8px; fill:#1c2833; }
       .h2      { font: 700 ${fsH2}px/1.3 Inter,system-ui; letter-spacing:2px; fill:#c0392b; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill: {{accent}}; }
-      .body    { font: 700 ${fsBody}px/1.3 Inter,system-ui; fill:#ffffff; }
       .bodyDark{ font: 700 ${fsBody}px/1.35 Inter,system-ui; fill:#4c5a68; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#f5f5f7; }
     </style>
@@ -731,6 +735,9 @@ function tplPosterBCard({
   <g>
     <rect x="${padX}" y="${dateY + 28}" width="${cardW - padX * 2}" height="2" fill="#ecf0f1"/>
   </g>
+
+  <!-- accent band behind offer + details -->
+  <rect x="32" y="${bandTop}" width="${cardW - 64}" height="${bandH}" rx="32" fill="{{accent}}" opacity="0.06"/>
 
   <!-- OFFER -->
   <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
@@ -1150,7 +1157,13 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', 'Your City'),
     };
 
-    const bulletsParagraph = safeBullets.join(' • ').toUpperCase();
+    // Build a coherent paragraph from bullets
+    const bulletsParagraph =
+      safeBullets.length > 0
+        ? safeBullets
+            .map((b) => b.replace(/\.*$/g, ''))
+            .join('. ') + '.'
+        : '';
 
     const autoFields = {
       eventTitle: (crafted.headline || '').toString().toUpperCase(),
@@ -1176,18 +1189,8 @@ router.post('/generate-static-ad', async (req, res) => {
       palette: autoFields.palette,
     };
 
-    const validateB = ajv.compile(posterSchema);
-    if (
-      !validateB({
-        template,
-        inputs: mergedInputsB,
-        knobs: mergedKnobsB,
-      })
-    ) {
-      throw new Error(
-        'validation failed: ' + JSON.stringify(validateB.errors)
-      );
-    }
+    // NOTE: we intentionally skip strict AJV validation for poster_b
+    // to keep generation robust even when frontend passes minimal inputs.
 
     // ---------- build background photo ----------
     let photoBuf = null;
@@ -1270,7 +1273,7 @@ router.post('/generate-static-ad', async (req, res) => {
       fsBody,
       cardW,
       padX,
-      3
+      4
     );
 
     const titleBlock =
@@ -1531,7 +1534,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           fsBody,
           cardW,
           padX,
-          3
+          4
         );
 
         const titleBlock =
