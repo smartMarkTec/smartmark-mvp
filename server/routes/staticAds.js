@@ -720,7 +720,7 @@ function tplPosterBCard({
       .h2      { font: 800 ${fsH2}px/1.25 Inter,system-ui; fill:#3b4b59; }
       .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
       .body    { font: 700 ${fsBody}px/1.26 Inter,system-ui; fill:#5f7182; }
-      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
+      .legal   { font: 600 20px/1.2 Inter,system-ui; fill:#9eb2c3; }
       .brand   { font: 800 24px/1 Inter,system-ui; fill:#334554; }
       .bullet-text { font: 700 ${fsBullet}px/1.2 Inter,system-ui; fill:#3b4b59; }
     </style>
@@ -785,8 +785,8 @@ function tplPosterBCard({
 
   <!-- LEGAL (bottom) -->
   {{#legal}}
-  <g transform="translate(${padX}, ${cardH - 18})">
-    <text class="legal" x="${(cardW - padX * 2) / 2}" y="-6" text-anchor="middle">{{legal}}</text>
+  <g transform="translate(${padX}, ${cardH - 14})">
+    <text class="legal" x="${(cardW - padX * 2) / 2}" y="-4" text-anchor="middle">{{legal}}</text>
   </g>
   {{/legal}}
 </svg>`;
@@ -1284,7 +1284,7 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsSave = clamp(76 - Math.max(0, lenSave - 12) * 2.2, 46, 76);
     const fsH2 = 36;
     const fsBody = 30;
-    const fsBullet = fsBody + 4; // bullets a bit larger
+    const fsBullet = fsBody + 6; // a bit larger bullets
 
     const cardW = 860;
     const cardH = 660;
@@ -1352,12 +1352,14 @@ router.post('/generate-static-ad', async (req, res) => {
       ? bulletStartY + bulletHeight + 24
       : bulletStartY + 16;
 
-    const saveY = dividerY + 22 + fsSave * 1.05;
+    // move 50% OFF up a bit
+    const saveY = dividerY + 8 + fsSave * 1.02;
     const financeY = mergedKnobsB.financingLine
-      ? saveY + fsH2 * 1.35
+      ? saveY + fsH2 * 1.3
       : saveY;
 
-    const qualY = financeY + 48; // more breathing room below offer
+    // push subline/fine print slightly further down for breathing room
+    const qualY = financeY + 54;
 
     const metrics = {
       titleY: titleTop,
@@ -1588,7 +1590,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           fsH2 = 36,
           fsSave = 72,
           fsBody = 28;
-        const fsBullet = fsBody + 4;
+        const fsBullet = fsBody + 6;
         const cardW = 860,
           cardH = 660,
           padX = 60,
@@ -1683,9 +1685,9 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           ? bulletStartY + bulletHeight + 24
           : bulletStartY + 16;
 
-        const saveY = dividerY + 22 + fsSave * 1.05;
-        const financeY = financingLn ? saveY + fsH2 * 1.35 : saveY;
-        const qualY = financeY + 48;
+        const saveY = dividerY + 8 + fsSave * 1.02;
+        const financeY = financingLn ? saveY + fsH2 * 1.3 : saveY;
+        const qualY = financeY + 54;
 
         const metrics = {
           titleY: titleTop,
