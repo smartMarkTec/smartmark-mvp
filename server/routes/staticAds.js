@@ -401,6 +401,21 @@ function clampWords(s = '', max = 16) {
   return w.length > max ? w.slice(0, max).join(' ') + '…' : String(s).trim();
 }
 
+// avoid sublines ending with dangling prepositions: "of", "for", etc.
+function fixDanglingSubline(str = '') {
+  const s = String(str || '').trim();
+  if (!s) return '';
+  const words = s.split(/\s+/);
+  if (words.length <= 2) return s;
+  const last = words[words.length - 1].toLowerCase();
+  const bad = ['of', 'for', 'to', 'with', 'on', 'in', 'from', 'by', 'about'];
+  if (bad.includes(last)) {
+    words.pop();
+    return words.join(' ');
+  }
+  return s;
+}
+
 const INDUSTRY_TEMPLATES = {
   fashion: {
     headline: (brand, benefit) =>
@@ -433,9 +448,9 @@ const INDUSTRY_TEMPLATES = {
   },
   flooring: {
     headline: (brand, benefit) =>
-      benefit || `${brand ? titleCase(brand) + ': ' : ''}Upgrade Your Floors`,
+      benefit || `${brand ? titleCase(brand) + ': ' : ''}Fall Flooring Sale`,
     subline: (aud, city) =>
-      [aud ? `Designed for ${aud}` : 'Hardwood • Vinyl • Tile', city || null]
+      [aud ? `Perfect for ${aud}` : 'Hardwood • Vinyl • Tile', city || null]
         .filter(Boolean)
         .join(' • '),
     bullets: (offer) => [
@@ -472,7 +487,9 @@ function craftCopyFromAnswers(a = {}, prof = {}) {
   const offer = cleanLine(a.offer || a.saveAmount || '');
 
   const headline = clampWords(cleanLine(t.headline(brand, benefit)), 6);
-  const subline = clampWords(cleanLine(t.subline(audience, city)), 12);
+  const subline = fixDanglingSubline(
+    clampWords(cleanLine(t.subline(audience, city)), 12)
+  );
   let bullets = (t.bullets(offer) || [])
     .map((b) => clampWords(cleanLine(b), 3))
     .slice(0, 3);
@@ -510,7 +527,7 @@ Headline rules:
 Subline rules:
 - One short complete thought, max 12 words.
 - Must read as a natural sentence or phrase.
-- Do not end with dangling words like "of", "for", or bare adjectives (e.g., "for modern" or just "modern").
+- Do not end with dangling words like "of", "for", "to", "with", "in", "on", "from", or "by".
 
 Offer rules:
 - "offer" must be based ONLY on the user's described offer/discount.
@@ -734,31 +751,9 @@ function tplPosterBCard({
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/dateRangeLines}}
     </text>
-
-    <!-- divider -->
-    <g transform="translate(${padX}, ${dividerY})">
-      <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
-    </g>
-
-    <!-- OFFER -->
-    <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
-
-    <!-- FINANCING / SECONDARY -->
-    {{#financingLine}}
-    <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
-    {{/financingLine}}
-
-    <!-- SMALL QUALIFIER (multi-line) -->
-    {{#qualifierLines.length}}
-    <text class="body t-center" x="${cardW / 2}" y="${qualY}">
-      {{#qualifierLines}}
-        <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
-      {{/qualifierLines}}
-    </text>
-    {{/qualifierLines.length}}
   </g>
 
-  <!-- BULLET LIST (centered) -->
+  <!-- BULLET LIST directly under headline/subline -->
   {{#hasBullets}}
   <g transform="translate(0, ${bulletStartY})">
     {{#bulletLines}}
@@ -766,6 +761,28 @@ function tplPosterBCard({
     {{/bulletLines}}
   </g>
   {{/hasBullets}}
+
+  <!-- divider -->
+  <g transform="translate(${padX}, ${dividerY})">
+    <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
+  </g>
+
+  <!-- OFFER -->
+  <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
+
+  <!-- FINANCING / SECONDARY -->
+  {{#financingLine}}
+  <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
+  {{/financingLine}}
+
+  <!-- SMALL QUALIFIER (multi-line, fine print under financing) -->
+  {{#qualifierLines.length}}
+  <text class="body t-center" x="${cardW / 2}" y="${qualY}">
+    {{#qualifierLines}}
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
+    {{/qualifierLines}}
+  </text>
+  {{/qualifierLines.length}}
 
   <!-- LEGAL -->
   {{#legal}}
@@ -1097,8 +1114,12 @@ router.post('/generate-static-ad', async (req, res) => {
     }
 
     // Normalize copy
-    const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
-    const safeSubline = clampWords(cleanLine(crafted.subline || ''), 12);
+    let safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
+    // Just in case GPT ignored the "no Elevate" rule
+    safeHeadline = safeHeadline.replace(/^Elevate\b/i, 'Refresh');
+    const safeSubline = fixDanglingSubline(
+      clampWords(cleanLine(crafted.subline || ''), 12)
+    );
     const safeOffer = tightenOfferText(crafted.offer || a.offer || a.saveAmount || '');
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
 
@@ -1137,7 +1158,6 @@ router.post('/generate-static-ad', async (req, res) => {
         safeBullets = ['Modern styles', 'Quality fabrics', 'New arrivals'];
       }
     }
-    // Ensure at least 2 bullets
     if (safeBullets.length === 1) {
       safeBullets.push('Limited-time');
     }
@@ -1167,7 +1187,7 @@ router.post('/generate-static-ad', async (req, res) => {
       dateRange: (crafted.subline || '').toString(),
       saveAmount: crafted.offer || '',
       financing: (crafted.secondary || '').toString(),
-      // use disclaimers/extra detail here instead of duplicating the subline
+      // fine-print style details (ON SELECT PRODUCTS ...)
       qualifiers: (crafted.disclaimers || '').toString(),
       legal: (crafted.disclaimers || '').toString(),
       palette: knobs.palette || prof.palette,
@@ -1298,7 +1318,6 @@ router.post('/generate-static-ad', async (req, res) => {
       line,
       y: fsBody + i * fsBody * 1.28,
     }));
-
     const bulletHeight = hasBullets
       ? fsBody + (bulletLines.length - 1) * fsBody * 1.28
       : 0;
@@ -1311,25 +1330,25 @@ router.post('/generate-static-ad', async (req, res) => {
     const dateBlock =
       Math.max(1, dateRangeLines.length) * (fsH2 * 1.25);
 
-    const dividerY = dateY + dateBlock + 18;
+    let bulletStartY = hasBullets
+      ? dateY + dateBlock + 24
+      : dateY + dateBlock + 10;
+
+    if (hasBullets) {
+      const maxTop = cardH - bulletHeight - 260; // leave room for offer + details
+      if (bulletStartY > maxTop) bulletStartY = maxTop;
+    }
+
+    const dividerY = hasBullets
+      ? bulletStartY + bulletHeight + 24
+      : bulletStartY + 16;
+
     const saveY = dividerY + 22 + fsSave * 1.05;
     const financeY = mergedKnobsB.financingLine
       ? saveY + fsH2 * 1.25
       : saveY;
 
     const qualY = financeY + 32;
-
-    const bulletStartRaw =
-      qualY +
-      (qualifierLines.length > 0 ? fsBody * 1.6 : fsBody * 1.2);
-
-    const bulletStartY = hasBullets
-      ? clamp(
-          bulletStartRaw,
-          qualY + fsBody * 0.8,
-          cardH - bulletHeight - 32
-        )
-      : 0;
 
     const metrics = {
       titleY: titleTop,
@@ -1543,7 +1562,9 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         });
 
         const eventTitle = (overlay.headline || '').trim();
-        const dateRange = (overlay.promoLine || '').trim();
+        const dateRange = fixDanglingSubline(
+          clampWords(cleanLine((overlay.promoLine || '').trim()), 12)
+        );
         const saveAmount = tightenOfferText(overlay.offer || '');
         const financingLn = (overlay.secondary || '').trim();
         const qualifiers = (overlay.body || '').trim();
@@ -1631,21 +1652,23 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const dateY = titleTop + titleBlock + 20;
         const dateBlock =
           Math.max(1, dateRangeLines.length) * (fsH2 * 1.25);
-        const dividerY = dateY + dateBlock + 18;
+
+        let bulletStartY = hasBullets
+          ? dateY + dateBlock + 24
+          : dateY + dateBlock + 10;
+
+        if (hasBullets) {
+          const maxTop = cardH - bulletHeight - 260;
+          if (bulletStartY > maxTop) bulletStartY = maxTop;
+        }
+
+        const dividerY = hasBullets
+          ? bulletStartY + bulletHeight + 24
+          : bulletStartY + 16;
+
         const saveY = dividerY + 22 + fsSave * 1.05;
         const financeY = financingLn ? saveY + fsH2 * 1.25 : saveY;
         const qualY = financeY + 32;
-
-        const bulletStartRaw =
-          qualY +
-          (qualifierLines.length > 0 ? fsBody * 1.6 : fsBody * 1.2);
-        const bulletStartY = hasBullets
-          ? clamp(
-              bulletStartRaw,
-              qualY + fsBody * 0.8,
-              cardH - bulletHeight - 32
-            )
-          : 0;
 
         const metrics = {
           titleY: titleTop,
@@ -1764,8 +1787,11 @@ router.post('/craft-ad-copy', async (req, res) => {
 
     const safeOffer = tightenOfferText(a.offer || a.saveAmount || rawCopy.offer || '');
 
-    const safeHeadline = clampWords(cleanLine(rawCopy.headline || ''), 6);
-    const safeSubline = clampWords(cleanLine(rawCopy.subline || ''), 12);
+    let safeHeadline = clampWords(cleanLine(rawCopy.headline || ''), 6);
+    safeHeadline = safeHeadline.replace(/^Elevate\b/i, 'Refresh');
+    const safeSubline = fixDanglingSubline(
+      clampWords(cleanLine(rawCopy.subline || ''), 12)
+    );
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 10);
 
     let bulletsRaw = Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [];
