@@ -1219,16 +1219,21 @@ const displayHeadline = (
           // Abort any stale in-flight jobs first
           abortAllVideoFetches();
 
-          // Global hard cap
-          const hardCap = setTimeout(() => {
-            console.warn("Hard cap reached; aborting video fetches");
-            abortAllVideoFetches();
-            setGenerating(false);
-            setLoading(false);
-            setError(
-              "Taking too long. Please try again (we limit generation to ~100 seconds)."
-            );
-          }, GENERATION_HARD_CAP_MS);
+          // Global soft cap (no abort) – we only warn if it's taking long.
+// We let the backend finish the generation so the ad is always complete.
+const hardCap = setTimeout(() => {
+  console.warn(
+    "[Generation] Soft cap (~100s) reached – still waiting for server. Not aborting, just FYI."
+  );
+  // IMPORTANT:
+  // - Do NOT call abortAllVideoFetches()
+  // - Do NOT flip setGenerating(false) / setLoading(false)
+  // - Do NOT setError() here
+  //
+  // The normal success / failure logic elsewhere will clear this timeout
+  // with clearTimeout(hardCap) when the job finishes.
+}, GENERATION_HARD_CAP_MS);
+
 
           // Clear old previews
           try { setVideoItems([]); } catch {}
