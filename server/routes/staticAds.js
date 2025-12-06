@@ -665,91 +665,91 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 }
 
 /**
- * Shaw-style poster overlay:
- * - full 1080x1080 SVG
- * - top white panel for headline + subline
- * - big SAVE/offer line on photo
- * - financing line
- * - bullets as stacked qualifiers
- * - tiny legal at bottom
+ * Shaw-style wide panel card used by poster_b.
+ * Everything lives inside a single clean white panel centered on the image.
  */
-function tplPosterBCard({ cardW, cardH }) {
-  const panelMarginX = 80;
-  const panelTop = 150;
-  const panelHeight = 340;
-  const panelWidth = cardW - panelMarginX * 2;
-  const panelX = panelMarginX;
-  const panelY = panelTop;
-  const centerX = cardW / 2;
-  const saveY = panelY + panelHeight + 140;
-  const financeY = saveY + 70;
-  const bulletGroupY = financeY + 40;
-  const legalY = cardH - 40;
+function tplPosterBCard({
+  cardW,
+  cardH,
+  padX,
+  padY,
+  fsTitle,
+  fsH2,
+  fsSave,
+  fsBody,
+  metrics,
+}) {
+  const { titleY, dateY, dividerY, saveY, financeY, qualY } = metrics;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000" flood-opacity="0.28"/>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000" flood-opacity="0.25"/>
     </filter>
     <style>
       .t-center { text-anchor: middle; }
-      .brand   { font: 800 26px/1 Inter,system-ui; fill:#4b5b6a; letter-spacing:.08em; text-transform:uppercase; }
-      .title   { font: 900 88px/1.08 Inter,system-ui; fill:#1c2733; letter-spacing:-1.5px; }
-      .sub     { font: 700 34px/1.25 Inter,system-ui; fill:#6b7c8c; }
-      .save    { font: 900 80px/1 Inter,system-ui; fill: {{accent}}; letter-spacing:.04em; text-transform:uppercase; }
-      .fin     { font: 800 40px/1.2 Inter,system-ui; fill:#ffffff; letter-spacing:.12em; text-transform:uppercase; }
-      .qual    { font: 700 28px/1.3 Inter,system-ui; fill:#f2f5f8; letter-spacing:.12em; text-transform:uppercase; }
-      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#c8d2dd; }
+      .brand   { font: 800 26px/1 Inter,system-ui; fill:#334554; }
+      .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#1c2833; }
+      .h2      { font: 700 ${fsH2}px/1.25 Inter,system-ui; letter-spacing:1px; fill:#4f5f6f; }
+      .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill: {{accent}}; }
+      .body    { font: 700 ${fsBody}px/1.32 Inter,system-ui; fill:#4c5a68; }
+      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
     </style>
   </defs>
 
-  <!-- top white promo panel -->
-  <g filter="url(#panelShadow)">
-    <rect x="${panelX}" y="${panelY}" width="${panelWidth}" height="${panelHeight}" rx="10" fill="#ffffff"/>
+  <!-- card -->
+  <g filter="url(#cardShadow)">
+    <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="34" fill="#ffffff"/>
   </g>
 
-  <!-- brand row -->
-  <text class="brand" x="${panelX + 40}" y="${panelY + 70}">{{brandName}}</text>
+  <!-- brand pill -->
+  <g transform="translate(${cardW / 2 - 160}, ${Math.max(10, padY - 40)})">
+    <rect width="320" height="46" rx="23" fill="#0f1a22" opacity="0.06"/>
+    <text class="brand t-center" x="160" y="30">{{brandName}}</text>
+  </g>
 
-  <!-- headline -->
-  <text class="title t-center" x="${centerX}" y="${panelY + 170}">
+  <!-- HEADLINE -->
+  <text class="title t-center" x="${cardW / 2}" y="${titleY}">
     {{#eventTitleLines}}
-      <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
     {{/eventTitleLines}}
   </text>
 
-  <!-- subline / date range inside panel bottom -->
-  {{#hasDateRange}}
-  <text class="sub t-center" x="${centerX}" y="${panelY + panelHeight - 50}">
+  <!-- SUBLINE -->
+  <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
     {{#dateRangeLines}}
-      <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
     {{/dateRangeLines}}
   </text>
-  {{/hasDateRange}}
 
-  <!-- big SAVE line -->
-  {{#saveAmount}}
-  <text class="save t-center" x="${centerX}" y="${saveY}">{{saveAmount}}</text>
-  {{/saveAmount}}
+  <!-- divider -->
+  <g transform="translate(${padX}, ${dividerY})">
+    <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
+  </g>
 
-  <!-- financing line -->
+  <!-- OFFER -->
+  <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
+
+  <!-- Secondary / financing line -->
   {{#financingLine}}
-  <text class="fin t-center" x="${centerX}" y="${financeY}">{{financingLine}}</text>
+  <text class="body t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
   {{/financingLine}}
 
-  <!-- stacked qualifiers derived from bullets -->
-  {{#hasBullets}}
-  <g transform="translate(0, ${bulletGroupY})">
-    {{#bulletLines}}
-      <text class="qual t-center" x="${centerX}" y="{{dy}}">{{line}}</text>
-    {{/bulletLines}}
-  </g>
-  {{/hasBullets}}
+  <!-- Bottom paragraph made from bullets -->
+  {{#qualifierLines.length}}
+  <text class="body t-center" x="${cardW / 2}" y="${qualY}">
+    {{#qualifierLines}}
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
+    {{/qualifierLines}}
+  </text>
+  {{/qualifierLines.length}}
 
-  <!-- legal at bottom -->
+  <!-- LEGAL -->
   {{#legal}}
-  <text class="legal t-center" x="${centerX}" y="${legalY}">{{legal}}</text>
+  <g transform="translate(${padX}, ${cardH - 22})">
+    <text class="legal" x="0" y="-4">{{legal}}</text>
+  </g>
   {{/legal}}
 </svg>`;
 }
@@ -1055,7 +1055,7 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    /* ---------- POSTER B (Shaw-style photo) ---------- */
+    /* ---------- POSTER B (photo) ---------- */
 
     // Prefer GPT-crafted copy from frontend; else craft here
     let crafted =
@@ -1081,11 +1081,14 @@ router.post('/generate-static-ad', async (req, res) => {
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
 
     let rawBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
-    rawBullets = rawBullets.map((b) => compactBullet(b || '')).filter(Boolean);
+    rawBullets = rawBullets
+      .map((b) => compactBullet(b || ''))
+      .filter(Boolean);
 
     const subLower = safeSubline.toLowerCase();
     const offerLower = (safeOffer || '').toLowerCase();
 
+    // Filter out bullets that duplicate the subline or offer-ish phrases
     let safeBullets = rawBullets.filter((b) => {
       const low = (b || '').toLowerCase();
       if (!low) return false;
@@ -1096,7 +1099,9 @@ router.post('/generate-static-ad', async (req, res) => {
       return true;
     });
 
-    if (!safeBullets.length) safeBullets = rawBullets.filter(Boolean);
+    if (!safeBullets.length) {
+      safeBullets = rawBullets.filter(Boolean);
+    }
     if (!safeBullets.length) {
       const tmpl = INDUSTRY_TEMPLATES[prof.kind];
       if (tmpl) {
@@ -1111,8 +1116,13 @@ router.post('/generate-static-ad', async (req, res) => {
       }
     }
 
+    // Disclaimers: avoid duplicating subline
     let safeDisclaimers = (crafted.disclaimers || '').toString().trim();
-    if (safeDisclaimers && safeSubline && safeDisclaimers.toLowerCase() === subLower) {
+    if (
+      safeDisclaimers &&
+      safeSubline &&
+      safeDisclaimers.toLowerCase() === subLower
+    ) {
       safeDisclaimers = '';
     }
     if (!safeDisclaimers && safeOffer) {
@@ -1138,15 +1148,16 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', 'Your City'),
     };
 
+    const bulletsParagraph = safeBullets.join(' • ').toUpperCase();
+
     const autoFields = {
-      eventTitle: (crafted.headline || '').toString(),
+      eventTitle: (crafted.headline || '').toString().toUpperCase(),
       dateRange: (crafted.subline || '').toString(),
       saveAmount: crafted.offer || '',
       financing: (crafted.secondary || '').toString(),
-      qualifiers: '',
+      qualifiers: bulletsParagraph,
       legal: safeDisclaimers,
       palette: knobs.palette || prof.palette,
-      bullets: Array.isArray(crafted.bullets) ? crafted.bullets : [],
     };
 
     const mergedKnobsB = {
@@ -1161,7 +1172,6 @@ router.post('/generate-static-ad', async (req, res) => {
       qualifiers: autoFields.qualifiers,
       legal: autoFields.legal,
       palette: autoFields.palette,
-      bullets: autoFields.bullets || [],
     };
 
     const validateB = ajv.compile(posterSchema);
@@ -1226,27 +1236,26 @@ router.post('/generate-static-ad', async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // ---------- card layout (Shaw-style) ----------
+    // ---------- card layout (Shaw-style wide panel) ----------
     const lenTitle = String(mergedKnobsB.eventTitle || '').length;
-    const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 56, 92);
-    const fsH2 = 36;
+    const lenSave = String(mergedKnobsB.saveAmount || '').length;
+    const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
+    const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
+    const fsH2 = 34;
     const fsBody = 30;
 
-    const cardW = 1080;
-    const cardH = 1080;
-    const padX = 110; // used only for wrapping calc
+    const cardW = 940;
+    const cardH = 720;
+    const padX = 80;
+    const padY = 70;
 
-    let eventTitleLines = wrapTextToWidth(
+    const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
       cardW,
       padX,
       2
     );
-    if (!eventTitleLines.length) {
-      eventTitleLines = [{ line: 'Your Promotion', dy: 0 }];
-    }
-
     const dateRangeLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsH2,
@@ -1254,45 +1263,76 @@ router.post('/generate-static-ad', async (req, res) => {
       padX,
       2
     );
+    const qualifierLines = wrapTextToWidth(
+      mergedKnobsB.qualifiers,
+      fsBody,
+      cardW,
+      padX,
+      2
+    );
 
-    const baseBulletLines = Array.isArray(mergedKnobsB.bullets)
-      ? mergedKnobsB.bullets
-          .map((b) => compactBullet(String(b || '')))
-          .filter(Boolean)
-          .slice(0, 3)
-      : [];
+    const titleBlock =
+      Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
+    const titleTop = padY + fsTitle;
 
-    const bulletLines = baseBulletLines.map((line, i) => ({
-      line: String(line || '').toUpperCase(),
-      dy: i === 0 ? 0 : i * fsBody * 1.25,
-    }));
+    const dateY = titleTop + titleBlock + 18;
+    const dateBlock =
+      Math.max(1, dateRangeLines.length) * (fsH2 * 1.25);
 
-    const hasBullets = bulletLines.length > 0;
+    const dividerY = dateY + dateBlock + 38;
+    const saveY = dividerY + 52 + fsSave * 0.9;
+
+    const financeY = mergedKnobsB.financingLine
+      ? saveY + fsBody * 1.4
+      : saveY;
+
+    const qualY =
+      qualifierLines.length > 0
+        ? financeY + (mergedKnobsB.financingLine ? fsBody * 1.5 : 34)
+        : financeY;
+
+    const metrics = {
+      titleY: titleTop,
+      dateY,
+      dividerY,
+      saveY,
+      financeY,
+      qualY,
+    };
 
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitleLines,
       dateRangeLines,
-      hasDateRange: dateRangeLines.length > 0,
-      bulletLines,
-      hasBullets,
+      qualifierLines,
       saveAmount: mergedKnobsB.saveAmount,
       financingLine: mergedKnobsB.financingLine,
       legal: mergedKnobsB.legal,
       accent: mergedKnobsB.palette.accent || '#ff7b41',
+      metrics,
     };
 
     const cardSvg = mustache.render(
       tplPosterBCard({
         cardW,
         cardH,
+        padX,
+        padY,
+        fsTitle,
+        fsH2,
+        fsSave,
+        fsBody,
+        metrics,
       }),
       cardVars
     );
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
+    const left = Math.round((1080 - cardW) / 2);
+    const top = Math.round((1080 - cardH) / 2);
+
     const finalPng = await sharp(bgPng)
-      .composite([{ input: cardPng, left: 0, top: 0 }])
+      .composite([{ input: cardPng, left, top }])
       .png({ quality: 92 })
       .toBuffer();
 
@@ -1457,29 +1497,29 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           photoBuffer: photoBuf,
         });
 
-        const eventTitle = (overlay.headline || '').trim();
-        const dateRange = ''; // simple regen variant – just headline panel
-        const saveAmount = tightenOfferText(overlay.offer || '');
+        const eventTitle = (overlay.headline || '').trim().toUpperCase();
+        const dateRange = ''; // keep regen variant simpler
+        const saveAmount = (overlay.offer || '').trim();
         const financingLn = (overlay.secondary || '').trim();
+        const qualifiers = ''; // for regen we skip bullets; main layout is enough
         const legal = (overlay.legal || '').trim();
 
-        const fsTitle = 88;
-        const fsH2 = 36;
-        const fsBody = 28;
-        const cardW = 1080;
-        const cardH = 1080;
-        const padX = 110;
+        const fsTitle = 90,
+          fsH2 = 34,
+          fsSave = 80,
+          fsBody = 28;
+        const cardW = 940,
+          cardH = 720,
+          padX = 80,
+          padY = 70;
 
-        let eventTitleLines = wrapTextToWidth(
+        const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
           cardW,
           padX,
           2
         );
-        if (!eventTitleLines.length) {
-          eventTitleLines = [{ line: 'Your Promotion', dy: 0 }];
-        }
         const dateRangeLines = wrapTextToWidth(
           dateRange,
           fsH2,
@@ -1487,32 +1527,70 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           padX,
           2
         );
+        const qualifierLines = wrapTextToWidth(
+          qualifiers,
+          fsBody,
+          cardW,
+          padX,
+          2
+        );
 
-        const bulletLines = []; // regen path: no bullets, just main lines
+        const titleBlock =
+          Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
+        const titleTop = padY + fsTitle;
+        const dateY = titleTop + titleBlock + 18;
+        const dateBlock =
+          Math.max(1, dateRangeLines.length) * (fsH2 * 1.25);
+
+        const dividerY = dateY + dateBlock + 38;
+        const saveY = dividerY + 52 + fsSave * 0.9;
+        const financeY = financingLn ? saveY + fsBody * 1.4 : saveY;
+        const qualY =
+          qualifierLines.length > 0
+            ? financeY + (financingLn ? fsBody * 1.5 : 34)
+            : financeY;
+
+        const metrics = {
+          titleY: titleTop,
+          dateY,
+          dividerY,
+          saveY,
+          financeY,
+          qualY,
+        };
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
           dateRangeLines,
-          hasDateRange: dateRangeLines.length > 0,
-          bulletLines,
-          hasBullets: false,
+          qualifierLines,
           saveAmount,
           financingLine: financingLn,
           legal,
           accent: (prof.palette && prof.palette.accent) || '#ff7b41',
+          metrics,
         };
         const cardSvg = mustache.render(
           tplPosterBCard({
             cardW,
             cardH,
+            padX,
+            padY,
+            fsTitle,
+            fsH2,
+            fsSave,
+            fsBody,
+            metrics,
           }),
           cardVars
         );
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
+        const left = Math.round((W - cardW) / 2);
+        const top = Math.round((H - cardH) / 2);
+
         const finalPng = await sharp(bgPng)
-          .composite([{ input: cardPng, left: 0, top: 0 }])
+          .composite([{ input: cardPng, left, top }])
           .png({ quality: 92 })
           .toBuffer();
 
@@ -1590,7 +1668,9 @@ router.post('/craft-ad-copy', async (req, res) => {
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 10);
 
     let bulletsRaw = Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [];
-    bulletsRaw = bulletsRaw.map((b) => compactBullet(b || '')).filter(Boolean);
+    bulletsRaw = bulletsRaw
+      .map((b) => compactBullet(b || ''))
+      .filter(Boolean);
 
     const subLower = safeSubline.toLowerCase();
     const offerLower = (safeOffer || '').toLowerCase();
@@ -1605,7 +1685,7 @@ router.post('/craft-ad-copy', async (req, res) => {
       return true;
     });
     if (!bullets.length) bullets = bulletsRaw.filter(Boolean);
-    if (!bullets.length) bullets = ['Quality you feel', 'Modern clean design'];
+    if (!bullets.length) bullets = ['QUALITY YOU FEEL', 'MODERN CLEAN DESIGN'];
 
     let safeDisclaimers = (rawCopy.disclaimers || '').toString().trim();
     if (
