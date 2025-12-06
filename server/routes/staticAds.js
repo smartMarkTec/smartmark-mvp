@@ -388,9 +388,7 @@ function titleCase(s = '') {
 }
 function cleanLine(s = '') {
   const noUrl = String(s).replace(/https?:\/\/\S+|www\.\S+/gi, '');
-  const noFiller = noUrl
-    .replace(/\s+/g, ' ')
-    .trim();
+  const noFiller = noUrl.replace(/\s+/g, ' ').trim();
   return noFiller;
 }
 function clampWords(s = '', max = 16) {
@@ -520,16 +518,23 @@ Rules:
     response_format: { type: 'json_object' },
   });
 
-  const { status, body: respBuf } = await fetchUpstream(
-    'POST',
-    'https://api.openai.com/v1/chat/completions',
-    {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    Buffer.from(body)
-  );
+  let resp;
+  try {
+    resp = await fetchUpstream(
+      'POST',
+      'https://api.openai.com/v1/chat/completions',
+      {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      Buffer.from(body)
+    );
+  } catch (e) {
+    console.warn('[craft-ad-copy] OpenAI error:', e.message || e);
+    return null;
+  }
 
+  const { status, body: respBuf } = resp;
   if (status !== 200) return null;
 
   try {
@@ -668,6 +673,13 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 </svg>`;
 }
 
+/**
+ * Poster B card:
+ * - Top white panel for brand + main headline + subline + bullets.
+ * - Big offer line and supporting text float over the photo beneath.
+ * - Tiny legal line down near the bottom.
+ * This mimics the Shaw "Fall Flooring Sale" style.
+ */
 function tplPosterBCard({
   cardW,
   cardH,
@@ -679,58 +691,68 @@ function tplPosterBCard({
   fsBody,
   metrics,
 }) {
-  const { titleY, dateY, dividerY, saveY, financeY, qualY, bulletStartY } =
-    metrics;
+  const {
+    titleY,
+    dateY,
+    saveY,
+    financeY,
+    qualY,
+    bulletStartY,
+    panelTop,
+    panelHeight,
+  } = metrics;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="22" stdDeviation="22" flood-color="#000" flood-opacity="0.25"/>
-    </filter>
     <style>
       .t-center { text-anchor: middle; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22; }
-      .h2      { font: 800 ${fsH2}px/1.25 Inter,system-ui; fill:#3b4b59; }
+      .h2      { font: 800 ${fsH2}px/1.2 Inter,system-ui; fill:#3b4b59; }
       .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
-      .body    { font: 700 ${fsBody}px/1.26 Inter,system-ui; fill:#5f7182; }
-      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
-      .brand   { font: 800 24px/1 Inter,system-ui; fill:#334554; }
+      .body    { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#556474; }
+      .bodyPhoto { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#ffffff; }
+      .legal   { font: 600 22px/1.3 Inter,system-ui; fill:#e1e7ed; }
+      .brand   { font: 800 26px/1 Inter,system-ui; fill:#4a5563; }
       .bullet-dot  { font: 900 ${fsBody}px/1 Inter,system-ui; fill:#3b4b59; }
       .bullet-text { font: 700 ${fsBody}px/1.2 Inter,system-ui; fill:#3b4b59; }
     </style>
   </defs>
 
-  <!-- card -->
-  <g filter="url(#cardShadow)">
-    <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="34" fill="#ffffff"/>
-  </g>
-
-  <!-- brand pill -->
-  <g transform="translate(${cardW / 2 - 140}, ${Math.max(10, padY - 40)})">
-    <rect width="280" height="44" rx="22" fill="#0f1a22" opacity="0.06"/>
-    <text class="brand t-center" x="140" y="30">{{brandName}}</text>
-  </g>
-
-  <!-- main text stack -->
+  <!-- TOP WHITE PANEL (headline + subline + bullets) -->
   <g>
-    <!-- HEADLINE (multi-line) -->
+    <rect
+      x="${padX}"
+      y="${panelTop}"
+      width="${cardW - padX * 2}"
+      height="${panelHeight}"
+      rx="24"
+      fill="#ffffff"
+      opacity="0.97"
+    />
+
+    <!-- Brand name row -->
+    <text class="brand t-center" x="${cardW / 2}" y="${
+      panelTop + 42
+    }">{{brandName}}</text>
+
+    <!-- Main headline inside panel -->
     <text class="title t-center" x="${cardW / 2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
-    <!-- SUBLINE (multi-line, under headline) -->
+    <!-- Subline / date line under headline -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
       {{#dateRangeLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/dateRangeLines}}
     </text>
 
-    <!-- BULLET LIST (center column under subline) -->
+    <!-- Short bullets inside panel -->
     {{#hasBullets}}
-    <g transform="translate(${padX}, ${bulletStartY})">
+    <g transform="translate(${padX + 40}, ${bulletStartY})">
       {{#bulletLines}}
         <g transform="translate(0, {{dy}})">
           <text class="bullet-dot" x="0" y="${fsBody}">•</text>
@@ -739,35 +761,28 @@ function tplPosterBCard({
       {{/bulletLines}}
     </g>
     {{/hasBullets}}
-
-    <!-- divider -->
-    <g transform="translate(${padX}, ${dividerY})">
-      <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
-    </g>
-
-    <!-- OFFER -->
-    <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
-
-    <!-- FINANCING / SECONDARY -->
-    {{#financingLine}}
-    <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
-    {{/financingLine}}
-
-    <!-- SMALL QUALIFIER (optional, just above legal or can be empty) -->
-    {{#qualifierLines.length}}
-    <text class="body t-center" x="${cardW / 2}" y="${qualY}">
-      {{#qualifierLines}}
-        <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
-      {{/qualifierLines}}
-    </text>
-    {{/qualifierLines.length}}
   </g>
 
-  <!-- LEGAL -->
+  <!-- OFFER & BODY COPY ON PHOTO (outside the white panel) -->
+  {{#saveAmount}}
+  <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
+  {{/saveAmount}}
+
+  {{#financingLine}}
+  <text class="bodyPhoto t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
+  {{/financingLine}}
+
+  {{#qualifierLines.length}}
+  <text class="bodyPhoto t-center" x="${cardW / 2}" y="${qualY}">
+    {{#qualifierLines}}
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
+    {{/qualifierLines}}
+  </text>
+  {{/qualifierLines.length}}
+
+  <!-- Legal / tiny disclaimer near bottom -->
   {{#legal}}
-  <g transform="translate(${padX}, ${cardH - 18})">
-    <text class="legal" x="0" y="-6">{{legal}}</text>
-  </g>
+  <text class="legal t-center" x="${cardW / 2}" y="${cardH - 24}">{{legal}}</text>
   {{/legal}}
 </svg>`;
 }
@@ -1319,7 +1334,7 @@ router.post('/generate-static-ad', async (req, res) => {
       Math.max(1, dateRangeLines.length) * (fsH2 * 1.25);
 
     const bulletStartY = hasBullets
-      ? dateY + dateBlock + 18
+      ? dateY + dateBlock + 22
       : dateY + dateBlock;
 
     const dividerY = bulletStartY + (hasBullets ? bulletHeight + 22 : 32);
@@ -1330,6 +1345,13 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const qualY = financeY + (mergedKnobsB.financingLine ? 32 : 20);
 
+    // top white panel bounds
+    const panelTop = padY - 24;
+    const panelBottom = hasBullets
+      ? bulletStartY + bulletHeight + 40
+      : dateY + dateBlock + 40;
+    const panelHeight = panelBottom - panelTop;
+
     const metrics = {
       titleY: titleTop,
       dateY,
@@ -1338,6 +1360,8 @@ router.post('/generate-static-ad', async (req, res) => {
       financeY,
       qualY,
       bulletStartY,
+      panelTop,
+      panelHeight,
     };
 
     const cardVars = {
@@ -1595,6 +1619,10 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const financeY = financingLn ? saveY + fsH2 * 1.25 : saveY;
         const qualY = financeY + (financingLn ? 32 : 20);
 
+        const panelTop = padY - 24;
+        const panelBottom = dateY + dateBlock + 40;
+        const panelHeight = panelBottom - panelTop;
+
         const metrics = {
           titleY: titleTop,
           dateY,
@@ -1603,6 +1631,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           financeY,
           qualY,
           bulletStartY,
+          panelTop,
+          panelHeight,
         };
 
         const cardVars = {
