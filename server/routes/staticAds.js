@@ -496,6 +496,7 @@ Rules:
 - Headline: max 6 words, punchy, no punctuation at end.
 - Subline: max 12 words; may include separators "•".
 - Bullets: 2–4 micro-phrases, 3–5 words each, no periods.
+- Bullets should NOT restate the offer; focus on features/benefits.
 - Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
 - Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
 - Keep it brand-safe and generic.`;
@@ -588,7 +589,6 @@ function tightenOfferText(s = '') {
 
   return shortenWords(cleaned, 4);
 }
-
 
 /* ------------------------ SVG templates ------------------------ */
 
@@ -707,7 +707,7 @@ function tplPosterBCard({
       {{/eventTitleLines}}
     </text>
 
-    <!-- SUBLINE / DATE (multi-line) -->
+    <!-- SUBLINE / TAGLINE (multi-line) -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
       {{#dateRangeLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
@@ -722,10 +722,10 @@ function tplPosterBCard({
     <!-- OFFER -->
     <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
 
-    <!-- FINANCING / SECONDARY -->
+    <!-- SECONDARY LINE -->
     <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
 
-    <!-- SMALL QUALIFIER (multi-line) -->
+    <!-- SMALL QUALIFIER (usually empty / subtle) -->
     <text class="body t-center" x="${cardW / 2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
@@ -733,7 +733,7 @@ function tplPosterBCard({
     </text>
   </g>
 
-  <!-- BULLET LIST under the small qualifier -->
+  <!-- BULLET LIST -->
   {{#hasBullets}}
   <g transform="translate(${padX}, ${bulletStartY})">
     {{#bulletLines}}
@@ -753,8 +753,6 @@ function tplPosterBCard({
   {{/legal}}
 </svg>`;
 }
-
-
 
 /* ------------------------ Utility helpers ------------------------ */
 
@@ -1106,29 +1104,31 @@ router.post('/generate-static-ad', async (req, res) => {
 
     // Build final fields ONLY from crafted copy (for text)
     const userOfferRaw = (a.offer || a.saveAmount || '').toString();
+    const normalizedOffer = tightenOfferText(userOfferRaw || crafted.offer || '');
 
-    // compact bullets as a single “• … • …” string for the small qualifier text
-    const bulletsCompact = (Array.isArray(crafted.bullets) ? crafted.bullets : [])
-      .map((b) => cleanLine(b || ''))
-      .filter(Boolean)
-      .join(' • ');
+    // Filter bullets so they do NOT just repeat the promo line
+    const baseBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
+    const promoCore = normalizedOffer.replace(/[^A-Z0-9%]/gi, '').toUpperCase();
+    const filteredBullets = baseBullets.filter((b) => {
+      const t = cleanLine(b || '').replace(/[^A-Z0-9%]/gi, '').toUpperCase();
+      if (!t) return false;
+      if (!promoCore) return true;
+      return !t.includes(promoCore) && !promoCore.includes(t);
+    });
 
     const autoFields = {
       eventTitle: (crafted.headline || '').toString(),
-      // this is the smaller top line under the big headline (date/subline)
+      // tagline / audience line under the big headline
       dateRange: (crafted.subline || '').toString(),
-      // Shaw-style “SAVE up to $1000” line
-      saveAmount: tightenOfferText(userOfferRaw || crafted.offer || ''),
+      // big promo line
+      saveAmount: normalizedOffer,
+      // smaller line under promo (optional)
       financing: (crafted.secondary || '').toString(),
-      // small copy block: subline + bullets, separated by dots
-      qualifiers: (
-        [crafted.subline, bulletsCompact]
-          .filter(Boolean)
-          .join(' • ')
-      ).toString(),
+      // keep qualifiers empty to avoid repeating subline/bullets
+      qualifiers: '',
       legal: (crafted.disclaimers || '').toString(),
       palette: knobs.palette || prof.palette,
-      bullets: Array.isArray(crafted.bullets) ? crafted.bullets : [],
+      bullets: filteredBullets,
     };
 
     const mergedKnobsB = {
@@ -1143,7 +1143,6 @@ router.post('/generate-static-ad', async (req, res) => {
       qualifiers: autoFields.qualifiers,
       legal: autoFields.legal,
       palette: autoFields.palette,
-      // pass bullets through so the SVG can render them as a stacked list
       bullets: autoFields.bullets || [],
     };
 
@@ -1222,7 +1221,6 @@ router.post('/generate-static-ad', async (req, res) => {
     const padX = 60;
     const padY = 56;
 
-    // multi-line blocks
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
@@ -1245,7 +1243,6 @@ router.post('/generate-static-ad', async (req, res) => {
       2
     );
 
-    // bullets: up to 3 short lines, stacked with “•”
     const bulletLines = Array.isArray(mergedKnobsB.bullets)
       ? mergedKnobsB.bullets
           .map((b) => cleanLine(String(b || '')))
@@ -1257,7 +1254,6 @@ router.post('/generate-static-ad', async (req, res) => {
           }))
       : [];
 
-    // vertical spacing based on actual wrapped heights
     const titleBlock =
       Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
     const titleTop = padY + fsTitle;
@@ -1302,7 +1298,6 @@ router.post('/generate-static-ad', async (req, res) => {
       metrics,
     };
 
-
     const cardSvg = mustache.render(
       tplPosterBCard({
         cardW,
@@ -1345,16 +1340,13 @@ router.post('/generate-static-ad', async (req, res) => {
       asset: { id: baseB, createdAt: Date.now() },
       ready: true,
     });
-
-      } catch (err) {
+  } catch (err) {
     console.error('[generate-static-ad]', err);
     res
       .status(400)
       .json({ ok: false, error: String(err?.message || err) });
   }
 });
-
-
 
 /* ------------------------ proxy-img ------------------------ */
 
