@@ -666,7 +666,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 /**
  * Shaw-style wide panel card used by poster_b.
- * Everything lives inside a single clean white panel centered on the image.
+ * Two-tiered panel: top band = event title + subline, bottom band = offer + paragraph + legal.
  */
 function tplPosterBCard({
   cardW,
@@ -679,7 +679,7 @@ function tplPosterBCard({
   fsBody,
   metrics,
 }) {
-  const { titleY, dateY, dividerY, saveY, financeY, qualY } = metrics;
+  const { titleY, dateY, dividerY, saveY, financeY, qualY, headerH } = metrics;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -689,44 +689,46 @@ function tplPosterBCard({
     </filter>
     <style>
       .t-center { text-anchor: middle; }
-      .brand   { font: 800 26px/1 Inter,system-ui; fill:#334554; }
-      .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#1c2833; }
-      .h2      { font: 700 ${fsH2}px/1.25 Inter,system-ui; letter-spacing:1px; fill:#4f5f6f; }
+      .brand   { font: 800 26px/1 Inter,system-ui; fill:#4b5c6b; }
+      .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-0.5px; fill:#1c2833; }
+      .h2      { font: 700 ${fsH2}px/1.25 Inter,system-ui; letter-spacing:1px; fill:#5b6a79; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill: {{accent}}; }
       .body    { font: 700 ${fsBody}px/1.32 Inter,system-ui; fill:#4c5a68; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
     </style>
   </defs>
 
-  <!-- card -->
+  <!-- base card -->
   <g filter="url(#cardShadow)">
     <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="34" fill="#ffffff"/>
   </g>
 
-  <!-- brand pill -->
-  <g transform="translate(${cardW / 2 - 160}, ${Math.max(10, padY - 40)})">
-    <rect width="320" height="46" rx="23" fill="#0f1a22" opacity="0.06"/>
-    <text class="brand t-center" x="160" y="30">{{brandName}}</text>
+  <!-- tiered bands: top = title/date, bottom = offer/body -->
+  <g>
+    <rect x="0" y="0" width="${cardW}" height="${headerH}" rx="34" ry="34" fill="#ffffff"/>
+    <rect x="0" y="${headerH}" width="${cardW}" height="${cardH - headerH}" fill="#f7fafc"/>
+    <rect x="${padX}" y="${headerH - 3}" width="${cardW - padX * 2}" height="2" fill="#e4edf5"/>
   </g>
 
-  <!-- HEADLINE -->
+  <!-- small brand line -->
+  <text class="brand t-center" x="${cardW / 2}" y="${Math.max(
+    28,
+    padY * 0.7
+  )}">{{brandName}}</text>
+
+  <!-- HEADLINE (event title) -->
   <text class="title t-center" x="${cardW / 2}" y="${titleY}">
     {{#eventTitleLines}}
       <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
     {{/eventTitleLines}}
   </text>
 
-  <!-- SUBLINE -->
+  <!-- SUBLINE (date/tagline) -->
   <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
     {{#dateRangeLines}}
       <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
     {{/dateRangeLines}}
   </text>
-
-  <!-- divider -->
-  <g transform="translate(${padX}, ${dividerY})">
-    <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
-  </g>
 
   <!-- OFFER -->
   <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
@@ -736,7 +738,7 @@ function tplPosterBCard({
   <text class="body t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
   {{/financingLine}}
 
-  <!-- Bottom paragraph made from bullets -->
+  <!-- Bottom paragraph made from secondary+bullets (qualifierLines) -->
   {{#qualifierLines.length}}
   <text class="body t-center" x="${cardW / 2}" y="${qualY}">
     {{#qualifierLines}}
@@ -745,11 +747,9 @@ function tplPosterBCard({
   </text>
   {{/qualifierLines.length}}
 
-  <!-- LEGAL -->
+  <!-- LEGAL (tiny, centered) -->
   {{#legal}}
-  <g transform="translate(${padX}, ${cardH - 22})">
-    <text class="legal" x="0" y="-4">{{legal}}</text>
-  </g>
+  <text class="legal t-center" x="${cardW / 2}" y="${cardH - 26}">{{legal}}</text>
   {{/legal}}
 </svg>`;
 }
@@ -1055,7 +1055,7 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    /* ---------- POSTER B (photo) ---------- */
+    /* ---------- POSTER B (photo, Shaw-style wide panel) ---------- */
 
     // Prefer GPT-crafted copy from frontend; else craft here
     let crafted =
@@ -1236,7 +1236,7 @@ router.post('/generate-static-ad', async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // ---------- card layout (Shaw-style wide panel) ----------
+    // ---------- card layout (Shaw-style wide panel, bottom anchored) ----------
     const lenTitle = String(mergedKnobsB.eventTitle || '').length;
     const lenSave = String(mergedKnobsB.saveAmount || '').length;
     const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
@@ -1244,10 +1244,10 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsH2 = 34;
     const fsBody = 30;
 
-    const cardW = 940;
-    const cardH = 720;
+    const cardW = 1040;
+    const cardH = 640;
     const padX = 80;
-    const padY = 70;
+    const padY = 80;
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
@@ -1298,6 +1298,7 @@ router.post('/generate-static-ad', async (req, res) => {
       saveY,
       financeY,
       qualY,
+      headerH: dividerY,
     };
 
     const cardVars = {
@@ -1329,7 +1330,7 @@ router.post('/generate-static-ad', async (req, res) => {
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
     const left = Math.round((1080 - cardW) / 2);
-    const top = Math.round((1080 - cardH) / 2);
+    const top = Math.round(1080 - cardH - 80); // sit in lower 2/3 of image
 
     const finalPng = await sharp(bgPng)
       .composite([{ input: cardPng, left, top }])
@@ -1508,10 +1509,10 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           fsH2 = 34,
           fsSave = 80,
           fsBody = 28;
-        const cardW = 940,
-          cardH = 720,
+        const cardW = 1040,
+          cardH = 640,
           padX = 80,
-          padY = 70;
+          padY = 80;
 
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
@@ -1557,6 +1558,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           saveY,
           financeY,
           qualY,
+          headerH: dividerY,
         };
 
         const cardVars = {
@@ -1587,7 +1589,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
         const left = Math.round((W - cardW) / 2);
-        const top = Math.round((H - cardH) / 2);
+        const top = Math.round(H - cardH - 80); // bottom anchored
 
         const finalPng = await sharp(bgPng)
           .composite([{ input: cardPng, left, top }])
