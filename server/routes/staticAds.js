@@ -645,16 +645,7 @@ function tplPosterBCard({
   fsBody,
   metrics,
 }) {
-  const {
-    titleY,
-    dateY,
-    dividerY,
-    saveY,
-    financeY,
-    qualY,
-    bulletStartY,
-  } = metrics;
-
+  const { titleY, dateY, dividerY, saveY, financeY, qualY, bulletStartY } = metrics;
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -672,60 +663,56 @@ function tplPosterBCard({
     </style>
   </defs>
 
-  <!-- white card with soft shadow -->
+  <!-- White card with soft shadow, like the Shaw template -->
   <g filter="url(#cardShadow)">
     <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="30" fill="#ffffff"/>
   </g>
 
-  <!-- top chip (brand) -->
+  <!-- Brand pill at the very top -->
   <g transform="translate(${cardW / 2 - 140}, ${Math.max(10, padY - 40)})">
     <rect width="280" height="44" rx="22" fill="#0f1a22" opacity="0.06"/>
     <text class="brand t-center" x="140" y="30">{{brandName}}</text>
   </g>
 
-  <!-- main text stack -->
+  <!-- Main stacked content -->
   <g>
-    <!-- big headline -->
+    <!-- Big headline (FALL FLOORING SALE style) -->
     <text class="title t-center" x="${cardW / 2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
-    <!-- small range / tagline -->
+    <!-- Date range / subline (AUGUST 15 – SEPTEMBER 30, 2020) -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">{{dateRange}}</text>
 
-    <!-- divider line -->
+    <!-- Divider -->
     <g transform="translate(${padX}, ${dividerY})">
       <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
     </g>
 
-    <!-- SAVE / offer -->
+    <!-- SAVE up to $1000 -->
     <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
 
-    <!-- financing -->
+    <!-- PLUS SPECIAL FINANCING -->
     <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
 
-    <!-- qualifier line, still centered -->
+    <!-- Qualifier lines (e.g., ON SELECT PRODUCTS...) -->
     <text class="body t-center" x="${cardW / 2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/qualifierLines}}
     </text>
-  </g>
 
-  <!-- bullets, left-aligned like a block of features -->
-  {{#hasBullets}}
-  <g>
-    <text class="body" x="${padX + 10}" y="${bulletStartY}">
+    <!-- Bullet list under the qualifier (centered, Shaw-style) -->
+    <text class="body t-center" x="${cardW / 2}" y="${bulletStartY}">
       {{#bulletLines}}
-        <tspan x="${padX + 10}" dy="{{dy}}">• {{line}}</tspan>
+        <tspan x="${cardW / 2}" dy="{{dy}}">• {{line}}</tspan>
       {{/bulletLines}}
     </text>
   </g>
-  {{/hasBullets}}
 
-  <!-- legal / disclaimer along bottom -->
+  <!-- Legal / disclaimer at the very bottom of the card -->
   {{#legal}}
   <g transform="translate(${padX}, ${cardH - 18})">
     <text class="legal" x="0" y="-6">{{legal}}</text>
@@ -733,6 +720,7 @@ function tplPosterBCard({
   {{/legal}}
 </svg>`;
 }
+
 
 /* ------------------------ Utility helpers ------------------------ */
 
