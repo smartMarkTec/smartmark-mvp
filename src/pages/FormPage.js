@@ -38,16 +38,27 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 /* -------- Image copy edit store -------- */
 const IMAGE_DRAFTS_KEY = "smartmark.imageDrafts.v1";
 const ALLOWED_CTAS = [
-  "Shop now", "Buy now", "Learn more", "Visit us", "Check us out",
-  "Take a look", "Get started"
+  "Shop now",
+  "Buy now",
+  "Learn more",
+  "Visit us",
+  "Check us out",
+  "Take a look",
+  "Get started",
 ];
 
 /* ===== image draft helpers ===== */
 function loadImageDrafts() {
-  try { return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}"); } catch { return {}; }
+  try {
+    return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}");
+  } catch {
+    return {};
+  }
 }
 function saveImageDrafts(map) {
-  try { localStorage.setItem(IMAGE_DRAFTS_KEY, JSON.stringify(map)); } catch {}
+  try {
+    localStorage.setItem(IMAGE_DRAFTS_KEY, JSON.stringify(map));
+  } catch {}
 }
 function getImageDraftById(id) {
   const all = loadImageDrafts();
@@ -64,9 +75,9 @@ function normalizeOverlayCTA(s = "") {
   const raw = String(s).trim();
   if (!raw) return ""; // no default CTA
   const plain = raw.replace(/[!?.]+$/g, "").toLowerCase();
-  const match = ALLOWED_CTAS.find(c => c.toLowerCase() === plain);
+  const match = ALLOWED_CTAS.find((c) => c.toLowerCase() === plain);
   const chosen = match || plain;
-  return chosen.replace(/\b\w/g, c => c.toUpperCase());
+  return chosen.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function creativeIdFromUrl(url = "") {
@@ -77,9 +88,15 @@ function creativeIdFromUrl(url = "") {
 function Dotty() {
   return (
     <span style={{ display: "inline-block", minWidth: 60, letterSpacing: 4 }}>
-      <span className="dotty-dot" style={dotStyle(0)}>.</span>
-      <span className="dotty-dot" style={dotStyle(1)}>.</span>
-      <span className="dotty-dot" style={dotStyle(2)}>.</span>
+      <span className="dotty-dot" style={dotStyle(0)}>
+        .
+      </span>
+      <span className="dotty-dot" style={dotStyle(1)}>
+        .
+      </span>
+      <span className="dotty-dot" style={dotStyle(2)}>
+        .
+      </span>
       <style>
         {`
         @keyframes bounceDot {
@@ -96,24 +113,50 @@ function Dotty() {
   );
 }
 function dotStyle(n) {
-  return { display: "inline-block", margin: "0 3px", fontSize: 36, color: TEAL, animationDelay: `${n * 0.13}s` };
+  return {
+    display: "inline-block",
+    margin: "0 3px",
+    fontSize: 36,
+    color: TEAL,
+    animationDelay: `${n * 0.13}s`,
+  };
 }
 
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   return (
-    <div style={{
-      position: "fixed", inset: 0,
-      background: "rgba(10,12,15,0.92)",
-      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999
-    }}>
-      <div style={{ position: "relative", background: SURFACE, borderRadius: 18, boxShadow: "0 0 40px #0008" }}>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(10,12,15,0.92)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 9999,
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          background: SURFACE,
+          borderRadius: 18,
+          boxShadow: "0 0 40px #0008",
+        }}
+      >
         <button
           onClick={onClose}
           style={{
-            position: "absolute", top: 16, right: 16, zIndex: 2,
-            background: "#23262a", color: "#fff", border: "none",
-            borderRadius: 20, padding: 8, cursor: "pointer"
+            position: "absolute",
+            top: 16,
+            right: 16,
+            zIndex: 2,
+            background: "#23262a",
+            color: "#fff",
+            border: "none",
+            borderRadius: 20,
+            padding: 8,
+            cursor: "pointer",
           }}
         >
           <FaTimes size={20} />
@@ -129,7 +172,7 @@ function ImageModal({ open, imageUrl, onClose }) {
             background: "#222",
             margin: "40px 28px 28px",
             boxShadow: "0 8px 38px #000b",
-            fontFamily: AD_FONT
+            fontFamily: AD_FONT,
           }}
         />
       </div>
@@ -141,13 +184,18 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
   const choices = [
     { key: "image", label: "Image" },
     { key: "both", label: "Both" },
-    { key: "video", label: "Video" }
+    { key: "video", label: "Video" },
   ];
   return (
-    <div style={{
-      display: "flex", gap: 16, justifyContent: "center", alignItems: "center",
-      margin: "18px 0 8px 0"
-    }}>
+    <div
+      style={{
+        display: "flex",
+        gap: 16,
+        justifyContent: "center",
+        alignItems: "center",
+        margin: "18px 0 8px 0",
+      }}
+    >
       {choices.map((choice) => (
         <button
           key={choice.key}
@@ -161,11 +209,13 @@ function MediaTypeToggle({ mediaType, setMediaType }) {
             background: mediaType === choice.key ? TEAL : "#23292c",
             color: mediaType === choice.key ? "#0e1418" : "#bcfff6",
             cursor: "pointer",
-            boxShadow: mediaType === choice.key ? `0 2px 18px ${TEAL_SOFT}` : "none",
+            boxShadow:
+              mediaType === choice.key ? `0 2px 18px ${TEAL_SOFT}` : "none",
             transform: mediaType === choice.key ? "scale(1.06)" : "scale(1)",
             transition: "all 0.15s",
-            outline: mediaType === choice.key ? `3px solid ${TEAL_SOFT}` : "none",
-            willChange: "transform"
+            outline:
+              mediaType === choice.key ? `3px solid ${TEAL_SOFT}` : "none",
+            willChange: "transform",
           }}
         >
           {choice.label}
@@ -188,19 +238,37 @@ function Arrow({ side = "left", onClick, disabled }) {
         background: "rgba(0,0,0,0.55)",
         color: "#fff",
         border: "none",
-        width: 34, height: 34, borderRadius: "50%",
+        width: 34,
+        height: 34,
+        borderRadius: "50%",
         cursor: disabled ? "not-allowed" : "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        opacity: disabled ? 0.45 : 0.85, zIndex: 3, willChange: "transform"
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        opacity: disabled ? 0.45 : 0.85,
+        zIndex: 3,
+        willChange: "transform",
       }}
       aria-label={side === "left" ? "Previous" : "Next"}
       title={side === "left" ? "Previous" : "Next"}
     >
       <svg width="16" height="16" viewBox="0 0 20 20" fill="none">
         {side === "left" ? (
-          <path d="M12.5 15L7.5 10L12.5 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M12.5 15L7.5 10L12.5 5"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         ) : (
-          <path d="M7.5 5L12.5 10L7.5 15" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M7.5 5L12.5 10L7.5 15"
+            stroke="white"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         )}
       </svg>
     </button>
@@ -209,20 +277,31 @@ function Arrow({ side = "left", onClick, disabled }) {
 
 function Dots({ count, active, onClick }) {
   return (
-    <div style={{
-      position: "absolute", bottom: 8, left: 0, right: 0,
-      display: "flex", justifyContent: "center", alignItems: "center",
-      gap: 8, zIndex: 3
-    }}>
+    <div
+      style={{
+        position: "absolute",
+        bottom: 8,
+        left: 0,
+        right: 0,
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: 8,
+        zIndex: 3,
+      }}
+    >
       {Array.from({ length: count }).map((_, i) => (
         <button
           key={i}
           onClick={() => onClick(i)}
           style={{
-            width: 8, height: 8, borderRadius: "50%",
+            width: 8,
+            height: 8,
+            borderRadius: "50%",
             border: "none",
             background: i === active ? TEAL : "rgba(255,255,255,0.55)",
-            cursor: "pointer", opacity: i === active ? 1 : 0.7
+            cursor: "pointer",
+            opacity: i === active ? 1 : 0.7,
           }}
           aria-label={`Go to slide ${i + 1}`}
           title={`Slide ${i + 1}`}
@@ -237,7 +316,11 @@ const _controllers = new Map(); // key -> AbortController
 
 function abortKey(key) {
   const c = _controllers.get(key);
-  if (c) { try { c.abort(); } catch {} }
+  if (c) {
+    try {
+      c.abort();
+    } catch {}
+  }
   _controllers.delete(key);
 }
 
@@ -250,9 +333,16 @@ function newControllerFor(key) {
 }
 
 // legacy helper (still here in case something else uses it)
-async function fetchJSON(url, { key = "GEN", timeoutMs = 15000, opts = {} } = {}) {
+async function fetchJSON(
+  url,
+  { key = "GEN", timeoutMs = 15000, opts = {} } = {}
+) {
   const c = newControllerFor(key);
-  const t = setTimeout(() => { try { c.abort(); } catch {} }, timeoutMs);
+  const t = setTimeout(() => {
+    try {
+      c.abort();
+    } catch {}
+  }, timeoutMs);
   try {
     const res = await fetch(url, { signal: c.signal, ...opts });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -268,9 +358,14 @@ async function fetchJsonOnceWithAbortKey(
   fetchOpts = {},
   { key = "GEN", timeoutMs } = {}
 ) {
-  const ms = typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 20000; // tighter per-call default
+  const ms =
+    typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 20000; // tighter per-call default
   const controller = newControllerFor(key);
-  const timer = setTimeout(() => { try { controller.abort(); } catch {} }, ms);
+  const timer = setTimeout(() => {
+    try {
+      controller.abort();
+    } catch {}
+  }, ms);
 
   try {
     const res = await fetch(url, { ...fetchOpts, signal: controller.signal });
@@ -287,11 +382,12 @@ async function fetchJsonOnceWithAbortKey(
 /* Call when unmounting or when starting a brand new run */
 function abortAllVideoFetches() {
   for (const [key, c] of _controllers.entries()) {
-    try { c.abort(); } catch {}
+    try {
+      c.abort();
+    } catch {}
   }
   _controllers.clear();
 }
-
 
 /* ===== helpers ===== */
 
@@ -301,33 +397,16 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const safe = (s) => String(s || "").trim();
 
   const headline =
-    a.headline ||
-    a.eventTitle ||
-    a.mainBenefit ||
-    a.businessName ||
-    "";
+    a.headline || a.eventTitle || a.mainBenefit || a.businessName || "";
 
   const promoLine =
-    a.promoLine ||
-    a.subline ||
-    a.idealCustomer ||
-    "";
+    a.promoLine || a.subline || a.idealCustomer || "";
 
-  const offer =
-    a.offer ||
-    a.saveAmount ||
-    "";
+  const offer = a.offer || a.saveAmount || "";
 
-  const secondary =
-    a.secondary ||
-    a.financingLine ||
-    "";
+  const secondary = a.secondary || a.financingLine || "";
 
-  const adCopy =
-    a.adCopy ||
-    a.details ||
-    a.mainBenefit ||
-    "";
+  const adCopy = a.adCopy || a.details || a.mainBenefit || "";
 
   const legal = a.legal || "";
   const backgroundUrl = a.backgroundUrl || fallback.backgroundUrl || "";
@@ -339,22 +418,19 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
     secondary: safe(secondary),
     adCopy: safe(adCopy),
     legal: safe(legal),
-    backgroundUrl
+    backgroundUrl,
   };
 }
 
-
-const CONTROLLER_TIMEOUT_MS = 22000;         // single-call guard
-const IMAGE_FETCH_TIMEOUT_MS = 38000;        // image job (retry-safe)
-const VIDEO_FETCH_TIMEOUT_MS = 56000;        // per-variant POST /generate-video-ad
-const GENERATION_HARD_CAP_MS = 100000;       // global cap per run (~1m40s)
-const VIDEO_TARGET_SECONDS = 19;             // server still targets ~19s
+const CONTROLLER_TIMEOUT_MS = 22000; // single-call guard
+const IMAGE_FETCH_TIMEOUT_MS = 38000; // image job (retry-safe)
+const VIDEO_FETCH_TIMEOUT_MS = 56000; // per-variant POST /generate-video-ad
+const GENERATION_HARD_CAP_MS = 100000; // global cap per run (~1m40s)
+const VIDEO_TARGET_SECONDS = 19; // server still targets ~19s
 const USE_FAST_MODE = true;
 
-const FORCE_HARD_CUTS = true;                // straight cuts (no xfade)
-const FORCE_SUBTITLES = true;                // on (burn if possible)
-
-
+const FORCE_HARD_CUTS = true; // straight cuts (no xfade)
+const FORCE_SUBTITLES = true; // on (burn if possible)
 
 function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -371,7 +447,9 @@ async function fetchJsonWithRetry(
   let attempt = 0;
   let lastErr = null;
   if (warm) {
-    try { await warmBackend(); } catch {}
+    try {
+      await warmBackend();
+    } catch {}
   }
   while (attempt < tries) {
     try {
@@ -392,8 +470,9 @@ async function fetchJsonWithRetry(
     } catch (e) {
       lastErr = e;
       // modest backoff so total stays under our hard cap
-      const backoff = 400 * Math.pow(1.7, attempt) + Math.floor(Math.random() * 180);
-      await new Promise(r => setTimeout(r, backoff));
+      const backoff =
+        400 * Math.pow(1.7, attempt) + Math.floor(Math.random() * 180);
+      await new Promise((r) => setTimeout(r, backoff));
       attempt++;
     }
   }
@@ -403,43 +482,66 @@ async function fetchJsonWithRetry(
 async function warmBackend() {
   // Quick warmup so first hit isn't slow; don't block too long
   try {
-    const res = await fetchWithTimeout(`${API_BASE}/test`, { mode: "cors", credentials: "omit" }, 5000);
+    const res = await fetchWithTimeout(
+      `${API_BASE}/test`,
+      { mode: "cors", credentials: "omit" },
+      5000
+    );
     if (!res.ok) throw new Error(`warmup ${res.status}`);
     return true;
   } catch {
     // one short retry
-    try { await fetchWithTimeout(`${API_BASE}/test`, { mode: "cors", credentials: "omit" }, 5000); } catch {}
+    try {
+      await fetchWithTimeout(
+        `${API_BASE}/test`,
+        { mode: "cors", credentials: "omit" },
+        5000
+      );
+    } catch {}
     return false;
   }
 }
-
-
 
 function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
 function isGenerateTrigger(input) {
-  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
+  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(
+    input.trim()
+  );
 }
 async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  try { return await res.json(); } catch { throw new Error("Bad JSON"); }
+  try {
+    return await res.json();
+  } catch {
+    throw new Error("Bad JSON");
+  }
 }
 
 const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
-function stripUrls(s = "") { return (s || "").replace(URL_REGEX, ""); }
-function extractFirstUrl(s = "") { const m = (s || "").match(URL_REGEX); return m ? m[0] : null; }
+function stripUrls(s = "") {
+  return (s || "").replace(URL_REGEX, "");
+}
+function extractFirstUrl(s = "") {
+  const m = (s || "").match(URL_REGEX);
+  return m ? m[0] : null;
+}
 function isLikelyQuestion(s) {
   const t = (s || "").trim().toLowerCase();
   if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
   const textWithoutUrls = stripUrls(t);
   const hasQMark = textWithoutUrls.includes("?");
-  const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
+  const startsWithQword =
+    /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(
+      t
+    );
   return hasQMark || startsWithQword;
 }
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
-  const sentimental = /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
+  const sentimental =
+    /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
   const hasBang = t.includes("!");
   return sentimental.test(t) || hasBang;
 }
@@ -482,20 +584,22 @@ function buildImagePrompt(answers = {}, overlay = {}) {
   if (overlay?.cta) parts.push(`CTA: ${overlay.cta}`);
 
   // Photo guidance
-  parts.push("Style: clean commercial photo, centered subject, negative space for text, uncluttered background");
+  parts.push(
+    "Style: clean commercial photo, centered subject, negative space for text, uncluttered background"
+  );
 
   return parts.filter(Boolean).join(" | ");
 }
 
 // --- GPT copy summarizer ---
 async function summarizeAdCopy(answers) {
- const url = `${API_BASE}/summarize-ad-copy`;
+  const url = `${API_BASE}/summarize-ad-copy`;
   console.debug("[SM][summarizeAdCopy:POST]", url, { answers });
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers })
+      body: JSON.stringify({ answers }),
     });
     const json = await res.json().catch(() => ({}));
     console.debug("[SM][summarizeAdCopy:RES]", res.status, json);
@@ -507,18 +611,14 @@ async function summarizeAdCopy(answers) {
   }
 }
 
-
-
-
-
 /* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
 function toAbsoluteMedia(u) {
   if (!u) return "";
   const s = String(u).trim();
-  if (/^https?:\/\//i.test(s)) return s;        // already absolute
-  if (s.startsWith("/")) return s;               // same-origin absolute path
-  if (s.startsWith("api/")) return "/" + s;      // "api/media/x" -> "/api/media/x"
-  if (s.startsWith("media/")) return "/api/" + s;// "media/x" -> "/api/media/x"
+  if (/^https?:\/\//i.test(s)) return s; // already absolute
+  if (s.startsWith("/")) return s; // same-origin absolute path
+  if (s.startsWith("api/")) return "/" + s; // "api/media/x" -> "/api/media/x"
+  if (s.startsWith("media/")) return "/api/" + s; // "media/x" -> "/api/media/x"
   return s; // last resort
 }
 
@@ -564,12 +664,17 @@ const parseImageResults = (data) => {
 
   const push = (u0) => {
     if (!u0) return;
-    const raw = typeof u0 === "string" ? u0 : (u0?.absoluteUrl || u0?.url || u0?.filename);
+    const raw =
+      typeof u0 === "string" ? u0 : u0?.absoluteUrl || u0?.url || u0?.filename;
     if (!raw) return;
     // If it’s absolute http(s), send through our proxy to avoid CORS in <img/> and warmers
     const maybeProxied = /^https?:\/\//i.test(raw) ? proxyImg(raw) : raw;
     // Normalize to same-origin (/api/media/.. etc.)
-    out.push(toAbsoluteMedia(maybeProxied.startsWith("/api/") ? maybeProxied : maybeProxied));
+    out.push(
+      toAbsoluteMedia(
+        maybeProxied.startsWith("/api/") ? maybeProxied : maybeProxied
+      )
+    );
   };
 
   if (Array.isArray(data?.imageVariations)) {
@@ -579,18 +684,26 @@ const parseImageResults = (data) => {
     for (const u0 of data.images) push(u0);
   }
   if (out.length === 0) {
-    push(data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename);
+    push(
+      data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename
+    );
   }
 
   const uniq = Array.from(new Set(out));
   return uniq.slice(0, 2);
 };
 
-
 async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
-  const fallbackA = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`);
-const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`);
-
+  const fallbackA = proxyImg(
+    `https://picsum.photos/seed/sm-${encodeURIComponent(
+      token
+    )}-A/1200/628`
+  );
+  const fallbackB = proxyImg(
+    `https://picsum.photos/seed/sm-${encodeURIComponent(
+      token
+    )}-B/1200/628`
+  );
 
   try {
     await warmBackend();
@@ -611,8 +724,8 @@ const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(t
       count: 2,
       width: 1200,
       height: 628,
-      styleHint: "photo",           // keep as 'photo' (you can switch to 'illustration' later)
-      negative: "busy cluttered background, low-contrast, text cut-off"
+      styleHint: "photo", // keep as 'photo' (you can switch to 'illustration' later)
+      negative: "busy cluttered background, low-contrast, text cut-off",
     };
 
     const data = await fetchJsonWithRetry(
@@ -620,7 +733,7 @@ const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(t
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
       },
       { tries: 3, warm: true, timeoutMs: IMAGE_FETCH_TIMEOUT_MS }
     ).catch(() => ({}));
@@ -636,7 +749,6 @@ const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(t
     return [fallbackA, fallbackB];
   }
 }
-
 
 /* ===== poll latest video (fallback) ===== */
 async function pollLatestVideo({ tries = 5, delayMs = 900 } = {}) {
@@ -655,63 +767,46 @@ async function pollLatestVideo({ tries = 5, delayMs = 900 } = {}) {
         (latest?.filename ? `/api/media/${latest.filename}` : "");
       if (!u && Array.isArray(latest?.variants) && latest.variants.length) {
         // pick first usable variant
-        const v0 = latest.variants.find(v => v?.absoluteUrl || v?.url || v?.filename);
-        if (v0) u = v0.absoluteUrl || v0.url || (v0.filename ? `/api/media/${v0.filename}` : "");
+        const v0 = latest.variants.find(
+          (v) => v?.absoluteUrl || v?.url || v?.filename
+        );
+        if (v0)
+          u =
+            v0.absoluteUrl ||
+            v0.url ||
+            (v0.filename ? `/api/media/${v0.filename}` : "");
       }
 
       if (u && /\.mp4(\?|$)/i.test(u)) {
         const finalUrl = toAbsoluteMedia(u);
-        try { await headRangeWarm("LATEST", finalUrl); } catch {}
+        try {
+          await headRangeWarm("LATEST", finalUrl);
+        } catch {}
         return {
           url: finalUrl,
           script: latest?.script || "",
           fbVideoId: latest?.fbVideoId || null,
         };
       }
-    } catch { /* ignore and retry */ }
+    } catch {
+      /* ignore and retry */
+    }
 
-    await new Promise(r => setTimeout(r, delayMs));
+    await new Promise((r) => setTimeout(r, delayMs));
   }
   return null;
 }
-
-/* ----- Grace finalize: after we stop waiting, try to recover finished video(s) ----- */
-async function finalizeGracePeriod({ maxMs = FINALIZE_GRACE_POLL_MS } = {}) {
-  const started = Date.now();
-  let best = null;
-
-  while (Date.now() - started < maxMs) {
-    try {
-      const latest = await pollLatestVideo({ tries: 1, delayMs: 500 });
-      if (latest && latest.url) {
-        // Try warming and attach as a single-item list if we currently have none
-        try { await headRangeWarm("GRACE", latest.url); } catch {}
-        best = latest;
-        break;
-      }
-    } catch {}
-    await new Promise(r => setTimeout(r, 700));
-  }
-
-  if (best && best.url) {
-    // If we already have two, keep them; otherwise seed with this recovered one.
-    setVideoItems((prev) => {
-      if (Array.isArray(prev) && prev.length) return prev;
-      return [{ url: best.url, script: best.script || "", fbVideoId: best.fbVideoId || null }];
-    });
-    setActiveVideo(0);
-    setVideoUrl(best.url);
-    setVideoScript(best.script || "");
-  }
-}
-
-
 
 /* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B or single-call pair) ---------- */
 
 // Try a single-call request that returns BOTH variants in one response.
 // If backend doesn't support it, we fall back to the two-call (A/B) method.
-async function fetchVideoPairSingleCall(token, answers, result, timeoutMs = VIDEO_FETCH_TIMEOUT_MS) {
+async function fetchVideoPairSingleCall(
+  token,
+  answers,
+  result,
+  timeoutMs = VIDEO_FETCH_TIMEOUT_MS
+) {
   const triggerKey = `VIDEO_PAIR_${token}`;
 
   try {
@@ -736,7 +831,7 @@ async function fetchVideoPairSingleCall(token, answers, result, timeoutMs = VIDE
           burnSubtitles: 1,
 
           // NEW: tell backend we only want a single call that returns exactly two
-          expectPair: 1
+          expectPair: 1,
         }),
       },
       { key: triggerKey, timeoutMs }
@@ -746,19 +841,24 @@ async function fetchVideoPairSingleCall(token, answers, result, timeoutMs = VIDE
     let pair = [];
     if (Array.isArray(data?.videos) && data.videos.length) {
       pair = data.videos
-        .map(v => {
-          let u = v?.absoluteUrl || v?.url || (v?.filename ? `/api/media/${v.filename}` : "");
+        .map((v) => {
+          let u =
+            v?.absoluteUrl ||
+            v?.url ||
+            (v?.filename ? `/api/media/${v.filename}` : "");
           if (!u) return null;
           const captionsVtt =
             v?.captionsVtt ||
             v?.vtt ||
             v?.captionsUrl ||
-            (v?.captionsFilename ? `/api/media/${v.captionsFilename}` : "");
+            (v?.captionsFilename
+              ? `/api/media/${v.captionsFilename}`
+              : "");
           return {
             url: toAbsoluteMedia(u),
             script: v?.script || data?.script || "",
             fbVideoId: v?.fbVideoId || null,
-            captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null
+            captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null,
           };
         })
         .filter(Boolean)
@@ -766,25 +866,34 @@ async function fetchVideoPairSingleCall(token, answers, result, timeoutMs = VIDE
     } else {
       // Some servers return a single object; normalize if so
       const maybeSingle =
-        data?.absoluteUrl || data?.url || (data?.filename ? `/api/media/${data.filename}` : "");
+        data?.absoluteUrl ||
+        data?.url ||
+        (data?.filename ? `/api/media/${data.filename}` : "");
       if (maybeSingle) {
-        pair = [{
-          url: toAbsoluteMedia(maybeSingle),
-          script: data?.script || "",
-          fbVideoId: data?.fbVideoId || null,
-          captionsVtt: data?.captionsVtt ? toAbsoluteMedia(data.captionsVtt) : null
-        }];
+        pair = [
+          {
+            url: toAbsoluteMedia(maybeSingle),
+            script: data?.script || "",
+            fbVideoId: data?.fbVideoId || null,
+            captionsVtt: data?.captionsVtt
+              ? toAbsoluteMedia(data.captionsVtt)
+              : null,
+          },
+        ];
       }
     }
 
     // Warm whatever URLs we have so the <video> starts instantly
-    await Promise.allSettled(pair.map((p, i) => headRangeWarm(i === 0 ? "A" : "B", p?.url)));
+    await Promise.allSettled(
+      pair.map((p, i) => headRangeWarm(i === 0 ? "A" : "B", p?.url))
+    );
 
     // Return up to two videos from the single call (no more)
     return pair.slice(0, 2);
   } catch (e) {
     // If we timeout/abort or server can't do pair, fall through to A/B path
-    if (e?.name !== "AbortError") console.warn("fetchVideoPairSingleCall fallback:", e?.message || e);
+    if (e?.name !== "AbortError")
+      console.warn("fetchVideoPairSingleCall fallback:", e?.message || e);
     return [];
   }
 }
@@ -820,7 +929,7 @@ async function fetchVideoOnce(
           hardCuts: FORCE_HARD_CUTS ? 1 : 0,
           xfade: 0,
           subtitles: FORCE_SUBTITLES ? 1 : 0,
-          burnSubtitles: 1
+          burnSubtitles: 1,
         }),
       },
       { key: triggerKey, timeoutMs }
@@ -833,8 +942,14 @@ async function fetchVideoOnce(
       (data?.filename ? `/api/media/${data.filename}` : "");
 
     if (!u && Array.isArray(data?.variants) && data.variants.length) {
-      const pick = data.variants.find(v => v?.absoluteUrl || v?.url || v?.filename);
-      if (pick) u = pick.absoluteUrl || pick.url || (pick.filename ? `/api/media/${pick.filename}` : "");
+      const pick = data.variants.find(
+        (v) => v?.absoluteUrl || v?.url || v?.filename
+      );
+      if (pick)
+        u =
+          pick.absoluteUrl ||
+          pick.url ||
+          (pick.filename ? `/api/media/${pick.filename}` : "");
     }
     if (!u) throw new Error("No video URL in response");
 
@@ -842,10 +957,14 @@ async function fetchVideoOnce(
       data?.captionsVtt ||
       data?.vtt ||
       data?.captionsUrl ||
-      (data?.captionsFilename ? `/api/media/${data.captionsFilename}` : "");
+      (data?.captionsFilename
+        ? `/api/media/${data.captionsFilename}`
+        : "");
 
     const finalUrl = toAbsoluteMedia(u);
-    try { await headRangeWarm(variant, finalUrl); } catch {}
+    try {
+      await headRangeWarm(variant, finalUrl);
+    } catch {}
 
     return {
       url: finalUrl,
@@ -854,7 +973,7 @@ async function fetchVideoOnce(
         data?.narration ||
         (result?.body ? `Narration: ${result.body}` : ""),
       fbVideoId: data?.fbVideoId || null,
-      captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null
+      captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null,
     };
   } catch (e) {
     // Try to recover from a completed job
@@ -877,13 +996,21 @@ async function fetchVideoOnce(
 //    and still clamp to two.
 async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
   // First attempt: single-call pair
-  const pair = await fetchVideoPairSingleCall(token, answers, result, VIDEO_FETCH_TIMEOUT_MS);
+  const pair = await fetchVideoPairSingleCall(
+    token,
+    answers,
+    result,
+    VIDEO_FETCH_TIMEOUT_MS
+  );
   if (pair.length >= 2) {
     // De-dup (defensive) and clamp to two
     const seen = new Set();
     const dedup = [];
     for (const v of pair) {
-      if (v?.url && !seen.has(v.url)) { seen.add(v.url); dedup.push(v); }
+      if (v?.url && !seen.has(v.url)) {
+        seen.add(v.url);
+        dedup.push(v);
+      }
       if (dedup.length === 2) break;
     }
     return dedup;
@@ -896,7 +1023,9 @@ async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
   ]);
 
   const vids = [];
-  const pushIfGood = (x) => { if (x && x.url) vids.push(x); };
+  const pushIfGood = (x) => {
+    if (x && x.url) vids.push(x);
+  };
 
   if (a.status === "fulfilled") pushIfGood(a.value);
   if (b.status === "fulfilled") pushIfGood(b.value);
@@ -905,13 +1034,15 @@ async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
   const dedup = [];
   const seen = new Set();
   for (const v of vids) {
-    if (v?.url && !seen.has(v.url)) { seen.add(v.url); dedup.push(v); }
+    if (v?.url && !seen.has(v.url)) {
+      seen.add(v.url);
+      dedup.push(v);
+    }
     if (dedup.length === 2) break;
   }
 
   return dedup;
 }
-
 
 /* ========================= Main Component ========================= */
 export default function FormPage() {
@@ -921,8 +1052,11 @@ export default function FormPage() {
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
-    { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+    {
+      from: "gpt",
+      text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.`,
+    },
+    { from: "gpt", text: "Are you ready to get started? (yes/no)" },
   ]);
 
   const [input, setInput] = useState("");
@@ -965,11 +1099,14 @@ export default function FormPage() {
 
   /* Scroll chat to bottom */
   useEffect(() => {
-    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    if (chatBoxRef.current)
+      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory]);
 
   /* Warm backend on mount */
-  useEffect(() => { warmBackend(); }, []);
+  useEffect(() => {
+    warmBackend();
+  }, []);
 
   /* Restore draft */
   useEffect(() => {
@@ -985,7 +1122,11 @@ export default function FormPage() {
       if (data) {
         setAnswers(data.answers || {});
         setStep(data.step ?? 0);
-        setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
+        setChatHistory(
+          Array.isArray(data.chatHistory) && data.chatHistory.length
+            ? data.chatHistory
+            : chatHistory
+        );
         setMediaType(data.mediaType || "both");
         setResult(data.result || null);
         setImageUrls(data.imageUrls || []);
@@ -1002,45 +1143,60 @@ export default function FormPage() {
   }, []);
 
   useEffect(() => {
-  const draft = currentImageId ? getImageDraftById(currentImageId) : null;
-  setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
-  setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? answers?.mainBenefit ?? "");
-  setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
-}, [currentImageId, result, answers]);
+    const draft = currentImageId ? getImageDraftById(currentImageId) : null;
+    setEditHeadline(
+      (draft?.headline ?? result?.headline ?? "").slice(0, 55)
+    );
+    setEditBody(
+      draft?.body ??
+        result?.body ??
+        answers?.details ??
+        answers?.adCopy ??
+        answers?.mainBenefit ??
+        ""
+    );
+    setEditCTA(
+      normalizeOverlayCTA(
+        draft?.overlay ??
+          result?.image_overlay_text ??
+          answers?.cta ??
+          ""
+      )
+    );
+  }, [currentImageId, result, answers]);
 
+  /* Debounced autosave of image edits */
+  useEffect(() => {
+    if (!currentImageId) return;
+    const t = setTimeout(() => {
+      saveImageDraftById(currentImageId, {
+        headline: (editHeadline || "").trim(),
+        body: (editBody || "").trim(),
+        overlay: normalizeOverlayCTA(editCTA || ""),
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [currentImageId, editHeadline, editBody, editCTA]);
 
- /* Debounced autosave of image edits */
-useEffect(() => {
-  if (!currentImageId) return;
-  const t = setTimeout(() => {
-    saveImageDraftById(currentImageId, {
-      headline: (editHeadline || "").trim(),
-      body: (editBody || "").trim(),
-      overlay: normalizeOverlayCTA(editCTA || "")
-    });
-  }, 400);
-  return () => clearTimeout(t);
-}, [currentImageId, editHeadline, editBody, editCTA]);
+  const displayHeadline = (editHeadline || result?.headline || "").slice(
+    0,
+    55
+  );
 
-
-const displayHeadline = (
-  editHeadline ||
-  result?.headline ||
-  ""
-).slice(0,55);
-
-
- const displayBody =
-  (editBody || result?.body || "").trim();
+  const displayBody = (editBody || result?.body || "").trim();
 
   const displayCTA = normalizeOverlayCTA(
-  editCTA || result?.image_overlay_text || answers?.cta || ""
-);
-
+    editCTA || result?.image_overlay_text || answers?.cta || ""
+  );
 
   /* Hard reset chat + draft */
   function hardResetChat() {
-    if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
+    if (
+      !window.confirm(
+        "Reset the chat and clear saved progress for this form?"
+      )
+    )
+      return;
     try {
       localStorage.removeItem(FORM_DRAFT_KEY);
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
@@ -1050,8 +1206,11 @@ const displayHeadline = (
     setAnswers({});
     setStep(0);
     setChatHistory([
-      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
-      { from: "gpt", text: "Are you ready to get started? (yes/no)" }
+      {
+        from: "gpt",
+        text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.`,
+      },
+      { from: "gpt", text: "Are you ready to get started? (yes/no)" },
     ]);
     setInput("");
     setResult(null);
@@ -1077,18 +1236,32 @@ const displayHeadline = (
   /* Autosave whole session + creatives (throttled) */
   useEffect(() => {
     const t = setTimeout(() => {
-      const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
-      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+      const activeDraft = currentImageId
+        ? getImageDraftById(currentImageId)
+        : null;
+      const mergedHeadline = (
+        activeDraft?.headline || result?.headline || ""
+      ).slice(0, 55);
       const mergedBody = activeDraft?.body || result?.body || "";
 
       const payload = {
-        answers, step, chatHistory, mediaType, result: {
+        answers,
+        step,
+        chatHistory,
+        mediaType,
+        result: {
           ...(result || {}),
           headline: mergedHeadline,
-          body: mergedBody
+          body: mergedBody,
         },
-        imageUrls, videoItems, activeImage, activeVideo,
-        awaitingReady, input, sideChatCount, hasGenerated
+        imageUrls,
+        videoItems,
+        activeImage,
+        activeVideo,
+        awaitingReady,
+        input,
+        sideChatCount,
+        hasGenerated,
       };
       localStorage.setItem(
         FORM_DRAFT_KEY,
@@ -1096,11 +1269,23 @@ const displayHeadline = (
       );
 
       let imgs = imageUrls.slice(0, 2).map(abs);
-      let vids = videoItems.map(v => v?.url).filter(Boolean).slice(0, 2).map(abs);
-      let fbIds = videoItems.map(v => v?.fbVideoId).filter(Boolean).slice(0, 2);
+      let vids = videoItems
+        .map((v) => v?.url)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(abs);
+      let fbIds = videoItems
+        .map((v) => v?.fbVideoId)
+        .filter(Boolean)
+        .slice(0, 2);
 
-      if (mediaType === "image") { vids = []; fbIds = []; }
-      if (mediaType === "video") { imgs = []; }
+      if (mediaType === "image") {
+        vids = [];
+        fbIds = [];
+      }
+      if (mediaType === "video") {
+        imgs = [];
+      }
 
       const draftForSetup = {
         images: imgs,
@@ -1108,42 +1293,76 @@ const displayHeadline = (
         fbVideoIds: fbIds,
         headline: mergedHeadline,
         body: mergedBody,
-        imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
-        videoScript: (videoItems[activeVideo]?.script || ""),
+        imageOverlayCTA: normalizeOverlayCTA(
+          activeDraft?.overlay ||
+            result?.image_overlay_text ||
+            answers?.cta ||
+            ""
+        ),
+        videoScript: videoItems[activeVideo]?.script || "",
         answers,
         mediaSelection: mediaType,
-        savedAt: Date.now()
+        savedAt: Date.now(),
       };
 
-      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+      localStorage.setItem(
+        CREATIVE_DRAFT_KEY,
+        JSON.stringify(draftForSetup)
+      );
+      sessionStorage.setItem(
+        "draft_form_creatives",
+        JSON.stringify(draftForSetup)
+      );
     }, 150);
 
     return () => clearTimeout(t);
   }, [
-    answers, step, chatHistory, mediaType, result,
-    imageUrls, videoItems, activeImage, activeVideo,
-    awaitingReady, input, sideChatCount, hasGenerated,
-    currentImageId, editHeadline, editBody, editCTA
+    answers,
+    step,
+    chatHistory,
+    mediaType,
+    result,
+    imageUrls,
+    videoItems,
+    activeImage,
+    activeVideo,
+    awaitingReady,
+    input,
+    sideChatCount,
+    hasGenerated,
+    currentImageId,
+    editHeadline,
+    editBody,
+    editCTA,
   ]);
 
-  function handleImageClick(url) { setShowModal(true); setModalImg(url); }
-  function handleModalClose() { setShowModal(false); setModalImg(""); }
+  function handleImageClick(url) {
+    setShowModal(true);
+    setModalImg(url);
+  }
+  function handleModalClose() {
+    setShowModal(false);
+    setModalImg("");
+  }
 
   /* ---- Ask OpenAI (side chat / FAQs) ---- */
   async function askGPT(userText) {
     try {
-      const history = chatHistory.slice(-8).map(m => ({
+      const history = chatHistory.slice(-8).map((m) => ({
         role: m.from === "gpt" ? "assistant" : "user",
-        content: m.text
+        content: m.text,
       }));
       history.push({ role: "user", content: userText });
 
-      const data = await fetchJsonWithRetry(`${API_BASE}/gpt-chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userText, history })
-      }, { tries: 3, warm: true });
+      const data = await fetchJsonWithRetry(
+        `${API_BASE}/gpt-chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: userText, history }),
+        },
+        { tries: 3, warm: true }
+      );
       return data?.reply || null;
     } catch (e) {
       console.warn("gpt-chat failed:", e.message);
@@ -1151,17 +1370,18 @@ const displayHeadline = (
     }
   }
 
-
-
   async function handleSideChat(userText, followUpPrompt) {
     if (sideChatCount >= SIDE_CHAT_LIMIT) {
-      if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
+      if (followUpPrompt)
+        setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
       return;
     }
-    setSideChatCount(c => c + 1);
+    setSideChatCount((c) => c + 1);
     const reply = await askGPT(userText);
-    if (reply) setChatHistory(ch => [...ch, { from: "gpt", text: reply }]);
-    if (followUpPrompt) setChatHistory(ch => [...ch, { from: "gpt", text: followUpPrompt }]);
+    if (reply)
+      setChatHistory((ch) => [...ch, { from: "gpt", text: reply }]);
+    if (followUpPrompt)
+      setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
   /* ---- Chat flow ---- */
@@ -1190,13 +1410,19 @@ const displayHeadline = (
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
         setChatHistory((ch) => [
           ...ch,
-          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
+          {
+            from: "gpt",
+            text: "No problem! Just say 'ready' when you want to start.",
+          },
         ]);
         return;
       } else {
         setChatHistory((ch) => [
           ...ch,
-          { from: "gpt", text: "Please reply 'yes' when you're ready to start!" },
+          {
+            from: "gpt",
+            text: "Please reply 'yes' when you're ready to start!",
+          },
         ]);
         return;
       }
@@ -1220,25 +1446,25 @@ const displayHeadline = (
           abortAllVideoFetches();
 
           // Global soft cap (no abort) – we only warn if it's taking long.
-// We let the backend finish the generation so the ad is always complete.
-const hardCap = setTimeout(() => {
-  console.warn(
-    "[Generation] Soft cap (~100s) reached – still waiting for server. Not aborting, just FYI."
-  );
-  // IMPORTANT:
-  // - Do NOT call abortAllVideoFetches()
-  // - Do NOT flip setGenerating(false) / setLoading(false)
-  // - Do NOT setError() here
-  //
-  // The normal success / failure logic elsewhere will clear this timeout
-  // with clearTimeout(hardCap) when the job finishes.
-}, GENERATION_HARD_CAP_MS);
-
+          // We let the backend finish the generation so the ad is always complete.
+          const hardCap = setTimeout(() => {
+            console.warn(
+              "[Generation] Soft cap (~100s) reached – still waiting for server. Not aborting, just FYI."
+            );
+          }, GENERATION_HARD_CAP_MS);
 
           // Clear old previews
-          try { setVideoItems([]); } catch {}
-          try { setVideoUrl(""); setVideoScript(""); } catch {}
-          try { setImageUrls([]); setImageUrl(""); } catch {}
+          try {
+            setVideoItems([]);
+          } catch {}
+          try {
+            setVideoUrl("");
+            setVideoScript("");
+          } catch {}
+          try {
+            setImageUrls([]);
+            setImageUrl("");
+          } catch {}
 
           try {
             await warmBackend();
@@ -1250,9 +1476,11 @@ const hardCap = setTimeout(() => {
               subline: (rawCopy.subline || "").toString(),
               offer: (rawCopy.offer || "").toString(),
               secondary: (rawCopy.secondary || "").toString(),
-              bullets: Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [],
+              bullets: Array.isArray(rawCopy.bullets)
+                ? rawCopy.bullets
+                : [],
               disclaimers: (rawCopy.disclaimers || "").toString(),
-              cta: (rawCopy.cta || "").toString()
+              cta: (rawCopy.cta || "").toString(),
             };
 
             // 2) Store GPT copy in state for the preview card
@@ -1262,18 +1490,20 @@ const hardCap = setTimeout(() => {
               offer: copy.offer,
               bullets: copy.bullets,
               disclaimers: copy.disclaimers,
-              image_overlay_text: copy.cta || answers?.cta || "Shop now"
+              image_overlay_text:
+                copy.cta || answers?.cta || "Shop now",
             });
 
             // 3) IMAGE: use GPT copy directly for the overlay
             const imagesPromise = (async () => {
               const poster = derivePosterFieldsFromAnswers(answers);
               const overlay = {
-                headline: (copy.headline || poster.headline || "").slice(0, 55),
+                headline:
+                  (copy.headline || poster.headline || "").slice(0, 55),
                 body: copy.subline || poster.adCopy || "",
                 cta: normalizeOverlayCTA(
                   copy.cta || answers?.cta || ""
-                )
+                ),
               };
 
               const prompt = buildImagePrompt(answers, overlay);
@@ -1305,18 +1535,21 @@ const hardCap = setTimeout(() => {
             })();
 
             // 5) Static Poster B: also gets the same GPT copy
-            const staticPromise = handleGenerateStaticAd("poster_b", copy);
+            const staticPromise = handleGenerateStaticAd(
+              "poster_b",
+              copy
+            );
 
             // 6) Mark as “done” once any media completes
             await Promise.any([
               imagesPromise,
               videosPromise,
-              staticPromise
+              staticPromise,
             ]).catch(() => {});
             await Promise.allSettled([
               imagesPromise,
               videosPromise,
-              staticPromise
+              staticPromise,
             ]);
 
             setChatHistory((ch) => [
@@ -1342,7 +1575,6 @@ const hardCap = setTimeout(() => {
 
         return;
       }
-
 
       if (hasGenerated) {
         await handleSideChat(value, null);
@@ -1388,7 +1620,8 @@ const hardCap = setTimeout(() => {
           ...ch,
           {
             from: "gpt",
-            text: "Are you ready for me to generate your campaign? (yes/no)",
+            text:
+              "Are you ready for me to generate your campaign? (yes/no)",
           },
         ]);
         setStep(nextStep);
@@ -1411,297 +1644,299 @@ const hardCap = setTimeout(() => {
   }, []);
 
   /* Regenerations (sequential with warmup/backoff) */
-async function handleRegenerateImage() {
-  setImageLoading(true);
-  try {
-    await warmBackend();
-    const token = getRandomString();
+  async function handleRegenerateImage() {
+    setImageLoading(true);
+    try {
+      await warmBackend();
+      const token = getRandomString();
 
-    // Fresh GPT copy for a brand-new variation
-    const rawCopy = (await summarizeAdCopy(answers)) || {};
-    const copy = {
-      headline: (rawCopy.headline || "").toString(),
-      subline: (rawCopy.subline || "").toString(),
-      offer: (rawCopy.offer || "").toString(),
-      secondary: (rawCopy.secondary || "").toString(),
-      bullets: Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [],
-      disclaimers: (rawCopy.disclaimers || "").toString(),
-      cta: (rawCopy.cta || "").toString()
-    };
+      // Fresh GPT copy for a brand-new variation
+      const rawCopy = (await summarizeAdCopy(answers)) || {};
+      const copy = {
+        headline: (rawCopy.headline || "").toString(),
+        subline: (rawCopy.subline || "").toString(),
+        offer: (rawCopy.offer || "").toString(),
+        secondary: (rawCopy.secondary || "").toString(),
+        bullets: Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [],
+        disclaimers: (rawCopy.disclaimers || "").toString(),
+        cta: (rawCopy.cta || "").toString(),
+      };
 
-    // Update preview state so the user sees the new words
-    setResult({
-      headline: copy.headline,
-      body: copy.subline,
-      offer: copy.offer,
-      bullets: copy.bullets,
-      disclaimers: copy.disclaimers,
-      image_overlay_text: copy.cta || answers?.cta || "Shop now"
-    });
+      // Update preview state so the user sees the new words
+      setResult({
+        headline: copy.headline,
+        body: copy.subline,
+        offer: copy.offer,
+        bullets: copy.bullets,
+        disclaimers: copy.disclaimers,
+        image_overlay_text:
+          copy.cta || answers?.cta || "Shop now",
+      });
 
-    // Overlay for the rendered image (uses fresh GPT copy)
-    const overlay = {
-      headline: (copy.headline || "").slice(0, 55),
-      body: copy.subline || "",
-      cta: normalizeOverlayCTA(copy.cta || answers?.cta || "")
-    };
+      // Overlay for the rendered image (uses fresh GPT copy)
+      const overlay = {
+        headline: (copy.headline || "").slice(0, 55),
+        body: copy.subline || "",
+        cta: normalizeOverlayCTA(copy.cta || answers?.cta || ""),
+      };
 
-    const prompt = buildImagePrompt(answers, overlay);
+      const prompt = buildImagePrompt(answers, overlay);
 
-    const imgs = await fetchImagesOnce(token, answers, overlay, prompt);
-    setImageUrls(imgs || []);
-    setActiveImage(0);
-    setImageUrl((imgs && imgs[0]) || "");
+      const imgs = await fetchImagesOnce(
+        token,
+        answers,
+        overlay,
+        prompt
+      );
+      setImageUrls(imgs || []);
+      setActiveImage(0);
+      setImageUrl((imgs && imgs[0]) || "");
 
-    // Also regenerate static Poster B to mirror this variation
-    handleGenerateStaticAd("poster_b", copy);
-  } finally {
-    setImageLoading(false);
+      // Also regenerate static Poster B to mirror this variation
+      handleGenerateStaticAd("poster_b", copy);
+    } finally {
+      setImageLoading(false);
+    }
   }
-}
 
-
-
-async function handleRegenerateVideo() {
-  setVideoLoading(true);
-  abortAllVideoFetches();
-  try { setVideoItems([]); setVideoUrl(""); setVideoScript(""); } catch {}
-
-  const hardCap = setTimeout(() => {
-    console.warn("Hard cap reached; aborting regen video fetches");
+  async function handleRegenerateVideo() {
+    setVideoLoading(true);
     abortAllVideoFetches();
-    setVideoLoading(false);
-    setError("Video regeneration took too long. Try again.");
-  }, GENERATION_HARD_CAP_MS);
+    try {
+      setVideoItems([]);
+      setVideoUrl("");
+      setVideoScript("");
+    } catch {}
 
-  try {
-    await warmBackend();
-    const token = getRandomString();
-
-    const vids = await fetchVideoPair(token, answers, result, null);
-
-    await Promise.allSettled([
-      headRangeWarm("VA", vids?.[0]?.url),
-      headRangeWarm("VB", vids?.[1]?.url),
-    ]);
+    const hardCap = setTimeout(() => {
+      console.warn("Hard cap reached; aborting regen video fetches");
+      abortAllVideoFetches();
+      setVideoLoading(false);
+      setError("Video regeneration took too long. Try again.");
+    }, GENERATION_HARD_CAP_MS);
 
     try {
-      setVideoItems(vids || []);
-      setActiveVideo(0);
-      setVideoUrl(vids?.[0]?.url || "");
-      setVideoScript(vids?.[0]?.script || "");
-    } catch {}
-  } catch (e) {
-    console.error("regenerate video failed:", e?.message || e);
-    setError("Video regeneration failed. Please try again.");
-  } finally {
-    clearTimeout(hardCap);
-    setVideoLoading(false);
-  }
-}
+      await warmBackend();
+      const token = getRandomString();
 
-// --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
-// --- Static Ad Generator (Templates A/B) — REPLACE ENTIRE BLOCK ---
-async function handleGenerateStaticAd(template = "poster_b", assetsData = null) {
-  const a = answers || {};
+      const vids = await fetchVideoPair(token, answers, result, null);
 
-  // 1) Prefer GPT summary copy that we already showed in the preview
-  //    (displayHeadline/displayBody/displayCTA are what /summarize-ad-copy returned)
+      await Promise.allSettled([
+        headRangeWarm("VA", vids?.[0]?.url),
+        headRangeWarm("VB", vids?.[1]?.url),
+      ]);
 
-// Prefer GPT-crafted copy only
-let craftedCopy = assetsData && Object.keys(assetsData).length
-  ? {
-      headline: (assetsData.headline || "").toString(),
-      subline: (assetsData.subline || "").toString(),
-      offer: (assetsData.offer || "").toString(),
-      bullets: Array.isArray(assetsData.bullets) ? assetsData.bullets : [],
-      disclaimers: (assetsData.disclaimers || "").toString(),
-      cta: (assetsData.cta || "").toString()
+      try {
+        setVideoItems(vids || []);
+        setActiveVideo(0);
+        setVideoUrl(vids?.[0]?.url || "");
+        setVideoScript(vids?.[0]?.script || "");
+      } catch {}
+    } catch (e) {
+      console.error("regenerate video failed:", e?.message || e);
+      setError("Video regeneration failed. Please try again.");
+    } finally {
+      clearTimeout(hardCap);
+      setVideoLoading(false);
     }
-  : null;
+  }
 
+  // --- Static Ad Generator (Templates A/B) — UPDATED TO PASS FULL COPY (WITH BULLETS) ---
+  async function handleGenerateStaticAd(
+    template = "poster_b",
+    assetsData = null
+  ) {
+    const a = answers || {};
 
+    // 1) Prefer GPT summary copy that we already showed in the preview
+    const fromAssets =
+      assetsData && typeof assetsData === "object" ? assetsData : {};
+    const fromResult = result || {};
 
+    const baseBullets =
+      (Array.isArray(fromAssets.bullets) && fromAssets.bullets.length
+        ? fromAssets.bullets
+        : Array.isArray(fromResult.bullets) && fromResult.bullets.length
+        ? fromResult.bullets
+        : []) || [];
 
-
-  // Stop any video pipeline for this run (prevents "Hard cap reached; aborting video fetches")
-  try {
-    if (typeof setMediaType === "function") setMediaType("image");
-    if (typeof setIsGeneratingVideo === "function") setIsGeneratingVideo(false);
-    if (typeof cancelVideoJobs === "function") cancelVideoJobs();
-  } catch (_) {}
-
-  // Build Poster-B defaults from answers (backup only)
-  const poster = derivePosterFieldsFromAnswers(a);
-
-  // What we show in the copy panel + what flyer_a uses
-  const display = {
-    headline: (craftedCopy?.headline || displayHeadline || poster.headline || "").slice(0, 55),
-    body: (craftedCopy?.subline || displayBody || poster.adCopy || "").trim(),
-    cta: normalizeOverlayCTA(craftedCopy?.cta || displayCTA || a?.cta || "")
-  };
-
-  // Common inputs (shared)
-  const common = {
-    industry: (a.industry || "Local Services").toString(),
-    businessName: (a.businessName || "Your Business").toString(),
-    website: (a.url || "").toString(),
-    location: a.city ? `${a.city}${a.state ? ", " + a.state : ""}` : (a.location || "Your City"),
-    offer: (a.offer || "").toString(),
-    mainBenefit: (a.mainBenefit || "").toString(),
-    idealCustomer: (a.idealCustomer || "").toString(),
-    phone: (a.phone || "(210) 555-0147").toString(),
-
-    // Flyer-A text
-    headline: display.headline,
-    subline: display.body,
-    cta: display.cta
-  };
-
-  const knobs =
-    template === "flyer_a"
-      ? {
-          size: "1080x1080",
-          palette: {
-            header: "#0d3b66",
-            body: "#dff3f4",
-            accent: "#ff8b4a",
-            textOnDark: "#ffffff",
-            textOnLight: "#2b3a44"
-          },
-          lists: {
-            left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-            right: a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"]
-          },
-          coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
-          showIcons: true,
-          headerSplitDiagonal: true,
-          roundedOuter: true
-        }
-      : (() => {
-          // Take up to 3 bullets from GPT
-          const bulletLines = (craftedCopy?.bullets || [])
-            .map(b => (b || "").toString().trim())
-            .filter(Boolean)
-            .slice(0, 3);
-
-          // Lines 2–3 compressed as a qualifier string
-          const qualifiersFromBullets =
-            bulletLines.length > 1 ? bulletLines.slice(1).join(" • ") : "";
-
-          return {
-            size: "1080x1080",
-            frame: { outerWhite: true, softShadow: true },
-            card: { widthPct: 70, heightPct: 55, shadow: true },
-
-            // Poster-B text: AI copy first, answers only as backup.
-            // Loosen length caps so the sentence doesn't get cut off.
-            eventTitle: (craftedCopy?.headline || poster.headline || `${common.industry} EVENT`).slice(0, 70),
-            dateRange: (craftedCopy?.subline || poster.promoLine || "LIMITED TIME ONLY").slice(0, 140),
-            saveAmount: (craftedCopy?.offer || poster.offer || "").slice(0, 40),
-
-            // Use first bullet as the "PLUS SPECIAL FINANCING..." style line
-            financingLine: (bulletLines[0] || poster.secondary || "").slice(0, 90),
-
-            // Remaining bullets as qualifiers under that
-            qualifiers: (qualifiersFromBullets || poster.adCopy || "").slice(0, 180),
-
-            // Legal/disclaimer at the very bottom
-            legal: (craftedCopy?.disclaimers || poster.legal || "").slice(0, 200),
-
-            // Expose full bullets array to the server template
-            bullets: bulletLines,
-
-            seasonalLeaves: true,
-            backgroundHint: common.industry,
-            backgroundUrl: poster.backgroundUrl || ""
-          };
-        })();
-
-
-  const payload = {
-    template,
-    inputs: common,
-    knobs,
-    copy: craftedCopy || null, // backend should prefer this
-
-    // IMPORTANT: override answers so any old server code that still
-    // uses answers.mainBenefit / answers.details also sees GPT copy,
-    // not the user's raw sentences.
-    answers: {
-      ...a,
-      headline: poster.headline,
-      promoLine: poster.promoLine,
-      offer: poster.offer,
-      secondary: poster.secondary,
-      adCopy: poster.adCopy,
-      legal: poster.legal,
-      backgroundUrl: poster.backgroundUrl,
-
-      // 🔥 NEW: force backend to use GPT copy
-      mainBenefit: (
-        craftedCopy?.headline ||
-        craftedCopy?.subline ||
+    const craftedCopy = {
+      headline: (
+        fromAssets.headline ||
+        displayHeadline ||
+        a.mainBenefit ||
+        a.businessName ||
+        ""
+      ).toString(),
+      subline: (
+        fromAssets.subline ||
+        displayBody ||
+        a.details ||
         a.mainBenefit ||
         ""
       ).toString(),
-
-      details: (
-        craftedCopy?.subline ||
-        craftedCopy?.secondary ||
-        a.details ||
+      offer: (
+        fromAssets.offer ||
+        a.offer ||
+        a.saveAmount ||
         ""
       ).toString(),
-    },
-  };
+      secondary: (fromAssets.secondary || "").toString(),
+      bullets: baseBullets,
+      disclaimers: (fromAssets.disclaimers || "").toString(),
+      cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
+    };
 
-  console.debug("[SM][static-ad:payload]", payload);
-
-
-  try {
-    const res = await fetch(`${API_BASE}/generate-static-ad`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-
-        const data = await res.json().catch(() => ({}));
-    console.debug("[SM][static-ad:status]", res.status, data);
-
-    if (!res.ok || !data?.ok) {
-      const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
-      setError(msg);
-      alert(msg);
-      return;
+    // Always have at least 2 short bullets; backend will further sanitize
+    if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
+      craftedCopy.bullets = [
+        "Quality you can feel",
+        "Modern, clean design",
+      ];
     }
 
-    const png = toAbsoluteMedia(
-      data.pngUrl || data.absoluteUrl || data.url || data.filename || ""
-    );
-    if (!png) {
-      setError("Static ad returned without a URL.");
-      alert("Static ad returned without a URL.");
-      return;
+    // 2) Common inputs (used by both flyer_a and poster_b)
+    const commonInputs = {
+      industry: (a.industry || "Local Services").toString(),
+      businessName: (a.businessName || "Your Business").toString(),
+      website: (a.url || "").toString(),
+      location: a.city
+        ? `${a.city}${a.state ? ", " + a.state : ""}`
+        : (a.location || "Your City").toString(),
+      phone: (a.phone || "(210) 555-0147").toString(),
+
+      // These feed flyer_a and give poster_b extra context
+      headline: craftedCopy.headline,
+      subline: craftedCopy.subline,
+      cta: normalizeOverlayCTA(craftedCopy.cta),
+    };
+
+    // 3) Knobs per template
+    let knobs;
+    if (template === "flyer_a") {
+      knobs = {
+        size: "1080x1080",
+        palette: {
+          header: "#0d3b66",
+          body: "#dff3f4",
+          accent: "#ff8b4a",
+          textOnDark: "#ffffff",
+          textOnLight: "#2b3a44",
+        },
+        lists: {
+          left:
+            a.frequencyList || [
+              "One Time",
+              "Weekly",
+              "Bi-Weekly",
+              "Monthly",
+            ],
+          right:
+            a.servicesList || [
+              "Kitchen",
+              "Bathrooms",
+              "Offices",
+              "Dusting",
+              "Mopping",
+              "Vacuuming",
+            ],
+        },
+        coverage: (
+          a.coverage ||
+          "Coverage area 25 Miles around your city"
+        ).toString(),
+        showIcons: true,
+        headerSplitDiagonal: true,
+        roundedOuter: true,
+        backgroundHint: commonInputs.industry,
+      };
+    } else {
+      // poster_b → let backend do Shaw-style card layout based on copy
+      knobs = {
+        size: "1080x1080",
+        backgroundHint: commonInputs.industry,
+        backgroundUrl: a.backgroundUrl || "",
+        // we don't stuff text into knobs; staticAds.js uses body.copy for the card typography
+      };
     }
 
-    setImageUrls((prev) => [png, ...prev.slice(0, 1)]);
-    setActiveImage(0);
-    setImageUrl(png);
-    setMediaType((prev) => (prev === "video" ? "both" : "image"));
+    const payload = {
+      template,
+      inputs: {
+        industry: commonInputs.industry,
+        businessName: commonInputs.businessName,
+        location: commonInputs.location,
+      },
+      knobs,
+      copy: {
+        headline: craftedCopy.headline,
+        subline: craftedCopy.subline,
+        offer: craftedCopy.offer,
+        secondary: craftedCopy.secondary,
+        bullets: craftedCopy.bullets,
+        disclaimers: craftedCopy.disclaimers,
+      },
+      // Original answers for context; backend may still look at offer, mainBenefit, etc.
+      answers: {
+        ...a,
+        offer: a.offer || a.saveAmount || craftedCopy.offer || "",
+      },
+    };
 
-    setChatHistory((ch) => [
-      ...ch,
-      { from: "gpt", text: `Static ad generated with template "${template}".` }
-    ]);
-  } catch (e) {
-    console.error("[SM][static-ad:ERR]", e?.message || e);
-    setError("Static ad failed. Please try again.");
-    alert("Static ad failed. Please try again.");
+    console.debug("[SM][static-ad:payload]", payload);
+
+    try {
+      const res = await fetch(`${API_BASE}/generate-static-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      console.debug("[SM][static-ad:status]", res.status, data);
+
+      if (!res.ok || !data?.ok) {
+        const msg =
+          data?.error ||
+          `Static ad generation failed (HTTP ${res.status})`;
+        setError(msg);
+        alert(msg);
+        return;
+      }
+
+      const png = toAbsoluteMedia(
+        data.pngUrl ||
+          data.absoluteUrl ||
+          data.url ||
+          data.filename ||
+          ""
+      );
+      if (!png) {
+        setError("Static ad returned without a URL.");
+        alert("Static ad returned without a URL.");
+        return;
+      }
+
+      setImageUrls((prev) => [png, ...prev.slice(0, 1)]);
+      setActiveImage(0);
+      setImageUrl(png);
+      setMediaType((prev) =>
+        prev === "video" ? "both" : prev // if it was pure video, now show both; otherwise keep current
+      );
+
+      setChatHistory((ch) => [
+        ...ch,
+        {
+          from: "gpt",
+          text: `Static ad generated with template "${template}".`,
+        },
+      ]);
+    } catch (e) {
+      console.error("[SM][static-ad:ERR]", e?.message || e);
+      setError("Static ad failed. Please try again.");
+      alert("Static ad failed. Please try again.");
+    }
   }
-
-}
-
-
 
   /* ---------------------- Render ---------------------- */
   return (
@@ -1730,16 +1965,26 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           right: "-10vw",
           width: 640,
           height: 640,
-          background: "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
+          background:
+            "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
           filter: "blur(18px)",
           pointerEvents: "none",
-          zIndex: 0
+          zIndex: 0,
         }}
       />
 
       {/* Top row */}
-      <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 980,
+          padding: "24px 20px 0",
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          style={{ display: "flex", alignItems: "center", gap: 12 }}
+        >
           <button
             onClick={() => navigate("/")}
             style={{
@@ -1755,7 +2000,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
               boxShadow: "0 2px 10px 0 rgba(0,0,0,0.25)",
               display: "flex",
               alignItems: "center",
-              gap: 8
+              gap: 8,
             }}
             aria-label="Back"
           >
@@ -1765,7 +2010,13 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
         </div>
 
         {/* Centered title */}
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            marginTop: 16,
+          }}
+        >
           <h1
             style={{
               margin: 0,
@@ -1797,10 +2048,20 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           display: "flex",
           flexDirection: "column",
           alignItems: "stretch",
-          zIndex: 1
+          zIndex: 1,
         }}
       >
-        <div style={{ color: "#9dffe9", fontSize: 15, fontWeight: 900, marginBottom: 10, letterSpacing: 1.6, textTransform: "uppercase", textAlign: "center" }}>
+        <div
+          style={{
+            color: "#9dffe9",
+            fontSize: 15,
+            fontWeight: 900,
+            marginBottom: 10,
+            letterSpacing: 1.6,
+            textTransform: "uppercase",
+            textAlign: "center",
+          }}
+        >
           AI Ad Manager
         </div>
 
@@ -1820,7 +2081,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
             border: `1px solid ${EDGE}`,
             display: "flex",
             flexDirection: "column",
-            gap: 10
+            gap: 10,
           }}
         >
           {chatHistory.slice(-40).map((msg, i) => {
@@ -1833,12 +2094,14 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                   color: isGPT ? "#d6fff8" : "#0e1519",
                   background: isGPT ? "#0f151a" : TEAL,
                   border: isGPT ? `1px solid ${EDGE}` : "none",
-                  borderRadius: isGPT ? "14px 16px 16px 8px" : "16px 12px 8px 16px",
+                  borderRadius: isGPT
+                    ? "14px 16px 16px 8px"
+                    : "16px 12px 8px 16px",
                   padding: "10px 14px",
                   maxWidth: "85%",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  boxShadow: isGPT ? "none" : `0 2px 12px ${TEAL_SOFT}`
+                  boxShadow: isGPT ? "none" : `0 2px 12px ${TEAL_SOFT}`,
                 }}
               >
                 {msg.text}
@@ -1849,7 +2112,15 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
 
         {/* prompt bar */}
         {!loading && (
-          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
+          <form
+            onSubmit={handleUserInput}
+            style={{
+              width: "100%",
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+            }}
+          >
             <button
               type="button"
               onClick={hardResetChat}
@@ -1866,7 +2137,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                 boxShadow: `0 1.5px 8px ${TEAL_SOFT}`,
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center"
+                justifyContent: "center",
               }}
             >
               <FaSyncAlt />
@@ -1874,7 +2145,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
 
             <input
               value={input}
-              onChange={e => setInput(e.target.value)}
+              onChange={(e) => setInput(e.target.value)}
               disabled={loading}
               autoFocus
               placeholder="Your answer…"
@@ -1890,7 +2161,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                 fontWeight: 700,
                 background: "#23262a",
                 color: "#fff",
-                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`
+                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`,
               }}
             />
             <button
@@ -1904,7 +2175,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                 fontSize: "1.2rem",
                 padding: "0 18px",
                 cursor: "pointer",
-                height: 48
+                height: 48,
               }}
               disabled={loading}
               tabIndex={0}
@@ -1915,52 +2186,107 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           </form>
         )}
 
-        {loading && <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 700, textAlign: "center" }}>AI generating...</div>}
-        {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
+        {loading && (
+          <div
+            style={{
+              color: "#15efb8",
+              marginTop: 10,
+              fontWeight: 700,
+              textAlign: "center",
+            }}
+          >
+            AI generating...
+          </div>
+        )}
+        {error && (
+          <div
+            style={{
+              color: "#f35e68",
+              marginTop: 18,
+              textAlign: "center",
+            }}
+          >
+            {error}
+          </div>
+        )}
       </div>
 
       {/* MediaType Toggle */}
-      <MediaTypeToggle mediaType={mediaType} setMediaType={setMediaType} />
+      <MediaTypeToggle
+        mediaType={mediaType}
+        setMediaType={setMediaType}
+      />
 
       {/* Ad Previews label */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
-        <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "center",
+          marginTop: 4,
+          marginBottom: 10,
+        }}
+      >
+        <div
+          style={{
+            color: "#bdfdf0",
+            fontWeight: 900,
+            letterSpacing: 0.6,
+            opacity: 0.9,
+          }}
+        >
           Ad Previews
         </div>
       </div>
 
       {/* ---- Ad Preview Cards ---- */}
-      <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          gap: 34,
+          flexWrap: "wrap",
+          width: "100%",
+          paddingBottom: 8,
+        }}
+      >
         {/* IMAGE CARD */}
-        <div style={{
-          background: "#fff",
-          borderRadius: 13,
-          boxShadow: "0 2px 24px #16242714",
-          minWidth: 340,
-          maxWidth: 390,
-          flex: mediaType === "video" ? 0 : 1,
-          marginBottom: 20,
-          padding: "0px 0px 14px 0px",
-          border: "1.5px solid #eaeaea",
-          fontFamily: AD_FONT,
-          display: mediaType === "video" ? "none" : "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative"
-        }}>
-          <div style={{
-            background: "#f5f6fa",
-            padding: "11px 20px",
-            borderBottom: "1px solid #e0e4eb",
-            fontWeight: 700,
-            color: "#495a68",
-            fontSize: 16,
-            letterSpacing: 0.08,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center"
-          }}>
-            <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 13,
+            boxShadow: "0 2px 24px #16242714",
+            minWidth: 340,
+            maxWidth: 390,
+            flex: mediaType === "video" ? 0 : 1,
+            marginBottom: 20,
+            padding: "0px 0px 14px 0px",
+            border: "1.5px solid #eaeaea",
+            fontFamily: AD_FONT,
+            display: mediaType === "video" ? "none" : "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              background: "#f5f6fa",
+              padding: "11px 20px",
+              borderBottom: "1px solid #e0e4eb",
+              fontWeight: 700,
+              color: "#495a68",
+              fontSize: 16,
+              letterSpacing: 0.08,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>
+              Sponsored ·{" "}
+              <span style={{ color: "#12cbb8" }}>SmartMark</span>
+            </span>
             <button
               style={{
                 background: "#1ad6b7",
@@ -1975,7 +2301,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                 boxShadow: "0 2px 7px #19e5b733",
                 display: "flex",
                 alignItems: "center",
-                gap: 7
+                gap: 7,
               }}
               onClick={handleRegenerateImage}
               disabled={imageLoading}
@@ -1987,9 +2313,26 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
           </div>
 
           {/* Carousel body */}
-          <div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
+          <div
+            style={{
+              background: "#222",
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 220,
+            }}
+          >
             {imageLoading || generating ? (
-              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div
+                style={{
+                  width: "100%",
+                  height: 220,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
                 <Dotty />
               </div>
             ) : imageUrls.length > 0 ? (
@@ -2002,68 +2345,98 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                     maxHeight: 220,
                     objectFit: "cover",
                     borderRadius: 0,
-                    cursor: "pointer"
+                    cursor: "pointer",
                   }}
-                  onClick={() => handleImageClick(imageUrls[activeImage])}
+                  onClick={() =>
+                    handleImageClick(imageUrls[activeImage])
+                  }
                 />
-                <Arrow side="left" onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
-                <Arrow side="right" onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)} disabled={imageUrls.length <= 1} />
-                <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
+                <Arrow
+                  side="left"
+                  onClick={() =>
+                    setActiveImage(
+                      (activeImage + imageUrls.length - 1) %
+                        imageUrls.length
+                    )
+                  }
+                  disabled={imageUrls.length <= 1}
+                />
+                <Arrow
+                  side="right"
+                  onClick={() =>
+                    setActiveImage(
+                      (activeImage + 1) % imageUrls.length
+                    )
+                  }
+                  disabled={imageUrls.length <= 1}
+                />
+                <Dots
+                  count={imageUrls.length}
+                  active={activeImage}
+                  onClick={setActiveImage}
+                />
               </>
             ) : (
-              <div style={{
-                height: 220,
-                width: "100%",
-                background: "#e9ecef",
-                color: "#a9abb0",
-                fontWeight: 700,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 22
-              }}>Image goes here</div>
+              <div
+                style={{
+                  height: 220,
+                  width: "100%",
+                  background: "#e9ecef",
+                  color: "#a9abb0",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 22,
+                }}
+              >
+                Image goes here
+              </div>
             )}
           </div>
 
           {/* Copy block */}
-<div style={{ padding: "17px 18px 4px 18px" }}>
-  <div
-    style={{
-      color: "#191c1e",
-      fontWeight: 800,
-      fontSize: 17,
-      marginBottom: 5,
-      fontFamily: AD_FONT
-    }}
-  >
-    {displayHeadline}
-  </div>
+          <div style={{ padding: "17px 18px 4px 18px" }}>
+            <div
+              style={{
+                color: "#191c1e",
+                fontWeight: 800,
+                fontSize: 17,
+                marginBottom: 5,
+                fontFamily: AD_FONT,
+              }}
+            >
+              {displayHeadline}
+            </div>
 
-  <div
-    style={{
-      color: "#3a4149",
-      fontSize: 15,
-      fontWeight: 600,
-      marginBottom: 3,
-      minHeight: 18
-    }}
-  >
-    {displayBody}
-  </div>
-</div>
-
+            <div
+              style={{
+                color: "#3a4149",
+                fontSize: 15,
+                fontWeight: 600,
+                marginBottom: 3,
+                minHeight: 18,
+              }}
+            >
+              {displayBody}
+            </div>
+          </div>
 
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
-            <button style={{
-              background: "#14e7b9",
-              color: "#181b20",
-              fontWeight: 700,
-              border: "none",
-              borderRadius: 9,
-              padding: "8px 20px",
-              fontSize: 15,
-              cursor: "pointer"
-            }}>{displayCTA}</button>
+            <button
+              style={{
+                background: "#14e7b9",
+                color: "#181b20",
+                fontWeight: 700,
+                border: "none",
+                borderRadius: 9,
+                padding: "8px 20px",
+                fontSize: 15,
+                cursor: "pointer",
+              }}
+            >
+              {displayCTA}
+            </button>
           </div>
 
           {/* Image Edit toggle + fields */}
@@ -2084,56 +2457,115 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
               display: "flex",
               alignItems: "center",
               gap: 5,
-              zIndex: 2
+              zIndex: 2,
             }}
-            onClick={() => setImageEditing(v => !v)}
+            onClick={() => setImageEditing((v) => !v)}
           >
             {imageEditing ? "Done" : "Edit"}
           </button>
 
           {imageEditing && (
-            <div style={{ padding: "10px 18px 4px 18px", display: "grid", gap: 10 }}>
+            <div
+              style={{
+                padding: "10px 18px 4px 18px",
+                display: "grid",
+                gap: 10,
+              }}
+            >
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Headline (max 55 chars)</div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#6b7785",
+                    marginBottom: 4,
+                  }}
+                >
+                  Headline (max 55 chars)
+                </div>
                 <input
                   value={editHeadline}
-                  onChange={(e) => setEditHeadline(e.target.value.slice(0, 55))}
-                  onBlur={() => saveImageDraftById(currentImageId, { headline: (editHeadline || "").trim() })}
+                  onChange={(e) =>
+                    setEditHeadline(e.target.value.slice(0, 55))
+                  }
+                  onBlur={() =>
+                    saveImageDraftById(currentImageId, {
+                      headline: (editHeadline || "").trim(),
+                    })
+                  }
                   placeholder="Headline"
                   maxLength={55}
                   style={{
-                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
-                    padding: "10px 12px", fontWeight: 700
+                    width: "100%",
+                    borderRadius: 10,
+                    border: "1px solid #e4e7ec",
+                    padding: "10px 12px",
+                    fontWeight: 700,
                   }}
                 />
-                <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>{editHeadline.length}/55</div>
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: "#9aa6b2",
+                    marginTop: 4,
+                  }}
+                >
+                  {editHeadline.length}/55
+                </div>
               </label>
 
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Body (18–30 words)</div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#6b7785",
+                    marginBottom: 4,
+                  }}
+                >
+                  Body (18–30 words)
+                </div>
                 <textarea
                   value={editBody}
                   onChange={(e) => setEditBody(e.target.value)}
-                  onBlur={() => saveImageDraftById(currentImageId, { body: (editBody || "").trim() })}
+                  onBlur={() =>
+                    saveImageDraftById(currentImageId, {
+                      body: (editBody || "").trim(),
+                    })
+                  }
                   rows={3}
                   placeholder="Body copy"
                   style={{
-                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
-                    padding: "10px 12px", fontWeight: 600
+                    width: "100%",
+                    borderRadius: 10,
+                    border: "1px solid #e4e7ec",
+                    padding: "10px 12px",
+                    fontWeight: 600,
                   }}
                 />
               </label>
 
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#6b7785",
+                    marginBottom: 4,
+                  }}
+                >
+                  CTA (e.g., Shop now, Learn more)
+                </div>
                 <input
                   value={editCTA}
                   onChange={(e) => setEditCTA(e.target.value)}
-                  onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
+                  onBlur={() =>
+                    setEditCTA(normalizeOverlayCTA(editCTA))
+                  }
                   placeholder="CTA"
                   style={{
-                    width: "100%", borderRadius: 10, border: "1px solid #e4e7ec",
-                    padding: "10px 12px", fontWeight: 700
+                    width: "100%",
+                    borderRadius: 10,
+                    border: "1px solid #e4e7ec",
+                    padding: "10px 12px",
+                    fontWeight: 700,
                   }}
                 />
               </label>
@@ -2142,35 +2574,42 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
         </div>
 
         {/* VIDEO CARD */}
-        <div style={{
-          background: "#fff",
-          borderRadius: 13,
-          boxShadow: "0 2px 24px #16242714",
-          minWidth: 340,
-          maxWidth: 390,
-          flex: mediaType === "image" ? 0 : 1,
-          marginBottom: 20,
-          padding: "0px 0px 14px 0px",
-          border: "1.5px solid #eaeaea",
-          fontFamily: AD_FONT,
-          display: mediaType === "image" ? "none" : "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          position: "relative"
-        }}>
-          <div style={{
-            background: "#f5f6fa",
-            padding: "11px 20px",
-            borderBottom: "1px solid #e0e4eb",
-            fontWeight: 700,
-            color: "#495a68",
-            fontSize: 16,
-            letterSpacing: 0.08,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center"
-          }}>
-            <span>Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span></span>
+        <div
+          style={{
+            background: "#fff",
+            borderRadius: 13,
+            boxShadow: "0 2px 24px #16242714",
+            minWidth: 340,
+            maxWidth: 390,
+            flex: mediaType === "image" ? 0 : 1,
+            marginBottom: 20,
+            padding: "0px 0px 14px 0px",
+            border: "1.5px solid #eaeaea",
+            fontFamily: AD_FONT,
+            display: mediaType === "image" ? "none" : "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+            position: "relative",
+          }}
+        >
+          <div
+            style={{
+              background: "#f5f6fa",
+              padding: "11px 20px",
+              borderBottom: "1px solid #e0e4eb",
+              fontWeight: 700,
+              color: "#495a68",
+              fontSize: 16,
+              letterSpacing: 0.08,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <span>
+              Sponsored ·{" "}
+              <span style={{ color: "#12cbb8" }}>SmartMark</span>
+            </span>
             <button
               style={{
                 background: "#1ad6b7",
@@ -2185,7 +2624,7 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                 boxShadow: "0 2px 7px #19e5b733",
                 display: "flex",
                 alignItems: "center",
-                gap: 7
+                gap: 7,
               }}
               onClick={handleRegenerateVideo}
               disabled={videoLoading}
@@ -2196,96 +2635,192 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
             </button>
           </div>
 
-      {/* Carousel body */}
-<div style={{ background: "#222", position: "relative", display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
-  {videoLoading || generating ? (
-    <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <Dotty />
-    </div>
-  ) : videoItems.length > 0 ? (
-    <>
-      <video
-        key={`${videoItems[activeVideo]?.url || "video"}-${activeVideo}`}
-        src={toAbsoluteMedia(videoItems[activeVideo]?.url || "")}
-        controls
-        playsInline
-        muted
-        preload="metadata"
-        style={{ width: "100%", maxHeight: 220, borderRadius: 0, background: "#111" }}
-      >
-        {/* If backend provided a sidecar VTT (when not burned-in), attach it */}
-        {videoItems[activeVideo]?.captionsVtt && (
-          <track
-            src={toAbsoluteMedia(videoItems[activeVideo].captionsVtt)}
-            kind="captions"
-            srcLang="en"
-            label="English"
-            default
-          />
-        )}
-      </video>
+          {/* Carousel body */}
+          <div
+            style={{
+              background: "#222",
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: 220,
+            }}
+          >
+            {videoLoading || generating ? (
+              <div
+                style={{
+                  width: "100%",
+                  height: 220,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Dotty />
+              </div>
+            ) : videoItems.length > 0 ? (
+              <>
+                <video
+                  key={`${
+                    videoItems[activeVideo]?.url || "video"
+                  }-${activeVideo}`}
+                  src={toAbsoluteMedia(
+                    videoItems[activeVideo]?.url || ""
+                  )}
+                  controls
+                  playsInline
+                  muted
+                  preload="metadata"
+                  style={{
+                    width: "100%",
+                    maxHeight: 220,
+                    borderRadius: 0,
+                    background: "#111",
+                  }}
+                >
+                  {videoItems[activeVideo]?.captionsVtt && (
+                    <track
+                      src={toAbsoluteMedia(
+                        videoItems[activeVideo].captionsVtt
+                      )}
+                      kind="captions"
+                      srcLang="en"
+                      label="English"
+                      default
+                    />
+                  )}
+                </video>
 
-      <Arrow side="left" onClick={() => {
-        const next = (activeVideo + videoItems.length - 1) % videoItems.length;
-        setActiveVideo(next);
-        setVideoUrl(videoItems[next]?.url || "");
-        setVideoScript(videoItems[next]?.script || "");
-      }} disabled={videoItems.length <= 1} />
-      <Arrow side="right" onClick={() => {
-        const next = (activeVideo + 1) % videoItems.length;
-        setActiveVideo(next);
-        setVideoUrl(videoItems[next]?.url || "");
-        setVideoScript(videoItems[next]?.script || "");
-      }} disabled={videoItems.length <= 1} />
-      <Dots count={videoItems.length} active={activeVideo} onClick={(i) => {
-        setActiveVideo(i);
-        setVideoUrl(videoItems[i]?.url || "");
-        setVideoScript(videoItems[i]?.script || "");
-      }} />
-    </>
-  ) : (
-    <div style={{
-      height: 220,
-      width: "100%",
-      background: "#e9ecef",
-      color: "#a9abb0",
-      fontWeight: 700,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      fontSize: 22
-    }}>Video goes here</div>
-  )}
-</div>
-
-
-          <div style={{ padding: "17px 18px 4px 18px" }}>
-            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
-              {result?.headline || "Welcome New Customers Instantly!"}
-            </div>
-            {videoItems.length > 0 && (videoItems[activeVideo]?.script || videoScript) && (
-              <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
-                <b>Script:</b> {videoItems[activeVideo]?.script || videoScript}
+                <Arrow
+                  side="left"
+                  onClick={() => {
+                    const next =
+                      (activeVideo +
+                        videoItems.length -
+                        1) %
+                      videoItems.length;
+                    setActiveVideo(next);
+                    setVideoUrl(videoItems[next]?.url || "");
+                    setVideoScript(
+                      videoItems[next]?.script || ""
+                    );
+                  }}
+                  disabled={videoItems.length <= 1}
+                />
+                <Arrow
+                  side="right"
+                  onClick={() => {
+                    const next =
+                      (activeVideo + 1) % videoItems.length;
+                    setActiveVideo(next);
+                    setVideoUrl(videoItems[next]?.url || "");
+                    setVideoScript(
+                      videoItems[next]?.script || ""
+                    );
+                  }}
+                  disabled={videoItems.length <= 1}
+                />
+                <Dots
+                  count={videoItems.length}
+                  active={activeVideo}
+                  onClick={(i) => {
+                    setActiveVideo(i);
+                    setVideoUrl(
+                      videoItems[i]?.url || ""
+                    );
+                    setVideoScript(
+                      videoItems[i]?.script || ""
+                    );
+                  }}
+                />
+              </>
+            ) : (
+              <div
+                style={{
+                  height: 220,
+                  width: "100%",
+                  background: "#e9ecef",
+                  color: "#a9abb0",
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 22,
+                }}
+              >
+                Video goes here
               </div>
             )}
           </div>
-          <div style={{ padding: "8px 18px", marginTop: 2 }}>
-            <button style={{
-              background: "#14e7b9",
-              color: "#181b20",
-              fontWeight: 700,
-              border: "none",
-              borderRadius: 9,
-              padding: "8px 20px",
-              fontSize: 15,
-              cursor: "pointer"
-            }}>Learn More</button>
+
+          <div
+            style={{
+              padding: "17px 18px 4px 18px",
+            }}
+          >
+            <div
+              style={{
+                color: "#191c1e",
+                fontWeight: 800,
+                fontSize: 17,
+                marginBottom: 5,
+                fontFamily: AD_FONT,
+              }}
+            >
+              {result?.headline || "Welcome New Customers Instantly!"}
+            </div>
+            {videoItems.length > 0 &&
+              (videoItems[activeVideo]?.script ||
+                videoScript) && (
+                <div
+                  style={{
+                    color: "#3a4149",
+                    fontSize: 15,
+                    fontWeight: 600,
+                    marginBottom: 3,
+                    minHeight: 18,
+                  }}
+                >
+                  <b>Script:</b>{" "}
+                  {videoItems[activeVideo]?.script ||
+                    videoScript}
+                </div>
+              )}
+          </div>
+          <div
+            style={{
+              padding: "8px 18px",
+              marginTop: 2,
+            }}
+          >
+            <button
+              style={{
+                background: "#14e7b9",
+                color: "#181b20",
+                fontWeight: 700,
+                border: "none",
+                borderRadius: 9,
+                padding: "8px 20px",
+                fontSize: 15,
+                cursor: "pointer",
+              }}
+            >
+              Learn More
+            </button>
           </div>
         </div>
       </div>
 
       {/* Continue */}
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 10, paddingBottom: 28 }}>
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "center",
+          marginTop: 10,
+          paddingBottom: 28,
+        }}
+      >
         <button
           style={{
             background: TEAL,
@@ -2299,21 +2834,40 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
             fontFamily: MODERN_FONT,
             boxShadow: `0 2px 16px ${TEAL_SOFT}`,
             cursor: "pointer",
-            transition: "background 0.18s"
+            transition: "background 0.18s",
           }}
           onClick={() => {
-            const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
-            const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
-            const mergedBody = activeDraft?.body || result?.body || "";
-            const mergedCTA = normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || "");
-
+            const activeDraft = currentImageId
+              ? getImageDraftById(currentImageId)
+              : null;
+            const mergedHeadline = (
+              activeDraft?.headline || result?.headline || ""
+            ).slice(0, 55);
+            const mergedBody =
+              activeDraft?.body || result?.body || "";
+            const mergedCTA = normalizeOverlayCTA(
+              activeDraft?.overlay ||
+                result?.image_overlay_text ||
+                answers?.cta ||
+                ""
+            );
 
             let imgA = imageUrls.map(abs).slice(0, 2);
-            let vidA = videoItems.map(v => abs(v.url)).slice(0, 2);
-            let fbIds = videoItems.map(v => v.fbVideoId).filter(Boolean).slice(0, 2);
+            let vidA = videoItems
+              .map((v) => abs(v.url))
+              .slice(0, 2);
+            let fbIds = videoItems
+              .map((v) => v.fbVideoId)
+              .filter(Boolean)
+              .slice(0, 2);
 
-            if (mediaType === "image") { vidA = []; fbIds = []; }
-            if (mediaType === "video") { imgA = []; }
+            if (mediaType === "image") {
+              vidA = [];
+              fbIds = [];
+            }
+            if (mediaType === "video") {
+              imgA = [];
+            }
 
             const draftForSetup = {
               images: imgA,
@@ -2322,19 +2876,41 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
               headline: mergedHeadline,
               body: mergedBody,
               imageOverlayCTA: mergedCTA,
-              videoScript: videoItems[0]?.script || videoScript || "",
+              videoScript:
+                videoItems[0]?.script || videoScript || "",
               answers,
               mediaSelection: mediaType,
-              savedAt: Date.now()
+              savedAt: Date.now(),
             };
 
-            sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
-            localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-            localStorage.setItem("smartmark_media_selection", mediaType);
+            sessionStorage.setItem(
+              "draft_form_creatives",
+              JSON.stringify(draftForSetup)
+            );
+            localStorage.setItem(
+              CREATIVE_DRAFT_KEY,
+              JSON.stringify(draftForSetup)
+            );
+            localStorage.setItem(
+              "smartmark_media_selection",
+              mediaType
+            );
 
-            if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
-            if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
-            if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+            if (imgA[0])
+              localStorage.setItem(
+                "smartmark_last_image_url",
+                imgA[0]
+              );
+            if (vidA[0])
+              localStorage.setItem(
+                "smartmark_last_video_url",
+                vidA[0]
+              );
+            if (fbIds[0])
+              localStorage.setItem(
+                "smartmark_last_fb_video_id",
+                String(fbIds[0])
+              );
 
             navigate("/setup", {
               state: {
@@ -2344,10 +2920,11 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
                 headline: mergedHeadline,
                 body: mergedBody,
                 imageOverlayCTA: mergedCTA,
-                videoScript: videoItems[0]?.script || videoScript,
+                videoScript:
+                  videoItems[0]?.script || videoScript,
                 answers,
-                mediaSelection: mediaType
-              }
+                mediaSelection: mediaType,
+              },
             });
           }}
         >
@@ -2355,7 +2932,11 @@ let craftedCopy = assetsData && Object.keys(assetsData).length
         </button>
       </div>
 
-      <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
+      <ImageModal
+        open={showModal}
+        imageUrl={modalImg}
+        onClose={handleModalClose}
+      />
     </div>
   );
 }
@@ -2365,8 +2946,22 @@ const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
   { key: "businessName", question: "What's your business name?" },
-  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
-  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
-  { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
-  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" }
+  {
+    key: "idealCustomer",
+    question: "Describe your ideal customer in one sentence.",
+  },
+  {
+    key: "hasOffer",
+    question: "Do you have a special offer or promo? (yes/no)",
+  },
+  {
+    key: "offer",
+    question: "What is your offer/promo?",
+    conditional: { key: "hasOffer", value: "yes" },
+  },
+  {
+    key: "mainBenefit",
+    question:
+      "What's the main benefit or transformation you promise?",
+  },
 ];

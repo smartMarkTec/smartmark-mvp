@@ -401,6 +401,20 @@ function clampWords(s = '', max = 16) {
   return w.length > max ? w.slice(0, max).join(' ') + '…' : String(s).trim();
 }
 
+// Remove trailing short connector word so sublines don't end with "of", "for", etc.
+function stripTrailingShortWord(s = '') {
+  const parts = String(s || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return '';
+  const last = parts[parts.length - 1].toLowerCase();
+  if (/^(of|for|to|and|or|with|in|on|at)$/.test(last)) {
+    parts.pop();
+  }
+  return parts.join(' ');
+}
+
 const INDUSTRY_TEMPLATES = {
   fashion: {
     headline: (brand, benefit) =>
@@ -492,12 +506,23 @@ Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
 
 Rules:
-- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Use varied wording.
-- Subline: one short complete thought, max 12 words. Do not end with a dangling word like "of" or "for".
-- Bullets: 2–4 micro-phrases, 3–5 words each, no periods.
-- Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
-- Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
-- Keep copy coherent, brand-safe, and specific to the business.`;
+- Headline:
+  - Max 6 words (2–4 words ideal).
+  - Punchy, no period at end.
+  - Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your".
+  - Use varied verbs: Refresh, Discover, Step into, New season, Bold looks, etc.
+- Subline:
+  - One short complete thought, max 12 words.
+  - Do not end with a dangling word like "of", "for", "to", "and", "or", "with", "in", "on", "at".
+- Bullets:
+  - 2–4 micro-phrases.
+  - 3–5 words each.
+  - No periods; no full sentences.
+- Offer:
+  - Must be based ONLY on the user's described offer/discount.
+  - If they did not describe a deal, set "offer" to an empty string "".
+  - Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
+- Copy must be coherent, brand-safe, and specific to the business.`;
 
   const user = {
     businessName: answers.businessName || '',
@@ -581,6 +606,66 @@ function tightenOfferText(s = '') {
     .trim();
 
   return shortenWords(cleaned, 4);
+}
+
+// Split user offer into main promo line (for big bold text) + extra detail
+function splitOfferMainExtra(raw = '') {
+  let text = cleanLine(raw || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text) return { main: '', extra: '' };
+
+  const lower = text.toLowerCase();
+  let main = '';
+  let extra = text;
+
+  const pct = lower.match(/(up to\s*)?(\d{1,3})\s*%/i);
+  if (pct) {
+    const full = pct[0];
+    const upTo = !!pct[1];
+    const num = pct[2];
+    const out = (upTo ? `up to ${num}%` : `${num}%`) + ' off';
+    main = tightenOfferText(out);
+    const idx = lower.indexOf(full.toLowerCase());
+    const before = text.slice(0, idx).trim();
+    const after = text.slice(idx + full.length).trim();
+    extra = [before, after].filter(Boolean).join(' ');
+  } else {
+    const dol = lower.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
+    if (dol) {
+      const full = dol[0];
+      const amt = dol[1];
+      const out = `$${amt} off`;
+      main = tightenOfferText(out);
+      const idx = lower.indexOf(full.toLowerCase());
+      const before = text.slice(0, idx).trim();
+      const after = text.slice(idx + full.length).trim();
+      extra = [before, after].filter(Boolean).join(' ');
+    } else if (/buy\s*1\s*get\s*1/i.test(lower)) {
+      const m = lower.match(/buy\s*1\s*get\s*1/i);
+      const full = m ? m[0] : '';
+      main = 'BUY 1 GET 1';
+      if (full) {
+        const idx = lower.indexOf(full.toLowerCase());
+        const before = text.slice(0, idx).trim();
+        const after = text.slice(idx + full.length).trim();
+        extra = [before, after].filter(Boolean).join(' ');
+      } else {
+        extra = '';
+      }
+    } else {
+      // Fallback: main = normalized whole; extra empty
+      main = tightenOfferText(text);
+      extra = '';
+    }
+  }
+
+  main = (main || '').trim();
+  extra = (extra || '').replace(/\s+/g, ' ').trim();
+  if (extra && extra.toUpperCase() === main) {
+    extra = '';
+  }
+  return { main, extra };
 }
 
 /* ------------------------ SVG templates ------------------------ */
@@ -1072,10 +1157,24 @@ router.post('/generate-static-ad', async (req, res) => {
     }
 
     // Normalize copy
-    const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
-    const safeSubline = clampWords(cleanLine(crafted.subline || ''), 12);
-    const safeOffer = tightenOfferText(crafted.offer || a.offer || a.saveAmount || '');
-    const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
+    const userOfferRaw = a.offer || a.saveAmount || crafted.offer || '';
+    const offerSplit = userOfferRaw ? splitOfferMainExtra(userOfferRaw) : { main: '', extra: '' };
+    const safeOffer = offerSplit.main || '';
+    const offerExtra = offerSplit.extra || '';
+
+    let safeHeadline = cleanLine(crafted.headline || '');
+    if (/^elevate\s+(your|the)\b/i.test(safeHeadline)) {
+      safeHeadline = safeHeadline.replace(/^elevate/i, 'Refresh');
+    }
+    safeHeadline = clampWords(safeHeadline, 6);
+
+    let safeSubline = clampWords(cleanLine(crafted.subline || ''), 12);
+    safeSubline = stripTrailingShortWord(safeSubline);
+    if (safeSubline && !/[.!?]$/.test(safeSubline)) {
+      safeSubline += '.';
+    }
+
+    let safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
 
     let rawBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
     rawBullets = rawBullets.map((b) =>
@@ -1095,12 +1194,13 @@ router.post('/generate-static-ad', async (req, res) => {
       return true;
     });
 
-    // Fallback: make sure we always have at least one bullet
+    // If bullets completely empty, fall back to original list
     if (!safeBullets.length) {
       safeBullets = rawBullets.filter(Boolean);
     }
+
+    // If still empty, ultimate fallback by industry
     if (!safeBullets.length) {
-      // ultimate fallback by industry
       const tmpl = INDUSTRY_TEMPLATES[prof.kind];
       if (tmpl) {
         safeBullets =
@@ -1111,6 +1211,40 @@ router.post('/generate-static-ad', async (req, res) => {
       } else {
         safeBullets = ['Modern styles', 'Quality you can feel'];
       }
+    }
+
+    // Optionally incorporate extra offer detail as a bullet (short)
+    if (offerExtra) {
+      const extraBullet = clampWords(cleanLine(offerExtra), 6);
+      const extraKey = extraBullet.toLowerCase();
+      if (
+        extraBullet &&
+        !safeBullets.some((b) => b.toLowerCase() === extraKey)
+      ) {
+        safeBullets.push(extraBullet);
+      }
+    }
+
+    // Ensure 2–3 bullets
+    if (safeBullets.length < 2) {
+      const tmpl = INDUSTRY_TEMPLATES[prof.kind];
+      const fallbacks = tmpl
+        ? tmpl
+            .bullets('')
+            .map((b) => clampWords(cleanLine(b), 6))
+        : ['Quality you can feel', 'Modern, clean design'];
+      for (const fb of fallbacks) {
+        const key = fb.toLowerCase();
+        if (safeBullets.some((b) => b.toLowerCase() === key)) continue;
+        safeBullets.push(fb);
+        if (safeBullets.length >= 2) break;
+      }
+    }
+    if (!safeBullets.length) {
+      safeBullets = ['Quality you can feel', 'Modern, clean design'];
+    }
+    if (safeBullets.length > 3) {
+      safeBullets = safeBullets.slice(0, 3);
     }
 
     crafted = {
@@ -1137,7 +1271,8 @@ router.post('/generate-static-ad', async (req, res) => {
       dateRange: (crafted.subline || '').toString(),
       saveAmount: crafted.offer || '',
       financing: (crafted.secondary || '').toString(),
-      qualifiers: (crafted.subline || '').toString(),
+      // qualifiers shows the extra tail of the offer / promo, not a duplicate of subline
+      qualifiers: offerExtra || '',
       legal: (crafted.disclaimers || '').toString(),
       palette: knobs.palette || prof.palette,
       bullets: Array.isArray(crafted.bullets) ? crafted.bullets : [],
@@ -1664,11 +1799,27 @@ router.post('/craft-ad-copy', async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: 'copy failed' });
 
-    const safeOffer = tightenOfferText(a.offer || a.saveAmount || rawCopy.offer || '');
+    // Only base offer on what the user actually typed
+    const userOfferRaw = a.offer || a.saveAmount || '';
+    const { main: offerMain, extra: offerExtra } = splitOfferMainExtra(userOfferRaw);
+    const safeOffer = offerMain;
 
-    const safeHeadline = clampWords(cleanLine(rawCopy.headline || ''), 6);
-    const safeSubline = clampWords(cleanLine(rawCopy.subline || ''), 12);
-    const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 10);
+    let safeHeadline = cleanLine(rawCopy.headline || '');
+    if (/^elevate\s+(your|the)\b/i.test(safeHeadline)) {
+      safeHeadline = safeHeadline.replace(/^elevate/i, 'Refresh');
+    }
+    safeHeadline = clampWords(safeHeadline, 6);
+
+    let safeSubline = clampWords(cleanLine(rawCopy.subline || ''), 12);
+    safeSubline = stripTrailingShortWord(safeSubline);
+    if (safeSubline && !/[.!?]$/.test(safeSubline)) {
+      safeSubline += '.';
+    }
+
+    let safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 10);
+    if (!safeSecondary && offerExtra) {
+      safeSecondary = clampWords(cleanLine(offerExtra), 10);
+    }
 
     let bulletsRaw = Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [];
     bulletsRaw = bulletsRaw.map((b) =>
@@ -1688,6 +1839,24 @@ router.post('/craft-ad-copy', async (req, res) => {
     });
     if (!bullets.length) bullets = bulletsRaw.filter(Boolean);
     if (!bullets.length) bullets = ['Quality you can feel', 'Modern, clean design'];
+
+    // Optionally add the extra offer tail as a bullet if it isn't already captured
+    if (offerExtra) {
+      const extraBullet = clampWords(cleanLine(offerExtra), 6);
+      const extraKey = extraBullet.toLowerCase();
+      if (
+        extraBullet &&
+        !bullets.some((b) => b.toLowerCase() === extraKey)
+      ) {
+        bullets.push(extraBullet);
+      }
+    }
+
+    // Enforce 2–3 bullets
+    if (bullets.length < 2) {
+      bullets.push('Modern, clean design');
+    }
+    bullets = bullets.slice(0, 3);
 
     const copy = {
       headline: safeHeadline,
