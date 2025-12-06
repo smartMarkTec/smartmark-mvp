@@ -689,89 +689,103 @@ function tplPosterBCard({
   fsH2,
   fsSave,
   fsBody,
-  metrics,
 }) {
-  const {
-    titleY,
-    dateY,
-    saveY,
-    financeY,
-    qualY,
-    bulletStartY,
-    panelTop,
-    panelHeight,
-  } = metrics;
+  // Shaw-style layout constants (relative to card coordinates)
+  const panelTop = 40;                    // top white panel inside the image
+  const panelHeight = 260;                // height of the top panel
+  const panelX = padX;
+  const panelW = cardW - padX * 2;
+
+  const brandY = panelTop + 38;           // brand text inside panel
+  const titleY = panelTop + 110;          // main headline inside panel
+  const sublineY = panelTop + 180;        // subline inside panel
+  const bulletsY = panelTop + 225;        // bullets inside panel
+
+  const saveY = panelTop + panelHeight + 120;   // big offer on photo
+  const financeY = saveY + fsH2 + 18;           // supporting/financing line
+  const qualY = financeY + fsBody + 16;         // tiny extra line above legal
+  const legalY = cardH - 26;                    // tiny legal at bottom
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
+    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#000" flood-opacity="0.25"/>
+    </filter>
     <style>
       .t-center { text-anchor: middle; }
+
+      /* Top white panel typography */
+      .brand   { font: 800 26px/1 Inter,system-ui; fill:#4a5563; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22; }
       .h2      { font: 800 ${fsH2}px/1.2 Inter,system-ui; fill:#3b4b59; }
-      .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
-      .body    { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#556474; }
-      .bodyPhoto { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#ffffff; }
-      .legal   { font: 600 22px/1.3 Inter,system-ui; fill:#e1e7ed; }
-      .brand   { font: 800 26px/1 Inter,system-ui; fill:#4a5563; }
+
+      /* Bullets in panel */
       .bullet-dot  { font: 900 ${fsBody}px/1 Inter,system-ui; fill:#3b4b59; }
       .bullet-text { font: 700 ${fsBody}px/1.2 Inter,system-ui; fill:#3b4b59; }
+
+      /* Offer / body on photo */
+      .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
+      .bodyPhoto { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#ffffff; text-shadow: 0 3px 6px rgba(0,0,0,0.35); }
+
+      /* Legal at very bottom */
+      .legal   { font: 600 22px/1.3 Inter,system-ui; fill:#e1e7ed; }
     </style>
   </defs>
 
-  <!-- TOP WHITE PANEL (headline + subline + bullets) -->
-  <g>
+  <!-- TOP WHITE PANEL (like the FALL FLOORING SALE box) -->
+  <g filter="url(#panelShadow)">
     <rect
-      x="${padX}"
+      x="${panelX}"
       y="${panelTop}"
-      width="${cardW - padX * 2}"
+      width="${panelW}"
       height="${panelHeight}"
       rx="24"
       fill="#ffffff"
-      opacity="0.97"
+      opacity="0.98"
     />
-
-    <!-- Brand name row -->
-    <text class="brand t-center" x="${cardW / 2}" y="${
-      panelTop + 42
-    }">{{brandName}}</text>
-
-    <!-- Main headline inside panel -->
-    <text class="title t-center" x="${cardW / 2}" y="${titleY}">
-      {{#eventTitleLines}}
-        <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
-      {{/eventTitleLines}}
-    </text>
-
-    <!-- Subline / date line under headline -->
-    <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
-      {{#dateRangeLines}}
-        <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
-      {{/dateRangeLines}}
-    </text>
-
-    <!-- Short bullets inside panel -->
-    {{#hasBullets}}
-    <g transform="translate(${padX + 40}, ${bulletStartY})">
-      {{#bulletLines}}
-        <g transform="translate(0, {{dy}})">
-          <text class="bullet-dot" x="0" y="${fsBody}">•</text>
-          <text class="bullet-text" x="30" y="${fsBody}">{{line}}</text>
-        </g>
-      {{/bulletLines}}
-    </g>
-    {{/hasBullets}}
   </g>
 
-  <!-- OFFER & BODY COPY ON PHOTO (outside the white panel) -->
+  <!-- Brand name / logos row -->
+  <text class="brand t-center" x="${cardW / 2}" y="${brandY}">{{brandName}}</text>
+
+  <!-- Main HEADLINE inside the white panel -->
+  <text class="title t-center" x="${cardW / 2}" y="${titleY}">
+    {{#eventTitleLines}}
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
+    {{/eventTitleLines}}
+  </text>
+
+  <!-- Subline inside panel -->
+  <text class="h2 t-center" x="${cardW / 2}" y="${sublineY}">
+    {{#dateRangeLines}}
+      <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
+    {{/dateRangeLines}}
+  </text>
+
+  <!-- 2–3 MICRO BULLETS inside the panel -->
+  {{#hasBullets}}
+  <g transform="translate(${panelX + 48}, ${bulletsY})">
+    {{#bulletLines}}
+      <g transform="translate(0, {{dy}})">
+        <text class="bullet-dot" x="0" y="${fsBody}">•</text>
+        <text class="bullet-text" x="30" y="${fsBody}">{{line}}</text>
+      </g>
+    {{/bulletLines}}
+  </g>
+  {{/hasBullets}}
+
+  <!-- BIG OFFER directly on the photo area -->
   {{#saveAmount}}
   <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
   {{/saveAmount}}
 
+  <!-- Supporting / financing line -->
   {{#financingLine}}
   <text class="bodyPhoto t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
   {{/financingLine}}
 
+  <!-- Extra qualifier/body line just above legal (optional) -->
   {{#qualifierLines.length}}
   <text class="bodyPhoto t-center" x="${cardW / 2}" y="${qualY}">
     {{#qualifierLines}}
@@ -780,12 +794,13 @@ function tplPosterBCard({
   </text>
   {{/qualifierLines.length}}
 
-  <!-- Legal / tiny disclaimer near bottom -->
+  <!-- Tiny legal line at the very bottom (like "*With approved credit. Ask for details.") -->
   {{#legal}}
-  <text class="legal t-center" x="${cardW / 2}" y="${cardH - 24}">{{legal}}</text>
+  <text class="legal t-center" x="${cardW / 2}" y="${legalY}">{{legal}}</text>
   {{/legal}}
 </svg>`;
 }
+
 
 /* ------------------------ Utility helpers ------------------------ */
 
