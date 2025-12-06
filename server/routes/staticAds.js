@@ -1073,16 +1073,22 @@ router.post('/generate-static-ad', async (req, res) => {
     // Build final fields ONLY from crafted copy (for text)
     const userOfferRaw = (a.offer || a.saveAmount || '').toString();
 
+    // compact bullets as a single “• … • …” string for the small qualifier text
+    const bulletsCompact = (Array.isArray(crafted.bullets) ? crafted.bullets : [])
+      .map((b) => cleanLine(b || ''))
+      .filter(Boolean)
+      .join(' • ');
+
     const autoFields = {
       eventTitle: (crafted.headline || '').toString(),
+      // this is the smaller top line under the big headline (date/subline)
       dateRange: (crafted.subline || '').toString(),
-      saveAmount: tightenOfferText(userOfferRaw),
+      // Shaw-style “SAVE up to $1000” line
+      saveAmount: tightenOfferText(userOfferRaw || crafted.offer || ''),
       financing: (crafted.secondary || '').toString(),
+      // small copy block: subline + bullets, separated by dots
       qualifiers: (
-        [
-          crafted.subline,
-          // keep qualifier line compact; bullets are separate
-        ]
+        [crafted.subline, bulletsCompact]
           .filter(Boolean)
           .join(' • ')
       ).toString(),
@@ -1103,6 +1109,7 @@ router.post('/generate-static-ad', async (req, res) => {
       qualifiers: autoFields.qualifiers,
       legal: autoFields.legal,
       palette: autoFields.palette,
+      // pass bullets through so the SVG can render them as a stacked list
       bullets: autoFields.bullets || [],
     };
 
@@ -1114,7 +1121,9 @@ router.post('/generate-static-ad', async (req, res) => {
         knobs: mergedKnobsB,
       })
     ) {
-      throw new Error('validation failed: ' + JSON.stringify(validateB.errors));
+      throw new Error(
+        'validation failed: ' + JSON.stringify(validateB.errors)
+      );
     }
 
     // ---------- build background photo ----------
@@ -1125,7 +1134,10 @@ router.post('/generate-static-ad', async (req, res) => {
       try {
         photoBuf = await fetchBuffer(mergedKnobsB.backgroundUrl);
       } catch (e) {
-        console.warn('[poster_b] backgroundUrl fetch failed → try Pexels/local:', e.message);
+        console.warn(
+          '[poster_b] backgroundUrl fetch failed → try Pexels/local:',
+          e.message
+        );
       }
     }
     if (!photoBuf) {
@@ -1140,7 +1152,10 @@ router.post('/generate-static-ad', async (req, res) => {
       }
     }
     if (!photoBuf) {
-      const localPath = pickLocalStockPath(classifyIndustry(industry), seed);
+      const localPath = pickLocalStockPath(
+        classifyIndustry(industry),
+        seed
+      );
       if (localPath) {
         try {
           photoBuf = fs.readFileSync(localPath);
@@ -1188,7 +1203,7 @@ router.post('/generate-static-ad', async (req, res) => {
       2
     );
 
-    // bullets: 2–3 short lines, stacked with dot prefix
+    // bullets: 2–3 short lines, stacked with “•” prefix, under the qualifier
     const bulletLines = Array.isArray(mergedKnobsB.bullets)
       ? mergedKnobsB.bullets
           .map((b) => cleanLine(String(b || '')))
@@ -1215,7 +1230,7 @@ router.post('/generate-static-ad', async (req, res) => {
       ? hasQual
         ? qualY + fsBody * 1.7
         : financeY + fsBody * 1.4
-      : 0;
+      : qualY;
 
     const metrics = {
       titleY: titleTop,
@@ -1232,7 +1247,6 @@ router.post('/generate-static-ad', async (req, res) => {
       eventTitleLines,
       qualifierLines,
       bulletLines,
-      hasBullets,
       dateRange: mergedKnobsB.dateRange,
       saveAmount: mergedKnobsB.saveAmount,
       financingLine: mergedKnobsB.financingLine,
@@ -1265,7 +1279,9 @@ router.post('/generate-static-ad', async (req, res) => {
       .png({ quality: 92 })
       .toBuffer();
 
-    const baseB = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const baseB = `static-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2)}`;
     const pngNameB = `${baseB}.png`;
     await fs.promises.writeFile(path.join(GEN_DIR, pngNameB), finalPng);
 
@@ -1281,11 +1297,16 @@ router.post('/generate-static-ad', async (req, res) => {
       asset: { id: baseB, createdAt: Date.now() },
       ready: true,
     });
-  } catch (err) {
+
+      } catch (err) {
     console.error('[generate-static-ad]', err);
-    res.status(400).json({ ok: false, error: String(err?.message || err) });
+    res
+      .status(400)
+      .json({ ok: false, error: String(err?.message || err) });
   }
 });
+
+
 
 /* ------------------------ proxy-img ------------------------ */
 
