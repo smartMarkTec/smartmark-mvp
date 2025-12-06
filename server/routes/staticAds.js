@@ -544,6 +544,7 @@ Rules:
 /* ------------------------ Offer normalizer ------------------------ */
 
 function tightenOfferText(s = '') {
+  // Normalize raw string
   let t = String(s || '')
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, ' ')
@@ -552,23 +553,42 @@ function tightenOfferText(s = '') {
     .trim();
   if (!t) return '';
 
+  const shortenWords = (str, maxWords = 4) => {
+    const words = String(str || '').trim().split(/\s+/);
+    if (words.length <= maxWords) return words.join(' ').toUpperCase();
+    return words.slice(0, maxWords).join(' ').toUpperCase();
+  };
+
+  // % OFF patterns → "50% OFF" or "UP TO 50% OFF"
   const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
   const upTo = /up to/.test(t);
   if (pct) {
-    let out = (upTo ? `UP TO ${pct[1]}%` : `${pct[1]}%`) + ' OFF';
-    if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) out += ' FIRST ORDER';
-    return out;
+    let out = (upTo ? `up to ${pct[1]}%` : `${pct[1]}%`) + ' off';
+    if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) {
+      out += ' first order';
+    }
+    return shortenWords(out, 4);
   }
+
+  // $ OFF patterns → "$100 OFF"
   const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
-  if (dol) return `$${dol[1]} OFF`;
+  if (dol) {
+    const out = `$${dol[1]} off`;
+    return shortenWords(out, 3);
+  }
+
+  // BOGO
   if (/buy\s*1\s*get\s*1/i.test(t)) return 'BUY 1 GET 1';
 
-  return t
+  // Fallback: strip filler words & cap to a few words
+  const cleaned = t
     .replace(/\b(we|our|you|your|they|their|will|get|receive|customers)\b/g, '')
     .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
+    .trim();
+
+  return shortenWords(cleaned, 4);
 }
+
 
 /* ------------------------ SVG templates ------------------------ */
 
@@ -663,56 +683,55 @@ function tplPosterBCard({
     </style>
   </defs>
 
-  <!-- White card with soft shadow, like the Shaw template -->
+  <!-- white card with soft shadow -->
   <g filter="url(#cardShadow)">
     <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="30" fill="#ffffff"/>
   </g>
 
-  <!-- Brand pill at the very top -->
+  <!-- pill brand label -->
   <g transform="translate(${cardW / 2 - 140}, ${Math.max(10, padY - 40)})">
     <rect width="280" height="44" rx="22" fill="#0f1a22" opacity="0.06"/>
     <text class="brand t-center" x="140" y="30">{{brandName}}</text>
   </g>
 
-  <!-- Main stacked content -->
+  <!-- headline + date + divider + SAVE + financing + small copy -->
   <g>
-    <!-- Big headline (FALL FLOORING SALE style) -->
     <text class="title t-center" x="${cardW / 2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
-    <!-- Date range / subline (AUGUST 15 – SEPTEMBER 30, 2020) -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">{{dateRange}}</text>
 
-    <!-- Divider -->
     <g transform="translate(${padX}, ${dividerY})">
       <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
     </g>
 
-    <!-- SAVE up to $1000 -->
     <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
 
-    <!-- PLUS SPECIAL FINANCING -->
     <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
 
-    <!-- Qualifier lines (e.g., ON SELECT PRODUCTS...) -->
     <text class="body t-center" x="${cardW / 2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/qualifierLines}}
     </text>
-
-    <!-- Bullet list under the qualifier (centered, Shaw-style) -->
-    <text class="body t-center" x="${cardW / 2}" y="${bulletStartY}">
-      {{#bulletLines}}
-        <tspan x="${cardW / 2}" dy="{{dy}}">• {{line}}</tspan>
-      {{/bulletLines}}
-    </text>
   </g>
 
-  <!-- Legal / disclaimer at the very bottom of the card -->
+  <!-- stacked bullet list under the qualifier (left aligned, Shaw-style) -->
+  {{#hasBullets}}
+  <g transform="translate(${padX + 40}, ${bulletStartY})">
+    {{#bulletLines}}
+      <g transform="translate(0, {{dy}})">
+        <circle cx="-18" cy="-8" r="5" fill="{{accent}}"/>
+        <text class="body" x="0" y="0">{{line}}</text>
+      </g>
+    {{/bulletLines}}
+  </g>
+  {{/hasBullets}}
+
+  <!-- tiny legal footer inside the card -->
   {{#legal}}
   <g transform="translate(${padX}, ${cardH - 18})">
     <text class="legal" x="0" y="-6">{{legal}}</text>
@@ -720,6 +739,7 @@ function tplPosterBCard({
   {{/legal}}
 </svg>`;
 }
+
 
 
 /* ------------------------ Utility helpers ------------------------ */
