@@ -388,7 +388,9 @@ function titleCase(s = '') {
 }
 function cleanLine(s = '') {
   const noUrl = String(s).replace(/https?:\/\/\S+|www\.\S+/gi, '');
-  const noFiller = noUrl.replace(/\s+/g, ' ').trim();
+  const noFiller = noUrl
+    .replace(/\s+/g, ' ')
+    .trim();
   return noFiller;
 }
 function clampWords(s = '', max = 16) {
@@ -460,7 +462,7 @@ function craftCopyFromAnswers(a = {}, prof = {}) {
   const offer = cleanLine(a.offer || a.saveAmount || '');
 
   const headline = clampWords(cleanLine(t.headline(brand, benefit)), 10);
-  const subline = clampWords(cleanLine(t.subline(audience, city)), 16);
+  const subline = clampWords(cleanLine(t.subline(audience, city)), 12);
   let bullets = (t.bullets(offer) || [])
     .map((b) => clampWords(cleanLine(b), 3))
     .slice(0, 3);
@@ -588,19 +590,18 @@ function compactBullet(s = '') {
   let t = cleanLine(s);
   if (!t) return '';
   t = t.replace(/•/g, ' ');
+  const lower = t.toLowerCase();
+
+  // drop leading filler like "Discover", "Enhance", etc.
   const fillerStarts = /^(discover|enhance|experience|enjoy|shop|find|explore|get|stay|keep)\b/i;
   t = t.replace(fillerStarts, '').trim();
 
   const words = t.split(/\s+/).filter(Boolean);
   if (!words.length) return '';
 
-  // keep it to 1–3 short words, then hard-cap characters so it stays on the card
+  // keep it to 1–3 words
   const kept = words.slice(0, 3);
-  let out = kept.join(' ');
-  if (out.length > 22) {
-    out = out.slice(0, 21).trimEnd() + '…';
-  }
-  return out;
+  return kept.join(' ');
 }
 
 /* ------------------------ SVG templates ------------------------ */
@@ -1092,10 +1093,10 @@ router.post('/generate-static-ad', async (req, res) => {
     }
 
     // Normalize copy
-    const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 9);
-    const safeSubline = clampWords(cleanLine(crafted.subline || ''), 16);
+    const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
+    const safeSubline = clampWords(cleanLine(crafted.subline || ''), 12);
     const safeOffer = tightenOfferText(crafted.offer || a.offer || a.saveAmount || '');
-    const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 12);
+    const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
 
     let rawBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
     rawBullets = rawBullets
@@ -1711,9 +1712,9 @@ router.post('/craft-ad-copy', async (req, res) => {
 
     const safeOffer = tightenOfferText(a.offer || a.saveAmount || rawCopy.offer || '');
 
-    const safeHeadline = clampWords(cleanLine(rawCopy.headline || ''), 9);
-    const safeSubline = clampWords(cleanLine(rawCopy.subline || ''), 16);
-    const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 12);
+    const safeHeadline = clampWords(cleanLine(rawCopy.headline || ''), 6);
+    const safeSubline = clampWords(cleanLine(rawCopy.subline || ''), 12);
+    const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ''), 10);
 
     let bulletsRaw = Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [];
     bulletsRaw = bulletsRaw
