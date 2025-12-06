@@ -665,7 +665,9 @@ function tplPosterBCard({
   fsBody,
   metrics,
 }) {
-  const { titleY, dateY, dividerY, saveY, financeY, qualY, bulletStartY } = metrics;
+  const { titleY, dateY, dividerY, saveY, financeY, qualY, bulletStartY } =
+    metrics;
+
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -675,43 +677,55 @@ function tplPosterBCard({
     <style>
       .t-center { text-anchor: middle; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:-1px; fill:#0f1a22; }
-      .h2      { font: 800 ${fsH2}px/1.22  Inter,system-ui; fill:#3b4b59; }
+      .h2      { font: 800 ${fsH2}px/1.2  Inter,system-ui; fill:#3b4b59; }
       .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
-      .body    { font: 700 ${fsBody}px/1.28 Inter,system-ui; fill:#5f7182; }
-      .legal   { font: 700 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
+      .body    { font: 700 ${fsBody}px/1.26 Inter,system-ui; fill:#5f7182; }
+      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
       .brand   { font: 800 24px/1 Inter,system-ui; fill:#334554; }
+      .bullet-dot  { font: 900 ${fsBody}px/1 Inter,system-ui; fill:#3b4b59; }
+      .bullet-text { font: 700 ${fsBody}px/1.2 Inter,system-ui; fill:#3b4b59; }
     </style>
   </defs>
 
-  <!-- white card with soft shadow -->
+  <!-- card -->
   <g filter="url(#cardShadow)">
-    <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="30" fill="#ffffff"/>
+    <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="34" fill="#ffffff"/>
   </g>
 
-  <!-- pill brand label -->
+  <!-- brand pill -->
   <g transform="translate(${cardW / 2 - 140}, ${Math.max(10, padY - 40)})">
     <rect width="280" height="44" rx="22" fill="#0f1a22" opacity="0.06"/>
     <text class="brand t-center" x="140" y="30">{{brandName}}</text>
   </g>
 
-  <!-- headline + date + divider + SAVE + financing + small copy -->
+  <!-- main text stack -->
   <g>
+    <!-- HEADLINE (multi-line) -->
     <text class="title t-center" x="${cardW / 2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
-    <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">{{dateRange}}</text>
+    <!-- SUBLINE / DATE (multi-line) -->
+    <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
+      {{#dateRangeLines}}
+        <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
+      {{/dateRangeLines}}
+    </text>
 
+    <!-- divider -->
     <g transform="translate(${padX}, ${dividerY})">
       <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
     </g>
 
+    <!-- OFFER -->
     <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
 
+    <!-- FINANCING / SECONDARY -->
     <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
 
+    <!-- SMALL QUALIFIER (multi-line) -->
     <text class="body t-center" x="${cardW / 2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
@@ -719,19 +733,19 @@ function tplPosterBCard({
     </text>
   </g>
 
-  <!-- stacked bullet list under the qualifier (left aligned, Shaw-style) -->
+  <!-- BULLET LIST under the small qualifier -->
   {{#hasBullets}}
-  <g transform="translate(${padX + 40}, ${bulletStartY})">
+  <g transform="translate(${padX}, ${bulletStartY})">
     {{#bulletLines}}
       <g transform="translate(0, {{dy}})">
-        <circle cx="-18" cy="-8" r="5" fill="{{accent}}"/>
-        <text class="body" x="0" y="0">{{line}}</text>
+        <text class="bullet-dot" x="0" y="0">•</text>
+        <text class="bullet-text" x="30" y="0">{{line}}</text>
       </g>
     {{/bulletLines}}
   </g>
   {{/hasBullets}}
 
-  <!-- tiny legal footer inside the card -->
+  <!-- LEGAL -->
   {{#legal}}
   <g transform="translate(${padX}, ${cardH - 18})">
     <text class="legal" x="0" y="-6">{{legal}}</text>
@@ -1203,14 +1217,22 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsH2 = 38;
     const fsBody = 30;
 
-    const cardW = 860,
-      cardH = 660,
-      padX = 60,
-      padY = 56;
+    const cardW = 860;
+    const cardH = 660;
+    const padX = 60;
+    const padY = 56;
 
+    // multi-line blocks
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
+      cardW,
+      padX,
+      2
+    );
+    const dateRangeLines = wrapTextToWidth(
+      mergedKnobsB.dateRange,
+      fsH2,
       cardW,
       padX,
       2
@@ -1223,7 +1245,7 @@ router.post('/generate-static-ad', async (req, res) => {
       2
     );
 
-    // bullets: 2–3 short lines, stacked with “•” prefix, under the qualifier
+    // bullets: up to 3 short lines, stacked with “•”
     const bulletLines = Array.isArray(mergedKnobsB.bullets)
       ? mergedKnobsB.bullets
           .map((b) => cleanLine(String(b || '')))
@@ -1235,21 +1257,24 @@ router.post('/generate-static-ad', async (req, res) => {
           }))
       : [];
 
+    // vertical spacing based on actual wrapped heights
     const titleBlock =
       Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
     const titleTop = padY + fsTitle;
+
     const dateY = titleTop + titleBlock + 20;
-    const dividerY = dateY + 28;
+    const dateBlock =
+      Math.max(1, dateRangeLines.length) * (fsH2 * 1.2);
+
+    const dividerY = dateY + dateBlock + 18;
     const saveY = dividerY + 22 + fsSave * 1.05;
     const financeY = saveY + fsH2 * 1.25;
     const qualY = financeY + 32;
 
-    const hasQual = qualifierLines.length > 0;
     const hasBullets = bulletLines.length > 0;
     const bulletStartY = hasBullets
-      ? hasQual
-        ? qualY + fsBody * 1.7
-        : financeY + fsBody * 1.4
+      ? qualY +
+        (qualifierLines.length > 0 ? fsBody * 1.8 : fsBody * 1.4)
       : qualY;
 
     const metrics = {
@@ -1265,8 +1290,10 @@ router.post('/generate-static-ad', async (req, res) => {
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitleLines,
+      dateRangeLines,
       qualifierLines,
       bulletLines,
+      hasBullets,
       dateRange: mergedKnobsB.dateRange,
       saveAmount: mergedKnobsB.saveAmount,
       financingLine: mergedKnobsB.financingLine,
@@ -1274,6 +1301,7 @@ router.post('/generate-static-ad', async (req, res) => {
       accent: mergedKnobsB.palette.accent || '#ff7b41',
       metrics,
     };
+
 
     const cardSvg = mustache.render(
       tplPosterBCard({
