@@ -21,14 +21,18 @@ const GEN_DIR =
 fs.mkdirSync(GEN_DIR, { recursive: true });
 
 const STOCK_DIR = path.join(process.cwd(), 'server', 'public', 'stock');
-try { fs.mkdirSync(STOCK_DIR, { recursive: true }); } catch {}
+try {
+  fs.mkdirSync(STOCK_DIR, { recursive: true });
+} catch {}
 
 function makeMediaUrl(req, filename) {
-  const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
+  const base =
+    process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
   return `${base}/api/media/${filename}`;
 }
 function selfUrl(req, p = '') {
-  const base = process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
+  const base =
+    process.env.PUBLIC_BASE_URL || (req.protocol + '://' + req.get('host'));
   return `${base}${p.startsWith('/') ? p : `/${p}`}`;
 }
 
@@ -43,8 +47,14 @@ router.use((req, res, next) => {
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,HEAD');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Range');
-  res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Requested-With, Range'
+  );
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'Content-Length, Content-Range, Accept-Ranges'
+  );
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
@@ -139,6 +149,7 @@ function classifyIndustry(s = '') {
 
 function profileForIndustry(industry = '') {
   const kind = classifyIndustry(industry);
+  const t = String(industry || '').toLowerCase();
   const PALETTES = {
     base: {
       header: '#0d3b66',
@@ -361,7 +372,7 @@ function profileForIndustry(industry = '') {
   };
 
   let prof = MAP[kind];
-  if (kind === 'hvac_plumbing' && /plumb/i.test(industry)) {
+  if (kind === 'hvac_plumbing' && /plumb/i.test(t)) {
     prof = { ...prof, lists: plumbingLists };
   }
   return { kind, ...prof };
@@ -639,7 +650,8 @@ function tplPosterBCard({
   fsBody,
   metrics,
 }) {
-  const { titleY, dateY, dividerY, saveY, financeY, qualY } = metrics;
+  const { titleY, dateY, dividerY, saveY, financeY, qualY, bulletStartY } =
+    metrics;
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -652,7 +664,7 @@ function tplPosterBCard({
       .h2      { font: 800 ${fsH2}px/1.22  Inter,system-ui; fill:#3b4b59; }
       .save    { font: 900 ${fsSave}px/1.05 Inter,system-ui; fill: {{accent}}; }
       .body    { font: 700 ${fsBody}px/1.28 Inter,system-ui; fill:#5f7182; }
-      .legal   { font: 700 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
+      .legal   { font: 700 22px/1.2 Inter,system-ui; fill:#7b8ea0; }
       .brand   { font: 800 24px/1 Inter,system-ui; fill:#334554; }
     </style>
   </defs>
@@ -661,35 +673,49 @@ function tplPosterBCard({
     <rect x="0" y="0" width="${cardW}" height="${cardH}" rx="30" fill="#ffffff"/>
   </g>
 
+  <!-- Brand pill at top -->
   <g transform="translate(${cardW / 2 - 140}, ${Math.max(10, padY - 40)})">
     <rect width="280" height="44" rx="22" fill="#0f1a22" opacity="0.06"/>
     <text class="brand t-center" x="140" y="30">{{brandName}}</text>
   </g>
 
+  <!-- Main content inside card -->
   <g>
+    <!-- HEADLINE -->
     <text class="title t-center" x="${cardW / 2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
+    <!-- (Optional) date / secondary line under headline -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">{{dateRange}}</text>
 
+    <!-- divider -->
     <g transform="translate(${padX}, ${dividerY})">
       <rect width="${cardW - padX * 2}" height="2" fill="#e8eef3"/>
     </g>
 
+    <!-- OFFER (e.g. 50% OFF / SAVE UP TO $1000) -->
     <text class="save t-center" x="${cardW / 2}" y="${saveY}">{{saveAmount}}</text>
 
+    <!-- SUBLINE / FINANCING LINE (e.g. PLUS SPECIAL FINANCING) -->
     <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
 
+    <!-- Qualifier body lines (used only if provided) -->
     <text class="body t-center" x="${cardW / 2}" y="${qualY}">
       {{#qualifierLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/qualifierLines}}
     </text>
+
+    <!-- BULLET BLOCK (inside card, toward bottom, like the flooring template text block) -->
+    {{#bulletLines}}
+      <text class="body t-center" x="${cardW / 2}" y="{{y}}">• {{text}}</text>
+    {{/bulletLines}}
   </g>
 
+  <!-- DISCLAIMER / LEGAL at very bottom of card -->
   {{#legal}}
   <g transform="translate(${padX}, ${cardH - 18})">
     <text class="legal" x="0" y="-6">{{legal}}</text>
@@ -813,29 +839,20 @@ async function fetchPexelsPhotoBuffer(query, seed = Date.now()) {
 function pexelsQueryForKind(kind, hint = '') {
   const h = (hint || '').trim();
   const map = {
-    fashion:
-      h ||
-      'fashion clothing rack apparel boutique models streetwear',
-    electronics:
-      h || 'electronics gadgets laptop smartphone tech workspace',
-    restaurant:
-      h || 'restaurant food dining table dishes gourmet chef',
-    coffee:
-      h || 'coffee shop cafe espresso cappuccino latte barista',
+    fashion: h || 'fashion clothing rack apparel boutique models streetwear',
+    electronics: h || 'electronics gadgets laptop smartphone tech workspace',
+    restaurant: h || 'restaurant food dining table dishes gourmet chef',
+    coffee: h || 'coffee shop cafe espresso cappuccino latte barista',
     pets: h || 'pets dogs cats pet care grooming',
-    real_estate:
-      h || 'modern home interior living room kitchen real estate',
+    real_estate: h || 'modern home interior living room kitchen real estate',
     flooring: h || 'hardwood floor vinyl tile flooring interior',
     fitness: h || 'gym fitness workout training weights',
     salon_spa: h || 'salon spa beauty hair nails skin care',
     auto: h || 'auto repair car garage mechanic workshop',
     landscaping: h || 'landscaping lawn garden yard mowing',
-    hvac_plumbing:
-      h || 'plumbing hvac air conditioner furnace repair',
-    home_cleaning:
-      h || 'cleaning service home cleaning tidy house',
-    generic:
-      h || 'small business storefront local shop',
+    hvac_plumbing: h || 'plumbing hvac air conditioner furnace repair',
+    home_cleaning: h || 'cleaning service home cleaning tidy house',
+    generic: h || 'small business storefront local shop',
   };
   return map[kind] || map.generic;
 }
@@ -937,9 +954,15 @@ router.post('/generate-static-ad', async (req, res) => {
     const template =
       templateReq !== 'auto'
         ? templateReq
-        : ['fashion', 'electronics', 'pets', 'coffee', 'restaurant', 'real_estate', 'flooring'].includes(
-            prof.kind
-          )
+        : [
+            'fashion',
+            'electronics',
+            'pets',
+            'coffee',
+            'restaurant',
+            'real_estate',
+            'flooring',
+          ].includes(prof.kind)
         ? 'poster_b'
         : 'flyer_a';
 
@@ -961,16 +984,13 @@ router.post('/generate-static-ad', async (req, res) => {
         palette: knobs.palette || prof.palette,
         lists: knobs.lists || prof.lists,
         coverage: knobs.coverage || prof.coverage || '',
-        showIcons:
-          knobs.showIcons !== undefined ? knobs.showIcons : true,
+        showIcons: knobs.showIcons !== undefined ? knobs.showIcons : true,
         headerSplitDiagonal:
           knobs.headerSplitDiagonal !== undefined
             ? knobs.headerSplitDiagonal
             : true,
         roundedOuter:
-          knobs.roundedOuter !== undefined
-            ? knobs.roundedOuter
-            : true,
+          knobs.roundedOuter !== undefined ? knobs.roundedOuter : true,
         backgroundHint:
           knobs.backgroundHint || prof.bgHint || 'generic',
       };
@@ -1033,19 +1053,10 @@ router.post('/generate-static-ad', async (req, res) => {
       body.copy && typeof body.copy === 'object' ? body.copy : null;
 
     if (crafted) {
-      const safeHeadline = clampWords(
-        cleanLine(crafted.headline || ''),
-        6
-      );
-      const safeSubline = clampWords(
-        cleanLine(crafted.subline || ''),
-        14
-      );
+      const safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
+      const safeSubline = clampWords(cleanLine(crafted.subline || ''), 14);
       const safeOffer = tightenOfferText(crafted.offer || '');
-      const safeSecondary = clampWords(
-        cleanLine(crafted.secondary || ''),
-        10
-      );
+      const safeSecondary = clampWords(cleanLine(crafted.secondary || ''), 10);
       const safeBullets = Array.isArray(crafted.bullets)
         ? crafted.bullets
             .map((b) => clampWords(cleanLine(b || ''), 5))
@@ -1083,23 +1094,20 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', 'Your City'),
     };
 
-    // Build final fields ONLY from crafted copy (for text)
     const userOfferRaw = (a.offer || a.saveAmount || '').toString();
+    const bulletTexts = Array.isArray(crafted.bullets)
+      ? crafted.bullets.filter(Boolean)
+      : [];
 
+    // Map GPT copy into the poster card structure
     const autoFields = {
-      eventTitle: (crafted.headline || '').toString(),
-      dateRange: (crafted.subline || '').toString(),
-      saveAmount: tightenOfferText(userOfferRaw),
-      financing: (crafted.secondary || '').toString(),
-      qualifiers: (
-        [
-          crafted.subline,
-          ...(Array.isArray(crafted.bullets) ? crafted.bullets : []),
-        ]
-          .filter(Boolean)
-          .join(' • ')
-      ).toString(),
-      legal: (crafted.disclaimers || '').toString(),
+      eventTitle: (crafted.headline || '').toString(), // main bold title
+      dateRange: '', // we aren't a date-based sale, keep empty
+      saveAmount: tightenOfferText(crafted.offer || userOfferRaw), // big "50% OFF"
+      financing: (crafted.subline || '').toString(), // line below the offer
+      qualifiers: '', // we will use bullets instead of this paragraph
+      bullets: bulletTexts,
+      legal: (crafted.disclaimers || '').toString(), // disclaimer line at bottom
       palette: knobs.palette || prof.palette,
     };
 
@@ -1115,16 +1123,11 @@ router.post('/generate-static-ad', async (req, res) => {
       qualifiers: autoFields.qualifiers,
       legal: autoFields.legal,
       palette: autoFields.palette,
+      bullets: autoFields.bullets,
     };
 
     const validateB = ajv.compile(posterSchema);
-    if (
-      !validateB({
-        template,
-        inputs: mergedInputsB,
-        knobs: mergedKnobsB,
-      })
-    ) {
+    if (!validateB({ template, inputs: mergedInputsB, knobs: mergedKnobsB })) {
       throw new Error(
         'validation failed: ' + JSON.stringify(validateB.errors)
       );
@@ -1155,10 +1158,7 @@ router.post('/generate-static-ad', async (req, res) => {
       }
     }
     if (!photoBuf) {
-      const localPath = pickLocalStockPath(
-        classifyIndustry(industry),
-        seed
-      );
+      const localPath = pickLocalStockPath(classifyIndustry(industry), seed);
       if (localPath) {
         try {
           photoBuf = fs.readFileSync(localPath);
@@ -1172,20 +1172,15 @@ router.post('/generate-static-ad', async (req, res) => {
     }
     if (!photoBuf) throw new Error('no background photo available');
 
-    const bgPng =
-      await buildPosterBackgroundFromPhotoBuffer({
-        width: 1080,
-        height: 1080,
-        photoBuffer: photoBuf,
-      });
+    const bgPng = await buildPosterBackgroundFromPhotoBuffer({
+      width: 1080,
+      height: 1080,
+      photoBuffer: photoBuf,
+    });
 
     const lenTitle = String(mergedKnobsB.eventTitle || '').length;
     const lenSave = String(mergedKnobsB.saveAmount || '').length;
-    const fsTitle = clamp(
-      92 - Math.max(0, lenTitle - 14) * 2.4,
-      56,
-      92
-    );
+    const fsTitle = clamp(92 - Math.max(0, lenTitle - 14) * 2.4, 56, 92);
     const fsSave = clamp(76 - Math.max(0, lenSave - 12) * 2.2, 46, 76);
     const fsH2 = 38;
     const fsBody = 30;
@@ -1218,13 +1213,28 @@ router.post('/generate-static-ad', async (req, res) => {
     const saveY = dividerY + 22 + fsSave * 1.05;
     const financeY = saveY + fsH2 * 1.25;
     const qualY = financeY + 36;
+    const bulletStartY = financeY + 46;
 
-    const metrics = { titleY: titleTop, dateY, dividerY, saveY, financeY, qualY };
+    const metrics = {
+      titleY: titleTop,
+      dateY,
+      dividerY,
+      saveY,
+      financeY,
+      qualY,
+      bulletStartY,
+    };
+
+    const bulletLines = (mergedKnobsB.bullets || []).map((text, idx) => ({
+      text,
+      y: metrics.bulletStartY + idx * fsBody * 1.3,
+    }));
 
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitleLines,
       qualifierLines,
+      bulletLines,
       dateRange: mergedKnobsB.dateRange,
       saveAmount: mergedKnobsB.saveAmount,
       financingLine: mergedKnobsB.financingLine,
@@ -1292,8 +1302,7 @@ async function proxyImgHandler(req, res) {
       return res.status(400).send('missing u');
 
     const passHeaders = {};
-    if (req.headers['range'])
-      passHeaders['Range'] = req.headers['range'];
+    if (req.headers['range']) passHeaders['Range'] = req.headers['range'];
 
     const { status, headers, body } = await fetchUpstream(
       'GET',
@@ -1331,8 +1340,7 @@ async function proxyHeadHandler(req, res) {
     if (!u || typeof u !== 'string') return res.status(400).end();
 
     const passHeaders = {};
-    if (req.headers['range'])
-      passHeaders['Range'] = req.headers['range'];
+    if (req.headers['range']) passHeaders['Range'] = req.headers['range'];
 
     const { status, headers } = await fetchUpstream(
       'HEAD',
@@ -1379,9 +1387,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const backgroundUrl = a.backgroundUrl || b.backgroundUrl || '';
 
     const overlay = {
-      headline: (a.headline || b.overlayHeadline || '')
-        .toString()
-        .slice(0, 55),
+      headline: (a.headline || b.overlayHeadline || '').toString().slice(0, 55),
       body: a.adCopy || b.overlayBody || '',
       offer: a.offer || '',
       promoLine: a.promoLine || '',
@@ -1440,12 +1446,11 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         }
         if (!photoBuf) throw new Error('no background photo');
 
-        const bgPng =
-          await buildPosterBackgroundFromPhotoBuffer({
-            width: W,
-            height: H,
-            photoBuffer: photoBuf,
-          });
+        const bgPng = await buildPosterBackgroundFromPhotoBuffer({
+          width: W,
+          height: H,
+          photoBuffer: photoBuf,
+        });
 
         const eventTitle = (overlay.headline || '').trim();
         const dateRange = (overlay.promoLine || '').trim();
@@ -1486,6 +1491,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const saveY = dividerY + 22 + fsSave * 1.05;
         const financeY = saveY + fsH2 * 1.25;
         const qualY = financeY + 36;
+        const bulletStartY = financeY + 46;
+
         const metrics = {
           titleY: titleTop,
           dateY,
@@ -1493,18 +1500,21 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           saveY,
           financeY,
           qualY,
+          bulletStartY,
         };
+
+        const bulletLines = []; // no explicit bullets in this route for now
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
           qualifierLines,
+          bulletLines,
           dateRange,
           saveAmount,
           financingLine: financingLn,
           legal,
-          accent:
-            (prof.palette && prof.palette.accent) || '#ff7b41',
+          accent: (prof.palette && prof.palette.accent) || '#ff7b41',
           metrics,
         };
         const cardSvg = mustache.render(
@@ -1521,9 +1531,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           }),
           cardVars
         );
-        const cardPng = await sharp(Buffer.from(cardSvg))
-          .png()
-          .toBuffer();
+        const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
         const left = Math.round((W - cardW) / 2);
         const top = Math.round((H - cardH) / 2);
@@ -1554,12 +1562,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
       const lists = withListLayout(
         prof.lists || {
           left: ['Free Quote', 'Same-Day', 'Licensed', 'Insured'],
-          right: [
-            'Great Reviews',
-            'Family Owned',
-            'Fair Prices',
-            'Guaranteed',
-          ],
+          right: ['Great Reviews', 'Family Owned', 'Fair Prices', 'Guaranteed'],
         }
       );
       const vars = {
@@ -1621,19 +1624,10 @@ router.post('/craft-ad-copy', async (req, res) => {
     const safeOffer = tightenOfferText(a.offer || a.saveAmount || '');
 
     const copy = {
-      headline: clampWords(
-        cleanLine(rawCopy.headline || ''),
-        6
-      ),
-      subline: clampWords(
-        cleanLine(rawCopy.subline || ''),
-        14
-      ),
+      headline: clampWords(cleanLine(rawCopy.headline || ''), 6),
+      subline: clampWords(cleanLine(rawCopy.subline || ''), 14),
       offer: safeOffer,
-      secondary: clampWords(
-        cleanLine(rawCopy.secondary || ''),
-        10
-      ),
+      secondary: clampWords(cleanLine(rawCopy.secondary || ''), 10),
       bullets: Array.isArray(rawCopy.bullets)
         ? rawCopy.bullets
             .map((b) => clampWords(cleanLine(b || ''), 5))
