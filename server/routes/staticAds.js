@@ -408,7 +408,7 @@ function fixDanglingSubline(str = '') {
   const words = s.split(/\s+/);
   if (words.length <= 2) return s;
   const last = words[words.length - 1].toLowerCase();
-  const bad = ['of', 'for', 'to', 'with', 'on', 'in', 'from', 'by', 'about'];
+  const bad = ['of', 'for', 'to', 'with', 'on', 'in', 'from', 'by', 'about', 'and'];
   if (bad.includes(last)) {
     words.pop();
     return words.join(' ');
@@ -527,7 +527,7 @@ Headline rules:
 Subline rules:
 - One short complete thought, max 12 words.
 - Must read as a natural sentence or phrase.
-- Do not end with dangling words like "of", "for", "to", "with", "in", "on", "from", or "by".
+- Do not end with dangling words like "of", "for", "to", "with", "in", "on", "from", "by", or "and".
 
 Offer rules:
 - "offer" must be based ONLY on the user's described offer/discount.
@@ -702,6 +702,7 @@ function tplPosterBCard({
   fsH2,
   fsSave,
   fsBody,
+  fsBullet,
   metrics,
 }) {
   const { titleY, dateY, dividerY, saveY, financeY, qualY, bulletStartY } =
@@ -721,7 +722,7 @@ function tplPosterBCard({
       .body    { font: 700 ${fsBody}px/1.26 Inter,system-ui; fill:#5f7182; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#9eb2c3; }
       .brand   { font: 800 24px/1 Inter,system-ui; fill:#334554; }
-      .bullet-text { font: 700 ${fsBody}px/1.2 Inter,system-ui; fill:#3b4b59; }
+      .bullet-text { font: 700 ${fsBullet}px/1.2 Inter,system-ui; fill:#3b4b59; }
     </style>
   </defs>
 
@@ -736,16 +737,14 @@ function tplPosterBCard({
     <text class="brand t-center" x="140" y="30">{{brandName}}</text>
   </g>
 
-  <!-- main text stack -->
+  <!-- HEADLINE & SUBLINE -->
   <g>
-    <!-- HEADLINE (multi-line) -->
     <text class="title t-center" x="${cardW / 2}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
-    <!-- SUBLINE (multi-line) -->
     <text class="h2 t-center" x="${cardW / 2}" y="${dateY}">
       {{#dateRangeLines}}
         <tspan x="${cardW / 2}" dy="{{dy}}">{{line}}</tspan>
@@ -775,7 +774,7 @@ function tplPosterBCard({
   <text class="h2 t-center" x="${cardW / 2}" y="${financeY}">{{financingLine}}</text>
   {{/financingLine}}
 
-  <!-- SMALL QUALIFIER (multi-line, fine print under financing) -->
+  <!-- SMALL QUALIFIER (fine print under financing) -->
   {{#qualifierLines.length}}
   <text class="body t-center" x="${cardW / 2}" y="${qualY}">
     {{#qualifierLines}}
@@ -784,10 +783,10 @@ function tplPosterBCard({
   </text>
   {{/qualifierLines.length}}
 
-  <!-- LEGAL -->
+  <!-- LEGAL (bottom) -->
   {{#legal}}
   <g transform="translate(${padX}, ${cardH - 18})">
-    <text class="legal" x="0" y="-6">{{legal}}</text>
+    <text class="legal" x="${(cardW - padX * 2) / 2}" y="-6" text-anchor="middle">{{legal}}</text>
   </g>
   {{/legal}}
 </svg>`;
@@ -1115,7 +1114,7 @@ router.post('/generate-static-ad', async (req, res) => {
 
     // Normalize copy
     let safeHeadline = clampWords(cleanLine(crafted.headline || ''), 6);
-    // Just in case GPT ignored the "no Elevate" rule
+    // backup guard against Elevate
     safeHeadline = safeHeadline.replace(/^Elevate\b/i, 'Refresh');
     const safeSubline = fixDanglingSubline(
       clampWords(cleanLine(crafted.subline || ''), 12)
@@ -1141,12 +1140,10 @@ router.post('/generate-static-ad', async (req, res) => {
       return true;
     });
 
-    // Fallback: make sure we always have some bullets
     if (!safeBullets.length) {
       safeBullets = rawBullets.filter(Boolean);
     }
     if (!safeBullets.length) {
-      // ultimate fallback by industry
       const tmpl = INDUSTRY_TEMPLATES[prof.kind];
       if (tmpl) {
         safeBullets =
@@ -1182,14 +1179,23 @@ router.post('/generate-static-ad', async (req, res) => {
       location: get('location', 'Your City'),
     };
 
+    // build qualifiers + legal, with Limited Time fallback
+    let disclaimersText = (crafted.disclaimers || '').toString().trim();
+    if (!disclaimersText && crafted.secondary) {
+      disclaimersText = crafted.secondary.toString().trim();
+    }
+    const qualifiersText = fixDanglingSubline(disclaimersText);
+    const legalText = fixDanglingSubline(
+      disclaimersText || 'Limited time only. See store for details.'
+    );
+
     const autoFields = {
       eventTitle: (crafted.headline || '').toString(),
       dateRange: (crafted.subline || '').toString(),
       saveAmount: crafted.offer || '',
       financing: (crafted.secondary || '').toString(),
-      // fine-print style details (ON SELECT PRODUCTS ...)
-      qualifiers: (crafted.disclaimers || '').toString(),
-      legal: (crafted.disclaimers || '').toString(),
+      qualifiers: qualifiersText,
+      legal: legalText,
       palette: knobs.palette || prof.palette,
       bullets: Array.isArray(crafted.bullets) ? crafted.bullets : [],
     };
@@ -1278,6 +1284,7 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsSave = clamp(76 - Math.max(0, lenSave - 12) * 2.2, 46, 76);
     const fsH2 = 36;
     const fsBody = 30;
+    const fsBullet = fsBody + 4; // bullets a bit larger
 
     const cardW = 860;
     const cardH = 660;
@@ -1314,12 +1321,14 @@ router.post('/generate-static-ad', async (req, res) => {
       : [];
 
     const hasBullets = baseBulletLines.length > 0;
-    const bulletLines = baseBulletLines.map((line, i) => ({
-      line,
-      y: fsBody + i * fsBody * 1.28,
-    }));
+    const bulletLines = hasBullets
+      ? baseBulletLines.map((line, i) => ({
+          line,
+          y: fsBullet + i * fsBullet * 1.3,
+        }))
+      : [];
     const bulletHeight = hasBullets
-      ? fsBody + (bulletLines.length - 1) * fsBody * 1.28
+      ? fsBullet + (bulletLines.length - 1) * fsBullet * 1.3
       : 0;
 
     const titleBlock =
@@ -1345,10 +1354,10 @@ router.post('/generate-static-ad', async (req, res) => {
 
     const saveY = dividerY + 22 + fsSave * 1.05;
     const financeY = mergedKnobsB.financingLine
-      ? saveY + fsH2 * 1.25
+      ? saveY + fsH2 * 1.35
       : saveY;
 
-    const qualY = financeY + 32;
+    const qualY = financeY + 48; // more breathing room below offer
 
     const metrics = {
       titleY: titleTop,
@@ -1385,6 +1394,7 @@ router.post('/generate-static-ad', async (req, res) => {
         fsH2,
         fsSave,
         fsBody,
+        fsBullet,
         metrics,
       }),
       cardVars
@@ -1567,13 +1577,18 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         );
         const saveAmount = tightenOfferText(overlay.offer || '');
         const financingLn = (overlay.secondary || '').trim();
-        const qualifiers = (overlay.body || '').trim();
-        const legal = (overlay.legal || '').trim();
+        const qualifiersRaw = (overlay.body || '').trim();
+        const qualifiers = fixDanglingSubline(qualifiersRaw);
+        let legal = (overlay.legal || '').trim();
+        legal = fixDanglingSubline(
+          legal || 'Limited time only. See store for details.'
+        );
 
         const fsTitle = 88,
           fsH2 = 36,
           fsSave = 72,
           fsBody = 28;
+        const fsBullet = fsBody + 4;
         const cardW = 860,
           cardH = 660,
           padX = 60,
@@ -1638,12 +1653,14 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         safeBullets = safeBullets.slice(0, 3);
 
         const hasBullets = safeBullets.length > 0;
-        const bulletLines = safeBullets.map((line, i) => ({
-          line,
-          y: fsBody + i * fsBody * 1.28,
-        }));
+        const bulletLines = hasBullets
+          ? safeBullets.map((line, i) => ({
+              line,
+              y: fsBullet + i * fsBullet * 1.3,
+            }))
+          : [];
         const bulletHeight = hasBullets
-          ? fsBody + (bulletLines.length - 1) * fsBody * 1.28
+          ? fsBullet + (bulletLines.length - 1) * fsBullet * 1.3
           : 0;
 
         const titleBlock =
@@ -1667,8 +1684,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           : bulletStartY + 16;
 
         const saveY = dividerY + 22 + fsSave * 1.05;
-        const financeY = financingLn ? saveY + fsH2 * 1.25 : saveY;
-        const qualY = financeY + 32;
+        const financeY = financingLn ? saveY + fsH2 * 1.35 : saveY;
+        const qualY = financeY + 48;
 
         const metrics = {
           titleY: titleTop,
@@ -1704,6 +1721,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
             fsH2,
             fsSave,
             fsBody,
+            fsBullet,
             metrics,
           }),
           cardVars
@@ -1822,7 +1840,9 @@ router.post('/craft-ad-copy', async (req, res) => {
       offer: safeOffer,
       secondary: safeSecondary,
       bullets,
-      disclaimers: (rawCopy.disclaimers || '').toString().trim(),
+      disclaimers: fixDanglingSubline(
+        (rawCopy.disclaimers || '').toString().trim()
+      ),
     };
 
     return res.json({ ok: true, copy });
