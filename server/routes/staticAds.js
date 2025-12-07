@@ -632,8 +632,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * Shaw-style full-frame square poster:
  * - 1080x1080 overall
  * - White picture frame on edges
- * - Top **square** white panel for brand + headline + subline
- * - Offer + bullets paragraph on the photo
+ * - Top **square** white panel for brand + headline
+ * - Subline + offer + bullets stacked below the square
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -643,21 +643,21 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // True square poster panel
-  const squareSide = Math.min(innerW * 0.78, innerH * 0.52);
+  // Slightly larger square panel
+  const squareSide = Math.min(innerW * 0.8, innerH * 0.6);
   const bannerW = squareSide;
   const bannerH = squareSide;
   const bannerX = centerX - bannerW / 2;
-  const bannerY = innerY + 70;
+  const bannerY = innerY + 60;
 
   const brandY = bannerY + 70;
-  const titleY = brandY + fsTitle * 1.2;
-  const subY = bannerY + bannerH - 40;
+  const titleY = brandY + fsTitle * 1.25;
 
-  // <<< CHANGE #1: push offer/body a bit lower so they never overlap subline
-  const offerY = innerY + innerH * 0.70;
-  const bodyY = offerY + fsSave * 1.10 + 28;
-  const legalY = cardH - frameT - 22;
+  // Now positioned clearly under the square
+  const subY = bannerY + bannerH + 60;
+  const offerY = subY + fsH2 * 2.1;
+  const bodyY = offerY + fsSave * 1.15 + 24;
+  const legalY = innerY + innerH - 22;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -691,21 +691,21 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     fill-rule="evenodd"
   />
 
-  <!-- square top panel -->
+  <!-- square top panel (brand + headline only) -->
   <g>
     <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
 
-    <!-- simple “leaf” accents -->
-    <path d="M ${bannerX + 22} ${bannerY + 32}
+    <!-- leaf accents -->
+    <path d="M ${bannerX + 26} ${bannerY + 40}
              C ${bannerX + bannerW * 0.30} ${bannerY - 10},
-               ${bannerX + bannerW * 0.30} ${bannerY + bannerH * 0.72},
-               ${bannerX + bannerW * 0.06} ${bannerY + bannerH * 0.80}
+               ${bannerX + bannerW * 0.30} ${bannerY + bannerH * 0.78},
+               ${bannerX + bannerW * 0.10} ${bannerY + bannerH * 0.88}
              Z"
           fill="#fde4cf"/>
-    <path d="M ${bannerX + bannerW - 22} ${bannerY + 32}
+    <path d="M ${bannerX + bannerW - 26} ${bannerY + 40}
              C ${bannerX + bannerW * 0.70} ${bannerY - 10},
-               ${bannerX + bannerW * 0.70} ${bannerY + bannerH * 0.72},
-               ${bannerX + bannerW * 0.94} ${bannerY + bannerH * 0.80}
+               ${bannerX + bannerW * 0.70} ${bannerY + bannerH * 0.78},
+               ${bannerX + bannerW * 0.90} ${bannerY + bannerH * 0.88}
              Z"
           fill="#fde1cd"/>
 
@@ -718,13 +718,14 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
         <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
-
-    <text class="sub t-center" x="${centerX}" y="${subY}">
-      {{#dateRangeLines}}
-        <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
-      {{/dateRangeLines}}
-    </text>
   </g>
+
+  <!-- Subline (red) under the square -->
+  <text class="sub t-center" x="${centerX}" y="${subY}">
+    {{#dateRangeLines}}
+      <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+    {{/dateRangeLines}}
+  </text>
 
   <!-- Offer -->
   <text class="save t-center" x="${centerX}" y="${offerY}">
@@ -733,7 +734,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- Bullets paragraph -->
+  <!-- Bullets paragraph / qualifiers -->
   <text class="body t-center" x="${centerX}" y="${bodyY}">
     {{#qualifierLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -768,35 +769,63 @@ function withListLayout(lists = {}) {
   };
 }
 
+/**
+ * Improved wrap: never drops the last word.
+ * Uses ellipsis only on the final line if text is too long.
+ */
 function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines = 2) {
   const s = String(str || "")
     .trim()
     .replace(/\s+/g, " ");
   if (!s) return [];
+
   const pxWidth = cardW - padX * 2;
   const maxChars = Math.max(6, Math.floor(pxWidth / (fsPx * 0.58)));
   const words = s.split(" ");
   const lines = [];
   let cur = "";
-  for (const w of words) {
+
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
     const next = cur ? cur + " " + w : w;
-    if (next.length <= maxChars) cur = next;
-    else {
-      if (cur) lines.push(cur);
+
+    if (next.length <= maxChars) {
+      cur = next;
+    } else {
+      if (cur) {
+        lines.push(cur);
+      } else {
+        // single ultra-long word
+        lines.push(ellipsize(next, maxChars));
+      }
+      // if adding another full line would exceed maxLines, shove the rest into the last line
+      if (lines.length === maxLines - 1) {
+        const remaining = words
+          .slice(i)
+          .join(" ")
+          .trim();
+        if (remaining) {
+          lines.push(ellipsize(remaining, maxChars));
+        }
+        cur = "";
+        break;
+      }
       cur = w;
-      if (lines.length >= maxLines - 1) break;
     }
   }
-  if (lines.length < maxLines && cur) lines.push(cur);
-  if (lines.length > maxLines) lines.length = maxLines;
-  const used = lines.join(" ").length;
-  if (used < s.length) {
-    lines[lines.length - 1] = ellipsize(
-      lines[lines.length - 1],
-      Math.max(6, maxChars)
-    );
+
+  if (cur && lines.length < maxLines) {
+    lines.push(cur);
   }
-  return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : fsPx * 1.08 }));
+
+  if (lines.length > maxLines) {
+    lines.length = maxLines;
+  }
+
+  return lines.map((line, idx) => ({
+    line,
+    dy: idx === 0 ? 0 : fsPx * 1.08,
+  }));
 }
 
 /* ------------------------ Stock / Pexels ------------------------ */
@@ -1261,23 +1290,18 @@ router.post("/generate-static-ad", async (req, res) => {
     const cardH = 1080;
     const padX = 180;
 
-    // <<< CHANGE #2: wrap headline/subline to the actual banner width
-    const bannerW = 520;
-    const titleWrapW = bannerW;
-    const titlePadX = 60;
-
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
-      titleWrapW,
-      titlePadX,
+      cardW,
+      padX,
       2
     );
     const dateRangeLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsH2,
-      titleWrapW,
-      titlePadX,
+      cardW,
+      padX,
       2
     );
     const saveLines = wrapTextToWidth(
@@ -1495,7 +1519,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
 
         const eventTitle = (overlay.headline || "").trim().toUpperCase();
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
-        const dateRange = clampWords(cleanLine(dateRangeRaw), 10);
+        const dateRange = clampWords(cleanLine(dateRangeRaw), 12);
         const saveAmount = tightenOfferText(overlay.offer || "");
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
@@ -1510,23 +1534,18 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           cardH = 1080,
           padX = 180;
 
-        // <<< CHANGE #3: wrap overlay headline/subline to banner width too
-        const bannerW = 520;
-        const titleWrapW = bannerW;
-        const titlePadX = 60;
-
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
-          titleWrapW,
-          titlePadX,
+          cardW,
+          padX,
           2
         );
         const dateRangeLines = wrapTextToWidth(
           dateRange,
           fsH2,
-          titleWrapW,
-          titlePadX,
+          cardW,
+          padX,
           2
         );
         const saveLines = wrapTextToWidth(
