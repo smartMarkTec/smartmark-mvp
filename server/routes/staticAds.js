@@ -658,8 +658,10 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
 
   const subBandX = cardW * 0.12;
   const subBandW = cardW * 0.76;
-  const subBandH = fsBody * 2.8;
+// taller band so 1–2 lines of subline text always sit fully inside
+  const subBandH = fsBody * 3.6;
   const subBandY = subY - fsBody * 1.8;
+
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -1302,9 +1304,10 @@ router.post("/generate-static-ad", async (req, res) => {
       fsBody,
       cardW,
       padXBody,
-      3,
+      2,
       1
     );
+
 
     const qualifiersText = [
       mergedKnobsB.financingLine,
@@ -1556,14 +1559,15 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           2,
           1
         );
-        const subLines = wrapTextToWidth(
+          const subLines = wrapTextToWidth(
           dateRange,
           fsBody,
           cardW,
           padXBody,
-          3,
+          2,
           1
         );
+
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
