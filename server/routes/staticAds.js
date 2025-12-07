@@ -643,10 +643,10 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Panel: a bit wider and not as tall (less slack)
-  const baseSide = Math.min(innerW * 0.64, innerH * 0.52);
-  const bannerW = baseSide * 1.05; // slightly wider
-  const bannerH = baseSide * 0.90; // slightly shorter
+  // Panel: wider and a bit shorter -> tighter, boxier look
+  const baseSide = Math.min(innerW * 0.72, innerH * 0.50);
+  const bannerW = baseSide * 1.18; // wider
+  const bannerH = baseSide * 0.88; // slightly shorter
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 90;
 
@@ -726,7 +726,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       {{/eventTitleLines}}
     </text>
 
-    <!-- (dateRangeLines are still supported but we'll usually keep them empty for static ads) -->
+    <!-- (dateRangeLines kept, but usually empty for this static style) -->
     <text class="sub t-center" x="${centerX}" y="${subY}">
       {{#dateRangeLines}}
         <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -1268,14 +1268,15 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    const fsTitle = clamp(88 - Math.max(0, lenTitle - 12) * 2.6, 54, 88);
+    // bigger possible headline font (still auto-shrinks for longer text)
+    const fsTitle = clamp(96 - Math.max(0, lenTitle - 12) * 2.6, 60, 96);
     const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
     const fsH2 = 32;
     const fsBody = 30;
 
     const cardW = 1080;
     const cardH = 1080;
-    const padX = 260; // forces wrapping sooner so headline stays inside box
+    const padX = 260; // keeps 3-line wrapping, locked inside the box
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
@@ -1500,17 +1501,21 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         });
 
         const eventTitle = (overlay.headline || "").trim().toUpperCase();
-        const dateRangeRaw = overlay.promoLine || overlay.body || "";
-        const dateRange = clampWords(cleanLine(dateRangeRaw), 10);
+
+        // Treat promo/body text as the *subline under the offer*, not inside the box
+        const rawSub = overlay.promoLine || overlay.body || "";
+        const dateRange = ""; // keep panel clean
+        const qualifiers = clampWords(cleanLine(rawSub), 16);
+
         const saveAmount = tightenOfferText(overlay.offer || "");
         const financingLn = (overlay.secondary || "").trim();
-        const qualifiers = "";
+
         const legal = (overlay.legal || "").trim();
 
         const lenTitle = eventTitle.length;
         const lenSave = saveAmount.length;
 
-        const fsTitle = clamp(88 - Math.max(0, lenTitle - 12) * 2.6, 54, 88);
+        const fsTitle = clamp(96 - Math.max(0, lenTitle - 12) * 2.6, 60, 96);
         const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
         const fsH2 = 32;
         const fsBody = 30;
@@ -1540,7 +1545,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           padX,
           2
         );
-        const qualifiersText = [financingLn, qualifiers]
+        const qualifiersText = [qualifiers, financingLn]
           .filter(Boolean)
           .join(" • ");
         const qualifierLines = wrapTextToWidth(
