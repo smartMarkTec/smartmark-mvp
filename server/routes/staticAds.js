@@ -382,7 +382,8 @@ const INDUSTRY_TEMPLATES = {
   },
   restaurant: {
     headline: (brand, benefit) =>
-      benefit || `${brand ? titleCase(brand) + ": " : ""}Fresh. Fast. Crave-worthy.`,
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Fresh. Fast. Crave-worthy.`,
     subline: (aud, city) =>
       [aud ? `Perfect for ${aud}` : "Chef-crafted flavors", city ? `In ${city}` : null]
         .filter(Boolean)
@@ -630,8 +631,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 /**
  * Shaw-inspired poster B:
- * - widened top box
- * - subline moved further below offer
+ * - wider top box (left-right)
+ * - subline sits on a translucent band for legibility
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -641,8 +642,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // slightly WIDER box (left-right) while keeping similar height
-  const bannerW = Math.round(innerW * 0.48);
+  // Slightly wider box (left-right) but roughly same height
+  const bannerW = Math.round(innerW * 0.54);
   const bannerH = Math.round(innerW * 0.42);
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 70;
@@ -651,9 +652,13 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const titleY = brandY + fsTitle * 1.2;
 
   const offerY = innerY + innerH * 0.62;
-  // move subline a bit further below the promotion line
   const subY = offerY + fsSave * 1.05 + 55;
   const legalY = cardH - frameT - 22;
+
+  const subBandX = cardW * 0.12;
+  const subBandW = cardW * 0.76;
+  const subBandH = fsBody * 2.8;
+  const subBandY = subY - fsBody * 1.7;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -663,7 +668,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
-      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:2; paint-order:stroke fill; letter-spacing:0.16em; }
+      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.78; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
   </defs>
@@ -722,7 +727,10 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- subline further below -->
+  <!-- translucent band behind subline for legibility -->
+  <rect x="${subBandX}" y="${subBandY}" width="${subBandW}" height="${subBandH}" rx="${fsBody}" fill="#000000" opacity="0.36"/>
+
+  <!-- subline on band -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -1251,7 +1259,7 @@ router.post("/generate-static-ad", async (req, res) => {
     // geometry kept in sync with tplPosterBCard
     const frameT = 40;
     const innerW = cardW - frameT * 2;
-    const bannerW = Math.round(innerW * 0.48);
+    const bannerW = Math.round(innerW * 0.54);
     const headPadX = 70;
 
     const padX = 180;
@@ -1504,7 +1512,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
         const innerW = cardW - frameT * 2;
-        const bannerW = Math.round(innerW * 0.48);
+        const bannerW = Math.round(innerW * 0.54);
         const headPadX = 70;
 
         const padX = 180;
