@@ -632,8 +632,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * Shaw-style full-frame square poster:
  * - 1080x1080 overall
  * - White picture frame on edges
- * - Top white “square-ish” panel for brand + headline (only)
- * - Offer + subline paragraph on the photo
+ * - Top **square** white panel for brand + headline + subline
+ * - Offer + bullets paragraph on the photo
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -643,39 +643,51 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Panel: wider and a bit shorter -> tighter, boxier look
-  const baseSide = Math.min(innerW * 0.72, innerH * 0.50);
-  const bannerW = baseSide * 1.18; // wider
-  const bannerH = baseSide * 0.88; // slightly shorter
+  // Square headline panel (we already dialed this in; leave geometry alone)
+  const squareSide = Math.min(innerW * 0.58, innerH * 0.55);
+  const bannerW = squareSide;
+  const bannerH = squareSide;
   const bannerX = centerX - bannerW / 2;
-  const bannerY = innerY + 90;
+  const bannerY = innerY + 60;
 
   const brandY = bannerY + 60;
-  const titleY = brandY + fsTitle * 1.35;
-  const subY = bannerY + bannerH - 60;
+  const titleY = brandY + fsTitle * 1.25;
+  const subY = bannerY + bannerH + 24; // (kept; subline now drawn under promo)
 
-  // Offer & subline are under the panel, with comfortable spacing
-  const offerY = bannerY + bannerH + 90;
-  const bodyY = offerY + fsSave * 1.25 + 40;
-  const legalY = cardH - frameT - 24;
+  const offerY = innerY + innerH * 0.64;
+  const bodyY = offerY + fsSave * 1.0 + 20;
+  const legalY = cardH - frameT - 22;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
       .t-center { text-anchor: middle; }
-      .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.16em; text-transform:uppercase; }
-      .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:-1px; fill:#111827; }
-      .sub     { font: 800 ${fsH2}px/1.1 Inter,system-ui; letter-spacing:0.18em; fill:#dc2626; text-transform:uppercase; }
-      .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; }
-      .body    { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#ffffff; }
+      .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.16em; }
+      .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#111827; }
+      .sub     { font: 800 ${fsH2}px/1.1 Inter,system-ui; letter-spacing:0.18em; fill:#dc2626; }
+      /* PROMO + SUBLINE: Shaw-style, bright & readable on any photo */
+      .save    {
+        font: 900 ${fsSave}px/1.0 Inter,system-ui;
+        fill:#ffffff;
+        letter-spacing:0.14em;
+        paint-order:stroke fill;
+        stroke:#000000;
+        stroke-width:3;
+        stroke-opacity:0.45;
+      }
+      .body    {
+        font: 800 ${fsBody}px/1.35 Inter,system-ui;
+        fill:#ffffff;
+        letter-spacing:0.20em;
+        text-transform:uppercase;
+        paint-order:stroke fill;
+        stroke:#000000;
+        stroke-width:2;
+        stroke-opacity:0.5;
+      }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
-
-    <!-- Clip so headline can NEVER visually leak outside the panel -->
-    <clipPath id="bannerClip">
-      <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" />
-    </clipPath>
   </defs>
 
   <!-- full-bleed white picture frame on edges -->
@@ -696,22 +708,21 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     fill-rule="evenodd"
   />
 
-  <!-- top panel -->
-  <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
+  <!-- square top panel -->
+  <g>
+    <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
 
-  <!-- Everything in this group is clipped to the panel -->
-  <g clip-path="url(#bannerClip)">
-    <!-- soft “leaf” accents -->
-    <path d="M ${bannerX + 26} ${bannerY + 32}
+    <!-- “leaf” accents -->
+    <path d="M ${bannerX + 22} ${bannerY + 32}
              C ${bannerX + bannerW * 0.30} ${bannerY - 10},
-               ${bannerX + bannerW * 0.30} ${bannerY + bannerH * 0.80},
-               ${bannerX + bannerW * 0.08} ${bannerY + bannerH * 0.90}
+               ${bannerX + bannerW * 0.30} ${bannerY + bannerH * 0.72},
+               ${bannerX + bannerW * 0.06} ${bannerY + bannerH * 0.80}
              Z"
           fill="#fde4cf"/>
-    <path d="M ${bannerX + bannerW - 26} ${bannerY + 32}
+    <path d="M ${bannerX + bannerW - 22} ${bannerY + 32}
              C ${bannerX + bannerW * 0.70} ${bannerY - 10},
-               ${bannerX + bannerW * 0.70} ${bannerY + bannerH * 0.80},
-               ${bannerX + bannerW * 0.92} ${bannerY + bannerH * 0.90}
+               ${bannerX + bannerW * 0.70} ${bannerY + bannerH * 0.72},
+               ${bannerX + bannerW * 0.94} ${bannerY + bannerH * 0.80}
              Z"
           fill="#fde1cd"/>
 
@@ -719,18 +730,11 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       {{brandName}}
     </text>
 
-    <!-- Headline: up to 3 lines, always fully inside the panel -->
+    <!-- HEADLINE (wrapped; we’ll feed it already sliced into 2–3 lines) -->
     <text class="title t-center" x="${centerX}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
-    </text>
-
-    <!-- (dateRangeLines kept, but usually empty for this static style) -->
-    <text class="sub t-center" x="${centerX}" y="${subY}">
-      {{#dateRangeLines}}
-        <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
-      {{/dateRangeLines}}
     </text>
   </g>
 
@@ -741,7 +745,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- Subline paragraph (under offer, white) -->
+  <!-- Subline / bullets paragraph (kept in same position, now white + stroked) -->
   <text class="body t-center" x="${centerX}" y="${bodyY}">
     {{#qualifierLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -776,13 +780,7 @@ function withListLayout(lists = {}) {
   };
 }
 
-function wrapTextToWidth(
-  str = "",
-  fsPx = 48,
-  cardW = 860,
-  padX = 60,
-  maxLines = 2
-) {
+function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines = 2) {
   const s = String(str || "")
     .trim()
     .replace(/\s+/g, " ");
@@ -1179,15 +1177,14 @@ router.post("/generate-static-ad", async (req, res) => {
       location: get("location", "Your City"),
     };
 
-    // Subline paragraph text (under the offer, white)
-    const qualifierText = (crafted.subline || "").toString();
+    const bulletsParagraph = safeBullets.join(" • ").toUpperCase();
 
     const autoFields = {
       eventTitle: (crafted.headline || "").toString().toUpperCase(),
-      dateRange: "", // keep subline out of the panel
+      dateRange: (crafted.subline || "").toString(),
       saveAmount: crafted.offer || "",
-      financingLine: "",
-      qualifiers: qualifierText,
+      financingLine: (crafted.secondary || "").toString(),
+      qualifiers: bulletsParagraph,
       legal: safeDisclaimers,
       palette: knobs.palette || prof.palette,
     };
@@ -1267,24 +1264,28 @@ router.post("/generate-static-ad", async (req, res) => {
 
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
-
-    // bigger possible headline font (still auto-shrinks for longer text)
-    const fsTitle = clamp(96 - Math.max(0, lenTitle - 12) * 2.6, 60, 96);
+    const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
     const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
-    const fsH2 = 32;
+    const fsH2 = 34;
     const fsBody = 30;
 
     const cardW = 1080;
     const cardH = 1080;
-    const padX = 260; // keeps 3-line wrapping, locked inside the box
+
+    // Headline wrapping: narrower virtual width so we reliably get up to 3 lines
+    const titleWrapCardW = cardW * 0.55;
+    const titlePadX = 60;
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
-      cardW,
-      padX,
+      titleWrapCardW,
+      titlePadX,
       3
     );
+
+    // Offer + subline keep their same positions; just style changed in SVG
+    const padX = 180;
     const dateRangeLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsH2,
@@ -1299,7 +1300,12 @@ router.post("/generate-static-ad", async (req, res) => {
       padX,
       2
     );
-    const qualifiersText = mergedKnobsB.qualifiers || "";
+    const qualifiersText = [
+      mergedKnobsB.financingLine,
+      mergedKnobsB.qualifiers,
+    ]
+      .filter(Boolean)
+      .join(" • ");
     const qualifierLines = wrapTextToWidth(
       qualifiersText,
       fsBody,
@@ -1501,36 +1507,34 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         });
 
         const eventTitle = (overlay.headline || "").trim().toUpperCase();
-
-        // Treat promo/body text as the *subline under the offer*, not inside the box
-        const rawSub = overlay.promoLine || overlay.body || "";
-        const dateRange = ""; // keep panel clean
-        const qualifiers = clampWords(cleanLine(rawSub), 16);
-
+        const dateRangeRaw = overlay.promoLine || overlay.body || "";
+        const dateRange = clampWords(cleanLine(dateRangeRaw), 10);
         const saveAmount = tightenOfferText(overlay.offer || "");
         const financingLn = (overlay.secondary || "").trim();
-
+        const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        const lenTitle = eventTitle.length;
-        const lenSave = saveAmount.length;
-
-        const fsTitle = clamp(96 - Math.max(0, lenTitle - 12) * 2.6, 60, 96);
-        const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
-        const fsH2 = 32;
-        const fsBody = 30;
+        const fsTitle = 90,
+          fsH2 = 34,
+          fsSave = 80,
+          fsBody = 28;
 
         const cardW = 1080,
-          cardH = 1080,
-          padX = 260;
+          cardH = 1080;
+
+        // Same headline wrapping logic here (virtual narrower width → up to 3 lines)
+        const titleWrapCardW = cardW * 0.55;
+        const titlePadX = 60;
 
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
-          cardW,
-          padX,
+          titleWrapCardW,
+          titlePadX,
           3
         );
+
+        const padX = 180;
         const dateRangeLines = wrapTextToWidth(
           dateRange,
           fsH2,
@@ -1545,7 +1549,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           padX,
           2
         );
-        const qualifiersText = [qualifiers, financingLn]
+        const qualifiersText = [financingLn, qualifiers]
           .filter(Boolean)
           .join(" • ");
         const qualifierLines = wrapTextToWidth(
