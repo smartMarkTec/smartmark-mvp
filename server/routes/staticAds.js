@@ -1277,8 +1277,10 @@ router.post("/generate-static-ad", async (req, res) => {
     const bannerW = Math.round(innerW * 0.62);
     const headPadX = 70;
 
-    const padX = 180;
-    const padXBody = 160;
+   const padX = 180;
+// slightly tighter width so subline always stays inside the pill band
+const padXBody = 220;
+
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
@@ -1535,8 +1537,10 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const bannerW = Math.round(innerW * 0.62);
         const headPadX = 70;
 
-        const padX = 180;
-        const padXBody = 160;
+       const padX = 180;
+// slightly tighter width so subline always stays inside the pill band
+const padXBody = 220;
+
 
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
