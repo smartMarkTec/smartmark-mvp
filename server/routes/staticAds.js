@@ -1263,13 +1263,13 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
     // slightly smaller headline/save size so it doesn't look oversized
-    const fsTitle = clamp(88 - Math.max(0, lenTitle - 14) * 2.2, 58, 88);
-    const fsSave = clamp(82 - Math.max(0, lenSave - 12) * 2.0, 52, 82);
-    const fsH2 = 34;
-    const fsBody = 30;
+const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
+const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
+const fsH2 = 34;
+const fsBody = 30;
 
-    const cardW = 1080;
-    const cardH = 1080;
+const cardW = 1080;
+const cardH = 1080;
 
     // geometry kept in sync with tplPosterBCard
     const frameT = 40;
@@ -1306,21 +1306,22 @@ const padXBody = 220;
       3,
       1
     );
-    const qualifiersText = [
-      mergedKnobsB.financingLine,
-      mergedKnobsB.qualifiers,
-    ]
-      .filter(Boolean)
-      .join(" • ");
+   const qualifiersText = [
+  mergedKnobsB.financingLine,
+  mergedKnobsB.qualifiers,
+]
+  .filter(Boolean)
+  .join(" • ");
 
-    const qualifierLines = wrapTextToWidth(
-      qualifiersText,
-      fsBody,
-      cardW,
-      padXBody,
-      3,
-      1
-    );
+// use a slightly larger effective font size for wrapping so lines are shorter
+const qualifierLines = wrapTextToWidth(
+  qualifiersText,
+  fsBody * 1.15,   // more conservative wrap → never leaks out of pill
+  cardW,
+  padXBody,
+  2
+);
+
 
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
@@ -1523,13 +1524,13 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const legal = (overlay.legal || "").trim();
 
         // slightly reduced sizes here too so it matches /generate-static-ad look
-        const fsTitle = 84,
-          fsH2 = 34,
-          fsSave = 78,
-          fsBody = 28;
+        const fsTitle = 90,
+  fsH2 = 34,
+  fsSave = 80,
+  fsBody = 28;
 
-        const cardW = 1080,
-          cardH = 1080;
+const cardW = 1080,
+  cardH = 1080
 
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
@@ -1566,17 +1567,7 @@ const padXBody = 220;
           3,
           1
         );
-        const qualifiersText = [financingLn, qualifiers]
-          .filter(Boolean)
-          .join(" • ");
-        const qualifierLines = wrapTextToWidth(
-          qualifiersText,
-          fsBody,
-          cardW,
-          padXBody,
-          3,
-          1
-        );
+     const qualifiersText = [financingLn, qualifiers]
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
