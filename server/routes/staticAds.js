@@ -665,66 +665,58 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 }
 
 /**
- * Shaw-style full-canvas overlay:
- * - Thick square white frame (solid, no photo on the frame itself)
- * - Top square poster for BRAND + HEADLINE + SUBLINE
- * - Offer + qualifiers centered on the photo, outside the top poster.
+ * Shaw-style full-frame square poster:
+ * - White picture frame on the very edges of the canvas
+ * - Top square-ish poster for BRAND + HEADLINE + SUBLINE
+ * - Offer + body copy centered on the photo
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
-  // Outer frame box and thickness
-  const frameMargin = 70;          // distance from canvas edge to outer frame box
-  const innerW = cardW - frameMargin * 2;
-  const innerH = cardH - frameMargin * 2;
-  const frameThickness = 34;       // white frame thickness
-
-  const innerX = frameMargin + frameThickness;
-  const innerY = frameMargin + frameThickness;
-  const innerW2 = innerW - frameThickness * 2;
-  const innerH2 = innerH - frameThickness * 2;
-
+  const frameT = 40; // white frame thickness
+  const innerX = frameT;
+  const innerY = frameT;
+  const innerW = cardW - frameT * 2;
+  const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Top poster panel (make it taller so it feels more like the Shaw card)
-  const bannerX = innerX + 40;
-  const bannerY = innerY + 40;
-  const bannerW = innerW2 - 80;
-  const bannerH = 320;             // increased height
-
+  // top poster panel (more square, like Shaw)
+  const bannerW = Math.min(760, innerW * 0.8);
+  const bannerH = 320;
+  const bannerX = centerX - bannerW / 2;
+  const bannerY = innerY + 70;
   const brandY = bannerY + 70;
-  const titleY = bannerY + 155;
-  const subY   = bannerY + bannerH - 40;
+  const titleY = brandY + 70;
+  const subY = bannerY + bannerH - 40;
 
-  // Offer + body positions
-  const offerY = innerY + innerH2 * 0.55;
-  const bodyY  = offerY + fsSave * 1.05;
-  const legalY = frameMargin + innerH - 26;
+  // offer + bottom copy
+  const offerY = innerY + innerH * 0.62;
+  const bodyY = offerY + fsSave * 1.0 + 18;
+  const legalY = cardH - frameT - 20;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
       .t-center { text-anchor: middle; }
-      .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.04em; }
+      .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.16em; }
       .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#111827; }
       .sub     { font: 800 ${fsH2}px/1.1 Inter,system-ui; letter-spacing:0.18em; fill:#dc2626; }
-      /* Offer is now WHITE like the Shaw example */
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; }
       .body    { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#f9fafb; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
   </defs>
 
-  <!-- Solid white frame ring: no photo shows under the frame -->
+  <!-- Full-bleed white frame (photo only shows inside inner window) -->
   <path
     d="
-      M ${frameMargin} ${frameMargin}
-        H ${frameMargin + innerW}
-        V ${frameMargin + innerH}
-        H ${frameMargin}
+      M 0 0
+        H ${cardW}
+        V ${cardH}
+        H 0
         Z
       M ${innerX} ${innerY}
-        H ${innerX + innerW2}
-        V ${innerY + innerH2}
+        H ${innerX + innerW}
+        V ${innerY + innerH}
         H ${innerX}
         Z
     "
@@ -732,23 +724,23 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     fill-rule="evenodd"
   />
 
-  <!-- top square poster panel -->
+  <!-- Top poster panel -->
   <g>
     <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
 
-    <!-- soft leaf shapes -->
-    <path d="M ${bannerX + 10} ${bannerY + 20}
+    <!-- simple “leaf” accents -->
+    <path d="M ${bannerX + 18} ${bannerY + 26}
              C ${bannerX + bannerW * 0.25} ${bannerY - 10},
-               ${bannerX + bannerW * 0.25} ${bannerY + bannerH * 0.65},
-               ${bannerX + bannerW * 0.05} ${bannerY + bannerH * 0.72}
+               ${bannerX + bannerW * 0.25} ${bannerY + bannerH * 0.72},
+               ${bannerX + bannerW * 0.05} ${bannerY + bannerH * 0.78}
              Z"
-          fill="#fde7d5" opacity="0.95"/>
-    <path d="M ${bannerX + bannerW - 10} ${bannerY + 20}
+          fill="#fde4cf"/>
+    <path d="M ${bannerX + bannerW - 18} ${bannerY + 26}
              C ${bannerX + bannerW * 0.75} ${bannerY - 10},
-               ${bannerX + bannerW * 0.75} ${bannerY + bannerH * 0.65},
-               ${bannerX + bannerW * 0.95} ${bannerY + bannerH * 0.72}
+               ${bannerX + bannerW * 0.75} ${bannerY + bannerH * 0.72},
+               ${bannerX + bannerW * 0.95} ${bannerY + bannerH * 0.78}
              Z"
-          fill="#fde1cd" opacity="0.95"/>
+          fill="#fde1cd"/>
 
     <!-- brand -->
     <text class="brand t-center" x="${centerX}" y="${brandY}">
@@ -762,7 +754,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       {{/eventTitleLines}}
     </text>
 
-    <!-- SUBLINE / date range -->
+    <!-- SUBLINE / date -->
     <text class="sub t-center" x="${centerX}" y="${subY}">
       {{#dateRangeLines}}
         <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -770,21 +762,21 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     </text>
   </g>
 
-  <!-- OFFER on photo, centered -->
+  <!-- OFFER on the photo -->
   <text class="save t-center" x="${centerX}" y="${offerY}">
     {{#saveLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
     {{/saveLines}}
   </text>
 
-  <!-- Qualifiers / extra info as paragraph -->
+  <!-- body copy / bullets paragraph -->
   <text class="body t-center" x="${centerX}" y="${bodyY}">
     {{#qualifierLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
     {{/qualifierLines}}
   </text>
 
-  <!-- Legal line at very bottom of frame -->
+  <!-- legal at bottom, separate so it never overlaps -->
   {{#legal}}
   <text class="legal t-center" x="${centerX}" y="${legalY}">
     {{legal}}
@@ -792,7 +784,6 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   {{/legal}}
 </svg>`;
 }
-
 
 /* ------------------------ Utility helpers ------------------------ */
 
@@ -1276,52 +1267,49 @@ router.post('/generate-static-ad', async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // ---------- Shaw-style full canvas layout ----------
+    // ---------- card layout (Shaw-style full-frame square) ----------
     const lenTitle = String(mergedKnobsB.eventTitle || '').length;
     const lenSave = String(mergedKnobsB.saveAmount || '').length;
+    const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
+    const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
+    const fsH2 = 34;
+    const fsBody = 30;
 
-    const fsTitle = clamp(100 - Math.max(0, lenTitle - 12) * 2.3, 64, 104);
-    const fsSave = clamp(90 - Math.max(0, lenSave - 10) * 2.1, 54, 92);
-    const fsH2 = 40; // bigger subline like template
-    const fsBody = 32;
-
+    // full-canvas square card so the frame sits on the edges
     const cardW = 1080;
     const cardH = 1080;
-
-    const padXForWrap = 70 + 80; // inside frame + inner padding
+    const padX = 180; // for wrapping width only
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
       cardW,
-      padXForWrap,
+      padX,
       2
     );
     const dateRangeLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsH2,
       cardW,
-      padXForWrap,
+      padX,
       2
     );
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
       fsSave,
       cardW,
-      padXForWrap,
+      padX,
       2
     );
-    const qualifierText = [
-      mergedKnobsB.financingLine || '',
-      mergedKnobsB.qualifiers || '',
-    ]
+
+    const qualifiersText = [mergedKnobsB.financingLine, mergedKnobsB.qualifiers]
       .filter(Boolean)
       .join(' • ');
     const qualifierLines = wrapTextToWidth(
-      qualifierText,
+      qualifiersText,
       fsBody,
       cardW,
-      padXForWrap,
+      padX,
       3
     );
 
@@ -1332,7 +1320,6 @@ router.post('/generate-static-ad', async (req, res) => {
       saveLines,
       qualifierLines,
       legal: mergedKnobsB.legal,
-      accent: mergedKnobsB.palette.accent || '#ff7b41',
     };
 
     const cardSvg = mustache.render(
@@ -1348,10 +1335,15 @@ router.post('/generate-static-ad', async (req, res) => {
     );
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
+    // card covers entire canvas so the frame is on the true edges
+    const left = 0;
+    const top = 0;
+
     const finalPng = await sharp(bgPng)
-      .composite([{ input: cardPng, left: 0, top: 0 }])
+      .composite([{ input: cardPng, left, top }])
       .png({ quality: 92 })
       .toBuffer();
+
 
     const baseB = `static-${Date.now()}-${Math.random()
       .toString(36)
@@ -1520,42 +1512,42 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const qualifiers = (overlay.body || '').toString().trim();
         const legal = (overlay.legal || '').trim();
 
-        const fsTitle = 90;
-        const fsH2 = 40;
-        const fsSave = 80;
-        const fsBody = 30;
+        const fsTitle = 90,
+          fsH2 = 34,
+          fsSave = 80,
+          fsBody = 28;
 
-        const cardW = 1080;
-        const cardH = 1080;
-
-        const padXForWrap = 70 + 80;
+        const cardW = 1080,
+          cardH = 1080,
+          padX = 180;
 
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
           cardW,
-          padXForWrap,
+          padX,
           2
         );
         const dateRangeLines = wrapTextToWidth(
           dateRange,
           fsH2,
           cardW,
-          padXForWrap,
+          padX,
           2
         );
         const saveLines = wrapTextToWidth(
           saveAmount,
           fsSave,
           cardW,
-          padXForWrap,
+          padX,
           2
         );
+        const qualifiersText = [financingLn, qualifiers].filter(Boolean).join(' • ');
         const qualifierLines = wrapTextToWidth(
-          qualifiers,
+          qualifiersText,
           fsBody,
           cardW,
-          padXForWrap,
+          padX,
           3
         );
 
@@ -1566,8 +1558,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           saveLines,
           qualifierLines,
           legal,
-          accent: (prof.palette && prof.palette.accent) || '#ff7b41',
         };
+
         const cardSvg = mustache.render(
           tplPosterBCard({
             cardW,
@@ -1579,6 +1571,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           }),
           cardVars
         );
+
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
         const finalPng = await sharp(bgPng)
