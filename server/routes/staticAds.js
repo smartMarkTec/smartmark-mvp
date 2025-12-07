@@ -629,12 +629,9 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 }
 
 /**
- * Shaw-inspired square poster:
- * - 1080x1080
- * - white frame
- * - true square top panel for brand + headline (headline must wrap & stay inside)
- * - bold offer line under the square
- * - subline under the offer
+ * Shaw-inspired poster B:
+ * - widened top box
+ * - subline moved further below offer
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -644,10 +641,9 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // square size tuned to match the look you liked
-  const bannerSide = Math.round(innerW * 0.42);
-  const bannerW = bannerSide;
-  const bannerH = bannerSide;
+  // slightly WIDER box (left-right) while keeping similar height
+  const bannerW = Math.round(innerW * 0.48);
+  const bannerH = Math.round(innerW * 0.42);
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 70;
 
@@ -655,7 +651,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const titleY = brandY + fsTitle * 1.2;
 
   const offerY = innerY + innerH * 0.62;
-  const subY = offerY + fsSave * 1.05 + 30;
+  // move subline a bit further below the promotion line
+  const subY = offerY + fsSave * 1.05 + 55;
   const legalY = cardH - frameT - 22;
 
   return `
@@ -689,7 +686,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     fill-rule="evenodd"
   />
 
-  <!-- square top panel -->
+  <!-- widened top panel -->
   <g>
     <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
 
@@ -718,14 +715,14 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     </text>
   </g>
 
-  <!-- offer line -->
+  <!-- promotion line -->
   <text class="save t-center" x="${centerX}" y="${offerY}">
     {{#saveLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
     {{/saveLines}}
   </text>
 
-  <!-- subline under offer -->
+  <!-- subline further below -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -733,7 +730,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   </text>
 
   {{#legal}}
-  <text class="legal t-center" x="${centerX}" y="${legalY}">
+  <text class="legal t-center" x="${centerX}" y="${legalY}}">
     {{legal}}
   </text>
   {{/legal}}
@@ -1251,10 +1248,10 @@ router.post("/generate-static-ad", async (req, res) => {
     const cardW = 1080;
     const cardH = 1080;
 
-    // geometry matched with tplPosterBCard so headline wraps inside the square
+    // geometry kept in sync with tplPosterBCard
     const frameT = 40;
     const innerW = cardW - frameT * 2;
-    const bannerSide = Math.round(innerW * 0.42);
+    const bannerW = Math.round(innerW * 0.48);
     const headPadX = 70;
 
     const padX = 180;
@@ -1263,7 +1260,7 @@ router.post("/generate-static-ad", async (req, res) => {
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
-      bannerSide,
+      bannerW,
       headPadX,
       3
     );
@@ -1504,9 +1501,10 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const cardW = 1080,
           cardH = 1080;
 
+        // keep geometry consistent with tplPosterBCard
         const frameT = 40;
         const innerW = cardW - frameT * 2;
-        const bannerSide = Math.round(innerW * 0.42);
+        const bannerW = Math.round(innerW * 0.48);
         const headPadX = 70;
 
         const padX = 180;
@@ -1515,7 +1513,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
-          bannerSide,
+          bannerW,
           headPadX,
           3
         );
