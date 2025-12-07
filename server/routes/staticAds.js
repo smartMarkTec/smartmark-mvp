@@ -632,8 +632,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * Shaw-style full-frame square poster:
  * - 1080x1080 overall
  * - White picture frame on edges
- * - Top **square** white panel for brand + headline + (optional) date range
- * - Offer + bullets paragraph on the photo
+ * - Top white “square-ish” panel for brand + headline (only)
+ * - Offer + subline paragraph on the photo
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -643,20 +643,20 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Slightly larger square, still leaving strong breathing room
-  const squareSide = Math.min(innerW * 0.65, innerH * 0.55);
-  const bannerW = squareSide;
-  const bannerH = squareSide;
+  // Panel: a bit wider and not as tall (less slack)
+  const baseSide = Math.min(innerW * 0.64, innerH * 0.52);
+  const bannerW = baseSide * 1.05; // slightly wider
+  const bannerH = baseSide * 0.90; // slightly shorter
   const bannerX = centerX - bannerW / 2;
-  const bannerY = innerY + 80;
+  const bannerY = innerY + 90;
 
-  const brandY = bannerY + 70;
-  const titleY = brandY + fsTitle * 1.4;
+  const brandY = bannerY + 60;
+  const titleY = brandY + fsTitle * 1.35;
   const subY = bannerY + bannerH - 60;
 
-  // Offer & body sit comfortably under the square, never overlapping it
-  const offerY = bannerY + bannerH + 100;
-  const bodyY = offerY + fsSave * 1.3 + 40;
+  // Offer & subline are under the panel, with comfortable spacing
+  const offerY = bannerY + bannerH + 90;
+  const bodyY = offerY + fsSave * 1.25 + 40;
   const legalY = cardH - frameT - 24;
 
   return `
@@ -672,7 +672,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
 
-    <!-- Clip so headline can NEVER visually leak outside the square panel -->
+    <!-- Clip so headline can NEVER visually leak outside the panel -->
     <clipPath id="bannerClip">
       <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" />
     </clipPath>
@@ -696,10 +696,10 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     fill-rule="evenodd"
   />
 
-  <!-- square top panel -->
+  <!-- top panel -->
   <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
 
-  <!-- Everything inside this group is hard-clipped to the square -->
+  <!-- Everything in this group is clipped to the panel -->
   <g clip-path="url(#bannerClip)">
     <!-- soft “leaf” accents -->
     <path d="M ${bannerX + 26} ${bannerY + 32}
@@ -719,13 +719,14 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       {{brandName}}
     </text>
 
-    <!-- Headline: up to 3 lines, always fully contained in box -->
+    <!-- Headline: up to 3 lines, always fully inside the panel -->
     <text class="title t-center" x="${centerX}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
 
+    <!-- (dateRangeLines are still supported but we'll usually keep them empty for static ads) -->
     <text class="sub t-center" x="${centerX}" y="${subY}">
       {{#dateRangeLines}}
         <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -740,7 +741,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- Bullets / qualifiers paragraph -->
+  <!-- Subline paragraph (under offer, white) -->
   <text class="body t-center" x="${centerX}" y="${bodyY}">
     {{#qualifierLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -775,11 +776,6 @@ function withListLayout(lists = {}) {
   };
 }
 
-/**
- * Wrap text to a visual width in pixels (approximation).
- * We pass a "cardW" and "padX" but effectively it's the same
- * as saying: usableWidth = cardW - padX*2.
- */
 function wrapTextToWidth(
   str = "",
   fsPx = 48,
@@ -1183,14 +1179,15 @@ router.post("/generate-static-ad", async (req, res) => {
       location: get("location", "Your City"),
     };
 
-    const bulletsParagraph = safeBullets.join(" • ").toUpperCase();
+    // Subline paragraph text (under the offer, white)
+    const qualifierText = (crafted.subline || "").toString();
 
     const autoFields = {
       eventTitle: (crafted.headline || "").toString().toUpperCase(),
-      dateRange: (crafted.subline || "").toString(),
+      dateRange: "", // keep subline out of the panel
       saveAmount: crafted.offer || "",
-      financingLine: (crafted.secondary || "").toString(),
-      qualifiers: bulletsParagraph,
+      financingLine: "",
+      qualifiers: qualifierText,
       legal: safeDisclaimers,
       palette: knobs.palette || prof.palette,
     };
@@ -1271,7 +1268,6 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    // more aggressive shrink for long headlines
     const fsTitle = clamp(88 - Math.max(0, lenTitle - 12) * 2.6, 54, 88);
     const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
     const fsH2 = 32;
@@ -1279,7 +1275,7 @@ router.post("/generate-static-ad", async (req, res) => {
 
     const cardW = 1080;
     const cardH = 1080;
-    const padX = 260; // tighter width so wrapping happens earlier → no leakage
+    const padX = 260; // forces wrapping sooner so headline stays inside box
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
@@ -1302,12 +1298,7 @@ router.post("/generate-static-ad", async (req, res) => {
       padX,
       2
     );
-    const qualifiersText = [
-      mergedKnobsB.financingLine,
-      mergedKnobsB.qualifiers,
-    ]
-      .filter(Boolean)
-      .join(" • ");
+    const qualifiersText = mergedKnobsB.qualifiers || "";
     const qualifierLines = wrapTextToWidth(
       qualifiersText,
       fsBody,
