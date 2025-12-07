@@ -631,7 +631,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 /**
  * Shaw-inspired poster B:
- * - wider top box (left-right)
+ * - widened top box (left-right)
  * - subline sits on a translucent band for legibility
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
@@ -642,8 +642,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Slightly wider box (left-right) but roughly same height
-  const bannerW = Math.round(innerW * 0.54);
+  // wider box left-right, similar height (keeps square-ish feel)
+  const bannerW = Math.round(innerW * 0.62);
   const bannerH = Math.round(innerW * 0.42);
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 70;
@@ -652,13 +652,14 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const titleY = brandY + fsTitle * 1.2;
 
   const offerY = innerY + innerH * 0.62;
-  const subY = offerY + fsSave * 1.05 + 55;
+  // more separation between promotion and subline
+  const subY = offerY + fsSave * 1.05 + 85;
   const legalY = cardH - frameT - 22;
 
   const subBandX = cardW * 0.12;
   const subBandW = cardW * 0.76;
   const subBandH = fsBody * 2.8;
-  const subBandY = subY - fsBody * 1.7;
+  const subBandY = subY - fsBody * 1.8;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -764,13 +765,27 @@ function withListLayout(lists = {}) {
   };
 }
 
-function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines = 2) {
+// updated: allow forcing more lines for the title so it doesn't get chopped
+function wrapTextToWidth(
+  str = "",
+  fsPx = 48,
+  cardW = 860,
+  padX = 60,
+  maxLines = 2,
+  minLines = 1
+) {
   const s = String(str || "")
     .trim()
     .replace(/\s+/g, " ");
   if (!s) return [];
-  const pxWidth = cardW - padX * 2;
-  const maxChars = Math.max(6, Math.floor(pxWidth / (fsPx * 0.58)));
+  const pxWidth = Math.max(10, cardW - padX * 2);
+  let maxChars = Math.max(6, Math.floor(pxWidth / (fsPx * 0.58)));
+
+  // if we want multiple lines, pretend usable width is smaller
+  if (minLines > 1) {
+    maxChars = Math.max(4, Math.floor(maxChars / minLines));
+  }
+
   const words = s.split(" ");
   const lines = [];
   let cur = "";
@@ -785,12 +800,11 @@ function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines =
   }
   if (lines.length < maxLines && cur) lines.push(cur);
   if (lines.length > maxLines) lines.length = maxLines;
+
   const used = lines.join(" ").length;
   if (used < s.length) {
-    lines[lines.length - 1] = ellipsize(
-      lines[lines.length - 1],
-      Math.max(6, maxChars)
-    );
+    const last = lines.length - 1;
+    lines[last] = ellipsize(lines[last], Math.max(6, maxChars - 2));
   }
   return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : fsPx * 1.08 }));
 }
@@ -1248,8 +1262,9 @@ router.post("/generate-static-ad", async (req, res) => {
 
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
-    const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
-    const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
+    // slightly smaller headline/save size so it doesn't look oversized
+    const fsTitle = clamp(88 - Math.max(0, lenTitle - 14) * 2.2, 58, 88);
+    const fsSave = clamp(82 - Math.max(0, lenSave - 12) * 2.0, 52, 82);
     const fsH2 = 34;
     const fsBody = 30;
 
@@ -1259,7 +1274,7 @@ router.post("/generate-static-ad", async (req, res) => {
     // geometry kept in sync with tplPosterBCard
     const frameT = 40;
     const innerW = cardW - frameT * 2;
-    const bannerW = Math.round(innerW * 0.54);
+    const bannerW = Math.round(innerW * 0.62);
     const headPadX = 70;
 
     const padX = 180;
@@ -1270,6 +1285,7 @@ router.post("/generate-static-ad", async (req, res) => {
       fsTitle,
       bannerW,
       headPadX,
+      3,
       3
     );
     const saveLines = wrapTextToWidth(
@@ -1277,14 +1293,16 @@ router.post("/generate-static-ad", async (req, res) => {
       fsSave,
       cardW,
       padX,
-      2
+      2,
+      1
     );
     const subLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsBody,
       cardW,
       padXBody,
-      3
+      3,
+      1
     );
     const qualifiersText = [
       mergedKnobsB.financingLine,
@@ -1298,7 +1316,8 @@ router.post("/generate-static-ad", async (req, res) => {
       fsBody,
       cardW,
       padXBody,
-      3
+      3,
+      1
     );
 
     const cardVars = {
@@ -1501,9 +1520,10 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        const fsTitle = 90,
+        // slightly reduced sizes here too so it matches /generate-static-ad look
+        const fsTitle = 84,
           fsH2 = 34,
-          fsSave = 80,
+          fsSave = 78,
           fsBody = 28;
 
         const cardW = 1080,
@@ -1512,7 +1532,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
         const innerW = cardW - frameT * 2;
-        const bannerW = Math.round(innerW * 0.54);
+        const bannerW = Math.round(innerW * 0.62);
         const headPadX = 70;
 
         const padX = 180;
@@ -1523,6 +1543,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           fsTitle,
           bannerW,
           headPadX,
+          3,
           3
         );
         const saveLines = wrapTextToWidth(
@@ -1530,14 +1551,16 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           fsSave,
           cardW,
           padX,
-          2
+          2,
+          1
         );
         const subLines = wrapTextToWidth(
           dateRange,
           fsBody,
           cardW,
           padXBody,
-          3
+          3,
+          1
         );
         const qualifiersText = [financingLn, qualifiers]
           .filter(Boolean)
@@ -1547,7 +1570,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           fsBody,
           cardW,
           padXBody,
-          3
+          3,
+          1
         );
 
         const cardVars = {
