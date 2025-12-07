@@ -667,18 +667,18 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 /**
  * Shaw-style full-frame square poster:
  * - White picture frame on the very edges of the canvas
- * - Top square-ish poster for BRAND + HEADLINE + SUBLINE
- * - Offer + body copy centered on the photo
+ * - Top square-ish white panel for BRAND + HEADLINE + SUBLINE
+ * - Offer + body copy centered on the photo area
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
-  const frameT = 40; // white frame thickness
+  const frameT = 40; // frame thickness
   const innerX = frameT;
   const innerY = frameT;
   const innerW = cardW - frameT * 2;
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // top poster panel (more square, like Shaw)
+  // top poster panel (square-ish)
   const bannerW = Math.min(760, innerW * 0.8);
   const bannerH = 320;
   const bannerX = centerX - bannerW / 2;
@@ -706,7 +706,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     </style>
   </defs>
 
-  <!-- Full-bleed white frame (photo only shows inside inner window) -->
+  <!-- Full-bleed white frame ring: photo shows only in center window -->
   <path
     d="
       M 0 0
@@ -827,7 +827,10 @@ function wrapTextToWidth(str = '', fsPx = 48, cardW = 860, padX = 60, maxLines =
   if (lines.length > maxLines) lines.length = maxLines;
   const used = lines.join(' ').length;
   if (used < s.length) {
-    lines[lines.length - 1] = ellipsize(lines[lines.length - 1], Math.max(6, maxChars));
+    lines[lines.length - 1] = ellipsize(
+      lines[lines.length - 1],
+      Math.max(6, maxChars)
+    );
   }
   return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : fsPx * 1.08 }));
 }
@@ -1275,10 +1278,9 @@ router.post('/generate-static-ad', async (req, res) => {
     const fsH2 = 34;
     const fsBody = 30;
 
-    // full-canvas square card so the frame sits on the edges
     const cardW = 1080;
     const cardH = 1080;
-    const padX = 180; // for wrapping width only
+    const padX = 180;
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
@@ -1335,7 +1337,6 @@ router.post('/generate-static-ad', async (req, res) => {
     );
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
-    // card covers entire canvas so the frame is on the true edges
     const left = 0;
     const top = 0;
 
@@ -1343,7 +1344,6 @@ router.post('/generate-static-ad', async (req, res) => {
       .composite([{ input: cardPng, left, top }])
       .png({ quality: 92 })
       .toBuffer();
-
 
     const baseB = `static-${Date.now()}-${Math.random()
       .toString(36)
@@ -1507,9 +1507,10 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         });
 
         const eventTitle = (overlay.headline || '').trim().toUpperCase();
-        const dateRange = ''; // keep regen simpler
-        const saveAmount = tightenOfferText((overlay.offer || '').trim());
-        const qualifiers = (overlay.body || '').toString().trim();
+        const dateRange = ''; // keep regen variant simpler
+        const saveAmount = (overlay.offer || '').trim();
+        const financingLn = (overlay.secondary || '').trim();
+        const qualifiers = ''; // extra copy skipped for regen
         const legal = (overlay.legal || '').trim();
 
         const fsTitle = 90,
@@ -1559,7 +1560,6 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           qualifierLines,
           legal,
         };
-
         const cardSvg = mustache.render(
           tplPosterBCard({
             cardW,
@@ -1571,11 +1571,13 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           }),
           cardVars
         );
-
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
+        const left = 0;
+        const top = 0;
+
         const finalPng = await sharp(bgPng)
-          .composite([{ input: cardPng, left: 0, top: 0 }])
+          .composite([{ input: cardPng, left, top }])
           .png({ quality: 92 })
           .toBuffer();
 
