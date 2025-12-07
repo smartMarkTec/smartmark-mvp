@@ -629,11 +629,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 }
 
 /**
- * Shaw-style full-frame square poster:
+ * Shaw-style full-frame square poster _v2_
  * - 1080x1080 overall
  * - White picture frame on edges
- * - Top **square** white panel for brand + headline
- * - Subline + offer + bullets stacked below the square
+ * - Top **square** white panel for brand + headline (wrapped)
+ * - Subline + offer + paragraph below the square, on the photo
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -643,21 +643,23 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Slightly larger square panel
-  const squareSide = Math.min(innerW * 0.8, innerH * 0.6);
+  // Smaller true square so there is comfortable space underneath
+  const squareSide = Math.min(innerW * 0.62, innerH * 0.36);
   const bannerW = squareSide;
   const bannerH = squareSide;
   const bannerX = centerX - bannerW / 2;
-  const bannerY = innerY + 60;
+  const bannerY = innerY + 80;
 
-  const brandY = bannerY + 70;
-  const titleY = brandY + fsTitle * 1.25;
+  const brandY = bannerY + 60;
+  const titleY = brandY + fsTitle * 1.2;
 
-  // Now positioned clearly under the square
-  const subY = bannerY + bannerH + 60;
-  const offerY = subY + fsH2 * 2.1;
-  const bodyY = offerY + fsSave * 1.15 + 24;
-  const legalY = innerY + innerH - 22;
+  // Subline OUTSIDE the square
+  const subOutsideY = bannerY + bannerH + 70;
+
+  // Offer + paragraph below subline
+  const offerY = subOutsideY + 80;
+  const bodyY = offerY + fsSave * 1.0 + 24;
+  const legalY = cardH - frameT - 22;
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -691,21 +693,21 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     fill-rule="evenodd"
   />
 
-  <!-- square top panel (brand + headline only) -->
+  <!-- square top panel: brand + HEADLINE ONLY -->
   <g>
     <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
 
-    <!-- leaf accents -->
-    <path d="M ${bannerX + 26} ${bannerY + 40}
+    <!-- simple “leaf” accents -->
+    <path d="M ${bannerX + 22} ${bannerY + 32}
              C ${bannerX + bannerW * 0.30} ${bannerY - 10},
-               ${bannerX + bannerW * 0.30} ${bannerY + bannerH * 0.78},
-               ${bannerX + bannerW * 0.10} ${bannerY + bannerH * 0.88}
+               ${bannerX + bannerW * 0.30} ${bannerY + bannerH * 0.72},
+               ${bannerX + bannerW * 0.06} ${bannerY + bannerH * 0.80}
              Z"
           fill="#fde4cf"/>
-    <path d="M ${bannerX + bannerW - 26} ${bannerY + 40}
+    <path d="M ${bannerX + bannerW - 22} ${bannerY + 32}
              C ${bannerX + bannerW * 0.70} ${bannerY - 10},
-               ${bannerX + bannerW * 0.70} ${bannerY + bannerH * 0.78},
-               ${bannerX + bannerW * 0.90} ${bannerY + bannerH * 0.88}
+               ${bannerX + bannerW * 0.70} ${bannerY + bannerH * 0.72},
+               ${bannerX + bannerW * 0.94} ${bannerY + bannerH * 0.80}
              Z"
           fill="#fde1cd"/>
 
@@ -720,8 +722,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     </text>
   </g>
 
-  <!-- Subline (red) under the square -->
-  <text class="sub t-center" x="${centerX}" y="${subY}">
+  <!-- Subline BELOW the square -->
+  <text class="sub t-center" x="${centerX}" y="${subOutsideY}">
     {{#dateRangeLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
     {{/dateRangeLines}}
@@ -734,7 +736,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- Bullets paragraph / qualifiers -->
+  <!-- Bullets paragraph -->
   <text class="body t-center" x="${centerX}" y="${bodyY}">
     {{#qualifierLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -769,63 +771,35 @@ function withListLayout(lists = {}) {
   };
 }
 
-/**
- * Improved wrap: never drops the last word.
- * Uses ellipsis only on the final line if text is too long.
- */
 function wrapTextToWidth(str = "", fsPx = 48, cardW = 860, padX = 60, maxLines = 2) {
   const s = String(str || "")
     .trim()
     .replace(/\s+/g, " ");
   if (!s) return [];
-
   const pxWidth = cardW - padX * 2;
   const maxChars = Math.max(6, Math.floor(pxWidth / (fsPx * 0.58)));
   const words = s.split(" ");
   const lines = [];
   let cur = "";
-
-  for (let i = 0; i < words.length; i++) {
-    const w = words[i];
+  for (const w of words) {
     const next = cur ? cur + " " + w : w;
-
-    if (next.length <= maxChars) {
-      cur = next;
-    } else {
-      if (cur) {
-        lines.push(cur);
-      } else {
-        // single ultra-long word
-        lines.push(ellipsize(next, maxChars));
-      }
-      // if adding another full line would exceed maxLines, shove the rest into the last line
-      if (lines.length === maxLines - 1) {
-        const remaining = words
-          .slice(i)
-          .join(" ")
-          .trim();
-        if (remaining) {
-          lines.push(ellipsize(remaining, maxChars));
-        }
-        cur = "";
-        break;
-      }
+    if (next.length <= maxChars) cur = next;
+    else {
+      if (cur) lines.push(cur);
       cur = w;
+      if (lines.length >= maxLines - 1) break;
     }
   }
-
-  if (cur && lines.length < maxLines) {
-    lines.push(cur);
+  if (lines.length < maxLines && cur) lines.push(cur);
+  if (lines.length > maxLines) lines.length = maxLines;
+  const used = lines.join(" ").length;
+  if (used < s.length) {
+    lines[lines.length - 1] = ellipsize(
+      lines[lines.length - 1],
+      Math.max(6, maxChars)
+    );
   }
-
-  if (lines.length > maxLines) {
-    lines.length = maxLines;
-  }
-
-  return lines.map((line, idx) => ({
-    line,
-    dy: idx === 0 ? 0 : fsPx * 1.08,
-  }));
+  return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : fsPx * 1.08 }));
 }
 
 /* ------------------------ Stock / Pexels ------------------------ */
@@ -1281,7 +1255,9 @@ router.post("/generate-static-ad", async (req, res) => {
 
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
-    const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
+
+    // Slightly more aggressive scaling so headline fits comfortably in square
+    const fsTitle = clamp(88 - Math.max(0, lenTitle - 10) * 2.4, 52, 82);
     const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
     const fsH2 = 34;
     const fsBody = 30;
@@ -1519,13 +1495,14 @@ router.post("/generate-image-from-prompt", async (req, res) => {
 
         const eventTitle = (overlay.headline || "").trim().toUpperCase();
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
-        const dateRange = clampWords(cleanLine(dateRangeRaw), 12);
+        const dateRange = clampWords(cleanLine(dateRangeRaw), 10);
         const saveAmount = tightenOfferText(overlay.offer || "");
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        const fsTitle = 90,
+        // Keep in sync with poster_b defaults
+        const fsTitle = 80,
           fsH2 = 34,
           fsSave = 80,
           fsBody = 28;
