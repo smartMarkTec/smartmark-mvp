@@ -666,7 +666,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.16em; }
       .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#111827; }
       .sub     { font: 800 ${fsH2}px/1.1 Inter,system-ui; letter-spacing:0.18em; fill:#dc2626; }
-      /* PROMO + SUBLINE: Shaw-style, bright & readable on any photo */
+            /* PROMO + SUBLINE: Shaw-style, bright &amp; readable on any photo */
       .save    {
         font: 900 ${fsSave}px/1.0 Inter,system-ui;
         fill:#ffffff;
