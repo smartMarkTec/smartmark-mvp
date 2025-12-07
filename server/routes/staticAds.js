@@ -629,13 +629,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 }
 
 /**
- * Shaw-style full-frame square poster _v3_
- * - 1080x1080 overall
- * - White picture frame on edges
- * - Top **square** white panel for brand + HEADLINE
- * - Offer directly under the square
- * - Subline under the offer
- * - Bullets/qualifiers under the subline
+ * Shaw-style full-frame square poster v4
+ * - White frame on edges
+ * - Slightly wider/taller square panel
+ * - Headline is forced to wrap inside the square
+ * - Offer under square, subline under offer, paragraph under subline
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -645,8 +643,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // Slightly bigger true square + still plenty of space below
-  const squareSide = Math.min(innerW * 0.68, innerH * 0.40);
+  // Square is a little bigger now (width and height)
+  const squareSide = Math.min(innerW * 0.72, innerH * 0.42);
   const bannerW = squareSide;
   const bannerH = squareSide;
   const bannerX = centerX - bannerW / 2;
@@ -657,7 +655,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
 
   // Vertical stack: OFFER -> SUBLINE -> BODY
   const offerY = bannerY + bannerH + 80;
-  const subOutsideY = offerY + fsSave * 1.15 + 26;
+  const subOutsideY = offerY + fsSave * 1.20 + 40; // lower a bit more for breathing room
   const bodyY = subOutsideY + fsH2 * 1.25 + 26;
   const legalY = cardH - frameT - 22;
 
@@ -1256,7 +1254,7 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    // Aggressive scaling so headline always fits inside the square
+    // Headline shrinks as it gets longer
     const fsTitle = clamp(88 - Math.max(0, lenTitle - 10) * 2.4, 52, 82);
     const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
     const fsH2 = 34;
@@ -1266,22 +1264,27 @@ router.post("/generate-static-ad", async (req, res) => {
     const cardH = 1080;
     const padXFull = 180;
 
-    // Title wraps using the approximate square width, so it stays inside
-    const titleBoxW = cardW * 0.68;
+    // Headline: wrap using a width that is tighter than the square,
+    // so it **cannot** leak outside.
+    const titleBoxW = cardW * 0.60;
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
       titleBoxW,
       40,
-      2
+      3
     );
+
+    // Subline: wrap more (narrower width + up to 3 lines)
+    const padXSub = padXFull + 40;
     const dateRangeLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsH2,
       cardW,
-      padXFull,
-      2
+      padXSub,
+      3
     );
+
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
       fsSave,
@@ -1506,7 +1509,6 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const lenTitle = eventTitle.length;
         const lenSave = saveAmount.length;
 
-        // match poster_b logic: headline shrinks when longer
         const fsTitle = clamp(88 - Math.max(0, lenTitle - 10) * 2.4, 52, 82);
         const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
         const fsH2 = 34;
@@ -1516,20 +1518,22 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           cardH = 1080,
           padXFull = 180;
 
-        const titleBoxW = cardW * 0.68;
+        const titleBoxW = cardW * 0.60;
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
           titleBoxW,
           40,
-          2
+          3
         );
+
+        const padXSub = padXFull + 40;
         const dateRangeLines = wrapTextToWidth(
           dateRange,
           fsH2,
           cardW,
-          padXFull,
-          2
+          padXSub,
+          3
         );
         const saveLines = wrapTextToWidth(
           saveAmount,
