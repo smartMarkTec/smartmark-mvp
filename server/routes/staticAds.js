@@ -1295,13 +1295,13 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    // base font sizes (we'll let wrapTitleToBox shrink headline if needed)
+    // slightly larger headline base, slightly smaller promo base
     const fsTitleBase = clamp(
-      96 - Math.max(0, lenTitle - 14) * 2.4,
+      100 - Math.max(0, lenTitle - 14) * 2.4,
       60,
-      96
+      100
     );
-    const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
+    const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
     const fsH2 = 34;
     const fsBody = 30;
 
@@ -1315,7 +1315,8 @@ router.post("/generate-static-ad", async (req, res) => {
     const headPadX = 70;
 
     const padX = 180;
-    const padXBody = 220;
+    // tighter wrap width so subline always sits inside pill
+    const padXBody = 260;
 
     const titleWrap = wrapTitleToBox(
       mergedKnobsB.eventTitle,
@@ -1343,7 +1344,6 @@ router.post("/generate-static-ad", async (req, res) => {
       3,
       1
     );
-
     const qualifiersText = [
       mergedKnobsB.financingLine,
       mergedKnobsB.qualifiers,
@@ -1560,9 +1560,9 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const legal = (overlay.legal || "").trim();
 
         // base sizes; wrapTitleToBox will shrink if needed
-        const fsTitleBase = 90,
+        const fsTitleBase = 94,
           fsH2 = 34,
-          fsSave = 80,
+          fsSave = 74,
           fsBody = 28;
 
         const cardW = 1080,
@@ -1575,7 +1575,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const headPadX = 70;
 
         const padX = 180;
-        const padXBody = 220;
+        const padXBody = 260;
 
         const titleWrap = wrapTitleToBox(
           eventTitle,
@@ -1603,7 +1603,6 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           3,
           1
         );
-
         const qualifiersText = [financingLn, qualifiers]
           .filter(Boolean)
           .join(" • ");
