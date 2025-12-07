@@ -666,27 +666,37 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 /**
  * Shaw-style full-canvas overlay:
- * - Thick square white frame
+ * - Thick square white frame (solid, no photo on the frame itself)
  * - Top square poster for BRAND + HEADLINE + SUBLINE
  * - Offer + qualifiers centered on the photo, outside the top poster.
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
-  const frameMargin = 70;
+  // Outer frame box and thickness
+  const frameMargin = 70;          // distance from canvas edge to outer frame box
   const innerW = cardW - frameMargin * 2;
   const innerH = cardH - frameMargin * 2;
+  const frameThickness = 34;       // white frame thickness
+
+  const innerX = frameMargin + frameThickness;
+  const innerY = frameMargin + frameThickness;
+  const innerW2 = innerW - frameThickness * 2;
+  const innerH2 = innerH - frameThickness * 2;
+
   const centerX = cardW / 2;
 
-  const bannerX = frameMargin + 80;
-  const bannerY = frameMargin + 80;
-  const bannerW = innerW - 160;
-  const bannerH = 230;
+  // Top poster panel (make it taller so it feels more like the Shaw card)
+  const bannerX = innerX + 40;
+  const bannerY = innerY + 40;
+  const bannerW = innerW2 - 80;
+  const bannerH = 320;             // increased height
 
-  const brandY = bannerY + 55;
-  const titleY = bannerY + 120;
-  const subY = bannerY + bannerH - 40;
+  const brandY = bannerY + 70;
+  const titleY = bannerY + 155;
+  const subY   = bannerY + bannerH - 40;
 
-  const offerY = frameMargin + innerH * 0.58;
-  const bodyY = offerY + fsSave * 1.05;
+  // Offer + body positions
+  const offerY = innerY + innerH2 * 0.55;
+  const bodyY  = offerY + fsSave * 1.05;
   const legalY = frameMargin + innerH - 26;
 
   return `
@@ -697,16 +707,30 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.04em; }
       .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#111827; }
       .sub     { font: 800 ${fsH2}px/1.1 Inter,system-ui; letter-spacing:0.18em; fill:#dc2626; }
-      .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill: {{accent}}; }
+      /* Offer is now WHITE like the Shaw example */
+      .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; }
       .body    { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#f9fafb; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
   </defs>
 
-  <!-- outer square white frame -->
-  <rect x="${frameMargin}" y="${frameMargin}"
-        width="${innerW}" height="${innerH}"
-        rx="0" fill="none" stroke="#ffffff" stroke-width="34"/>
+  <!-- Solid white frame ring: no photo shows under the frame -->
+  <path
+    d="
+      M ${frameMargin} ${frameMargin}
+        H ${frameMargin + innerW}
+        V ${frameMargin + innerH}
+        H ${frameMargin}
+        Z
+      M ${innerX} ${innerY}
+        H ${innerX + innerW2}
+        V ${innerY + innerH2}
+        H ${innerX}
+        Z
+    "
+    fill="#ffffff"
+    fill-rule="evenodd"
+  />
 
   <!-- top square poster panel -->
   <g>
@@ -768,6 +792,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   {{/legal}}
 </svg>`;
 }
+
 
 /* ------------------------ Utility helpers ------------------------ */
 
