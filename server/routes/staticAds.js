@@ -1436,14 +1436,15 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const location = a.location || b.location || 'Your City';
     const backgroundUrl = a.backgroundUrl || b.backgroundUrl || '';
 
+    // Overlay coming from frontend (FormPage / ai.js)
     const overlay = {
-      headline: (a.headline || b.overlayHeadline || '').toString().slice(0, 55),
+      headline: (a.headline || b.overlayHeadline || '').toString().slice(0, 60),
       body: a.adCopy || b.overlayBody || '',
-      offer: a.offer || '',
-      promoLine: a.promoLine || '',
-      secondary: a.secondary || '',
+      offer: a.offer || b.offer || '',
+      promoLine: a.promoLine || b.promoLine || '',
+      secondary: a.secondary || b.secondary || '',
       cta: a.cta || b.overlayCTA || 'Learn more',
-      legal: a.legal || '',
+      legal: a.legal || b.legal || '',
     };
 
     const prof = profileForIndustry(industry);
@@ -1463,13 +1464,18 @@ router.post('/generate-image-from-prompt', async (req, res) => {
 
     if (isPoster) {
       const seeds = [Date.now(), Date.now() + 7777];
+
       for (const seed of seeds) {
         let photoBuf = null;
+
+        // 1) explicit background if provided
         if (backgroundUrl) {
           try {
             photoBuf = await fetchBuffer(backgroundUrl);
           } catch {}
         }
+
+        // 2) Pexels
         if (!photoBuf) {
           try {
             const q = pexelsQueryForKind(prof.kind, prof.bgHint);
@@ -1478,6 +1484,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
             console.warn('[generate-image-from-prompt] Pexels failed:', e.message);
           }
         }
+
+        // 3) local stock
         if (!photoBuf) {
           const localPath = pickLocalStockPath(prof.kind, seed);
           if (localPath) {
@@ -1486,6 +1494,8 @@ router.post('/generate-image-from-prompt', async (req, res) => {
             } catch {}
           }
         }
+
+        // 4) fallback image
         if (!photoBuf) {
           try {
             photoBuf = await fetchBuffer(selfUrl(req, '/__fallback/1200.jpg'));
@@ -1499,21 +1509,43 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           photoBuffer: photoBuf,
         });
 
-        const eventTitle = (overlay.headline || '').trim().toUpperCase();
-        const dateRange = ''; // keep regen variant simpler
-        const saveAmount = (overlay.offer || '').trim();
-        const financingLn = (overlay.secondary || '').trim();
-        const qualifiers = ''; // regen: skip para, main layout only
-        const legal = (overlay.legal || '').trim();
+        // --------- MAP OVERLAY → SHAW FIELDS (same logic as poster_b) ---------
+        const rawTitle =
+          overlay.headline ||
+          a.headline ||
+          prof.eventTitle ||
+          (industry ? `${titleCase(industry)} Sale` : 'Seasonal Sale');
+        const eventTitle = cleanLine(rawTitle).toUpperCase();
 
-        const fsTitle = 90,
-          fsH2 = 32,
-          fsSave = 80,
-          fsBody = 26;
-        const cardW = 880,
-          cardH = 720,
-          padX = 80,
-          padY = 110;
+        const dateRange = cleanLine(overlay.promoLine || '');
+
+        const rawOffer = overlay.offer || a.offer || a.saveAmount || '';
+        const saveAmount = tightenOfferText(rawOffer); // e.g. "50% OFF"
+
+        const financingLn = cleanLine(overlay.secondary || '');
+
+        let qualifiersSrc = cleanLine(overlay.body || '');
+        if (!qualifiersSrc && a.mainBenefit) {
+          qualifiersSrc = cleanLine(a.mainBenefit);
+        }
+        if (qualifiersSrc.length > 0) {
+          const words = qualifiersSrc.split(/\s+/).slice(0, 40); // keep it compact
+          qualifiersSrc = words.join(' ');
+        }
+        const qualifiers = qualifiersSrc;
+
+        const legal = (overlay.legal || '').toString().trim();
+
+        // --------- LAYOUT (same centered Shaw panel as poster_b) ---------
+        const fsTitle = 90;
+        const fsH2 = 32;
+        const fsSave = 80;
+        const fsBody = 26;
+
+        const cardW = 880;
+        const cardH = 720;
+        const padX = 80;
+        const padY = 110;
 
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
@@ -1540,11 +1572,14 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const titleBlock =
           Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
         const titleY = padY + fsTitle;
+
         const dateY = titleY + titleBlock + 26;
         const dateBlock =
           Math.max(1, dateRangeLines.length) * (fsH2 * 1.3);
+
         const saveY = dateY + dateBlock + 80;
         const financeY = financingLn ? saveY + fsBody * 1.5 : saveY;
+
         const qualY =
           qualifierLines.length > 0
             ? financeY + (financingLn ? fsBody * 1.8 : 46)
@@ -1569,6 +1604,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           accent: (prof.palette && prof.palette.accent) || '#ff7b41',
           metrics,
         };
+
         const cardSvg = mustache.render(
           tplPosterBCard({
             cardW,
@@ -1586,7 +1622,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
         const left = Math.round((W - cardW) / 2);
-        const top = Math.round((H - cardH) / 2); // centered
+        const top = Math.round((H - cardH) / 2); // centered square panel
 
         const finalPng = await sharp(bgPng)
           .composite([{ input: cardPng, left, top }])
@@ -1600,6 +1636,7 @@ router.post('/generate-image-from-prompt', async (req, res) => {
         files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
     } else {
+      // service flyer preview still uses flyer_a
       const palette =
         prof.palette || {
           header: '#0d3b66',
