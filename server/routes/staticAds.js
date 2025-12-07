@@ -1295,11 +1295,11 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    // slightly larger headline base, slightly smaller promo base
+    // headline base size back closer to original feel (but still adaptive)
     const fsTitleBase = clamp(
-      100 - Math.max(0, lenTitle - 14) * 2.4,
+      96 - Math.max(0, lenTitle - 14) * 2.4,
       60,
-      100
+      96
     );
     const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
     const fsH2 = 34;
@@ -1559,8 +1559,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes; wrapTitleToBox will shrink if needed
-        const fsTitleBase = 94,
+        // base sizes; headline base aligned with original vibe
+        const fsTitleBase = 90,
           fsH2 = 34,
           fsSave = 74,
           fsBody = 28;
