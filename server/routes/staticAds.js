@@ -658,10 +658,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
 
   const subBandX = cardW * 0.12;
   const subBandW = cardW * 0.76;
-// taller band so 1–2 lines of subline text always sit fully inside
-  const subBandH = fsBody * 3.6;
+  const subBandH = fsBody * 2.8;
   const subBandY = subY - fsBody * 1.8;
-
 
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
@@ -774,7 +772,8 @@ function wrapTextToWidth(
   cardW = 860,
   padX = 60,
   maxLines = 2,
-  minLines = 1
+  minLines = 1,
+  avoidEllipsis = false // if true, never add "..."
 ) {
   const s = String(str || "")
     .trim()
@@ -804,11 +803,42 @@ function wrapTextToWidth(
   if (lines.length > maxLines) lines.length = maxLines;
 
   const used = lines.join(" ").length;
-  if (used < s.length) {
+  if (used < s.length && !avoidEllipsis) {
     const last = lines.length - 1;
     lines[last] = ellipsize(lines[last], Math.max(6, maxChars - 2));
   }
   return lines.map((line, i) => ({ line, dy: i === 0 ? 0 : fsPx * 1.08 }));
+}
+
+// special wrapper for the headline inside the top square:
+// it shrinks the font down (to a floor) until ALL characters fit in
+// the requested number of lines, with NO ellipsis.
+function wrapTitleToBox(
+  str = "",
+  fsInitial = 72,
+  boxW = 600,
+  padX = 60,
+  maxLines = 3
+) {
+  const s = String(str || "")
+    .trim()
+    .replace(/\s+/g, " ");
+  if (!s) return { fs: fsInitial, lines: [] };
+
+  const fullLen = s.length;
+  let fs = fsInitial;
+  let lines = [];
+  const minFs = Math.max(40, Math.floor(fsInitial * 0.6)); // don't get silly small
+
+  for (let i = 0; i < 8; i++) {
+    lines = wrapTextToWidth(s, fs, boxW, padX, maxLines, maxLines, true);
+    const used = lines.map((l) => l.line).join(" ").length;
+
+    if (used >= fullLen || fs <= minFs) break;
+    fs -= 4;
+  }
+
+  return { fs, lines };
 }
 
 /* ------------------------ Stock / Pexels ------------------------ */
@@ -1264,8 +1294,13 @@ router.post("/generate-static-ad", async (req, res) => {
 
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
-    // slightly smaller headline/save size so it doesn't look oversized
-    const fsTitle = clamp(96 - Math.max(0, lenTitle - 14) * 2.4, 60, 96);
+
+    // base font sizes (we'll let wrapTitleToBox shrink headline if needed)
+    const fsTitleBase = clamp(
+      96 - Math.max(0, lenTitle - 14) * 2.4,
+      60,
+      96
+    );
     const fsSave = clamp(86 - Math.max(0, lenSave - 12) * 2.2, 50, 86);
     const fsH2 = 34;
     const fsBody = 30;
@@ -1280,17 +1315,18 @@ router.post("/generate-static-ad", async (req, res) => {
     const headPadX = 70;
 
     const padX = 180;
-    // tighter width so subline always stays inside the pill band
-    const padXBody = 280;
+    const padXBody = 220;
 
-    const eventTitleLines = wrapTextToWidth(
+    const titleWrap = wrapTitleToBox(
       mergedKnobsB.eventTitle,
-      fsTitle,
+      fsTitleBase,
       bannerW,
       headPadX,
-      3,
       3
     );
+    const fsTitle = titleWrap.fs;
+    const eventTitleLines = titleWrap.lines;
+
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
       fsSave,
@@ -1304,10 +1340,9 @@ router.post("/generate-static-ad", async (req, res) => {
       fsBody,
       cardW,
       padXBody,
-      2,
+      3,
       1
     );
-
 
     const qualifiersText = [
       mergedKnobsB.financingLine,
@@ -1315,13 +1350,13 @@ router.post("/generate-static-ad", async (req, res) => {
     ]
       .filter(Boolean)
       .join(" • ");
+
     const qualifierLines = wrapTextToWidth(
       qualifiersText,
       fsBody * 1.15,
       cardW,
       padXBody,
-      2,
-      1
+      2
     );
 
     const cardVars = {
@@ -1524,8 +1559,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // slightly reduced sizes here too so it matches /generate-static-ad look
-        const fsTitle = 90,
+        // base sizes; wrapTitleToBox will shrink if needed
+        const fsTitleBase = 90,
           fsH2 = 34,
           fsSave = 80,
           fsBody = 28;
@@ -1540,17 +1575,18 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const headPadX = 70;
 
         const padX = 180;
-        // tighter width so subline always stays inside the pill band
-        const padXBody = 280;
+        const padXBody = 220;
 
-        const eventTitleLines = wrapTextToWidth(
+        const titleWrap = wrapTitleToBox(
           eventTitle,
-          fsTitle,
+          fsTitleBase,
           bannerW,
           headPadX,
-          3,
           3
         );
+        const fsTitle = titleWrap.fs;
+        const eventTitleLines = titleWrap.lines;
+
         const saveLines = wrapTextToWidth(
           saveAmount,
           fsSave,
@@ -1559,21 +1595,33 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           2,
           1
         );
-          const subLines = wrapTextToWidth(
+        const subLines = wrapTextToWidth(
           dateRange,
           fsBody,
           cardW,
           padXBody,
-          2,
+          3,
           1
         );
 
+        const qualifiersText = [financingLn, qualifiers]
+          .filter(Boolean)
+          .join(" • ");
+
+        const qualifierLines = wrapTextToWidth(
+          qualifiersText,
+          fsBody * 1.15,
+          cardW,
+          padXBody,
+          2
+        );
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
           saveLines,
           subLines,
+          qualifierLines,
           legal,
         };
         const cardSvg = mustache.render(
