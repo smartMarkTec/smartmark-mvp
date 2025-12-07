@@ -559,11 +559,11 @@ function tightenOfferText(s = '') {
   const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
   const upTo = /up to/.test(t);
   if (pct) {
-    // Always return a super tight line like "50% OFF" or "UP TO 30% OFF"
-    const basePct = upTo ? `up to ${pct[1]}%` : `${pct[1]}%`;
-    let out = `${basePct} off`;
-    // We intentionally DROP "first order/purchase" etc to avoid leaking
-    return shortenWords(out, upTo ? 3 : 2);
+    let out = (upTo ? `up to ${pct[1]}%` : `${pct[1]}%`) + ' off';
+    if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) {
+      out += ' first order';
+    }
+    return shortenWords(out, 4);
   }
 
   const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
@@ -665,120 +665,104 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 }
 
 /**
- * Shaw-style overlay:
- * - outer white frame
- * - smaller top poster card (brand + title + date)
- * - big offer + paragraph floating on the photo
+ * Shaw-style full-canvas overlay:
+ * - Thick square white frame
+ * - Top square poster for BRAND + HEADLINE + SUBLINE
+ * - Offer + qualifiers centered on the photo, outside the top poster.
  */
-function tplPosterBCard({
-  W,
-  H,
-  cardLeft,
-  cardTop,
-  cardWidth,
-  cardHeight,
-  fsTitle,
-  fsH2,
-  fsSave,
-  fsBody,
-  metrics,
-}) {
-  const { titleY, dateY, saveY, financeY, qualY } = metrics;
+function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
+  const frameMargin = 70;
+  const innerW = cardW - frameMargin * 2;
+  const innerH = cardH - frameMargin * 2;
+  const centerX = cardW / 2;
+
+  const bannerX = frameMargin + 80;
+  const bannerY = frameMargin + 80;
+  const bannerW = innerW - 160;
+  const bannerH = 230;
+
+  const brandY = bannerY + 55;
+  const titleY = bannerY + 120;
+  const subY = bannerY + bannerH - 40;
+
+  const offerY = frameMargin + innerH * 0.58;
+  const bodyY = offerY + fsSave * 1.05;
+  const legalY = frameMargin + innerH - 26;
 
   return `
-<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="18" stdDeviation="20" flood-color="#000" flood-opacity="0.28"/>
-    </filter>
-    <filter id="softGlow">
-      <feDropShadow dx="0" dy="0" stdDeviation="10" flood-color="#000" flood-opacity="0.36"/>
-    </filter>
     <style>
       .t-center { text-anchor: middle; }
-      .brand   { font: 800 26px/1 Inter,system-ui; fill:#4a5662; }
-      .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#1c2833; }
-      .h2      { font: 700 ${fsH2}px/1.25 Inter,system-ui; letter-spacing:2px; fill:#c0392b; }
-      .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; letter-spacing:1px; fill: {{accent}}; }
-      .body    { font: 700 ${fsBody}px/1.35 Inter,system-ui; fill:#ffffff; }
-      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e1e7ee; }
-      .body-dark { font: 700 ${fsH2}px/1.25 Inter,system-ui; fill:#4f5f6f; }
+      .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.04em; }
+      .title   { font: 900 ${fsTitle}px/1.05 Inter,system-ui; letter-spacing:-1px; fill:#111827; }
+      .sub     { font: 800 ${fsH2}px/1.1 Inter,system-ui; letter-spacing:0.18em; fill:#dc2626; }
+      .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill: {{accent}}; }
+      .body    { font: 700 ${fsBody}px/1.25 Inter,system-ui; fill:#f9fafb; }
+      .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
   </defs>
 
-  <!-- OUTER FRAME -->
-  <rect x="32" y="32" width="${W - 64}" height="${H - 64}" rx="42"
-        fill="none" stroke="#ffffff" stroke-width="16" opacity="0.96"/>
+  <!-- outer square white frame -->
+  <rect x="${frameMargin}" y="${frameMargin}"
+        width="${innerW}" height="${innerH}"
+        rx="0" fill="none" stroke="#ffffff" stroke-width="34"/>
 
-  <!-- TOP POSTER CARD -->
-  <g filter="url(#cardShadow)">
-    <rect x="${cardLeft}" y="${cardTop}" width="${cardWidth}" height="${cardHeight}" rx="40" fill="#ffffff"/>
+  <!-- top square poster panel -->
+  <g>
+    <rect x="${bannerX}" y="${bannerY}" width="${bannerW}" height="${bannerH}" rx="0" fill="#ffffff"/>
+
+    <!-- soft leaf shapes -->
+    <path d="M ${bannerX + 10} ${bannerY + 20}
+             C ${bannerX + bannerW * 0.25} ${bannerY - 10},
+               ${bannerX + bannerW * 0.25} ${bannerY + bannerH * 0.65},
+               ${bannerX + bannerW * 0.05} ${bannerY + bannerH * 0.72}
+             Z"
+          fill="#fde7d5" opacity="0.95"/>
+    <path d="M ${bannerX + bannerW - 10} ${bannerY + 20}
+             C ${bannerX + bannerW * 0.75} ${bannerY - 10},
+               ${bannerX + bannerW * 0.75} ${bannerY + bannerH * 0.65},
+               ${bannerX + bannerW * 0.95} ${bannerY + bannerH * 0.72}
+             Z"
+          fill="#fde1cd" opacity="0.95"/>
+
+    <!-- brand -->
+    <text class="brand t-center" x="${centerX}" y="${brandY}">
+      {{brandName}}
+    </text>
+
+    <!-- HEADLINE -->
+    <text class="title t-center" x="${centerX}" y="${titleY}">
+      {{#eventTitleLines}}
+        <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+      {{/eventTitleLines}}
+    </text>
+
+    <!-- SUBLINE / date range -->
+    <text class="sub t-center" x="${centerX}" y="${subY}">
+      {{#dateRangeLines}}
+        <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+      {{/dateRangeLines}}
+    </text>
   </g>
 
-  <!-- soft "leaf" corners -->
-  <g opacity="0.85">
-    <path d="
-      M ${cardLeft + 40} ${cardTop + 46}
-      C ${cardLeft + 200} ${cardTop - 40},
-        ${cardLeft + 260} ${cardTop + 40},
-        ${cardLeft + 260} ${cardTop + 140}
-      L ${cardLeft + 40} ${cardTop + 140} Z"
-      fill="{{accent}}" fill-opacity="0.22"/>
-    <path d="
-      M ${cardLeft + cardWidth - 40} ${cardTop + 46}
-      C ${cardLeft + cardWidth - 200} ${cardTop - 40},
-        ${cardLeft + cardWidth - 260} ${cardTop + 40},
-        ${cardLeft + cardWidth - 260} ${cardTop + 140}
-      L ${cardLeft + cardWidth - 40} ${cardTop + 140} Z"
-      fill="{{accent}}" fill-opacity="0.22"/>
-  </g>
-
-  <!-- brand pill -->
-  <g transform="translate(${W / 2 - 160}, ${cardTop + 46})">
-    <rect width="320" height="50" rx="25" fill="#f3f5f8"/>
-    <text class="brand t-center" x="160" y="32">{{brandName}}</text>
-  </g>
-
-  <!-- HEADLINE in card -->
-  <text class="title t-center" x="${W / 2}" y="${titleY}">
-    {{#eventTitleLines}}
-      <tspan x="${W / 2}" dy="{{dy}}">{{line}}</tspan>
-    {{/eventTitleLines}}
+  <!-- OFFER on photo, centered -->
+  <text class="save t-center" x="${centerX}" y="${offerY}">
+    {{#saveLines}}
+      <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+    {{/saveLines}}
   </text>
 
-  <!-- SUBLINE / DATE in card -->
-  <text class="h2 t-center" x="${W / 2}" y="${dateY}">
-    {{#dateRangeLines}}
-      <tspan x="${W / 2}" dy="{{dy}}">{{line}}</tspan>
-    {{/dateRangeLines}}
-  </text>
-
-  <!-- OFFER on photo -->
-  {{#saveAmount}}
-  <text class="save t-center" x="${W / 2}" y="${saveY}" filter="url(#softGlow)">
-    {{saveAmount}}
-  </text>
-  {{/saveAmount}}
-
-  <!-- Financing / secondary on photo -->
-  {{#financingLine}}
-  <text class="body-dark t-center" x="${W / 2}" y="${financeY}">
-    {{financingLine}}
-  </text>
-  {{/financingLine}}
-
-  <!-- Paragraph qualifiers on photo -->
-  {{#qualifierLines.length}}
-  <text class="body t-center" x="${W / 2}" y="${qualY}">
+  <!-- Qualifiers / extra info as paragraph -->
+  <text class="body t-center" x="${centerX}" y="${bodyY}">
     {{#qualifierLines}}
-      <tspan x="${W / 2}" dy="{{dy}}">{{line}}</tspan>
+      <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
     {{/qualifierLines}}
   </text>
-  {{/qualifierLines.length}}
 
-  <!-- LEGAL at bottom -->
+  <!-- Legal line at very bottom of frame -->
   {{#legal}}
-  <text class="legal t-center" x="${W / 2}" y="${H - 60}">
+  <text class="legal t-center" x="${centerX}" y="${legalY}">
     {{legal}}
   </text>
   {{/legal}}
@@ -1267,104 +1251,80 @@ router.post('/generate-static-ad', async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // ---------- Shaw-style layout: top poster + offer on photo ----------
-    const W = 1080;
-    const H = 1080;
-
-    const cardWidth = 780;
-    const cardHeight = 340;
-    const cardLeft = Math.round((W - cardWidth) / 2);
-    const cardTop = 140;
-
-    const fsTitle = 80;
-    const fsH2 = 30;
-
+    // ---------- Shaw-style full canvas layout ----------
+    const lenTitle = String(mergedKnobsB.eventTitle || '').length;
     const lenSave = String(mergedKnobsB.saveAmount || '').length;
-    const fsSave = clamp(80 - Math.max(0, lenSave - 10) * 2.4, 44, 80);
-    const fsBody = 26;
 
-    const padX = cardLeft + 40;
+    const fsTitle = clamp(100 - Math.max(0, lenTitle - 12) * 2.3, 64, 104);
+    const fsSave = clamp(90 - Math.max(0, lenSave - 10) * 2.1, 54, 92);
+    const fsH2 = 40; // bigger subline like template
+    const fsBody = 32;
+
+    const cardW = 1080;
+    const cardH = 1080;
+
+    const padXForWrap = 70 + 80; // inside frame + inner padding
 
     const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
       fsTitle,
-      W,
-      padX,
+      cardW,
+      padXForWrap,
       2
     );
     const dateRangeLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsH2,
-      W,
-      padX,
+      cardW,
+      padXForWrap,
       2
     );
-    const qualifierLines = wrapTextToWidth(
-      mergedKnobsB.qualifiers,
-      fsBody,
-      W,
-      120,
-      4
+    const saveLines = wrapTextToWidth(
+      mergedKnobsB.saveAmount,
+      fsSave,
+      cardW,
+      padXForWrap,
+      2
     );
-
-    const titleBlock =
-      Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
-    const titleY = cardTop + 120;
-
-    const dateY = titleY + titleBlock + 24;
-    const dateBlock =
-      Math.max(1, dateRangeLines.length) * (fsH2 * 1.3);
-
-    const saveY = cardTop + cardHeight + 90;
-    const financeY = mergedKnobsB.financingLine
-      ? saveY + fsBody * 1.6
-      : saveY;
-
-    const qualY =
-      qualifierLines.length > 0
-        ? financeY + (mergedKnobsB.financingLine ? fsBody * 1.8 : 46)
-        : financeY;
-
-    const metrics = {
-      titleY,
-      dateY,
-      saveY,
-      financeY,
-      qualY,
-    };
+    const qualifierText = [
+      mergedKnobsB.financingLine || '',
+      mergedKnobsB.qualifiers || '',
+    ]
+      .filter(Boolean)
+      .join(' • ');
+    const qualifierLines = wrapTextToWidth(
+      qualifierText,
+      fsBody,
+      cardW,
+      padXForWrap,
+      3
+    );
 
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitleLines,
       dateRangeLines,
+      saveLines,
       qualifierLines,
-      saveAmount: mergedKnobsB.saveAmount,
-      financingLine: mergedKnobsB.financingLine,
       legal: mergedKnobsB.legal,
       accent: mergedKnobsB.palette.accent || '#ff7b41',
-      metrics,
     };
 
-    const overlaySvg = mustache.render(
+    const cardSvg = mustache.render(
       tplPosterBCard({
-        W,
-        H,
-        cardLeft,
-        cardTop,
-        cardWidth,
-        cardHeight,
+        cardW,
+        cardH,
         fsTitle,
         fsH2,
         fsSave,
         fsBody,
-        metrics,
       }),
       cardVars
     );
-    const overlayPng = await sharp(Buffer.from(overlaySvg)).png().toBuffer();
+    const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
     const finalPng = await sharp(bgPng)
-      .composite([{ input: overlayPng, left: 0, top: 0 }])
+      .composite([{ input: cardPng, left: 0, top: 0 }])
       .png({ quality: 92 })
       .toBuffer();
 
@@ -1467,13 +1427,13 @@ router.post('/generate-image-from-prompt', async (req, res) => {
     const backgroundUrl = a.backgroundUrl || b.backgroundUrl || '';
 
     const overlay = {
-      headline: (a.headline || b.overlayHeadline || '').toString().slice(0, 60),
+      headline: (a.headline || b.overlayHeadline || '').toString().slice(0, 55),
       body: a.adCopy || b.overlayBody || '',
-      offer: a.offer || b.offer || '',
-      promoLine: a.promoLine || b.promoLine || '',
-      secondary: a.secondary || b.secondary || '',
+      offer: a.offer || '',
+      promoLine: a.promoLine || '',
+      secondary: a.secondary || '',
       cta: a.cta || b.overlayCTA || 'Learn more',
-      legal: a.legal || b.legal || '',
+      legal: a.legal || '',
     };
 
     const prof = profileForIndustry(industry);
@@ -1529,124 +1489,75 @@ router.post('/generate-image-from-prompt', async (req, res) => {
           photoBuffer: photoBuf,
         });
 
-        // Map frontend overlay → Shaw fields
-        const rawTitle =
-          overlay.headline ||
-          a.headline ||
-          prof.eventTitle ||
-          (industry ? `${titleCase(industry)} Sale` : 'Seasonal Sale');
-        const eventTitle = cleanLine(rawTitle).toUpperCase();
+        const eventTitle = (overlay.headline || '').trim().toUpperCase();
+        const dateRange = ''; // keep regen simpler
+        const saveAmount = tightenOfferText((overlay.offer || '').trim());
+        const qualifiers = (overlay.body || '').toString().trim();
+        const legal = (overlay.legal || '').trim();
 
-        const dateRange = cleanLine(overlay.promoLine || '');
+        const fsTitle = 90;
+        const fsH2 = 40;
+        const fsSave = 80;
+        const fsBody = 30;
 
-        const rawOffer = overlay.offer || a.offer || a.saveAmount || '';
-        const saveAmount = tightenOfferText(rawOffer);
+        const cardW = 1080;
+        const cardH = 1080;
 
-        const financingLn = cleanLine(overlay.secondary || '');
-
-        let qualifiersSrc = cleanLine(overlay.body || '');
-        if (!qualifiersSrc && a.mainBenefit) {
-          qualifiersSrc = cleanLine(a.mainBenefit);
-        }
-        if (qualifiersSrc.length > 0) {
-          const words = qualifiersSrc.split(/\s+/).slice(0, 40);
-          qualifiersSrc = words.join(' ');
-        }
-        const qualifiers = qualifiersSrc;
-
-        const legal = (overlay.legal || '').toString().trim();
-
-        // layout same as poster_b
-        const cardWidth = 780;
-        const cardHeight = 340;
-        const cardLeft = Math.round((W - cardWidth) / 2);
-        const cardTop = 140;
-
-        const fsTitle = 80;
-        const fsH2 = 30;
-
-        const lenSave = String(saveAmount || '').length;
-        const fsSave = clamp(80 - Math.max(0, lenSave - 10) * 2.4, 44, 80);
-        const fsBody = 26;
-
-        const padX = cardLeft + 40;
+        const padXForWrap = 70 + 80;
 
         const eventTitleLines = wrapTextToWidth(
           eventTitle,
           fsTitle,
-          W,
-          padX,
+          cardW,
+          padXForWrap,
           2
         );
         const dateRangeLines = wrapTextToWidth(
           dateRange,
           fsH2,
-          W,
-          padX,
+          cardW,
+          padXForWrap,
+          2
+        );
+        const saveLines = wrapTextToWidth(
+          saveAmount,
+          fsSave,
+          cardW,
+          padXForWrap,
           2
         );
         const qualifierLines = wrapTextToWidth(
           qualifiers,
           fsBody,
-          W,
-          120,
-          4
+          cardW,
+          padXForWrap,
+          3
         );
-
-        const titleBlock =
-          Math.max(1, eventTitleLines.length) * (fsTitle * 1.08);
-        const titleY = cardTop + 120;
-
-        const dateY = titleY + titleBlock + 24;
-        const dateBlock =
-          Math.max(1, dateRangeLines.length) * (fsH2 * 1.3);
-
-        const saveY = cardTop + cardHeight + 90;
-        const financeY = financingLn ? saveY + fsBody * 1.6 : saveY;
-        const qualY =
-          qualifierLines.length > 0
-            ? financeY + (financingLn ? fsBody * 1.8 : 46)
-            : financeY;
-
-        const metrics = {
-          titleY,
-          dateY,
-          saveY,
-          financeY,
-          qualY,
-        };
 
         const cardVars = {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
           dateRangeLines,
+          saveLines,
           qualifierLines,
-          saveAmount,
-          financingLine: financingLn,
           legal,
           accent: (prof.palette && prof.palette.accent) || '#ff7b41',
-          metrics,
         };
-        const overlaySvg = mustache.render(
+        const cardSvg = mustache.render(
           tplPosterBCard({
-            W,
-            H,
-            cardLeft,
-            cardTop,
-            cardWidth,
-            cardHeight,
+            cardW,
+            cardH,
             fsTitle,
             fsH2,
             fsSave,
             fsBody,
-            metrics,
           }),
           cardVars
         );
-        const overlayPng = await sharp(Buffer.from(overlaySvg)).png().toBuffer();
+        const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
         const finalPng = await sharp(bgPng)
-          .composite([{ input: overlayPng, left: 0, top: 0 }])
+          .composite([{ input: cardPng, left: 0, top: 0 }])
           .png({ quality: 92 })
           .toBuffer();
 
