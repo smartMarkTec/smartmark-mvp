@@ -654,8 +654,9 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const bannerY = innerY + 70;
 
   const brandY = bannerY + 70;
-  // headline block sits under the brand; lines get their dy from wrapTitleToBox
-  const titleY = brandY + fsTitle * 1.2;
+// tiny downward nudge so the three lines look perfectly centered
+const titleY = brandY + fsTitle * 1.2 + 6;
+
 
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
@@ -1297,20 +1298,19 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-// headline base size slightly larger, still adaptive (tiny bump +2)
+// headline base size slightly larger, still adaptive (tiny bump +3)
 const fsTitleBase = clamp(
-  109 - Math.max(0, lenTitle - 14) * 2.0,
-  67,
-  109
+  110 - Math.max(0, lenTitle - 14) * 2.0,
+  68,
+  110
 );
 const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
 const fsH2 = 34;
-// subline font a bit larger (+2)
-const fsBody = 33;
+// subline font a bit larger (+3 total)
+const fsBody = 34;
 
 const cardW = 1080;
 const cardH = 1080;
-
 
 
     // geometry kept in sync with tplPosterBCard
@@ -1564,14 +1564,15 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
- // base sizes; headline base slightly larger (+2)
-const fsTitleBase = 102,
+ // base sizes; headline base slightly larger (+3 total)
+const fsTitleBase = 101,
   fsH2 = 34,
   fsSave = 74,
-  fsBody = 32; // subline +2 here as well
+  fsBody = 31; // subline +3 total
 
 const cardW = 1080,
   cardH = 1080;
+
 
 
 
