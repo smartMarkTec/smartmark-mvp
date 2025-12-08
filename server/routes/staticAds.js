@@ -647,16 +647,15 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // widened box left-right, similar height
+  // widened box left-right, similar height (keeps square-ish feel)
   const bannerW = Math.round(innerW * 0.62);
   const bannerH = Math.round(innerW * 0.42);
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 70;
 
   const brandY = bannerY + 70;
-  // anchor the headline block at the vertical center of the box;
-  // wrapTitleToBox gives positive/negative dy so it's perfectly centered.
-  const titleY = bannerY + bannerH * 0.56;
+  // headline block sits under the brand; lines get their dy from wrapTitleToBox
+  const titleY = brandY + fsTitle * 1.2;
 
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
@@ -745,6 +744,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
 </svg>`;
 }
 
+
 /* ------------------------ Utility helpers ------------------------ */
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -812,7 +812,6 @@ function wrapTextToWidth(
 // special wrapper for the headline inside the top square:
 // it shrinks the font down (to a floor) until ALL characters fit in
 // the requested number of lines, with NO ellipsis.
-// Now also centers the lines vertically around y.
 function wrapTitleToBox(
   str = "",
   fsInitial = 72,
@@ -831,7 +830,7 @@ function wrapTitleToBox(
   const minFs = Math.max(40, Math.floor(fsInitial * 0.6)); // don't get silly small
 
   for (let i = 0; i < 8; i++) {
-    // we ignore the dy that wrapTextToWidth gives back and recalc below
+    // standard wrap: first line dy = 0, then +fs*1.08, etc.
     lines = wrapTextToWidth(s, fs, boxW, padX, maxLines, maxLines, true);
     const used = lines.map((l) => l.line).join(" ").length;
 
@@ -839,16 +838,10 @@ function wrapTitleToBox(
     fs -= 4;
   }
 
-  // recenter vertically around y using dy offsets
-  const n = lines.length || 1;
-  const lineHeight = fs * 1.08;
-  const centeredLines = lines.map((l, i) => ({
-    line: l.line,
-    dy: (i - (n - 1) / 2) * lineHeight,
-  }));
-
-  return { fs, lines: centeredLines };
+  // NO extra centering math here – this keeps wrap stable
+  return { fs, lines };
 }
+
 
 /* ------------------------ Stock / Pexels ------------------------ */
 
