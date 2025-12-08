@@ -811,6 +811,7 @@ function wrapTextToWidth(
 // special wrapper for the headline inside the top square:
 // it shrinks the font down (to a floor) until ALL characters fit in
 // the requested number of lines, with NO ellipsis.
+// Now also centers the lines vertically around y.
 function wrapTitleToBox(
   str = "",
   fsInitial = 72,
@@ -829,6 +830,7 @@ function wrapTitleToBox(
   const minFs = Math.max(40, Math.floor(fsInitial * 0.6)); // don't get silly small
 
   for (let i = 0; i < 8; i++) {
+    // we ignore the dy that wrapTextToWidth gives back and recalc below
     lines = wrapTextToWidth(s, fs, boxW, padX, maxLines, maxLines, true);
     const used = lines.map((l) => l.line).join(" ").length;
 
@@ -836,7 +838,15 @@ function wrapTitleToBox(
     fs -= 4;
   }
 
-  return { fs, lines };
+  // recenter vertically around y using dy offsets
+  const n = lines.length || 1;
+  const lineHeight = fs * 1.08;
+  const centeredLines = lines.map((l, i) => ({
+    line: l.line,
+    dy: (i - (n - 1) / 2) * lineHeight,
+  }));
+
+  return { fs, lines: centeredLines };
 }
 
 /* ------------------------ Stock / Pexels ------------------------ */
@@ -1293,19 +1303,20 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-  // headline base size slightly larger, still adaptive (tiny bump)
+// headline base size slightly larger, still adaptive (tiny bump +2)
 const fsTitleBase = clamp(
-  107 - Math.max(0, lenTitle - 14) * 2.0,
-  65,
-  107
+  109 - Math.max(0, lenTitle - 14) * 2.0,
+  67,
+  109
 );
 const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
 const fsH2 = 34;
-// subline font +1 point
-const fsBody = 32;
+// subline font a bit larger (+2)
+const fsBody = 33;
 
 const cardW = 1080;
 const cardH = 1080;
+
 
 
     // geometry kept in sync with tplPosterBCard
@@ -1559,14 +1570,15 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-   // base sizes; headline base slightly larger
-const fsTitleBase = 100,
+ // base sizes; headline base slightly larger (+2)
+const fsTitleBase = 102,
   fsH2 = 34,
   fsSave = 74,
-  fsBody = 30; // subline slightly bigger
+  fsBody = 32; // subline +2 here as well
 
 const cardW = 1080,
   cardH = 1080;
+
 
 
         // keep geometry consistent with tplPosterBCard
