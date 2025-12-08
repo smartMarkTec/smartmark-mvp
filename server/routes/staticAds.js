@@ -632,7 +632,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 /**
  * Shaw-inspired poster B:
  * - widened top box (left-right)
- * - subline sits on a translucent band for legibility
+ * - subline sits on a subtle bottom strip for legibility (no pill)
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -669,9 +669,14 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
-      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.78; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
+      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.9; stroke-width:3.4; paint-order:stroke fill; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
+    <!-- subtle vertical gradient for subline strip -->
+    <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#020617" stop-opacity="0.78"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0.18"/>
+    </linearGradient>
   </defs>
 
   <!-- white frame -->
@@ -728,10 +733,10 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- translucent band behind subline for legibility -->
-  <rect x="${subBandX}" y="${subBandY}" width="${subBandW}" height="${subBandH}" rx="${fsBody}" fill="#000000" opacity="0.36"/>
+  <!-- subtle bottom strip (non-pill) behind subline for legibility -->
+  <rect x="0" y="${subBandY}" width="${cardW}" height="${subBandH}" fill="url(#subGrad)"/>
 
-  <!-- subline on band -->
+  <!-- subline -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -1295,11 +1300,11 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    // headline base size back closer to original feel (but still adaptive)
+    // headline base size slightly larger, still adaptive
     const fsTitleBase = clamp(
-      96 - Math.max(0, lenTitle - 14) * 2.4,
+      100 - Math.max(0, lenTitle - 14) * 2.4,
       60,
-      96
+      100
     );
     const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
     const fsH2 = 34;
@@ -1315,7 +1320,7 @@ router.post("/generate-static-ad", async (req, res) => {
     const headPadX = 70;
 
     const padX = 180;
-    // tighter wrap width so subline always sits inside pill
+    // tighter wrap width so subline always sits in its band region
     const padXBody = 260;
 
     const titleWrap = wrapTitleToBox(
@@ -1559,8 +1564,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes; headline base aligned with original vibe
-        const fsTitleBase = 90,
+        // base sizes; headline base slightly larger
+        const fsTitleBase = 94,
           fsH2 = 34,
           fsSave = 74,
           fsBody = 28;
