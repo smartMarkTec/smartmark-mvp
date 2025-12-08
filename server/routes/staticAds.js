@@ -654,7 +654,9 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const bannerY = innerY + 70;
 
   const brandY = bannerY + 70;
-  const titleY = brandY + fsTitle * 1.2;
+  // anchor the headline block at the vertical center of the box;
+  // wrapTitleToBox gives positive/negative dy so it's perfectly centered.
+  const titleY = bannerY + bannerH * 0.56;
 
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
@@ -742,7 +744,6 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   {{/legal}}
 </svg>`;
 }
-
 
 /* ------------------------ Utility helpers ------------------------ */
 
