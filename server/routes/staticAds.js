@@ -671,7 +671,7 @@ const titleY = brandY + fsTitle * 1.2 + 6;
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
       /* subline: plain white text, no stroke/shadow */
-      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; letter-spacing:0.16em; }
+      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.65; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
   </defs>
