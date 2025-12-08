@@ -409,84 +409,242 @@ function safeSublineText(s = "") {
 
 
 const INDUSTRY_TEMPLATES = {
+  home_cleaning: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Sparkling Clean Spaces`,
+    subline: (aud, city) =>
+      [
+        aud || "Apartments • Homes • Offices",
+        city ? `Serving ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Weekly & one-time",
+      "Kitchens & bathrooms",
+    ],
+  },
+
+  flooring: {
+    headline: (brand, benefit) =>
+      benefit || `${brand ? titleCase(brand) + ": " : ""}Flooring Sale Event`,
+    subline: (aud, city) =>
+      [
+        aud || "Hardwood • Vinyl • Tile",
+        city ? `In ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Free estimates",
+      "Pro installation",
+    ],
+  },
+
+  restaurant: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Fresh Flavor, Fast Service`,
+    subline: (aud, city) =>
+      [
+        aud || "Dine-in • Takeout • Delivery",
+        city ? `In ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Daily specials",
+      "Order online",
+    ],
+  },
+
+  salon_spa: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Relax, Refresh, Renew`,
+    subline: (aud, city) =>
+      [
+        aud || "Hair • Nails • Skin",
+        city ? `Located in ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Cuts & color",
+      "Spa treatments",
+    ],
+  },
+
+  fitness: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Stronger Every Session`,
+    subline: (aud, city) =>
+      [
+        aud || "Classes • Personal training",
+        city ? `In ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Group classes",
+      "Open gym access",
+    ],
+  },
+
+  real_estate: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Find Your Next Home`,
+    subline: (aud, city) =>
+      [
+        aud || "Buying • Selling • Leasing",
+        city ? `Across ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Free home valuation",
+      "Local experts",
+    ],
+  },
+
+  auto: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Reliable Auto Service`,
+    subline: (aud, city) =>
+      [
+        aud || "Oil changes • Brakes • Tires",
+        city ? `In ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Same-day appointments",
+      "Certified techs",
+    ],
+  },
+
+  landscaping: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Yards That Stand Out`,
+    subline: (aud, city) =>
+      [
+        aud || "Mowing • Cleanup • Installs",
+        city ? `Serving ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Seasonal cleanups",
+      "Ongoing maintenance",
+    ],
+  },
+
+  hvac_plumbing: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Comfort You Can Count On`,
+    subline: (aud, city) =>
+      [
+        aud || "Heat • AC • Plumbing",
+        city ? `Serving ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Install & repair",
+      "24/7 emergency",
+    ],
+  },
+
   fashion: {
     headline: (brand, benefit) =>
       benefit || `${brand ? titleCase(brand) + ": " : ""}New Season Styles`,
     subline: (aud, city) => {
       const parts = [];
-      if (aud) parts.push(`Style for ${aud}`);
+      if (aud) parts.push(aud);
       else parts.push("Everyday quality. Statement looks.");
       if (city) parts.push(`Available in ${city}`);
       return parts.join(" • ");
     },
     bullets: (offer) => [
       offer ? clampWords(cleanLine(offer), 6) : "Premium fabrics",
-      "Modern fits • New drops",
+      "Modern fits",
     ],
   },
-  restaurant: {
+
+  electronics: {
     headline: (brand, benefit) =>
       benefit ||
-      `${brand ? titleCase(brand) + ": " : ""}Fresh. Fast. Crave-worthy.`,
+      `${brand ? titleCase(brand) + ": " : ""}Smart Tech Deals`,
     subline: (aud, city) =>
-      [aud ? `Perfect for ${aud}` : "Chef-crafted flavors", city ? `In ${city}` : null]
+      [
+        aud || "Laptops • Phones • Accessories",
+        city ? `In ${city}` : null,
+      ]
         .filter(Boolean)
         .join(" • "),
     bullets: (offer) => [
-      offer || "Lunch specials daily",
-      "Order online • Pickup or delivery",
+      offer ? clampWords(cleanLine(offer), 6) : "Latest devices",
+      "Expert support",
     ],
   },
-  flooring: {
+
+  pets: {
     headline: (brand, benefit) =>
-      benefit || `${brand ? titleCase(brand) + ": " : ""}Fall Flooring Sale`,
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Play-Ready Pet Toys`,
+    subline: (aud, city) => {
+      const parts = [];
+      if (aud) parts.push(aud);
+      parts.push("Safe • Long-lasting fun");
+      if (city) parts.push(`Available in ${city}`);
+      return parts.join(" • ");
+    },
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Tough materials",
+      "For all breeds",
+    ],
+  },
+
+  coffee: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Your Daily Coffee Spot`,
     subline: (aud, city) =>
-      [aud ? `Ideal for ${aud}` : "Hardwood • Vinyl • Tile", city || null]
+      [
+        aud || "Espresso • Lattes • Pastries",
+        city ? `In ${city}` : null,
+      ]
         .filter(Boolean)
         .join(" • "),
-    bullets: (offer) => [offer || "Free in-home estimate", "Install by licensed pros"],
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Freshly roasted",
+      "Cozy atmosphere",
+    ],
+  },
+
+  generic: {
+    headline: (brand, benefit) =>
+      benefit ||
+      `${brand ? titleCase(brand) + ": " : ""}Quality You Can Trust`,
+    subline: (aud, city) =>
+      [
+        aud || "Local service you can count on",
+        city ? `Serving ${city}` : null,
+      ]
+        .filter(Boolean)
+        .join(" • "),
+    bullets: (offer) => [
+      offer ? clampWords(cleanLine(offer), 6) : "Fast scheduling",
+      "Great reviews",
+    ],
   },
 };
-
-function craftCopyFromAnswers(a = {}, prof = {}) {
-  const kind = prof?.kind || classifyIndustry(a.industry || "");
-  const t =
-    INDUSTRY_TEMPLATES[kind] || {
-      headline: (brand, benefit) =>
-        benefit || `${brand ? titleCase(brand) + ": " : ""}Quality You Can Feel`,
-      subline: (aud, city) =>
-        [aud ? `Built for ${aud}` : "Trusted local service", city ? `Serving ${city}` : null]
-          .filter(Boolean)
-          .join(" • "),
-      bullets: (offer) => [offer || "Fast scheduling", "Great reviews • Fair pricing"],
-    };
-
-  const brand = cleanLine(a.businessName || a.brand?.businessName || "");
-  const city = cleanLine(
-    a.city ? (a.state ? `${a.city}, ${a.state}` : a.city) : a.location || ""
-  );
-  const benefit = clampWords(cleanLine(a.mainBenefit || a.details || ""), 10);
-  const audience = clampWords(cleanLine(a.idealCustomer || ""), 8);
-  const offer = cleanLine(a.offer || a.saveAmount || "");
-
-  const headline = clampWords(cleanLine(t.headline(brand, benefit)), 10);
-  const subline = clampWords(cleanLine(t.subline(audience, city)), 12);
-  let bullets = (t.bullets(offer) || [])
-    .map((b) => clampWords(cleanLine(b), 3))
-    .slice(0, 3);
-
-  return {
-    ok: true,
-    copy: {
-      headline,
-      subline,
-      offer: offer || "",
-      secondary: "",
-      bullets,
-      disclaimers: "",
-    },
-  };
-}
 
 /* ------------------------ OpenAI copy ------------------------ */
 
@@ -495,12 +653,14 @@ async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   if (!key) return null;
 
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-    const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
+      const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
 Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
 
 Rules:
-- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Use varied wording and make it feel like a real campaign headline (e.g., "Fall Flooring Sale", "New Season Styles"). Do NOT always repeat the same phrasing (for example, avoid using "Durable Toys For" over and over for pet brands).
+- Every request is a NEW variation. Do NOT repeat the exact same headline wording across different calls.
+- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Also avoid overusing words like "Durable", "Quality", "Perfect" at the start. Use varied phrasing that fits the specific business.
+- For pet and toy businesses, rotate between ideas like: "Tough Toys That Last", "Play-Ready Toys For Dogs", "Indoor & Outdoor Play", "Safe Chews For Power Dogs", etc. Do NOT keep reusing "Durable Toys For".
 - Subline: one short complete thought, max 12 words. It should read as a full phrase or sentence. Do NOT end with a dangling word like "of" or "for".
 - Bullets: 2–3 micro-phrases, 1–3 words each, no periods. Think of compact feature labels such as "Long wear", "Vegan formulas", "Free install".
 - Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
@@ -1358,8 +1518,9 @@ const fsTitleBase = clamp(
 );
 const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
 const fsH2 = 34;
-// subline font a bit larger (+3 total)
-const fsBody = 34;
+// subline font a bit larger again (+5 total)
+const fsBody = 36;
+
 
 const cardW = 1080;
 const cardH = 1080;
@@ -1393,14 +1554,16 @@ const cardH = 1080;
       2,
       1
     );
-    const subLines = wrapTextToWidth(
+  const subLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsBody,
       cardW,
       padXBody,
-      3, // allow up to 3 lines so the sentence can finish
-      1
+      2,
+      1,
+      true
     );
+
 
     const qualifiersText = [
       mergedKnobsB.financingLine,
