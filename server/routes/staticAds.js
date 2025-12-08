@@ -364,6 +364,12 @@ function clampWords(s = "", max = 16) {
   return w.length > max ? w.slice(0, max).join(" ") + "…" : String(s).trim();
 }
 
+function pickHeadlineWordCap() {
+  // Random int between 3 and 6
+  return 3 + Math.floor(Math.random() * 4);
+}
+
+
 function trimDanglingTail(s = "") {
   const words = String(s || "")
     .trim()
@@ -663,11 +669,12 @@ Global behavior / variety:
 - Avoid reusing the same generic headline over and over (for example, don't keep giving "Durable Toys For" or "Elevate Your Style").
 - Use concrete language tied to the business, audience, and offer.
 
-Headline rules:
-- 4–8 words, punchy, brand-safe, no period at the end.
-- It can span up to 3 stacked lines in the layout.
-- MUST be a complete idea. If you use link words like "for / with / to / of", always include the object, e.g. "Durable Toys for Happy Dogs" (never end on just "for").
-- Avoid extremely generic phrases like "Elevate your style" or "Transform your home".
+- Headline: between 3 and 6 words total, punchy, no period at end.
+  • Randomly choose a word count between 3 and 6 for each ad (do not always use the same length).
+  • It must stand alone as a complete campaign idea (e.g., "Happy Pup Toys", "Fresh Summer Styles").
+  • Do NOT end with connector words like "for", "of", "to", "with", "and".
+  • Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your".
+  • Use varied wording from ad to ad based on the business and benefit (don’t always repeat words like "Durable").
 
 Subline rules:
 - One complete phrase or short sentence, up to about 16 words.
@@ -1361,12 +1368,15 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-       const safeHeadline = trimDanglingTail(
-  clampWords(cleanLine(crafted.headline || ""), 8)
+       const headlineWordCap = pickHeadlineWordCap();
+
+const safeHeadline = trimDanglingTail(
+  clampWords(cleanLine(crafted.headline || ""), headlineWordCap)
 );
 const safeSubline = trimDanglingTail(
-  clampWords(cleanLine(crafted.subline || ""), 18)
+  clampWords(cleanLine(crafted.subline || ""), 12)
 );
+
 
 
 
@@ -1963,16 +1973,20 @@ router.post("/craft-ad-copy", async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: "copy failed" });
 
-    const safeOffer = tightenOfferText(
-      a.offer || a.saveAmount || rawCopy.offer || ""
-    );
+   const safeOffer = tightenOfferText(
+  a.offer || a.saveAmount || rawCopy.offer || ""
+);
 
-    const safeHeadline = trimDanglingTail(
-  clampWords(cleanLine(rawCopy.headline || ""), 8)
+const headlineWordCap = pickHeadlineWordCap();
+
+const safeHeadline = trimDanglingTail(
+  clampWords(cleanLine(rawCopy.headline || ""), headlineWordCap)
 );
 const safeSubline = trimDanglingTail(
-  clampWords(cleanLine(rawCopy.subline || ""), 18)
+  clampWords(cleanLine(rawCopy.subline || ""), 12)
 );
+
+
 
 
 
