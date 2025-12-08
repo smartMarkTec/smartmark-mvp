@@ -364,6 +364,23 @@ function clampWords(s = "", max = 16) {
   return w.length > max ? w.slice(0, max).join(" ") + "…" : String(s).trim();
 }
 
+function trimDanglingTail(s = "") {
+  const words = String(s || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "";
+
+  const badEnd = new Set(["for", "of", "to", "with", "and", "or", "at", "in", "on"]);
+  const last = words[words.length - 1].toLowerCase();
+
+  if (badEnd.has(last)) {
+    words.pop();
+  }
+  return words.join(" ");
+}
+
+
 const INDUSTRY_TEMPLATES = {
   fashion: {
     headline: (brand, benefit) =>
@@ -521,6 +538,12 @@ function tightenOfferText(s = "") {
     if (words.length <= maxWords) return words.join(" ").toUpperCase();
     return words.slice(0, maxWords).join(" ").toUpperCase();
   };
+
+    // Handle BOGO cleanly: "buy one get one free" -> "BUY 1 GET 1 FREE"
+  if (/buy\s*(?:1|one)\s*get\s*(?:1|one)\s*(?:free)?/i.test(t)) {
+    return "BUY 1 GET 1 FREE";
+  }
+
 
   const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
   const upTo = /up to/.test(t);
@@ -1132,8 +1155,13 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-    const safeHeadline = clampWords(cleanLine(crafted.headline || ""), 6);
-    const safeSubline = clampWords(cleanLine(crafted.subline || ""), 12);
+    const safeHeadline = trimDanglingTail(
+  clampWords(cleanLine(crafted.headline || ""), 6)
+);
+const safeSubline = trimDanglingTail(
+  clampWords(cleanLine(crafted.subline || ""), 12)
+);
+
     const safeOffer = tightenOfferText(
       crafted.offer || a.offer || a.saveAmount || ""
     );
@@ -1721,8 +1749,13 @@ router.post("/craft-ad-copy", async (req, res) => {
       a.offer || a.saveAmount || rawCopy.offer || ""
     );
 
-    const safeHeadline = clampWords(cleanLine(rawCopy.headline || ""), 6);
-    const safeSubline = clampWords(cleanLine(rawCopy.subline || ""), 12);
+    const safeHeadline = trimDanglingTail(
+  clampWords(cleanLine(rawCopy.headline || ""), 6)
+);
+const safeSubline = trimDanglingTail(
+  clampWords(cleanLine(rawCopy.subline || ""), 12)
+);
+
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ""), 10);
 
     let bulletsRaw = Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [];
