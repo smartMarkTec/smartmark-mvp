@@ -632,7 +632,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 /**
  * Shaw-inspired poster B:
  * - widened top box (left-right)
- * - subline sits on a subtle bottom strip for legibility (no pill)
+ * - subline sits on a subtle bottom strip for legibility (non-pill)
  */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
@@ -642,7 +642,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
 
-  // wider box left-right, similar height (keeps square-ish feel)
+  // widened box left-right, similar height
   const bannerW = Math.round(innerW * 0.62);
   const bannerH = Math.round(innerW * 0.42);
   const bannerX = centerX - bannerW / 2;
@@ -652,12 +652,9 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const titleY = brandY + fsTitle * 1.2;
 
   const offerY = innerY + innerH * 0.62;
-  // more separation between promotion and subline
   const subY = offerY + fsSave * 1.05 + 85;
   const legalY = cardH - frameT - 22;
 
-  const subBandX = cardW * 0.12;
-  const subBandW = cardW * 0.76;
   const subBandH = fsBody * 2.8;
   const subBandY = subY - fsBody * 1.8;
 
@@ -669,13 +666,13 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
-      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.9; stroke-width:3.4; paint-order:stroke fill; letter-spacing:0.16em; }
+      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:1; stroke-width:4; paint-order:stroke fill; letter-spacing:0.12em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
-    <!-- subtle vertical gradient for subline strip -->
+    <!-- stronger vertical gradient for subline strip -->
     <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#020617" stop-opacity="0.78"/>
-      <stop offset="100%" stop-color="#020617" stop-opacity="0.18"/>
+      <stop offset="0%" stop-color="#020617" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#020617" stop-opacity="0.35"/>
     </linearGradient>
   </defs>
 
@@ -733,7 +730,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- subtle bottom strip (non-pill) behind subline for legibility -->
+  <!-- subtle full-width bottom strip (non-pill) behind subline -->
   <rect x="0" y="${subBandY}" width="${cardW}" height="${subBandH}" fill="url(#subGrad)"/>
 
   <!-- subline -->
@@ -1302,9 +1299,9 @@ router.post("/generate-static-ad", async (req, res) => {
 
     // headline base size slightly larger, still adaptive
     const fsTitleBase = clamp(
-      100 - Math.max(0, lenTitle - 14) * 2.4,
-      60,
-      100
+      106 - Math.max(0, lenTitle - 14) * 2.0,
+      64,
+      106
     );
     const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
     const fsH2 = 34;
@@ -1346,7 +1343,7 @@ router.post("/generate-static-ad", async (req, res) => {
       fsBody,
       cardW,
       padXBody,
-      3,
+      2,
       1
     );
     const qualifiersText = [
@@ -1565,7 +1562,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const legal = (overlay.legal || "").trim();
 
         // base sizes; headline base slightly larger
-        const fsTitleBase = 94,
+        const fsTitleBase = 100,
           fsH2 = 34,
           fsSave = 74,
           fsBody = 28;
@@ -1605,7 +1602,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           fsBody,
           cardW,
           padXBody,
-          3,
+          2,
           1
         );
         const qualifiersText = [financingLn, qualifiers]
