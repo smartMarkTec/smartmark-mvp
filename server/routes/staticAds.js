@@ -653,20 +653,39 @@ async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   if (!key) return null;
 
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-      const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
+        const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
 Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
 
-Rules:
-- Every request is a NEW variation. Do NOT repeat the exact same headline wording across different calls.
-- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Also avoid overusing words like "Durable", "Quality", "Perfect" at the start. Use varied phrasing that fits the specific business.
-- For pet and toy businesses, rotate between ideas like: "Tough Toys That Last", "Play-Ready Toys For Dogs", "Indoor & Outdoor Play", "Safe Chews For Power Dogs", etc. Do NOT keep reusing "Durable Toys For".
-- Subline: one short complete thought, max 12 words. It should read as a full phrase or sentence. Do NOT end with a dangling word like "of" or "for".
-- Bullets: 2–3 micro-phrases, 1–3 words each, no periods. Think of compact feature labels such as "Long wear", "Vegan formulas", "Free install".
-- Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
-- Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
+Global behavior / variety:
+- Imagine this business will run many different ad variations over time.
+- For each request, choose a headline and subline pattern that feels fresh and specific to the inputs.
+- Avoid reusing the same generic headline over and over (for example, don't keep giving "Durable Toys For" or "Elevate Your Style").
+- Use concrete language tied to the business, audience, and offer.
+
+Headline rules:
+- 4–8 words, punchy, brand-safe, no period at the end.
+- It can span up to 3 stacked lines in the layout.
+- MUST be a complete idea. If you use link words like "for / with / to / of", always include the object, e.g. "Durable Toys for Happy Dogs" (never end on just "for").
+- Avoid extremely generic phrases like "Elevate your style" or "Transform your home".
+
+Subline rules:
+- One complete phrase or short sentence, up to about 16 words.
+- It should read naturally and should NOT end on just "for / of / to / with / and / or".
+- It can echo the benefit or describe how/when the product is used.
+
+Bullet rules:
+- 2–3 micro-phrases, 1–3 words each, no periods.
+- Think of compact feature labels such as "Long wear", "Vegan formulas", "Tough chewers".
 - Do NOT repeat the offer text inside bullets or the subline.
-- Keep copy coherent, brand-safe, specific to the business, and suitable for a single static promo image.`;
+
+Offer rules:
+- "offer" must be based ONLY on the user's described offer/discount.
+- If they did not clearly describe a deal, set "offer" to an empty string "".
+- Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
+
+General:
+- Keep all copy coherent, brand-safe, specific to the business, and suitable for a single static promo image.`;
 
   const user = {
     businessName: answers.businessName || "",
@@ -1342,8 +1361,13 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-       const safeHeadline = safeHeadlineText(crafted.headline || "");
-    const safeSubline = safeSublineText(crafted.subline || "");
+       const safeHeadline = trimDanglingTail(
+  clampWords(cleanLine(crafted.headline || ""), 8)
+);
+const safeSubline = trimDanglingTail(
+  clampWords(cleanLine(crafted.subline || ""), 18)
+);
+
 
 
     const safeOffer = tightenOfferText(
@@ -1943,8 +1967,13 @@ router.post("/craft-ad-copy", async (req, res) => {
       a.offer || a.saveAmount || rawCopy.offer || ""
     );
 
-    const safeHeadline = safeHeadlineText(rawCopy.headline || "");
-    const safeSubline = safeSublineText(rawCopy.subline || "");
+    const safeHeadline = trimDanglingTail(
+  clampWords(cleanLine(rawCopy.headline || ""), 8)
+);
+const safeSubline = trimDanglingTail(
+  clampWords(cleanLine(rawCopy.subline || ""), 18)
+);
+
 
 
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ""), 10);
