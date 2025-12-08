@@ -380,6 +380,33 @@ function trimDanglingTail(s = "") {
   return words.join(" ");
 }
 
+function trimDanglingTail(s = "") {
+  const words = String(s || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "";
+
+  const badEnd = new Set(["for", "of", "to", "with", "and", "or", "at", "in", "on"]);
+  const last = words[words.length - 1].toLowerCase();
+
+  if (badEnd.has(last)) {
+    words.pop();
+  }
+  return words.join(" ");
+}
+
+// normalize headline → max ~6 words, no dangling "for/of/to…"
+function safeHeadlineText(s = "") {
+  return trimDanglingTail(clampWords(cleanLine(s || ""), 6));
+}
+
+// normalize subline → allow to be fairly long, but still neat
+function safeSublineText(s = "") {
+  return trimDanglingTail(clampWords(cleanLine(s || ""), 14));
+}
+
+
 
 const INDUSTRY_TEMPLATES = {
   fashion: {
@@ -468,12 +495,12 @@ async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   if (!key) return null;
 
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-  const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
+    const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
 Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
 
 Rules:
-- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Use varied wording and make it feel like a real campaign headline (e.g., "Fall Flooring Sale", "New Season Styles").
+- Headline: max 6 words, punchy, no period at end. Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your". Use varied wording and make it feel like a real campaign headline (e.g., "Fall Flooring Sale", "New Season Styles"). Do NOT always repeat the same phrasing (for example, avoid using "Durable Toys For" over and over for pet brands).
 - Subline: one short complete thought, max 12 words. It should read as a full phrase or sentence. Do NOT end with a dangling word like "of" or "for".
 - Bullets: 2–3 micro-phrases, 1–3 words each, no periods. Think of compact feature labels such as "Long wear", "Vegan formulas", "Free install".
 - Offer must be based ONLY on the user's described offer/discount. If they did not describe a deal, set "offer" to an empty string "".
@@ -1155,12 +1182,9 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-    const safeHeadline = trimDanglingTail(
-  clampWords(cleanLine(crafted.headline || ""), 6)
-);
-const safeSubline = trimDanglingTail(
-  clampWords(cleanLine(crafted.subline || ""), 12)
-);
+       const safeHeadline = safeHeadlineText(crafted.headline || "");
+    const safeSubline = safeSublineText(crafted.subline || "");
+
 
     const safeOffer = tightenOfferText(
       crafted.offer || a.offer || a.saveAmount || ""
@@ -1374,9 +1398,10 @@ const cardH = 1080;
       fsBody,
       cardW,
       padXBody,
-      2,
+      3, // allow up to 3 lines so the sentence can finish
       1
     );
+
     const qualifiersText = [
       mergedKnobsB.financingLine,
       mergedKnobsB.qualifiers,
@@ -1584,9 +1609,14 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           photoBuffer: photoBuf,
         });
 
-        const eventTitle = (overlay.headline || "").trim().toUpperCase();
+        // headline: cleaned, no dangling "for/of/to", then uppercased
+        const eventTitleRaw = overlay.headline || "";
+        const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
+
+        // subline: allow to be fairly long, but still neat and complete
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
-        const dateRange = clampWords(cleanLine(dateRangeRaw), 10);
+        const dateRange = safeSublineText(dateRangeRaw);
+
         const saveAmount = tightenOfferText(overlay.offer || "");
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
@@ -1636,9 +1666,10 @@ const cardW = 1080,
           fsBody,
           cardW,
           padXBody,
-          2,
+          3,
           1
         );
+
         const qualifiersText = [financingLn, qualifiers]
           .filter(Boolean)
           .join(" • ");
@@ -1749,12 +1780,9 @@ router.post("/craft-ad-copy", async (req, res) => {
       a.offer || a.saveAmount || rawCopy.offer || ""
     );
 
-    const safeHeadline = trimDanglingTail(
-  clampWords(cleanLine(rawCopy.headline || ""), 6)
-);
-const safeSubline = trimDanglingTail(
-  clampWords(cleanLine(rawCopy.subline || ""), 12)
-);
+    const safeHeadline = safeHeadlineText(rawCopy.headline || "");
+    const safeSubline = safeSublineText(rawCopy.subline || "");
+
 
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ""), 10);
 
