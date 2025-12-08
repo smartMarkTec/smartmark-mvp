@@ -634,6 +634,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * - widened top box (left-right)
  * - subline sits on a subtle bottom strip for legibility (non-pill)
  */
+/**
+ * Shaw-inspired poster B:
+ * - widened top box (left-right)
+ * - clean subline text (no band / shadow)
+ */
 function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
   const innerX = frameT;
@@ -655,9 +660,6 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const subY = offerY + fsSave * 1.05 + 85;
   const legalY = cardH - frameT - 22;
 
-  const subBandH = fsBody * 2.8;
-  const subBandY = subY - fsBody * 1.8;
-
   return `
 <svg viewBox="0 0 ${cardW} ${cardH}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -666,14 +668,10 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
-      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:1; stroke-width:4; paint-order:stroke fill; letter-spacing:0.12em; }
+      /* subline: plain white text, no stroke/shadow */
+      .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
-    <!-- stronger vertical gradient for subline strip -->
-    <linearGradient id="subGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#020617" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#020617" stop-opacity="0.35"/>
-    </linearGradient>
   </defs>
 
   <!-- white frame -->
@@ -730,10 +728,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- subtle full-width bottom strip (non-pill) behind subline -->
-  <rect x="0" y="${subBandY}" width="${cardW}" height="${subBandH}" fill="url(#subGrad)"/>
-
-  <!-- subline -->
+  <!-- subline (no background band) -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -747,6 +742,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   {{/legal}}
 </svg>`;
 }
+
 
 /* ------------------------ Utility helpers ------------------------ */
 
@@ -1297,18 +1293,20 @@ router.post("/generate-static-ad", async (req, res) => {
     const lenTitle = String(mergedKnobsB.eventTitle || "").length;
     const lenSave = String(mergedKnobsB.saveAmount || "").length;
 
-    // headline base size slightly larger, still adaptive
-    const fsTitleBase = clamp(
-      106 - Math.max(0, lenTitle - 14) * 2.0,
-      64,
-      106
-    );
-    const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
-    const fsH2 = 34;
-    const fsBody = 30;
+  // headline base size slightly larger, still adaptive (tiny bump)
+const fsTitleBase = clamp(
+  107 - Math.max(0, lenTitle - 14) * 2.0,
+  65,
+  107
+);
+const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
+const fsH2 = 34;
+// subline font +1 point
+const fsBody = 32;
 
-    const cardW = 1080;
-    const cardH = 1080;
+const cardW = 1080;
+const cardH = 1080;
+
 
     // geometry kept in sync with tplPosterBCard
     const frameT = 40;
@@ -1561,14 +1559,15 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes; headline base slightly larger
-        const fsTitleBase = 100,
-          fsH2 = 34,
-          fsSave = 74,
-          fsBody = 28;
+   // base sizes; headline base slightly larger
+const fsTitleBase = 100,
+  fsH2 = 34,
+  fsSave = 74,
+  fsBody = 30; // subline slightly bigger
 
-        const cardW = 1080,
-          cardH = 1080;
+const cardW = 1080,
+  cardH = 1080;
+
 
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
