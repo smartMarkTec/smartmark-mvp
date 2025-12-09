@@ -659,7 +659,7 @@ async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   if (!key) return null;
 
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-        const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
+         const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
 Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
 
@@ -669,17 +669,25 @@ Global behavior / variety:
 - Avoid reusing the same generic headline over and over (for example, don't keep giving "Durable Toys For" or "Elevate Your Style").
 - Use concrete language tied to the business, audience, and offer.
 
+Headline rules:
 - Headline: between 3 and 6 words total, punchy, no period at end.
-  • Randomly choose a word count between 3 and 6 for each ad (do not always use the same length).
-  • It must stand alone as a complete campaign idea (e.g., "Happy Pup Toys", "Fresh Summer Styles").
-  • Do NOT end with connector words like "for", "of", "to", "with", "and".
-  • Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your".
-  • Use varied wording from ad to ad based on the business and benefit (don’t always repeat words like "Durable").
+- You MAY end the headline with a single exclamation mark (!) if it feels natural for the brand and offer.
+- Never use more than one '!' in the headline (no "!!").
+- It must stand alone as a complete campaign idea (e.g., "Happy Pup Toys", "Fresh Summer Styles").
+- Do NOT end with connector words like "for", "of", "to", "with", "and".
+- Avoid generic phrases like "Elevate your", "Transform your", or "Upgrade your".
+- Use varied wording from ad to ad based on the business and benefit (don’t always repeat words like "Durable").
 
 Subline rules:
 - One complete phrase or short sentence, up to about 16 words.
 - It should read naturally and should NOT end on just "for / of / to / with / and / or".
 - It can echo the benefit or describe how/when the product is used.
+- The subline MAY end with a single exclamation mark (!) for warmth, but only if the headline does NOT use '!'.
+
+Exclamation rules:
+- Across the headline and subline combined, you may use AT MOST ONE exclamation mark total.
+- If the headline uses '!', the subline must not contain any '!'.
+- Never use more than one '!' in a row.
 
 Bullet rules:
 - 2–3 micro-phrases, 1–3 words each, no periods.
@@ -882,6 +890,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const innerW = cardW - frameT * 2;
   const innerH = cardH - frameT * 2;
   const centerX = cardW / 2;
+  const titleCenterX = centerX + 6;
 
   // widened box left-right, similar height (keeps square-ish feel)
   const bannerW = Math.round(innerW * 0.62);
@@ -952,11 +961,12 @@ const titleY = brandY + fsTitle * 1.2 + 6;
       {{brandName}}
     </text>
 
-    <text class="title t-center" x="${centerX}" y="${titleY}">
+    <text class="title t-center" x="${titleCenterX}" y="${titleY}">
       {{#eventTitleLines}}
-        <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
+        <tspan x="${titleCenterX}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
     </text>
+
   </g>
 
   <!-- promotion line -->
