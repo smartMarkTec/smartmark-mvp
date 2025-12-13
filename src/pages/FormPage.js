@@ -592,23 +592,38 @@ function buildImagePrompt(answers = {}, overlay = {}) {
 }
 
 // --- GPT copy summarizer ---
-async function summarizeAdCopy(answers) {
+async function summarizeAdCopy(answers, { regenerateToken = "", variant = "" } = {}) {
   const url = `${API_BASE}/summarize-ad-copy`;
-  console.debug("[SM][summarizeAdCopy:POST]", url, { answers });
+  console.debug("[SM][summarizeAdCopy:POST]", url, { answers, regenerateToken, variant });
+
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers }),
+      body: JSON.stringify({ answers, regenerateToken, variant }),
     });
+
     const json = await res.json().catch(() => ({}));
     console.debug("[SM][summarizeAdCopy:RES]", res.status, json);
+
     if (!res.ok || !json?.ok) throw new Error(`summarize failed ${res.status}`);
     return json.copy || {};
   } catch (e) {
     console.error("[SM][summarizeAdCopy:ERR]", e?.message || e);
     return {};
   }
+}
+
+function normalizeSmartCopy(raw = {}, answers = {}) {
+  return {
+    headline: String(raw?.headline || "").trim(),
+    subline: String(raw?.subline || raw?.body || "").trim(),
+    offer: String(raw?.offer || "").trim(),
+    secondary: String(raw?.secondary || "").trim(),
+    bullets: Array.isArray(raw?.bullets) ? raw.bullets : [],
+    disclaimers: String(raw?.disclaimers || "").trim(),
+    cta: String(raw?.cta || answers?.cta || "Shop now").trim(),
+  };
 }
 
 /* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
@@ -1469,76 +1484,37 @@ export default function FormPage() {
           try {
             await warmBackend();
 
-            // 1) Get fresh GPT-crafted copy for THIS run
-            const rawCopy = (await summarizeAdCopy(answers)) || {};
-            const copy = {
-              headline: (rawCopy.headline || "").toString(),
-              subline: (rawCopy.subline || "").toString(),
-              offer: (rawCopy.offer || "").toString(),
-              secondary: (rawCopy.secondary || "").toString(),
-              bullets: Array.isArray(rawCopy.bullets)
-                ? rawCopy.bullets
-                : [],
-              disclaimers: (rawCopy.disclaimers || "").toString(),
-              cta: (rawCopy.cta || "").toString(),
-            };
+// 1) IMAGE: Poster B A/B with DIFFERENT COPY per image (consistent layout)
+const wantImage = mediaType !== "video";
+const imagesPromise = (async () => {
+  if (!wantImage) return;
 
-            // 2) Store GPT copy in state for the preview card
-            setResult({
-              headline: copy.headline,
-              body: copy.subline,
-              offer: copy.offer,
-              bullets: copy.bullets,
-              disclaimers: copy.disclaimers,
-              image_overlay_text:
-                copy.cta || answers?.cta || "Shop now",
-            });
+  // This will:
+  // - call GPT twice (A/B)
+  // - render poster_b twice (A/B)
+  // - set imageUrls to exactly two
+  // - store per-image drafts so each slide has its own copy
+  await generatePosterBPair(token);
+})();
 
-            // 3) IMAGE: use GPT copy directly for the overlay
-            const imagesPromise = (async () => {
-              const poster = derivePosterFieldsFromAnswers(answers);
-              const overlay = {
-                headline:
-                  (copy.headline || poster.headline || "").slice(0, 55),
-                body: copy.subline || poster.adCopy || "",
-                cta: normalizeOverlayCTA(
-                  copy.cta || answers?.cta || ""
-                ),
-              };
+// 4) VIDEO: unchanged
+const videosPromise = (async () => {
+  const vs = await fetchVideoPair(token, answers, null, null);
+  await Promise.allSettled([
+    headRangeWarm("VA", vs?.[0]?.url),
+    headRangeWarm("VB", vs?.[1]?.url),
+  ]);
+  try {
+    setVideoItems(vs || []);
+    setActiveVideo(0);
+    setVideoUrl(vs?.[0]?.url || "");
+    setVideoScript(vs?.[0]?.script || "");
+  } catch {}
+})();
 
-              const prompt = buildImagePrompt(answers, overlay);
+// 5) Static Poster B: NO-OP (Poster B is now produced inside generatePosterBPair)
+const staticPromise = Promise.resolve();
 
-              const imgs = await fetchImagesOnce(
-                token,
-                answers,
-                overlay,
-                prompt
-              );
-              setImageUrls(imgs || []);
-              setActiveImage(0);
-              setImageUrl((imgs && imgs[0]) || "");
-            })();
-
-            // 4) VIDEO: unchanged
-            const videosPromise = (async () => {
-              const vs = await fetchVideoPair(token, answers, null, null);
-              await Promise.allSettled([
-                headRangeWarm("VA", vs?.[0]?.url),
-                headRangeWarm("VB", vs?.[1]?.url),
-              ]);
-              try {
-                setVideoItems(vs || []);
-                setActiveVideo(0);
-                setVideoUrl(vs?.[0]?.url || "");
-                setVideoScript(vs?.[0]?.script || "");
-              } catch {}
-            })();
-
-            // 5) Static Poster B: also gets the same GPT copy
-            const staticPromise = handleGenerateStaticAd(
-              "poster_b",
-              copy
-            );
 
             // 6) Mark as “done” once any media completes
             await Promise.any([
@@ -1643,61 +1619,90 @@ export default function FormPage() {
     };
   }, []);
 
-  /* Regenerations (sequential with warmup/backoff) */
-  async function handleRegenerateImage() {
-    setImageLoading(true);
-    try {
-      await warmBackend();
-      const token = getRandomString();
+  async function generateTwoPosterBVariants(runToken) {
+  const tA = `${runToken}-A`;
+  const tB = `${runToken}-B`;
 
-      // Fresh GPT copy for a brand-new variation
-      const rawCopy = (await summarizeAdCopy(answers)) || {};
-      const copy = {
-        headline: (rawCopy.headline || "").toString(),
-        subline: (rawCopy.subline || "").toString(),
-        offer: (rawCopy.offer || "").toString(),
-        secondary: (rawCopy.secondary || "").toString(),
-        bullets: Array.isArray(rawCopy.bullets) ? rawCopy.bullets : [],
-        disclaimers: (rawCopy.disclaimers || "").toString(),
-        cta: (rawCopy.cta || "").toString(),
-      };
+  // 1) Two independent GPT calls -> different copy
+  const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
+  const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
 
-      // Update preview state so the user sees the new words
-      setResult({
-        headline: copy.headline,
-        body: copy.subline,
-        offer: copy.offer,
-        bullets: copy.bullets,
-        disclaimers: copy.disclaimers,
-        image_overlay_text:
-          copy.cta || answers?.cta || "Shop now",
-      });
+  const copyA = normalizeSmartCopy(rawA, answers);
+  let copyB = normalizeSmartCopy(rawB, answers);
 
-      // Overlay for the rendered image (uses fresh GPT copy)
-      const overlay = {
-        headline: (copy.headline || "").slice(0, 55),
-        body: copy.subline || "",
-        cta: normalizeOverlayCTA(copy.cta || answers?.cta || ""),
-      };
+  // If copy accidentally matches, try one more time for B (cheap + effective)
+  const same =
+    (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
+    (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
 
-      const prompt = buildImagePrompt(answers, overlay);
-
-      const imgs = await fetchImagesOnce(
-        token,
-        answers,
-        overlay,
-        prompt
-      );
-      setImageUrls(imgs || []);
-      setActiveImage(0);
-      setImageUrl((imgs && imgs[0]) || "");
-
-      // Also regenerate static Poster B to mirror this variation
-      handleGenerateStaticAd("poster_b", copy);
-    } finally {
-      setImageLoading(false);
-    }
+  if (same) {
+    const rawB2 = await summarizeAdCopy(answers, { regenerateToken: `${tB}-2`, variant: "B2" });
+    copyB = normalizeSmartCopy(rawB2, answers);
   }
+
+  // 2) Two independent poster_b renders -> different background + correct Shaw layout
+  const [urlA, urlB] = await Promise.all([
+    handleGenerateStaticAd("poster_b", copyA, { regenerateToken: tA, silent: true }),
+    handleGenerateStaticAd("poster_b", copyB, { regenerateToken: tB, silent: true }),
+  ]);
+
+  const urls = [urlA, urlB].filter(Boolean).slice(0, 2);
+
+  // 3) Save per-image drafts so switching images shows the correct copy
+  if (urls[0]) {
+    saveImageDraftById(creativeIdFromUrl(urls[0]), {
+      headline: (copyA.headline || "").slice(0, 55),
+      body: copyA.subline || "",
+      overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+    });
+  }
+  if (urls[1]) {
+    saveImageDraftById(creativeIdFromUrl(urls[1]), {
+      headline: (copyB.headline || "").slice(0, 55),
+      body: copyB.subline || "",
+      overlay: normalizeOverlayCTA(copyB.cta || answers?.cta || ""),
+    });
+  }
+
+  // 4) Update UI
+  setImageUrls(urls);
+  setActiveImage(0);
+  setImageUrl(urls[0] || "");
+
+  // Show A’s copy in the preview card initially (switching images will load drafts)
+  setResult({
+    headline: copyA.headline,
+    body: copyA.subline,
+    offer: copyA.offer,
+    bullets: copyA.bullets,
+    disclaimers: copyA.disclaimers,
+    image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+  });
+
+  return urls;
+}
+
+
+  /* Regenerations (sequential with warmup/backoff) */
+/* Regenerations (sequential with warmup/backoff) */
+async function handleRegenerateImage() {
+  setImageLoading(true);
+  try {
+    await warmBackend();
+    const token = getRandomString();
+
+    // NEW: Generate a consistent Poster B A/B pair
+    // - different copy per image
+    // - different background/photo per image
+    // - consistent layout across both images
+    await generatePosterBPair(token);
+  } catch (e) {
+    console.error("handleRegenerateImage failed:", e?.message || e);
+    setError("Image regeneration failed. Please try again.");
+  } finally {
+    setImageLoading(false);
+  }
+}
 
   async function handleRegenerateVideo() {
     setVideoLoading(true);
@@ -1742,201 +1747,153 @@ export default function FormPage() {
   }
 
   // --- Static Ad Generator (Templates A/B) — UPDATED TO PASS FULL COPY (WITH BULLETS) ---
-  async function handleGenerateStaticAd(
-    template = "poster_b",
-    assetsData = null
-  ) {
-    const a = answers || {};
+async function handleGenerateStaticAd(
+  template = "poster_b",
+  assetsData = null,
+  { regenerateToken = "", silent = false } = {}
+) {
+  const a = answers || {};
 
-    // 1) Prefer GPT summary copy that we already showed in the preview
-    const fromAssets =
-      assetsData && typeof assetsData === "object" ? assetsData : {};
-    const fromResult = result || {};
+  const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
+  const fromResult = result || {};
 
-    const baseBullets =
-      (Array.isArray(fromAssets.bullets) && fromAssets.bullets.length
-        ? fromAssets.bullets
-        : Array.isArray(fromResult.bullets) && fromResult.bullets.length
-        ? fromResult.bullets
-        : []) || [];
+  const baseBullets =
+    (Array.isArray(fromAssets.bullets) && fromAssets.bullets.length
+      ? fromAssets.bullets
+      : Array.isArray(fromResult.bullets) && fromResult.bullets.length
+      ? fromResult.bullets
+      : []) || [];
 
-    const craftedCopy = {
-      headline: (
-        fromAssets.headline ||
-        displayHeadline ||
-        a.mainBenefit ||
-        a.businessName ||
-        ""
-      ).toString(),
-      subline: (
-        fromAssets.subline ||
-        displayBody ||
-        a.details ||
-        a.mainBenefit ||
-        ""
-      ).toString(),
-      offer: (
-        fromAssets.offer ||
-        a.offer ||
-        a.saveAmount ||
-        ""
-      ).toString(),
-      secondary: (fromAssets.secondary || "").toString(),
-      bullets: baseBullets,
-      disclaimers: (fromAssets.disclaimers || "").toString(),
-      cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
+  const craftedCopy = {
+    headline: (
+      fromAssets.headline ||
+      displayHeadline ||
+      a.mainBenefit ||
+      a.businessName ||
+      ""
+    ).toString(),
+    subline: (
+      fromAssets.subline ||
+      displayBody ||
+      a.details ||
+      a.mainBenefit ||
+      ""
+    ).toString(),
+    offer: (fromAssets.offer || a.offer || a.saveAmount || "").toString(),
+    secondary: (fromAssets.secondary || "").toString(),
+    bullets: baseBullets,
+    disclaimers: (fromAssets.disclaimers || "").toString(),
+    cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
+  };
+
+  if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
+    craftedCopy.bullets = ["High quality", "Loved by dogs"];
+  }
+
+  // IMPORTANT: clamp these to avoid your 400 validation errors
+  const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
+  const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);
+  const safeLocation = (a.location || "Your City").toString().trim().slice(0, 60);
+
+  let knobs;
+  if (template === "flyer_a") {
+    knobs = {
+      size: "1080x1080",
+      palette: {
+        header: "#0d3b66",
+        body: "#dff3f4",
+        accent: "#ff8b4a",
+        textOnDark: "#ffffff",
+        textOnLight: "#2b3a44",
+      },
+      lists: {
+        left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+        right: a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
+      },
+      coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
+      showIcons: true,
+      headerSplitDiagonal: true,
+      roundedOuter: true,
+      backgroundHint: safeIndustry,
     };
+  } else {
+    knobs = {
+      size: "1080x1080",
+      backgroundHint: safeIndustry,
+      backgroundUrl: a.backgroundUrl || "",
+    };
+  }
 
-    // Always have at least 2 short bullets; backend will further sanitize
-    if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
-      craftedCopy.bullets = [
-        "Quality you can feel",
-        "Modern, clean design",
-      ];
-    }
-
-    // 2) Common inputs (used by both flyer_a and poster_b)
-    const commonInputs = {
-      industry: (a.industry || "Local Services").toString(),
-      businessName: (a.businessName || "Your Business").toString(),
-      website: (a.url || "").toString(),
-      location: a.city
-        ? `${a.city}${a.state ? ", " + a.state : ""}`
-        : (a.location || "Your City").toString(),
-      phone: (a.phone || "(210) 555-0147").toString(),
-
-      // These feed flyer_a and give poster_b extra context
+  const payload = {
+    template,
+    regenerateToken, // <-- NEW: lets backend randomize background deterministically per variant
+    inputs: {
+      industry: safeIndustry,
+      businessName: safeBiz,
+      location: safeLocation,
+    },
+    knobs,
+    copy: {
       headline: craftedCopy.headline,
       subline: craftedCopy.subline,
-      cta: normalizeOverlayCTA(craftedCopy.cta),
-    };
+      offer: craftedCopy.offer,
+      secondary: craftedCopy.secondary,
+      bullets: craftedCopy.bullets,
+      disclaimers: craftedCopy.disclaimers,
+    },
+    answers: {
+      ...a,
+      industry: safeIndustry,
+      businessName: safeBiz,
+      location: safeLocation,
+      offer: a.offer || a.saveAmount || craftedCopy.offer || "",
+    },
+  };
 
-    // 3) Knobs per template
-    let knobs;
-    if (template === "flyer_a") {
-      knobs = {
-        size: "1080x1080",
-        palette: {
-          header: "#0d3b66",
-          body: "#dff3f4",
-          accent: "#ff8b4a",
-          textOnDark: "#ffffff",
-          textOnLight: "#2b3a44",
-        },
-        lists: {
-          left:
-            a.frequencyList || [
-              "One Time",
-              "Weekly",
-              "Bi-Weekly",
-              "Monthly",
-            ],
-          right:
-            a.servicesList || [
-              "Kitchen",
-              "Bathrooms",
-              "Offices",
-              "Dusting",
-              "Mopping",
-              "Vacuuming",
-            ],
-        },
-        coverage: (
-          a.coverage ||
-          "Coverage area 25 Miles around your city"
-        ).toString(),
-        showIcons: true,
-        headerSplitDiagonal: true,
-        roundedOuter: true,
-        backgroundHint: commonInputs.industry,
-      };
-    } else {
-      // poster_b → let backend do Shaw-style card layout based on copy
-      knobs = {
-        size: "1080x1080",
-        backgroundHint: commonInputs.industry,
-        backgroundUrl: a.backgroundUrl || "",
-        // we don't stuff text into knobs; staticAds.js uses body.copy for the card typography
-      };
+  console.debug("[SM][static-ad:payload]", payload);
+
+  try {
+    const res = await fetch(`${API_BASE}/generate-static-ad`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    console.debug("[SM][static-ad:status]", res.status, data);
+
+    if (!res.ok || !data?.ok) {
+      const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
+      setError(msg);
+      if (!silent) alert(msg);
+      return "";
     }
 
-    const payload = {
-      template,
-      inputs: {
-        industry: commonInputs.industry,
-        businessName: commonInputs.businessName,
-        location: commonInputs.location,
-      },
-      knobs,
-      copy: {
-        headline: craftedCopy.headline,
-        subline: craftedCopy.subline,
-        offer: craftedCopy.offer,
-        secondary: craftedCopy.secondary,
-        bullets: craftedCopy.bullets,
-        disclaimers: craftedCopy.disclaimers,
-      },
-      // Original answers for context; backend may still look at offer, mainBenefit, etc.
-      answers: {
-        ...a,
-        offer: a.offer || a.saveAmount || craftedCopy.offer || "",
-      },
-    };
+    const png = toAbsoluteMedia(
+      data.pngUrl || data.absoluteUrl || data.url || (data.filename ? `/api/media/${data.filename}` : "")
+    );
 
-    console.debug("[SM][static-ad:payload]", payload);
-
-    try {
-      const res = await fetch(`${API_BASE}/generate-static-ad`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      console.debug("[SM][static-ad:status]", res.status, data);
-
-      if (!res.ok || !data?.ok) {
-        const msg =
-          data?.error ||
-          `Static ad generation failed (HTTP ${res.status})`;
-        setError(msg);
-        alert(msg);
-        return;
-      }
-
-      const png = toAbsoluteMedia(
-        data.pngUrl ||
-          data.absoluteUrl ||
-          data.url ||
-          data.filename ||
-          ""
-      );
-      if (!png) {
-        setError("Static ad returned without a URL.");
-        alert("Static ad returned without a URL.");
-        return;
-      }
-
-      setImageUrls((prev) => [png, ...prev.slice(0, 1)]);
-      setActiveImage(0);
-      setImageUrl(png);
-      setMediaType((prev) =>
-        prev === "video" ? "both" : prev // if it was pure video, now show both; otherwise keep current
-      );
-
-      setChatHistory((ch) => [
-        ...ch,
-        {
-          from: "gpt",
-          text: `Static ad generated with template "${template}".`,
-        },
-      ]);
-    } catch (e) {
-      console.error("[SM][static-ad:ERR]", e?.message || e);
-      setError("Static ad failed. Please try again.");
-      alert("Static ad failed. Please try again.");
+    if (!png) {
+      const msg = "Static ad returned without a URL.";
+      setError(msg);
+      if (!silent) alert(msg);
+      return "";
     }
+
+    if (!silent) {
+      setChatHistory((ch) => [...ch, { from: "gpt", text: `Static ad generated with template "${template}".` }]);
+    }
+
+    return png;
+  } catch (e) {
+    console.error("[SM][static-ad:ERR]", e?.message || e);
+    const msg = "Static ad failed. Please try again.";
+    setError(msg);
+    if (!silent) alert(msg);
+    return "";
   }
+}
+
 
   /* ---------------------- Render ---------------------- */
   return (

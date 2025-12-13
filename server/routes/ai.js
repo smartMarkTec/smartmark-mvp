@@ -34,12 +34,14 @@ router.use((req, res, next) => {
  * Frontend sometimes tries "<id>-seg.mp4". We redirect that to "<id>.mp4".
  * Zero visual change; just avoids 404 noise.
  */
-router.get('/api/media/:idSeg', (req, res, next) => {
+// was: router.get('/api/media/:idSeg', ...)
+router.get('/media/:idSeg', (req, res, next) => {
   const m = String(req.params.idSeg || '').match(/^([a-f0-9-]+)-seg\.mp4$/i);
   if (!m) return next();
   const id = m[1];
   return res.redirect(302, `/api/media/${id}.mp4`);
 });
+
 
 
 /* ---------------- Memory discipline + concurrency gate --------------- */
@@ -103,7 +105,8 @@ const ax = axios.create({
   maxRedirects: 3,
   transitional: { clarifyTimeoutError: true }
 });
-module.exports.ax = ax;
+router.ax = ax;
+
 
 const fs = require('fs');
 const path = require('path');
@@ -2611,49 +2614,10 @@ async function getCoherentSubline(answers = {}, category = 'generic', seed = '')
 }
 
 /* ---------- required helpers for subline + SVG (UPDATED) ---------- */
-function escSVG(s = '') {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 function escRegExp(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/* Headline/Subline cleaning */
-function cleanHeadline(s = '') {
-  return String(s).replace(/\s+/g, ' ').trim().toUpperCase();
-}
-function cleanSubline(s = '') {
-  return String(s).replace(/\s+/g, ' ').trim();
-}
-
-/* General clamps for consistent layout */
-function clampChars(s = '', max = 42) {
-  const t = String(s);
-  return t.length <= max ? t : t.slice(0, max);
-}
-function ellipsize(s = '', max = 42) {
-  const t = String(s);
-  return t.length <= max ? t : t.slice(0, Math.max(0, max - 1)) + '…';
-}
-
-/* FS + paths */
-function ensureGeneratedDir() {
-  const out = path.join(process.cwd(), 'generated');
-  if (!fs.existsSync(out)) fs.mkdirSync(out, { recursive: true });
-  return out;
-}
-function mediaPath(file) { return `/api/media/${file}`; }
-function absolutePublicUrl(rel) {
-  const base = process.env.PUBLIC_BASE_URL || '';
-  return base ? (new URL(rel, base)).toString() : rel;
-}
-function maybeGC() { if (global.gc) { try { global.gc(); } catch {} } }
 
 /* ------------------------------ UTILS: conditional SVG helpers ------------------------------ */
 function _nonEmpty(s) { return !!String(s || '').trim(); }
@@ -3465,7 +3429,10 @@ async function fetchPexelsPhotos(keyword, want = 8, seed = '') {
 
 /** Ensure 3–4 clips with random order/choices per seed */
 function buildVirtualPlan(rawClips, variant = 0, seed = '') {
-  const clips = Array.isArray(rawClips) ? rawClips.filter(Boolean) : [];
+  const clips = Array.isArray(rawClips)
+    ? rawClips.filter((c) => c && c.url)
+    : [];
+
   if (!clips.length) {
     console.warn('[video] no Pexels clips available for virtual plan');
     return [];
@@ -3477,8 +3444,28 @@ function buildVirtualPlan(rawClips, variant = 0, seed = '') {
 
   const wantCount = pool.length >= 4 ? 4 : Math.max(3, Math.min(4, pool.length));
   const pick = pool.slice(0, wantCount);
-  // Tag seeds so downstream trim offsets vary reproducibly per regenerate
-  return pick.map((c, i) => ({ url: c.url, seed: `${variant}-${i}-${seed}` }));
+
+  // Return a normalized plan (url + optional trim hints)
+  return pick.map((c, i) => {
+    const dur = Number(c.dur || 0);
+    // aim ~18–20s total; per-clip target
+    const per = 18.5 / wantCount;
+
+    // If we know duration, randomize a safe start offset
+    const clipDur = dur > 0 ? dur : per;
+    const useDur = Math.max(3.5, Math.min(per, clipDur));
+    const maxStart = Math.max(0, clipDur - useDur - 0.15);
+    const start = maxStart > 0 ? (rng() * maxStart) : 0;
+
+    return {
+      url: c.url,
+      id: c.id ?? `${variant}-${i}`,
+      dur: dur || 0,
+      // optional hints for downstream trim
+      trimStart: +start.toFixed(2),
+      trimDur: +useDur.toFixed(2),
+    };
+  });
 }
 
 

@@ -1378,17 +1378,9 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-       const headlineWordCap = pickHeadlineWordCap();
-
-const safeHeadline = trimDanglingTail(
-  clampWords(cleanLine(crafted.headline || ""), headlineWordCap)
-);
-const safeSubline = trimDanglingTail(
-  clampWords(cleanLine(crafted.subline || ""), 12)
-);
-
-
-
+    // 🔒 Normalize headline / subline exactly like /generate-image-from-prompt
+    const safeHeadline = safeHeadlineText(crafted.headline || "");
+    const safeSubline = safeSublineText(crafted.subline || "");
 
     const safeOffer = tightenOfferText(
       crafted.offer || a.offer || a.saveAmount || ""
@@ -1458,7 +1450,8 @@ const safeSubline = trimDanglingTail(
 
     console.log("[poster_b] using copy:", crafted);
 
-    const get = (k, def = "") => a[k] ?? inputs[k] ?? knobs[k] ?? def;
+    const get = (k, def = "") =>
+      a[k] ?? inputs[k] ?? knobs[k] ?? def;
 
     const mergedInputsB = {
       industry,
@@ -1551,24 +1544,14 @@ const safeSubline = trimDanglingTail(
       photoBuffer: photoBuf,
     });
 
-    const lenTitle = String(mergedKnobsB.eventTitle || "").length;
-    const lenSave = String(mergedKnobsB.saveAmount || "").length;
+    // 🔒 Typography sizes kept in sync with /generate-image-from-prompt
+    const fsTitleBase = 101;
+    const fsSave = 74;
+    const fsH2 = 34;
+    const fsBody = 31;
 
-// headline base size slightly larger, still adaptive (tiny bump +3)
-const fsTitleBase = clamp(
-  110 - Math.max(0, lenTitle - 14) * 2.0,
-  68,
-  110
-);
-const fsSave = clamp(80 - Math.max(0, lenSave - 12) * 2.2, 48, 80);
-const fsH2 = 34;
-// subline font a bit larger again (+5 total)
-const fsBody = 36;
-
-
-const cardW = 1080;
-const cardH = 1080;
-
+    const cardW = 1080;
+    const cardH = 1080;
 
     // geometry kept in sync with tplPosterBCard
     const frameT = 40;
@@ -1577,7 +1560,6 @@ const cardH = 1080;
     const headPadX = 70;
 
     const padX = 180;
-    // tighter wrap width so subline always sits in its band region
     const padXBody = 260;
 
     const titleWrap = wrapTitleToBox(
@@ -1598,16 +1580,14 @@ const cardH = 1080;
       2,
       1
     );
-  const subLines = wrapTextToWidth(
+    const subLines = wrapTextToWidth(
       mergedKnobsB.dateRange,
       fsBody,
       cardW,
       padXBody,
-      2,
-      1,
-      true
+      3,
+      1
     );
-
 
     const qualifiersText = [
       mergedKnobsB.financingLine,
@@ -1676,6 +1656,7 @@ const cardH = 1080;
       .json({ ok: false, error: String(err?.message || err) });
   }
 });
+
 
 /* ------------------------ proxy-img ------------------------ */
 
@@ -1983,22 +1964,13 @@ router.post("/craft-ad-copy", async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: "copy failed" });
 
-   const safeOffer = tightenOfferText(
-  a.offer || a.saveAmount || rawCopy.offer || ""
-);
+    const safeOffer = tightenOfferText(
+      a.offer || a.saveAmount || rawCopy.offer || ""
+    );
 
-const headlineWordCap = pickHeadlineWordCap();
-
-const safeHeadline = trimDanglingTail(
-  clampWords(cleanLine(rawCopy.headline || ""), headlineWordCap)
-);
-const safeSubline = trimDanglingTail(
-  clampWords(cleanLine(rawCopy.subline || ""), 12)
-);
-
-
-
-
+    // Use the same normalization helper as poster B so copy matches layout behavior
+    const safeHeadline = safeHeadlineText(rawCopy.headline || "");
+    const safeSubline = safeSublineText(rawCopy.subline || "");
 
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ""), 10);
 
@@ -2053,6 +2025,7 @@ const safeSubline = trimDanglingTail(
     return res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
 });
+
 
 /* ------------------------ Exports ------------------------ */
 
