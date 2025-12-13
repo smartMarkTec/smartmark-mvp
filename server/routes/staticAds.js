@@ -402,10 +402,84 @@ function trimDanglingTail(s = "") {
   return words.join(" ");
 }
 
-// normalize headline → max ~6 words, no dangling "for/of/to…"
+const HEADLINE_CHAR_MAX = 20; // keep headlines compact
+
 function safeHeadlineText(s = "") {
-  return trimDanglingTail(clampWords(cleanLine(s || ""), 6));
+  const cleaned = trimDanglingTail(clampWords(cleanLine(s || ""), 6));
+  if (!cleaned) return "";
+  return cleaned.length > HEADLINE_CHAR_MAX
+    ? cleaned.slice(0, HEADLINE_CHAR_MAX).trimEnd()
+    : cleaned;
 }
+
+// --- Very simple headline variety by industry ---
+const HEADLINE_VARIANTS = {
+  flooring: [
+    "Flooring Deals",
+    "Fresh New Floors",
+    "Update Your Floors",
+    "Stylish Flooring",
+  ],
+  restaurant: [
+    "Tonight’s Special",
+    "Hungry? Pull Up",
+    "Fresh Hot Bites",
+    "Dinner Plans?",
+  ],
+  coffee: [
+    "Coffee Time",
+    "Your Daily Brew",
+    "Fresh Hot Coffee",
+    "Morning Fuel",
+  ],
+  fashion: [
+    "New Fits In",
+    "Drop New Styles",
+    "Fresh Fits Daily",
+    "Style Upgrade",
+  ],
+  electronics: [
+    "Tech Deals",
+    "Upgrade Your Tech",
+    "New Gadgets In",
+    "Smart Tech Sale",
+  ],
+  pets: [
+    "Happy Pet Toys",
+    "For Happy Pups",
+    "Spoil Your Pet",
+    "Pet Fun Time",
+  ],
+  generic: [
+    "Local Deals",
+    "New Offer In",
+    "Don’t Miss This",
+    "Limited Time",
+  ],
+};
+
+function pickHeadlineVariant(kind = "generic") {
+  const list = HEADLINE_VARIANTS[kind] || HEADLINE_VARIANTS.generic;
+  if (!list || !list.length) return "";
+  const idx = Math.floor(Math.random() * list.length);
+  return list[idx];
+}
+
+// Use GPT headline *if* it’s decent, otherwise swap to a random variant
+function applyHeadlineVariety(rawHeadline = "", kind = "generic") {
+  let h = safeHeadlineText(rawHeadline || "");
+
+  // If GPT gave nothing or some tiny/generic junk, swap for one of ours
+  if (!h || h.length < 4) {
+    h = pickHeadlineVariant(kind);
+  }
+
+  if (!h) h = "Local Deals";
+
+  return safeHeadlineText(h);
+}
+
+
 
 // normalize subline → allow to be fairly long, but still neat
 function safeSublineText(s = "") {
@@ -994,6 +1068,8 @@ const titleY = brandY + fsTitle * 1.2 + 6;
 
 /* ------------------------ Utility helpers ------------------------ */
 
+
+
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 function ellipsize(s = "", max = 22) {
   s = String(s).trim();
@@ -1379,8 +1455,9 @@ router.post("/generate-static-ad", async (req, res) => {
     }
 
     // 🔒 Normalize headline / subline exactly like /generate-image-from-prompt
-    const safeHeadline = safeHeadlineText(crafted.headline || "");
-    const safeSubline = safeSublineText(crafted.subline || "");
+   const safeHeadline = applyHeadlineVariety(crafted.headline || "", prof.kind);
+const safeSubline = safeSublineText(crafted.subline || "");
+
 
     const safeOffer = tightenOfferText(
       crafted.offer || a.offer || a.saveAmount || ""
@@ -1798,8 +1875,9 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         });
 
         // headline: cleaned, no dangling "for/of/to", then uppercased
-        const eventTitleRaw = overlay.headline || "";
-        const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
+    const eventTitleRaw = applyHeadlineVariety(overlay.headline || "", prof.kind);
+const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
+
 
         // subline: allow to be fairly long, but still neat and complete
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
@@ -1969,7 +2047,8 @@ router.post("/craft-ad-copy", async (req, res) => {
     );
 
     // Use the same normalization helper as poster B so copy matches layout behavior
-    const safeHeadline = safeHeadlineText(rawCopy.headline || "");
+    const safeHeadline = applyHeadlineVariety(rawCopy.headline || "", prof.kind);
+
     const safeSubline = safeSublineText(rawCopy.subline || "");
 
     const safeSecondary = clampWords(cleanLine(rawCopy.secondary || ""), 10);
