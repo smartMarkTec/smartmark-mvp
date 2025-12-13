@@ -1619,68 +1619,69 @@ const staticPromise = Promise.resolve();
     };
   }, []);
 
-  async function generateTwoPosterBVariants(runToken) {
-  const tA = `${runToken}-A`;
-  const tB = `${runToken}-B`;
+  async function generatePosterBPair(runToken) {
+    const tA = `${runToken}-A`;
+    const tB = `${runToken}-B`;
 
-  // 1) Two independent GPT calls -> different copy
-  const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
-  const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
+    // 1) Two independent GPT calls -> different copy
+    const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
+    const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
 
-  const copyA = normalizeSmartCopy(rawA, answers);
-  let copyB = normalizeSmartCopy(rawB, answers);
+    const copyA = normalizeSmartCopy(rawA, answers);
+    let copyB = normalizeSmartCopy(rawB, answers);
 
-  // If copy accidentally matches, try one more time for B (cheap + effective)
-  const same =
-    (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
-    (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
+    // If copy accidentally matches, try one more time for B (cheap + effective)
+    const same =
+      (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
+      (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
 
-  if (same) {
-    const rawB2 = await summarizeAdCopy(answers, { regenerateToken: `${tB}-2`, variant: "B2" });
-    copyB = normalizeSmartCopy(rawB2, answers);
-  }
+    if (same) {
+      const rawB2 = await summarizeAdCopy(answers, { regenerateToken: `${tB}-2`, variant: "B2" });
+      copyB = normalizeSmartCopy(rawB2, answers);
+    }
 
-  // 2) Two independent poster_b renders -> different background + correct Shaw layout
-  const [urlA, urlB] = await Promise.all([
-    handleGenerateStaticAd("poster_b", copyA, { regenerateToken: tA, silent: true }),
-    handleGenerateStaticAd("poster_b", copyB, { regenerateToken: tB, silent: true }),
-  ]);
+    // 2) Two independent poster_b renders -> different background + correct Shaw layout
+    const [urlA, urlB] = await Promise.all([
+      handleGenerateStaticAd("poster_b", copyA, { regenerateToken: tA, silent: true }),
+      handleGenerateStaticAd("poster_b", copyB, { regenerateToken: tB, silent: true }),
+    ]);
 
-  const urls = [urlA, urlB].filter(Boolean).slice(0, 2);
+    const urls = [urlA, urlB].filter(Boolean).slice(0, 2);
 
-  // 3) Save per-image drafts so switching images shows the correct copy
-  if (urls[0]) {
-    saveImageDraftById(creativeIdFromUrl(urls[0]), {
-      headline: (copyA.headline || "").slice(0, 55),
-      body: copyA.subline || "",
-      overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+    // 3) Save per-image drafts so switching images shows the correct copy
+    if (urls[0]) {
+      saveImageDraftById(creativeIdFromUrl(urls[0]), {
+        headline: (copyA.headline || "").slice(0, 55),
+        body: copyA.subline || "",
+        overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+      });
+    }
+    if (urls[1]) {
+      saveImageDraftById(creativeIdFromUrl(urls[1]), {
+        headline: (copyB.headline || "").slice(0, 55),
+        body: copyB.subline || "",
+        overlay: normalizeOverlayCTA(copyB.cta || answers?.cta || ""),
+      });
+    }
+
+    // 4) Update UI
+    setImageUrls(urls);
+    setActiveImage(0);
+    setImageUrl(urls[0] || "");
+
+    // Show A’s copy in the preview card initially (switching images will load drafts)
+    setResult({
+      headline: copyA.headline,
+      body: copyA.subline,
+      offer: copyA.offer,
+      bullets: copyA.bullets,
+      disclaimers: copyA.disclaimers,
+      image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
     });
-  }
-  if (urls[1]) {
-    saveImageDraftById(creativeIdFromUrl(urls[1]), {
-      headline: (copyB.headline || "").slice(0, 55),
-      body: copyB.subline || "",
-      overlay: normalizeOverlayCTA(copyB.cta || answers?.cta || ""),
-    });
+
+    return urls;
   }
 
-  // 4) Update UI
-  setImageUrls(urls);
-  setActiveImage(0);
-  setImageUrl(urls[0] || "");
-
-  // Show A’s copy in the preview card initially (switching images will load drafts)
-  setResult({
-    headline: copyA.headline,
-    body: copyA.subline,
-    offer: copyA.offer,
-    bullets: copyA.bullets,
-    disclaimers: copyA.disclaimers,
-    image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
-  });
-
-  return urls;
-}
 
 
   /* Regenerations (sequential with warmup/backoff) */
