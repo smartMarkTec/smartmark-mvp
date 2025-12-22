@@ -402,17 +402,15 @@ function trimDanglingTail(s = "") {
   return words.join(" ");
 }
 
-const HEADLINE_CHAR_MAX = 20; // target ~16–20 characters max
+const HEADLINE_CHAR_MAX = 20; // keep tight so it never leaks
 
 function safeHeadlineText(s = "") {
-  // 1) basic clean + remove URLs + clamp to at most 6 words
+  // basic clean + remove URLs + clamp to at most 6 words
   const base = trimDanglingTail(clampWords(cleanLine(s || ""), 6));
   if (!base) return "";
 
-  // 2) if already short enough, we're done
   if (base.length <= HEADLINE_CHAR_MAX) return base;
 
-  // 3) otherwise, build up word-by-word until we hit the char cap
   const words = base.split(/\s+/).filter(Boolean);
   let out = "";
 
@@ -422,57 +420,46 @@ function safeHeadlineText(s = "") {
     out = candidate;
   }
 
-  // 4) if (weirdly) nothing fit, do a hard slice as a last resort
   if (!out) out = base.slice(0, HEADLINE_CHAR_MAX).trim();
-
-  // 5) make sure we don't end on "for / of / to / with / and / or / at / in / on"
   return trimDanglingTail(out);
 }
 
-
-// --- Very simple headline variety by industry ---
+// --- 3-word headline variants by industry (all coherent) ---
 const HEADLINE_VARIANTS = {
   flooring: [
-    "Flooring Deals",
-    "Fresh New Floors",
-    "Update Your Floors",
-    "Stylish Flooring",
+    "Fresh Flooring Finds",
+    "Cozy Home Floors",
+    "Modern Floor Styles",
   ],
   restaurant: [
-    "Tonight’s Special",
-    "Hungry? Pull Up",
-    "Fresh Hot Bites",
-    "Dinner Plans?",
+    "Fresh Dinner Specials",
+    "Local Flavor Night",
+    "Family Dinner Deals",
   ],
   coffee: [
-    "Coffee Time",
-    "Your Daily Brew",
-    "Fresh Hot Coffee",
-    "Morning Fuel",
+    "Morning Coffee Ritual",
+    "Daily Brew Fix",
+    "Cozy Coffee Break",
   ],
   fashion: [
-    "New Fits In",
-    "Drop New Styles",
-    "Fresh Fits Daily",
-    "Style Upgrade",
+    "New Thrift Styles",
+    "Trendy Closet Finds",
+    "Everyday Style Upgrade",
   ],
   electronics: [
-    "Tech Deals",
-    "Upgrade Your Tech",
-    "New Gadgets In",
-    "Smart Tech Sale",
+    "Smart Gadget Deals",
+    "Upgrade Tech Today",
+    "Latest Tech Picks",
   ],
   pets: [
-    "Happy Pet Toys",
-    "For Happy Pups",
+    "Happy Pet Treats",
+    "Playtime Pet Fun",
     "Spoil Your Pet",
-    "Pet Fun Time",
   ],
   generic: [
-    "Local Deals",
-    "New Offer In",
-    "Don’t Miss This",
-    "Limited Time",
+    "Local Deals Today",
+    "New Offer Inside",
+    "Limited Time Offer",
   ],
 };
 
@@ -483,19 +470,47 @@ function pickHeadlineVariant(kind = "generic") {
   return list[idx];
 }
 
-// Use GPT headline *if* it’s decent, otherwise swap to a random variant
+// force headline to EXACTLY 3 words, always coherent
+function enforceThreeWordHeadline(h = "", kind = "generic") {
+  h = safeHeadlineText(h || "").trim();
+  let words = h.split(/\s+/).filter(Boolean);
+
+  if (words.length === 3) return words.join(" ");
+
+  if (words.length > 3) {
+    return words.slice(0, 3).join(" ");
+  }
+
+  // If we have fewer than 3 words, grab a 3-word preset for this industry
+  const variants = (HEADLINE_VARIANTS[kind] || []).filter(
+    (txt) => txt.trim().split(/\s+/).length === 3
+  );
+  if (variants.length) {
+    return variants[Math.floor(Math.random() * variants.length)];
+  }
+
+  // Fallback: pad with generic words
+  while (words.length < 3) {
+    if (words.length === 0) words.push("Local");
+    else if (words.length === 1) words.push("Deals");
+    else words.push("Today");
+  }
+  return words.join(" ");
+}
+
+// Use GPT headline if decent, then lock it to 3 words
 function applyHeadlineVariety(rawHeadline = "", kind = "generic") {
   let h = safeHeadlineText(rawHeadline || "");
 
-  // If GPT gave nothing or some tiny/generic junk, swap for one of ours
+  // If GPT gave nothing or junk, use our preset
   if (!h || h.length < 4) {
     h = pickHeadlineVariant(kind);
   }
 
-  if (!h) h = "Local Deals";
-
-  return safeHeadlineText(h);
+  if (!h) h = "Local Deals Today"; // already 3 words
+  return enforceThreeWordHeadline(h, kind);
 }
+
 
 
 
@@ -847,20 +862,22 @@ function tightenOfferText(s = "") {
     .replace(/[^\w\s%$]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
   if (!t) return "";
 
-  const shortenWords = (str, maxWords = 4) => {
-    const words = String(str || "").trim().split(/\s+/);
-    if (words.length <= maxWords) return words.join(" ").toUpperCase();
-    return words.slice(0, maxWords).join(" ").toUpperCase();
+  const shortenWords = (arr, maxWords = 4) => {
+    if (!arr.length) return "";
+    return arr.slice(0, maxWords).join(" ").toUpperCase();
   };
 
-    // Handle BOGO cleanly: "buy one get one free" -> "BUY 1 GET 1 FREE"
+  const words = t.split(/\s+/).filter(Boolean);
+
+  // 1) Handle BOGO cleanly
   if (/buy\s*(?:1|one)\s*get\s*(?:1|one)\s*(?:free)?/i.test(t)) {
     return "BUY 1 GET 1 FREE";
   }
 
-
+  // 2) Percentage offers (e.g., "up to 30% off first order")
   const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
   const upTo = /up to/.test(t);
   if (pct) {
@@ -868,27 +885,58 @@ function tightenOfferText(s = "") {
     if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) {
       out += " first order";
     }
-    return shortenWords(out, 4);
+    return shortenWords(out.split(/\s+/), 4);
   }
 
+  // 3) Dollar-off offers (e.g., "$50 off", "50 discount")
   const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
   if (dol) {
     const out = `$${dol[1]} off`;
-    return shortenWords(out, 3);
+    return shortenWords(out.split(/\s+/), 3);
   }
 
-  if (/buy\s*1\s*get\s*1/i.test(t)) return "BUY 1 GET 1";
+  // 4) Simple B1G1 pattern
+  if (/buy\s*1\s*get\s*1/i.test(t)) {
+    return "BUY 1 GET 1";
+  }
 
-  const cleaned = t
-    .replace(
-      /\b(we|our|you|your|they|their|will|get|receive|customers)\b/g,
-      ""
-    )
-    .replace(/\s+/g, " ")
-    .trim();
+  // 5) Non-discount promo labels
+  // Strip generic call-to-action words so we don’t get "SHOP NOW FOR EXCLUSIVE"
+  const fillerStarts = new Set([
+    "shop",
+    "order",
+    "book",
+    "call",
+    "visit",
+    "get",
+    "grab",
+    "find",
+    "discover",
+    "learn",
+    "save",
+    "enjoy",
+    "explore",
+    "see",
+    "check",
+    "try",
+    "for",
+    "your",
+    "our",
+    "the",
+    "now",
+    "today",
+  ]);
 
-  return shortenWords(cleaned, 4);
+  let core = [...words];
+  while (core.length && fillerStarts.has(core[0])) {
+    core.shift();
+  }
+  if (!core.length) core = words;
+
+  const label = core.slice(0, 3); // 1–3 meaningful words
+  return label.join(" ").toUpperCase();
 }
+
 
 function compactBullet(s = "") {
   let t = cleanLine(s);
