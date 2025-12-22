@@ -1648,8 +1648,8 @@ const safeSubline = safeSublineText(crafted.subline || "");
       photoBuffer: photoBuf,
     });
 
-    // 🔒 Typography sizes – keep headline one consistent size so it stays inside the box
-    const fsTitle = 86;  // fixed headline size
+    // 🔒 Typography sizes – let headline auto-shrink to fit inside the box
+    const fsTitleBase = 101;
     const fsSave = 74;
     const fsH2 = 34;
     const fsBody = 31;
@@ -1666,15 +1666,17 @@ const safeSubline = safeSublineText(crafted.subline || "");
     const padX = 180;
     const padXBody = 260;
 
-    // wrap headline into up to 3 lines at this fixed size
-    const eventTitleLines = wrapTextToWidth(
+    // shrink headline font size as needed so ALL characters fit in up to 3 lines
+    const titleWrap = wrapTitleToBox(
       mergedKnobsB.eventTitle,
-      fsTitle,
+      fsTitleBase,
       bannerW,
       headPadX,
-      3,
-      1
+      3
     );
+    const fsTitle = titleWrap.fs;
+    const eventTitleLines = titleWrap.lines;
+
 
 
     const saveLines = wrapTextToWidth(
@@ -1925,8 +1927,8 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes – fixed headline size so it always fits the box
-        const fsTitle = 86;   // fixed headline
+        // base sizes – let headline auto-shrink so it always fits in the box
+        const fsTitleBase = 101;
         const fsH2 = 34;
         const fsSave = 74;
         const fsBody = 31;
@@ -1943,15 +1945,17 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         const padX = 180;
         const padXBody = 260;
 
-        // wrap headline into lines at fixed size
-        const eventTitleLines = wrapTextToWidth(
+        // shrink headline font size as needed so ALL characters fit in up to 3 lines
+        const titleWrap = wrapTitleToBox(
           eventTitle,
-          fsTitle,
+          fsTitleBase,
           bannerW,
           headPadX,
-          3,
-          1
+          3
         );
+        const fsTitle = titleWrap.fs;
+        const eventTitleLines = titleWrap.lines;
+
 
 
         const saveLines = wrapTextToWidth(
