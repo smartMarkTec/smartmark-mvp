@@ -402,15 +402,33 @@ function trimDanglingTail(s = "") {
   return words.join(" ");
 }
 
-const HEADLINE_CHAR_MAX = 20; // keep headlines compact
+const HEADLINE_CHAR_MAX = 20; // target ~16–20 characters max
 
 function safeHeadlineText(s = "") {
-  const cleaned = trimDanglingTail(clampWords(cleanLine(s || ""), 6));
-  if (!cleaned) return "";
-  return cleaned.length > HEADLINE_CHAR_MAX
-    ? cleaned.slice(0, HEADLINE_CHAR_MAX).trimEnd()
-    : cleaned;
+  // 1) basic clean + remove URLs + clamp to at most 6 words
+  const base = trimDanglingTail(clampWords(cleanLine(s || ""), 6));
+  if (!base) return "";
+
+  // 2) if already short enough, we're done
+  if (base.length <= HEADLINE_CHAR_MAX) return base;
+
+  // 3) otherwise, build up word-by-word until we hit the char cap
+  const words = base.split(/\s+/).filter(Boolean);
+  let out = "";
+
+  for (const w of words) {
+    const candidate = out ? out + " " + w : w;
+    if (candidate.length > HEADLINE_CHAR_MAX) break;
+    out = candidate;
+  }
+
+  // 4) if (weirdly) nothing fit, do a hard slice as a last resort
+  if (!out) out = base.slice(0, HEADLINE_CHAR_MAX).trim();
+
+  // 5) make sure we don't end on "for / of / to / with / and / or / at / in / on"
+  return trimDanglingTail(out);
 }
+
 
 // --- Very simple headline variety by industry ---
 const HEADLINE_VARIANTS = {
