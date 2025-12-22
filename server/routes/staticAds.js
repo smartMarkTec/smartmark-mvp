@@ -1488,6 +1488,7 @@ router.post("/generate-static-ad", async (req, res) => {
       });
     }
 
+
     /* ---------- POSTER B ---------- */
 
     let crafted =
@@ -1711,12 +1712,20 @@ router.post("/generate-static-ad", async (req, res) => {
     const fsTitle = titleWrap.fs;
     const eventTitleLines = titleWrap.lines;
 
-    // center the stack of headline lines within the banner vertically
+    // center the stack of headline lines in the LOWER part of the banner
+    // (between brand baseline and bottom of the box), so it sits between the “ears”
     const lineCount = eventTitleLines.length || 1;
     const lineSpacing = fsTitle * 1.08;
-    const boxCenterY = bannerY + bannerH / 2;
-    const titleBaseY =
-      boxCenterY - ((lineCount - 1) / 2) * lineSpacing;
+    const brandBaselineY = bannerY + 56; // must match tplPosterBCard brandY
+    const headlineTopLimit = brandBaselineY + fsTitle * 0.55;
+    const headlineBottomLimit = bannerY + bannerH - fsTitle * 0.35;
+    const usableHeight = Math.max(
+      fsTitle,
+      headlineBottomLimit - headlineTopLimit
+    );
+    const stackHeight = (lineCount - 1) * lineSpacing;
+    const boxCenterY = headlineTopLimit + usableHeight / 2;
+    const titleBaseY = boxCenterY - stackHeight / 2;
 
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
@@ -1796,6 +1805,7 @@ router.post("/generate-static-ad", async (req, res) => {
       asset: { id: baseB, createdAt: Date.now() },
       ready: true,
     });
+
 
   } catch (err) {
     console.error("[generate-static-ad]", err);
@@ -2004,12 +2014,19 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const fsTitle = titleWrap.fs;
         const eventTitleLines = titleWrap.lines;
 
-        // center the stack of headline lines inside the banner
+        // center headline in the lower part of the banner (between brand + shapes)
         const lineCount = eventTitleLines.length || 1;
         const lineSpacing = fsTitle * 1.08;
-        const boxCenterY = bannerY + bannerH / 2;
-        const titleBaseY =
-          boxCenterY - ((lineCount - 1) / 2) * lineSpacing;
+        const brandBaselineY = bannerY + 56; // must match tplPosterBCard brandY
+        const headlineTopLimit = brandBaselineY + fsTitle * 0.55;
+        const headlineBottomLimit = bannerY + bannerH - fsTitle * 0.35;
+        const usableHeight = Math.max(
+          fsTitle,
+          headlineBottomLimit - headlineTopLimit
+        );
+        const stackHeight = (lineCount - 1) * lineSpacing;
+        const boxCenterY = headlineTopLimit + usableHeight / 2;
+        const titleBaseY = boxCenterY - stackHeight / 2;
 
         const saveLines = wrapTextToWidth(
           saveAmount,
@@ -2119,6 +2136,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     res.status(400).json({ ok: false, error: String(err?.message || err) });
   }
 });
+
 
 
 /* ------------------------ /craft-ad-copy ------------------------ */
