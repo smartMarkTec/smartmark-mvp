@@ -862,22 +862,19 @@ function tightenOfferText(s = "") {
     .replace(/[^\w\s%$]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-
   if (!t) return "";
 
-  const shortenWords = (arr, maxWords = 4) => {
-    if (!arr.length) return "";
-    return arr.slice(0, maxWords).join(" ").toUpperCase();
+  const shortenWords = (str, maxWords = 4) => {
+    const words = String(str || "").trim().split(/\s+/);
+    if (words.length <= maxWords) return words.join(" ").toUpperCase();
+    return words.slice(0, maxWords).join(" ").toUpperCase();
   };
 
-  const words = t.split(/\s+/).filter(Boolean);
-
-  // 1) Handle BOGO cleanly
+  // Handle BOGO cleanly: "buy one get one free" -> "BUY 1 GET 1 FREE"
   if (/buy\s*(?:1|one)\s*get\s*(?:1|one)\s*(?:free)?/i.test(t)) {
     return "BUY 1 GET 1 FREE";
   }
 
-  // 2) Percentage offers (e.g., "up to 30% off first order")
   const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
   const upTo = /up to/.test(t);
   if (pct) {
@@ -885,58 +882,46 @@ function tightenOfferText(s = "") {
     if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) {
       out += " first order";
     }
-    return shortenWords(out.split(/\s+/), 4);
+    return shortenWords(out, 4);
   }
 
-  // 3) Dollar-off offers (e.g., "$50 off", "50 discount")
   const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
   if (dol) {
     const out = `$${dol[1]} off`;
-    return shortenWords(out.split(/\s+/), 3);
+    return shortenWords(out, 3);
   }
 
-  // 4) Simple B1G1 pattern
-  if (/buy\s*1\s*get\s*1/i.test(t)) {
-    return "BUY 1 GET 1";
-  }
+  if (/buy\s*1\s*get\s*1/i.test(t)) return "BUY 1 GET 1";
 
-  // 5) Non-discount promo labels
-  // Strip generic call-to-action words so we don’t get "SHOP NOW FOR EXCLUSIVE"
-  const fillerStarts = new Set([
-    "shop",
-    "order",
-    "book",
-    "call",
-    "visit",
-    "get",
-    "grab",
-    "find",
-    "discover",
-    "learn",
-    "save",
-    "enjoy",
-    "explore",
-    "see",
-    "check",
-    "try",
-    "for",
-    "your",
-    "our",
-    "the",
-    "now",
-    "today",
-  ]);
+  const cleaned = t
+    .replace(
+      /\b(we|our|you|your|they|their|will|get|receive|customers)\b/g,
+      ""
+    )
+    .replace(/\s+/g, " ")
+    .trim();
 
-  let core = [...words];
-  while (core.length && fillerStarts.has(core[0])) {
-    core.shift();
-  }
-  if (!core.length) core = words;
-
-  const label = core.slice(0, 3); // 1–3 meaningful words
-  return label.join(" ").toUpperCase();
+  return shortenWords(cleaned, 4);
 }
 
+function defaultPromoLabelForIndustry(kind = "generic") {
+  switch (kind) {
+    case "fashion":
+      return "NEW COLLECTION";
+    case "restaurant":
+      return "SIGNATURE FAVORITES";
+    case "coffee":
+      return "SIGNATURE BREWS";
+    case "flooring":
+      return "NEW FLOORING";
+    case "electronics":
+      return "LATEST ARRIVALS";
+    case "pets":
+      return "PET FAVORITES";
+    default:
+      return "CUSTOMER FAVORITES";
+  }
+}
 
 function compactBullet(s = "") {
   let t = cleanLine(s);
@@ -951,6 +936,7 @@ function compactBullet(s = "") {
   const kept = words.slice(0, 3);
   return kept.join(" ");
 }
+
 
 /* ------------------------ SVG templates ------------------------ */
 
@@ -1022,6 +1008,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * - subline sits on a subtle bottom strip for legibility (non-pill)
  */
 /**
+/**
  * Shaw-inspired poster B:
  * - widened top box (left-right)
  * - clean subline text (no band / shadow)
@@ -1041,11 +1028,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 70;
 
-  const brandY = bannerY + 70;
-// tiny downward nudge so the three lines look perfectly centered
-const titleY = brandY + fsTitle * 1.2 + 6;
-
-
+  const brandY = bannerY + 56;
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
   const legalY = cardH - frameT - 22;
@@ -1058,7 +1041,6 @@ const titleY = brandY + fsTitle * 1.2 + 6;
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
-      /* subline: plain white text, no stroke/shadow */
       .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.65; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
@@ -1104,7 +1086,8 @@ const titleY = brandY + fsTitle * 1.2 + 6;
       {{brandName}}
     </text>
 
-    <text class="title t-center" x="${titleCenterX}" y="${titleY}">
+    <!-- headline: base Y is injected from cardVars so we can center by line count -->
+    <text class="title t-center" x="${titleCenterX}" y="{{titleBaseY}}">
       {{#eventTitleLines}}
         <tspan x="${titleCenterX}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
@@ -1119,7 +1102,7 @@ const titleY = brandY + fsTitle * 1.2 + 6;
     {{/saveLines}}
   </text>
 
-  <!-- subline (no background band) -->
+  <!-- subline -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -1523,19 +1506,19 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-    // 🔒 Normalize headline / subline exactly like /generate-image-from-prompt
-   const safeHeadline = applyHeadlineVariety(crafted.headline || "", prof.kind);
-const safeSubline = safeSublineText(crafted.subline || "");
+    // Normalize headline / subline
+    const safeHeadline = applyHeadlineVariety(crafted.headline || "", prof.kind);
+    const safeSubline = safeSublineText(crafted.subline || "");
 
-
-        const rawOffer =
-      crafted.offer || a.offer || a.saveAmount || "";
+    const rawOffer = crafted.offer || a.offer || a.saveAmount || "";
     const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
       String(rawOffer).trim()
     )
       ? ""
       : rawOffer;
-    const safeOffer = tightenOfferText(cleanedOffer);
+    const safeOfferTight = tightenOfferText(cleanedOffer);
+    const finalOffer =
+      safeOfferTight || defaultPromoLabelForIndustry(prof.kind);
 
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ""), 10);
 
@@ -1545,7 +1528,7 @@ const safeSubline = safeSublineText(crafted.subline || "");
       .filter(Boolean);
 
     const subLower = safeSubline.toLowerCase();
-    const offerLower = (safeOffer || "").toLowerCase();
+    const offerLower = (finalOffer || "").toLowerCase();
 
     let safeBullets = rawBullets.filter((b) => {
       const low = (b || "").toLowerCase();
@@ -1587,14 +1570,14 @@ const safeSubline = safeSublineText(crafted.subline || "");
     ) {
       safeDisclaimers = "";
     }
-    if (!safeDisclaimers && safeOffer) {
+    if (!safeDisclaimers && finalOffer && finalOffer !== "CUSTOMER FAVORITES") {
       safeDisclaimers = "Limited time offer.";
     }
 
     crafted = {
       headline: safeHeadline,
       subline: safeSubline,
-      offer: safeOffer,
+      offer: finalOffer,
       secondary: safeSecondary,
       bullets: safeBullets,
       disclaimers: safeDisclaimers,
@@ -1696,8 +1679,8 @@ const safeSubline = safeSublineText(crafted.subline || "");
       photoBuffer: photoBuf,
     });
 
-    // 🔒 Typography sizes – let headline auto-shrink to fit inside the box
-    const fsTitleBase = 101;
+    // Typography sizes – slightly smaller headline so it sits cleaner
+    const fsTitleBase = 90;
     const fsSave = 74;
     const fsH2 = 34;
     const fsBody = 31;
@@ -1708,7 +1691,10 @@ const safeSubline = safeSublineText(crafted.subline || "");
     // geometry kept in sync with tplPosterBCard
     const frameT = 40;
     const innerW = cardW - frameT * 2;
+    const innerY = frameT;
     const bannerW = Math.round(innerW * 0.62);
+    const bannerH = Math.round(innerW * 0.42);
+    const bannerY = innerY + 70;
     const headPadX = 70;
 
     const padX = 180;
@@ -1725,7 +1711,12 @@ const safeSubline = safeSublineText(crafted.subline || "");
     const fsTitle = titleWrap.fs;
     const eventTitleLines = titleWrap.lines;
 
-
+    // center the stack of headline lines within the banner vertically
+    const lineCount = eventTitleLines.length || 1;
+    const lineSpacing = fsTitle * 1.08;
+    const boxCenterY = bannerY + bannerH / 2;
+    const titleBaseY =
+      boxCenterY - ((lineCount - 1) / 2) * lineSpacing;
 
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
@@ -1762,6 +1753,7 @@ const safeSubline = safeSublineText(crafted.subline || "");
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitleLines,
+      titleBaseY,
       saveLines,
       subLines,
       qualifierLines,
@@ -1804,6 +1796,7 @@ const safeSubline = safeSublineText(crafted.subline || "");
       asset: { id: baseB, createdAt: Date.now() },
       ready: true,
     });
+
   } catch (err) {
     console.error("[generate-static-ad]", err);
     res
@@ -1952,12 +1945,14 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           photoBuffer: photoBuf,
         });
 
-        // headline: cleaned, no dangling "for/of/to", then uppercased
-    const eventTitleRaw = applyHeadlineVariety(overlay.headline || "", prof.kind);
-const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
+        // headline: cleaned, then uppercased
+        const eventTitleRaw = applyHeadlineVariety(
+          overlay.headline || "",
+          prof.kind
+        );
+        const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
 
-
-        // subline: allow to be fairly long, but still neat and complete
+        // subline: allow to be fairly long, but neat
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
         const dateRange = safeSublineText(dateRangeRaw);
 
@@ -1968,15 +1963,17 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         )
           ? ""
           : rawOffer;
-        const saveAmount = tightenOfferText(cleanedOffer);
 
+        const tightenedOffer = tightenOfferText(cleanedOffer);
+        const saveAmount =
+          tightenedOffer || defaultPromoLabelForIndustry(prof.kind);
 
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes – let headline auto-shrink so it always fits in the box
-        const fsTitleBase = 101;
+        // base sizes – slightly smaller headline so it sits cleaner
+        const fsTitleBase = 90;
         const fsH2 = 34;
         const fsSave = 74;
         const fsBody = 31;
@@ -1987,7 +1984,10 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
         const innerW = cardW - frameT * 2;
+        const innerY = frameT;
         const bannerW = Math.round(innerW * 0.62);
+        const bannerH = Math.round(innerW * 0.42);
+        const bannerY = innerY + 70;
         const headPadX = 70;
 
         const padX = 180;
@@ -2004,7 +2004,12 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         const fsTitle = titleWrap.fs;
         const eventTitleLines = titleWrap.lines;
 
-
+        // center the stack of headline lines inside the banner
+        const lineCount = eventTitleLines.length || 1;
+        const lineSpacing = fsTitle * 1.08;
+        const boxCenterY = bannerY + bannerH / 2;
+        const titleBaseY =
+          boxCenterY - ((lineCount - 1) / 2) * lineSpacing;
 
         const saveLines = wrapTextToWidth(
           saveAmount,
@@ -2038,6 +2043,7 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         const cardVars = {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
+          titleBaseY,
           saveLines,
           subLines,
           qualifierLines,
@@ -2114,6 +2120,7 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
   }
 });
 
+
 /* ------------------------ /craft-ad-copy ------------------------ */
 
 router.post("/craft-ad-copy", async (req, res) => {
@@ -2129,7 +2136,7 @@ router.post("/craft-ad-copy", async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: "copy failed" });
 
-     const rawOffer =
+    const rawOffer =
       rawCopy.offer || a.offer || a.saveAmount || "";
 
     const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
@@ -2137,11 +2144,15 @@ router.post("/craft-ad-copy", async (req, res) => {
     )
       ? ""
       : rawOffer;
-    const safeOffer = tightenOfferText(cleanedOffer);
-
+    const safeOfferTight = tightenOfferText(cleanedOffer);
+    const finalOffer =
+      safeOfferTight || defaultPromoLabelForIndustry(prof.kind);
 
     // Use the same normalization helper as poster B so copy matches layout behavior
-    const safeHeadline = applyHeadlineVariety(rawCopy.headline || "", prof.kind);
+    const safeHeadline = applyHeadlineVariety(
+      rawCopy.headline || "",
+      prof.kind
+    );
 
     const safeSubline = safeSublineText(rawCopy.subline || "");
 
@@ -2153,7 +2164,7 @@ router.post("/craft-ad-copy", async (req, res) => {
       .filter(Boolean);
 
     const subLower = safeSubline.toLowerCase();
-    const offerLower = (safeOffer || "").toLowerCase();
+    const offerLower = (finalOffer || "").toLowerCase();
 
     let bullets = bulletsRaw.filter((b) => {
       const low = (b || "").toLowerCase();
@@ -2186,7 +2197,7 @@ router.post("/craft-ad-copy", async (req, res) => {
     const copy = {
       headline: safeHeadline,
       subline: safeSubline,
-      offer: safeOffer,
+      offer: finalOffer,
       secondary: safeSecondary,
       bullets,
       disclaimers: safeDisclaimers,
@@ -2198,6 +2209,7 @@ router.post("/craft-ad-copy", async (req, res) => {
     return res.status(400).json({ ok: false, error: String(e?.message || e) });
   }
 });
+
 
 
 /* ------------------------ Exports ------------------------ */
