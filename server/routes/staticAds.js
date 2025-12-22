@@ -746,12 +746,14 @@ const INDUSTRY_TEMPLATES = {
 
 /* ------------------------ OpenAI copy ------------------------ */
 
+/* ------------------------ OpenAI copy ------------------------ */
+
 async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
 
   const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-         const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
+  const sys = `You are a marketing copywriter for clean square social ads with a Shaw Floors style layout.
 Return only strict JSON for these fields:
 { "headline": "...", "subline": "...", "offer": "...", "secondary": "", "bullets": ["...","..."], "disclaimers": "" }
 
@@ -787,9 +789,9 @@ Bullet rules:
 - Do NOT repeat the offer text inside bullets or the subline.
 
 Offer rules:
-- "offer" must be based ONLY on the user's described offer/discount.
-- If they did not clearly describe a deal, set "offer" to an empty string "".
-- Do NOT invent discounts, free shipping, financing, APR, rebates, or % OFF if the user didn't clearly provide one.
+- If the user's input clearly describes a deal (e.g., 20% off, $50 off, buy one get one, free shipping), put a very short, punchy version in "offer" (1–4 words) that matches the deal.
+- If the user's offer field is blank or clearly indicates no discount (e.g., "no offer", "none", "n/a"), STILL fill "offer" with a short non-discount promo label such as a collection or benefit tag (for example: "New Collection", "Best Sellers", "Signature Menu", "Everyday Favorites").
+- When you create one of these non-discount promo labels, do NOT invent fake percentages, prices, or words like "OFF", "% OFF", "$ OFF", "SALE", "FREE", "DEAL", or "DISCOUNT". It must read like a neutral promo tag, not a discount.
 
 General:
 - Keep all copy coherent, brand-safe, specific to the business, and suitable for a single static promo image.`;
@@ -834,6 +836,7 @@ General:
   } catch (_) {}
   return null;
 }
+
 
 /* ------------------------ Offer & bullets ------------------------ */
 
@@ -1477,9 +1480,15 @@ router.post("/generate-static-ad", async (req, res) => {
 const safeSubline = safeSublineText(crafted.subline || "");
 
 
-    const safeOffer = tightenOfferText(
-      crafted.offer || a.offer || a.saveAmount || ""
-    );
+        const rawOffer =
+      crafted.offer || a.offer || a.saveAmount || "";
+    const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
+      String(rawOffer).trim()
+    )
+      ? ""
+      : rawOffer;
+    const safeOffer = tightenOfferText(cleanedOffer);
+
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ""), 10);
 
     let rawBullets = Array.isArray(crafted.bullets) ? crafted.bullets : [];
@@ -1901,7 +1910,14 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
         const dateRange = safeSublineText(dateRangeRaw);
 
-        const saveAmount = tightenOfferText(overlay.offer || "");
+                const rawOffer = overlay.offer || "";
+        const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
+          String(rawOffer).trim()
+        )
+          ? ""
+          : rawOffer;
+        const saveAmount = tightenOfferText(cleanedOffer);
+
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
@@ -2060,9 +2076,15 @@ router.post("/craft-ad-copy", async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: "copy failed" });
 
-    const safeOffer = tightenOfferText(
-      a.offer || a.saveAmount || rawCopy.offer || ""
-    );
+        const rawOffer =
+      a.offer || a.saveAmount || rawCopy.offer || "";
+    const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
+      String(rawOffer).trim()
+    )
+      ? ""
+      : rawOffer;
+    const safeOffer = tightenOfferText(cleanedOffer);
+
 
     // Use the same normalization helper as poster B so copy matches layout behavior
     const safeHeadline = applyHeadlineVariety(rawCopy.headline || "", prof.kind);
