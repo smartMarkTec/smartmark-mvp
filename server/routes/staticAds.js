@@ -1648,8 +1648,8 @@ const safeSubline = safeSublineText(crafted.subline || "");
       photoBuffer: photoBuf,
     });
 
-    // 🔒 Typography sizes kept in sync with /generate-image-from-prompt
-    const fsTitleBase = 101;
+    // 🔒 Typography sizes – keep headline one consistent size so it stays inside the box
+    const fsTitle = 86;  // fixed headline size
     const fsSave = 74;
     const fsH2 = 34;
     const fsBody = 31;
@@ -1666,15 +1666,16 @@ const safeSubline = safeSublineText(crafted.subline || "");
     const padX = 180;
     const padXBody = 260;
 
-    const titleWrap = wrapTitleToBox(
+    // wrap headline into up to 3 lines at this fixed size
+    const eventTitleLines = wrapTextToWidth(
       mergedKnobsB.eventTitle,
-      fsTitleBase,
+      fsTitle,
       bannerW,
       headPadX,
-      3
+      3,
+      1
     );
-    const fsTitle = titleWrap.fs;
-    const eventTitleLines = titleWrap.lines;
+
 
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
@@ -1910,7 +1911,8 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
         const dateRange = safeSublineText(dateRangeRaw);
 
-                const rawOffer = overlay.offer || "";
+        const rawOffer =
+          (b.copy && b.copy.offer) || overlay.offer || "";
         const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
           String(rawOffer).trim()
         )
@@ -1918,21 +1920,19 @@ const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
           : rawOffer;
         const saveAmount = tightenOfferText(cleanedOffer);
 
+
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
- // base sizes; headline base slightly larger (+3 total)
-const fsTitleBase = 101,
-  fsH2 = 34,
-  fsSave = 74,
-  fsBody = 31; // subline +3 total
+        // base sizes – fixed headline size so it always fits the box
+        const fsTitle = 86;   // fixed headline
+        const fsH2 = 34;
+        const fsSave = 74;
+        const fsBody = 31;
 
-const cardW = 1080,
-  cardH = 1080;
-
-
-
+        const cardW = 1080;
+        const cardH = 1080;
 
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
@@ -1943,15 +1943,16 @@ const cardW = 1080,
         const padX = 180;
         const padXBody = 260;
 
-        const titleWrap = wrapTitleToBox(
+        // wrap headline into lines at fixed size
+        const eventTitleLines = wrapTextToWidth(
           eventTitle,
-          fsTitleBase,
+          fsTitle,
           bannerW,
           headPadX,
-          3
+          3,
+          1
         );
-        const fsTitle = titleWrap.fs;
-        const eventTitleLines = titleWrap.lines;
+
 
         const saveLines = wrapTextToWidth(
           saveAmount,
@@ -2076,8 +2077,9 @@ router.post("/craft-ad-copy", async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: "copy failed" });
 
-        const rawOffer =
-      a.offer || a.saveAmount || rawCopy.offer || "";
+     const rawOffer =
+      rawCopy.offer || a.offer || a.saveAmount || "";
+
     const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
       String(rawOffer).trim()
     )
