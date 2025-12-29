@@ -761,8 +761,6 @@ const INDUSTRY_TEMPLATES = {
 
 /* ------------------------ OpenAI copy ------------------------ */
 
-/* ------------------------ OpenAI copy ------------------------ */
-
 async function generateSmartCopyWithOpenAI(answers = {}, prof = {}) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return null;
@@ -805,7 +803,8 @@ Bullet rules:
 
 Offer rules:
 - If the user's input clearly describes a deal (e.g., 20% off, $50 off, buy one get one, free shipping), put a very short, punchy version in "offer" (1–4 words) that matches the deal.
-- If the user's offer field is blank or clearly indicates no discount (e.g., "no offer", "none", "n/a"), STILL fill "offer" with a short non-discount promo label such as a collection or benefit tag (for example: "New Collection", "Best Sellers", "Signature Menu", "Everyday Favorites").
+- If the user's offer field is blank or clearly indicates no discount (e.g., "no offer", "none", "n/a"), STILL fill "offer" with a short non-discount promo label such as a collection or benefit tag (for example: "Fresh Arrivals", "Best Sellers", "Signature Styles", "Everyday Essentials").
+- When you create one of these non-discount promo labels, ROTATE the wording from ad to ad. Do NOT keep using the same phrase (especially avoid always using "New Collection"). Choose phrases that fit the specific business and vary across generations.
 - When you create one of these non-discount promo labels, do NOT invent fake percentages, prices, or words like "OFF", "% OFF", "$ OFF", "SALE", "FREE", "DEAL", or "DISCOUNT". It must read like a neutral promo tag, not a discount.
 
 General:
