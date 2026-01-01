@@ -1068,21 +1068,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * - widened top box (left-right)
  * - clean subline text (no band / shadow)
  */
-/**
-/**
- * Shaw-inspired poster B:
- * - widened top box (left-right)
- * - clean subline text (no band / shadow)
- */
-function tplPosterBCard({
-  cardW,
-  cardH,
-  fsTitle,
-  fsH2,
-  fsSave,
-  fsBody,
-  titleLineCount = 2, // NEW: tells us how many headline lines we actually have
-}) {
+
+function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const frameT = 40;
   const innerX = frameT;
   const innerY = frameT;
@@ -1098,14 +1085,8 @@ function tplPosterBCard({
   const bannerY = innerY + 70;
 
   const brandY = bannerY + 70;
-
-  // 🔧 Vertically center the *whole* headline block inside the box
-  const lineCount = Math.max(1, titleLineCount);
-  const lineGap = fsTitle * 1.08; // matches tspan dy
-  const blockHeight = (lineCount - 1) * lineGap;
-  const bannerCenterY = bannerY + bannerH / 2;
-  // y = baseline of first line
-  const titleY = bannerCenterY - blockHeight / 2;
+  // scoot headline DOWN a bit more so it sits visually in the middle of the box
+  const titleY = brandY + fsTitle * 1.35;
 
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
@@ -1119,6 +1100,7 @@ function tplPosterBCard({
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
+      /* subline: plain white text, no stroke/shadow */
       .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.65; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
@@ -1164,7 +1146,6 @@ function tplPosterBCard({
       {{brandName}}
     </text>
 
-    <!-- HEADLINE: always centered inside the box -->
     <text class="title t-center" x="${titleCenterX}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${titleCenterX}" dy="{{dy}}">{{line}}</tspan>
@@ -1180,7 +1161,7 @@ function tplPosterBCard({
     {{/saveLines}}
   </text>
 
-  <!-- subline (body) -->
+  <!-- subline (no background band) -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
@@ -1194,7 +1175,6 @@ function tplPosterBCard({
   {{/legal}}
 </svg>`;
 }
-
 
 
 /* ------------------------ Utility helpers ------------------------ */
@@ -1774,11 +1754,12 @@ router.post("/generate-static-ad", async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // 🔒 Typography sizes – headline slightly smaller (back to earlier look)
-    const fsTitleBase = 90;   // ↓ reduced from 101
+        // 🔒 Typography sizes – slightly smaller base so headline looks like the old dog-toy card
+    const fsTitleBase = 92;
     const fsSave = 74;
     const fsH2 = 34;
     const fsBody = 31;
+
 
 
     const cardW = 1080;
