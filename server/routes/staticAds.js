@@ -1069,11 +1069,20 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  * - clean subline text (no band / shadow)
  */
 /**
+/**
  * Shaw-inspired poster B:
  * - widened top box (left-right)
  * - clean subline text (no band / shadow)
  */
-function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
+function tplPosterBCard({
+  cardW,
+  cardH,
+  fsTitle,
+  fsH2,
+  fsSave,
+  fsBody,
+  titleLineCount = 2, // NEW: tells us how many headline lines we actually have
+}) {
   const frameT = 40;
   const innerX = frameT;
   const innerY = frameT;
@@ -1090,9 +1099,13 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
 
   const brandY = bannerY + 70;
 
-  // 🔧 UPDATED: scoot headline up so the whole 3-line block
-  // stays inside the box and feels vertically centered.
-  const titleY = bannerY + bannerH * 0.48;
+  // 🔧 Vertically center the *whole* headline block inside the box
+  const lineCount = Math.max(1, titleLineCount);
+  const lineGap = fsTitle * 1.08; // matches tspan dy
+  const blockHeight = (lineCount - 1) * lineGap;
+  const bannerCenterY = bannerY + bannerH / 2;
+  // y = baseline of first line
+  const titleY = bannerCenterY - blockHeight / 2;
 
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
@@ -1151,7 +1164,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       {{brandName}}
     </text>
 
-    <!-- headline block -->
+    <!-- HEADLINE: always centered inside the box -->
     <text class="title t-center" x="${titleCenterX}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${titleCenterX}" dy="{{dy}}">{{line}}</tspan>
@@ -1837,9 +1850,11 @@ router.post("/generate-static-ad", async (req, res) => {
         fsH2,
         fsSave,
         fsBody,
+        titleLineCount: eventTitleLines.length || 1,
       }),
       cardVars
     );
+
     const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
     const finalPng = await sharp(bgPng)
@@ -2129,9 +2144,11 @@ router.post("/generate-image-from-prompt", async (req, res) => {
             fsH2,
             fsSave,
             fsBody,
+            titleLineCount: eventTitleLines.length || 1,
           }),
           cardVars
         );
+
         const cardPng = await sharp(Buffer.from(cardSvg)).png().toBuffer();
 
         const finalPng = await sharp(bgPng)
