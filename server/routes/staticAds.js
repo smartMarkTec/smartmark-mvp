@@ -1774,11 +1774,12 @@ router.post("/generate-static-ad", async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // 🔒 Typography sizes – let headline auto-shrink to fit inside the box
-    const fsTitleBase = 101;
+    // 🔒 Typography sizes – headline slightly smaller (back to earlier look)
+    const fsTitleBase = 90;   // ↓ reduced from 101
     const fsSave = 74;
     const fsH2 = 34;
     const fsBody = 31;
+
 
     const cardW = 1080;
     const cardH = 1080;
@@ -2070,11 +2071,12 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes – let headline auto-shrink so it always fits in the box
-        const fsTitleBase = 101;
+              // base sizes – headline slightly smaller (matching static poster)
+        const fsTitleBase = 90;   // ↓ reduced from 101
         const fsH2 = 34;
         const fsSave = 74;
         const fsBody = 31;
+
 
         const cardW = 1080;
         const cardH = 1080;
