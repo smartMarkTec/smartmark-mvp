@@ -463,6 +463,61 @@ const HEADLINE_VARIANTS = {
   ],
 };
 
+// Promo tags for the big middle line when there is NO real discount entered
+const PROMO_TAG_VARIANTS = {
+  fashion: [
+    "New Collection",
+    "Fresh Arrivals",
+    "Seasonal Edit",
+    "Trending Styles",
+    "Closet Favorites",
+  ],
+  flooring: [
+    "Home Refresh",
+    "Flooring Update",
+    "New Floor Looks",
+    "Style Your Floors",
+  ],
+  restaurant: [
+    "Chef’s Favorites",
+    "Signature Menu",
+    "House Specials",
+    "Fan Favorites",
+  ],
+  coffee: [
+    "Seasonal Sips",
+    "Barista Picks",
+    "New Roasts",
+    "Morning Favorites",
+  ],
+  electronics: [
+    "Latest Tech",
+    "Smart Picks",
+    "New Devices",
+    "Gadget Highlights",
+  ],
+  pets: [
+    "Pet Favorites",
+    "Playtime Picks",
+    "Treats & Toys",
+    "Happy Pet Finds",
+  ],
+  generic: [
+    "Featured Picks",
+    "Customer Favorites",
+    "Top Choices",
+    "Just In Today",
+  ],
+};
+
+function pickPromoTag(kind = "generic") {
+  const list = PROMO_TAG_VARIANTS[kind] || PROMO_TAG_VARIANTS.generic;
+  if (!list.length) return "Featured Picks";
+  const idx = Math.floor(Math.random() * list.length);
+  return list[idx];
+}
+
+
 function pickHeadlineVariant(kind = "generic") {
   const list = HEADLINE_VARIANTS[kind] || HEADLINE_VARIANTS.generic;
   if (!list || !list.length) return "";
@@ -1382,6 +1437,8 @@ const posterSchema = {
 
 /* ------------------------ /generate-static-ad ------------------------ */
 
+/* ------------------------ /generate-static-ad ------------------------ */
+
 router.post("/generate-static-ad", async (req, res) => {
   try {
     const body = req.body || {};
@@ -1487,7 +1544,6 @@ router.post("/generate-static-ad", async (req, res) => {
       });
     }
 
-
     /* ---------- POSTER B ---------- */
 
     let crafted =
@@ -1506,19 +1562,33 @@ router.post("/generate-static-ad", async (req, res) => {
         };
     }
 
-    // Normalize headline / subline
+    // 🔒 Normalize headline / subline
     const safeHeadline = applyHeadlineVariety(crafted.headline || "", prof.kind);
     const safeSubline = safeSublineText(crafted.subline || "");
 
-    const rawOffer = crafted.offer || a.offer || a.saveAmount || "";
-    const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
-      String(rawOffer).trim()
-    )
+    // --- Offer / promo line ---
+    const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
+    const userOfferRaw = a.offer || a.saveAmount || "";
+    const modelOfferRaw = crafted.offer || "";
+    const rawOffer = userOfferRaw || modelOfferRaw;
+
+    const cleanedOffer = NO_OFFER_RE.test(String(rawOffer).trim())
       ? ""
       : rawOffer;
-    const safeOfferTight = tightenOfferText(cleanedOffer);
-    const finalOffer =
-      safeOfferTight || defaultPromoLabelForIndustry(prof.kind);
+
+    const hasUserOffer =
+      !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw.toString().trim());
+
+    let safeOffer;
+    if (!hasUserOffer) {
+      // user left the offer blank → ignore GPT’s "New Collection"
+      // and instead pick a random neutral promo tag for variety
+      const promoLabel = pickPromoTag(prof.kind);
+      safeOffer = tightenOfferText(promoLabel);
+    } else {
+      // user gave a real deal → tighten that
+      safeOffer = tightenOfferText(cleanedOffer);
+    }
 
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ""), 10);
 
@@ -1528,7 +1598,7 @@ router.post("/generate-static-ad", async (req, res) => {
       .filter(Boolean);
 
     const subLower = safeSubline.toLowerCase();
-    const offerLower = (finalOffer || "").toLowerCase();
+    const offerLower = (safeOffer || "").toLowerCase();
 
     let safeBullets = rawBullets.filter((b) => {
       const low = (b || "").toLowerCase();
@@ -1570,14 +1640,14 @@ router.post("/generate-static-ad", async (req, res) => {
     ) {
       safeDisclaimers = "";
     }
-    if (!safeDisclaimers && finalOffer && finalOffer !== "CUSTOMER FAVORITES") {
+    if (!safeDisclaimers && safeOffer) {
       safeDisclaimers = "Limited time offer.";
     }
 
     crafted = {
       headline: safeHeadline,
       subline: safeSubline,
-      offer: finalOffer,
+      offer: safeOffer,
       secondary: safeSecondary,
       bullets: safeBullets,
       disclaimers: safeDisclaimers,
@@ -1679,8 +1749,8 @@ router.post("/generate-static-ad", async (req, res) => {
       photoBuffer: photoBuf,
     });
 
-    // Typography sizes – slightly smaller headline so it sits cleaner
-    const fsTitleBase = 90;
+    // 🔒 Typography sizes – let headline auto-shrink to fit inside the box
+    const fsTitleBase = 101;
     const fsSave = 74;
     const fsH2 = 34;
     const fsBody = 31;
@@ -1688,19 +1758,14 @@ router.post("/generate-static-ad", async (req, res) => {
     const cardW = 1080;
     const cardH = 1080;
 
-    // geometry kept in sync with tplPosterBCard
     const frameT = 40;
     const innerW = cardW - frameT * 2;
-    const innerY = frameT;
     const bannerW = Math.round(innerW * 0.62);
-    const bannerH = Math.round(innerW * 0.42);
-    const bannerY = innerY + 70;
     const headPadX = 70;
 
     const padX = 180;
     const padXBody = 260;
 
-    // shrink headline font size as needed so ALL characters fit in up to 3 lines
     const titleWrap = wrapTitleToBox(
       mergedKnobsB.eventTitle,
       fsTitleBase,
@@ -1710,21 +1775,6 @@ router.post("/generate-static-ad", async (req, res) => {
     );
     const fsTitle = titleWrap.fs;
     const eventTitleLines = titleWrap.lines;
-
-    // center the stack of headline lines in the LOWER part of the banner
-    // (between brand baseline and bottom of the box), so it sits between the “ears”
-    const lineCount = eventTitleLines.length || 1;
-    const lineSpacing = fsTitle * 1.08;
-    const brandBaselineY = bannerY + 56; // must match tplPosterBCard brandY
-    const headlineTopLimit = brandBaselineY + fsTitle * 0.55;
-    const headlineBottomLimit = bannerY + bannerH - fsTitle * 0.35;
-    const usableHeight = Math.max(
-      fsTitle,
-      headlineBottomLimit - headlineTopLimit
-    );
-    const stackHeight = (lineCount - 1) * lineSpacing;
-    const boxCenterY = headlineTopLimit + usableHeight / 2;
-    const titleBaseY = boxCenterY - stackHeight / 2;
 
     const saveLines = wrapTextToWidth(
       mergedKnobsB.saveAmount,
@@ -1761,7 +1811,6 @@ router.post("/generate-static-ad", async (req, res) => {
     const cardVars = {
       brandName: ellipsize(mergedInputsB.businessName, 22),
       eventTitleLines,
-      titleBaseY,
       saveLines,
       subLines,
       qualifierLines,
@@ -1804,8 +1853,6 @@ router.post("/generate-static-ad", async (req, res) => {
       asset: { id: baseB, createdAt: Date.now() },
       ready: true,
     });
-
-
   } catch (err) {
     console.error("[generate-static-ad]", err);
     res
@@ -1813,6 +1860,7 @@ router.post("/generate-static-ad", async (req, res) => {
       .json({ ok: false, error: String(err?.message || err) });
   }
 });
+
 
 
 /* ------------------------ proxy-img ------------------------ */
@@ -1875,6 +1923,8 @@ async function proxyHeadHandler(req, res) {
 
 router.get("/proxy-img", proxyImgHandler);
 router.head("/proxy-img", proxyHeadHandler);
+
+/* ------------------------ /generate-image-from-prompt ------------------------ */
 
 /* ------------------------ /generate-image-from-prompt ------------------------ */
 
@@ -1954,35 +2004,47 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           photoBuffer: photoBuf,
         });
 
-        // headline: cleaned, then uppercased
+        // headline: cleaned, no dangling "for/of/to", then uppercased
         const eventTitleRaw = applyHeadlineVariety(
           overlay.headline || "",
           prof.kind
         );
         const eventTitle = safeHeadlineText(eventTitleRaw).toUpperCase();
 
-        // subline: allow to be fairly long, but neat
+        // subline: allow to be fairly long, but still neat and complete
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
         const dateRange = safeSublineText(dateRangeRaw);
 
-        const rawOffer =
-          (b.copy && b.copy.offer) || overlay.offer || "";
-        const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
-          String(rawOffer).trim()
-        )
+        // --- NEW: varied promo line when there is no real offer ---
+        const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
+        const userOfferRaw = overlay.offer || "";
+        const modelOfferRaw = (b.copy && b.copy.offer) || "";
+        const rawOffer = userOfferRaw || modelOfferRaw;
+
+        const cleanedOffer = NO_OFFER_RE.test(String(rawOffer).trim())
           ? ""
           : rawOffer;
 
-        const tightenedOffer = tightenOfferText(cleanedOffer);
-        const saveAmount =
-          tightenedOffer || defaultPromoLabelForIndustry(prof.kind);
+        const hasUserOffer =
+          !!userOfferRaw &&
+          !NO_OFFER_RE.test(userOfferRaw.toString().trim());
+
+        let saveAmount;
+        if (!hasUserOffer) {
+          // user left offer blank → pick a varied promo tag
+          const promoLabel = pickPromoTag(prof.kind);
+          saveAmount = tightenOfferText(promoLabel);
+        } else {
+          // user gave real deal → keep it, but tightened
+          saveAmount = tightenOfferText(cleanedOffer);
+        }
 
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
         const legal = (overlay.legal || "").trim();
 
-        // base sizes – slightly smaller headline so it sits cleaner
-        const fsTitleBase = 90;
+        // base sizes – let headline auto-shrink so it always fits in the box
+        const fsTitleBase = 101;
         const fsH2 = 34;
         const fsSave = 74;
         const fsBody = 31;
@@ -1993,10 +2055,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         // keep geometry consistent with tplPosterBCard
         const frameT = 40;
         const innerW = cardW - frameT * 2;
-        const innerY = frameT;
         const bannerW = Math.round(innerW * 0.62);
-        const bannerH = Math.round(innerW * 0.42);
-        const bannerY = innerY + 70;
         const headPadX = 70;
 
         const padX = 180;
@@ -2012,20 +2071,6 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         );
         const fsTitle = titleWrap.fs;
         const eventTitleLines = titleWrap.lines;
-
-        // center headline in the lower part of the banner (between brand + shapes)
-        const lineCount = eventTitleLines.length || 1;
-        const lineSpacing = fsTitle * 1.08;
-        const brandBaselineY = bannerY + 56; // must match tplPosterBCard brandY
-        const headlineTopLimit = brandBaselineY + fsTitle * 0.55;
-        const headlineBottomLimit = bannerY + bannerH - fsTitle * 0.35;
-        const usableHeight = Math.max(
-          fsTitle,
-          headlineBottomLimit - headlineTopLimit
-        );
-        const stackHeight = (lineCount - 1) * lineSpacing;
-        const boxCenterY = headlineTopLimit + usableHeight / 2;
-        const titleBaseY = boxCenterY - stackHeight / 2;
 
         const saveLines = wrapTextToWidth(
           saveAmount,
@@ -2059,7 +2104,6 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const cardVars = {
           brandName: ellipsize(businessName, 22),
           eventTitleLines,
-          titleBaseY,
           saveLines,
           subLines,
           qualifierLines,
@@ -2140,6 +2184,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
 
 /* ------------------------ /craft-ad-copy ------------------------ */
 
+/* ------------------------ /craft-ad-copy ------------------------ */
+
 router.post("/craft-ad-copy", async (req, res) => {
   try {
     const b = req.body || {};
@@ -2153,17 +2199,29 @@ router.post("/craft-ad-copy", async (req, res) => {
     if (!rawCopy)
       return res.status(400).json({ ok: false, error: "copy failed" });
 
-    const rawOffer =
-      rawCopy.offer || a.offer || a.saveAmount || "";
+    // --- NEW: smarter offer / promo handling with variety ---
+    const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
+    const userOfferRaw = a.offer || a.saveAmount || "";
+    const modelOfferRaw = rawCopy.offer || "";
+    const rawOffer = userOfferRaw || modelOfferRaw;
 
-    const cleanedOffer = /^(no offer|none|n\/a|null|no deal)$/i.test(
-      String(rawOffer).trim()
-    )
+    const cleanedOffer = NO_OFFER_RE.test(String(rawOffer).trim())
       ? ""
       : rawOffer;
-    const safeOfferTight = tightenOfferText(cleanedOffer);
-    const finalOffer =
-      safeOfferTight || defaultPromoLabelForIndustry(prof.kind);
+
+    const hasUserOffer =
+      !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw.toString().trim());
+
+    let safeOffer;
+    if (!hasUserOffer) {
+      // user left offer blank → ignore GPT's "New Collection" repeat
+      // and choose a promo tag for this industry
+      const promoLabel = pickPromoTag(prof.kind);
+      safeOffer = tightenOfferText(promoLabel);
+    } else {
+      // user supplied actual deal
+      safeOffer = tightenOfferText(cleanedOffer);
+    }
 
     // Use the same normalization helper as poster B so copy matches layout behavior
     const safeHeadline = applyHeadlineVariety(
@@ -2181,7 +2239,7 @@ router.post("/craft-ad-copy", async (req, res) => {
       .filter(Boolean);
 
     const subLower = safeSubline.toLowerCase();
-    const offerLower = (finalOffer || "").toLowerCase();
+    const offerLower = (safeOffer || "").toLowerCase();
 
     let bullets = bulletsRaw.filter((b) => {
       const low = (b || "").toLowerCase();
@@ -2214,7 +2272,7 @@ router.post("/craft-ad-copy", async (req, res) => {
     const copy = {
       headline: safeHeadline,
       subline: safeSubline,
-      offer: finalOffer,
+      offer: safeOffer,
       secondary: safeSecondary,
       bullets,
       disclaimers: safeDisclaimers,
