@@ -1063,6 +1063,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
  */
 /**
 /**
+/**
  * Shaw-inspired poster B:
  * - widened top box (left-right)
  * - clean subline text (no band / shadow)
@@ -1082,7 +1083,12 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   const bannerX = centerX - bannerW / 2;
   const bannerY = innerY + 70;
 
-  const brandY = bannerY + 56;
+  const brandY = bannerY + 70;
+
+  // 🔧 NEW: place the headline block centered vertically in the banner,
+  // a bit lower so it doesn't collide with the brand name.
+  const titleY = bannerY + bannerH * 0.60;
+
   const offerY = innerY + innerH * 0.62;
   const subY = offerY + fsSave * 1.05 + 85;
   const legalY = cardH - frameT - 22;
@@ -1095,6 +1101,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       .brand   { font: 700 28px/1 Inter,system-ui; fill:#f97316; letter-spacing:0.18em; }
       .title   { font: 900 ${fsTitle}px/1.08 Inter,system-ui; letter-spacing:0.02em; fill:#111827; }
       .save    { font: 900 ${fsSave}px/1.0 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.55; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
+      /* subline: plain white text, no stroke/shadow */
       .sub     { font: 700 ${fsBody}px/1.4 Inter,system-ui; fill:#ffffff; stroke:#000000; stroke-opacity:.65; stroke-width:3; paint-order:stroke fill; letter-spacing:0.16em; }
       .legal   { font: 600 22px/1.2 Inter,system-ui; fill:#e5e7eb; }
     </style>
@@ -1140,8 +1147,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
       {{brandName}}
     </text>
 
-    <!-- headline: base Y is injected from cardVars so we can center by line count -->
-    <text class="title t-center" x="${titleCenterX}" y="{{titleBaseY}}">
+    <!-- headline: centered between the two shapes, fully inside the box -->
+    <text class="title t-center" x="${titleCenterX}" y="${titleY}">
       {{#eventTitleLines}}
         <tspan x="${titleCenterX}" dy="{{dy}}">{{line}}</tspan>
       {{/eventTitleLines}}
@@ -1156,7 +1163,7 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
     {{/saveLines}}
   </text>
 
-  <!-- subline -->
+  <!-- subline (no background band) -->
   <text class="sub t-center" x="${centerX}" y="${subY}">
     {{#subLines}}
       <tspan x="${centerX}" dy="{{dy}}">{{line}}</tspan>
