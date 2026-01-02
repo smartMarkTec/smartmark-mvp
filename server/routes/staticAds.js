@@ -135,20 +135,17 @@ function fetchBuffer(url, extraHeaders = {}) {
 function isServiceFixIndustry(s = "") {
   const t = String(s || "").toLowerCase();
 
-  // Exclusions: these are service-y but NOT "fix something" trades → Poster B
-  if (
-    /(salon|spa|barber|nail|lash|beauty|fitness|gym|yoga|pilates|restaurant|cafe|coffee|bar|grill|taqueria|diner|real\s?estate|realtor|broker)/i.test(
-      t
-    )
-  ) {
-    return false;
-  }
+  // These are NOT "fix something" trades for Template A.
+  // (They should stay Template B.)
+  const EXCLUDE = /(salon|spa|barber|nail|lash|beauty|fitness|gym|yoga|pilates|restaurant|food|pizza|burger|cafe|coffee|boba|tea|bar|grill|taqueria|diner|real\s?estate|realtor|broker|fashion|apparel|clothing|boutique|electronics?|gadgets?|tech|online\s?store|e-?commerce|shopify|dropship|saas|software|app|course|coaching|marketing|agency)/i;
+  if (EXCLUDE.test(t)) return false;
 
-  // Strong "fix / onsite / physical service" signals → Template A
-  return /(repair|fix|install|installation|replace|replacement|maintenance|tune[-\s]?up|\bservice\b(?!\s*plan)|technician|contractor|licensed|insured|emergency|same[-\s]?day|on[-\s]?site|in[-\s]?home|residential|commercial|hvac|air\s?conditioning|\bac\b|heating|cooling|furnace|thermostat|duct|vent|plumb|plumber|drain|clog|leak|sewer|septic|water\s?heater|electric|electrician|breaker|panel|wiring|outlet|lighting|pool|hot\s?tub|spa\s?maintenance|clean(ing)?|maid|janitor|housekeep|carpet\s?clean|window\s?clean|gutter\s?clean|landscap|lawn|mow|edg|trim|tree|stump|yard|mulch|irrigation|sprinkler|pest|extermin|termite|rodent|bug|roach|pressure\s?wash|power\s?wash|roof|roofer|roofing|siding|paint|painter|painting|drywall|tile\s?install|floor\s?install|handyman|home\s?repair|moving|mover|junk\s?removal|haul|dumpster|locksmith|keys?|appliance\s?repair|garage\s?door|concrete|foundation|paving|asphalt|fence|fencing|deck|patio|restoration|water\s?damage|mold|fire\s?damage)/i.test(
-    t
-  );
+  // Strong "fix / onsite / physical service" signals (Template A)
+  const INCLUDE = /(repair|fix|install|installation|replace|replacement|maintenance|maintain|tune[-\s]?up|service\b|technician|contractor|licensed|insured|emergency|same[-\s]?day|on[-\s]?site|in[-\s]?home|residential|commercial|hvac|air\s?conditioning|\bac\b|heating|cooling|furnace|thermostat|duct|vent|plumb|plumber|drain|clog|leak|sewer|septic|water\s?heater|electric|electrician|breaker|panel|wiring|outlet|lighting|pool|pool\s?clean|pool\s?service|hot\s?tub|clean(ing)?|maid|janitor|housekeep|carpet\s?clean|window\s?clean|gutter\s?clean|landscap|lawn|mow|mowing|edg|trim|tree|stump|yard|mulch|irrigation|sprinkler|pest|extermin|termite|rodent|bug|roach|pressure\s?wash|power\s?wash|roof|roofer|roofing|siding|paint|painter|painting|drywall|tile\s?install|floor\s?install|handyman|home\s?repair|moving|mover|junk\s?removal|haul|dumpster|locksmith|keys?|appliance\s?repair|garage\s?door|concrete|foundation|paving|asphalt|fence|fencing|deck|patio|restoration|water\s?damage|mold|fire\s?damage)/i;
+
+  return INCLUDE.test(t);
 }
+
 
 const ALWAYS_POSTER_B_KINDS = new Set([
   "fashion",
@@ -163,15 +160,16 @@ const ALWAYS_POSTER_B_KINDS = new Set([
 ]);
 
 function autoTemplateForIndustry(industry = "", kind = "generic") {
-  // Certain verticals should always use the product/retail poster style
+  // Always Template B for these verticals
   if (ALWAYS_POSTER_B_KINDS.has(kind)) return "poster_b";
 
-  // Otherwise, if it’s a physical "fix/onsite" service → Template A
+  // If it's a physical "fix/onsite" service -> Template A
   if (isServiceFixIndustry(industry)) return "flyer_a";
 
-  // Default for online / retail / non-fix businesses → Template B
+  // Otherwise default -> Template B
   return "poster_b";
 }
+
 
 function classifyIndustry(s = "") {
   const t = String(s).toLowerCase();
@@ -564,8 +562,9 @@ function profileForIndustry(industry = "") {
     prof = { ...prof, lists: plumbingLists };
   }
 
-  const template = autoTemplateForIndustry(industry, kind);
-  return { kind, template, serviceFix: isServiceFixIndustry(industry), ...prof };
+   const template = prof?.template || autoTemplateForIndustry(industry, kind);
+  return { kind, ...prof, template };
+
 }
 
 /* ------------------------ Copy helpers ------------------------ */
@@ -1757,10 +1756,11 @@ router.post("/generate-static-ad", async (req, res) => {
     const industry = inputs.industry || a.industry || "Local Services";
     const prof = profileForIndustry(industry);
 
-    const template =
+       const template =
       templateReq !== "auto"
         ? templateReq
-        : autoTemplateForIndustry(industry, prof.kind);
+        : (prof.template || autoTemplateForIndustry(industry, prof.kind));
+
 
 
     /* ---------- FLYER A ---------- */
@@ -2274,7 +2274,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     };
 
     const prof = profileForIndustry(industry);
-    const isPoster = autoTemplateForIndustry(industry, prof.kind) === "poster_b";
+    const isPoster = (prof.template || autoTemplateForIndustry(industry, prof.kind)) === "poster_b";
+
 
 
     const W = 1080,
