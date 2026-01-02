@@ -130,27 +130,114 @@ function fetchBuffer(url, extraHeaders = {}) {
 
 /* ------------------------ Industry profiles ------------------------ */
 
+/* ------------------------ Industry profiles ------------------------ */
+
+function isServiceFixIndustry(s = "") {
+  const t = String(s || "").toLowerCase();
+
+  // Exclusions: these are service-y but NOT "fix something" trades → Poster B
+  if (
+    /(salon|spa|barber|nail|lash|beauty|fitness|gym|yoga|pilates|restaurant|cafe|coffee|bar|grill|taqueria|diner|real\s?estate|realtor|broker)/i.test(
+      t
+    )
+  ) {
+    return false;
+  }
+
+  // Strong "fix / onsite / physical service" signals → Template A
+  return /(repair|fix|install|installation|replace|replacement|maintenance|tune[-\s]?up|\bservice\b(?!\s*plan)|technician|contractor|licensed|insured|emergency|same[-\s]?day|on[-\s]?site|in[-\s]?home|residential|commercial|hvac|air\s?conditioning|\bac\b|heating|cooling|furnace|thermostat|duct|vent|plumb|plumber|drain|clog|leak|sewer|septic|water\s?heater|electric|electrician|breaker|panel|wiring|outlet|lighting|pool|hot\s?tub|spa\s?maintenance|clean(ing)?|maid|janitor|housekeep|carpet\s?clean|window\s?clean|gutter\s?clean|landscap|lawn|mow|edg|trim|tree|stump|yard|mulch|irrigation|sprinkler|pest|extermin|termite|rodent|bug|roach|pressure\s?wash|power\s?wash|roof|roofer|roofing|siding|paint|painter|painting|drywall|tile\s?install|floor\s?install|handyman|home\s?repair|moving|mover|junk\s?removal|haul|dumpster|locksmith|keys?|appliance\s?repair|garage\s?door|concrete|foundation|paving|asphalt|fence|fencing|deck|patio|restoration|water\s?damage|mold|fire\s?damage)/i.test(
+    t
+  );
+}
+
+const ALWAYS_POSTER_B_KINDS = new Set([
+  "fashion",
+  "electronics",
+  "pets",
+  "coffee",
+  "restaurant",
+  "real_estate",
+  "salon_spa",
+  "fitness",
+  "flooring",
+]);
+
+function autoTemplateForIndustry(industry = "", kind = "generic") {
+  // Certain verticals should always use the product/retail poster style
+  if (ALWAYS_POSTER_B_KINDS.has(kind)) return "poster_b";
+
+  // Otherwise, if it’s a physical "fix/onsite" service → Template A
+  if (isServiceFixIndustry(industry)) return "flyer_a";
+
+  // Default for online / retail / non-fix businesses → Template B
+  return "poster_b";
+}
+
 function classifyIndustry(s = "") {
   const t = String(s).toLowerCase();
   const has = (rx) => rx.test(t);
 
-  if (has(/clean|maid|janitor|housekeep/)) return "home_cleaning";
+  // --- FIX / TRADE / PHYSICAL SERVICES (Template A via isServiceFixIndustry) ---
+  // Keep kinds compatible with profileForIndustry() MAP (do NOT introduce new kinds).
+  if (
+    has(
+      /hvac|heating|cooling|air\s?conditioning|\bac\b|furnace|duct|thermostat|plumb|plumber|drain|clog|leak|sewer|septic|water\s?heater/
+    )
+  )
+    return "hvac_plumbing";
+
+  if (has(/clean|maid|janitor|housekeep|carpet\s?clean|window\s?clean/))
+    return "home_cleaning";
+
+  if (has(/landscap|lawn|tree|garden|yard|mulch|irrigation|sprinkler/))
+    return "landscaping";
+
+  if (has(/auto|mechanic|tire|oil|detailing|car wash|brakes?|alignment/))
+    return "auto";
+
+  // Many other “fix” industries (pool, electrical, pest, roofing, handyman, etc.)
+  // should still be treated as service/fix → we return "generic" here and let
+  // isServiceFixIndustry() decide flyer_a vs poster_b.
+  if (
+    has(
+      /pool|hot\s?tub|spa\s?maintenance|electric|electrician|pest|extermin|termite|pressure\s?wash|power\s?wash|roof|roofer|roofing|siding|handyman|home\s?repair|moving|mover|junk\s?removal|haul|dumpster|locksmith|appliance\s?repair|garage\s?door|concrete|foundation|paving|asphalt|fence|fencing|deck|patio|restoration|water\s?damage|mold|fire\s?damage/
+    )
+  )
+    return "generic";
+
+  // --- PRODUCT / ONLINE / NON-FIX (Template B by default) ---
   if (has(/floor|carpet|tile|vinyl|hardwood/)) return "flooring";
+
   if (has(/restaurant|food|pizza|burger|cafe|bar|grill|taqueria|eat|diner/))
     return "restaurant";
+
   if (has(/gym|fitness|trainer|yoga|crossfit|pilates/)) return "fitness";
+
   if (has(/salon|spa|barber|nail|lash|beauty/)) return "salon_spa";
-  if (has(/real\s?estate|realtor|broker|homes?|listings?/))
-    return "real_estate";
-  if (has(/auto|mechanic|tire|oil|detailing|car wash/)) return "auto";
-  if (has(/landscap|lawn|tree|garden|yard/)) return "landscaping";
-  if (has(/plumb|hvac|heating|cooling|air|electric/)) return "hvac_plumbing";
+
+  if (has(/real\s?estate|realtor|broker|homes?|listings?/)) return "real_estate";
+
   if (has(/fashion|apparel|clothing|boutique|shoe|jewel/)) return "fashion";
-  if (has(/electronics?|gadgets?|tech/)) return "electronics";
+
+  if (has(/electronics?|gadgets?|tech|laptop|phone|smart\s?home/))
+    return "electronics";
+
   if (has(/pet|groom|vet|animal/)) return "pets";
+
   if (has(/coffee|bakery|dessert|boba|tea/)) return "coffee";
+
+  // Online keywords catch (generic, and autoTemplateForIndustry will pick poster_b unless fix-signals exist)
+  if (
+    has(
+      /e-?commerce|shopify|dropship|online\s?store|brand|saas|app|software|course|coaching|agency|marketing/
+    )
+  ) {
+    return "generic";
+  }
+
   return "generic";
 }
+
 
 function profileForIndustry(industry = "") {
   const kind = classifyIndustry(industry);
@@ -201,88 +288,96 @@ function profileForIndustry(industry = "") {
   };
 
   const serviceLists = {
-    left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-    right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
+    left: ["Free Quote", "Same-Day", "Licensed", "Insured"],
+    right: ["On-Site Work", "Upfront Pricing", "Fast Scheduling", "Quality Guaranteed"],
   };
+
   const hvacLists = {
     left: ["Install", "Repair", "Tune-Up", "Maintenance"],
-    right: [
-      "AC Units",
-      "Furnaces",
-      "Ductwork",
-      "Thermostats",
-      "Heat Pumps",
-      "Filters",
-    ],
+    right: ["AC Units", "Furnaces", "Ductwork", "Thermostats", "Heat Pumps", "Filters"],
   };
+
   const plumbingLists = {
     left: ["Leaks", "Clogs", "Installs", "Repairs"],
-    right: [
-      "Water Heaters",
-      "Toilets",
-      "Sinks",
-      "Showers",
-      "Garbage Disposal",
-      "Piping",
-    ],
+    right: ["Water Heaters", "Toilets", "Sinks", "Showers", "Disposals", "Piping"],
   };
+
+  const electricalLists = {
+    left: ["Troubleshoot", "Install", "Repair", "Upgrade"],
+    right: ["Panels", "Outlets", "Lighting", "Wiring", "Breakers", "Ceiling Fans"],
+  };
+
   const landscapingLists = {
     left: ["Mowing", "Edging", "Trimming", "Cleanup"],
     right: ["Mulch", "Hedges", "Tree Care", "Fertilize", "Weed Control", "Irrigation"],
   };
+
   const autoLists = {
     left: ["Oil Change", "Brakes", "Tires", "Alignment"],
     right: ["Diagnostics", "AC Service", "Batteries", "Inspections"],
   };
 
+  const poolLists = {
+    left: ["Cleaning", "Chemicals", "Filter Care", "Repairs"],
+    right: ["Weekly Service", "Green-to-Clean", "Pump/Heater", "Leak Checks"],
+  };
+
+  const pestLists = {
+    left: ["Inspection", "Treatment", "Prevention", "Follow-Up"],
+    right: ["Ants", "Roaches", "Termites", "Rodents", "Spiders", "Mosquitoes"],
+  };
+
+  const pressureWashLists = {
+    left: ["Driveways", "Sidewalks", "Patios", "Decks"],
+    right: ["Houses", "Fences", "Gutters", "Stains", "Mildew", "Commercial"],
+  };
+
+  const roofingLists = {
+    left: ["Repair", "Replace", "Inspect", "Storm"],
+    right: ["Shingles", "Leaks", "Flashing", "Gutters", "Soffits", "Ventilation"],
+  };
+
+  const movingLists = {
+    left: ["Local", "Long-Distance", "Packing", "Loading"],
+    right: ["Homes", "Apartments", "Offices", "Heavy Items", "Storage", "Same-Day"],
+  };
+
   const MAP = {
+    // Service / fix → Template A (auto)
     home_cleaning: {
-      template: "flyer_a",
       headline: "HOME CLEANING SERVICES",
       subline: "Apartment • Home • Office",
       cta: "CALL NOW!",
       palette: PALETTES.navy,
-      lists: serviceLists,
-      coverage: "Coverage area 25 Miles around your city",
+      lists: {
+        left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+        right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
+      },
+      coverage: "Serving your area",
       bgHint: "home cleaning",
     },
-    flooring: {
-      template: "poster_b",
-      palette: PALETTES.forest,
-      bgHint: "flooring",
-    },
-    restaurant: {
-      template: "poster_b",
-      palette: PALETTES.wine,
-      bgHint: "restaurant",
-    },
-    salon_spa: {
-      template: "poster_b",
-      palette: PALETTES.wine,
-      bgHint: "salon spa",
-    },
-    fitness: {
-      template: "poster_b",
-      palette: PALETTES.slate,
-      bgHint: "gym fitness",
-    },
-    real_estate: {
-      template: "poster_b",
+
+    hvac_plumbing: {
+      headline: "HVAC & PLUMBING",
+      subline: "Install • Repair • Maintenance",
+      cta: "SCHEDULE NOW",
       palette: PALETTES.teal,
-      bgHint: "real estate",
+      lists: hvacLists, // may be swapped to plumbing below
+      coverage: "Emergency service available",
+      bgHint: "hvac plumbing",
     },
-    auto: {
-      template: "flyer_a",
-      headline: "AUTO REPAIR & SERVICE",
-      subline: "Reliable • Fast • Affordable",
+
+    electrical: {
+      headline: "ELECTRICAL SERVICES",
+      subline: "Repairs • Installs • Upgrades",
       cta: "CALL NOW!",
       palette: PALETTES.slate,
-      lists: autoLists,
-      coverage: "Same-day appointments available",
-      bgHint: "auto repair",
+      lists: electricalLists,
+      coverage: "Serving your area",
+      bgHint: "electrician",
     },
+
     landscaping: {
-      template: "flyer_a",
       headline: "LANDSCAPING & LAWN CARE",
       subline: "Clean-ups • Maintenance • Installs",
       cta: "GET A QUOTE",
@@ -291,56 +386,186 @@ function profileForIndustry(industry = "") {
       coverage: "Serving your area",
       bgHint: "landscaping",
     },
-    hvac_plumbing: {
-      template: "flyer_a",
-      headline: "HVAC & PLUMBING",
-      subline: "Install • Repair • Maintenance",
-      cta: "SCHEDULE NOW",
-      palette: PALETTES.teal,
-      lists: hvacLists,
-      coverage: "Emergency service available",
-      bgHint: "hvac plumbing",
-    },
-    fashion: {
-      template: "poster_b",
-      palette: PALETTES.wine,
-      bgHint: "fashion",
-    },
-    electronics: {
-      template: "poster_b",
+
+    auto: {
+      headline: "AUTO REPAIR & SERVICE",
+      subline: "Reliable • Fast • Affordable",
+      cta: "CALL NOW!",
       palette: PALETTES.slate,
-      bgHint: "electronics",
+      lists: autoLists,
+      coverage: "Same-day appointments available",
+      bgHint: "auto repair",
     },
-    pets: {
-      template: "poster_b",
+
+    pool_service: {
+      headline: "POOL CLEANING SERVICE",
+      subline: "Weekly • One-Time • Repairs",
+      cta: "GET A QUOTE",
+      palette: PALETTES.teal,
+      lists: poolLists,
+      coverage: "Serving your area",
+      bgHint: "pool service",
+    },
+
+    pest_control: {
+      headline: "PEST CONTROL SERVICE",
+      subline: "Safe • Effective • Reliable",
+      cta: "SCHEDULE NOW",
       palette: PALETTES.forest,
-      bgHint: "pets",
+      lists: pestLists,
+      coverage: "Serving your area",
+      bgHint: "pest control",
     },
-    coffee: {
-      template: "poster_b",
+
+    pressure_washing: {
+      headline: "PRESSURE WASHING",
+      subline: "Homes • Driveways • Patios",
+      cta: "GET A QUOTE",
+      palette: PALETTES.navy,
+      lists: pressureWashLists,
+      coverage: "Serving your area",
+      bgHint: "pressure washing",
+    },
+
+    roofing: {
+      headline: "ROOFING SERVICES",
+      subline: "Repairs • Replacements • Inspections",
+      cta: "CALL NOW!",
+      palette: PALETTES.slate,
+      lists: roofingLists,
+      coverage: "Serving your area",
+      bgHint: "roofing",
+    },
+
+    handyman: {
+      headline: "HANDYMAN SERVICES",
+      subline: "Repairs • Installs • Maintenance",
+      cta: "GET A QUOTE",
+      palette: PALETTES.base,
+      lists: serviceLists,
+      coverage: "Serving your area",
+      bgHint: "handyman",
+    },
+
+    moving: {
+      headline: "MOVING SERVICES",
+      subline: "Fast • Careful • On Time",
+      cta: "BOOK TODAY",
       palette: PALETTES.wine,
-      bgHint: "coffee",
+      lists: movingLists,
+      coverage: "Serving your area",
+      bgHint: "moving company",
     },
+
+    locksmith: {
+      headline: "LOCKSMITH SERVICES",
+      subline: "Home • Auto • Commercial",
+      cta: "CALL NOW!",
+      palette: PALETTES.slate,
+      lists: {
+        left: ["Lockouts", "Rekey", "Repair", "Install"],
+        right: ["Homes", "Cars", "Businesses", "Keys", "Deadbolts", "Smart Locks"],
+      },
+      coverage: "24/7 available",
+      bgHint: "locksmith",
+    },
+
+    garage_door: {
+      headline: "GARAGE DOOR SERVICE",
+      subline: "Repair • Install • Replace",
+      cta: "SCHEDULE NOW",
+      palette: PALETTES.navy,
+      lists: {
+        left: ["Springs", "Openers", "Tracks", "Panels"],
+        right: ["Same-Day", "Insured", "Upfront", "Guaranteed"],
+      },
+      coverage: "Serving your area",
+      bgHint: "garage door repair",
+    },
+
+    appliance_repair: {
+      headline: "APPLIANCE REPAIR",
+      subline: "Fast • Reliable • Affordable",
+      cta: "CALL NOW!",
+      palette: PALETTES.teal,
+      lists: {
+        left: ["Fridge", "Washer", "Dryer", "Oven"],
+        right: ["Dishwasher", "Microwave", "Same-Day", "Warranty"],
+      },
+      coverage: "Serving your area",
+      bgHint: "appliance repair",
+    },
+
+    concrete: {
+      headline: "CONCRETE & FOUNDATION",
+      subline: "Driveways • Patios • Slabs",
+      cta: "GET A QUOTE",
+      palette: PALETTES.forest,
+      lists: {
+        left: ["Pour", "Repair", "Level", "Finish"],
+        right: ["Driveways", "Sidewalks", "Patios", "Foundations", "Stamped", "Commercial"],
+      },
+      coverage: "Serving your area",
+      bgHint: "concrete",
+    },
+
+    fence_deck: {
+      headline: "FENCE & DECK SERVICE",
+      subline: "Build • Repair • Replace",
+      cta: "GET A QUOTE",
+      palette: PALETTES.wine,
+      lists: {
+        left: ["Wood", "Vinyl", "Chain Link", "Stain"],
+        right: ["Privacy", "Gates", "Repairs", "New Builds", "Pergolas", "Patios"],
+      },
+      coverage: "Serving your area",
+      bgHint: "fence deck",
+    },
+
+    restoration: {
+      headline: "RESTORATION SERVICES",
+      subline: "Water • Mold • Fire Damage",
+      cta: "CALL NOW!",
+      palette: PALETTES.slate,
+      lists: {
+        left: ["Emergency", "Inspect", "Remove", "Restore"],
+        right: ["Water Damage", "Mold", "Smoke", "Odor", "Dry-Out", "Rebuild"],
+      },
+      coverage: "24/7 available",
+      bgHint: "restoration",
+    },
+
+    // Non-fix / retail / online → Template B (auto)
+    flooring: { palette: PALETTES.forest, bgHint: "flooring" },
+    restaurant: { palette: PALETTES.wine, bgHint: "restaurant" },
+    salon_spa: { palette: PALETTES.wine, bgHint: "salon spa" },
+    fitness: { palette: PALETTES.slate, bgHint: "gym fitness" },
+    real_estate: { palette: PALETTES.teal, bgHint: "real estate" },
+    fashion: { palette: PALETTES.wine, bgHint: "fashion" },
+    electronics: { palette: PALETTES.slate, bgHint: "electronics" },
+    pets: { palette: PALETTES.forest, bgHint: "pets" },
+    coffee: { palette: PALETTES.wine, bgHint: "coffee" },
+
     generic: {
-      template: "flyer_a",
       headline: "LOCAL SERVICES",
       subline: "Reliable • Friendly • On Time",
       cta: "CONTACT US",
       palette: PALETTES.base,
-      lists: {
-        left: ["Free Quote", "Same-Day", "Licensed", "Insured"],
-        right: ["Great Reviews", "Family Owned", "Fair Prices", "Guaranteed"],
-      },
+      lists: serviceLists,
       coverage: "Serving your area",
       bgHint: "generic",
     },
   };
 
-  let prof = MAP[kind];
+  let prof = MAP[kind] || MAP.generic;
+
+  // Special case: if user explicitly typed "plumb" we show plumbing list (still Template A auto)
   if (kind === "hvac_plumbing" && /plumb/i.test(industry)) {
     prof = { ...prof, lists: plumbingLists };
   }
-  return { kind, ...prof };
+
+  const template = autoTemplateForIndustry(industry, kind);
+  return { kind, template, serviceFix: isServiceFixIndustry(industry), ...prof };
 }
 
 /* ------------------------ Copy helpers ------------------------ */
@@ -1518,7 +1743,6 @@ const posterSchema = {
   },
 };
 
-/* ------------------------ /generate-static-ad ------------------------ */
 
 /* ------------------------ /generate-static-ad ------------------------ */
 
@@ -1536,17 +1760,8 @@ router.post("/generate-static-ad", async (req, res) => {
     const template =
       templateReq !== "auto"
         ? templateReq
-        : [
-            "fashion",
-            "electronics",
-            "pets",
-            "coffee",
-            "restaurant",
-            "real_estate",
-            "flooring",
-          ].includes(prof.kind)
-        ? "poster_b"
-        : "flyer_a";
+        : autoTemplateForIndustry(industry, prof.kind);
+
 
     /* ---------- FLYER A ---------- */
     if (template === "flyer_a") {
@@ -2059,15 +2274,8 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     };
 
     const prof = profileForIndustry(industry);
-    const isPoster = [
-      "fashion",
-      "electronics",
-      "pets",
-      "coffee",
-      "restaurant",
-      "real_estate",
-      "flooring",
-    ].includes(prof.kind);
+    const isPoster = autoTemplateForIndustry(industry, prof.kind) === "poster_b";
+
 
     const W = 1080,
       H = 1080;
