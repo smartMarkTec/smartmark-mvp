@@ -995,66 +995,144 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
+  // Home-cleaning style flyer template (like the reference image)
+  // - Big stacked headline in dark top band
+  // - Subline under headline
+  // - Diagonal split into light body area
+  // - Center illustration (simple SVG character)
+  // - Left checklist + Right services offered list
+  // - Bottom location line + big "CALL NOW!" phone line
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <filter id="soft"><feGaussianBlur stdDeviation="28"/></filter>
     <style>
-      .h0{font:900 110px/1 Inter,system-ui}
-      .h1{font:900 64px/1 Inter,system-ui}
-      .h2{font:800 44px/1 Inter,system-ui}
-      .b1{font:700 34px/1.28 Inter,system-ui}
-      .chip{font:900 44px/1 Inter,system-ui;letter-spacing:.5px}
-      .meta{font:600 26px/1.2 Inter,system-ui}
+      .hBig{font:900 118px/1.0 Inter,system-ui; letter-spacing:0.02em;}
+      .hSub{font:800 32px/1.1 Inter,system-ui; letter-spacing:0.12em;}
+      .label{font:800 34px/1.1 Inter,system-ui;}
+      .li{font:700 34px/1.2 Inter,system-ui;}
+      .meta{font:700 26px/1.2 Inter,system-ui;}
+      .call{font:900 54px/1 Inter,system-ui; letter-spacing:0.02em;}
+      .tCenter{text-anchor:middle;}
+      .tLeft{text-anchor:start;}
     </style>
   </defs>
 
+  <!-- Base -->
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
-  <rect width="${W}" height="220" fill="{{palette.header}}"/>
 
-  <g transform="translate(60, 85)">
-    <text class="h0" fill="#ffffff">{{headline}}</text>
+  <!-- Top dark header -->
+  <rect x="0" y="0" width="${W}" height="360" fill="{{palette.header}}"/>
+
+  <!-- Diagonal split (light panel) -->
+  <path d="M0 360 L${W} 300 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
+
+  <!-- Headline (stacked like template) -->
+  <g transform="translate(${W / 2}, 120)">
+    <text class="hBig tCenter" fill="{{palette.textOnDark}}">
+      {{^headlineLines}}{{headline}}{{/headlineLines}}
+      {{#headlineLines}}
+        <tspan x="0" dy="{{dy}}">{{line}}</tspan>
+      {{/headlineLines}}
+    </text>
+
+    <text class="hSub tCenter" y="170" fill="{{palette.textOnDark}}" opacity="0.9">
+      {{subline}}
+    </text>
   </g>
 
-  <path d="M0,220 L${W},160 L${W},${H} L0,${H} Z" fill="#ffffff" opacity=".16"/>
-  <circle cx="${W / 2}" cy="${H / 2 + 20}" r="120" fill="{{palette.accent}}" opacity=".15" filter="url(#soft)"/>
+  <!-- Center illustration (simple “cleaner” character) -->
+  {{#showIcons}}
+  <g transform="translate(${W / 2 - 70}, 430)">
+    <!-- mop handle -->
+    <rect x="145" y="40" width="10" height="250" rx="5" fill="#a3a3a3" opacity="0.9"/>
+    <!-- mop head -->
+    <ellipse cx="150" cy="300" rx="42" ry="18" fill="#fda4af"/>
+    <ellipse cx="120" cy="304" rx="18" ry="10" fill="#fda4af" opacity="0.9"/>
+    <ellipse cx="180" cy="304" rx="18" ry="10" fill="#fda4af" opacity="0.9"/>
 
-  <g transform="translate(80, 440)">
-    <text class="h1" fill="{{palette.header}}">FREQUENCY</text>
+    <!-- head -->
+    <circle cx="70" cy="55" r="34" fill="#f2c6a8"/>
+    <!-- hair -->
+    <path d="M40 55 C45 18, 95 18, 100 55 C98 35, 85 25, 70 25 C55 25, 42 35, 40 55 Z"
+      fill="#7c2d12"/>
+    <!-- face -->
+    <circle cx="60" cy="52" r="4" fill="#111827"/>
+    <circle cx="82" cy="52" r="4" fill="#111827"/>
+    <path d="M60 70 C66 78, 76 78, 82 70" stroke="#111827" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <!-- band -->
+    <path d="M38 45 C55 22, 85 22, 102 45" stroke="#cbd5e1" stroke-width="10" fill="none" stroke-linecap="round"/>
+
+    <!-- body -->
+    <path d="M35 98 C35 78, 105 78, 105 98 L105 200 C105 230, 35 230, 35 200 Z" fill="#0f3b5a" opacity="0.95"/>
+    <!-- apron -->
+    <path d="M45 130 C55 115, 85 115, 95 130 L95 210 C95 225, 45 225, 45 210 Z" fill="#cbd5e1" opacity="0.95"/>
+
+    <!-- arms -->
+    <path d="M35 125 C15 145, 15 160, 35 175" stroke="#0f3b5a" stroke-width="16" fill="none" stroke-linecap="round"/>
+    <path d="M105 125 C125 145, 128 160, 112 180" stroke="#0f3b5a" stroke-width="16" fill="none" stroke-linecap="round"/>
+
+    <!-- legs -->
+    <rect x="55" y="230" width="14" height="55" rx="7" fill="#111827"/>
+    <rect x="80" y="230" width="14" height="55" rx="7" fill="#111827"/>
+    <!-- shoes -->
+    <ellipse cx="62" cy="292" rx="18" ry="8" fill="#111827"/>
+    <ellipse cx="87" cy="292" rx="18" ry="8" fill="#111827"/>
+  </g>
+  {{/showIcons}}
+
+  <!-- Left checklist -->
+  <g transform="translate(110, 520)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="10" fill="{{accentLeft}}"/>
-        <text class="b1" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+        <!-- check icon -->
+        <circle cx="16" cy="14" r="12" fill="{{palette.accent}}" opacity="0.95"/>
+        <path d="M10 14 L15 19 L24 9" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <text class="li tLeft" x="44" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.left}}
   </g>
 
-  <g transform="translate(${W - 520}, 440)">
-    <text class="h1" fill="{{palette.header}}">SERVICES</text>
+  <!-- Right services list -->
+  <g transform="translate(${W - 470}, 520)">
+    <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.9">{{servicesLabel}}</text>
+
     {{#lists.right}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="10" fill="{{accentRight}}"/>
-        <text class="b1" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.75"/>
+        <text class="li tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.right}}
   </g>
 
-  <g transform="translate(80, 350)">
-    <text class="b1" fill="#113a5d" opacity=".65">{{subline}}</text>
-  </g>
-
+  <!-- Bottom meta / coverage -->
   {{#coverage}}
-  <g transform="translate(80, ${H - 210})">
-    <text class="meta" fill="#2b3a44" opacity=".7">📍 {{coverage}}</text>
+  <g transform="translate(${W / 2}, ${H - 180})">
+    <!-- location pin -->
+    <g transform="translate(-250, -18)">
+      <path d="M18 2 C9 2, 2 9, 2 18 C2 32, 18 46, 18 46 C18 46, 34 32, 34 18 C34 9, 27 2, 18 2 Z"
+        fill="{{palette.accent}}" opacity="0.9"/>
+      <circle cx="18" cy="18" r="6" fill="#ffffff"/>
+    </g>
+    <text class="meta tCenter" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.8">📍 {{coverage}}</text>
   </g>
   {{/coverage}}
 
-  <g transform="translate(80, ${H - 160})">
-    <rect width="${W - 160}" height="96" rx="22" fill="{{palette.accent}}"/>
-    <text class="chip" x="${(W - 160) / 2}" y="62" text-anchor="middle" fill="#0b1115">{{cta}} {{phone}}</text>
+  <!-- Call now line -->
+  <g transform="translate(${W / 2}, ${H - 95})">
+    <!-- phone icon circle -->
+    <g transform="translate(-420, -44)">
+      <circle cx="44" cy="44" r="34" fill="{{palette.accent}}" opacity="0.95"/>
+      <path d="M38 34 C46 44, 50 48, 60 54 C56 60, 50 64, 44 60 C34 54, 28 48, 22 38 C18 32, 22 26, 28 22 C34 28, 34 28, 38 34 Z"
+        fill="#ffffff" opacity="0.95"/>
+    </g>
+
+    <text class="call tCenter" x="0" y="0" fill="{{palette.header}}">
+      {{cta}} {{phone}}
+    </text>
   </g>
 </svg>`;
 }
+
 
 /**
  * Shaw-inspired poster B:
@@ -1505,17 +1583,41 @@ router.post("/generate-static-ad", async (req, res) => {
         );
       }
 
+      // Layout lists like the reference template
       const listsLaidOut = withListLayout(mergedKnobs.lists || {});
+
+      // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
+      const headlineUpper = String(mergedInputs.headline || "")
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const headlineLines = wrapTextToWidth(
+        headlineUpper,
+        118,     // match template big headline
+        1080,
+        160,     // padding so it stays centered and not too wide
+        3,       // max 3 lines
+        2,       // prefer at least 2 lines when possible
+        true     // avoid ellipsis (we want full stacked look)
+      );
+
+      const sublineUpper = String(mergedInputs.subline || "")
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
       const vars = {
-        headline: mergedInputs.headline,
-        subline: mergedInputs.subline,
+        headline: headlineUpper,
+        headlineLines,
+        subline: sublineUpper,
         phone: mergedInputs.phone,
         cta: mergedInputs.cta,
         coverage: mergedKnobs.coverage,
         palette: mergedKnobs.palette,
-        accentLeft: mergedKnobs.palette.accent,
-        accentRight: "#1f3b58",
         lists: listsLaidOut,
+        showIcons: mergedKnobs.showIcons,
+        servicesLabel: "Services Offered",
       };
 
       const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
@@ -2154,28 +2256,52 @@ router.post("/generate-image-from-prompt", async (req, res) => {
           textOnDark: "#ffffff",
           textOnLight: "#2b3a44",
         };
+
       const lists = withListLayout(
         prof.lists || {
-          left: ["Free Quote", "Same-Day", "Licensed", "Insured"],
-          right: ["Great Reviews", "Family Owned", "Fair Prices", "Guaranteed"],
+          left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+          right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
         }
       );
+
+      const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const headlineLines = wrapTextToWidth(
+        headlineUpper,
+        118,
+        1080,
+        160,
+        3,
+        2,
+        true
+      );
+
+      const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
       const vars = {
-        headline: overlay.headline || prof.headline || "LOCAL SERVICES",
-        subline:
-          overlay.body || prof.subline || "Reliable • Friendly • On Time",
+        headline: headlineUpper,
+        headlineLines,
+        subline: sublineUpper,
         phone: a.phone || "(000) 000-0000",
-        cta: overlay.cta || prof.cta || "Contact Us",
-        coverage: prof.coverage || "Serving your area",
+        cta: overlay.cta || prof.cta || "CALL NOW!",
+        coverage: prof.coverage || "Coverage area 25 Miles around your city",
         palette,
-        accentLeft: palette.accent,
-        accentRight: "#1f3b58",
         lists,
+        showIcons: true,
+        servicesLabel: "Services Offered",
       };
+
       const svg = mustache.render(tplFlyerA({ W, H }), vars);
       const pngBuf = await sharp(Buffer.from(svg))
         .png({ quality: 92 })
         .toBuffer();
+
       for (let i = 0; i < 2; i++) {
         const fname = `static-${Date.now()}-${Math.random()
           .toString(36)
@@ -2184,6 +2310,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
     }
+
 
     return res.json({ ok: true, images: files });
   } catch (err) {
