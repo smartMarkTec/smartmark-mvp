@@ -130,18 +130,250 @@ function fetchBuffer(url, extraHeaders = {}) {
 
 /* ------------------------ Industry profiles ------------------------ */
 
-/* ------------------------ Industry profiles ------------------------ */
-
 function isServiceFixIndustry(s = "") {
   const t = String(s || "").toLowerCase();
 
-  // These are NOT "fix something" trades for Template A.
-  // (They should stay Template B.)
-  const EXCLUDE = /(salon|spa|barber|nail|lash|beauty|fitness|gym|yoga|pilates|restaurant|food|pizza|burger|cafe|coffee|boba|tea|bar|grill|taqueria|diner|real\s?estate|realtor|broker|fashion|apparel|clothing|boutique|electronics?|gadgets?|tech|online\s?store|e-?commerce|shopify|dropship|saas|software|app|course|coaching|marketing|agency)/i;
+  // JS does NOT support the /x flag (extended regex), so we use RegExp() strings.
+  // IMPORTANT: We intentionally avoid matching "app" so we don't accidentally catch "appliance".
+  const EXCLUDE = new RegExp(
+    [
+      // food / hospitality
+      "restaurant",
+      "food",
+      "pizza",
+      "burger",
+      "cafe",
+      "coffee",
+      "boba",
+      "tea",
+      "bar",
+      "grill",
+      "taqueria",
+      "diner",
+      "bakery",
+
+      // beauty / wellness
+      "salon",
+      "spa",
+      "barber",
+      "nail",
+      "lash",
+      "beauty",
+
+      // fitness
+      "gym",
+      "fitness",
+      "yoga",
+      "pilates",
+      "trainer",
+
+      // real estate
+      "real\\s?estate",
+      "realtor",
+      "broker",
+
+      // retail categories
+      "fashion",
+      "apparel",
+      "clothing",
+      "boutique",
+      "jewel",
+      "jewelry",
+      "electronics?",
+      "gadgets?",
+      "tech",
+      "laptop",
+      "phone",
+      "smart\\s?home",
+      "pet\\s?store",
+      "pet\\s?shop",
+
+      // ecommerce
+      "e-?commerce",
+      "shopify",
+      "dropship",
+      "online\\s?store",
+
+      // software/marketing (avoid plain "app" token!)
+      "saas",
+      "software",
+      "web\\s?design",
+      "web\\s?development",
+      "app\\s?development",
+      "mobile\\s?app",
+      "course",
+      "coaching",
+      "marketing",
+      "agency",
+    ].join("|"),
+    "i"
+  );
+
   if (EXCLUDE.test(t)) return false;
 
-  // Strong "fix / onsite / physical service" signals (Template A)
-  const INCLUDE = /(repair|fix|install|installation|replace|replacement|maintenance|maintain|tune[-\s]?up|service\b|technician|contractor|licensed|insured|emergency|same[-\s]?day|on[-\s]?site|in[-\s]?home|residential|commercial|hvac|air\s?conditioning|\bac\b|heating|cooling|furnace|thermostat|duct|vent|plumb|plumber|drain|clog|leak|sewer|septic|water\s?heater|electric|electrician|breaker|panel|wiring|outlet|lighting|pool|pool\s?clean|pool\s?service|hot\s?tub|clean(ing)?|maid|janitor|housekeep|carpet\s?clean|window\s?clean|gutter\s?clean|landscap|lawn|mow|mowing|edg|trim|tree|stump|yard|mulch|irrigation|sprinkler|pest|extermin|termite|rodent|bug|roach|pressure\s?wash|power\s?wash|roof|roofer|roofing|siding|paint|painter|painting|drywall|tile\s?install|floor\s?install|handyman|home\s?repair|moving|mover|junk\s?removal|haul|dumpster|locksmith|keys?|appliance\s?repair|garage\s?door|concrete|foundation|paving|asphalt|fence|fencing|deck|patio|restoration|water\s?damage|mold|fire\s?damage)/i;
+  // Strong "onsite / fix / trade service" signals (Template A)
+  const INCLUDE = new RegExp(
+    [
+      // hvac
+      "hvac",
+      "air\\s*conditioning",
+      "air\\s*conditioner",
+      "a\\/c",
+      "\\bac\\b",
+      "heating",
+      "cooling",
+      "furnace",
+      "thermostat",
+      "duct",
+      "vent",
+      "heat\\s*pump",
+
+      // plumbing
+      "plumb",
+      "plumber",
+      "drain",
+      "clog",
+      "leak",
+      "sewer",
+      "septic",
+      "water\\s*heater",
+
+      // electrical
+      "electric",
+      "electrician",
+      "breaker",
+      "panel",
+      "wiring",
+      "outlet",
+      "lighting",
+      "ceiling\\s*fan",
+
+      // pool / spa maintenance
+      "pool",
+      "pool\\s*clean",
+      "pool\\s*service",
+      "hot\\s*tub",
+      "spa\\s*maintenance",
+
+      // cleaning
+      "clean(ing)?",
+      "house\\s*clean",
+      "maid",
+      "janitor",
+      "housekeep",
+      "carpet\\s*clean",
+      "window\\s*clean",
+      "gutter\\s*clean",
+
+      // landscaping
+      "landscap",
+      "lawn",
+      "mow",
+      "mowing",
+      "edg",
+      "trim",
+      "tree",
+      "stump",
+      "yard",
+      "mulch",
+      "irrigation",
+      "sprinkler",
+
+      // pest
+      "pest",
+      "extermin",
+      "termite",
+      "rodent",
+      "roach",
+      "bug\\s*control",
+      "mosquito",
+
+      // washing
+      "pressure\\s*wash",
+      "power\\s*wash",
+
+      // roofing / siding
+      "roof",
+      "roofer",
+      "roofing",
+      "siding",
+
+      // paint / drywall
+      "paint",
+      "painter",
+      "painting",
+      "drywall",
+
+      // handyman / home repair
+      "handyman",
+      "home\\s*repair",
+
+      // moving / junk
+      "moving",
+      "mover",
+      "junk\\s*removal",
+      "haul",
+      "dumpster",
+
+      // locksmith
+      "locksmith",
+      "rekey",
+      "key\\s*replacement",
+      "lockout",
+
+      // appliance repair (explicit!)
+      "appliance\\s*repair",
+      "washer",
+      "dryer",
+      "fridge",
+      "refrigerator",
+      "oven",
+      "dishwasher",
+
+      // garage door
+      "garage\\s*door",
+      "opener",
+      "springs",
+
+      // concrete / foundation
+      "concrete",
+      "foundation",
+      "paving",
+      "asphalt",
+
+      // fence / deck
+      "fence",
+      "fencing",
+      "deck",
+      "patio",
+
+      // restoration
+      "restoration",
+      "water\\s*damage",
+      "mold",
+      "fire\\s*damage",
+
+      // generic fix/service words
+      "install",
+      "installation",
+      "repair",
+      "fix",
+      "replace",
+      "replacement",
+      "maintenance",
+      "maintain",
+      "tune[-\\s]*up",
+      "technician",
+      "contractor",
+      "on[-\\s]*site",
+      "in[-\\s]*home",
+      "same[-\\s]*day",
+      "emergency",
+      "licensed",
+      "insured",
+    ].join("|"),
+    "i"
+  );
 
   return INCLUDE.test(t);
 }
@@ -163,90 +395,97 @@ function autoTemplateForIndustry(industry = "", kind = "generic") {
   // Always Template B for these verticals
   if (ALWAYS_POSTER_B_KINDS.has(kind)) return "poster_b";
 
-  // If it's a physical "fix/onsite" service -> Template A
+  // Physical "fix/onsite" service → Template A
   if (isServiceFixIndustry(industry)) return "flyer_a";
 
-  // Otherwise default -> Template B
+  // Otherwise default → Template B
   return "poster_b";
 }
 
-
 function classifyIndustry(s = "") {
-  const t = String(s).toLowerCase();
+  const t = String(s || "").toLowerCase();
   const has = (rx) => rx.test(t);
 
-  // --- FIX / TRADE / PHYSICAL SERVICES (Template A via isServiceFixIndustry) ---
-  // Keep kinds compatible with profileForIndustry() MAP (do NOT introduce new kinds).
-  if (
-    has(
-      /hvac|heating|cooling|air\s?conditioning|\bac\b|furnace|duct|thermostat|plumb|plumber|drain|clog|leak|sewer|septic|water\s?heater/
-    )
-  )
+  // ---- SERVICE / FIX (Template A) ----
+  if (has(/home\s*clean|cleaning|maid|janitor|housekeep|carpet\s*clean|window\s*clean|gutter\s*clean/))
+    return "home_cleaning";
+
+  if (has(/hvac|heating|cooling|air\s*conditioning|air\s*conditioner|a\/c|\bac\b|furnace|duct|thermostat|vent|heat\s*pump/))
     return "hvac_plumbing";
 
-  if (has(/clean|maid|janitor|housekeep|carpet\s?clean|window\s?clean/))
-    return "home_cleaning";
+  if (has(/plumb|plumber|drain|clog|leak|sewer|septic|water\s*heater/))
+    return "hvac_plumbing";
+
+  if (has(/electric|electrician|breaker|panel|wiring|outlet|lighting|ceiling\s*fan/))
+    return "electrical";
+
+  if (has(/pool|pool\s*clean|pool\s*service|hot\s*tub|spa\s*maintenance/))
+    return "pool_service";
+
+  if (has(/pest|extermin|termite|rodent|roach|bug\s*control|mosquito/))
+    return "pest_control";
+
+  if (has(/pressure\s*wash|power\s*wash/))
+    return "pressure_washing";
+
+  if (has(/roof|roofer|roofing|siding|gutter/))
+    return "roofing";
+
+  if (has(/handyman|home\s*repair/))
+    return "handyman";
+
+  if (has(/moving|mover|junk\s*removal|haul|dumpster/))
+    return "moving";
+
+  if (has(/locksmith|rekey|key\s*replacement|lockout/))
+    return "locksmith";
+
+  if (has(/garage\s*door|opener|springs/))
+    return "garage_door";
+
+  if (has(/appliance\s*repair|washer|dryer|fridge|refrigerator|oven|dishwasher/))
+    return "appliance_repair";
+
+  if (has(/concrete|foundation|paving|asphalt/))
+    return "concrete";
+
+  if (has(/fence|fencing|deck|patio/))
+    return "fence_deck";
+
+  if (has(/restoration|water\s*damage|mold|fire\s*damage/))
+    return "restoration";
 
   if (has(/landscap|lawn|tree|garden|yard|mulch|irrigation|sprinkler/))
     return "landscaping";
 
-  if (has(/auto|mechanic|tire|oil|detailing|car wash|brakes?|alignment/))
+  if (has(/auto|mechanic|tire|oil|detailing|car\s*wash|brakes?|alignment/))
     return "auto";
 
-  // Many other “fix” industries (pool, electrical, pest, roofing, handyman, etc.)
-  // should still be treated as service/fix → we return "generic" here and let
-  // isServiceFixIndustry() decide flyer_a vs poster_b.
-  if (
-    has(
-      /pool|hot\s?tub|spa\s?maintenance|electric|electrician|pest|extermin|termite|pressure\s?wash|power\s?wash|roof|roofer|roofing|siding|handyman|home\s?repair|moving|mover|junk\s?removal|haul|dumpster|locksmith|appliance\s?repair|garage\s?door|concrete|foundation|paving|asphalt|fence|fencing|deck|patio|restoration|water\s?damage|mold|fire\s?damage/
-    )
-  )
-    return "generic";
-
-  // --- PRODUCT / ONLINE / NON-FIX (Template B by default) ---
+  // ---- PRODUCT / NON-FIX (Template B) ----
   if (has(/floor|carpet|tile|vinyl|hardwood/)) return "flooring";
-
-  if (has(/restaurant|food|pizza|burger|cafe|bar|grill|taqueria|eat|diner/))
-    return "restaurant";
-
+  if (has(/restaurant|food|pizza|burger|cafe|bar|grill|taqueria|eat|diner/)) return "restaurant";
   if (has(/gym|fitness|trainer|yoga|crossfit|pilates/)) return "fitness";
-
   if (has(/salon|spa|barber|nail|lash|beauty/)) return "salon_spa";
-
   if (has(/real\s?estate|realtor|broker|homes?|listings?/)) return "real_estate";
-
   if (has(/fashion|apparel|clothing|boutique|shoe|jewel/)) return "fashion";
-
-  if (has(/electronics?|gadgets?|tech|laptop|phone|smart\s?home/))
-    return "electronics";
-
+  if (has(/electronics?|gadgets?|tech|laptop|phone|smart\s*home/)) return "electronics";
   if (has(/pet|groom|vet|animal/)) return "pets";
-
   if (has(/coffee|bakery|dessert|boba|tea/)) return "coffee";
-
-  // Online keywords catch (generic, and autoTemplateForIndustry will pick poster_b unless fix-signals exist)
-  if (
-    has(
-      /e-?commerce|shopify|dropship|online\s?store|brand|saas|app|software|course|coaching|agency|marketing/
-    )
-  ) {
-    return "generic";
-  }
 
   return "generic";
 }
-
 
 function profileForIndustry(industry = "") {
   const kind = classifyIndustry(industry);
 
   const PALETTES = {
-    base: {
-      header: "#0d3b66",
+    // Use the home-cleaning look as the default service palette
+    navy: {
+      header: "#0a3a4f",
       body: "#dff3f4",
       accent: "#ff8b4a",
       textOnDark: "#ffffff",
-      textOnLight: "#2b3a44",
+      textOnLight: "#24323b",
     },
     teal: {
       header: "#0b5563",
@@ -255,12 +494,12 @@ function profileForIndustry(industry = "") {
       textOnDark: "#ffffff",
       textOnLight: "#23343d",
     },
-    navy: {
-      header: "#113a5d",
-      body: "#e8f0f6",
-      accent: "#ff7b41",
+    slate: {
+      header: "#213043",
+      body: "#eaf2fb",
+      accent: "#f59e0b",
       textOnDark: "#ffffff",
-      textOnLight: "#213547",
+      textOnLight: "#182435",
     },
     wine: {
       header: "#3a2740",
@@ -276,18 +515,18 @@ function profileForIndustry(industry = "") {
       textOnDark: "#ffffff",
       textOnLight: "#273b33",
     },
-    slate: {
-      header: "#213043",
-      body: "#eaf2fb",
-      accent: "#f59e0b",
+    base: {
+      header: "#0a3a4f",
+      body: "#dff3f4",
+      accent: "#ff8b4a",
       textOnDark: "#ffffff",
-      textOnLight: "#182435",
+      textOnLight: "#24323b",
     },
   };
 
   const serviceLists = {
-    left: ["Free Quote", "Same-Day", "Licensed", "Insured"],
-    right: ["On-Site Work", "Upfront Pricing", "Fast Scheduling", "Quality Guaranteed"],
+    left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+    right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
   };
 
   const hvacLists = {
@@ -341,55 +580,52 @@ function profileForIndustry(industry = "") {
   };
 
   const MAP = {
-    // Service / fix → Template A (auto)
+    // --- Service / fix (Template A auto) ---
     home_cleaning: {
       headline: "HOME CLEANING SERVICES",
-      subline: "Apartment • Home • Office",
+      subline: "APARTMENT • HOME • OFFICE",
       cta: "CALL NOW!",
       palette: PALETTES.navy,
-      lists: {
-        left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-        right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
-      },
-      coverage: "Serving your area",
+      lists: serviceLists,
+      coverage: "Coverage area 25 Miles around your city",
       bgHint: "home cleaning",
     },
 
     hvac_plumbing: {
-      headline: "HVAC & PLUMBING",
-      subline: "Install • Repair • Maintenance",
-      cta: "SCHEDULE NOW",
-      palette: PALETTES.teal,
-      lists: hvacLists, // may be swapped to plumbing below
-      coverage: "Emergency service available",
-      bgHint: "hvac plumbing",
+      headline: "HVAC SERVICES",
+      subline: "REPAIR • INSTALL • MAINTENANCE",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
+      lists: hvacLists,
+      coverage: "Same-day service available",
+      bgHint: "hvac service",
     },
 
     electrical: {
       headline: "ELECTRICAL SERVICES",
-      subline: "Repairs • Installs • Upgrades",
+      subline: "REPAIRS • INSTALLS • UPGRADES",
       cta: "CALL NOW!",
-      palette: PALETTES.slate,
+      palette: PALETTES.navy,
       lists: electricalLists,
       coverage: "Serving your area",
       bgHint: "electrician",
     },
 
     landscaping: {
-      headline: "LANDSCAPING & LAWN CARE",
-      subline: "Clean-ups • Maintenance • Installs",
-      cta: "GET A QUOTE",
-      palette: PALETTES.forest,
+      headline: "LAWN CARE SERVICES",
+      subline: "MOWING • CLEANUPS • MAINTENANCE",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
       lists: landscapingLists,
       coverage: "Serving your area",
       bgHint: "landscaping",
     },
 
     auto: {
-      headline: "AUTO REPAIR & SERVICE",
-      subline: "Reliable • Fast • Affordable",
+      headline: "AUTO SERVICE",
+      subline: "FAST • RELIABLE • AFFORDABLE",
       cta: "CALL NOW!",
-      palette: PALETTES.slate,
+      palette: PALETTES.navy,
       lists: autoLists,
       coverage: "Same-day appointments available",
       bgHint: "auto repair",
@@ -397,9 +633,9 @@ function profileForIndustry(industry = "") {
 
     pool_service: {
       headline: "POOL CLEANING SERVICE",
-      subline: "Weekly • One-Time • Repairs",
-      cta: "GET A QUOTE",
-      palette: PALETTES.teal,
+      subline: "WEEKLY • ONE-TIME • REPAIRS",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
       lists: poolLists,
       coverage: "Serving your area",
       bgHint: "pool service",
@@ -407,9 +643,9 @@ function profileForIndustry(industry = "") {
 
     pest_control: {
       headline: "PEST CONTROL SERVICE",
-      subline: "Safe • Effective • Reliable",
-      cta: "SCHEDULE NOW",
-      palette: PALETTES.forest,
+      subline: "SAFE • EFFECTIVE • RELIABLE",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
       lists: pestLists,
       coverage: "Serving your area",
       bgHint: "pest control",
@@ -417,8 +653,8 @@ function profileForIndustry(industry = "") {
 
     pressure_washing: {
       headline: "PRESSURE WASHING",
-      subline: "Homes • Driveways • Patios",
-      cta: "GET A QUOTE",
+      subline: "HOMES • DRIVEWAYS • PATIOS",
+      cta: "CALL NOW!",
       palette: PALETTES.navy,
       lists: pressureWashLists,
       coverage: "Serving your area",
@@ -427,9 +663,9 @@ function profileForIndustry(industry = "") {
 
     roofing: {
       headline: "ROOFING SERVICES",
-      subline: "Repairs • Replacements • Inspections",
+      subline: "REPAIRS • REPLACEMENTS • INSPECTIONS",
       cta: "CALL NOW!",
-      palette: PALETTES.slate,
+      palette: PALETTES.navy,
       lists: roofingLists,
       coverage: "Serving your area",
       bgHint: "roofing",
@@ -437,19 +673,22 @@ function profileForIndustry(industry = "") {
 
     handyman: {
       headline: "HANDYMAN SERVICES",
-      subline: "Repairs • Installs • Maintenance",
-      cta: "GET A QUOTE",
-      palette: PALETTES.base,
-      lists: serviceLists,
+      subline: "REPAIRS • INSTALLS • MAINTENANCE",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
+      lists: {
+        left: ["Repairs", "Installs", "Maintenance", "Upgrades"],
+        right: ["Drywall", "Doors", "Fixtures", "Shelving", "Tile", "Painting"],
+      },
       coverage: "Serving your area",
       bgHint: "handyman",
     },
 
     moving: {
       headline: "MOVING SERVICES",
-      subline: "Fast • Careful • On Time",
-      cta: "BOOK TODAY",
-      palette: PALETTES.wine,
+      subline: "FAST • CAREFUL • ON TIME",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
       lists: movingLists,
       coverage: "Serving your area",
       bgHint: "moving company",
@@ -457,9 +696,9 @@ function profileForIndustry(industry = "") {
 
     locksmith: {
       headline: "LOCKSMITH SERVICES",
-      subline: "Home • Auto • Commercial",
+      subline: "HOME • AUTO • COMMERCIAL",
       cta: "CALL NOW!",
-      palette: PALETTES.slate,
+      palette: PALETTES.navy,
       lists: {
         left: ["Lockouts", "Rekey", "Repair", "Install"],
         right: ["Homes", "Cars", "Businesses", "Keys", "Deadbolts", "Smart Locks"],
@@ -470,8 +709,8 @@ function profileForIndustry(industry = "") {
 
     garage_door: {
       headline: "GARAGE DOOR SERVICE",
-      subline: "Repair • Install • Replace",
-      cta: "SCHEDULE NOW",
+      subline: "REPAIR • INSTALL • REPLACE",
+      cta: "CALL NOW!",
       palette: PALETTES.navy,
       lists: {
         left: ["Springs", "Openers", "Tracks", "Panels"],
@@ -483,9 +722,9 @@ function profileForIndustry(industry = "") {
 
     appliance_repair: {
       headline: "APPLIANCE REPAIR",
-      subline: "Fast • Reliable • Affordable",
+      subline: "FAST • RELIABLE • AFFORDABLE",
       cta: "CALL NOW!",
-      palette: PALETTES.teal,
+      palette: PALETTES.navy,
       lists: {
         left: ["Fridge", "Washer", "Dryer", "Oven"],
         right: ["Dishwasher", "Microwave", "Same-Day", "Warranty"],
@@ -495,10 +734,10 @@ function profileForIndustry(industry = "") {
     },
 
     concrete: {
-      headline: "CONCRETE & FOUNDATION",
-      subline: "Driveways • Patios • Slabs",
-      cta: "GET A QUOTE",
-      palette: PALETTES.forest,
+      headline: "CONCRETE SERVICES",
+      subline: "DRIVEWAYS • PATIOS • SLABS",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
       lists: {
         left: ["Pour", "Repair", "Level", "Finish"],
         right: ["Driveways", "Sidewalks", "Patios", "Foundations", "Stamped", "Commercial"],
@@ -509,9 +748,9 @@ function profileForIndustry(industry = "") {
 
     fence_deck: {
       headline: "FENCE & DECK SERVICE",
-      subline: "Build • Repair • Replace",
-      cta: "GET A QUOTE",
-      palette: PALETTES.wine,
+      subline: "BUILD • REPAIR • REPLACE",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
       lists: {
         left: ["Wood", "Vinyl", "Chain Link", "Stain"],
         right: ["Privacy", "Gates", "Repairs", "New Builds", "Pergolas", "Patios"],
@@ -522,9 +761,9 @@ function profileForIndustry(industry = "") {
 
     restoration: {
       headline: "RESTORATION SERVICES",
-      subline: "Water • Mold • Fire Damage",
+      subline: "WATER • MOLD • FIRE DAMAGE",
       cta: "CALL NOW!",
-      palette: PALETTES.slate,
+      palette: PALETTES.navy,
       lists: {
         left: ["Emergency", "Inspect", "Remove", "Restore"],
         right: ["Water Damage", "Mold", "Smoke", "Odor", "Dry-Out", "Rebuild"],
@@ -533,7 +772,7 @@ function profileForIndustry(industry = "") {
       bgHint: "restoration",
     },
 
-    // Non-fix / retail / online → Template B (auto)
+    // --- Non-fix / retail / online (Template B auto) ---
     flooring: { palette: PALETTES.forest, bgHint: "flooring" },
     restaurant: { palette: PALETTES.wine, bgHint: "restaurant" },
     salon_spa: { palette: PALETTES.wine, bgHint: "salon spa" },
@@ -546,26 +785,31 @@ function profileForIndustry(industry = "") {
 
     generic: {
       headline: "LOCAL SERVICES",
-      subline: "Reliable • Friendly • On Time",
-      cta: "CONTACT US",
-      palette: PALETTES.base,
-      lists: serviceLists,
-      coverage: "Serving your area",
-      bgHint: "generic",
+      subline: "RELIABLE • FRIENDLY • ON TIME",
+      cta: "CALL NOW!",
+      palette: PALETTES.navy,
+      lists: {
+        left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+        right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
+      },
+      coverage: "Coverage area 25 Miles around your city",
+      bgHint: "local services",
     },
   };
 
   let prof = MAP[kind] || MAP.generic;
 
-  // Special case: if user explicitly typed "plumb" we show plumbing list (still Template A auto)
-  if (kind === "hvac_plumbing" && /plumb/i.test(industry)) {
+  // Special case: if user explicitly typed plumbing terms, switch lists
+  if (kind === "hvac_plumbing" && /plumb|water\s*heater|drain|sewer|septic|leak/i.test(String(industry || ""))) {
     prof = { ...prof, lists: plumbingLists };
   }
 
-   const template = prof?.template || autoTemplateForIndustry(industry, kind);
-  return { kind, ...prof, template };
+  // Always compute template from your global rule
+  const template = autoTemplateForIndustry(industry, kind);
 
+  return { kind, ...prof, template };
 }
+
 
 /* ------------------------ Copy helpers ------------------------ */
 
@@ -1219,39 +1463,43 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Home-cleaning style flyer template (like the reference image)
-  // - Big stacked headline in dark top band
-  // - Subline under headline
-  // - Diagonal split into light body area
-  // - Center illustration (simple SVG character)
-  // - Left checklist + Right services offered list
-  // - Bottom location line + big "CALL NOW!" phone line
+  // Home-cleaning style flyer template (match reference layout)
+  // - WHITE base
+  // - DARK top header
+  // - Light diagonal body panel
+  // - Bottom WHITE strip
+  // - Orange checkmarks on left
+  // - Right bullet list
+  // - Big call line at bottom
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      .hBig{font:900 118px/1.0 Inter,system-ui; letter-spacing:0.02em;}
-      .hSub{font:800 32px/1.1 Inter,system-ui; letter-spacing:0.12em;}
-      .label{font:800 34px/1.1 Inter,system-ui;}
+      .hBig{font:900 118px/0.95 Inter,system-ui; letter-spacing:0.02em;}
+      .hSub{font:800 30px/1 Inter,system-ui; letter-spacing:0.10em;}
+      .label{font:800 34px/1 Inter,system-ui;}
       .li{font:700 34px/1.2 Inter,system-ui;}
-      .meta{font:700 26px/1.2 Inter,system-ui;}
-      .call{font:900 54px/1 Inter,system-ui; letter-spacing:0.02em;}
+      .meta{font:700 24px/1.2 Inter,system-ui;}
+      .call{font:900 54px/1 Inter,system-ui; letter-spacing:0.01em;}
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
     </style>
   </defs>
 
-  <!-- Base -->
-  <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
+  <!-- WHITE base like reference -->
+  <rect width="${W}" height="${H}" fill="#ffffff"/>
 
-  <!-- Top dark header -->
-  <rect x="0" y="0" width="${W}" height="360" fill="{{palette.header}}"/>
+  <!-- Top dark header band -->
+  <rect x="0" y="0" width="${W}" height="340" fill="{{palette.header}}"/>
 
-  <!-- Diagonal split (light panel) -->
-  <path d="M0 360 L${W} 300 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
+  <!-- Light diagonal panel -->
+  <path d="M0 340 L${W} 285 L${W} 830 L0 890 Z" fill="{{palette.body}}"/>
 
-  <!-- Headline (stacked like template) -->
-  <g transform="translate(${W / 2}, 120)">
+  <!-- Bottom WHITE strip -->
+  <rect x="0" y="${H - 170}" width="${W}" height="170" fill="#ffffff"/>
+
+  <!-- Headline -->
+  <g transform="translate(${W / 2}, 118)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{^headlineLines}}{{headline}}{{/headlineLines}}
       {{#headlineLines}}
@@ -1259,91 +1507,81 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       {{/headlineLines}}
     </text>
 
-    <text class="hSub tCenter" y="170" fill="{{palette.textOnDark}}" opacity="0.9">
+    <text class="hSub tCenter" y="205" fill="#cbd5e1" opacity="0.95">
       {{subline}}
     </text>
   </g>
 
-  <!-- Center illustration (simple “cleaner” character) -->
+  <!-- Center illustration -->
   {{#showIcons}}
-  <g transform="translate(${W / 2 - 70}, 430)">
-    <!-- mop handle -->
-    <rect x="145" y="40" width="10" height="250" rx="5" fill="#a3a3a3" opacity="0.9"/>
-    <!-- mop head -->
-    <ellipse cx="150" cy="300" rx="42" ry="18" fill="#fda4af"/>
-    <ellipse cx="120" cy="304" rx="18" ry="10" fill="#fda4af" opacity="0.9"/>
-    <ellipse cx="180" cy="304" rx="18" ry="10" fill="#fda4af" opacity="0.9"/>
+  <g transform="translate(${W / 2 - 70}, 400)">
+    <!-- duster -->
+    <ellipse cx="160" cy="85" rx="28" ry="12" fill="#f9a8d4"/>
+    <ellipse cx="132" cy="92" rx="12" ry="8" fill="#f9a8d4" opacity="0.9"/>
+    <ellipse cx="188" cy="92" rx="12" ry="8" fill="#f9a8d4" opacity="0.9"/>
+    <rect x="120" y="98" width="78" height="10" rx="5" fill="#9ca3af" opacity="0.9"/>
 
     <!-- head -->
-    <circle cx="70" cy="55" r="34" fill="#f2c6a8"/>
+    <circle cx="70" cy="58" r="34" fill="#f2c6a8"/>
     <!-- hair -->
-    <path d="M40 55 C45 18, 95 18, 100 55 C98 35, 85 25, 70 25 C55 25, 42 35, 40 55 Z"
+    <path d="M40 58 C45 18, 95 18, 100 58 C98 36, 85 26, 70 26 C55 26, 42 36, 40 58 Z"
       fill="#7c2d12"/>
     <!-- face -->
-    <circle cx="60" cy="52" r="4" fill="#111827"/>
-    <circle cx="82" cy="52" r="4" fill="#111827"/>
-    <path d="M60 70 C66 78, 76 78, 82 70" stroke="#111827" stroke-width="4" fill="none" stroke-linecap="round"/>
-    <!-- band -->
-    <path d="M38 45 C55 22, 85 22, 102 45" stroke="#cbd5e1" stroke-width="10" fill="none" stroke-linecap="round"/>
+    <circle cx="60" cy="56" r="4" fill="#111827"/>
+    <circle cx="82" cy="56" r="4" fill="#111827"/>
+    <path d="M60 74 C66 82, 76 82, 82 74" stroke="#111827" stroke-width="4" fill="none" stroke-linecap="round"/>
+    <!-- headband -->
+    <path d="M38 48 C55 22, 85 22, 102 48" stroke="#cbd5e1" stroke-width="10" fill="none" stroke-linecap="round"/>
 
     <!-- body -->
-    <path d="M35 98 C35 78, 105 78, 105 98 L105 200 C105 230, 35 230, 35 200 Z" fill="#0f3b5a" opacity="0.95"/>
+    <path d="M35 105 C35 80, 105 80, 105 105 L105 212 C105 242, 35 242, 35 212 Z"
+      fill="#0f3b5a" opacity="0.95"/>
     <!-- apron -->
-    <path d="M45 130 C55 115, 85 115, 95 130 L95 210 C95 225, 45 225, 45 210 Z" fill="#cbd5e1" opacity="0.95"/>
-
-    <!-- arms -->
-    <path d="M35 125 C15 145, 15 160, 35 175" stroke="#0f3b5a" stroke-width="16" fill="none" stroke-linecap="round"/>
-    <path d="M105 125 C125 145, 128 160, 112 180" stroke="#0f3b5a" stroke-width="16" fill="none" stroke-linecap="round"/>
+    <path d="M45 138 C55 120, 85 120, 95 138 L95 225 C95 240, 45 240, 45 225 Z"
+      fill="#cbd5e1" opacity="0.96"/>
 
     <!-- legs -->
-    <rect x="55" y="230" width="14" height="55" rx="7" fill="#111827"/>
-    <rect x="80" y="230" width="14" height="55" rx="7" fill="#111827"/>
+    <rect x="55" y="242" width="14" height="55" rx="7" fill="#111827"/>
+    <rect x="80" y="242" width="14" height="55" rx="7" fill="#111827"/>
     <!-- shoes -->
-    <ellipse cx="62" cy="292" rx="18" ry="8" fill="#111827"/>
-    <ellipse cx="87" cy="292" rx="18" ry="8" fill="#111827"/>
+    <ellipse cx="62" cy="305" rx="18" ry="8" fill="#111827"/>
+    <ellipse cx="87" cy="305" rx="18" ry="8" fill="#111827"/>
   </g>
   {{/showIcons}}
 
-  <!-- Left checklist -->
-  <g transform="translate(110, 520)">
+  <!-- Left checklist (orange checks like reference) -->
+  <g transform="translate(120, 520)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
-        <!-- check icon -->
-        <circle cx="16" cy="14" r="12" fill="{{palette.accent}}" opacity="0.95"/>
-        <path d="M10 14 L15 19 L24 9" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <text class="li tLeft" x="44" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
+        <path d="M0 14 L12 26 L34 6"
+          stroke="{{palette.accent}}" stroke-width="6"
+          fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <text class="li tLeft" x="52" y="28" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.left}}
   </g>
 
   <!-- Right services list -->
-  <g transform="translate(${W - 470}, 520)">
+  <g transform="translate(${W - 470}, 510)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.9">{{servicesLabel}}</text>
 
     {{#lists.right}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.75"/>
-        <text class="li tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+        <circle cx="10" cy="12" r="4" fill="{{palette.textOnLight}}" opacity="0.65"/>
+        <text class="li tLeft" x="28" y="24" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.right}}
   </g>
 
-  <!-- Bottom meta / coverage -->
+  <!-- Coverage line -->
   {{#coverage}}
-  <g transform="translate(${W / 2}, ${H - 180})">
-    <!-- location pin -->
-    <g transform="translate(-250, -18)">
-      <path d="M18 2 C9 2, 2 9, 2 18 C2 32, 18 46, 18 46 C18 46, 34 32, 34 18 C34 9, 27 2, 18 2 Z"
-        fill="{{palette.accent}}" opacity="0.9"/>
-      <circle cx="18" cy="18" r="6" fill="#ffffff"/>
-    </g>
-    <text class="meta tCenter" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.8">📍 {{coverage}}</text>
+  <g transform="translate(${W / 2}, ${H - 210})">
+    <text class="meta tCenter" x="0" y="0" fill="#64748b">📍 {{coverage}}</text>
   </g>
   {{/coverage}}
 
   <!-- Call now line -->
   <g transform="translate(${W / 2}, ${H - 95})">
-    <!-- phone icon circle -->
     <g transform="translate(-420, -44)">
       <circle cx="44" cy="44" r="34" fill="{{palette.accent}}" opacity="0.95"/>
       <path d="M38 34 C46 44, 50 48, 60 54 C56 60, 50 64, 44 60 C34 54, 28 48, 22 38 C18 32, 22 26, 28 22 C34 28, 34 28, 38 34 Z"
@@ -1356,6 +1594,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </g>
 </svg>`;
 }
+
 
 
 /**
@@ -1756,10 +1995,11 @@ router.post("/generate-static-ad", async (req, res) => {
     const industry = inputs.industry || a.industry || "Local Services";
     const prof = profileForIndustry(industry);
 
-       const template =
-      templateReq !== "auto"
-        ? templateReq
-        : (prof.template || autoTemplateForIndustry(industry, prof.kind));
+     const template =
+  templateReq !== "auto"
+    ? templateReq
+    : (prof.template || "poster_b");
+
 
 
 
@@ -2274,7 +2514,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     };
 
     const prof = profileForIndustry(industry);
-    const isPoster = (prof.template || autoTemplateForIndustry(industry, prof.kind)) === "poster_b";
+const isPoster = (prof.template || "poster_b") === "poster_b";
 
 
 
