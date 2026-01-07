@@ -1462,28 +1462,29 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Clean flyer A (reference-like)
-  // Updates:
-  // - Bigger blue fold + cleaner diagonal
-  // - Headline always inside blue (no leaking)
-  // - Subline sits directly under headline (inside blue)
-  // - Left checks = orange check ONLY (no circle) + bigger text + moved left
-  // - Removes the middle circle/badge design completely
-  // - Keeps everything aligned + clean
+  // Home-cleaning style Flyer A (clean + aligned)
+  // Fixes:
+  // - Bigger dark header (fold pulled DOWN)
+  // - Headline moved DOWN + slightly smaller so it never leaks
+  // - Horizontal bullets line placed under header on light bg (black)
+  // - Left checks are orange-only (no circles), moved left, bigger text
+  // - No phone/call-now/bottom sentence
+  // - Subline stays inside header under headline
 
-  const HEADER_H = 470;      // bigger blue area
-  const DIAG_RIGHT_Y = 385;  // diagonal tilt like reference
+  const HEADER_H = 520;      // ✅ pulled DOWN (bigger blue)
+  const DIAG_RIGHT_Y = 420;  // diagonal angle like reference
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      .hBig{font:900 102px/0.95 Inter,system-ui; letter-spacing:0.02em;}
+      .hBig{font:900 96px/0.92 Inter,system-ui; letter-spacing:0.02em;}
       .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
+      .hRow{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.08em;}
 
       .label{font:800 34px/1.1 Inter,system-ui;}
-      .liL{font:800 38px/1.2 Inter,system-ui;}  /* LEFT list bigger */
-      .liR{font:700 34px/1.2 Inter,system-ui;}  /* RIGHT list normal */
+      .liL{font:800 42px/1.15 Inter,system-ui;}
+      .liR{font:700 34px/1.2 Inter,system-ui;}
 
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
@@ -1499,24 +1500,34 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <!-- Diagonal split -->
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline (centered, tight) -->
-  <g transform="translate(${W / 2}, 108)">
+  <!-- Small accent bars (pazaz, tasteful) -->
+  <rect x="90" y="${HEADER_H - 18}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+  <rect x="${W - 330}" y="${HEADER_H - 18}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+
+  <!-- Headline + subline (moved DOWN so it never leaks) -->
+  <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
         <tspan x="0" dy="{{dy}}">{{line}}</tspan>
       {{/headlineLines}}
     </text>
 
-    <text class="hSub tCenter" x="0" y="{{sublineY}}" fill="{{palette.textOnDark}}" opacity="0.70">
+    <text class="hSub tCenter" x="0" y="{{sublineY}}" fill="{{palette.textOnDark}}" opacity="0.72">
       {{subline}}
     </text>
   </g>
 
-  <!-- Left checklist (moved left, orange check only) -->
-  <g transform="translate(170, 545)">
+  <!-- Horizontal bullets line under header (black, clean) -->
+  {{#hBulletsLine}}
+  <text class="hRow tCenter" x="${W / 2}" y="${HEADER_H + 64}" fill="{{palette.textOnLight}}" opacity="0.95">
+    {{hBulletsLine}}
+  </text>
+  {{/hBulletsLine}}
+
+  <!-- Left checklist (moved left, orange check only, bigger text) -->
+  <g transform="translate(140, 635)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
-        <!-- orange check (NO circle) -->
         <path d="M6 16 L14 24 L30 6"
           stroke="{{palette.accent}}" stroke-width="6"
           fill="none" stroke-linecap="round" stroke-linejoin="round" />
@@ -1526,7 +1537,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </g>
 
   <!-- Right services list -->
-  <g transform="translate(${W - 480}, 545)">
+  <g transform="translate(${W - 480}, 635)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.90">{{servicesLabel}}</text>
 
     {{#lists.right}}
@@ -2072,9 +2083,9 @@ if (template === "flyer_a") {
     .replace(/\s+/g, " ")
     .trim();
 
-  const HEAD_FS = 102;
+  // ✅ slightly smaller headline so it never leaks
+  const HEAD_FS = 96;
 
-  // wrap to 2–3 lines, but keep it compact vertically
   const headlineLinesRaw = wrapTextToWidth(
     headlineUpper,
     HEAD_FS,
@@ -2085,8 +2096,8 @@ if (template === "flyer_a") {
     true
   );
 
-  // tighter line gap (your SVG headline uses line-height 0.95)
-  const lineGap = Math.round(HEAD_FS * 0.94);
+  // ✅ tighter but clean
+  const lineGap = Math.round(HEAD_FS * 0.90);
 
   const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
     line: l.line,
@@ -2098,23 +2109,30 @@ if (template === "flyer_a") {
     .replace(/\s+/g, " ")
     .trim();
 
-  // IMPORTANT: tplFlyerA renders headline+subline inside a <g translate(...,108)>,
-  // so sublineY must be RELATIVE (no big extra padding like +18).
+  // ✅ RELATIVE inside the header group (tplFlyerA uses translate(...,140))
   const sublineY =
     (headlineLines.length - 1) * lineGap +
     Math.round(HEAD_FS * 0.88) +
-    22;
+    26;
+
+  // ✅ Horizontal bullet row under header (black on light)
+  const hBulletsLine = (Array.isArray(mergedKnobs.lists?.right) ? mergedKnobs.lists.right : [])
+    .slice(0, 3)
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .join(" • ")
+    .toUpperCase();
 
   const vars = {
     headlineLines,
     subline: sublineUpper,
     sublineY,
+    hBulletsLine,
     palette: mergedKnobs.palette,
     lists: listsLaidOut,
     showIcons: false,
     servicesLabel: "Services Offered",
   };
-
 
 
   const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
@@ -2777,7 +2795,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     .replace(/\s+/g, " ")
     .trim();
 
-  const HEAD_FS = 102;
+  const HEAD_FS = 96;
 
   const headlineLinesRaw = wrapTextToWidth(
     headlineUpper,
@@ -2789,7 +2807,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     true
   );
 
-  const lineGap = Math.round(HEAD_FS * 0.94);
+  const lineGap = Math.round(HEAD_FS * 0.90);
 
   const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
     line: l.line,
@@ -2804,18 +2822,25 @@ router.post("/generate-image-from-prompt", async (req, res) => {
   const sublineY =
     (headlineLines.length - 1) * lineGap +
     Math.round(HEAD_FS * 0.88) +
-    22;
+    26;
+
+  const hBulletsLine = (Array.isArray(prof?.lists?.right) ? prof.lists.right : [])
+    .slice(0, 3)
+    .map((x) => String(x || "").trim())
+    .filter(Boolean)
+    .join(" • ")
+    .toUpperCase();
 
   const vars = {
     headlineLines,
     subline: sublineUpper,
     sublineY,
+    hBulletsLine,
     palette,
     lists,
     showIcons: false,
     servicesLabel: "Services Offered",
   };
-
 
 
   const svg = mustache.render(tplFlyerA({ W, H }), vars);
