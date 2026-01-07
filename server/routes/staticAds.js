@@ -1462,21 +1462,29 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Clean Home-cleaning style flyer template (reference-like)
-  // Fixes:
-  // - Headline scooted up so it never leaks
-  // - Subline becomes dark/clean + gets a subtle strip behind it (no clash)
-  // - Keeps the columns + center badge clean and aligned
-  // - No bottom sentence / no call-now area
+  // Clean flyer A (reference-like)
+  // Updates:
+  // - Bigger blue fold + cleaner diagonal
+  // - Headline always inside blue (no leaking)
+  // - Subline sits directly under headline (inside blue)
+  // - Left checks = orange check ONLY (no circle) + bigger text + moved left
+  // - Removes the middle circle/badge design completely
+  // - Keeps everything aligned + clean
+
+  const HEADER_H = 470;      // bigger blue area
+  const DIAG_RIGHT_Y = 385;  // diagonal tilt like reference
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      .hBig{font:900 106px/0.98 Inter,system-ui; letter-spacing:0.02em;}
-      .hSub{font:800 30px/1.1 Inter,system-ui; letter-spacing:0.12em;}
+      .hBig{font:900 102px/0.95 Inter,system-ui; letter-spacing:0.02em;}
+      .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
+
       .label{font:800 34px/1.1 Inter,system-ui;}
-      .li{font:700 34px/1.2 Inter,system-ui;}
+      .liL{font:800 38px/1.2 Inter,system-ui;}  /* LEFT list bigger */
+      .liR{font:700 34px/1.2 Inter,system-ui;}  /* RIGHT list normal */
+
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
     </style>
@@ -1486,62 +1494,47 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
 
   <!-- Top dark header -->
-  <rect x="0" y="0" width="${W}" height="430" fill="{{palette.header}}"/>
+  <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
 
   <!-- Diagonal split -->
-  <path d="M0 430 L${W} 360 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
+  <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline (headline group scooted up) -->
-  <g transform="translate(${W / 2}, 118)">
+  <!-- Headline + subline (centered, tight) -->
+  <g transform="translate(${W / 2}, 108)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
         <tspan x="0" dy="{{dy}}">{{line}}</tspan>
       {{/headlineLines}}
     </text>
 
-    <!-- subtle strip behind the subline (clean “pazaz”, no clash) -->
-    <g transform="translate(0, {{sublineY}})">
-      <rect x="-420" y="-34" width="840" height="56" rx="0" fill="#ffffff" opacity="0.30"/>
-      <text class="hSub tCenter" x="0" y="6" fill="{{palette.textOnLight}}" opacity="0.90">
-        {{subline}}
-      </text>
-    </g>
+    <text class="hSub tCenter" x="0" y="{{sublineY}}" fill="{{palette.textOnDark}}" opacity="0.70">
+      {{subline}}
+    </text>
   </g>
 
-  <!-- Left checklist column -->
-  <g transform="translate(230, 540)">
+  <!-- Left checklist (moved left, orange check only) -->
+  <g transform="translate(170, 545)">
     {{#lists.left}}
-      {{#show}}
       <g transform="translate(0, {{y}})">
-        <circle cx="16" cy="14" r="12" fill="{{palette.accent}}" opacity="0.95"/>
-        <path d="M10 14 L15 19 L24 9" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <text class="li tLeft" x="44" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
+        <!-- orange check (NO circle) -->
+        <path d="M6 16 L14 24 L30 6"
+          stroke="{{palette.accent}}" stroke-width="6"
+          fill="none" stroke-linecap="round" stroke-linejoin="round" />
+        <text class="liL tLeft" x="54" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
-      {{/show}}
     {{/lists.left}}
   </g>
 
-  <!-- Right services column -->
-  <g transform="translate(${W - 480}, 540)">
-    <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.9">{{servicesLabel}}</text>
+  <!-- Right services list -->
+  <g transform="translate(${W - 480}, 545)">
+    <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.90">{{servicesLabel}}</text>
 
     {{#lists.right}}
-      {{#show}}
       <g transform="translate(0, {{y}})">
         <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.70"/>
-        <text class="li tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+        <text class="liR tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
-      {{/show}}
     {{/lists.right}}
-  </g>
-
-  <!-- Center badge (perfectly centered between columns) -->
-  <g transform="translate(${W / 2}, 605)">
-    <circle cx="0" cy="0" r="56" fill="{{palette.accent}}" opacity="0.18"/>
-    <circle cx="0" cy="0" r="40" fill="{{palette.accent}}" opacity="0.10"/>
-    <circle cx="0" cy="0" r="28" fill="#ffffff" opacity="0.92"/>
-    <path d="M0 -12 L6 0 L0 12 L-6 0 Z" fill="{{palette.accent}}" opacity="0.9"/>
-    <path d="M-12 0 L0 6 L12 0 L0 -6 Z" fill="{{palette.accent}}" opacity="0.65"/>
   </g>
 
 </svg>`;
@@ -1748,18 +1741,19 @@ function layoutList(items, len) {
 }
 
 function withListLayout(lists = {}) {
-  const left = Array.isArray(lists.left) ? lists.left : [];
-  const right = Array.isArray(lists.right) ? lists.right : [];
+  const leftRaw = (lists.left || []).slice(0, 6);
+  const rightRaw = (lists.right || []).slice(0, 6);
 
-  // Keep both columns visually even:
-  // - Use the larger count, capped to 6
-  const len = Math.min(6, Math.max(left.length, right.length, 4));
+  const n = leftRaw.length && rightRaw.length
+    ? Math.min(leftRaw.length, rightRaw.length)
+    : Math.max(leftRaw.length, rightRaw.length);
 
   return {
-    left: layoutList(left, len),
-    right: layoutList(right, len),
+    left: layoutList(leftRaw.slice(0, n)),
+    right: layoutList(rightRaw.slice(0, n)),
   };
 }
+
 
 
 // updated: allow forcing more lines for the title so it doesn't get chopped
@@ -2072,15 +2066,15 @@ if (template === "flyer_a") {
   const listsLaidOut = withListLayout(mergedKnobs.lists || {});
 
       // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
+      // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
       const headlineUpper = String(mergedInputs.headline || "")
         .toUpperCase()
         .replace(/\s+/g, " ")
         .trim();
 
-      // slightly smaller font so it stays inside the blue area
-      const HEAD_FS = 106;
+      const HEAD_FS = 102;
 
-      const headlineLines = wrapTextToWidth(
+      const headlineLinesRaw = wrapTextToWidth(
         headlineUpper,
         HEAD_FS,
         1080,
@@ -2090,13 +2084,24 @@ if (template === "flyer_a") {
         true
       );
 
+      // tighter vertical wrapping so subline can sit right under headline
+      const lineGap = Math.round(HEAD_FS * 0.92);
+      const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
+        line: l.line,
+        dy: i === 0 ? 0 : lineGap,
+      }));
+
       const sublineUpper = String(mergedInputs.subline || "")
         .toUpperCase()
         .replace(/\s+/g, " ")
         .trim();
 
-      // tighter/cleaner placement
-      const sublineY = 18 + (headlineLines.length || 2) * (HEAD_FS * 1.02);
+      // baseline just under headline stack
+      const sublineY =
+        18 +
+        (headlineLines.length - 1) * lineGap +
+        Math.round(HEAD_FS * 0.95);
+
 
 
       const vars = {
@@ -2107,6 +2112,8 @@ if (template === "flyer_a") {
         lists: listsLaidOut,
         showIcons: false, // we're not using the person illustration
         servicesLabel: "Services Offered",
+                sublineY,
+
       };
 
 
@@ -2765,16 +2772,14 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     right: rawRight.slice(0, count),
   });
 
-      const headlineUpper = String(
-        overlay.headline || prof.headline || "LOCAL SERVICES"
-      )
+            const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
         .toUpperCase()
         .replace(/\s+/g, " ")
         .trim();
 
-      const HEAD_FS = 106;
+      const HEAD_FS = 102;
 
-      const headlineLines = wrapTextToWidth(
+      const headlineLinesRaw = wrapTextToWidth(
         headlineUpper,
         HEAD_FS,
         1080,
@@ -2784,14 +2789,21 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         true
       );
 
-      const sublineUpper = String(mergedInputs.subline || "")
+      const lineGap = Math.round(HEAD_FS * 0.92);
+      const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
+        line: l.line,
+        dy: i === 0 ? 0 : lineGap,
+      }));
+
+      const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
         .toUpperCase()
         .replace(/\s+/g, " ")
         .trim();
 
-      // tighter/cleaner placement
-      const sublineY = 18 + (headlineLines.length || 2) * (HEAD_FS * 1.02);
-
+      const sublineY =
+        18 +
+        (headlineLines.length - 1) * lineGap +
+        Math.round(HEAD_FS * 0.95);
 
       const vars = {
         headlineLines,
