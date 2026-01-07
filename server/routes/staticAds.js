@@ -1462,22 +1462,22 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Home-cleaning style flyer template (like the reference image)
-  // - Big stacked headline in dark top band
-  // - Subline under headline
-  // - Diagonal split into light body area
-  // - Center badge icon (no person)
-  // - Left checklist + Right services offered list
-  // - Bottom coverage line (NO phone / call-now footer)
+  // Clean Home-cleaning style flyer template (like reference)
+  // Fixes:
+  // - Blue header pulled down (more space)
+  // - Headline shrunk slightly + ALWAYS stays inside blue
+  // - Subline auto-positions under headline (no overlap)
+  // - Center badge stays centered between columns
+  // - Removes bottom sentence + removes call-now/phone area
+
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      .hBig{font:900 118px/1.0 Inter,system-ui; letter-spacing:0.02em;}
-      .hSub{font:800 32px/1.1 Inter,system-ui; letter-spacing:0.12em;}
+      .hBig{font:900 110px/1.0 Inter,system-ui; letter-spacing:0.02em;}
+      .hSub{font:800 30px/1.1 Inter,system-ui; letter-spacing:0.12em;}
       .label{font:800 34px/1.1 Inter,system-ui;}
       .li{font:700 34px/1.2 Inter,system-ui;}
-      .meta{font:700 26px/1.2 Inter,system-ui;}
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
     </style>
@@ -1486,80 +1486,63 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <!-- Base -->
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
 
-  <!-- Top dark header -->
-  <rect x="0" y="0" width="${W}" height="360" fill="{{palette.header}}"/>
+  <!-- Top dark header (pulled down) -->
+  <rect x="0" y="0" width="${W}" height="430" fill="{{palette.header}}"/>
 
-  <!-- Diagonal split (light panel) -->
-  <path d="M0 360 L${W} 300 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
+  <!-- Diagonal split (pulled down + clean slope like reference) -->
+  <path d="M0 430 L${W} 360 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline (stacked like template) -->
-  <g transform="translate(${W / 2}, 120)">
+  <!-- Headline + subline (sublineY is computed in JS vars) -->
+  <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
-      {{^headlineLines}}{{headline}}{{/headlineLines}}
       {{#headlineLines}}
         <tspan x="0" dy="{{dy}}">{{line}}</tspan>
       {{/headlineLines}}
     </text>
 
-    <text class="hSub tCenter" y="170" fill="{{palette.textOnDark}}" opacity="0.9">
+    <text class="hSub tCenter" y="{{sublineY}}" fill="{{palette.textOnDark}}" opacity="0.9">
       {{subline}}
     </text>
   </g>
 
-  <!-- Left checklist -->
-  <g transform="translate(150, 520)">
+  <!-- Left checklist column -->
+  <g transform="translate(230, 540)">
     {{#lists.left}}
+      {{#show}}
       <g transform="translate(0, {{y}})">
         <circle cx="16" cy="14" r="12" fill="{{palette.accent}}" opacity="0.95"/>
         <path d="M10 14 L15 19 L24 9" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
         <text class="li tLeft" x="44" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
+      {{/show}}
     {{/lists.left}}
   </g>
 
-  <!-- Center badge (perfectly between columns) -->
-  <g transform="translate(${W / 2}, 610)">
-    <!-- outer soft ring -->
-    <circle cx="0" cy="0" r="78" fill="{{palette.textOnLight}}" opacity="0.08"/>
-    <circle cx="0" cy="0" r="62" fill="{{palette.textOnLight}}" opacity="0.10"/>
-    <!-- main badge -->
-    <circle cx="0" cy="0" r="52" fill="{{palette.accent}}" opacity="0.22"/>
-    <circle cx="0" cy="0" r="38" fill="#ffffff" opacity="0.55"/>
-
-    <!-- simple compass/star -->
-    <g opacity="0.95">
-      <path d="M0 -26 L7 -7 L26 0 L7 7 L0 26 L-7 7 L-26 0 L-7 -7 Z"
-            fill="{{palette.accent}}"/>
-      <circle cx="0" cy="0" r="5" fill="#ffffff" opacity="0.9"/>
-    </g>
-  </g>
-
-  <!-- Right services list -->
-  <g transform="translate(${W - 420}, 520)">
+  <!-- Right services column -->
+  <g transform="translate(${W - 480}, 540)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.9">{{servicesLabel}}</text>
 
     {{#lists.right}}
+      {{#show}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.75"/>
+        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.70"/>
         <text class="li tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
+      {{/show}}
     {{/lists.right}}
   </g>
 
-  <!-- Bottom meta / coverage (moved down since phone footer removed) -->
-  {{#coverage}}
-  <g transform="translate(${W / 2}, ${H - 80})">
-    <g transform="translate(-250, -18)">
-      <path d="M18 2 C9 2, 2 9, 2 18 C2 32, 18 46, 18 46 C18 46, 34 32, 34 18 C34 9, 27 2, 18 2 Z"
-        fill="{{palette.accent}}" opacity="0.9"/>
-      <circle cx="18" cy="18" r="6" fill="#ffffff"/>
-    </g>
-    <text class="meta tCenter" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.85">📍 {{coverage}}</text>
+  <!-- Center badge (kept perfectly centered between columns) -->
+  <g transform="translate(${W / 2}, 605)">
+    <circle cx="0" cy="0" r="56" fill="{{palette.accent}}" opacity="0.18"/>
+    <circle cx="0" cy="0" r="40" fill="{{palette.accent}}" opacity="0.10"/>
+    <circle cx="0" cy="0" r="28" fill="#ffffff" opacity="0.9"/>
+    <path d="M0 -12 L6 0 L0 12 L-6 0 Z" fill="{{palette.accent}}" opacity="0.9"/>
+    <path d="M-12 0 L0 6 L12 0 L0 -6 Z" fill="{{palette.accent}}" opacity="0.65"/>
   </g>
-  {{/coverage}}
+
 </svg>`;
 }
-
 
 
 
@@ -1744,19 +1727,38 @@ function normalizeListsEqual(lists = {}, min = 4, max = 6) {
   };
 }
 
-function layoutList(items, startY = 56, step = 54, cap = 6) {
-  return (items || [])
-    .slice(0, cap)
-    .map((t, i) => ({ y: startY + i * step, text: t }));
+function layoutList(items, len) {
+  const startY = 56;
+  const step = 54;
+
+  const arr = Array.isArray(items) ? items.slice(0, 6) : [];
+  const out = [];
+
+  for (let i = 0; i < len; i++) {
+    const text = arr[i] ? String(arr[i]) : "";
+    out.push({
+      y: startY + i * step,
+      text,
+      show: !!text.trim(),
+    });
+  }
+  return out;
 }
 
 function withListLayout(lists = {}) {
-  const eq = normalizeListsEqual(lists, 4, 6);
+  const left = Array.isArray(lists.left) ? lists.left : [];
+  const right = Array.isArray(lists.right) ? lists.right : [];
+
+  // Keep both columns visually even:
+  // - Use the larger count, capped to 6
+  const len = Math.min(6, Math.max(left.length, right.length, 4));
+
   return {
-    left: layoutList(eq.left, 56, 54, 6),
-    right: layoutList(eq.right, 56, 54, 6),
+    left: layoutList(left, len),
+    right: layoutList(right, len),
   };
 }
+
 
 // updated: allow forcing more lines for the title so it doesn't get chopped
 function wrapTextToWidth(
@@ -2067,40 +2069,44 @@ if (template === "flyer_a") {
   // ✅ force columns to match count + consistent spacing
   const listsLaidOut = withListLayout(mergedKnobs.lists || {});
 
-  // Wrap headline to 2–3 lines big & centered
-  const headlineUpper = String(mergedInputs.headline || "")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+      // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
+      const headlineUpper = String(mergedInputs.headline || "")
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
 
-  const headlineLines = wrapTextToWidth(
-    headlineUpper,
-    118,
-    1080,
-    160,
-    3,
-    2,
-    true
-  );
+      // slightly smaller font so it stays inside the blue area
+      const HEAD_FS = 110;
 
-  const sublineUpper = String(mergedInputs.subline || "")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+      const headlineLines = wrapTextToWidth(
+        headlineUpper,
+        HEAD_FS,
+        1080,
+        170,
+        3,
+        2,
+        true
+      );
 
-  const vars = {
-    headline: headlineUpper,
-    headlineLines,
-    subline: sublineUpper,
-    // phone + cta still exist in vars but template no longer renders them
-    phone: mergedInputs.phone,
-    cta: mergedInputs.cta,
-    coverage: mergedKnobs.coverage,
-    palette: mergedKnobs.palette,
-    lists: listsLaidOut,
-    showIcons: false,
-    servicesLabel: "Services Offered",
-  };
+      const sublineUpper = String(mergedInputs.subline || "")
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
+      // ✅ dynamic subline Y so it NEVER overlaps the stacked headline
+      // first headline line baseline is at y=0 in the group, so push subline below all lines
+      const sublineY = 36 + (headlineLines.length || 2) * (HEAD_FS * 1.06);
+
+      const vars = {
+        headlineLines,
+        subline: sublineUpper,
+        sublineY,
+        palette: mergedKnobs.palette,
+        lists: listsLaidOut,
+        showIcons: false, // we're not using the person illustration
+        servicesLabel: "Services Offered",
+      };
+
 
   const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
   const svg = mustache.render(svgTpl, vars);
@@ -2757,39 +2763,44 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     right: rawRight.slice(0, count),
   });
 
-  const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+      const headlineUpper = String(
+        overlay.headline || prof.headline || "LOCAL SERVICES"
+      )
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
 
-  const headlineLines = wrapTextToWidth(
-    headlineUpper,
-    118,
-    1080,
-    160,
-    3,
-    2,
-    true
-  );
+      const HEAD_FS = 110;
 
-  const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+      const headlineLines = wrapTextToWidth(
+        headlineUpper,
+        HEAD_FS,
+        1080,
+        170,
+        3,
+        2,
+        true
+      );
 
-  // Match the reference: no phone number here, just CALL NOW!
-  const vars = {
-    headline: headlineUpper,
-    headlineLines,
-    subline: sublineUpper,
-    phone: "",                 // remove phone number
-    cta: "CALL NOW!",          // keep CTA only
-    coverage: prof.coverage || "Coverage area 25 Miles around your city",
-    palette,
-    lists,
-    showIcons: false,          // remove person illustration
-    servicesLabel: "Services Offered",
-  };
+      const sublineUpper = String(
+        overlay.body || prof.subline || "APARTMENT • HOME • OFFICE"
+      )
+        .toUpperCase()
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const sublineY = 36 + (headlineLines.length || 2) * (HEAD_FS * 1.06);
+
+      const vars = {
+        headlineLines,
+        subline: sublineUpper,
+        sublineY,
+        palette,
+        lists,
+        showIcons: false,
+        servicesLabel: "Services Offered",
+      };
+
 
   const svg = mustache.render(tplFlyerA({ W, H }), vars);
   const pngBuf = await sharp(Buffer.from(svg))
