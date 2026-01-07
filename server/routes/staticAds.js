@@ -1462,19 +1462,18 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Clean Home-cleaning style flyer template (like reference)
+  // Clean Home-cleaning style flyer template (reference-like)
   // Fixes:
-  // - Blue header pulled down (more space)
-  // - Headline shrunk slightly + ALWAYS stays inside blue
-  // - Subline auto-positions under headline (no overlap)
-  // - Center badge stays centered between columns
-  // - Removes bottom sentence + removes call-now/phone area
+  // - Headline scooted up so it never leaks
+  // - Subline becomes dark/clean + gets a subtle strip behind it (no clash)
+  // - Keeps the columns + center badge clean and aligned
+  // - No bottom sentence / no call-now area
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      .hBig{font:900 110px/1.0 Inter,system-ui; letter-spacing:0.02em;}
+      .hBig{font:900 106px/0.98 Inter,system-ui; letter-spacing:0.02em;}
       .hSub{font:800 30px/1.1 Inter,system-ui; letter-spacing:0.12em;}
       .label{font:800 34px/1.1 Inter,system-ui;}
       .li{font:700 34px/1.2 Inter,system-ui;}
@@ -1486,23 +1485,27 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <!-- Base -->
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
 
-  <!-- Top dark header (pulled down) -->
+  <!-- Top dark header -->
   <rect x="0" y="0" width="${W}" height="430" fill="{{palette.header}}"/>
 
-  <!-- Diagonal split (pulled down + clean slope like reference) -->
+  <!-- Diagonal split -->
   <path d="M0 430 L${W} 360 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline (sublineY is computed in JS vars) -->
-  <g transform="translate(${W / 2}, 140)">
+  <!-- Headline + subline (headline group scooted up) -->
+  <g transform="translate(${W / 2}, 118)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
         <tspan x="0" dy="{{dy}}">{{line}}</tspan>
       {{/headlineLines}}
     </text>
 
-    <text class="hSub tCenter" y="{{sublineY}}" fill="{{palette.textOnDark}}" opacity="0.9">
-      {{subline}}
-    </text>
+    <!-- subtle strip behind the subline (clean “pazaz”, no clash) -->
+    <g transform="translate(0, {{sublineY}})">
+      <rect x="-420" y="-34" width="840" height="56" rx="0" fill="#ffffff" opacity="0.30"/>
+      <text class="hSub tCenter" x="0" y="6" fill="{{palette.textOnLight}}" opacity="0.90">
+        {{subline}}
+      </text>
+    </g>
   </g>
 
   <!-- Left checklist column -->
@@ -1532,18 +1535,17 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.right}}
   </g>
 
-  <!-- Center badge (kept perfectly centered between columns) -->
+  <!-- Center badge (perfectly centered between columns) -->
   <g transform="translate(${W / 2}, 605)">
     <circle cx="0" cy="0" r="56" fill="{{palette.accent}}" opacity="0.18"/>
     <circle cx="0" cy="0" r="40" fill="{{palette.accent}}" opacity="0.10"/>
-    <circle cx="0" cy="0" r="28" fill="#ffffff" opacity="0.9"/>
+    <circle cx="0" cy="0" r="28" fill="#ffffff" opacity="0.92"/>
     <path d="M0 -12 L6 0 L0 12 L-6 0 Z" fill="{{palette.accent}}" opacity="0.9"/>
     <path d="M-12 0 L0 6 L12 0 L0 -6 Z" fill="{{palette.accent}}" opacity="0.65"/>
   </g>
 
 </svg>`;
 }
-
 
 
 /**
@@ -2076,7 +2078,7 @@ if (template === "flyer_a") {
         .trim();
 
       // slightly smaller font so it stays inside the blue area
-      const HEAD_FS = 110;
+      const HEAD_FS = 106;
 
       const headlineLines = wrapTextToWidth(
         headlineUpper,
@@ -2093,9 +2095,9 @@ if (template === "flyer_a") {
         .replace(/\s+/g, " ")
         .trim();
 
-      // ✅ dynamic subline Y so it NEVER overlaps the stacked headline
-      // first headline line baseline is at y=0 in the group, so push subline below all lines
-      const sublineY = 36 + (headlineLines.length || 2) * (HEAD_FS * 1.06);
+      // tighter/cleaner placement
+      const sublineY = 18 + (headlineLines.length || 2) * (HEAD_FS * 1.02);
+
 
       const vars = {
         headlineLines,
@@ -2770,7 +2772,7 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         .replace(/\s+/g, " ")
         .trim();
 
-      const HEAD_FS = 110;
+      const HEAD_FS = 106;
 
       const headlineLines = wrapTextToWidth(
         headlineUpper,
@@ -2782,14 +2784,14 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         true
       );
 
-      const sublineUpper = String(
-        overlay.body || prof.subline || "APARTMENT • HOME • OFFICE"
-      )
+      const sublineUpper = String(mergedInputs.subline || "")
         .toUpperCase()
         .replace(/\s+/g, " ")
         .trim();
 
-      const sublineY = 36 + (headlineLines.length || 2) * (HEAD_FS * 1.06);
+      // tighter/cleaner placement
+      const sublineY = 18 + (headlineLines.length || 2) * (HEAD_FS * 1.02);
+
 
       const vars = {
         headlineLines,
