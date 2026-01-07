@@ -2063,58 +2063,58 @@ if (template === "flyer_a") {
   }
 
   // ✅ force columns to match count + consistent spacing
+  // ✅ force columns to match count + consistent spacing
   const listsLaidOut = withListLayout(mergedKnobs.lists || {});
 
-      // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
-      // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
-      const headlineUpper = String(mergedInputs.headline || "")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  // --- Headline/Subline stack (FIXED: subline stays in the blue header) ---
+  const headlineUpper = String(mergedInputs.headline || "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      const HEAD_FS = 102;
+  const HEAD_FS = 102;
 
-      const headlineLinesRaw = wrapTextToWidth(
-        headlineUpper,
-        HEAD_FS,
-        1080,
-        170,
-        3,
-        2,
-        true
-      );
+  // wrap to 2–3 lines, but keep it compact vertically
+  const headlineLinesRaw = wrapTextToWidth(
+    headlineUpper,
+    HEAD_FS,
+    1080,
+    170,
+    3,
+    2,
+    true
+  );
 
-      // tighter vertical wrapping so subline can sit right under headline
-      const lineGap = Math.round(HEAD_FS * 0.92);
-      const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
-        line: l.line,
-        dy: i === 0 ? 0 : lineGap,
-      }));
+  // tighter line gap (your SVG headline uses line-height 0.95)
+  const lineGap = Math.round(HEAD_FS * 0.94);
 
-      const sublineUpper = String(mergedInputs.subline || "")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
+    line: l.line,
+    dy: i === 0 ? 0 : lineGap,
+  }));
 
-      // baseline just under headline stack
-      const sublineY =
-        18 +
-        (headlineLines.length - 1) * lineGap +
-        Math.round(HEAD_FS * 0.95);
+  const sublineUpper = String(mergedInputs.subline || "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
+  // IMPORTANT: tplFlyerA renders headline+subline inside a <g translate(...,108)>,
+  // so sublineY must be RELATIVE (no big extra padding like +18).
+  const sublineY =
+    (headlineLines.length - 1) * lineGap +
+    Math.round(HEAD_FS * 0.88) +
+    22;
 
+  const vars = {
+    headlineLines,
+    subline: sublineUpper,
+    sublineY,
+    palette: mergedKnobs.palette,
+    lists: listsLaidOut,
+    showIcons: false,
+    servicesLabel: "Services Offered",
+  };
 
-      const vars = {
-        headlineLines,
-        subline: sublineUpper,
-        sublineY,
-        palette: mergedKnobs.palette,
-        lists: listsLaidOut,
-        showIcons: false, // we're not using the person illustration
-        servicesLabel: "Services Offered",
-                sublineY,
-
-      };
 
 
   const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
@@ -2772,48 +2772,50 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     right: rawRight.slice(0, count),
   });
 
-            const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      const HEAD_FS = 102;
+  const HEAD_FS = 102;
 
-      const headlineLinesRaw = wrapTextToWidth(
-        headlineUpper,
-        HEAD_FS,
-        1080,
-        170,
-        3,
-        2,
-        true
-      );
+  const headlineLinesRaw = wrapTextToWidth(
+    headlineUpper,
+    HEAD_FS,
+    1080,
+    170,
+    3,
+    2,
+    true
+  );
 
-      const lineGap = Math.round(HEAD_FS * 0.92);
-      const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
-        line: l.line,
-        dy: i === 0 ? 0 : lineGap,
-      }));
+  const lineGap = Math.round(HEAD_FS * 0.94);
 
-      const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
+    line: l.line,
+    dy: i === 0 ? 0 : lineGap,
+  }));
 
-      const sublineY =
-        18 +
-        (headlineLines.length - 1) * lineGap +
-        Math.round(HEAD_FS * 0.95);
+  const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      const vars = {
-        headlineLines,
-        subline: sublineUpper,
-        sublineY,
-        palette,
-        lists,
-        showIcons: false,
-        servicesLabel: "Services Offered",
-      };
+  const sublineY =
+    (headlineLines.length - 1) * lineGap +
+    Math.round(HEAD_FS * 0.88) +
+    22;
+
+  const vars = {
+    headlineLines,
+    subline: sublineUpper,
+    sublineY,
+    palette,
+    lists,
+    showIcons: false,
+    servicesLabel: "Services Offered",
+  };
+
 
 
   const svg = mustache.render(tplFlyerA({ W, H }), vars);
