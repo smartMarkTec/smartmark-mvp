@@ -133,11 +133,11 @@ function fetchBuffer(url, extraHeaders = {}) {
 function isServiceFixIndustry(s = "") {
   const t = String(s || "").toLowerCase();
 
-  // JS does NOT support the /x flag (extended regex), so we use RegExp() strings.
-  // IMPORTANT: We intentionally avoid matching "app" so we don't accidentally catch "appliance".
+  // Use RegExp constructors to avoid VSCode "red regex" issues from multiline literals
+  // and to avoid invalid flags like /x (JS does NOT support x flag).
   const EXCLUDE = new RegExp(
     [
-      // food / hospitality
+      // food/venues
       "restaurant",
       "food",
       "pizza",
@@ -152,7 +152,7 @@ function isServiceFixIndustry(s = "") {
       "diner",
       "bakery",
 
-      // beauty / wellness
+      // beauty/wellness that is NOT "fix something"
       "salon",
       "spa",
       "barber",
@@ -160,7 +160,7 @@ function isServiceFixIndustry(s = "") {
       "lash",
       "beauty",
 
-      // fitness
+      // fitness/wellness
       "gym",
       "fitness",
       "yoga",
@@ -172,7 +172,7 @@ function isServiceFixIndustry(s = "") {
       "realtor",
       "broker",
 
-      // retail categories
+      // retail/product categories (not onsite trades)
       "fashion",
       "apparel",
       "clothing",
@@ -188,13 +188,11 @@ function isServiceFixIndustry(s = "") {
       "pet\\s?store",
       "pet\\s?shop",
 
-      // ecommerce
+      // online business keywords (avoid excluding "appliance" by NOT using \\bapp\\b)
       "e-?commerce",
       "shopify",
       "dropship",
       "online\\s?store",
-
-      // software/marketing (avoid plain "app" token!)
       "saas",
       "software",
       "web\\s?design",
@@ -211,10 +209,9 @@ function isServiceFixIndustry(s = "") {
 
   if (EXCLUDE.test(t)) return false;
 
-  // Strong "onsite / fix / trade service" signals (Template A)
   const INCLUDE = new RegExp(
     [
-      // hvac
+      // HVAC
       "hvac",
       "air\\s*conditioning",
       "air\\s*conditioner",
@@ -228,7 +225,7 @@ function isServiceFixIndustry(s = "") {
       "vent",
       "heat\\s*pump",
 
-      // plumbing
+      // Plumbing
       "plumb",
       "plumber",
       "drain",
@@ -238,7 +235,7 @@ function isServiceFixIndustry(s = "") {
       "septic",
       "water\\s*heater",
 
-      // electrical
+      // Electrical
       "electric",
       "electrician",
       "breaker",
@@ -248,14 +245,14 @@ function isServiceFixIndustry(s = "") {
       "lighting",
       "ceiling\\s*fan",
 
-      // pool / spa maintenance
+      // Pool
       "pool",
       "pool\\s*clean",
       "pool\\s*service",
       "hot\\s*tub",
       "spa\\s*maintenance",
 
-      // cleaning
+      // Cleaning
       "clean(ing)?",
       "house\\s*clean",
       "maid",
@@ -265,7 +262,7 @@ function isServiceFixIndustry(s = "") {
       "window\\s*clean",
       "gutter\\s*clean",
 
-      // landscaping
+      // Landscaping
       "landscap",
       "lawn",
       "mow",
@@ -279,7 +276,7 @@ function isServiceFixIndustry(s = "") {
       "irrigation",
       "sprinkler",
 
-      // pest
+      // Pest
       "pest",
       "extermin",
       "termite",
@@ -288,40 +285,41 @@ function isServiceFixIndustry(s = "") {
       "bug\\s*control",
       "mosquito",
 
-      // washing
+      // Pressure washing
       "pressure\\s*wash",
       "power\\s*wash",
 
-      // roofing / siding
+      // Roofing / siding
       "roof",
       "roofer",
       "roofing",
       "siding",
+      "gutter",
 
-      // paint / drywall
+      // Painting / drywall
       "paint",
       "painter",
       "painting",
       "drywall",
 
-      // handyman / home repair
+      // Handyman
       "handyman",
       "home\\s*repair",
 
-      // moving / junk
+      // Moving / hauling
       "moving",
       "mover",
       "junk\\s*removal",
       "haul",
       "dumpster",
 
-      // locksmith
+      // Locksmith
       "locksmith",
       "rekey",
       "key\\s*replacement",
       "lockout",
 
-      // appliance repair (explicit!)
+      // Appliance repair (IMPORTANT: should NOT get caught by "app")
       "appliance\\s*repair",
       "washer",
       "dryer",
@@ -330,30 +328,30 @@ function isServiceFixIndustry(s = "") {
       "oven",
       "dishwasher",
 
-      // garage door
+      // Garage door
       "garage\\s*door",
       "opener",
       "springs",
 
-      // concrete / foundation
+      // Concrete / foundation
       "concrete",
       "foundation",
       "paving",
       "asphalt",
 
-      // fence / deck
+      // Fence / deck / patio
       "fence",
       "fencing",
       "deck",
       "patio",
 
-      // restoration
+      // Restoration
       "restoration",
       "water\\s*damage",
       "mold",
       "fire\\s*damage",
 
-      // generic fix/service words
+      // Generic onsite service signals
       "install",
       "installation",
       "repair",
@@ -377,6 +375,7 @@ function isServiceFixIndustry(s = "") {
 
   return INCLUDE.test(t);
 }
+
 
 
 const ALWAYS_POSTER_B_KINDS = new Set([
@@ -1463,43 +1462,39 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Home-cleaning style flyer template (match reference layout)
-  // - WHITE base
-  // - DARK top header
-  // - Light diagonal body panel
-  // - Bottom WHITE strip
-  // - Orange checkmarks on left
-  // - Right bullet list
-  // - Big call line at bottom
+  // Cleaner "home-cleaning style" flyer:
+  // - No person illustration
+  // - Center design badge instead
+  // - Lists aligned and clean
+  // - Bottom line is CTA only (NO phone number)
+  // - Subline stays inside header (no overlap)
+
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      .hBig{font:900 118px/0.95 Inter,system-ui; letter-spacing:0.02em;}
-      .hSub{font:800 30px/1 Inter,system-ui; letter-spacing:0.10em;}
-      .label{font:800 34px/1 Inter,system-ui;}
+      .hBig{font:900 118px/1.0 Inter,system-ui; letter-spacing:0.02em;}
+      .hSub{font:800 32px/1.1 Inter,system-ui; letter-spacing:0.12em;}
+      .label{font:800 34px/1.1 Inter,system-ui;}
       .li{font:700 34px/1.2 Inter,system-ui;}
-      .meta{font:700 24px/1.2 Inter,system-ui;}
-      .call{font:900 54px/1 Inter,system-ui; letter-spacing:0.01em;}
+      .meta{font:700 26px/1.2 Inter,system-ui;}
+      .cta{font:900 54px/1 Inter,system-ui; letter-spacing:0.02em;}
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
     </style>
   </defs>
 
-  <!-- WHITE base like reference -->
-  <rect width="${W}" height="${H}" fill="#ffffff"/>
+  <!-- Background -->
+  <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
 
-  <!-- Top dark header band -->
-  <rect x="0" y="0" width="${W}" height="340" fill="{{palette.header}}"/>
+  <!-- Header band -->
+  <rect x="0" y="0" width="${W}" height="360" fill="{{palette.header}}"/>
 
-  <!-- Light diagonal panel -->
-  <path d="M0 340 L${W} 285 L${W} 830 L0 890 Z" fill="{{palette.body}}"/>
+  <!-- Diagonal split -->
+  <path d="M0 360 L${W} 300 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Bottom WHITE strip -->
-  <rect x="0" y="${H - 170}" width="${W}" height="170" fill="#ffffff"/>
-
-  <!-- Headline -->
-  <g transform="translate(${W / 2}, 118)">
+  <!-- Headline + subline (locked in header) -->
+  <g transform="translate(${W / 2}, 120)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{^headlineLines}}{{headline}}{{/headlineLines}}
       {{#headlineLines}}
@@ -1507,89 +1502,56 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       {{/headlineLines}}
     </text>
 
-    <text class="hSub tCenter" y="205" fill="#cbd5e1" opacity="0.95">
+    <text class="hSub tCenter" y="190" fill="{{palette.textOnDark}}" opacity="0.92">
       {{subline}}
     </text>
   </g>
 
-  <!-- Center illustration -->
-  {{#showIcons}}
-  <g transform="translate(${W / 2 - 70}, 400)">
-    <!-- duster -->
-    <ellipse cx="160" cy="85" rx="28" ry="12" fill="#f9a8d4"/>
-    <ellipse cx="132" cy="92" rx="12" ry="8" fill="#f9a8d4" opacity="0.9"/>
-    <ellipse cx="188" cy="92" rx="12" ry="8" fill="#f9a8d4" opacity="0.9"/>
-    <rect x="120" y="98" width="78" height="10" rx="5" fill="#9ca3af" opacity="0.9"/>
-
-    <!-- head -->
-    <circle cx="70" cy="58" r="34" fill="#f2c6a8"/>
-    <!-- hair -->
-    <path d="M40 58 C45 18, 95 18, 100 58 C98 36, 85 26, 70 26 C55 26, 42 36, 40 58 Z"
-      fill="#7c2d12"/>
-    <!-- face -->
-    <circle cx="60" cy="56" r="4" fill="#111827"/>
-    <circle cx="82" cy="56" r="4" fill="#111827"/>
-    <path d="M60 74 C66 82, 76 82, 82 74" stroke="#111827" stroke-width="4" fill="none" stroke-linecap="round"/>
-    <!-- headband -->
-    <path d="M38 48 C55 22, 85 22, 102 48" stroke="#cbd5e1" stroke-width="10" fill="none" stroke-linecap="round"/>
-
-    <!-- body -->
-    <path d="M35 105 C35 80, 105 80, 105 105 L105 212 C105 242, 35 242, 35 212 Z"
-      fill="#0f3b5a" opacity="0.95"/>
-    <!-- apron -->
-    <path d="M45 138 C55 120, 85 120, 95 138 L95 225 C95 240, 45 240, 45 225 Z"
-      fill="#cbd5e1" opacity="0.96"/>
-
-    <!-- legs -->
-    <rect x="55" y="242" width="14" height="55" rx="7" fill="#111827"/>
-    <rect x="80" y="242" width="14" height="55" rx="7" fill="#111827"/>
-    <!-- shoes -->
-    <ellipse cx="62" cy="305" rx="18" ry="8" fill="#111827"/>
-    <ellipse cx="87" cy="305" rx="18" ry="8" fill="#111827"/>
+  <!-- Center badge (simple clean design instead of person) -->
+  <g transform="translate(${W / 2}, 520)">
+    <circle cx="0" cy="0" r="78" fill="{{palette.body}}" opacity="0.85"/>
+    <circle cx="0" cy="0" r="62" fill="{{palette.accent}}" opacity="0.18"/>
+    <circle cx="0" cy="0" r="44" fill="{{palette.accent}}" opacity="0.12"/>
+    <!-- sparkle -->
+    <path d="M0 -34 L6 -8 L34 0 L6 8 L0 34 L-6 8 L-34 0 L-6 -8 Z"
+      fill="{{palette.accent}}" opacity="0.55"/>
+    <circle cx="0" cy="0" r="10" fill="{{palette.accent}}" opacity="0.75"/>
   </g>
-  {{/showIcons}}
 
-  <!-- Left checklist (orange checks like reference) -->
+  <!-- Left checklist (aligned) -->
   <g transform="translate(120, 520)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
-        <path d="M0 14 L12 26 L34 6"
-          stroke="{{palette.accent}}" stroke-width="6"
-          fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-        <text class="li tLeft" x="52" y="28" fill="{{palette.textOnLight}}">{{text}}</text>
+        <circle cx="16" cy="14" r="12" fill="{{palette.accent}}" opacity="0.95"/>
+        <path d="M10 14 L15 19 L24 9" stroke="#ffffff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <text class="li tLeft" x="44" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.left}}
   </g>
 
-  <!-- Right services list -->
-  <g transform="translate(${W - 470}, 510)">
+  <!-- Right services list (aligned, fixed width) -->
+  <g transform="translate(${W - 470}, 520)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.9">{{servicesLabel}}</text>
 
     {{#lists.right}}
       <g transform="translate(0, {{y}})">
-        <circle cx="10" cy="12" r="4" fill="{{palette.textOnLight}}" opacity="0.65"/>
-        <text class="li tLeft" x="28" y="24" fill="{{palette.textOnLight}}">{{text}}</text>
+        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.70"/>
+        <text class="li tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.right}}
   </g>
 
   <!-- Coverage line -->
   {{#coverage}}
-  <g transform="translate(${W / 2}, ${H - 210})">
-    <text class="meta tCenter" x="0" y="0" fill="#64748b">📍 {{coverage}}</text>
+  <g transform="translate(${W / 2}, ${H - 160})">
+    <text class="meta tCenter" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.8">📍 {{coverage}}</text>
   </g>
   {{/coverage}}
 
-  <!-- Call now line -->
+  <!-- Bottom CTA (NO phone) -->
   <g transform="translate(${W / 2}, ${H - 95})">
-    <g transform="translate(-420, -44)">
-      <circle cx="44" cy="44" r="34" fill="{{palette.accent}}" opacity="0.95"/>
-      <path d="M38 34 C46 44, 50 48, 60 54 C56 60, 50 64, 44 60 C34 54, 28 48, 22 38 C18 32, 22 26, 28 22 C34 28, 34 28, 38 34 Z"
-        fill="#ffffff" opacity="0.95"/>
-    </g>
-
-    <text class="call tCenter" x="0" y="0" fill="{{palette.header}}">
-      {{cta}} {{phone}}
+    <text class="cta tCenter" x="0" y="0" fill="{{palette.header}}">
+      {{cta}}
     </text>
   </g>
 </svg>`;
@@ -1995,10 +1957,17 @@ router.post("/generate-static-ad", async (req, res) => {
     const industry = inputs.industry || a.industry || "Local Services";
     const prof = profileForIndustry(industry);
 
-     const template =
-  templateReq !== "auto"
-    ? templateReq
-    : (prof.template || "poster_b");
+      // Resolve template (and FORCE Flyer A for fix/onsite services)
+    let template =
+      templateReq !== "auto"
+        ? templateReq
+        : (prof.template || "poster_b");
+
+    // Hard-force: any fix/onsite service should ALWAYS use Flyer A
+    if (isServiceFixIndustry(industry)) {
+      template = "flyer_a";
+    }
+
 
 
 
@@ -2514,7 +2483,19 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     };
 
     const prof = profileForIndustry(industry);
-const isPoster = (prof.template || "poster_b") === "poster_b";
+
+    // Resolve template + force flyer for fix/onsite
+    let resolvedTemplate =
+      (b.template && String(b.template) !== "auto")
+        ? String(b.template)
+        : (prof.template || "poster_b");
+
+    if (isServiceFixIndustry(industry)) {
+      resolvedTemplate = "flyer_a";
+    }
+
+    const isPoster = resolvedTemplate === "poster_b";
+
 
 
 
