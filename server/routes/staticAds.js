@@ -1462,13 +1462,13 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Cleaner "home-cleaning style" flyer:
-  // - No person illustration
-  // - Center design badge instead
-  // - Lists aligned and clean
-  // - Bottom line is CTA only (NO phone number)
-  // - Subline stays inside header (no overlap)
-
+  // Home-cleaning style flyer template (like the reference image)
+  // - Big stacked headline in dark top band
+  // - Subline under headline
+  // - Diagonal split into light body area
+  // - Center badge icon (no person)
+  // - Left checklist + Right services offered list
+  // - Bottom coverage line (NO phone / call-now footer)
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
@@ -1478,22 +1478,21 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       .label{font:800 34px/1.1 Inter,system-ui;}
       .li{font:700 34px/1.2 Inter,system-ui;}
       .meta{font:700 26px/1.2 Inter,system-ui;}
-      .cta{font:900 54px/1 Inter,system-ui; letter-spacing:0.02em;}
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
     </style>
   </defs>
 
-  <!-- Background -->
+  <!-- Base -->
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
 
-  <!-- Header band -->
+  <!-- Top dark header -->
   <rect x="0" y="0" width="${W}" height="360" fill="{{palette.header}}"/>
 
-  <!-- Diagonal split -->
+  <!-- Diagonal split (light panel) -->
   <path d="M0 360 L${W} 300 L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline (locked in header) -->
+  <!-- Headline (stacked like template) -->
   <g transform="translate(${W / 2}, 120)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{^headlineLines}}{{headline}}{{/headlineLines}}
@@ -1502,24 +1501,13 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       {{/headlineLines}}
     </text>
 
-    <text class="hSub tCenter" y="190" fill="{{palette.textOnDark}}" opacity="0.92">
+    <text class="hSub tCenter" y="170" fill="{{palette.textOnDark}}" opacity="0.9">
       {{subline}}
     </text>
   </g>
 
-  <!-- Center badge (simple clean design instead of person) -->
-  <g transform="translate(${W / 2}, 520)">
-    <circle cx="0" cy="0" r="78" fill="{{palette.body}}" opacity="0.85"/>
-    <circle cx="0" cy="0" r="62" fill="{{palette.accent}}" opacity="0.18"/>
-    <circle cx="0" cy="0" r="44" fill="{{palette.accent}}" opacity="0.12"/>
-    <!-- sparkle -->
-    <path d="M0 -34 L6 -8 L34 0 L6 8 L0 34 L-6 8 L-34 0 L-6 -8 Z"
-      fill="{{palette.accent}}" opacity="0.55"/>
-    <circle cx="0" cy="0" r="10" fill="{{palette.accent}}" opacity="0.75"/>
-  </g>
-
-  <!-- Left checklist (aligned) -->
-  <g transform="translate(120, 520)">
+  <!-- Left checklist -->
+  <g transform="translate(150, 520)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
         <circle cx="16" cy="14" r="12" fill="{{palette.accent}}" opacity="0.95"/>
@@ -1529,33 +1517,49 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- Right services list (aligned, fixed width) -->
-  <g transform="translate(${W - 470}, 520)">
+  <!-- Center badge (perfectly between columns) -->
+  <g transform="translate(${W / 2}, 610)">
+    <!-- outer soft ring -->
+    <circle cx="0" cy="0" r="78" fill="{{palette.textOnLight}}" opacity="0.08"/>
+    <circle cx="0" cy="0" r="62" fill="{{palette.textOnLight}}" opacity="0.10"/>
+    <!-- main badge -->
+    <circle cx="0" cy="0" r="52" fill="{{palette.accent}}" opacity="0.22"/>
+    <circle cx="0" cy="0" r="38" fill="#ffffff" opacity="0.55"/>
+
+    <!-- simple compass/star -->
+    <g opacity="0.95">
+      <path d="M0 -26 L7 -7 L26 0 L7 7 L0 26 L-7 7 L-26 0 L-7 -7 Z"
+            fill="{{palette.accent}}"/>
+      <circle cx="0" cy="0" r="5" fill="#ffffff" opacity="0.9"/>
+    </g>
+  </g>
+
+  <!-- Right services list -->
+  <g transform="translate(${W - 420}, 520)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.9">{{servicesLabel}}</text>
 
     {{#lists.right}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.70"/>
+        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.75"/>
         <text class="li tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
     {{/lists.right}}
   </g>
 
-  <!-- Coverage line -->
+  <!-- Bottom meta / coverage (moved down since phone footer removed) -->
   {{#coverage}}
-  <g transform="translate(${W / 2}, ${H - 160})">
-    <text class="meta tCenter" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.8">📍 {{coverage}}</text>
+  <g transform="translate(${W / 2}, ${H - 80})">
+    <g transform="translate(-250, -18)">
+      <path d="M18 2 C9 2, 2 9, 2 18 C2 32, 18 46, 18 46 C18 46, 34 32, 34 18 C34 9, 27 2, 18 2 Z"
+        fill="{{palette.accent}}" opacity="0.9"/>
+      <circle cx="18" cy="18" r="6" fill="#ffffff"/>
+    </g>
+    <text class="meta tCenter" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.85">📍 {{coverage}}</text>
   </g>
   {{/coverage}}
-
-  <!-- Bottom CTA (NO phone) -->
-  <g transform="translate(${W / 2}, ${H - 95})">
-    <text class="cta tCenter" x="0" y="0" fill="{{palette.header}}">
-      {{cta}}
-    </text>
-  </g>
 </svg>`;
 }
+
 
 
 
@@ -1685,19 +1689,72 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
 
 
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+
 function ellipsize(s = "", max = 22) {
   s = String(s).trim();
   return s.length > max ? s.slice(0, max - 1).trimEnd() + "…" : s;
 }
-function layoutList(items) {
-  const startY = 56,
-    step = 54;
-  return (items || []).slice(0, 6).map((t, i) => ({ y: startY + i * step, text: t }));
+
+// --- small, safe color tweak (no crazy colors) ---
+function tweakHex(hex = "#000000", amt = 0) {
+  const h = String(hex || "").replace("#", "").trim();
+  if (!/^[0-9a-f]{6}$/i.test(h)) return hex;
+  const r = clamp(parseInt(h.slice(0, 2), 16) + amt, 0, 255);
+  const g = clamp(parseInt(h.slice(2, 4), 16) + amt, 0, 255);
+  const b = clamp(parseInt(h.slice(4, 6), 16) + amt, 0, 255);
+  return (
+    "#" +
+    [r, g, b]
+      .map((v) => v.toString(16).padStart(2, "0"))
+      .join("")
+  );
 }
-function withListLayout(lists = {}) {
+
+function varyPalette(pal = null, seed = Date.now()) {
+  if (!pal) return pal;
+  const s = Math.abs(Number(seed) || Date.now());
+  const variants = [
+    pal,
+    {
+      ...pal,
+      header: tweakHex(pal.header, -14),
+      body: tweakHex(pal.body, +6),
+    },
+    {
+      ...pal,
+      header: tweakHex(pal.header, +10),
+      body: tweakHex(pal.body, -6),
+    },
+  ];
+  return variants[s % variants.length];
+}
+
+// --- force both columns to have same count (no weird lopsided look) ---
+function normalizeListsEqual(lists = {}, min = 4, max = 6) {
+  const left = Array.isArray(lists.left) ? lists.left.filter(Boolean) : [];
+  const right = Array.isArray(lists.right) ? lists.right.filter(Boolean) : [];
+
+  const L = left.slice(0, max);
+  const R = right.slice(0, max);
+
+  const n = Math.min(max, Math.max(min, Math.min(L.length, R.length) || min));
   return {
-    left: layoutList(lists.left || []),
-    right: layoutList(lists.right || []),
+    left: L.slice(0, n),
+    right: R.slice(0, n),
+  };
+}
+
+function layoutList(items, startY = 56, step = 54, cap = 6) {
+  return (items || [])
+    .slice(0, cap)
+    .map((t, i) => ({ y: startY + i * step, text: t }));
+}
+
+function withListLayout(lists = {}) {
+  const eq = normalizeListsEqual(lists, 4, 6);
+  return {
+    left: layoutList(eq.left, 56, 54, 6),
+    right: layoutList(eq.right, 56, 54, 6),
   };
 }
 
@@ -1972,108 +2029,106 @@ router.post("/generate-static-ad", async (req, res) => {
 
 
 
-    /* ---------- FLYER A ---------- */
-    if (template === "flyer_a") {
-      const mergedInputs = {
-        industry,
-        businessName: inputs.businessName || a.businessName || "Your Brand",
-        phone: inputs.phone || a.phone || "(000) 000-0000",
-        location: inputs.location || a.location || "Your City",
-        website: inputs.website || a.website || "",
-        headline: inputs.headline || prof.headline,
-        subline: inputs.subline || prof.subline,
-        cta: inputs.cta || prof.cta,
-      };
+  
+/* ---------- FLYER A ---------- */
+if (template === "flyer_a") {
+  const seed = Date.now();
 
-      const mergedKnobs = {
-        size: knobs.size || "1080x1080",
-        palette: knobs.palette || prof.palette,
-        lists: knobs.lists || prof.lists,
-        coverage: knobs.coverage || prof.coverage || "",
-        showIcons: knobs.showIcons !== undefined ? knobs.showIcons : true,
-        headerSplitDiagonal:
-          knobs.headerSplitDiagonal !== undefined
-            ? knobs.headerSplitDiagonal
-            : true,
-        roundedOuter:
-          knobs.roundedOuter !== undefined ? knobs.roundedOuter : true,
-        backgroundHint: knobs.backgroundHint || prof.bgHint || "generic",
-      };
+  const mergedInputs = {
+    industry,
+    businessName: inputs.businessName || a.businessName || "Your Brand",
+    phone: inputs.phone || a.phone || "(000) 000-0000",
+    location: inputs.location || a.location || "Your City",
+    website: inputs.website || a.website || "",
+    headline: inputs.headline || prof.headline,
+    subline: inputs.subline || prof.subline,
+    cta: inputs.cta || prof.cta,
+  };
 
-      const validate = ajv.compile(flyerSchema);
-      if (!validate({ template, inputs: mergedInputs, knobs: mergedKnobs })) {
-        throw new Error(
-          "validation failed: " + JSON.stringify(validate.errors)
-        );
-      }
+  const mergedKnobs = {
+    size: knobs.size || "1080x1080",
+    // ✅ palette variation per generation (safe)
+    palette: knobs.palette || varyPalette(prof.palette, seed),
+    // ✅ equalized lists (no lopsided look)
+    lists: knobs.lists || prof.lists,
+    coverage: knobs.coverage || prof.coverage || "",
+    showIcons: false, // (we removed the person; keeping param for compatibility)
+    headerSplitDiagonal:
+      knobs.headerSplitDiagonal !== undefined ? knobs.headerSplitDiagonal : true,
+    roundedOuter: knobs.roundedOuter !== undefined ? knobs.roundedOuter : true,
+    backgroundHint: knobs.backgroundHint || prof.bgHint || "generic",
+  };
 
-      // Layout lists like the reference template
-      const listsLaidOut = withListLayout(mergedKnobs.lists || {});
+  const validate = ajv.compile(flyerSchema);
+  if (!validate({ template, inputs: mergedInputs, knobs: mergedKnobs })) {
+    throw new Error("validation failed: " + JSON.stringify(validate.errors));
+  }
 
-      // Wrap headline to 2–3 lines big & centered (like "HOME / CLEANING / SERVICES")
-      const headlineUpper = String(mergedInputs.headline || "")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  // ✅ force columns to match count + consistent spacing
+  const listsLaidOut = withListLayout(mergedKnobs.lists || {});
 
-      const headlineLines = wrapTextToWidth(
-        headlineUpper,
-        118,     // match template big headline
-        1080,
-        160,     // padding so it stays centered and not too wide
-        3,       // max 3 lines
-        2,       // prefer at least 2 lines when possible
-        true     // avoid ellipsis (we want full stacked look)
-      );
+  // Wrap headline to 2–3 lines big & centered
+  const headlineUpper = String(mergedInputs.headline || "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      const sublineUpper = String(mergedInputs.subline || "")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  const headlineLines = wrapTextToWidth(
+    headlineUpper,
+    118,
+    1080,
+    160,
+    3,
+    2,
+    true
+  );
 
-      const vars = {
-        headline: headlineUpper,
-        headlineLines,
-        subline: sublineUpper,
-        phone: mergedInputs.phone,
-        cta: mergedInputs.cta,
-        coverage: mergedKnobs.coverage,
-        palette: mergedKnobs.palette,
-        lists: listsLaidOut,
-        showIcons: mergedKnobs.showIcons,
-        servicesLabel: "Services Offered",
-      };
+  const sublineUpper = String(mergedInputs.subline || "")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
-      const svg = mustache.render(svgTpl, vars);
+  const vars = {
+    headline: headlineUpper,
+    headlineLines,
+    subline: sublineUpper,
+    // phone + cta still exist in vars but template no longer renders them
+    phone: mergedInputs.phone,
+    cta: mergedInputs.cta,
+    coverage: mergedKnobs.coverage,
+    palette: mergedKnobs.palette,
+    lists: listsLaidOut,
+    showIcons: false,
+    servicesLabel: "Services Offered",
+  };
 
-      const base = `static-${Date.now()}-${Math.random()
-        .toString(36)
-        .slice(2)}`;
-      const svgName = `${base}.svg`;
-      const pngName = `${base}.png`;
+  const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
+  const svg = mustache.render(svgTpl, vars);
 
-      fs.writeFileSync(path.join(GEN_DIR, svgName), svg, "utf8");
-      await sharp(Buffer.from(svg))
-        .png({ quality: 92 })
-        .toFile(path.join(GEN_DIR, pngName));
+  const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const svgName = `${base}.svg`;
+  const pngName = `${base}.png`;
 
-      const mediaPng = makeMediaUrl(req, pngName);
-      const mediaSvg = makeMediaUrl(req, svgName);
+  fs.writeFileSync(path.join(GEN_DIR, svgName), svg, "utf8");
+  await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(path.join(GEN_DIR, pngName));
 
-      return res.json({
-        ok: true,
-        type: "image",
-        template,
-        svgUrl: mediaSvg,
-        pngUrl: mediaPng,
-        url: mediaPng,
-        absoluteUrl: mediaPng,
-        filename: pngName,
-        asset: { id: base, createdAt: Date.now() },
-        ready: true,
-      });
-    }
+  const mediaPng = makeMediaUrl(req, pngName);
+  const mediaSvg = makeMediaUrl(req, svgName);
+
+  return res.json({
+    ok: true,
+    type: "image",
+    template,
+    svgUrl: mediaSvg,
+    pngUrl: mediaPng,
+    url: mediaPng,
+    absoluteUrl: mediaPng,
+    filename: pngName,
+    asset: { id: base, createdAt: Date.now() },
+    ready: true,
+  });
+}
+
 
     /* ---------- POSTER B ---------- */
 
@@ -2677,69 +2732,76 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         await fs.promises.writeFile(path.join(GEN_DIR, fname), finalPng);
         files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
-    } else {
-      const palette =
-        prof.palette || {
-          header: "#0d3b66",
-          body: "#dff3f4",
-          accent: "#ff8b4a",
-          textOnDark: "#ffffff",
-          textOnLight: "#2b3a44",
-        };
+ } else {
+  // --- FLYER A (service/fix template) ---
+  // Soft, tasteful palette variation per generation (no crazy colors)
+  const PALETTE_VARIANTS = [
+    { header: "#0d3b66", body: "#dff3f4", accent: "#ff8b4a", textOnDark: "#ffffff", textOnLight: "#2b3a44" }, // classic navy
+    { header: "#0b5563", body: "#e7f6f2", accent: "#16a085", textOnDark: "#ffffff", textOnLight: "#23343d" }, // teal
+    { header: "#113a5d", body: "#e8f0f6", accent: "#ff7b41", textOnDark: "#ffffff", textOnLight: "#213547" }, // navy alt
+    { header: "#213043", body: "#eaf2fb", accent: "#f59e0b", textOnDark: "#ffffff", textOnLight: "#182435" }, // slate
+    { header: "#1d3b2a", body: "#e9f5ee", accent: "#f4a261", textOnDark: "#ffffff", textOnLight: "#273b33" }, // forest
+  ];
 
-      const lists = withListLayout(
-        prof.lists || {
-          left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-          right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
-        }
-      );
+  const palette =
+    (prof && prof.palette) ||
+    PALETTE_VARIANTS[Math.floor(Math.random() * PALETTE_VARIANTS.length)];
 
-      const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  // Ensure balanced lists (same count left/right) so layout never looks weird
+  const rawLeft = (prof?.lists?.left || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]).slice(0, 6);
+  const rawRight = (prof?.lists?.right || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"]).slice(0, 6);
+  const count = Math.min(rawLeft.length, rawRight.length, 6);
 
-      const headlineLines = wrapTextToWidth(
-        headlineUpper,
-        118,
-        1080,
-        160,
-        3,
-        2,
-        true
-      );
+  const lists = withListLayout({
+    left: rawLeft.slice(0, count),
+    right: rawRight.slice(0, count),
+  });
 
-      const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
-        .toUpperCase()
-        .replace(/\s+/g, " ")
-        .trim();
+  const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      const vars = {
-        headline: headlineUpper,
-        headlineLines,
-        subline: sublineUpper,
-        phone: a.phone || "(000) 000-0000",
-        cta: overlay.cta || prof.cta || "CALL NOW!",
-        coverage: prof.coverage || "Coverage area 25 Miles around your city",
-        palette,
-        lists,
-        showIcons: true,
-        servicesLabel: "Services Offered",
-      };
+  const headlineLines = wrapTextToWidth(
+    headlineUpper,
+    118,
+    1080,
+    160,
+    3,
+    2,
+    true
+  );
 
-      const svg = mustache.render(tplFlyerA({ W, H }), vars);
-      const pngBuf = await sharp(Buffer.from(svg))
-        .png({ quality: 92 })
-        .toBuffer();
+  const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
+    .toUpperCase()
+    .replace(/\s+/g, " ")
+    .trim();
 
-      for (let i = 0; i < 2; i++) {
-        const fname = `static-${Date.now()}-${Math.random()
-          .toString(36)
-          .slice(2)}.png`;
-        await fs.promises.writeFile(path.join(GEN_DIR, fname), pngBuf);
-        files.push({ absoluteUrl: makeMediaUrl(req, fname) });
-      }
-    }
+  // Match the reference: no phone number here, just CALL NOW!
+  const vars = {
+    headline: headlineUpper,
+    headlineLines,
+    subline: sublineUpper,
+    phone: "",                 // remove phone number
+    cta: "CALL NOW!",          // keep CTA only
+    coverage: prof.coverage || "Coverage area 25 Miles around your city",
+    palette,
+    lists,
+    showIcons: false,          // remove person illustration
+    servicesLabel: "Services Offered",
+  };
+
+  const svg = mustache.render(tplFlyerA({ W, H }), vars);
+  const pngBuf = await sharp(Buffer.from(svg))
+    .png({ quality: 92 })
+    .toBuffer();
+
+  for (let i = 0; i < 2; i++) {
+    const fname = `static-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
+    await fs.promises.writeFile(path.join(GEN_DIR, fname), pngBuf);
+    files.push({ absoluteUrl: makeMediaUrl(req, fname) });
+  }
+}
 
 
     return res.json({ ok: true, images: files });
