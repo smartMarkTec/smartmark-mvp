@@ -1465,14 +1465,20 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // orange bars DOWN a tad more
+  // orange bars DOWN a tad
   const ACCENT_Y = HEADER_H + 30;
 
-  // label BELOW orange bars
-  const LABEL_Y = ACCENT_Y + 52;
+  // ✅ lists now sit BELOW the orange bars
+  // (list items start at y=56 inside the group, so this places them safely below)
+  const LIST_Y = ACCENT_Y + 40;
 
-  // lists start BELOW label
-  const LIST_Y = LABEL_Y + 10;
+  // label stays just under the bars
+  const LABEL_Y = ACCENT_Y + 34;
+
+  // simple center design to fill space between columns
+  const MID_X = Math.round(W / 2);
+  const DIVIDER_TOP = LIST_Y + 40;
+  const DIVIDER_BOT = LIST_Y + 56 + 54 * 5 + 40; // fits up to 6 rows
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1513,10 +1519,20 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- Services Offered label (below orange bars, aligned to right column) -->
-  <text class="label tLeft" x="${W - 480}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+  <!-- Services Offered label (below orange bars) -->
+  <text class="label tCenter" x="${MID_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
+
+  <!-- ✅ simple center divider design between columns -->
+  <line x1="${MID_X}" y1="${DIVIDER_TOP}" x2="${MID_X}" y2="${DIVIDER_BOT}"
+        stroke="{{palette.textOnLight}}" stroke-width="4" opacity="0.10"
+        stroke-linecap="round" stroke-dasharray="10 18" />
+  <g opacity="0.16">
+    <rect x="${MID_X - 10}" y="${DIVIDER_TOP - 18}" width="20" height="20"
+          fill="{{palette.accent}}" transform="rotate(45 ${MID_X} ${DIVIDER_TOP - 8})"/>
+    <circle cx="${MID_X}" cy="${DIVIDER_BOT + 10}" r="7" fill="{{palette.accent}}"/>
+  </g>
 
   <!-- Left checklist (checkmarks) -->
   <g transform="translate(140, ${LIST_Y})">
