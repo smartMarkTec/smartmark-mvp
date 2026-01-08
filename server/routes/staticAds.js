@@ -1468,12 +1468,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   // orange bars DOWN a tad more
   const ACCENT_Y = HEADER_H + 30;
 
-  // lists sit RIGHT under the orange bars
-  // (your list items already start at y=56, so we pull the group up)
-  const LIST_Y = ACCENT_Y - 44;
+  // label BELOW orange bars
+  const LABEL_Y = ACCENT_Y + 52;
 
-  // "Services Offered" should be BELOW the bars and ABOVE the bullets
-  const LABEL_Y = ACCENT_Y + 30;
+  // lists start BELOW label
+  const LIST_Y = LABEL_Y + 10;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1547,7 +1546,6 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
-
 
 /**
  * Shaw-inspired poster B:
@@ -1749,16 +1747,17 @@ function layoutList(items, len) {
 }
 
 function withListLayout(lists = {}) {
-  const leftRaw = (lists.left || []).slice(0, 6);
-  const rightRaw = (lists.right || []).slice(0, 6);
+  const leftRaw = Array.isArray(lists.left) ? lists.left.filter(Boolean).slice(0, 6) : [];
+  const rightRaw = Array.isArray(lists.right) ? lists.right.filter(Boolean).slice(0, 6) : [];
 
-  const n = leftRaw.length && rightRaw.length
-    ? Math.min(leftRaw.length, rightRaw.length)
-    : Math.max(leftRaw.length, rightRaw.length);
+  const n =
+    leftRaw.length && rightRaw.length
+      ? Math.min(leftRaw.length, rightRaw.length)
+      : Math.max(leftRaw.length, rightRaw.length);
 
   return {
-    left: layoutList(leftRaw.slice(0, n)),
-    right: layoutList(rightRaw.slice(0, n)),
+    left: layoutList(leftRaw, n),   // ✅ pass len
+    right: layoutList(rightRaw, n), // ✅ pass len
   };
 }
 
