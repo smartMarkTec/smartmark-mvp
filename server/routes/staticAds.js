@@ -1462,17 +1462,13 @@ function compactBullet(s = "") {
 /* ------------------------ SVG templates ------------------------ */
 
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Home-cleaning style Flyer A (clean + aligned)
-  // Fixes:
-  // - Bigger dark header (fold pulled DOWN)
-  // - Headline moved DOWN + slightly smaller so it never leaks
-  // - Horizontal bullets line placed under header on light bg (black)
-  // - Left checks are orange-only (no circles), moved left, bigger text
-  // - No phone/call-now/bottom sentence
-  // - Subline stays inside header under headline
+  // Same design as before — only changes:
+  // - horizontal bullet strip moved into header under headline
+  // - orange accent bars moved slightly lower
+  // - lists moved up so they are visible again
 
-  const HEADER_H = 520;      // ✅ pulled DOWN (bigger blue)
-  const DIAG_RIGHT_Y = 420;  // diagonal angle like reference
+  const HEADER_H = 520;
+  const DIAG_RIGHT_Y = 420;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1500,11 +1496,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <!-- Diagonal split -->
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Small accent bars (pazaz, tasteful) -->
-  <rect x="90" y="${HEADER_H - 18}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
-  <rect x="${W - 330}" y="${HEADER_H - 18}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+  <!-- Orange accent bars (moved DOWN a tad) -->
+  <rect x="90" y="${HEADER_H - 10}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+  <rect x="${W - 330}" y="${HEADER_H - 10}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
 
-  <!-- Headline + subline (moved DOWN so it never leaks) -->
+  <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
@@ -1517,15 +1513,15 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- Horizontal bullets line under header (black, clean) -->
+  <!-- Horizontal bullet strip (MOVED UP under headline, inside header) -->
   {{#hBulletsLine}}
-  <text class="hRow tCenter" x="${W / 2}" y="${HEADER_H + 64}" fill="{{palette.textOnLight}}" opacity="0.95">
+  <text class="hRow tCenter" x="${W / 2}" y="{{hBulletsY}}" fill="{{palette.textOnDark}}" opacity="0.70">
     {{hBulletsLine}}
   </text>
   {{/hBulletsLine}}
 
-  <!-- Left checklist (moved left, orange check only, bigger text) -->
-  <g transform="translate(140, 635)">
+  <!-- Left checklist (moved UP a bit so it shows) -->
+  <g transform="translate(140, 600)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
         <path d="M6 16 L14 24 L30 6"
@@ -1536,8 +1532,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- Right services list -->
-  <g transform="translate(${W - 480}, 635)">
+  <!-- Right services list (moved UP a bit so it shows) -->
+  <g transform="translate(${W - 480}, 600)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.90">{{servicesLabel}}</text>
 
     {{#lists.right}}
@@ -2116,23 +2112,29 @@ if (template === "flyer_a") {
     26;
 
   // ✅ Horizontal bullet row under header (black on light)
-  const hBulletsLine = (Array.isArray(mergedKnobs.lists?.right) ? mergedKnobs.lists.right : [])
-    .slice(0, 3)
-    .map((x) => String(x || "").trim())
-    .filter(Boolean)
-    .join(" • ")
-    .toUpperCase();
+const hBulletsLine = (Array.isArray(mergedKnobs.lists?.right) ? mergedKnobs.lists.right : [])
+  .slice(0, 3)
+  .map((x) => String(x || "").trim())
+  .filter(Boolean)
+  .join(" • ")
+  .toUpperCase();
 
-  const vars = {
-    headlineLines,
-    subline: sublineUpper,
-    sublineY,
-    hBulletsLine,
-    palette: mergedKnobs.palette,
-    lists: listsLaidOut,
-    showIcons: false,
-    servicesLabel: "Services Offered",
-  };
+// tplFlyerA headline group is translate(..., 140)
+// so place horizontal bullets directly under the headline/subline inside header:
+const hBulletsY = 140 + sublineY + 58;
+
+const vars = {
+  headlineLines,
+  subline: sublineUpper,
+  sublineY,
+  hBulletsLine,
+  hBulletsY,
+  palette: mergedKnobs.palette,
+  lists: listsLaidOut,
+  showIcons: false,
+  servicesLabel: "Services Offered",
+};
+
 
 
   const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
@@ -2824,23 +2826,27 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     Math.round(HEAD_FS * 0.88) +
     26;
 
-  const hBulletsLine = (Array.isArray(prof?.lists?.right) ? prof.lists.right : [])
-    .slice(0, 3)
-    .map((x) => String(x || "").trim())
-    .filter(Boolean)
-    .join(" • ")
-    .toUpperCase();
+ const hBulletsLine = (Array.isArray(prof?.lists?.right) ? prof.lists.right : [])
+  .slice(0, 3)
+  .map((x) => String(x || "").trim())
+  .filter(Boolean)
+  .join(" • ")
+  .toUpperCase();
 
-  const vars = {
-    headlineLines,
-    subline: sublineUpper,
-    sublineY,
-    hBulletsLine,
-    palette,
-    lists,
-    showIcons: false,
-    servicesLabel: "Services Offered",
-  };
+const hBulletsY = 140 + sublineY + 58;
+
+const vars = {
+  headlineLines,
+  subline: sublineUpper,
+  sublineY,
+  hBulletsLine,
+  hBulletsY,
+  palette,
+  lists,
+  showIcons: false,
+  servicesLabel: "Services Offered",
+};
+
 
 
   const svg = mustache.render(tplFlyerA({ W, H }), vars);
