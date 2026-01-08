@@ -1461,14 +1461,18 @@ function compactBullet(s = "") {
 
 /* ------------------------ SVG templates ------------------------ */
 
+// ✅ REPLACE your entire tplFlyerA() function with THIS version
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // Same design as before — only changes:
-  // - horizontal bullet strip moved into header under headline
-  // - orange accent bars moved slightly lower
-  // - lists moved up so they are visible again
+  // ONLY changes:
+  // 1) REMOVE the horizontal "KITCHEN • BATHROOMS • OFFICES" line entirely
+  // 2) Scoot orange accent bars DOWN a tad
+  // Everything else stays the same.
 
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
+
+  // moved DOWN slightly (was HEADER_H - 10)
+  const ACCENT_Y = HEADER_H + 6;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1476,7 +1480,6 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     <style>
       .hBig{font:900 96px/0.92 Inter,system-ui; letter-spacing:0.02em;}
       .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
-      .hRow{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.08em;}
 
       .label{font:800 34px/1.1 Inter,system-ui;}
       .liL{font:800 42px/1.15 Inter,system-ui;}
@@ -1496,9 +1499,9 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <!-- Diagonal split -->
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Orange accent bars (moved DOWN a tad) -->
-  <rect x="90" y="${HEADER_H - 10}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
-  <rect x="${W - 330}" y="${HEADER_H - 10}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+  <!-- Orange accent bars (scooted DOWN a tad) -->
+  <rect x="90" y="${ACCENT_Y}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+  <rect x="${W - 330}" y="${ACCENT_Y}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
 
   <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
@@ -1513,14 +1516,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- Horizontal bullet strip (MOVED UP under headline, inside header) -->
-  {{#hBulletsLine}}
-  <text class="hRow tCenter" x="${W / 2}" y="{{hBulletsY}}" fill="{{palette.textOnDark}}" opacity="0.70">
-    {{hBulletsLine}}
-  </text>
-  {{/hBulletsLine}}
-
-  <!-- Left checklist (moved UP a bit so it shows) -->
+  <!-- Left checklist -->
   <g transform="translate(140, 600)">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
@@ -1532,7 +1528,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- Right services list (moved UP a bit so it shows) -->
+  <!-- Right services list -->
   <g transform="translate(${W - 480}, 600)">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.90">{{servicesLabel}}</text>
 
@@ -2125,10 +2121,8 @@ const hBulletsY = 140 + sublineY + 58;
 
 const vars = {
   headlineLines,
-  subline: sublineUpper,
+  subline: sublineUpper, // keeps "APARTMENT • HOME • OFFICE"
   sublineY,
-  hBulletsLine,
-  hBulletsY,
   palette: mergedKnobs.palette,
   lists: listsLaidOut,
   showIcons: false,
@@ -2837,10 +2831,8 @@ const hBulletsY = 140 + sublineY + 58;
 
 const vars = {
   headlineLines,
-  subline: sublineUpper,
+  subline: sublineUpper, // keeps "APARTMENT • HOME • OFFICE"
   sublineY,
-  hBulletsLine,
-  hBulletsY,
   palette,
   lists,
   showIcons: false,
