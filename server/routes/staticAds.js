@@ -1465,12 +1465,15 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // ✅ orange bars DOWN a tad more
-  const ACCENT_Y = HEADER_H + 26;
+  // orange bars DOWN a tad more
+  const ACCENT_Y = HEADER_H + 30;
 
-  // ✅ move lists UP so they sit right under orange bars
-  // (your list items start at +56px inside the group)
-  const LIST_Y = 510;
+  // lists sit RIGHT under the orange bars
+  // (your list items already start at y=56, so we pull the group up)
+  const LIST_Y = ACCENT_Y - 44;
+
+  // "Services Offered" should be BELOW the bars and ABOVE the bullets
+  const LABEL_Y = ACCENT_Y + 30;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1489,7 +1492,9 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </defs>
 
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
+
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
+
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
   <!-- Orange accent bars -->
@@ -1509,27 +1514,34 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
+  <!-- Services Offered label (below orange bars, aligned to right column) -->
+  <text class="label tLeft" x="${W - 480}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+    {{servicesLabel}}
+  </text>
+
   <!-- Left checklist (checkmarks) -->
   <g transform="translate(140, ${LIST_Y})">
     {{#lists.left}}
+      {{#show}}
       <g transform="translate(0, {{y}})">
         <path d="M6 16 L14 24 L30 6"
           stroke="{{palette.accent}}" stroke-width="6"
           fill="none" stroke-linecap="round" stroke-linejoin="round" />
         <text class="liL tLeft" x="54" y="26" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
+      {{/show}}
     {{/lists.left}}
   </g>
 
   <!-- Right services list (bullets) -->
   <g transform="translate(${W - 480}, ${LIST_Y})">
-    <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.90">{{servicesLabel}}</text>
-
     {{#lists.right}}
+      {{#show}}
       <g transform="translate(0, {{y}})">
         <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.70"/>
         <text class="liR tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
+      {{/show}}
     {{/lists.right}}
   </g>
 
