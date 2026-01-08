@@ -1461,18 +1461,16 @@ function compactBullet(s = "") {
 
 /* ------------------------ SVG templates ------------------------ */
 
-// ✅ REPLACE your entire tplFlyerA() function with THIS version
 function tplFlyerA({ W = 1080, H = 1080 }) {
-  // ONLY changes:
-  // 1) REMOVE the horizontal "KITCHEN • BATHROOMS • OFFICES" line entirely
-  // 2) Scoot orange accent bars DOWN a tad
-  // Everything else stays the same.
-
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // moved DOWN slightly (was HEADER_H - 10)
-  const ACCENT_Y = HEADER_H + 6;
+  // ✅ orange bars DOWN a tad more
+  const ACCENT_Y = HEADER_H + 26;
+
+  // ✅ move lists UP so they sit right under orange bars
+  // (your list items start at +56px inside the group)
+  const LIST_Y = 510;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1490,16 +1488,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </style>
   </defs>
 
-  <!-- Base -->
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
-
-  <!-- Top dark header -->
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
-
-  <!-- Diagonal split -->
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Orange accent bars (scooted DOWN a tad) -->
+  <!-- Orange accent bars -->
   <rect x="90" y="${ACCENT_Y}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
   <rect x="${W - 330}" y="${ACCENT_Y}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
 
@@ -1516,8 +1509,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- Left checklist -->
-  <g transform="translate(140, 600)">
+  <!-- Left checklist (checkmarks) -->
+  <g transform="translate(140, ${LIST_Y})">
     {{#lists.left}}
       <g transform="translate(0, {{y}})">
         <path d="M6 16 L14 24 L30 6"
@@ -1528,8 +1521,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- Right services list -->
-  <g transform="translate(${W - 480}, 600)">
+  <!-- Right services list (bullets) -->
+  <g transform="translate(${W - 480}, ${LIST_Y})">
     <text class="label tLeft" x="0" y="0" fill="{{palette.textOnLight}}" opacity="0.90">{{servicesLabel}}</text>
 
     {{#lists.right}}
@@ -2032,6 +2025,7 @@ router.post("/generate-static-ad", async (req, res) => {
 
   
 /* ---------- FLYER A ---------- */
+/* ---------- FLYER A ---------- */
 if (template === "flyer_a") {
   const seed = Date.now();
 
@@ -2046,14 +2040,19 @@ if (template === "flyer_a") {
     cta: inputs.cta || prof.cta,
   };
 
+  // ✅ FIX: don’t let empty knobs.lists override prof.lists
+  const knobLists = knobs && knobs.lists;
+  const effectiveLists =
+    knobLists && (Array.isArray(knobLists.left) || Array.isArray(knobLists.right))
+      ? knobLists
+      : prof.lists;
+
   const mergedKnobs = {
     size: knobs.size || "1080x1080",
-    // ✅ palette variation per generation (safe)
     palette: knobs.palette || varyPalette(prof.palette, seed),
-    // ✅ equalized lists (no lopsided look)
-    lists: knobs.lists || prof.lists,
+    lists: effectiveLists,
     coverage: knobs.coverage || prof.coverage || "",
-    showIcons: false, // (we removed the person; keeping param for compatibility)
+    showIcons: false,
     headerSplitDiagonal:
       knobs.headerSplitDiagonal !== undefined ? knobs.headerSplitDiagonal : true,
     roundedOuter: knobs.roundedOuter !== undefined ? knobs.roundedOuter : true,
@@ -2065,17 +2064,15 @@ if (template === "flyer_a") {
     throw new Error("validation failed: " + JSON.stringify(validate.errors));
   }
 
-  // ✅ force columns to match count + consistent spacing
-  // ✅ force columns to match count + consistent spacing
+  // ✅ lists will ALWAYS exist now
   const listsLaidOut = withListLayout(mergedKnobs.lists || {});
 
-  // --- Headline/Subline stack (FIXED: subline stays in the blue header) ---
+  // --- Headline/Subline stack ---
   const headlineUpper = String(mergedInputs.headline || "")
     .toUpperCase()
     .replace(/\s+/g, " ")
     .trim();
 
-  // ✅ slightly smaller headline so it never leaks
   const HEAD_FS = 96;
 
   const headlineLinesRaw = wrapTextToWidth(
@@ -2088,7 +2085,6 @@ if (template === "flyer_a") {
     true
   );
 
-  // ✅ tighter but clean
   const lineGap = Math.round(HEAD_FS * 0.90);
 
   const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
@@ -2101,35 +2097,21 @@ if (template === "flyer_a") {
     .replace(/\s+/g, " ")
     .trim();
 
-  // ✅ RELATIVE inside the header group (tplFlyerA uses translate(...,140))
+  // ✅ move the bullet subline UP (closer to headline)
   const sublineY =
     (headlineLines.length - 1) * lineGap +
-    Math.round(HEAD_FS * 0.88) +
-    26;
+    Math.round(HEAD_FS * 0.86) -
+    24;
 
-  // ✅ Horizontal bullet row under header (black on light)
-const hBulletsLine = (Array.isArray(mergedKnobs.lists?.right) ? mergedKnobs.lists.right : [])
-  .slice(0, 3)
-  .map((x) => String(x || "").trim())
-  .filter(Boolean)
-  .join(" • ")
-  .toUpperCase();
-
-// tplFlyerA headline group is translate(..., 140)
-// so place horizontal bullets directly under the headline/subline inside header:
-const hBulletsY = 140 + sublineY + 58;
-
-const vars = {
-  headlineLines,
-  subline: sublineUpper, // keeps "APARTMENT • HOME • OFFICE"
-  sublineY,
-  palette: mergedKnobs.palette,
-  lists: listsLaidOut,
-  showIcons: false,
-  servicesLabel: "Services Offered",
-};
-
-
+  const vars = {
+    headlineLines,
+    subline: sublineUpper,
+    sublineY,
+    palette: mergedKnobs.palette,
+    lists: listsLaidOut,
+    showIcons: false,
+    servicesLabel: "Services Offered",
+  };
 
   const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
   const svg = mustache.render(svgTpl, vars);
@@ -2139,7 +2121,9 @@ const vars = {
   const pngName = `${base}.png`;
 
   fs.writeFileSync(path.join(GEN_DIR, svgName), svg, "utf8");
-  await sharp(Buffer.from(svg)).png({ quality: 92 }).toFile(path.join(GEN_DIR, pngName));
+  await sharp(Buffer.from(svg))
+    .png({ quality: 92 })
+    .toFile(path.join(GEN_DIR, pngName));
 
   const mediaPng = makeMediaUrl(req, pngName);
   const mediaSvg = makeMediaUrl(req, svgName);
@@ -2761,24 +2745,30 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         await fs.promises.writeFile(path.join(GEN_DIR, fname), finalPng);
         files.push({ absoluteUrl: makeMediaUrl(req, fname) });
       }
- } else {
+} else {
   // --- FLYER A (service/fix template) ---
-  // Soft, tasteful palette variation per generation (no crazy colors)
+
   const PALETTE_VARIANTS = [
-    { header: "#0d3b66", body: "#dff3f4", accent: "#ff8b4a", textOnDark: "#ffffff", textOnLight: "#2b3a44" }, // classic navy
-    { header: "#0b5563", body: "#e7f6f2", accent: "#16a085", textOnDark: "#ffffff", textOnLight: "#23343d" }, // teal
-    { header: "#113a5d", body: "#e8f0f6", accent: "#ff7b41", textOnDark: "#ffffff", textOnLight: "#213547" }, // navy alt
-    { header: "#213043", body: "#eaf2fb", accent: "#f59e0b", textOnDark: "#ffffff", textOnLight: "#182435" }, // slate
-    { header: "#1d3b2a", body: "#e9f5ee", accent: "#f4a261", textOnDark: "#ffffff", textOnLight: "#273b33" }, // forest
+    { header: "#0d3b66", body: "#dff3f4", accent: "#ff8b4a", textOnDark: "#ffffff", textOnLight: "#2b3a44" },
+    { header: "#0b5563", body: "#e7f6f2", accent: "#16a085", textOnDark: "#ffffff", textOnLight: "#23343d" },
+    { header: "#113a5d", body: "#e8f0f6", accent: "#ff7b41", textOnDark: "#ffffff", textOnLight: "#213547" },
+    { header: "#213043", body: "#eaf2fb", accent: "#f59e0b", textOnDark: "#ffffff", textOnLight: "#182435" },
+    { header: "#1d3b2a", body: "#e9f5ee", accent: "#f4a261", textOnDark: "#ffffff", textOnLight: "#273b33" },
   ];
 
   const palette =
     (prof && prof.palette) ||
     PALETTE_VARIANTS[Math.floor(Math.random() * PALETTE_VARIANTS.length)];
 
-  // Ensure balanced lists (same count left/right) so layout never looks weird
-  const rawLeft = (prof?.lists?.left || ["One Time", "Weekly", "Bi-Weekly", "Monthly"]).slice(0, 6);
-  const rawRight = (prof?.lists?.right || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"]).slice(0, 6);
+  // ✅ FIX: don’t let empty b.knobs.lists override prof.lists
+  const knobLists = b && b.knobs && b.knobs.lists;
+  const effectiveLists =
+    knobLists && (Array.isArray(knobLists.left) || Array.isArray(knobLists.right))
+      ? knobLists
+      : (prof?.lists || {});
+
+  const rawLeft = (effectiveLists.left || ["One Time","Weekly","Bi-Weekly","Monthly"]).slice(0, 6);
+  const rawRight = (effectiveLists.right || ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"]).slice(0, 6);
   const count = Math.min(rawLeft.length, rawRight.length, 6);
 
   const lists = withListLayout({
@@ -2815,36 +2805,24 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     .replace(/\s+/g, " ")
     .trim();
 
+  // ✅ move the bullet subline UP (closer to headline)
   const sublineY =
     (headlineLines.length - 1) * lineGap +
-    Math.round(HEAD_FS * 0.88) +
-    26;
+    Math.round(HEAD_FS * 0.86) -
+    24;
 
- const hBulletsLine = (Array.isArray(prof?.lists?.right) ? prof.lists.right : [])
-  .slice(0, 3)
-  .map((x) => String(x || "").trim())
-  .filter(Boolean)
-  .join(" • ")
-  .toUpperCase();
-
-const hBulletsY = 140 + sublineY + 58;
-
-const vars = {
-  headlineLines,
-  subline: sublineUpper, // keeps "APARTMENT • HOME • OFFICE"
-  sublineY,
-  palette,
-  lists,
-  showIcons: false,
-  servicesLabel: "Services Offered",
-};
-
-
+  const vars = {
+    headlineLines,
+    subline: sublineUpper,
+    sublineY,
+    palette,
+    lists,
+    showIcons: false,
+    servicesLabel: "Services Offered",
+  };
 
   const svg = mustache.render(tplFlyerA({ W, H }), vars);
-  const pngBuf = await sharp(Buffer.from(svg))
-    .png({ quality: 92 })
-    .toBuffer();
+  const pngBuf = await sharp(Buffer.from(svg)).png({ quality: 92 }).toBuffer();
 
   for (let i = 0; i < 2; i++) {
     const fname = `static-${Date.now()}-${Math.random().toString(36).slice(2)}.png`;
