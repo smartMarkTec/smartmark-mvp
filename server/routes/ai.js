@@ -252,6 +252,20 @@ const FAST = {
 
 })();
 
+function safeUnlink(p) {
+  try {
+    if (!p) return;
+    require("fs").unlink(p, () => {});
+  } catch {}
+}
+
+function cleanupMany(paths) {
+  try {
+    (paths || []).filter(Boolean).forEach(safeUnlink);
+  } catch {}
+}
+
+
 
 
 /**
