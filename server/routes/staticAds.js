@@ -1467,23 +1467,26 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // layout system (base)
-  const SECTION_NUDGE_X = 0;
+  // --- Bottom layout tuning (ONLY affects the bottom section) ---
   const MARGIN = 90;
-  const MID_BAR_W = 10;
-  const COL_GAP = 50;
 
-  const COL_W = Math.round((W - 2 * MARGIN - MID_BAR_W - 2 * COL_GAP) / 2);
-  const LEFT_COL_X = MARGIN + SECTION_NUDGE_X;
-  const RIGHT_COL_X =
-    MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_NUDGE_X;
+  // ✅ Smaller center gap now that the divider line is removed
+  const CENTER_GAP = 140; // reduce this if you want even tighter (ex: 120)
+
+  // Keep original column width feel (same as before-ish)
+  const COL_W = Math.round((W - 2 * MARGIN - CENTER_GAP) / 2);
+
+  // Center the entire bottom block around the true middle
+  const MID_X = Math.round(W / 2);
+  const LEFT_COL_X = Math.round(MID_X - CENTER_GAP / 2 - COL_W);
+  const RIGHT_COL_X = Math.round(MID_X + CENTER_GAP / 2);
 
   // label + lists
   const ACCENT_Y = HEADER_H + 30; // used for Y math only
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // ✅ keep the bottom block centered (same as your current good look)
+  // ✅ keep your current centered “feel”
   const BOTTOM_SECTION_SHIFT_X = 22;
 
   // LEFT block positions
@@ -1515,7 +1518,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline -->
+  <!-- Headline + subline (UNCHANGED) -->
   <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
@@ -1528,7 +1531,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- ✅ REMOVED middle divider line -->
+  <!-- ✅ no middle divider line -->
 
   <!-- Left label -->
   <text class="label tLeft" x="${LEFT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
