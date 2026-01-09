@@ -109,6 +109,15 @@ router.ax = ax;
 
 
 const fs = require('fs');
+async function cleanupMany(paths = []) {
+  const fsp = fs.promises;
+  await Promise.all(
+    (paths || [])
+      .filter(Boolean)
+      .map((p) => fsp.unlink(p).catch(() => null))
+  );
+}
+
 const path = require('path');
 // Where we store generated images/videos
 const GENERATED_DIR =
@@ -3642,10 +3651,12 @@ async function makeVideoVariant({
       180000
     );
 
-    cleanupMany([...segs, voicePath]);
+    await cleanupMany([...segs, voicePath]);
+
     return { outPath, duration: OUTLEN };
   } catch (e) {
-    cleanupMany([...segs, voicePath, ...tmpToDelete].filter(Boolean));
+   await cleanupMany([...segs, voicePath, ...tmpToDelete].filter(Boolean));
+
     throw e;
   }
 }
@@ -3820,10 +3831,12 @@ async function makeSlideshowVariantFromPhotos({
       180000
     );
 
-    cleanupMany([...segs, voicePath, ...tmpToDelete]);
+    await cleanupMany([...segs, voicePath, ...tmpToDelete]);
+
     return { outPath, duration: OUTLEN };
   } catch (e) {
-    cleanupMany([...segs, voicePath, ...tmpToDelete].filter(Boolean));
+    await cleanupMany([...segs, voicePath, ...tmpToDelete].filter(Boolean));
+
     throw e;
   }
 }
