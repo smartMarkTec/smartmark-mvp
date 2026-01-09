@@ -1470,19 +1470,33 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   // orange bars
   const ACCENT_Y = HEADER_H + 30;
 
-  // label above right list
-  const LABEL_Y = ACCENT_Y + 44;
+  // layout system (keeps symmetry around center)
+  const MID_X = Math.round(W / 2);
+  const MARGIN = 90;
+  const MID_BAR_W = 10;
+  const COL_GAP = 50;
 
-  // lists down a bit below bars + label
+  const COL_W = Math.round((W - 2 * MARGIN - MID_BAR_W - 2 * COL_GAP) / 2);
+  const LEFT_COL_X = MARGIN;
+  const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP;
+
+  // bars inside each column
+  const BAR_W = 240;
+  const BAR_H = 10;
+  const LEFT_BAR_X = LEFT_COL_X;
+  // ✅ move right bar LEFT (toward center) a bit
+  const RIGHT_BAR_X = RIGHT_COL_X + (COL_W - BAR_W) - 30;
+
+  // label + lists
+  const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // ✅ adjust columns (per your request)
-  const LEFT_X = 80;        // scoot left list LEFT
-  const RIGHT_X = W - 430;  // scoot right column LEFT
+  // ✅ scoot lists outward for symmetry
+  const LEFT_LIST_X = LEFT_COL_X + 10;
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10;      // label anchor
+  const RIGHT_LIST_X = RIGHT_LABEL_X + 22;     // list slightly to the RIGHT flank of label
 
-  // ✅ vertical orange separator (middle)
-  const MID_X = Math.round(W / 2);
-  const MID_BAR_W = 10;
+  // ✅ middle vertical orange line (same style as top orange bars)
   const MID_BAR_H = 230;
   const MID_BAR_Y = LABEL_Y + 18;
 
@@ -1504,14 +1518,12 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </defs>
 
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
-
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
-
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
   <!-- Orange accent bars -->
-  <rect x="90" y="${ACCENT_Y}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
-  <rect x="${W - 330}" y="${ACCENT_Y}" width="240" height="10" fill="{{palette.accent}}" opacity="0.95"/>
+  <rect x="${LEFT_BAR_X}" y="${ACCENT_Y}" width="${BAR_W}" height="${BAR_H}" fill="{{palette.accent}}" opacity="0.95"/>
+  <rect x="${RIGHT_BAR_X}" y="${ACCENT_Y}" width="${BAR_W}" height="${BAR_H}" fill="{{palette.accent}}" opacity="0.95"/>
 
   <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
@@ -1526,24 +1538,23 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- ✅ Middle vertical orange line (same as bars) -->
+  <!-- ✅ Middle vertical orange line (same style as bars) -->
   <rect
     x="${MID_X - Math.round(MID_BAR_W / 2)}"
     y="${MID_BAR_Y}"
     width="${MID_BAR_W}"
     height="${MID_BAR_H}"
     fill="{{palette.accent}}"
-    opacity="0.45"
-    rx="6"
+    opacity="0.95"
   />
 
-  <!-- ✅ Services Offered label (above RIGHT column list) -->
-  <text class="label tLeft" x="${RIGHT_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+  <!-- ✅ Services Offered label (above RIGHT list) -->
+  <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
 
   <!-- Left checklist (checkmarks) -->
-  <g transform="translate(${LEFT_X}, ${LIST_Y})">
+  <g transform="translate(${LEFT_LIST_X}, ${LIST_Y})">
     {{#lists.left}}
       {{#show}}
       <g transform="translate(0, {{y}})">
@@ -1557,11 +1568,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </g>
 
   <!-- Right services list (bullets) -->
-  <g transform="translate(${RIGHT_X}, ${LIST_Y})">
+  <g transform="translate(${RIGHT_LIST_X}, ${LIST_Y})">
     {{#lists.right}}
       {{#show}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="6" fill="{{palette.accent}}" opacity="0.75"/>
+        <circle cx="14" cy="10" r="6" fill="{{palette.accent}}" opacity="0.95"/>
         <text class="liR tLeft" x="34" y="22" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
       {{/show}}
@@ -1570,7 +1581,6 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
-
 
 
 /**
