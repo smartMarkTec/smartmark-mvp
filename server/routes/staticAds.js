@@ -1554,7 +1554,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </text>
 
   <!-- Left checklist (checkmarks) -->
-  <g transform="translate(${LEFT_LIST_X}, ${LIST_Y})">
+  <g transform="translate(${LEFT_LIST_X - 50}, ${LIST_Y})">
+
     {{#lists.left}}
       {{#show}}
       <g transform="translate(0, {{y}})">
@@ -1568,7 +1569,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </g>
 
   <!-- Right services list (bullets) -->
-  <g transform="translate(${RIGHT_LIST_X}, ${LIST_Y})">
+  <g transform="translate(${RIGHT_LIST_X + 55}, ${LIST_Y})">
+
     {{#lists.right}}
       {{#show}}
       <g transform="translate(0, {{y}})">
