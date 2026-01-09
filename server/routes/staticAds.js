@@ -523,10 +523,12 @@ function profileForIndustry(industry = "") {
     },
   };
 
-  const serviceLists = {
-    left: ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-    right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
-  };
+ const serviceLists = {
+  // ✅ safer “info” items (no assumptions like weekly/monthly)
+  left: ["Trusted Pros", "Supplies Included", "Flexible Scheduling", "Attention to Detail"],
+  right: ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
+};
+
 
   const hvacLists = {
     left: ["Install", "Repair", "Tune-Up", "Maintenance"],
@@ -1465,20 +1467,17 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // orange bars DOWN a tad
+  // orange bars DOWN a tad more
   const ACCENT_Y = HEADER_H + 30;
 
-  // ✅ lists now sit BELOW the orange bars
-  // (list items start at y=56 inside the group, so this places them safely below)
-  const LIST_Y = ACCENT_Y + 40;
+  // ✅ label above right list, under the bars
+  const LABEL_Y = ACCENT_Y + 44;
 
-  // label stays just under the bars
-  const LABEL_Y = ACCENT_Y + 34;
+  // ✅ push both lists DOWN so they sit clearly below the orange lines + label
+  // (first list item appears at LIST_Y + 56)
+  const LIST_Y = ACCENT_Y + 32;
 
-  // simple center design to fill space between columns
   const MID_X = Math.round(W / 2);
-  const DIVIDER_TOP = LIST_Y + 40;
-  const DIVIDER_BOT = LIST_Y + 56 + 54 * 5 + 40; // fits up to 6 rows
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1519,19 +1518,18 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- Services Offered label (below orange bars) -->
-  <text class="label tCenter" x="${MID_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+  <!-- ✅ Services Offered label (above right column list) -->
+  <text class="label tLeft" x="${W - 480}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
 
-  <!-- ✅ simple center divider design between columns -->
-  <line x1="${MID_X}" y1="${DIVIDER_TOP}" x2="${MID_X}" y2="${DIVIDER_BOT}"
-        stroke="{{palette.textOnLight}}" stroke-width="4" opacity="0.10"
-        stroke-linecap="round" stroke-dasharray="10 18" />
-  <g opacity="0.16">
-    <rect x="${MID_X - 10}" y="${DIVIDER_TOP - 18}" width="20" height="20"
-          fill="{{palette.accent}}" transform="rotate(45 ${MID_X} ${DIVIDER_TOP - 8})"/>
-    <circle cx="${MID_X}" cy="${DIVIDER_BOT + 10}" r="7" fill="{{palette.accent}}"/>
+  <!-- ✅ Simple center filler (sparkle badge) -->
+  <g transform="translate(${MID_X}, ${LABEL_Y + 32})" opacity="0.35">
+    <circle r="24" fill="{{palette.accent}}" opacity="0.18"/>
+    <path d="M0 -16 L4 -4 L16 0 L4 4 L0 16 L-4 4 L-16 0 L-4 -4 Z"
+      fill="{{palette.accent}}" opacity="0.55"/>
+    <circle cx="-18" cy="20" r="3" fill="{{palette.accent}}" opacity="0.35"/>
+    <circle cx="18" cy="20" r="3" fill="{{palette.accent}}" opacity="0.35"/>
   </g>
 
   <!-- Left checklist (checkmarks) -->
@@ -1562,6 +1560,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
+
 
 /**
  * Shaw-inspired poster B:
