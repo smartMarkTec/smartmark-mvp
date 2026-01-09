@@ -1467,15 +1467,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // ✅ keep the middle divider line EXACTLY where it is
-  const SECTION_NUDGE_X = 0;
-  const MID_X = Math.round(W / 2) + SECTION_NUDGE_X;
-
-  // ✅ NEW: center the entire bottom section (both columns + their labels)
-  // (moves Overview + checklist + Services Offered + bullets together)
-  const BOTTOM_SECTION_SHIFT_X = 22; // "center it" — nudges whole bottom block to the right
-
   // layout system (base)
+  const SECTION_NUDGE_X = 0;
   const MARGIN = 90;
   const MID_BAR_W = 10;
   const COL_GAP = 50;
@@ -1486,23 +1479,20 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_NUDGE_X;
 
   // label + lists
-  const ACCENT_Y = HEADER_H + 30;
+  const ACCENT_Y = HEADER_H + 30; // used for Y math only
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // LEFT block (shifted as part of bottom centering)
+  // ✅ keep the bottom block centered (same as your current good look)
+  const BOTTOM_SECTION_SHIFT_X = 22;
+
+  // LEFT block positions
   const LEFT_LABEL_X = LEFT_COL_X + BOTTOM_SECTION_SHIFT_X;
   const LEFT_LIST_X = LEFT_COL_X + 10 + BOTTOM_SECTION_SHIFT_X;
 
-  // RIGHT block (shifted as part of bottom centering)
+  // RIGHT block positions
   const RIGHT_LABEL_X = RIGHT_COL_X + 10 + BOTTOM_SECTION_SHIFT_X;
-
-  // keep bullets aligned neatly under the right label (but still part of the same shift)
   const RIGHT_LIST_X = RIGHT_LABEL_X + 12;
-
-  // middle vertical orange line (UNCHANGED)
-  const MID_BAR_H = 230;
-  const MID_BAR_Y = LABEL_Y + 18;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1525,7 +1515,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline (UNCHANGED) -->
+  <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
@@ -1538,15 +1528,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- middle divider (DO NOT MOVE) -->
-  <rect
-    x="${MID_X - Math.round(MID_BAR_W / 2)}"
-    y="${MID_BAR_Y}"
-    width="${MID_BAR_W}"
-    height="${MID_BAR_H}"
-    fill="{{palette.accent}}"
-    opacity="0.95"
-  />
+  <!-- ✅ REMOVED middle divider line -->
 
   <!-- Left label -->
   <text class="label tLeft" x="${LEFT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
@@ -1586,6 +1568,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
+
 
 /**
  * Shaw-inspired poster B:
@@ -1735,23 +1718,42 @@ function tweakHex(hex = "#000000", amt = 0) {
 }
 
 function varyPalette(pal = null, seed = Date.now()) {
-  if (!pal) return pal;
   const s = Math.abs(Number(seed) || Date.now());
-  const variants = [
-    pal,
-    {
-      ...pal,
-      header: tweakHex(pal.header, -14),
-      body: tweakHex(pal.body, +6),
-    },
-    {
-      ...pal,
-      header: tweakHex(pal.header, +10),
-      body: tweakHex(pal.body, -6),
-    },
+
+  // Neutral, good-looking combos only (rotates each generation)
+  const NEUTRAL_PALETTES = [
+    { header: "#0a3a4f", body: "#dff3f4", accent: "#ff8b4a", textOnDark: "#ffffff", textOnLight: "#24323b" }, // navy + soft orange
+    { header: "#1f2a37", body: "#eef2f7", accent: "#f59e0b", textOnDark: "#ffffff", textOnLight: "#111827" }, // slate + amber
+    { header: "#0b5563", body: "#e7f6f2", accent: "#16a085", textOnDark: "#ffffff", textOnLight: "#23343d" }, // teal + green
+    { header: "#3a2740", body: "#f2ecf7", accent: "#e76f51", textOnDark: "#ffffff", textOnLight: "#2d283a" }, // wine + coral
+    { header: "#1d3b2a", body: "#e9f5ee", accent: "#f4a261", textOnDark: "#ffffff", textOnLight: "#273b33" }, // forest + sand
+    { header: "#111827", body: "#f3f4f6", accent: "#fb923c", textOnDark: "#ffffff", textOnLight: "#111827" }, // near-black + light gray + orange
+    { header: "#22324a", body: "#eaf2fb", accent: "#f59e0b", textOnDark: "#ffffff", textOnLight: "#182435" }, // deep blue + pale blue
   ];
-  return variants[s % variants.length];
+
+  // include the industry palette sometimes, but rotate into neutrals
+  const baseList = pal ? [pal, ...NEUTRAL_PALETTES] : NEUTRAL_PALETTES;
+  const base = baseList[s % baseList.length];
+
+  // small tasteful shade variance so even same base looks fresh
+  const shadeMode = Math.floor((s / 7) % 3); // 0,1,2
+  if (shadeMode === 0) return base;
+
+  if (shadeMode === 1) {
+    return {
+      ...base,
+      header: tweakHex(base.header, -12),
+      body: tweakHex(base.body, +6),
+    };
+  }
+
+  return {
+    ...base,
+    header: tweakHex(base.header, +10),
+    body: tweakHex(base.body, -6),
+  };
 }
+
 
 // --- force both columns to have same count (no weird lopsided look) ---
 function normalizeListsEqual(lists = {}, min = 4, max = 6) {
