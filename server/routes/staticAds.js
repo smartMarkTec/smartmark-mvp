@@ -1473,15 +1473,18 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   // label above right list
   const LABEL_Y = ACCENT_Y + 44;
 
-  // push lists down so they are clearly below bars + label
+  // lists down a bit below bars + label
   const LIST_Y = ACCENT_Y + 32;
 
-  // ✅ align columns under the orange bars
-  const LEFT_X = 100;          // left bar starts at 90
-  const RIGHT_X = W - 360;     // right bar starts at W-330
+  // ✅ adjust columns (per your request)
+  const LEFT_X = 80;        // scoot left list LEFT
+  const RIGHT_X = W - 430;  // scoot right column LEFT
 
-  // center divider position
+  // ✅ vertical orange separator (middle)
   const MID_X = Math.round(W / 2);
+  const MID_BAR_W = 10;
+  const MID_BAR_H = 230;
+  const MID_BAR_Y = LABEL_Y + 18;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1492,10 +1495,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
       .label{font:800 34px/1.1 Inter,system-ui;}
 
-      /* left list */
       .liL{font:800 42px/1.15 Inter,system-ui;}
-
-      /* ✅ right list: match left list color + slightly heavier to look the same */
       .liR{font:800 38px/1.2 Inter,system-ui;}
 
       .tCenter{text-anchor:middle;}
@@ -1526,18 +1526,21 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
+  <!-- ✅ Middle vertical orange line (same as bars) -->
+  <rect
+    x="${MID_X - Math.round(MID_BAR_W / 2)}"
+    y="${MID_BAR_Y}"
+    width="${MID_BAR_W}"
+    height="${MID_BAR_H}"
+    fill="{{palette.accent}}"
+    opacity="0.45"
+    rx="6"
+  />
+
   <!-- ✅ Services Offered label (above RIGHT column list) -->
   <text class="label tLeft" x="${RIGHT_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
-
-  <!-- ✅ clean center separator (not weird) -->
-  <g opacity="0.35">
-    <line x1="${MID_X}" y1="${LABEL_Y + 18}" x2="${MID_X}" y2="${LABEL_Y + 255}"
-      stroke="{{palette.textOnLight}}" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 14"/>
-    <circle cx="${MID_X}" cy="${LABEL_Y + 18}" r="6" fill="{{palette.accent}}" opacity="0.55"/>
-    <circle cx="${MID_X}" cy="${LABEL_Y + 255}" r="6" fill="{{palette.accent}}" opacity="0.55"/>
-  </g>
 
   <!-- Left checklist (checkmarks) -->
   <g transform="translate(${LEFT_X}, ${LIST_Y})">
@@ -1567,6 +1570,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
+
 
 
 /**
