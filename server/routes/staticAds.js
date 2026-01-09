@@ -1504,34 +1504,32 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // --- Bottom section spacing (closer, but NEVER touching) ---
+  // --- Bottom section spacing: ALWAYS close, with a fixed center "boundary" gap ---
   const MARGIN = 90;
 
-  // reserved “boundary” space between the two columns
-  const MIN_SPACE_BETWEEN = 80; // hard safety gap
-const CENTER_GAP = 96;        // ✅ closer columns (matches cleaning-style even with short HVAC text)
-
-  const INWARD_NUDGE = Math.max(0, Math.floor((CENTER_GAP - MIN_SPACE_BETWEEN) / 2));
-  const RIGHT_EXTRA = 14;
-
-  const COL_W = Math.round((W - 2 * MARGIN - CENTER_GAP) / 2);
+  // ✅ This is the invisible safety boundary between columns (they will never visually meet)
+  const BOUNDARY_GAP = 96; // adjust only this if you want even tighter (e.g. 88)
 
   const MID_X = Math.round(W / 2);
-  const LEFT_COL_X = Math.round(MID_X - CENTER_GAP / 2 - COL_W);
-  const RIGHT_COL_X = Math.round(MID_X + CENTER_GAP / 2);
+
+  // ✅ Anchor columns to the boundary (not to content)
+  const LEFT_COL_X = MARGIN;
+  const RIGHT_COL_X = Math.round(MID_X + BOUNDARY_GAP / 2);
+
+  // keep your slight right push
+  const RIGHT_EXTRA = 14;
 
   const ACCENT_Y = HEADER_H + 30;
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  const LEFT_LABEL_X = LEFT_COL_X + INWARD_NUDGE;
-  const LEFT_LIST_X = LEFT_COL_X + 10 + INWARD_NUDGE;
+  // ✅ Fixed padding inside each column
+  const LEFT_LABEL_X = LEFT_COL_X + 22;
+  const LEFT_LIST_X  = LEFT_COL_X + 22;
 
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10 - INWARD_NUDGE + RIGHT_EXTRA;
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 10;
+  const RIGHT_LABEL_X = RIGHT_COL_X + 22 + RIGHT_EXTRA;
+  const RIGHT_LIST_X  = RIGHT_COL_X + 22 + RIGHT_EXTRA;
 
-  const DECOR_OP = 0.08;
-  const DECOR_Y = 940;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
