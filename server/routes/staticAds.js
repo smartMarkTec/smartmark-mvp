@@ -1463,6 +1463,43 @@ function compactBullet(s = "") {
 
 /* ------------------------ SVG templates ------------------------ */
 
+// -------------------- Flyer A variety helpers --------------------
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function shuffleArray(arr, rng) {
+  const a = Array.isArray(arr) ? arr.slice() : [];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Shuffles subline segments like "REPAIR • INSTALL • MAINTENANCE"
+function shuffleSublineParts(s, rng) {
+  const raw = String(s || "").trim();
+  if (!raw) return raw;
+
+  const parts = raw
+    .split(/\s*[•·|/–—-]\s*/g)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) return raw;
+
+  return shuffleArray(parts, rng).join(" • ");
+}
+
+
 function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
@@ -1472,7 +1509,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
   // reserved “boundary” space between the two columns
   const MIN_SPACE_BETWEEN = 80; // hard safety gap
-  const CENTER_GAP = 120;       // target center gap
+const CENTER_GAP = 96;        // ✅ closer columns (matches cleaning-style even with short HVAC text)
 
   const INWARD_NUDGE = Math.max(0, Math.floor((CENTER_GAP - MIN_SPACE_BETWEEN) / 2));
   const RIGHT_EXTRA = 14;
@@ -2137,7 +2174,15 @@ if (template === "flyer_a") {
   }
 
   // ✅ lists will ALWAYS exist now
-  const listsLaidOut = withListLayout(mergedKnobs.lists || {});
+  // ✅ Variety: shuffle Flyer A lists every generation (same items, new order)
+const rngA = mulberry32(seed);
+const variedLists = {
+  left: shuffleArray((mergedKnobs.lists && mergedKnobs.lists.left) || [], rngA),
+  right: shuffleArray((mergedKnobs.lists && mergedKnobs.lists.right) || [], rngA),
+};
+
+const listsLaidOut = withListLayout(variedLists);
+
 
   // --- Headline/Subline stack ---
 // --- Headline/Subline stack ---
@@ -2169,10 +2214,14 @@ const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
   x: rawCount >= 3 && i === rawCount - 1 ? -8 : 0,
 }));
 
-const sublineUpper = String(mergedInputs.subline || "")
+// ✅ Variety: shuffle subline parts (same words, different order) each generation
+const sublineVaried = shuffleSublineParts(mergedInputs.subline || "", rngA);
+
+const sublineUpper = String(sublineVaried || "")
   .toUpperCase()
   .replace(/\s+/g, " ")
   .trim();
+
 
 // ✅ keep subline close to headline
 const sublineY =
@@ -2850,10 +2899,16 @@ router.post("/generate-image-from-prompt", async (req, res) => {
   const rawRight = (effectiveLists.right || ["Kitchen","Bathrooms","Offices","Dusting","Mopping","Vacuuming"]).slice(0, 6);
   const count = Math.min(rawLeft.length, rawRight.length, 6);
 
-  const lists = withListLayout({
-    left: rawLeft.slice(0, count),
-    right: rawRight.slice(0, count),
-  });
+  // ✅ Variety: shuffle Flyer A lists every generation
+const rngA = mulberry32(Date.now());
+const leftVar = shuffleArray(rawLeft.slice(0, count), rngA);
+const rightVar = shuffleArray(rawRight.slice(0, count), rngA);
+
+const lists = withListLayout({
+  left: leftVar,
+  right: rightVar,
+});
+
 
   const headlineUpper = String(overlay.headline || prof.headline || "LOCAL SERVICES")
     .toUpperCase()
@@ -2879,10 +2934,14 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     dy: i === 0 ? 0 : lineGap,
   }));
 
-  const sublineUpper = String(overlay.body || prof.subline || "APARTMENT • HOME • OFFICE")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+  // ✅ Variety: shuffle subline parts each generation
+const sublineRaw = overlay.body || prof.subline || "APARTMENT • HOME • OFFICE";
+const sublineVaried = shuffleSublineParts(sublineRaw, rngA);
+
+const sublineUpper = String(sublineVaried || "")
+  .toUpperCase()
+  .replace(/\s+/g, " ")
+  .trim();
 
   // ✅ move the bullet subline UP (closer to headline)
   const sublineY =
