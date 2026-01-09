@@ -1467,39 +1467,38 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // layout system (keeps symmetry around center)
-  const MID_X_BASE = Math.round(W / 2);
-  const SECTION_SHIFT_X = 24; // keep the whole lower section where it is now
+  // orange bars
+  const ACCENT_Y = HEADER_H + 30;
 
-  const MID_X = MID_X_BASE + SECTION_SHIFT_X;
+  // layout system (keeps symmetry around center)
+  const MID_X = Math.round(W / 2);
   const MARGIN = 90;
   const MID_BAR_W = 10;
   const COL_GAP = 50;
 
   const COL_W = Math.round((W - 2 * MARGIN - MID_BAR_W - 2 * COL_GAP) / 2);
+  const LEFT_COL_X = MARGIN;
+  const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP;
 
-  const LEFT_COL_X = MARGIN + SECTION_SHIFT_X;
-  const RIGHT_COL_X =
-    MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_SHIFT_X;
+  // bars inside each column
+  const BAR_W = 240;
+  const BAR_H = 10;
+  const LEFT_BAR_X = LEFT_COL_X;
+  // ✅ move right bar LEFT (toward center) a bit
+  const RIGHT_BAR_X = RIGHT_COL_X + (COL_W - BAR_W) - 30;
 
-  // labels + lists
-  const ACCENT_Y = HEADER_H + 30;
+  // label + lists
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  const LEFT_LABEL_X = LEFT_COL_X;
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10;
+  // ✅ scoot lists outward for symmetry
+  const LEFT_LIST_X = LEFT_COL_X + 10;
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10; // label anchor
+  const RIGHT_LIST_X = RIGHT_LABEL_X + 22; // list slightly to the RIGHT flank of label
 
-  // middle vertical orange line
+  // ✅ middle vertical orange line (same style as top orange bars)
   const MID_BAR_H = 230;
   const MID_BAR_Y = LABEL_Y + 18;
-
-  // lists
-  const LEFT_LIST_X = LEFT_COL_X + 10;
-
-  // ✅ MOVE RIGHT LIST LEFT + CENTER UNDER "Services Offered"
-  const RIGHT_LIST_SHIFT_LEFT = 46; // <-- tweak if needed (smaller/larger)
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 22 - RIGHT_LIST_SHIFT_LEFT;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1508,10 +1507,12 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       .hBig{font:900 96px/0.92 Inter,system-ui; letter-spacing:0.02em;}
       .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
 
-      .label{font:800 34px/1.1 Montserrat,Poppins,Inter,system-ui;}
+      /* keep the top sublines bold */
+      .label{font:800 34px/1.1 Inter,system-ui;}
 
-      .liL{font:800 42px/1.15 Montserrat,Poppins,Inter,system-ui;}
-      .liR{font:800 40px/1.2 Montserrat,Poppins,Inter,system-ui;}
+      /* ✅ unbolden ONLY the list item text */
+      .liL{font:600 42px/1.15 Inter,system-ui;}
+      .liR{font:600 38px/1.2 Inter,system-ui;}
 
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
@@ -1521,6 +1522,10 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
+
+  <!-- Orange accent bars -->
+  <rect x="${LEFT_BAR_X}" y="${ACCENT_Y}" width="${BAR_W}" height="${BAR_H}" fill="{{palette.accent}}" opacity="0.95"/>
+  <rect x="${RIGHT_BAR_X}" y="${ACCENT_Y}" width="${BAR_W}" height="${BAR_H}" fill="{{palette.accent}}" opacity="0.95"/>
 
   <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
@@ -1535,17 +1540,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- Left label -->
-  <text class="label tLeft" x="${LEFT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
-    Overview
-  </text>
-
-  <!-- Right label -->
-  <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
-    {{servicesLabel}}
-  </text>
-
-  <!-- ✅ KEEP ONLY THE MIDDLE LINE -->
+  <!-- ✅ Middle vertical orange line (same style as bars) -->
   <rect
     x="${MID_X - Math.round(MID_BAR_W / 2)}"
     y="${MID_BAR_Y}"
@@ -1554,6 +1549,16 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     fill="{{palette.accent}}"
     opacity="0.95"
   />
+
+  <!-- ✅ Services Offered label (above RIGHT list) -->
+  <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+    {{servicesLabel}}
+  </text>
+
+  <!-- ✅ Left label -->
+  <text class="label tLeft" x="${LEFT_COL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+    {{leftLabel}}
+  </text>
 
   <!-- Left checklist (checkmarks) -->
   <g transform="translate(${LEFT_LIST_X - 50}, ${LIST_Y})">
@@ -1569,8 +1574,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- ✅ Right services list (bullets) moved LEFT + centered under label -->
-  <g transform="translate(${RIGHT_LIST_X + 55}, ${LIST_Y})">
+  <!-- Right services list (bullets) -->
+  <g transform="translate(${RIGHT_LIST_X}, ${LIST_Y})">
     {{#lists.right}}
       {{#show}}
       <g transform="translate(0, {{y}})">
