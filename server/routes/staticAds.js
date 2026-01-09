@@ -1467,16 +1467,20 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // orange bars DOWN a tad more
+  // orange bars
   const ACCENT_Y = HEADER_H + 30;
 
-  // ✅ label above right list, under the bars
+  // label above right list
   const LABEL_Y = ACCENT_Y + 44;
 
-  // ✅ push both lists DOWN so they sit clearly below the orange lines + label
-  // (first list item appears at LIST_Y + 56)
+  // push lists down so they are clearly below bars + label
   const LIST_Y = ACCENT_Y + 32;
 
+  // ✅ align columns under the orange bars
+  const LEFT_X = 100;          // left bar starts at 90
+  const RIGHT_X = W - 360;     // right bar starts at W-330
+
+  // center divider position
   const MID_X = Math.round(W / 2);
 
   return `
@@ -1487,8 +1491,12 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
 
       .label{font:800 34px/1.1 Inter,system-ui;}
+
+      /* left list */
       .liL{font:800 42px/1.15 Inter,system-ui;}
-      .liR{font:700 34px/1.2 Inter,system-ui;}
+
+      /* ✅ right list: match left list color + slightly heavier to look the same */
+      .liR{font:800 38px/1.2 Inter,system-ui;}
 
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
@@ -1518,22 +1526,21 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- ✅ Services Offered label (above right column list) -->
-  <text class="label tLeft" x="${W - 480}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+  <!-- ✅ Services Offered label (above RIGHT column list) -->
+  <text class="label tLeft" x="${RIGHT_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
 
-  <!-- ✅ Simple center filler (sparkle badge) -->
-  <g transform="translate(${MID_X}, ${LABEL_Y + 32})" opacity="0.35">
-    <circle r="24" fill="{{palette.accent}}" opacity="0.18"/>
-    <path d="M0 -16 L4 -4 L16 0 L4 4 L0 16 L-4 4 L-16 0 L-4 -4 Z"
-      fill="{{palette.accent}}" opacity="0.55"/>
-    <circle cx="-18" cy="20" r="3" fill="{{palette.accent}}" opacity="0.35"/>
-    <circle cx="18" cy="20" r="3" fill="{{palette.accent}}" opacity="0.35"/>
+  <!-- ✅ clean center separator (not weird) -->
+  <g opacity="0.35">
+    <line x1="${MID_X}" y1="${LABEL_Y + 18}" x2="${MID_X}" y2="${LABEL_Y + 255}"
+      stroke="{{palette.textOnLight}}" stroke-width="4" stroke-linecap="round" stroke-dasharray="10 14"/>
+    <circle cx="${MID_X}" cy="${LABEL_Y + 18}" r="6" fill="{{palette.accent}}" opacity="0.55"/>
+    <circle cx="${MID_X}" cy="${LABEL_Y + 255}" r="6" fill="{{palette.accent}}" opacity="0.55"/>
   </g>
 
   <!-- Left checklist (checkmarks) -->
-  <g transform="translate(140, ${LIST_Y})">
+  <g transform="translate(${LEFT_X}, ${LIST_Y})">
     {{#lists.left}}
       {{#show}}
       <g transform="translate(0, {{y}})">
@@ -1547,12 +1554,12 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   </g>
 
   <!-- Right services list (bullets) -->
-  <g transform="translate(${W - 480}, ${LIST_Y})">
+  <g transform="translate(${RIGHT_X}, ${LIST_Y})">
     {{#lists.right}}
       {{#show}}
       <g transform="translate(0, {{y}})">
-        <circle cx="14" cy="10" r="6" fill="{{palette.textOnLight}}" opacity="0.70"/>
-        <text class="liR tLeft" x="34" y="20" fill="{{palette.textOnLight}}">{{text}}</text>
+        <circle cx="14" cy="10" r="6" fill="{{palette.accent}}" opacity="0.75"/>
+        <text class="liR tLeft" x="34" y="22" fill="{{palette.textOnLight}}">{{text}}</text>
       </g>
       {{/show}}
     {{/lists.right}}
