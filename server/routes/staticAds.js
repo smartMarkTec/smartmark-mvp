@@ -1467,8 +1467,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // ✅ global nudge for the entire bottom section (barely any)
-  const SECTION_NUDGE_X = 12;
+  // ✅ revert: NO global section nudge (back to how it was)
+  const SECTION_NUDGE_X = 0;
+
+  // ✅ ONLY change: move the Services Offered LIST slightly to the RIGHT
+  const SERVICES_LIST_NUDGE_X = 10; // "just a tad bit more"
 
   // layout system (keeps symmetry around center)
   const MID_X = Math.round(W / 2) + SECTION_NUDGE_X;
@@ -1487,7 +1490,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
   const LEFT_LIST_X = LEFT_COL_X + 10;
   const RIGHT_LABEL_X = RIGHT_COL_X + 10;
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 22;
+  const RIGHT_LIST_X = RIGHT_LABEL_X + 22 + SERVICES_LIST_NUDGE_X; // ✅ only nudge list
 
   // middle vertical orange line
   const MID_BAR_H = 230;
@@ -1575,7 +1578,6 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
-
 
 
 
