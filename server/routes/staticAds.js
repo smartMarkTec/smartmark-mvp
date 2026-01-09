@@ -1470,15 +1470,15 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   // --- Bottom section spacing (closer, but NEVER touching) ---
   const MARGIN = 90;
 
-  // This is the reserved “boundary” space between the two columns
-  const MIN_SPACE_BETWEEN = 80;     // hard safety gap so lists never touch
-  const CENTER_GAP = 120;           // overall center gap target (we’ll “eat” into it evenly)
+  // reserved “boundary” space between the two columns
+  const MIN_SPACE_BETWEEN = 80; // hard safety gap
+  const CENTER_GAP = 120;       // target center gap
 
   // Pull both blocks inward toward the center, but never past MIN_SPACE_BETWEEN
-  const INWARD_NUDGE = Math.max(
-    0,
-    Math.floor((CENTER_GAP - MIN_SPACE_BETWEEN) / 2)
-  );
+  const INWARD_NUDGE = Math.max(0, Math.floor((CENTER_GAP - MIN_SPACE_BETWEEN) / 2));
+
+  // ✅ requested: move ONLY the right side a tad more to the right
+  const RIGHT_EXTRA = 14;
 
   // Column width based on CENTER_GAP
   const COL_W = Math.round((W - 2 * MARGIN - CENTER_GAP) / 2);
@@ -1497,9 +1497,14 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const LEFT_LABEL_X = LEFT_COL_X + INWARD_NUDGE;
   const LEFT_LIST_X = LEFT_COL_X + 10 + INWARD_NUDGE;
 
-  // RIGHT block (move toward center)
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10 - INWARD_NUDGE;
+  // RIGHT block (move toward center, then a tad back right)
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10 - INWARD_NUDGE + RIGHT_EXTRA;
   const RIGHT_LIST_X = RIGHT_LABEL_X + 10; // slightly tighter indent
+
+  // --- Decorative fill for bottom empty space (kept WELL below lists) ---
+  // Lists typically end ~820ish; keep decor under ~880
+  const DECOR_OP = 0.08;
+  const DECOR_Y = 940;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1521,6 +1526,26 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect width="${W}" height="${H}" fill="{{palette.body}}"/>
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
+
+  <!-- ✅ subtle bottom decor (away from lists) -->
+  <g opacity="${DECOR_OP}">
+    <!-- soft corner blobs -->
+    <circle cx="160" cy="${DECOR_Y}" r="210" fill="{{palette.header}}"/>
+    <circle cx="${W - 150}" cy="${DECOR_Y - 20}" r="240" fill="{{palette.header}}"/>
+
+    <!-- faint rings for texture -->
+    <circle cx="240" cy="${DECOR_Y + 20}" r="140" fill="none" stroke="{{palette.header}}" stroke-width="10" opacity="0.55"/>
+    <circle cx="${W - 260}" cy="${DECOR_Y - 10}" r="150" fill="none" stroke="{{palette.header}}" stroke-width="10" opacity="0.45"/>
+
+    <!-- tiny dot row near the bottom edge -->
+    <g opacity="0.55">
+      <circle cx="${W/2 - 80}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W/2 - 40}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W/2}"      cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W/2 + 40}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W/2 + 80}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+    </g>
+  </g>
 
   <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
