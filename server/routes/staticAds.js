@@ -1467,14 +1467,18 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // ✅ revert: NO global section nudge (back to how it was)
+  // ✅ middle line stays EXACTLY where it is (no global nudge)
   const SECTION_NUDGE_X = 0;
 
-  // ✅ ONLY change: move the Services Offered LIST slightly to the RIGHT
-  const SERVICES_LIST_NUDGE_X = 10; // "just a tad bit more"
+  // ✅ ONLY changes requested:
+  // - move LEFT label + LEFT list slightly RIGHT
+  // - move RIGHT label + RIGHT list slightly RIGHT
+  // - keep middle divider line fixed
+  const LEFT_BLOCK_NUDGE_X = 10;   // "just a tad"
+  const RIGHT_BLOCK_NUDGE_X = 10;  // "just a tad"
 
-  // layout system (keeps symmetry around center)
-  const MID_X = Math.round(W / 2) + SECTION_NUDGE_X;
+  // layout system (base)
+  const MID_X = Math.round(W / 2) + SECTION_NUDGE_X; // ✅ stays put
   const MARGIN = 90;
   const MID_BAR_W = 10;
   const COL_GAP = 50;
@@ -1488,11 +1492,15 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  const LEFT_LIST_X = LEFT_COL_X + 10;
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10;
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 22 + SERVICES_LIST_NUDGE_X; // ✅ only nudge list
+  // LEFT block positions (nudged right)
+  const LEFT_LABEL_X = LEFT_COL_X + LEFT_BLOCK_NUDGE_X;
+  const LEFT_LIST_X = (LEFT_COL_X + 10) + LEFT_BLOCK_NUDGE_X;
 
-  // middle vertical orange line
+  // RIGHT block positions (nudged right)
+  const RIGHT_LABEL_X = (RIGHT_COL_X + 10) + RIGHT_BLOCK_NUDGE_X;
+  const RIGHT_LIST_X = (RIGHT_LABEL_X + 22) + RIGHT_BLOCK_NUDGE_X;
+
+  // middle vertical orange line (UNCHANGED)
   const MID_BAR_H = 230;
   const MID_BAR_Y = LABEL_Y + 18;
 
@@ -1530,7 +1538,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- keep ONLY the middle vertical line -->
+  <!-- keep ONLY the middle vertical line (DO NOT MOVE) -->
   <rect
     x="${MID_X - Math.round(MID_BAR_W / 2)}"
     y="${MID_BAR_Y}"
@@ -1540,17 +1548,17 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     opacity="0.95"
   />
 
-  <!-- Right label -->
+  <!-- Right label (nudged right) -->
   <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
 
-  <!-- Left label -->
-  <text class="label tLeft" x="${LEFT_COL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+  <!-- Left label (nudged right) -->
+  <text class="label tLeft" x="${LEFT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{leftLabel}}
   </text>
 
-  <!-- Left checklist (checkmarks) -->
+  <!-- Left checklist (checkmarks) (nudged right) -->
   <g transform="translate(${LEFT_LIST_X - 50}, ${LIST_Y})">
     {{#lists.left}}
       {{#show}}
@@ -1564,7 +1572,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- Right services list (bullets) -->
+  <!-- Right services list (bullets) (nudged right) -->
   <g transform="translate(${RIGHT_LIST_X}, ${LIST_Y})">
     {{#lists.right}}
       {{#show}}
