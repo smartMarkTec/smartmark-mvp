@@ -1504,32 +1504,39 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // --- Bottom section spacing: ALWAYS close, with a fixed center "boundary" gap ---
+  // --- Bottom section spacing: ALWAYS close (like cleaning), never touching ---
   const MARGIN = 90;
 
-  // ✅ This is the invisible safety boundary between columns (they will never visually meet)
-  const BOUNDARY_GAP = 96; // adjust only this if you want even tighter (e.g. 88)
+  // fixed invisible boundary gap between the two columns
+  const CENTER_GAP = 96; // tighten to 88 if you want slightly closer
+
+  // cap column width so they don't "spread out" on short-list industries (HVAC, etc.)
+  const MAX_COL_W = 360;
 
   const MID_X = Math.round(W / 2);
+  const available = W - 2 * MARGIN - CENTER_GAP;
+  const COL_W = Math.min(MAX_COL_W, Math.floor(available / 2));
 
-  // ✅ Anchor columns to the boundary (not to content)
-  const LEFT_COL_X = MARGIN;
-  const RIGHT_COL_X = Math.round(MID_X + BOUNDARY_GAP / 2);
+  const LEFT_COL_X = Math.round(MID_X - CENTER_GAP / 2 - COL_W);
+  const RIGHT_COL_X = Math.round(MID_X + CENTER_GAP / 2);
 
-  // keep your slight right push
+  // small, intentional right nudge you liked
   const RIGHT_EXTRA = 14;
 
   const ACCENT_Y = HEADER_H + 30;
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // ✅ Fixed padding inside each column
+  // fixed padding inside each column
   const LEFT_LABEL_X = LEFT_COL_X + 22;
-  const LEFT_LIST_X  = LEFT_COL_X + 22;
+  const LEFT_LIST_X = LEFT_COL_X + 22;
 
   const RIGHT_LABEL_X = RIGHT_COL_X + 22 + RIGHT_EXTRA;
-  const RIGHT_LIST_X  = RIGHT_COL_X + 22 + RIGHT_EXTRA;
+  const RIGHT_LIST_X = RIGHT_COL_X + 22 + RIGHT_EXTRA;
 
+  // bottom decor constants (were missing → caused your errors)
+  const DECOR_OP = 0.08;
+  const DECOR_Y = 940;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1540,7 +1547,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
       .label{font:800 34px/1.1 Inter,system-ui;}
 
-      /* ✅ ONLY change: unbolden checklist + bullets */
+      /* unbolden checklist + bullets */
       .liL{font:500 40px/1.15 Inter,system-ui;}
       .liR{font:500 38px/1.2 Inter,system-ui;}
 
@@ -1562,17 +1569,16 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     <circle cx="${W - 260}" cy="${DECOR_Y - 10}" r="150" fill="none" stroke="{{palette.header}}" stroke-width="10" opacity="0.45"/>
 
     <g opacity="0.55">
-      <circle cx="${W/2 - 80}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
-      <circle cx="${W/2 - 40}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
-      <circle cx="${W/2}"      cy="${H - 46}" r="6" fill="{{palette.header}}"/>
-      <circle cx="${W/2 + 40}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
-      <circle cx="${W/2 + 80}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W / 2 - 80}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W / 2 - 40}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W / 2}"      cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W / 2 + 40}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
+      <circle cx="${W / 2 + 80}" cy="${H - 46}" r="6" fill="{{palette.header}}"/>
     </g>
   </g>
 
   <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
-    <!-- ✅ ONLY change: ensure each line is centered by forcing x=0 -->
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
         <tspan x="0" dy="{{dy}}">{{line}}</tspan>
