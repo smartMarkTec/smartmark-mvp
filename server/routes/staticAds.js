@@ -1507,8 +1507,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   // --- Bottom section spacing: ALWAYS close (like cleaning), never touching ---
   const MARGIN = 90;
 
-  // fixed invisible boundary gap between the two columns
-  const CENTER_GAP = 96; // tighten to 88 if you want slightly closer
+  // ✅ tighter invisible boundary gap between the two columns
+  const CENTER_GAP = 72; // was 96 (closer now). If you want even tighter: try 64.
 
   // cap column width so they don't "spread out" on short-list industries (HVAC, etc.)
   const MAX_COL_W = 360;
@@ -1534,7 +1534,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const RIGHT_LABEL_X = RIGHT_COL_X + 22 + RIGHT_EXTRA;
   const RIGHT_LIST_X = RIGHT_COL_X + 22 + RIGHT_EXTRA;
 
-  // bottom decor constants (were missing → caused your errors)
+  // bottom decor constants
   const DECOR_OP = 0.08;
   const DECOR_Y = 940;
 
