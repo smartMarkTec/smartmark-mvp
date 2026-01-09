@@ -1467,15 +1467,15 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // ✅ middle line stays EXACTLY where it is (no global nudge)
+  // ✅ keep middle divider line fixed
   const SECTION_NUDGE_X = 0;
 
   // ✅ ONLY changes requested:
-  // - move LEFT label + LEFT list slightly RIGHT
-  // - move RIGHT label + RIGHT list slightly RIGHT
-  // - keep middle divider line fixed
-  const LEFT_BLOCK_NUDGE_X = 10;   // "just a tad"
-  const RIGHT_BLOCK_NUDGE_X = 10;  // "just a tad"
+  // Move LEFT label + LEFT list right a tad
+  // Move RIGHT label + RIGHT list right a tad
+  // Keep middle vertical line in same spot
+  const LEFT_BLOCK_NUDGE_X = 18;   // was 10
+  const RIGHT_BLOCK_NUDGE_X = 18;  // was 10
 
   // layout system (base)
   const MID_X = Math.round(W / 2) + SECTION_NUDGE_X; // ✅ stays put
@@ -1485,7 +1485,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
   const COL_W = Math.round((W - 2 * MARGIN - MID_BAR_W - 2 * COL_GAP) / 2);
   const LEFT_COL_X = MARGIN + SECTION_NUDGE_X;
-  const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_NUDGE_X;
+  const RIGHT_COL_X =
+    MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_NUDGE_X;
 
   // label + lists
   const ACCENT_Y = HEADER_H + 30; // used for Y math only
@@ -1494,11 +1495,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
   // LEFT block positions (nudged right)
   const LEFT_LABEL_X = LEFT_COL_X + LEFT_BLOCK_NUDGE_X;
-  const LEFT_LIST_X = (LEFT_COL_X + 10) + LEFT_BLOCK_NUDGE_X;
+  const LEFT_LIST_X = LEFT_COL_X + 10 + LEFT_BLOCK_NUDGE_X;
 
-  // RIGHT block positions (nudged right)
-  const RIGHT_LABEL_X = (RIGHT_COL_X + 10) + RIGHT_BLOCK_NUDGE_X;
-  const RIGHT_LIST_X = (RIGHT_LABEL_X + 22) + RIGHT_BLOCK_NUDGE_X;
+  // RIGHT block positions (nudged right) — keep list offset consistent from label
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10 + RIGHT_BLOCK_NUDGE_X;
+  const RIGHT_LIST_X = RIGHT_COL_X + 32 + RIGHT_BLOCK_NUDGE_X; // (label + 22)
 
   // middle vertical orange line (UNCHANGED)
   const MID_BAR_H = 230;
@@ -1586,8 +1587,6 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
-
-
 
 /**
  * Shaw-inspired poster B:
