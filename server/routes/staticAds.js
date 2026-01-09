@@ -1467,26 +1467,21 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // orange bars (REMOVED from SVG below)
-  const ACCENT_Y = HEADER_H + 30;
+  // ✅ global nudge for the entire bottom section (barely any)
+  const SECTION_NUDGE_X = 12;
 
   // layout system (keeps symmetry around center)
-  const MID_X = Math.round(W / 2);
+  const MID_X = Math.round(W / 2) + SECTION_NUDGE_X;
   const MARGIN = 90;
   const MID_BAR_W = 10;
   const COL_GAP = 50;
 
   const COL_W = Math.round((W - 2 * MARGIN - MID_BAR_W - 2 * COL_GAP) / 2);
-  const LEFT_COL_X = MARGIN;
-  const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP;
-
-  // bars inside each column (kept for spacing math, but not drawn)
-  const BAR_W = 240;
-  const BAR_H = 10;
-  const LEFT_BAR_X = LEFT_COL_X;
-  const RIGHT_BAR_X = RIGHT_COL_X + (COL_W - BAR_W) - 30;
+  const LEFT_COL_X = MARGIN + SECTION_NUDGE_X;
+  const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_NUDGE_X;
 
   // label + lists
+  const ACCENT_Y = HEADER_H + 30; // used for Y math only
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
@@ -1505,10 +1500,8 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       .hBig{font:900 96px/0.92 Inter,system-ui; letter-spacing:0.02em;}
       .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
 
-      /* keep the sublabels bold */
       .label{font:800 34px/1.1 Inter,system-ui;}
 
-      /* ✅ checklist slightly smaller (just a tad) */
       .liL{font:600 40px/1.15 Inter,system-ui;}
       .liR{font:600 38px/1.2 Inter,system-ui;}
 
@@ -1534,7 +1527,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- ✅ keep ONLY the middle vertical line -->
+  <!-- keep ONLY the middle vertical line -->
   <rect
     x="${MID_X - Math.round(MID_BAR_W / 2)}"
     y="${MID_BAR_Y}"
@@ -1582,6 +1575,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
+
 
 
 
