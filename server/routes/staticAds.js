@@ -1477,31 +1477,55 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const LEFT_COL_X = MARGIN;
   const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP;
 
-  // label + lists
-  const LABEL_Y = HEADER_H + 30 + 44;
-  const LIST_Y = HEADER_H + 30 + 32;
+  // vertical section anchor
+  const ACCENT_Y = HEADER_H + 30;
 
-  // lists placement
-  const LEFT_LIST_X = LEFT_COL_X + 10;
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10;
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 22;
+  // headers + lists
+  const LABEL_Y = ACCENT_Y + 44;
+  const LIST_Y = ACCENT_Y + 56; // a touch lower so headers breathe
 
-  // ✅ middle divider line (same style as the old top orange lines)
-  const LINE_THICK = 10;                 // same as old BAR_H
-  const MID_LINE_H = 230;
-  const MID_LINE_Y = LABEL_Y + 18;
+  // ✅ headers aligned (makes the layout feel “even”)
+  const LEFT_LABEL_X = LEFT_COL_X + 10;
+  const RIGHT_LABEL_X = RIGHT_COL_X + 40;
+
+  // ✅ lists under headers
+  // (left moved further LEFT; right centered under Services Offered)
+  const LEFT_LIST_X = LEFT_COL_X - 55;  // <<< scoot left list outward
+  const RIGHT_LIST_X = RIGHT_COL_X + 40;
+
+  // ✅ middle vertical line (ONLY line we keep) — same style as old top lines
+  const MID_BAR_H = 230;
+  const MID_BAR_Y = LABEL_Y + 22;
+
+  // ✅ small underline bars under each header (same style as old orange lines)
+  const UNDER_W = 190;
+  const UNDER_H = 10;
+  const UNDER_Y = LABEL_Y + 14;
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <style>
-      /* ✅ closer to example template */
-      .hBig{font-family:Montserrat,Poppins,Inter,system-ui; font-weight:900; font-size:96px; line-height:0.92; letter-spacing:0.02em;}
-      .hSub{font-family:Montserrat,Poppins,Inter,system-ui; font-weight:800; font-size:30px; line-height:1.0;  letter-spacing:0.12em;}
+      /* closer to template look */
+      .hBig{
+        font:900 96px/0.92 Montserrat, Impact, "Arial Black", Inter, system-ui;
+        letter-spacing:0.02em;
+      }
+      .hSub{
+        font:800 30px/1.0 Montserrat, Inter, system-ui;
+        letter-spacing:0.12em;
+      }
 
-      .label{font-family:Montserrat,Poppins,Inter,system-ui; font-weight:800; font-size:34px; line-height:1.1;}
-      .liL{font-family:Montserrat,Poppins,Inter,system-ui; font-weight:800; font-size:42px; line-height:1.15;}
-      .liR{font-family:Montserrat,Poppins,Inter,system-ui; font-weight:800; font-size:38px; line-height:1.2;}
+      .label{
+        font:800 34px/1.1 Montserrat, Inter, system-ui;
+      }
+
+      .liL{
+        font:800 42px/1.15 Montserrat, Inter, system-ui;
+      }
+      .liR{
+        font:800 38px/1.2 Montserrat, Inter, system-ui;
+      }
 
       .tCenter{text-anchor:middle;}
       .tLeft{text-anchor:start;}
@@ -1525,21 +1549,29 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- ✅ ONLY middle divider line (top two lines removed) -->
+  <!-- ✅ ONLY keep the middle line (styled like the old orange lines) -->
   <rect
-    x="${MID_X - Math.round(LINE_THICK / 2)}"
-    y="${MID_LINE_Y}"
-    width="${LINE_THICK}"
-    height="${MID_LINE_H}"
-    rx="${Math.round(LINE_THICK / 2)}"
+    x="${MID_X - Math.round(MID_BAR_W / 2)}"
+    y="${MID_BAR_Y}"
+    width="${MID_BAR_W}"
+    height="${MID_BAR_H}"
     fill="{{palette.accent}}"
     opacity="0.95"
   />
 
-  <!-- Services Offered label (above RIGHT list) -->
+  <!-- ✅ Left header so both sides feel balanced -->
+  <text class="label tLeft" x="${LEFT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+    {{leftLabel}}
+  </text>
+  <rect x="${LEFT_LABEL_X}" y="${UNDER_Y}" width="${UNDER_W}" height="${UNDER_H}"
+        fill="{{palette.accent}}" opacity="0.95"/>
+
+  <!-- ✅ Right header (Services Offered) positioned cleaner -->
   <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
+  <rect x="${RIGHT_LABEL_X}" y="${UNDER_Y}" width="${UNDER_W}" height="${UNDER_H}"
+        fill="{{palette.accent}}" opacity="0.95"/>
 
   <!-- Left checklist (checkmarks) -->
   <g transform="translate(${LEFT_LIST_X}, ${LIST_Y})">
@@ -2140,14 +2172,16 @@ if (template === "flyer_a") {
     24;
 
   const vars = {
-    headlineLines,
-    subline: sublineUpper,
-    sublineY,
-    palette: mergedKnobs.palette,
-    lists: listsLaidOut,
-    showIcons: false,
-    servicesLabel: "Services Offered",
-  };
+  headlineLines,
+  subline: sublineUpper,
+  sublineY,
+  palette: mergedKnobs.palette,
+  lists: listsLaidOut,
+  showIcons: false,
+  servicesLabel: "Services Offered",
+  leftLabel: "Overview",
+};
+
 
   const svgTpl = tplFlyerA({ W: 1080, H: 1080 });
   const svg = mustache.render(svgTpl, vars);
@@ -2848,14 +2882,16 @@ router.post("/generate-image-from-prompt", async (req, res) => {
     24;
 
   const vars = {
-    headlineLines,
-    subline: sublineUpper,
-    sublineY,
-    palette,
-    lists,
-    showIcons: false,
-    servicesLabel: "Services Offered",
-  };
+  headlineLines,
+  subline: sublineUpper,
+  sublineY,
+  palette,
+  lists,
+  showIcons: false,
+  servicesLabel: "Services Offered",
+  leftLabel: "Overview",
+};
+
 
   const svg = mustache.render(tplFlyerA({ W, H }), vars);
   const pngBuf = await sharp(Buffer.from(svg)).png({ quality: 92 }).toBuffer();
