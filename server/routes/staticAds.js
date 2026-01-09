@@ -1467,35 +1467,39 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // --- Bottom layout tuning (ONLY affects the bottom section) ---
+  // --- Bottom section spacing (closer, but NEVER touching) ---
   const MARGIN = 90;
 
-  // ✅ Smaller center gap now that the divider line is removed
-  const CENTER_GAP = 140; // reduce this if you want even tighter (ex: 120)
+  // This is the reserved “boundary” space between the two columns
+  const MIN_SPACE_BETWEEN = 80;     // hard safety gap so lists never touch
+  const CENTER_GAP = 120;           // overall center gap target (we’ll “eat” into it evenly)
 
-  // Keep original column width feel (same as before-ish)
+  // Pull both blocks inward toward the center, but never past MIN_SPACE_BETWEEN
+  const INWARD_NUDGE = Math.max(
+    0,
+    Math.floor((CENTER_GAP - MIN_SPACE_BETWEEN) / 2)
+  );
+
+  // Column width based on CENTER_GAP
   const COL_W = Math.round((W - 2 * MARGIN - CENTER_GAP) / 2);
 
-  // Center the entire bottom block around the true middle
+  // Columns centered around the middle
   const MID_X = Math.round(W / 2);
   const LEFT_COL_X = Math.round(MID_X - CENTER_GAP / 2 - COL_W);
   const RIGHT_COL_X = Math.round(MID_X + CENTER_GAP / 2);
 
-  // label + lists
-  const ACCENT_Y = HEADER_H + 30; // used for Y math only
+  // label + lists Y positions
+  const ACCENT_Y = HEADER_H + 30;
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // ✅ keep your current centered “feel”
-  const BOTTOM_SECTION_SHIFT_X = 22;
+  // LEFT block (move toward center)
+  const LEFT_LABEL_X = LEFT_COL_X + INWARD_NUDGE;
+  const LEFT_LIST_X = LEFT_COL_X + 10 + INWARD_NUDGE;
 
-  // LEFT block positions
-  const LEFT_LABEL_X = LEFT_COL_X + BOTTOM_SECTION_SHIFT_X;
-  const LEFT_LIST_X = LEFT_COL_X + 10 + BOTTOM_SECTION_SHIFT_X;
-
-  // RIGHT block positions
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10 + BOTTOM_SECTION_SHIFT_X;
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 12;
+  // RIGHT block (move toward center)
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10 - INWARD_NUDGE;
+  const RIGHT_LIST_X = RIGHT_LABEL_X + 10; // slightly tighter indent
 
   return `
 <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
@@ -1518,7 +1522,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline (UNCHANGED) -->
+  <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
