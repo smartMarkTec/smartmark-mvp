@@ -924,11 +924,10 @@ const CampaignSetup = () => {
         }}>
           {/* Facebook Connect */}
           <button
-            onClick={() => {
-              window.location.href = `${backendUrl}/auth/facebook`;
-              setFbConnected(true);
-              try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
-            }}
+          onClick={() => {
+  window.location.href = `${backendUrl}/auth/facebook`;
+}}
+
             style={{
               padding: "14px 22px",
               borderRadius: "14px",

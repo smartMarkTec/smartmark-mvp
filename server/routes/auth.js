@@ -196,6 +196,23 @@ router.get('/facebook/defaults', async (_req, res) => {
   });
 });
 
+// NEW: Return ad accounts (for CampaignSetup.js)
+router.get('/facebook/adaccounts', async (_req, res) => {
+  const userToken = getFbUserToken();
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  await refreshDefaults(userToken);
+  return res.json({ data: DEFAULTS.adAccounts || [] });
+});
+
+// NEW: Return pages (for CampaignSetup.js)
+router.get('/facebook/pages', async (_req, res) => {
+  const userToken = getFbUserToken();
+  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  await refreshDefaults(userToken);
+  return res.json({ data: DEFAULTS.pages || [] });
+});
+
+
 router.post('/facebook/defaults/select', (req, res) => {
   const { adAccountId, pageId } = req.body || {};
   if (adAccountId) DEFAULTS.adAccountId = String(adAccountId).replace(/^act_/, '');
