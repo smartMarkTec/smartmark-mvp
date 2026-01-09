@@ -1467,7 +1467,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // orange bars
+  // orange bars (REMOVED from SVG below)
   const ACCENT_Y = HEADER_H + 30;
 
   // layout system (keeps symmetry around center)
@@ -1480,23 +1480,21 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const LEFT_COL_X = MARGIN;
   const RIGHT_COL_X = MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP;
 
-  // bars inside each column
+  // bars inside each column (kept for spacing math, but not drawn)
   const BAR_W = 240;
   const BAR_H = 10;
   const LEFT_BAR_X = LEFT_COL_X;
-  // ✅ move right bar LEFT (toward center) a bit
   const RIGHT_BAR_X = RIGHT_COL_X + (COL_W - BAR_W) - 30;
 
   // label + lists
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // ✅ scoot lists outward for symmetry
   const LEFT_LIST_X = LEFT_COL_X + 10;
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10; // label anchor
-  const RIGHT_LIST_X = RIGHT_LABEL_X + 22; // list slightly to the RIGHT flank of label
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10;
+  const RIGHT_LIST_X = RIGHT_LABEL_X + 22;
 
-  // ✅ middle vertical orange line (same style as top orange bars)
+  // middle vertical orange line
   const MID_BAR_H = 230;
   const MID_BAR_Y = LABEL_Y + 18;
 
@@ -1507,11 +1505,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
       .hBig{font:900 96px/0.92 Inter,system-ui; letter-spacing:0.02em;}
       .hSub{font:800 30px/1.0 Inter,system-ui; letter-spacing:0.12em;}
 
-      /* keep the top sublines bold */
+      /* keep the sublabels bold */
       .label{font:800 34px/1.1 Inter,system-ui;}
 
-      /* ✅ unbolden ONLY the list item text */
-      .liL{font:600 42px/1.15 Inter,system-ui;}
+      /* ✅ checklist slightly smaller (just a tad) */
+      .liL{font:600 40px/1.15 Inter,system-ui;}
       .liR{font:600 38px/1.2 Inter,system-ui;}
 
       .tCenter{text-anchor:middle;}
@@ -1523,15 +1521,11 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Orange accent bars -->
-  <rect x="${LEFT_BAR_X}" y="${ACCENT_Y}" width="${BAR_W}" height="${BAR_H}" fill="{{palette.accent}}" opacity="0.95"/>
-  <rect x="${RIGHT_BAR_X}" y="${ACCENT_Y}" width="${BAR_W}" height="${BAR_H}" fill="{{palette.accent}}" opacity="0.95"/>
-
   <!-- Headline + subline -->
   <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
-        <tspan x="0" dy="{{dy}}">{{line}}</tspan>
+        <tspan x="{{x}}" dy="{{dy}}">{{line}}</tspan>
       {{/headlineLines}}
     </text>
 
@@ -1540,7 +1534,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- ✅ Middle vertical orange line (same style as bars) -->
+  <!-- ✅ keep ONLY the middle vertical line -->
   <rect
     x="${MID_X - Math.round(MID_BAR_W / 2)}"
     y="${MID_BAR_Y}"
@@ -1550,12 +1544,12 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     opacity="0.95"
   />
 
-  <!-- ✅ Services Offered label (above RIGHT list) -->
+  <!-- Right label -->
   <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{servicesLabel}}
   </text>
 
-  <!-- ✅ Left label -->
+  <!-- Left label -->
   <text class="label tLeft" x="${LEFT_COL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{leftLabel}}
   </text>
@@ -1588,6 +1582,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
+
 
 
 /**
@@ -2122,42 +2117,47 @@ if (template === "flyer_a") {
   const listsLaidOut = withListLayout(mergedKnobs.lists || {});
 
   // --- Headline/Subline stack ---
-  const headlineUpper = String(mergedInputs.headline || "")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+// --- Headline/Subline stack ---
+const headlineUpper = String(mergedInputs.headline || "")
+  .toUpperCase()
+  .replace(/\s+/g, " ")
+  .trim();
 
-  const HEAD_FS = 96;
+const HEAD_FS = 96;
 
-  const headlineLinesRaw = wrapTextToWidth(
-    headlineUpper,
-    HEAD_FS,
-    1080,
-    170,
-    3,
-    2,
-    true
-  );
+const headlineLinesRaw = wrapTextToWidth(
+  headlineUpper,
+  HEAD_FS,
+  1080,
+  170,
+  3,
+  2,
+  true
+);
 
-  const lineGap = Math.round(HEAD_FS * 0.90);
+const lineGap = Math.round(HEAD_FS * 0.90);
 
-  const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
-    line: l.line,
-    dy: i === 0 ? 0 : lineGap,
-  }));
+// ✅ optical centering fix: if 3 lines, nudge ONLY the last line slightly left
+const rawCount = (headlineLinesRaw || []).length;
 
-  const sublineUpper = String(mergedInputs.subline || "")
-    .toUpperCase()
-    .replace(/\s+/g, " ")
-    .trim();
+const headlineLines = (headlineLinesRaw || []).map((l, i) => ({
+  line: l.line,
+  dy: i === 0 ? 0 : lineGap,
+  x: rawCount >= 3 && i === rawCount - 1 ? -8 : 0,
+}));
 
-  // ✅ move the bullet subline UP (closer to headline)
-  const sublineY =
-    (headlineLines.length - 1) * lineGap +
-    Math.round(HEAD_FS * 0.86) -
-    24;
+const sublineUpper = String(mergedInputs.subline || "")
+  .toUpperCase()
+  .replace(/\s+/g, " ")
+  .trim();
 
-  const vars = {
+// ✅ keep subline close to headline
+const sublineY =
+  (headlineLines.length - 1) * lineGap +
+  Math.round(HEAD_FS * 0.86) -
+  24;
+
+const vars = {
   headlineLines,
   subline: sublineUpper,
   sublineY,
