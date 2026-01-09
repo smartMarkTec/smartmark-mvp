@@ -2684,16 +2684,18 @@ function safeHex(hex = '', fallback = '#111111') {
 }
 
 /* --- CTA normalizers — NO DEFAULTS --- */
-function normalizeCTA(s = '') {
+/* --- CTA normalizers — NO DEFAULTS (RENAMED to avoid duplicates) --- */
+function normalizeCTA_noDefaults(s = '') {
   const base = String(s).replace(/\s+/g, ' ').trim();
   return base ? base.slice(0, 28).toUpperCase() : '';
 }
-function cleanCTA(s = '', brand = '') {
+function cleanCTA_noDefaults(s = '', brand = '') {
   let t = String(s || '');
   if (brand) t = t.replace(new RegExp(escRegExp(brand), 'i'), '');
   t = t.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  return normalizeCTA(t); // returns '' when empty
+  return normalizeCTA_noDefaults(t); // returns '' when empty
 }
+
 
 /* --- Centering helpers for SVG text alignment (use with text-anchor="middle") --- */
 function centerAnchorAttrs() {
@@ -2702,7 +2704,8 @@ function centerAnchorAttrs() {
 
 /* --- CTA pill (pure black, white text; same geometry) --- */
 function pillBtn(cx, cy, label, fs = 34) {
-  const txt = normalizeCTA(label || '');
+ const txt = normalizeCTA_noDefaults(label || '');
+
   if (!txt) return ''; // do not draw when no CTA
   const padX = 32;
   const estTextW = Math.round(txt.length * fs * 0.60);
