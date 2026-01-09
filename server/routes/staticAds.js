@@ -1467,20 +1467,15 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   const HEADER_H = 520;
   const DIAG_RIGHT_Y = 420;
 
-  // ✅ middle line stays EXACTLY where it is (no global nudge)
+  // ✅ keep the middle divider line EXACTLY where it is
   const SECTION_NUDGE_X = 0;
+  const MID_X = Math.round(W / 2) + SECTION_NUDGE_X;
 
-  // ✅ ONLY changes requested:
-  // - keep middle divider line fixed
-  // - move LEFT label + LEFT list slightly RIGHT
-  // - move RIGHT list 2x more to the RIGHT than before
-  // - move RIGHT label only "just a tad" to the RIGHT
-  const LEFT_BLOCK_NUDGE_X = 10;       // same as before (left side)
-  const RIGHT_LABEL_NUDGE_X = 10;      // "just a tad" (label)
-  const RIGHT_LIST_NUDGE_X = 20;       // ✅ 2x the prior move (list)
+  // ✅ NEW: center the entire bottom section (both columns + their labels)
+  // (moves Overview + checklist + Services Offered + bullets together)
+  const BOTTOM_SECTION_SHIFT_X = 22; // "center it" — nudges whole bottom block to the right
 
   // layout system (base)
-  const MID_X = Math.round(W / 2) + SECTION_NUDGE_X; // ✅ stays put
   const MARGIN = 90;
   const MID_BAR_W = 10;
   const COL_GAP = 50;
@@ -1491,20 +1486,19 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     MARGIN + COL_W + COL_GAP + MID_BAR_W + COL_GAP + SECTION_NUDGE_X;
 
   // label + lists
-  const ACCENT_Y = HEADER_H + 30; // used for Y math only
+  const ACCENT_Y = HEADER_H + 30;
   const LABEL_Y = ACCENT_Y + 44;
   const LIST_Y = ACCENT_Y + 32;
 
-  // LEFT block positions (nudged right)
-  const LEFT_LABEL_X = LEFT_COL_X + LEFT_BLOCK_NUDGE_X;
-  const LEFT_LIST_X = LEFT_COL_X + 10 + LEFT_BLOCK_NUDGE_X;
+  // LEFT block (shifted as part of bottom centering)
+  const LEFT_LABEL_X = LEFT_COL_X + BOTTOM_SECTION_SHIFT_X;
+  const LEFT_LIST_X = LEFT_COL_X + 10 + BOTTOM_SECTION_SHIFT_X;
 
-  // RIGHT label (nudged right just a tad)
-  const RIGHT_LABEL_X = RIGHT_COL_X + 10 + RIGHT_LABEL_NUDGE_X;
+  // RIGHT block (shifted as part of bottom centering)
+  const RIGHT_LABEL_X = RIGHT_COL_X + 10 + BOTTOM_SECTION_SHIFT_X;
 
-  // RIGHT list (nudged right 2x as much)
-  // (base offset keeps bullets nicely aligned under label visually)
-  const RIGHT_LIST_X = RIGHT_COL_X + 32 + RIGHT_LIST_NUDGE_X;
+  // keep bullets aligned neatly under the right label (but still part of the same shift)
+  const RIGHT_LIST_X = RIGHT_LABEL_X + 12;
 
   // middle vertical orange line (UNCHANGED)
   const MID_BAR_H = 230;
@@ -1531,7 +1525,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
   <rect x="0" y="0" width="${W}" height="${HEADER_H}" fill="{{palette.header}}"/>
   <path d="M0 ${HEADER_H} L${W} ${DIAG_RIGHT_Y} L${W} ${H} L0 ${H} Z" fill="{{palette.body}}"/>
 
-  <!-- Headline + subline -->
+  <!-- Headline + subline (UNCHANGED) -->
   <g transform="translate(${W / 2}, 140)">
     <text class="hBig tCenter" fill="{{palette.textOnDark}}">
       {{#headlineLines}}
@@ -1544,7 +1538,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     </text>
   </g>
 
-  <!-- keep ONLY the middle vertical line (DO NOT MOVE) -->
+  <!-- middle divider (DO NOT MOVE) -->
   <rect
     x="${MID_X - Math.round(MID_BAR_W / 2)}"
     y="${MID_BAR_Y}"
@@ -1554,17 +1548,17 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     opacity="0.95"
   />
 
-  <!-- Right label (moved just a tad right) -->
-  <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
-    {{servicesLabel}}
-  </text>
-
-  <!-- Left label (nudged right) -->
+  <!-- Left label -->
   <text class="label tLeft" x="${LEFT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
     {{leftLabel}}
   </text>
 
-  <!-- Left checklist (checkmarks) (nudged right) -->
+  <!-- Right label -->
+  <text class="label tLeft" x="${RIGHT_LABEL_X}" y="${LABEL_Y}" fill="{{palette.textOnLight}}" opacity="0.90">
+    {{servicesLabel}}
+  </text>
+
+  <!-- Left checklist (checkmarks) -->
   <g transform="translate(${LEFT_LIST_X - 50}, ${LIST_Y})">
     {{#lists.left}}
       {{#show}}
@@ -1578,7 +1572,7 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
     {{/lists.left}}
   </g>
 
-  <!-- Right services list (bullets) (moved 2x more right) -->
+  <!-- Right services list (bullets) -->
   <g transform="translate(${RIGHT_LIST_X}, ${LIST_Y})">
     {{#lists.right}}
       {{#show}}
@@ -1592,7 +1586,6 @@ function tplFlyerA({ W = 1080, H = 1080 }) {
 
 </svg>`;
 }
-
 
 /**
  * Shaw-inspired poster B:
