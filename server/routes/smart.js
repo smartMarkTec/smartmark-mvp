@@ -152,8 +152,12 @@ router.post('/enable', async (req, res) => {
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
-    const userToken = getFbUserToken();
-    if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+    const { simulate = false, simDay = 1 } = req.body;
+
+const userToken = getFbUserToken();
+if (!simulate && !userToken) {
+  return res.status(401).json({ error: 'Not authenticated with Facebook' });
+}
 
     const {
       accountId, campaignId, form = {}, answers = {}, url = '',
@@ -190,9 +194,61 @@ router.post('/run-once', async (req, res) => {
       await db.write();
     }
 
-    const analysis = await analyzer.analyzeCampaign({
+    function buildSimAnalysis({ day = 1, campaignId }) {
+  const adsetId = `SIM_ADSET_${campaignId}`;
+  const adA = `SIM_AD_A_${campaignId}`;
+  const adB = `SIM_AD_B_${campaignId}`;
+
+  const plateau = day >= 8; // plateau starts day 8
+
+  const mk = (impressions, clicks, spend, frequency) => ({
+    impressions, clicks, spend, frequency,
+    ctr: impressions ? clicks / impressions : 0
+  });
+
+  const prior = mk(2200, 30, 14.0, 1.7);
+
+  // “recent” gets worse starting day 8 (plateau)
+  const recent = plateau
+    ? mk(2200, 18, 14.5, 2.4)
+    : mk(2200, 36, 14.5, 1.6);
+
+  return {
+    adsetIds: [adsetId],
+    adMapByAdset: { [adsetId]: [adA, adB] },
+    adsetInsights: {
+      [adsetId]: {
+        recent,
+        prior,
+        _ranges: {
+          recentRange: { since: `SIM_DAY_${Math.max(1, day - 2)}`, until: `SIM_DAY_${day}` },
+          priorRange: { since: `SIM_DAY_${Math.max(1, day - 5)}`, until: `SIM_DAY_${Math.max(1, day - 3)}` }
+        }
+      }
+    },
+    adInsights: {
+      [adA]: { recent, prior, _ranges: {} },
+      [adB]: { recent, prior, _ranges: {} }
+    },
+    plateauByAdset: { [adsetId]: plateau },
+    winnersByAdset: { [adsetId]: [adA] },
+    losersByAdset: { [adsetId]: [adB] },
+    stopFlagsByAd: {
+      [adA]: { flags: { spend: false, impressions: false, clicks: false, time: false }, any: false },
+      [adB]: { flags: { spend: false, impressions: false, clicks: false, time: false }, any: false }
+    },
+    championByAdset: { [adsetId]: adA },
+    championPlateauByAdset: { [adsetId]: plateau }
+  };
+}
+
+
+   const analysis = simulate
+  ? buildSimAnalysis({ day: Number(simDay) || 1, campaignId })
+  : await analyzer.analyzeCampaign({
       accountId, campaignId, userToken, kpi: cfg.kpi || 'cpc', stopRules: normalizeStopRules(cfg)
     });
+
 
     const variantPlan = decideVariantPlanFrom(cfg, {
       assetTypes: mediaSelection, dailyBudget, flightStart, flightEnd, flightHours, overrideCountPerType, forceTwoPerType
@@ -200,6 +256,24 @@ router.post('/run-once', async (req, res) => {
 
     const plateauDetected = Object.values(analysis.plateauByAdset || {}).some(Boolean);
     const shouldForceInitial = !!force || !!initial;
+
+
+if (simulate) {
+  return res.json({
+    success: true,
+    simulate: true,
+    simDay: Number(simDay) || 1,
+    plateauDetected,
+    message: plateauDetected
+      ? 'Plateau detected — would regenerate creatives now (SIM).'
+      : 'No plateau detected (SIM).',
+    analysis,
+    variantPlan,
+    plannedAction: plateauDetected
+      ? { action: 'REGENERATE_CREATIVES', addNewVariants: { images: 2, videos: 0 } }
+      : { action: 'NONE' }
+  });
+}
 
     if (!plateauDetected && !shouldForceInitial) {
       return res.json({ success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan });
