@@ -7,6 +7,7 @@ const FormData = require('form-data');
 // ===== runtime test toggles (no spend / dry run) =====
 const NO_SPEND = process.env.NO_SPEND === '1';
 const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1';
+const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
 
 // =========================
 // Shared helpers
@@ -17,15 +18,22 @@ function absolutePublicUrl(relativePath) {
     process.env.RENDER_EXTERNAL_URL ||
     'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
-  if (relativePath.startsWith('http')) return relativePath;
-  if (relativePath.startsWith('/')) return `${base}${relativePath}`;
-  return `${base}/${relativePath}`;
+  return relativePath.startsWith('http') ? relativePath : `${base}${relativePath}`;
 }
+
 function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
   const port = process.env.PORT || 10000;
-  return `http://127.0.0.1:${port}`;
+  return `http://localhost:${port}`; // safer than 127.0.0.1 in some hosts
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function safeJson(obj) {
+  try { return JSON.stringify(obj); } catch { return '[unserializable]'; }
 }
 
 async function fbGetV(apiVersion, endpoint, params) {
@@ -33,6 +41,7 @@ async function fbGetV(apiVersion, endpoint, params) {
   const res = await axios.get(url, { params });
   return res.data;
 }
+
 async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
   const mergedParams = { ...params };
@@ -40,6 +49,7 @@ async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
+
 const FB_API_VER = 'v23.0';
 
 // =========================
@@ -86,16 +96,27 @@ const policy = {
     return false;
   },
 
-  decideVariantPlan({ assetTypes = 'both', dailyBudget = 0, flightHours = 0, overrideCountPerType = null }) {
+  decideVariantPlan({
+    assetTypes = 'both',
+    dailyBudget = 0,
+    flightHours = 0,
+    overrideCountPerType = null,
+    forceTwoPerType = false
+  }) {
     const at = String(assetTypes || 'both').toLowerCase();
     const wantsImage = at === 'image' || at === 'both';
     const wantsVideo = at === 'video' || at === 'both';
 
     if (overrideCountPerType && typeof overrideCountPerType === 'object') {
       return {
-        images: wantsImage ? Math.max(1, Number(overrideCountPerType.images || 0)) : 0,
-        videos: wantsVideo ? Math.max(1, Number(overrideCountPerType.videos || 0)) : 0
+        images: wantsImage ? Math.max(0, Number(overrideCountPerType.images || 0)) : 0,
+        videos: wantsVideo ? Math.max(0, Number(overrideCountPerType.videos || 0)) : 0
       };
+    }
+
+    if (forceTwoPerType) {
+      const count = this.VARIANTS.DEFAULT_COUNT_PER_TYPE;
+      return { images: wantsImage ? count : 0, videos: wantsVideo ? count : 0 };
     }
 
     const canAB =
@@ -110,6 +131,7 @@ const policy = {
 // =========================
 // TEST MOCKS
 const _mocks = { adset: {}, ad: {} };
+
 function _norm(m = {}) {
   const imp = Number(m.impressions || 0);
   const clk = Number(m.clicks || 0);
@@ -120,6 +142,7 @@ function _norm(m = {}) {
   const cpc = clk > 0 ? sp / clk : null;
   return { impressions: imp, clicks: clk, spend: sp, ctr, cpm, frequency: freq, cpc };
 }
+
 const testing = {
   setMockInsights({ adset = {}, ad = {} } = {}) {
     _mocks.adset = { ..._mocks.adset, ...adset };
@@ -352,129 +375,166 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
-function pickVideoFromApiResponse(data, variantFallback = 1) {
-  const d = data || {};
-  const variant = Number(d.variant || variantFallback || 1);
-
-  // Most common
-  const videoUrl =
-    d.videoUrl ||
-    d.relativeUrl ||
-    d.video?.relativeUrl ||
-    d.video?.url ||
-    (variant === 1 ? (d.videoUrlA || d.videoA || d.a) : (d.videoUrlB || d.videoB || d.b)) ||
-    '';
-
-  const abs =
-    d.absoluteVideoUrl ||
-    d.absoluteUrl ||
-    d.video?.absoluteUrl ||
-    (variant === 1 ? (d.absoluteVideoUrlA || d.absoluteA) : (d.absoluteVideoUrlB || d.absoluteB)) ||
-    '';
-
-  const fbVideoId =
-    d.fbVideoId ||
-    d.video?.fbVideoId ||
-    (variant === 1 ? d.fbVideoIdA : d.fbVideoIdB) ||
-    null;
-
-  const resolvedRelative = videoUrl || '';
-  const resolvedAbsolute = abs || (resolvedRelative ? absolutePublicUrl(resolvedRelative) : '');
-
-  return {
-    relativeUrl: resolvedRelative,
-    absoluteUrl: resolvedAbsolute,
-    fbVideoId,
-    variant
-  };
-}
-
 const generator = {
-  async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
+  async generateVariants({
+    form = {},
+    answers = {},
+    url = '',
+    mediaSelection = 'both',
+    variantPlan = { images: 2, videos: 2 },
+    debug = false
+  }) {
     const api = baseUrl() + '/api';
-    const wantsImage = variantPlan.images > 0;
-    const wantsVideo = variantPlan.videos > 0;
+
+    const wantsImage = Number(variantPlan.images || 0) > 0;
+    const wantsVideo = Number(variantPlan.videos || 0) > 0;
+
+    const seedUrl = url || form?.url || '';
+    const seedIndustry = answers?.industry || form?.industry || '';
+
+    const errors = [];
 
     let copy = '';
     try {
       const copyResp = await axios.post(`${api}/generate-campaign-assets`, {
         answers,
-        url: url || form?.url || ''
-      }, { timeout: 60000 });
+        url: seedUrl
+      }, { timeout: 120000 });
       copy = `${copyResp.data?.headline || ''}\n\n${copyResp.data?.body || ''}`.trim();
-    } catch { copy = ''; }
+    } catch (e) {
+      errors.push({ step: 'copy', message: e?.response?.data?.error || e?.message || 'copy_failed' });
+      copy = '';
+    }
 
     const out = [];
 
+    const genImageOnce = async (i) => {
+      const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
+
+      const imgResp = await axios.post(`${api}/generate-image-from-prompt`, {
+        url: seedUrl,
+        industry: seedIndustry,
+        answers,
+        regenerateToken: regTok
+      }, { timeout: 180000 });
+
+      const pickedUrl = imgResp.data?.imageUrl;
+      if (!pickedUrl) throw new Error('image_endpoint_returned_no_imageUrl');
+
+      const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
+      let imageUrl = pickedUrl;
+
+      if (!alreadyGenerated) {
+        const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
+          imageUrl: pickedUrl,
+          answers,
+          url: seedUrl,
+          regenerateToken: regTok
+        }, { timeout: 240000 });
+
+        imageUrl = overlayResp.data?.imageUrl || pickedUrl;
+      }
+
+      imageUrl = absolutePublicUrl(imageUrl);
+      if (!imageUrl.startsWith('http')) throw new Error('imageUrl_not_public');
+
+      return { kind: 'image', variantId: `img_${i}`, imageUrl, adCopy: copy };
+    };
+
+    const genVideoOnce = async (i) => {
+      const regTok = `${Date.now()}_vid_${i}_${Math.random().toString(36).slice(2, 8)}`;
+
+      const vidResp = await axios.post(`${api}/generate-video-ad`, {
+        url: seedUrl,
+        answers: { ...answers, cta: answers?.cta || 'Learn More!' },
+        regenerateToken: regTok,
+        variant: (i % 2) + 1
+      }, { timeout: 420000 });
+
+      const rel = vidResp.data?.videoUrl || '';
+      const abs = vidResp.data?.absoluteVideoUrl || absolutePublicUrl(rel);
+
+      if (!abs || !abs.startsWith('http')) throw new Error('videoUrl_not_public');
+
+      return {
+        kind: 'video',
+        variantId: `vid_${i}`,
+        video: {
+          relativeUrl: rel,
+          absoluteUrl: abs,
+          fbVideoId: vidResp.data?.fbVideoId || null,
+          variant: vidResp.data?.variant || ((i % 2) + 1)
+        },
+        adCopy: copy
+      };
+    };
+
+    // Retry strategy: attempt up to 3x per requested creative.
+    const maxImgAttempts = wantsImage ? Math.max(variantPlan.images * 3, variantPlan.images) : 0;
+    const maxVidAttempts = wantsVideo ? Math.max(variantPlan.videos * 3, variantPlan.videos) : 0;
+
     if (wantsImage) {
-      for (let i = 0; i < variantPlan.images; i++) {
+      let made = 0;
+      let attempts = 0;
+      while (made < variantPlan.images && attempts < maxImgAttempts) {
+        attempts += 1;
         try {
-          const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
-          const imgResp = await axios.post(`${api}/generate-image-from-prompt`, {
-            url: url || form?.url || '',
-            industry: answers?.industry || form?.industry || '',
-            answers,
-            regenerateToken: regTok
-          }, { timeout: 45000 });
-
-          const pickedUrl = imgResp.data?.imageUrl || imgResp.data?.url || imgResp.data?.absoluteUrl;
-          if (!pickedUrl) continue;
-
-          const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
-          let imageUrl = pickedUrl;
-
-          if (!alreadyGenerated) {
-            try {
-              const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-                imageUrl: pickedUrl,
-                answers,
-                url: url || form?.url || '',
-                regenerateToken: regTok
-              }, { timeout: 90000 });
-              imageUrl = overlayResp.data?.imageUrl || overlayResp.data?.url || imageUrl;
-            } catch {}
-          }
-
-          imageUrl = absolutePublicUrl(imageUrl);
-          out.push({ kind: 'image', variantId: `img_${i + 1}`, imageUrl, adCopy: copy });
-        } catch {}
+          const c = await genImageOnce(made + 1);
+          out.push(c);
+          made += 1;
+        } catch (e) {
+          const msg = e?.response?.data?.error || e?.message || 'image_generate_failed';
+          errors.push({ step: 'image', attempt: attempts, message: msg });
+          if (debug) console.warn('[smartCampaignEngine] image gen fail:', msg);
+          await sleep(250);
+        }
+      }
+      if (made < variantPlan.images) {
+        console.warn(`[smartCampaignEngine] images generated ${made}/${variantPlan.images}. errors=${errors.filter(x => x.step === 'image').length}`);
       }
     }
 
     if (wantsVideo) {
-      for (let i = 0; i < variantPlan.videos; i++) {
+      let made = 0;
+      let attempts = 0;
+      while (made < variantPlan.videos && attempts < maxVidAttempts) {
+        attempts += 1;
         try {
-          const regTok = `${Date.now()}_vid_${i}_${Math.random().toString(36).slice(2, 8)}`;
-          const resp = await axios.post(`${api}/generate-video-ad`, {
-            url: url || form?.url || '',
-            answers: { ...answers, cta: answers?.cta || 'Learn More!' },
-            regenerateToken: regTok,
-            variant: (i % 2) + 1
-          }, { timeout: 240000 });
-
-          const video = pickVideoFromApiResponse(resp.data, (i % 2) + 1);
-          if (!video.absoluteUrl && !video.relativeUrl && !video.fbVideoId) continue;
-
-          out.push({
-            kind: 'video',
-            variantId: `vid_${i + 1}`,
-            video,
-            adCopy: copy
-          });
-        } catch {}
+          const c = await genVideoOnce(made + 1);
+          out.push(c);
+          made += 1;
+        } catch (e) {
+          const msg = e?.response?.data?.error || e?.message || 'video_generate_failed';
+          errors.push({ step: 'video', attempt: attempts, message: msg });
+          if (debug) console.warn('[smartCampaignEngine] video gen fail:', msg);
+          await sleep(500);
+        }
+      }
+      if (made < variantPlan.videos) {
+        console.warn(`[smartCampaignEngine] videos generated ${made}/${variantPlan.videos}. errors=${errors.filter(x => x.step === 'video').length}`);
       }
     }
 
+    // Always surface a useful log line so you can see whether generation happened
+    if (debug) {
+      const imgs = out.filter(x => x.kind === 'image').length;
+      const vids = out.filter(x => x.kind === 'video').length;
+      console.warn('[smartCampaignEngine] generateVariants done', safeJson({ requested: variantPlan, got: { images: imgs, videos: vids }, errorCount: errors.length }));
+      if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
+    }
+
+    // Keep return type backward compatible (array), but expose errors through console + attach for internal use
+    out._errors = errors; // note: not serialized in JSON if you stringify array, but useful to callers in-process
     return out;
   },
 
-  async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both' }) {
-    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 2 } });
+  async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both', debug = false }) {
+    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 2 }, debug });
   }
 };
 
 // =========================
-/* DEPLOYER (+ dryRun for tests) */
+/* DEPLOYER (+ dryRun simulation for tests) */
 async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
   if (!m) throw new Error('Invalid image data URL');
@@ -491,31 +551,27 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
 async function ensureVideoId({ accountId, userToken, creativeVideo }) {
   if (creativeVideo?.fbVideoId) return creativeVideo.fbVideoId;
 
-  const fileUrl =
-    creativeVideo?.absoluteUrl ||
-    (creativeVideo?.relativeUrl ? absolutePublicUrl(creativeVideo.relativeUrl) : '');
-
-  if (!fileUrl) throw new Error('No video available to upload');
-
-  const form = new FormData();
-  form.append('file_url', fileUrl);
-  form.append('name', 'SmartMark Generated Video');
-  form.append('description', 'Generated by SmartMark');
-
-  const res = await axios.post(
-    `https://graph.facebook.com/${FB_API_VER}/act_${accountId}/advideos`,
-    form,
-    {
-      headers: form.getHeaders(),
-      params: VALIDATE_ONLY
-        ? { access_token: userToken, execution_options: 'validate_only' }
-        : { access_token: userToken }
-    }
-  );
-
-  const vid = res.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
-  if (!vid) throw new Error('Video upload failed');
-  return vid;
+  const absoluteUrl = creativeVideo?.absoluteUrl || (creativeVideo?.relativeUrl ? absolutePublicUrl(creativeVideo.relativeUrl) : '');
+  if (absoluteUrl) {
+    const form = new FormData();
+    form.append('file_url', absoluteUrl);
+    form.append('name', 'SmartMark Generated Video');
+    form.append('description', 'Generated by SmartMark');
+    const res = await axios.post(
+      `https://graph.facebook.com/${FB_API_VER}/act_${accountId}/advideos`,
+      form,
+      {
+        headers: form.getHeaders(),
+        params: VALIDATE_ONLY
+          ? { access_token: userToken, execution_options: 'validate_only' }
+          : { access_token: userToken }
+      }
+    );
+    const vid = res.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
+    if (!vid) throw new Error('Video upload failed');
+    return vid;
+  }
+  throw new Error('No video available to upload');
 }
 
 async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, userToken, link }) {
@@ -545,10 +601,7 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
   let image_url = null;
   try {
-    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, {
-      access_token: userToken,
-      fields: 'uri,is_preferred'
-    });
+    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
     image_url = (thumbs.data || [])[0]?.uri || null;
   } catch {}
 
@@ -593,6 +646,7 @@ async function pauseAds({ adIds, userToken }) {
 async function setAdsetDailyBudget({ adsetId, dailyBudgetCents, userToken }) {
   await fbPostV(FB_API_VER, adsetId, { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) }, { access_token: userToken });
 }
+
 async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, challengerAdsetId, totalBudgetCents, championPct = 0.75, userToken }) {
   const total = Math.max(200, Number(totalBudgetCents || 0));
   const champ = Math.round(total * Math.min(0.95, Math.max(0.05, championPct)));
@@ -636,39 +690,79 @@ async function ensureChallengerAdsetClone({
   return id;
 }
 
+function countKinds(creatives) {
+  const counts = { images: 0, videos: 0 };
+  for (const c of creatives || []) {
+    if (c?.kind === 'image' && c?.imageUrl) counts.images += 1;
+    if (c?.kind === 'video' && c?.video?.absoluteUrl) counts.videos += 1;
+  }
+  return counts;
+}
+
 const deployer = {
-  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken }) {
+  async deploy({
+    accountId,
+    pageId,
+    campaignLink,
+    adsetIds,
+    winnersByAdset,
+    losersByAdset,
+    creatives,
+    userToken,
+    dryRun = false,
+    debug = false
+  }) {
     const createdAdsByAdset = {};
     const pausedAdsByAdset = {};
     const variantMapByAdset = {};
-    const uploadedImageHashByDataUrl = new Map();
 
-    for (const adsetId of adsetIds) {
+    const generatedCounts = countKinds(creatives);
+    if (debug) console.warn('[smartCampaignEngine] deploy input', safeJson({ dryRun, generatedCounts, adsetCount: (adsetIds || []).length }));
+
+    for (const adsetId of (adsetIds || [])) {
       createdAdsByAdset[adsetId] = [];
       pausedAdsByAdset[adsetId] = [];
       variantMapByAdset[adsetId] = {};
 
-      // IMPORTANT: treat MAX_NEW_ADS_PER_RUN_PER_ADSET as "per type" to allow 2 images + 2 videos
-      const maxPerType = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
-      let createdImages = 0;
-      let createdVideos = 0;
+      // Always pause losers if present (safe)
+      const losers = losersByAdset?.[adsetId] || [];
+      if (losers.length && userToken) {
+        await pauseAds({ adIds: losers, userToken });
+        pausedAdsByAdset[adsetId].push(...losers);
+      }
 
-      for (const c of creatives) {
+      // If dryRun, simulate "created" IDs so your tests can prove the engine produced the right # of variants
+      if (dryRun) {
+        let n = 0;
+        for (const c of creatives || []) {
+          if (c.kind === 'image' && c.imageUrl) {
+            n += 1;
+            const fake = `DRYRUN_IMG_AD_${Date.now()}_${n}`;
+            createdAdsByAdset[adsetId].push(fake);
+            variantMapByAdset[adsetId][c.variantId || `image_${n}`] = fake;
+          } else if (c.kind === 'video' && c.video?.absoluteUrl) {
+            n += 1;
+            const fake = `DRYRUN_VID_AD_${Date.now()}_${n}`;
+            createdAdsByAdset[adsetId].push(fake);
+            variantMapByAdset[adsetId][c.variantId || `video_${n}`] = fake;
+          }
+        }
+        continue;
+      }
+
+      // LIVE deploy (but NO_SPEND=1 will keep ads PAUSED)
+      const maxNew = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
+      let created = 0;
+
+      for (const c of creatives || []) {
+        if (created >= maxNew) break;
+
         try {
           if (c.kind === 'image' && c.imageUrl) {
-            if (createdImages >= maxPerType) continue;
-
-            const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer' });
+            const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer', timeout: 120000 });
             const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
 
-            let hash;
-            if (uploadedImageHashByDataUrl.has(dataUrl)) {
-              hash = uploadedImageHashByDataUrl.get(dataUrl);
-            } else {
-              hash = await uploadImageToAccount({ accountId, userToken, dataUrl });
-              uploadedImageHashByDataUrl.set(dataUrl, hash);
-            }
-
+            const hash = await uploadImageToAccount({ accountId, userToken, dataUrl });
             const adId = await createImageAd({
               pageId,
               accountId,
@@ -680,11 +774,9 @@ const deployer = {
             });
 
             createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `img_${createdImages + 1}`] = adId;
-            createdImages += 1;
+            variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
+            created += 1;
           } else if (c.kind === 'video' && c.video) {
-            if (createdVideos >= maxPerType) continue;
-
             const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
             const adId = await createVideoAd({
               pageId,
@@ -697,22 +789,16 @@ const deployer = {
             });
 
             createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `vid_${createdVideos + 1}`] = adId;
-            createdVideos += 1;
+            variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
+            created += 1;
           }
         } catch (e) {
           console.warn('Create ad failed:', e?.response?.data?.error?.message || e.message);
         }
       }
-
-      const losers = losersByAdset[adsetId] || [];
-      if (losers.length) {
-        await pauseAds({ adIds: losers, userToken });
-        pausedAdsByAdset[adsetId].push(...losers);
-      }
     }
 
-    return { createdAdsByAdset, pausedAdsByAdset, variantMapByAdset };
+    return { createdAdsByAdset, pausedAdsByAdset, variantMapByAdset, generatedCounts };
   },
 
   pauseAds,
