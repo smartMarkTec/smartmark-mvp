@@ -12,18 +12,40 @@ const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 // =========================
 // Shared helpers
 // =========================
+function normalizePublicBase(raw) {
+  if (!raw) return '';
+  let s = String(raw).trim();
+  if (!s) return '';
+  // Handle values like "smartmark-mvp.onrender.com" (no scheme)
+  if (!/^https?:\/\//i.test(s)) {
+    // Handle protocol-relative
+    if (s.startsWith('//')) s = `https:${s}`;
+    else s = `https://${s}`;
+  }
+  return s.replace(/\/+$/, '');
+}
+
 function absolutePublicUrl(relativePath) {
   const base =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
+    normalizePublicBase(process.env.PUBLIC_BASE_URL) ||
+    normalizePublicBase(process.env.RENDER_EXTERNAL_URL) ||
     'https://smartmark-mvp.onrender.com';
+
   if (!relativePath) return '';
-  return relativePath.startsWith('http') ? relativePath : `${base}${relativePath}`;
+  const p = String(relativePath).trim();
+  if (!p) return '';
+
+  // Already absolute
+  if (/^https?:\/\//i.test(p)) return p;
+
+  // Ensure leading slash
+  const path = p.startsWith('/') ? p : `/${p}`;
+  return `${base}${path}`;
 }
 
 function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
-  if (fromEnv) return fromEnv.replace(/\/+$/, '');
+  if (fromEnv) return String(fromEnv).replace(/\/+$/, '');
   const port = process.env.PORT || 10000;
   return `http://localhost:${port}`; // safer than 127.0.0.1 in some hosts
 }
@@ -375,24 +397,32 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
-function pickImageUrlFromPromptResponse(data) {
+function pickImageUrlFromResponse(data) {
   if (!data) return '';
-  // Most common legacy shape
-  if (typeof data.imageUrl === 'string' && data.imageUrl) return data.imageUrl;
-  if (typeof data.absoluteUrl === 'string' && data.absoluteUrl) return data.absoluteUrl;
 
-  // Current shape you showed: { ok:true, images:[{absoluteUrl:...}, ...] }
-  if (Array.isArray(data.images) && data.images.length) {
+  // Preferred (older shape)
+  if (data.imageUrl && typeof data.imageUrl === 'string') return data.imageUrl;
+
+  // Common new shape from your curl: { ok:true, images:[{absoluteUrl:"..."}] }
+  if (Array.isArray(data.images) && data.images.length > 0) {
     const first = data.images[0] || {};
-    if (typeof first.absoluteUrl === 'string' && first.absoluteUrl) return first.absoluteUrl;
-    if (typeof first.url === 'string' && first.url) return first.url;
-    if (typeof first.imageUrl === 'string' && first.imageUrl) return first.imageUrl;
+    if (typeof first.absoluteUrl === 'string') return first.absoluteUrl;
+    if (typeof first.url === 'string') return first.url;
+    if (typeof first.imageUrl === 'string') return first.imageUrl;
   }
 
-  // Other possible shapes
-  if (Array.isArray(data.imageUrls) && data.imageUrls.length) return data.imageUrls[0] || '';
-  if (Array.isArray(data.urls) && data.urls.length) return data.urls[0] || '';
+  // Alternative shapes
+  if (typeof data.absoluteUrl === 'string') return data.absoluteUrl;
+  if (Array.isArray(data.imageUrls) && data.imageUrls.length > 0) return String(data.imageUrls[0]);
+
   return '';
+}
+
+function ensureAbsUrl(maybeRelOrAbs) {
+  const s = String(maybeRelOrAbs || '').trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  return absolutePublicUrl(s);
 }
 
 const generator = {
@@ -438,37 +468,12 @@ const generator = {
         regenerateToken: regTok
       }, { timeout: 180000 });
 
-      const pickedUrl = pickImageUrlFromPromptResponse(imgResp.data);
+      const pickedUrl = pickImageUrlFromResponse(imgResp.data);
       if (!pickedUrl) throw new Error('image_endpoint_returned_no_imageUrl');
 
-      // IMPORTANT FIX:
-      // Your generate-image-from-prompt already returns a final composed static (api/media/...)
-      // The overlay endpoint is not guaranteed to exist on Render; do NOT hard-fail on it.
-      let imageUrl = pickedUrl;
-
-      // Optional overlay (safe fallback). Only attempt if explicitly enabled.
-      const TRY_OVERLAY = process.env.SMART_TRY_IMAGE_OVERLAY === '1';
-      if (TRY_OVERLAY) {
-        try {
-          const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-            imageUrl: pickedUrl,
-            answers,
-            url: seedUrl,
-            regenerateToken: regTok
-          }, { timeout: 240000 });
-
-          const overlayUrl = overlayResp.data?.imageUrl;
-          if (overlayUrl) imageUrl = overlayUrl;
-        } catch (e) {
-          // swallow overlay errors so image generation still succeeds
-          const status = e?.response?.status;
-          const msg = e?.response?.data?.error || e?.response?.data || e?.message || 'overlay_failed';
-          if (debug) console.warn('[smartCampaignEngine] overlay skipped/fallback', safeJson({ status, msg }));
-        }
-      }
-
-      imageUrl = absolutePublicUrl(imageUrl);
-      if (!imageUrl.startsWith('http')) throw new Error('imageUrl_not_public');
+      // If it already looks like a rendered asset, just make it absolute and return
+      let imageUrl = ensureAbsUrl(pickedUrl);
+      if (!/^https?:\/\//i.test(imageUrl)) throw new Error('imageUrl_not_public');
 
       return { kind: 'image', variantId: `img_${i}`, imageUrl, adCopy: copy };
     };
@@ -483,10 +488,11 @@ const generator = {
         variant: (i % 2) + 1
       }, { timeout: 420000 });
 
-      const rel = vidResp.data?.videoUrl || '';
-      const abs = vidResp.data?.absoluteVideoUrl || absolutePublicUrl(rel);
+      const rel = (vidResp.data?.videoUrl || vidResp.data?.relativeUrl || '').trim();
+      const absRaw = (vidResp.data?.absoluteVideoUrl || vidResp.data?.absoluteUrl || '').trim();
 
-      if (!abs || !abs.startsWith('http')) throw new Error('videoUrl_not_public');
+      const abs = ensureAbsUrl(absRaw || rel);
+      if (!abs || !/^https?:\/\//i.test(abs)) throw new Error('videoUrl_not_public');
 
       return {
         kind: 'video',
@@ -515,8 +521,8 @@ const generator = {
           out.push(c);
           made += 1;
         } catch (e) {
-          const msg = e?.response?.data?.error || e?.response?.data || e?.message || 'image_generate_failed';
-          errors.push({ step: 'image', attempt: attempts, message: String(msg) });
+          const msg = e?.response?.data?.error || e?.message || 'image_generate_failed';
+          errors.push({ step: 'image', attempt: attempts, message: msg });
           if (debug) console.warn('[smartCampaignEngine] image gen fail:', msg);
           await sleep(250);
         }
@@ -536,8 +542,8 @@ const generator = {
           out.push(c);
           made += 1;
         } catch (e) {
-          const msg = e?.response?.data?.error || e?.response?.data || e?.message || 'video_generate_failed';
-          errors.push({ step: 'video', attempt: attempts, message: String(msg) });
+          const msg = e?.response?.data?.error || e?.message || 'video_generate_failed';
+          errors.push({ step: 'video', attempt: attempts, message: msg });
           if (debug) console.warn('[smartCampaignEngine] video gen fail:', msg);
           await sleep(500);
         }
@@ -547,20 +553,14 @@ const generator = {
       }
     }
 
-    // Always surface a useful log line so you can see whether generation happened
     if (debug) {
       const imgs = out.filter(x => x.kind === 'image').length;
       const vids = out.filter(x => x.kind === 'video').length;
-      console.warn('[smartCampaignEngine] generateVariants done', safeJson({
-        requested: variantPlan,
-        got: { images: imgs, videos: vids },
-        errorCount: errors.length
-      }));
+      console.warn('[smartCampaignEngine] generateVariants done', safeJson({ requested: variantPlan, got: { images: imgs, videos: vids }, errorCount: errors.length }));
       if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
     }
 
-    // Keep return type backward compatible (array), but expose errors through console + attach for internal use
-    out._errors = errors; // useful to callers in-process
+    out._errors = errors; // in-process only
     return out;
   },
 
