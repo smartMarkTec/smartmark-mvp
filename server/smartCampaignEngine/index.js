@@ -7,7 +7,6 @@ const FormData = require('form-data');
 // ===== runtime test toggles (no spend / dry run) =====
 const NO_SPEND = process.env.NO_SPEND === '1';
 const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1';
-const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
 
 // =========================
 // Shared helpers
@@ -25,7 +24,7 @@ function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
   const port = process.env.PORT || 10000;
-  return `http://localhost:${port}`; // safer than 127.0.0.1 in some hosts
+  return `http://localhost:${port}`;
 }
 
 function sleep(ms) {
@@ -131,7 +130,6 @@ const policy = {
 // =========================
 // TEST MOCKS
 const _mocks = { adset: {}, ad: {} };
-
 function _norm(m = {}) {
   const imp = Number(m.impressions || 0);
   const clk = Number(m.clicks || 0);
@@ -226,17 +224,8 @@ function rankAds(listByAdId, kpi = 'cpc') {
     if (Math.abs(actr - bctr) > EPS) return bctr - actr;
     return String(a.adId).localeCompare(String(b.adId));
   };
-  const byCtrThenCpc = (a, b) => {
-    const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
-    const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
-    if (Math.abs(actr - bctr) > EPS) return bctr - actr;
-    const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
-    const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
-    if (Math.abs(ac - bc) > EPS) return ac - bc;
-    return String(a.adId).localeCompare(String(b.adId));
-  };
 
-  rows.sort(kpi === 'ctr' ? byCtrThenCpc : byCpcThenCtr);
+  rows.sort(kpi === 'ctr' ? (a, b) => (b.ctr ?? -1) - (a.ctr ?? -1) : byCpcThenCtr);
   return rows.map(r => ({ adId: r.adId, value: kpi === 'ctr' ? r.ctr : r.cpc, windows: r.windows }));
 }
 
@@ -294,6 +283,7 @@ const analyzer = {
 
       const ids = (ads.data || []).map(a => a.id);
       adMapByAdset[adsetId] = ids;
+
       for (const a of (ads.data || [])) {
         adMeta[a.id] = { created_time: a.created_time || null };
       }
@@ -376,31 +366,9 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
-
-// ✅ robustly extract image URL from multiple response shapes
-function extractImageUrlFromResponse(data, preferIndex = 0) {
-  if (!data) return '';
-
-  // legacy
-  if (typeof data.imageUrl === 'string' && data.imageUrl) return data.imageUrl;
-  if (typeof data.absoluteImageUrl === 'string' && data.absoluteImageUrl) return data.absoluteImageUrl;
-
-  // new shape: { ok:true, images:[{absoluteUrl:...}, ...] }
-  if (Array.isArray(data.images) && data.images.length > 0) {
-    const idx = Math.min(Math.max(0, preferIndex), data.images.length - 1);
-    const picked = data.images[idx] || data.images[0] || {};
-    return (
-      picked.absoluteUrl ||
-      picked.url ||
-      picked.imageUrl ||
-      ''
-    );
-  }
-
-  // sometimes: { url: "..." }
-  if (typeof data.url === 'string' && data.url) return data.url;
-
-  return '';
+function pickFirstAbsoluteUrl(list) {
+  if (!Array.isArray(list) || list.length === 0) return '';
+  return String(list[0]?.absoluteUrl || list[0]?.url || list[0]?.href || '');
 }
 
 const generator = {
@@ -436,73 +404,37 @@ const generator = {
 
     const out = [];
 
-    // Prefetch pool for images (your endpoint often returns 2 images at once)
-    let prefetchedImageUrls = [];
+    const genImageOnce = async (i) => {
+      const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
 
-    const fetchMoreImages = async () => {
-      const regTok = `${Date.now()}_img_pool_${Math.random().toString(36).slice(2, 8)}`;
       const imgResp = await axios.post(`${api}/generate-image-from-prompt`, {
         url: seedUrl,
         industry: seedIndustry,
         answers,
         regenerateToken: regTok
-      }, { timeout: 240000 });
+      }, { timeout: 180000 });
 
-      const data = imgResp?.data || {};
-      if (Array.isArray(data.images) && data.images.length) {
-        const urls = data.images
-          .map(x => x?.absoluteUrl || x?.url || x?.imageUrl)
-          .filter(Boolean);
-        prefetchedImageUrls.push(...urls);
-      } else {
-        const single = extractImageUrlFromResponse(data, 0);
-        if (single) prefetchedImageUrls.push(single);
-      }
+      // accept multiple shapes:
+      //  - { imageUrl: "..." }
+      //  - { images: [{ absoluteUrl: "..." }, ...] }
+      const pickedUrl =
+        imgResp.data?.imageUrl ||
+        pickFirstAbsoluteUrl(imgResp.data?.images);
 
-      if (debug) {
-        console.warn('[smartCampaignEngine] image pool fetched', safeJson({
-          got: prefetchedImageUrls.length,
-          sample: prefetchedImageUrls.slice(0, 2)
-        }));
-      }
-    };
+      if (!pickedUrl) throw new Error('image_endpoint_returned_no_url');
 
-    const genImageOnce = async (i) => {
-      const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
-
-      // ensure we have a url to use
-      if (prefetchedImageUrls.length < i) {
-        await fetchMoreImages();
-      }
-
-      const pickedUrl = prefetchedImageUrls[i - 1] || prefetchedImageUrls[0] || '';
-      if (!pickedUrl) throw new Error('image_endpoint_returned_no_imageUrl');
-
-      // Decide if we need overlay
-      const alreadyGenerated =
-        typeof pickedUrl === 'string' &&
-        (pickedUrl.includes('/generated/') || pickedUrl.includes('/api/media/'));
-
+      const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
       let imageUrl = pickedUrl;
 
       if (!alreadyGenerated) {
-        try {
-          const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-            imageUrl: pickedUrl,
-            answers,
-            url: seedUrl,
-            regenerateToken: regTok
-          }, { timeout: 300000 });
+        const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
+          imageUrl: pickedUrl,
+          answers,
+          url: seedUrl,
+          regenerateToken: regTok
+        }, { timeout: 240000 });
 
-          const overlayData = overlayResp?.data || {};
-          const overlayPicked = extractImageUrlFromResponse(overlayData, 0);
-          imageUrl = overlayPicked || overlayData?.imageUrl || pickedUrl;
-        } catch (e) {
-          // overlay failed — still allow base image so we don't return 0 assets
-          const msg = e?.response?.data?.error || e?.message || 'overlay_failed';
-          errors.push({ step: 'overlay', attempt: i, message: msg });
-          imageUrl = pickedUrl;
-        }
+        imageUrl = overlayResp.data?.imageUrl || overlayResp.data?.absoluteUrl || pickedUrl;
       }
 
       imageUrl = absolutePublicUrl(imageUrl);
@@ -519,12 +451,27 @@ const generator = {
         answers: { ...answers, cta: answers?.cta || 'Learn More!' },
         regenerateToken: regTok,
         variant: (i % 2) + 1
-      }, { timeout: 420000 });
+      }, { timeout: 300000 }); // 5 min per attempt (was 7)
 
-      const rel = vidResp.data?.videoUrl || '';
-      const abs = vidResp.data?.absoluteVideoUrl || absolutePublicUrl(rel);
+      // accept multiple shapes:
+      // - { videoUrl:"/api/media/..", absoluteVideoUrl:"https://.." }
+      // - { video:{ relativeUrl:"..", absoluteUrl:".." } }
+      // - { videos:[{ absoluteUrl:".." }] }
+      const rel =
+        vidResp.data?.videoUrl ||
+        vidResp.data?.relativeUrl ||
+        vidResp.data?.video?.relativeUrl ||
+        vidResp.data?.video?.url ||
+        '';
 
-      if (!abs || !abs.startsWith('http')) throw new Error('videoUrl_not_public');
+      const abs =
+        vidResp.data?.absoluteVideoUrl ||
+        vidResp.data?.absoluteUrl ||
+        vidResp.data?.video?.absoluteUrl ||
+        pickFirstAbsoluteUrl(vidResp.data?.videos) ||
+        (rel ? absolutePublicUrl(rel) : '');
+
+      if (!abs || !String(abs).startsWith('http')) throw new Error('videoUrl_not_public');
 
       return {
         kind: 'video',
@@ -532,16 +479,18 @@ const generator = {
         video: {
           relativeUrl: rel,
           absoluteUrl: abs,
-          fbVideoId: vidResp.data?.fbVideoId || null,
+          fbVideoId: vidResp.data?.fbVideoId || vidResp.data?.video?.fbVideoId || null,
           variant: vidResp.data?.variant || ((i % 2) + 1)
         },
         adCopy: copy
       };
     };
 
-    // Retry strategy: attempt up to 3x per requested creative.
-    const maxImgAttempts = wantsImage ? Math.max(variantPlan.images * 3, variantPlan.images) : 0;
-    const maxVidAttempts = wantsVideo ? Math.max(variantPlan.videos * 3, variantPlan.videos) : 0;
+    // Retry strategy:
+    // - images: allow up to 2x attempts (fast)
+    // - videos: allow up to 2x attempts (prevents “running forever”)
+    const maxImgAttempts = wantsImage ? Math.max(variantPlan.images * 2, variantPlan.images) : 0;
+    const maxVidAttempts = wantsVideo ? Math.max(variantPlan.videos * 2, variantPlan.videos) : 0;
 
     if (wantsImage) {
       let made = 0;
@@ -588,17 +537,17 @@ const generator = {
     if (debug) {
       const imgs = out.filter(x => x.kind === 'image').length;
       const vids = out.filter(x => x.kind === 'video').length;
-      console.warn('[smartCampaignEngine] generateVariants done', safeJson({ requested: variantPlan, got: { images: imgs, videos: vids }, errorCount: errors.length }));
+      console.warn('[smartCampaignEngine] generateVariants done', safeJson({
+        requested: variantPlan,
+        got: { images: imgs, videos: vids },
+        errorCount: errors.length
+      }));
       if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
     }
 
-    // Attach errors for in-process callers
+    // attach errors for callers (in-process)
     out._errors = errors;
     return out;
-  },
-
-  async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both', debug = false }) {
-    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 2 }, debug });
   }
 };
 
@@ -793,14 +742,12 @@ const deployer = {
       pausedAdsByAdset[adsetId] = [];
       variantMapByAdset[adsetId] = {};
 
-      // Always pause losers if present (safe)
       const losers = losersByAdset?.[adsetId] || [];
       if (losers.length && userToken) {
         await pauseAds({ adIds: losers, userToken });
         pausedAdsByAdset[adsetId].push(...losers);
       }
 
-      // If dryRun, simulate "created" IDs so tests prove the right # of variants
       if (dryRun) {
         let n = 0;
         for (const c of creatives || []) {
@@ -819,7 +766,6 @@ const deployer = {
         continue;
       }
 
-      // LIVE deploy (but NO_SPEND=1 will keep ads PAUSED)
       const maxNew = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
       let created = 0;
 

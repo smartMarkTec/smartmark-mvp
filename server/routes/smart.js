@@ -18,7 +18,7 @@ async function ensureSmartTables() {
   db.data.creative_history = db.data.creative_history || [];
   db.data.campaign_creatives = db.data.campaign_creatives || [];
 
-  // NEW: async job tracking (persisted)
+  // async job tracking (persisted)
   db.data.smart_run_jobs = db.data.smart_run_jobs || [];
 
   await db.write();
@@ -82,7 +82,7 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
-// persist seed inputs (Typeform) so scheduler can always regenerate correctly
+// persist seed inputs so scheduler can always regenerate correctly
 function mergeSeedIntoCfg(cfg, incoming = {}) {
   if (!cfg) return;
   const hasObj = (o) => o && typeof o === 'object' && Object.keys(o).length > 0;
@@ -93,15 +93,12 @@ function mergeSeedIntoCfg(cfg, incoming = {}) {
   if (incoming.url) next.url = String(incoming.url);
   if (incoming.mediaSelection) next.mediaSelection = String(incoming.mediaSelection).toLowerCase();
 
-  if (Object.keys(next).length > 0) {
-    cfg.seed = next;
-  }
+  if (Object.keys(next).length > 0) cfg.seed = next;
 }
 
 // Count creatives even in dryRun so you can verify 2 images / 2 videos logic
 function countCreatives(creatives) {
   const counts = { images: 0, videos: 0 };
-
   if (!creatives) return counts;
 
   // common shape: { images:[], videos:[] }
@@ -109,7 +106,6 @@ function countCreatives(creatives) {
     if (Array.isArray(creatives.images)) counts.images += creatives.images.length;
     if (Array.isArray(creatives.videos)) counts.videos += creatives.videos.length;
 
-    // sometimes variants live under "variants"
     if (Array.isArray(creatives.variants)) {
       for (const v of creatives.variants) {
         const kind = (v?.kind || v?.type || '').toLowerCase();
@@ -196,20 +192,19 @@ async function withConcurrency(fn) {
   }
 }
 
-// hard timeout so jobs never stay "running" forever
 function withTimeout(promise, ms, label = 'timeout') {
+  if (!ms || ms <= 0) return promise;
   let t = null;
-  const timeout = new Promise((_, rej) => {
+  const timeout = new Promise((_, reject) => {
     t = setTimeout(() => {
       const err = new Error(label);
       err.status = 504;
-      rej(err);
+      reject(err);
     }, ms);
   });
-  return Promise.race([
-    promise.finally(() => { if (t) clearTimeout(t); }),
-    timeout
-  ]);
+  return Promise.race([promise, timeout]).finally(() => {
+    if (t) clearTimeout(t);
+  });
 }
 
 /* ----------------------- TEST MOCK ENDPOINTS ----------------------- */
@@ -218,7 +213,6 @@ router.post('/mock-insights', async (req, res) => {
   testing.setMockInsights({ adset, ad });
   res.json({ ok: true, counts: { adset: Object.keys(adset).length, ad: Object.keys(ad).length } });
 });
-
 router.post('/mock-insights/clear', async (_req, res) => {
   testing.clearMockInsights();
   res.json({ ok: true });
@@ -316,7 +310,8 @@ async function runSmartOnceInternal(reqBody) {
   }
 
   const {
-    accountId, campaignId, form = {}, answers = {}, url = '',
+    accountId, campaignId, pageId = null,
+    form = {}, answers = {}, url = '',
     mediaSelection = 'both',
     force = false, initial = false,
     dailyBudget = null, flightStart = null, flightEnd = null, flightHours = null,
@@ -325,6 +320,8 @@ async function runSmartOnceInternal(reqBody) {
 
     // IMPORTANT: default dryRun is true for safety
     dryRun: dryRunRaw = true,
+
+    // pass debug through
     debug: debugRaw = false
   } = reqBody;
 
@@ -343,7 +340,6 @@ async function runSmartOnceInternal(reqBody) {
   let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
 
   if (!cfg) {
-    const pageId = reqBody.pageId || null;
     if (!pageId) {
       const err = new Error('Config not found. Provide pageId or call /smart/enable first.');
       err.status = 400;
@@ -380,6 +376,9 @@ async function runSmartOnceInternal(reqBody) {
     });
 
     cfg.updatedAt = nowIso();
+    // keep pageId if provided
+    if (pageId) cfg.pageId = pageId;
+
     await db.write();
   }
 
@@ -403,8 +402,7 @@ async function runSmartOnceInternal(reqBody) {
       adMapByAdset: { [adsetId]: [adA, adB] },
       adsetInsights: {
         [adsetId]: {
-          recent,
-          prior,
+          recent, prior,
           _ranges: {
             recentRange: { since: `SIM_DAY_${Math.max(1, day - 2)}`, until: `SIM_DAY_${day}` },
             priorRange: { since: `SIM_DAY_${Math.max(1, day - 5)}`, until: `SIM_DAY_${Math.max(1, day - 3)}` }
@@ -430,7 +428,9 @@ async function runSmartOnceInternal(reqBody) {
   const analysis = simulate
     ? buildSimAnalysis({ day: Number(simDay) || 1, campaignId })
     : await analyzer.analyzeCampaign({
-        accountId, campaignId, userToken, kpi: cfg.kpi || 'cpc', stopRules: normalizeStopRules(cfg)
+        accountId, campaignId, userToken,
+        kpi: cfg.kpi || 'cpc',
+        stopRules: normalizeStopRules(cfg)
       });
 
   const variantPlan = decideVariantPlanFrom(cfg, {
@@ -474,29 +474,39 @@ async function runSmartOnceInternal(reqBody) {
   const useUrl = url || useForm?.url || seed.url || cfg.link || '';
   const useMedia = (mediaSelection || seed.mediaSelection || cfg.assetTypes || 'both').toLowerCase();
 
-  const creatives = await generator.generateVariants({
-    form: useForm,
-    answers: useAnswers,
-    url: useUrl,
-    mediaSelection: useMedia,
-    variantPlan,
-    debug
-  });
+  // hard cap generation time so jobs do NOT sit "running" forever
+  const GEN_MAX_MS = Number(process.env.SMART_GENERATION_MAX_MS || 12 * 60 * 1000); // 12 minutes default
+
+  const creatives = await withTimeout(
+    generator.generateVariants({
+      form: useForm,
+      answers: useAnswers,
+      url: useUrl,
+      mediaSelection: useMedia,
+      variantPlan,
+      debug
+    }),
+    GEN_MAX_MS,
+    'generation_timeout'
+  );
 
   const generatedCounts = countCreatives(creatives);
 
-  const wantImages = variantPlan.images || 0;
-  const wantVideos = variantPlan.videos || 0;
+  const wantImages = Number(variantPlan.images || 0);
+  const wantVideos = Number(variantPlan.videos || 0);
 
   // HARD FAIL: expected > 0 but got 0
-  if ((wantImages > 0 && generatedCounts.images === 0) || (wantVideos > 0 && generatedCounts.videos === 0)) {
+  const badImages = wantImages > 0 && generatedCounts.images === 0;
+  const badVideos = wantVideos > 0 && generatedCounts.videos === 0;
+
+  if (badImages || badVideos) {
     const err = new Error('generation_returned_zero_assets');
     err.status = 502;
     err.detail = {
       error: 'generation_returned_zero_assets',
       expectedPerType: { images: wantImages, videos: wantVideos },
       generatedCounts,
-      generatorErrors: Array.isArray(creatives?._errors) ? creatives._errors.slice(-50) : []
+      generatorErrors: Array.isArray(creatives?._errors) ? creatives._errors.slice(-25) : []
     };
     throw err;
   }
@@ -648,11 +658,6 @@ async function runSmartOnceInternal(reqBody) {
 }
 
 /* ---------------------------- RUN ONCE ---------------------------- */
-/**
- * IMPORTANT:
- * - For real users (video/both), you MUST run async to avoid Render 504.
- * - Default: async=true unless simulate=true.
- */
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -666,30 +671,18 @@ router.post('/run-once', async (req, res) => {
     }
 
     if (!wantAsync) {
-      // synchronous (SIM, or you explicitly set async:false)
       const out = await withConcurrency(() => runSmartOnceInternal(req.body));
       return res.json(out);
     }
 
-    // Async: create job record and return immediately (prevents 504)
     const runId = newRunId();
     await createJobRecord({ runId, campaignId, accountId, payload: req.body });
 
-    // fire in background
     setImmediate(async () => {
       try {
-        const MAX_JOB_MS = Number(process.env.SMART_RUN_MAX_MS || 12 * 60 * 1000); // 12 min default
-
         const result = await withConcurrency(async () => {
-          // IMPORTANT: mark running only when actually executing (after concurrency slot acquired)
           await updateJob(runId, { state: 'running', startedAt: nowIso() });
-
-          // IMPORTANT: hard timeout so job never stays running forever
-          return await withTimeout(
-            runSmartOnceInternal(req.body),
-            MAX_JOB_MS,
-            'smart_run_job_timeout'
-          );
+          return await runSmartOnceInternal(req.body);
         });
 
         await updateJob(runId, { state: 'done', finishedAt: nowIso(), result });
@@ -751,31 +744,6 @@ router.get('/run-status/:runId', async (req, res) => {
   }
 });
 
-/* ------------------------- PERSIST STOP RULES ------------------------- */
-router.post('/config/:campaignId/stop-rules', async (req, res) => {
-  try {
-    await ensureSmartTables();
-    const { campaignId } = req.params;
-    const inb = req.body || {};
-    await db.read();
-    const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
-    if (!cfg) return res.status(404).json({ error: 'Config not found. Call /smart/enable first.' });
-    const next = {
-      spendPerAdUSD: Number(inb.spendPerAdUSD ?? cfg.stopRules?.spendPerAdUSD ?? 0),
-      impressionsPerAd: Number(inb.impressionsPerAd ?? cfg.stopRules?.impressionsPerAd ?? 0),
-      clicksPerAd: Number(inb.clicksPerAd ?? cfg.stopRules?.clicksPerAd ?? 0),
-      timeCapHours: Number(inb.timeCapHours ?? cfg.stopRules?.timeCapHours ?? 0),
-    };
-    cfg.stopRules = next;
-    cfg.updatedAt = nowIso();
-    await db.write();
-    res.json({ ok: true, stored: cfg.stopRules });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-/* ------------------------------ STATUS ------------------------------ */
 router.get('/status/:campaignId', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -784,83 +752,6 @@ router.get('/status/:campaignId', async (req, res) => {
     const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     const runs = (db.data.smart_runs || []).filter(r => r.campaignId === campaignId).slice(-10).reverse();
     res.json({ config: cfg || null, recentRuns: runs });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-/* ----------------------------- SWEEP NOW ----------------------------- */
-router.post('/sweep-now', async (_req, res) => {
-  try {
-    const jobs = require('../scheduler/jobs');
-    if (!jobs || typeof jobs.sweep !== 'function') {
-      return res.status(500).json({ error: 'jobs.sweep not available' });
-    }
-    await jobs.sweep();
-    res.json({ ok: true });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-/* ---------------------------- COMMIT NOW ---------------------------- */
-router.post('/commit-now', async (req, res) => {
-  try {
-    await ensureSmartTables();
-    const userToken = getFbUserToken();
-    if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-
-    const { accountId, campaignId } = req.body || {};
-    if (!accountId || !campaignId) {
-      return res.status(400).json({ error: 'accountId and campaignId are required' });
-    }
-
-    const analysis = await analyzer.analyzeCampaign({
-      accountId, campaignId, userToken, kpi: 'cpc'
-    });
-
-    const eligibleAdsets = [];
-    const losersToPause = [];
-
-    for (const adsetId of (analysis.adsetIds || [])) {
-      const adIds = analysis.adMapByAdset?.[adsetId] || [];
-      if (!adIds.length) continue;
-
-      const hasStop = adIds.some(id => analysis.stopFlagsByAd?.[id]?.any);
-      if (!hasStop) continue;
-
-      const loserList = analysis.losersByAdset?.[adsetId] || [];
-      if (loserList.length) {
-        losersToPause.push(...loserList);
-        eligibleAdsets.push(adsetId);
-      }
-    }
-
-    if (!losersToPause.length) {
-      return res.json({
-        success: true,
-        message: 'No ad sets met stop rules yet. Nothing paused.',
-        eligibleAdsets
-      });
-    }
-
-    const uniqueLosers = Array.from(new Set(losersToPause)).filter(Boolean);
-    await deployer.pauseAds({ adIds: uniqueLosers, userToken });
-
-    await db.read();
-    db.data.smart_runs.push({
-      id: `run_${Date.now()}`,
-      campaignId, accountId, startedAt: nowIso(),
-      mode: 'stop_rules_commit',
-      plateauDetected: true,
-      variantPlan: { images: 0, videos: 0 },
-      createdAdsByAdset: {},
-      pausedAdsByAdset: { '*': uniqueLosers },
-      meta: { eligibleAdsets }
-    });
-    await db.write();
-
-    res.json({ success: true, paused: uniqueLosers, eligibleAdsets });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
