@@ -7,6 +7,7 @@ const FormData = require('form-data');
 // ===== runtime test toggles (no spend / dry run) =====
 const NO_SPEND = process.env.NO_SPEND === '1';
 const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1';
+const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
 
 // =========================
 // Shared helpers
@@ -24,7 +25,7 @@ function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
   if (fromEnv) return fromEnv.replace(/\/+$/, '');
   const port = process.env.PORT || 10000;
-  return `http://localhost:${port}`;
+  return `http://localhost:${port}`; // safer than 127.0.0.1 in some hosts
 }
 
 function sleep(ms) {
@@ -130,6 +131,7 @@ const policy = {
 // =========================
 // TEST MOCKS
 const _mocks = { adset: {}, ad: {} };
+
 function _norm(m = {}) {
   const imp = Number(m.impressions || 0);
   const clk = Number(m.clicks || 0);
@@ -224,8 +226,17 @@ function rankAds(listByAdId, kpi = 'cpc') {
     if (Math.abs(actr - bctr) > EPS) return bctr - actr;
     return String(a.adId).localeCompare(String(b.adId));
   };
+  const byCtrThenCpc = (a, b) => {
+    const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
+    const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
+    if (Math.abs(actr - bctr) > EPS) return bctr - actr;
+    const ac = a.cpc == null ? Number.POSITIVE_INFINITY : a.cpc;
+    const bc = b.cpc == null ? Number.POSITIVE_INFINITY : b.cpc;
+    if (Math.abs(ac - bc) > EPS) return ac - bc;
+    return String(a.adId).localeCompare(String(b.adId));
+  };
 
-  rows.sort(kpi === 'ctr' ? (a, b) => (b.ctr ?? -1) - (a.ctr ?? -1) : byCpcThenCtr);
+  rows.sort(kpi === 'ctr' ? byCtrThenCpc : byCpcThenCtr);
   return rows.map(r => ({ adId: r.adId, value: kpi === 'ctr' ? r.ctr : r.cpc, windows: r.windows }));
 }
 
@@ -283,7 +294,6 @@ const analyzer = {
 
       const ids = (ads.data || []).map(a => a.id);
       adMapByAdset[adsetId] = ids;
-
       for (const a of (ads.data || [])) {
         adMeta[a.id] = { created_time: a.created_time || null };
       }
@@ -335,7 +345,6 @@ const analyzer = {
         const enoughVol =
           (recent.impressions || 0) >= policy.PLATEAU.MIN_IMPRESSIONS_RECENT &&
           (recent.spend || 0) >= policy.PLATEAU.MIN_SPEND_RECENT;
-
         const priorCpc = prior.cpc;
         const recentCpc = recent.cpc;
         let degraded = false;
@@ -366,9 +375,24 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
-function pickFirstAbsoluteUrl(list) {
-  if (!Array.isArray(list) || list.length === 0) return '';
-  return String(list[0]?.absoluteUrl || list[0]?.url || list[0]?.href || '');
+function pickImageUrlFromPromptResponse(data) {
+  if (!data) return '';
+  // Most common legacy shape
+  if (typeof data.imageUrl === 'string' && data.imageUrl) return data.imageUrl;
+  if (typeof data.absoluteUrl === 'string' && data.absoluteUrl) return data.absoluteUrl;
+
+  // Current shape you showed: { ok:true, images:[{absoluteUrl:...}, ...] }
+  if (Array.isArray(data.images) && data.images.length) {
+    const first = data.images[0] || {};
+    if (typeof first.absoluteUrl === 'string' && first.absoluteUrl) return first.absoluteUrl;
+    if (typeof first.url === 'string' && first.url) return first.url;
+    if (typeof first.imageUrl === 'string' && first.imageUrl) return first.imageUrl;
+  }
+
+  // Other possible shapes
+  if (Array.isArray(data.imageUrls) && data.imageUrls.length) return data.imageUrls[0] || '';
+  if (Array.isArray(data.urls) && data.urls.length) return data.urls[0] || '';
+  return '';
 }
 
 const generator = {
@@ -414,27 +438,33 @@ const generator = {
         regenerateToken: regTok
       }, { timeout: 180000 });
 
-      // accept multiple shapes:
-      //  - { imageUrl: "..." }
-      //  - { images: [{ absoluteUrl: "..." }, ...] }
-      const pickedUrl =
-        imgResp.data?.imageUrl ||
-        pickFirstAbsoluteUrl(imgResp.data?.images);
+      const pickedUrl = pickImageUrlFromPromptResponse(imgResp.data);
+      if (!pickedUrl) throw new Error('image_endpoint_returned_no_imageUrl');
 
-      if (!pickedUrl) throw new Error('image_endpoint_returned_no_url');
-
-      const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
+      // IMPORTANT FIX:
+      // Your generate-image-from-prompt already returns a final composed static (api/media/...)
+      // The overlay endpoint is not guaranteed to exist on Render; do NOT hard-fail on it.
       let imageUrl = pickedUrl;
 
-      if (!alreadyGenerated) {
-        const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-          imageUrl: pickedUrl,
-          answers,
-          url: seedUrl,
-          regenerateToken: regTok
-        }, { timeout: 240000 });
+      // Optional overlay (safe fallback). Only attempt if explicitly enabled.
+      const TRY_OVERLAY = process.env.SMART_TRY_IMAGE_OVERLAY === '1';
+      if (TRY_OVERLAY) {
+        try {
+          const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
+            imageUrl: pickedUrl,
+            answers,
+            url: seedUrl,
+            regenerateToken: regTok
+          }, { timeout: 240000 });
 
-        imageUrl = overlayResp.data?.imageUrl || overlayResp.data?.absoluteUrl || pickedUrl;
+          const overlayUrl = overlayResp.data?.imageUrl;
+          if (overlayUrl) imageUrl = overlayUrl;
+        } catch (e) {
+          // swallow overlay errors so image generation still succeeds
+          const status = e?.response?.status;
+          const msg = e?.response?.data?.error || e?.response?.data || e?.message || 'overlay_failed';
+          if (debug) console.warn('[smartCampaignEngine] overlay skipped/fallback', safeJson({ status, msg }));
+        }
       }
 
       imageUrl = absolutePublicUrl(imageUrl);
@@ -451,27 +481,12 @@ const generator = {
         answers: { ...answers, cta: answers?.cta || 'Learn More!' },
         regenerateToken: regTok,
         variant: (i % 2) + 1
-      }, { timeout: 300000 }); // 5 min per attempt (was 7)
+      }, { timeout: 420000 });
 
-      // accept multiple shapes:
-      // - { videoUrl:"/api/media/..", absoluteVideoUrl:"https://.." }
-      // - { video:{ relativeUrl:"..", absoluteUrl:".." } }
-      // - { videos:[{ absoluteUrl:".." }] }
-      const rel =
-        vidResp.data?.videoUrl ||
-        vidResp.data?.relativeUrl ||
-        vidResp.data?.video?.relativeUrl ||
-        vidResp.data?.video?.url ||
-        '';
+      const rel = vidResp.data?.videoUrl || '';
+      const abs = vidResp.data?.absoluteVideoUrl || absolutePublicUrl(rel);
 
-      const abs =
-        vidResp.data?.absoluteVideoUrl ||
-        vidResp.data?.absoluteUrl ||
-        vidResp.data?.video?.absoluteUrl ||
-        pickFirstAbsoluteUrl(vidResp.data?.videos) ||
-        (rel ? absolutePublicUrl(rel) : '');
-
-      if (!abs || !String(abs).startsWith('http')) throw new Error('videoUrl_not_public');
+      if (!abs || !abs.startsWith('http')) throw new Error('videoUrl_not_public');
 
       return {
         kind: 'video',
@@ -479,18 +494,16 @@ const generator = {
         video: {
           relativeUrl: rel,
           absoluteUrl: abs,
-          fbVideoId: vidResp.data?.fbVideoId || vidResp.data?.video?.fbVideoId || null,
+          fbVideoId: vidResp.data?.fbVideoId || null,
           variant: vidResp.data?.variant || ((i % 2) + 1)
         },
         adCopy: copy
       };
     };
 
-    // Retry strategy:
-    // - images: allow up to 2x attempts (fast)
-    // - videos: allow up to 2x attempts (prevents “running forever”)
-    const maxImgAttempts = wantsImage ? Math.max(variantPlan.images * 2, variantPlan.images) : 0;
-    const maxVidAttempts = wantsVideo ? Math.max(variantPlan.videos * 2, variantPlan.videos) : 0;
+    // Retry strategy: attempt up to 3x per requested creative.
+    const maxImgAttempts = wantsImage ? Math.max(variantPlan.images * 3, variantPlan.images) : 0;
+    const maxVidAttempts = wantsVideo ? Math.max(variantPlan.videos * 3, variantPlan.videos) : 0;
 
     if (wantsImage) {
       let made = 0;
@@ -502,8 +515,8 @@ const generator = {
           out.push(c);
           made += 1;
         } catch (e) {
-          const msg = e?.response?.data?.error || e?.message || 'image_generate_failed';
-          errors.push({ step: 'image', attempt: attempts, message: msg });
+          const msg = e?.response?.data?.error || e?.response?.data || e?.message || 'image_generate_failed';
+          errors.push({ step: 'image', attempt: attempts, message: String(msg) });
           if (debug) console.warn('[smartCampaignEngine] image gen fail:', msg);
           await sleep(250);
         }
@@ -523,8 +536,8 @@ const generator = {
           out.push(c);
           made += 1;
         } catch (e) {
-          const msg = e?.response?.data?.error || e?.message || 'video_generate_failed';
-          errors.push({ step: 'video', attempt: attempts, message: msg });
+          const msg = e?.response?.data?.error || e?.response?.data || e?.message || 'video_generate_failed';
+          errors.push({ step: 'video', attempt: attempts, message: String(msg) });
           if (debug) console.warn('[smartCampaignEngine] video gen fail:', msg);
           await sleep(500);
         }
@@ -534,6 +547,7 @@ const generator = {
       }
     }
 
+    // Always surface a useful log line so you can see whether generation happened
     if (debug) {
       const imgs = out.filter(x => x.kind === 'image').length;
       const vids = out.filter(x => x.kind === 'video').length;
@@ -545,9 +559,13 @@ const generator = {
       if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
     }
 
-    // attach errors for callers (in-process)
-    out._errors = errors;
+    // Keep return type backward compatible (array), but expose errors through console + attach for internal use
+    out._errors = errors; // useful to callers in-process
     return out;
+  },
+
+  async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both', debug = false }) {
+    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 2 }, debug });
   }
 };
 
@@ -742,12 +760,14 @@ const deployer = {
       pausedAdsByAdset[adsetId] = [];
       variantMapByAdset[adsetId] = {};
 
+      // Always pause losers if present (safe)
       const losers = losersByAdset?.[adsetId] || [];
       if (losers.length && userToken) {
         await pauseAds({ adIds: losers, userToken });
         pausedAdsByAdset[adsetId].push(...losers);
       }
 
+      // If dryRun, simulate "created" IDs so your tests can prove the engine produced the right # of variants
       if (dryRun) {
         let n = 0;
         for (const c of creatives || []) {
@@ -766,6 +786,7 @@ const deployer = {
         continue;
       }
 
+      // LIVE deploy (but NO_SPEND=1 will keep ads PAUSED)
       const maxNew = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
       let created = 0;
 
