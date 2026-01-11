@@ -18,7 +18,7 @@ async function ensureSmartTables() {
   db.data.creative_history = db.data.creative_history || [];
   db.data.campaign_creatives = db.data.campaign_creatives || [];
 
-  // async job tracking
+  // NEW: async job tracking (persisted)
   db.data.smart_run_jobs = db.data.smart_run_jobs || [];
 
   await db.write();
@@ -82,7 +82,7 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
-// persist seed inputs (Typeform)
+// persist seed inputs (Typeform) so scheduler can always regenerate correctly
 function mergeSeedIntoCfg(cfg, incoming = {}) {
   if (!cfg) return;
   const hasObj = (o) => o && typeof o === 'object' && Object.keys(o).length > 0;
@@ -98,14 +98,18 @@ function mergeSeedIntoCfg(cfg, incoming = {}) {
   }
 }
 
+// Count creatives even in dryRun so you can verify 2 images / 2 videos logic
 function countCreatives(creatives) {
   const counts = { images: 0, videos: 0 };
+
   if (!creatives) return counts;
 
+  // common shape: { images:[], videos:[] }
   if (typeof creatives === 'object' && !Array.isArray(creatives)) {
     if (Array.isArray(creatives.images)) counts.images += creatives.images.length;
     if (Array.isArray(creatives.videos)) counts.videos += creatives.videos.length;
 
+    // sometimes variants live under "variants"
     if (Array.isArray(creatives.variants)) {
       for (const v of creatives.variants) {
         const kind = (v?.kind || v?.type || '').toLowerCase();
@@ -117,6 +121,7 @@ function countCreatives(creatives) {
     return counts;
   }
 
+  // array shape: [{kind:'image'|'video'}]
   if (Array.isArray(creatives)) {
     for (const v of creatives) {
       const kind = (v?.kind || v?.type || '').toLowerCase();
@@ -142,7 +147,7 @@ async function createJobRecord({ runId, campaignId, accountId, payload }) {
     id: runId,
     campaignId,
     accountId,
-    state: 'queued',
+    state: 'queued', // queued | running | done | error
     createdAt: nowIso(),
     startedAt: null,
     finishedAt: null,
@@ -175,7 +180,7 @@ async function getJob(runId) {
   return (db.data.smart_run_jobs || []).find(j => j.id === runId) || null;
 }
 
-// concurrency gate
+// simple concurrency gate so Render doesn’t melt
 let inFlight = 0;
 const MAX_IN_FLIGHT = Number(process.env.SMART_RUN_CONCURRENCY || 1);
 
@@ -191,12 +196,29 @@ async function withConcurrency(fn) {
   }
 }
 
+// hard timeout so jobs never stay "running" forever
+function withTimeout(promise, ms, label = 'timeout') {
+  let t = null;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => {
+      const err = new Error(label);
+      err.status = 504;
+      rej(err);
+    }, ms);
+  });
+  return Promise.race([
+    promise.finally(() => { if (t) clearTimeout(t); }),
+    timeout
+  ]);
+}
+
 /* ----------------------- TEST MOCK ENDPOINTS ----------------------- */
 router.post('/mock-insights', async (req, res) => {
   const { adset = {}, ad = {} } = req.body || {};
   testing.setMockInsights({ adset, ad });
   res.json({ ok: true, counts: { adset: Object.keys(adset).length, ad: Object.keys(ad).length } });
 });
+
 router.post('/mock-insights/clear', async (_req, res) => {
   testing.clearMockInsights();
   res.json({ ok: true });
@@ -281,19 +303,6 @@ router.post('/enable', async (req, res) => {
 });
 
 /* ------------------------ INTERNAL RUN LOGIC ------------------------ */
-
-function buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors }) {
-  const err = new Error('generation_returned_zero_assets');
-  err.status = 502;
-  err.detail = {
-    error: 'generation_returned_zero_assets',
-    expectedPerType,
-    generatedCounts,
-    generatorErrors: Array.isArray(generatorErrors) ? generatorErrors.slice(-10) : []
-  };
-  return err;
-}
-
 async function runSmartOnceInternal(reqBody) {
   await ensureSmartTables();
 
@@ -314,9 +323,12 @@ async function runSmartOnceInternal(reqBody) {
     overrideCountPerType = null, forceTwoPerType = null,
     championPct: championPctRaw = 0.70,
 
+    // IMPORTANT: default dryRun is true for safety
     dryRun: dryRunRaw = true,
     debug: debugRaw = false
   } = reqBody;
+
+  const debug = !!debugRaw;
 
   if (!accountId || !campaignId) {
     const err = new Error('accountId and campaignId are required');
@@ -324,8 +336,8 @@ async function runSmartOnceInternal(reqBody) {
     throw err;
   }
 
+  // Hard safety: if NO_SPEND=1, ALWAYS dryRun
   const dryRun = (process.env.NO_SPEND === '1') ? true : !!dryRunRaw;
-  const debug = !!debugRaw;
 
   await db.read();
   let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
@@ -455,7 +467,7 @@ async function runSmartOnceInternal(reqBody) {
     return { success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan };
   }
 
-  // fallback to stored seed
+  // fallback to stored seed if caller did not send form/answers/url
   const seed = cfg.seed || {};
   const useForm = (form && typeof form === 'object' && Object.keys(form).length) ? form : (seed.form || {});
   const useAnswers = (answers && typeof answers === 'object' && Object.keys(answers).length) ? answers : (seed.answers || {});
@@ -473,17 +485,23 @@ async function runSmartOnceInternal(reqBody) {
 
   const generatedCounts = countCreatives(creatives);
 
-  const expectedPerType = { images: Number(variantPlan.images || 0), videos: Number(variantPlan.videos || 0) };
-  const generatorErrors = creatives?._errors || [];
+  const wantImages = variantPlan.images || 0;
+  const wantVideos = variantPlan.videos || 0;
 
-  if (expectedPerType.images > 0 && generatedCounts.images === 0) {
-    throw buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors });
-  }
-  if (expectedPerType.videos > 0 && generatedCounts.videos === 0) {
-    throw buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors });
+  // HARD FAIL: expected > 0 but got 0
+  if ((wantImages > 0 && generatedCounts.images === 0) || (wantVideos > 0 && generatedCounts.videos === 0)) {
+    const err = new Error('generation_returned_zero_assets');
+    err.status = 502;
+    err.detail = {
+      error: 'generation_returned_zero_assets',
+      expectedPerType: { images: wantImages, videos: wantVideos },
+      generatedCounts,
+      generatorErrors: Array.isArray(creatives?._errors) ? creatives._errors.slice(-50) : []
+    };
+    throw err;
   }
 
-  // Determine target ad sets
+  // Determine target ad sets from analysis (fallback: fetch)
   let adsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
   if (!adsetIds.length) {
     try {
@@ -500,6 +518,7 @@ async function runSmartOnceInternal(reqBody) {
     throw err;
   }
 
+  // --------- REUSE GUARD + 70/30 BUDGET SPLIT ON PLATEAU ----------
   let adsetIdsForNewCreatives = adsetIds;
   let budgetSplit = null;
 
@@ -564,6 +583,7 @@ async function runSmartOnceInternal(reqBody) {
   const losersByAdset = (plateauDetected && !shouldForceInitial) ? {} : analysis.losersByAdset;
   const winnersByAdset = shouldForceInitial ? {} : analysis.winnersByAdset;
 
+  // Single deploy call (still runs in dryRun, but should NOT spend)
   const deployed = await deployer.deploy({
     accountId,
     pageId: cfg.pageId,
@@ -621,13 +641,18 @@ async function runSmartOnceInternal(reqBody) {
     run,
     analysis,
     variantPlan,
-    expectedPerType,
+    expectedPerType: { images: wantImages, videos: wantVideos },
     generatedCounts,
     createdCountsPerAdset: createdCounts
   };
 }
 
 /* ---------------------------- RUN ONCE ---------------------------- */
+/**
+ * IMPORTANT:
+ * - For real users (video/both), you MUST run async to avoid Render 504.
+ * - Default: async=true unless simulate=true.
+ */
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -641,18 +666,32 @@ router.post('/run-once', async (req, res) => {
     }
 
     if (!wantAsync) {
+      // synchronous (SIM, or you explicitly set async:false)
       const out = await withConcurrency(() => runSmartOnceInternal(req.body));
       return res.json(out);
     }
 
+    // Async: create job record and return immediately (prevents 504)
     const runId = newRunId();
     await createJobRecord({ runId, campaignId, accountId, payload: req.body });
 
+    // fire in background
     setImmediate(async () => {
-      await updateJob(runId, { state: 'running', startedAt: nowIso() });
-
       try {
-        const result = await withConcurrency(() => runSmartOnceInternal(req.body));
+        const MAX_JOB_MS = Number(process.env.SMART_RUN_MAX_MS || 12 * 60 * 1000); // 12 min default
+
+        const result = await withConcurrency(async () => {
+          // IMPORTANT: mark running only when actually executing (after concurrency slot acquired)
+          await updateJob(runId, { state: 'running', startedAt: nowIso() });
+
+          // IMPORTANT: hard timeout so job never stays running forever
+          return await withTimeout(
+            runSmartOnceInternal(req.body),
+            MAX_JOB_MS,
+            'smart_run_job_timeout'
+          );
+        });
+
         await updateJob(runId, { state: 'done', finishedAt: nowIso(), result });
       } catch (e) {
         const status = e?.status || e?.response?.status || 500;
