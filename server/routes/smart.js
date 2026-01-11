@@ -18,7 +18,7 @@ async function ensureSmartTables() {
   db.data.creative_history = db.data.creative_history || [];
   db.data.campaign_creatives = db.data.campaign_creatives || [];
 
-  // NEW: async job tracking (persisted)
+  // async job tracking
   db.data.smart_run_jobs = db.data.smart_run_jobs || [];
 
   await db.write();
@@ -82,7 +82,7 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
-// persist seed inputs (Typeform) so scheduler can always regenerate correctly
+// persist seed inputs (Typeform)
 function mergeSeedIntoCfg(cfg, incoming = {}) {
   if (!cfg) return;
   const hasObj = (o) => o && typeof o === 'object' && Object.keys(o).length > 0;
@@ -98,18 +98,14 @@ function mergeSeedIntoCfg(cfg, incoming = {}) {
   }
 }
 
-// Count creatives even in dryRun so you can verify 2 images / 2 videos logic
 function countCreatives(creatives) {
   const counts = { images: 0, videos: 0 };
-
   if (!creatives) return counts;
 
-  // common shape: { images:[], videos:[] }
   if (typeof creatives === 'object' && !Array.isArray(creatives)) {
     if (Array.isArray(creatives.images)) counts.images += creatives.images.length;
     if (Array.isArray(creatives.videos)) counts.videos += creatives.videos.length;
 
-    // sometimes variants live under "variants"
     if (Array.isArray(creatives.variants)) {
       for (const v of creatives.variants) {
         const kind = (v?.kind || v?.type || '').toLowerCase();
@@ -121,7 +117,6 @@ function countCreatives(creatives) {
     return counts;
   }
 
-  // array shape: [{kind:'image'|'video'}]
   if (Array.isArray(creatives)) {
     for (const v of creatives) {
       const kind = (v?.kind || v?.type || '').toLowerCase();
@@ -147,7 +142,7 @@ async function createJobRecord({ runId, campaignId, accountId, payload }) {
     id: runId,
     campaignId,
     accountId,
-    state: 'queued', // queued | running | done | error
+    state: 'queued',
     createdAt: nowIso(),
     startedAt: null,
     finishedAt: null,
@@ -180,7 +175,7 @@ async function getJob(runId) {
   return (db.data.smart_run_jobs || []).find(j => j.id === runId) || null;
 }
 
-// simple concurrency gate so Render doesn’t melt
+// concurrency gate
 let inFlight = 0;
 const MAX_IN_FLIGHT = Number(process.env.SMART_RUN_CONCURRENCY || 1);
 
@@ -319,10 +314,7 @@ async function runSmartOnceInternal(reqBody) {
     overrideCountPerType = null, forceTwoPerType = null,
     championPct: championPctRaw = 0.70,
 
-    // IMPORTANT: default dryRun is true for safety
     dryRun: dryRunRaw = true,
-
-    // NEW: pass debug down to generator/deployer
     debug: debugRaw = false
   } = reqBody;
 
@@ -332,7 +324,6 @@ async function runSmartOnceInternal(reqBody) {
     throw err;
   }
 
-  // Hard safety: if NO_SPEND=1, ALWAYS dryRun
   const dryRun = (process.env.NO_SPEND === '1') ? true : !!dryRunRaw;
   const debug = !!debugRaw;
 
@@ -464,7 +455,7 @@ async function runSmartOnceInternal(reqBody) {
     return { success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan };
   }
 
-  // fallback to stored seed if caller did not send form/answers/url
+  // fallback to stored seed
   const seed = cfg.seed || {};
   const useForm = (form && typeof form === 'object' && Object.keys(form).length) ? form : (seed.form || {});
   const useAnswers = (answers && typeof answers === 'object' && Object.keys(answers).length) ? answers : (seed.answers || {});
@@ -482,7 +473,6 @@ async function runSmartOnceInternal(reqBody) {
 
   const generatedCounts = countCreatives(creatives);
 
-  // ✅ HARD FAIL: if expected > 0 but generated == 0 for that type
   const expectedPerType = { images: Number(variantPlan.images || 0), videos: Number(variantPlan.videos || 0) };
   const generatorErrors = creatives?._errors || [];
 
@@ -493,7 +483,7 @@ async function runSmartOnceInternal(reqBody) {
     throw buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors });
   }
 
-  // Determine target ad sets from analysis (fallback: fetch)
+  // Determine target ad sets
   let adsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
   if (!adsetIds.length) {
     try {
@@ -510,7 +500,6 @@ async function runSmartOnceInternal(reqBody) {
     throw err;
   }
 
-  // --------- REUSE GUARD + 70/30 BUDGET SPLIT ON PLATEAU ----------
   let adsetIdsForNewCreatives = adsetIds;
   let budgetSplit = null;
 
@@ -575,7 +564,6 @@ async function runSmartOnceInternal(reqBody) {
   const losersByAdset = (plateauDetected && !shouldForceInitial) ? {} : analysis.losersByAdset;
   const winnersByAdset = shouldForceInitial ? {} : analysis.winnersByAdset;
 
-  // Single deploy call (still runs in dryRun, but should NOT spend)
   const deployed = await deployer.deploy({
     accountId,
     pageId: cfg.pageId,
@@ -634,17 +622,12 @@ async function runSmartOnceInternal(reqBody) {
     analysis,
     variantPlan,
     expectedPerType,
-    generatedCounts, // <<< verify in dryRun
+    generatedCounts,
     createdCountsPerAdset: createdCounts
   };
 }
 
 /* ---------------------------- RUN ONCE ---------------------------- */
-/**
- * IMPORTANT:
- * - For real users (video/both), you MUST run async to avoid Render 504.
- * - Default: async=true unless simulate=true.
- */
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -658,16 +641,13 @@ router.post('/run-once', async (req, res) => {
     }
 
     if (!wantAsync) {
-      // synchronous (SIM, or you explicitly set async:false)
       const out = await withConcurrency(() => runSmartOnceInternal(req.body));
       return res.json(out);
     }
 
-    // Async: create job record and return immediately (prevents 504)
     const runId = newRunId();
     await createJobRecord({ runId, campaignId, accountId, payload: req.body });
 
-    // fire in background
     setImmediate(async () => {
       await updateJob(runId, { state: 'running', startedAt: nowIso() });
 
@@ -676,7 +656,6 @@ router.post('/run-once', async (req, res) => {
         await updateJob(runId, { state: 'done', finishedAt: nowIso(), result });
       } catch (e) {
         const status = e?.status || e?.response?.status || 500;
-        // ✅ include our structured err.detail if present
         const detail =
           e?.detail ||
           e?.response?.data?.error ||
@@ -713,7 +692,6 @@ router.get('/run-status/:runId', async (req, res) => {
     const job = await getJob(runId);
     if (!job) return res.status(404).json({ error: 'run_not_found' });
 
-    // return minimal + result when done
     const out = {
       id: job.id,
       campaignId: job.campaignId,

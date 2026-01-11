@@ -345,6 +345,7 @@ const analyzer = {
         const enoughVol =
           (recent.impressions || 0) >= policy.PLATEAU.MIN_IMPRESSIONS_RECENT &&
           (recent.spend || 0) >= policy.PLATEAU.MIN_SPEND_RECENT;
+
         const priorCpc = prior.cpc;
         const recentCpc = recent.cpc;
         let degraded = false;
@@ -375,6 +376,33 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
+
+// ✅ robustly extract image URL from multiple response shapes
+function extractImageUrlFromResponse(data, preferIndex = 0) {
+  if (!data) return '';
+
+  // legacy
+  if (typeof data.imageUrl === 'string' && data.imageUrl) return data.imageUrl;
+  if (typeof data.absoluteImageUrl === 'string' && data.absoluteImageUrl) return data.absoluteImageUrl;
+
+  // new shape: { ok:true, images:[{absoluteUrl:...}, ...] }
+  if (Array.isArray(data.images) && data.images.length > 0) {
+    const idx = Math.min(Math.max(0, preferIndex), data.images.length - 1);
+    const picked = data.images[idx] || data.images[0] || {};
+    return (
+      picked.absoluteUrl ||
+      picked.url ||
+      picked.imageUrl ||
+      ''
+    );
+  }
+
+  // sometimes: { url: "..." }
+  if (typeof data.url === 'string' && data.url) return data.url;
+
+  return '';
+}
+
 const generator = {
   async generateVariants({
     form = {},
@@ -408,31 +436,73 @@ const generator = {
 
     const out = [];
 
-    const genImageOnce = async (i) => {
-      const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
+    // Prefetch pool for images (your endpoint often returns 2 images at once)
+    let prefetchedImageUrls = [];
 
+    const fetchMoreImages = async () => {
+      const regTok = `${Date.now()}_img_pool_${Math.random().toString(36).slice(2, 8)}`;
       const imgResp = await axios.post(`${api}/generate-image-from-prompt`, {
         url: seedUrl,
         industry: seedIndustry,
         answers,
         regenerateToken: regTok
-      }, { timeout: 180000 });
+      }, { timeout: 240000 });
 
-      const pickedUrl = imgResp.data?.imageUrl;
+      const data = imgResp?.data || {};
+      if (Array.isArray(data.images) && data.images.length) {
+        const urls = data.images
+          .map(x => x?.absoluteUrl || x?.url || x?.imageUrl)
+          .filter(Boolean);
+        prefetchedImageUrls.push(...urls);
+      } else {
+        const single = extractImageUrlFromResponse(data, 0);
+        if (single) prefetchedImageUrls.push(single);
+      }
+
+      if (debug) {
+        console.warn('[smartCampaignEngine] image pool fetched', safeJson({
+          got: prefetchedImageUrls.length,
+          sample: prefetchedImageUrls.slice(0, 2)
+        }));
+      }
+    };
+
+    const genImageOnce = async (i) => {
+      const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
+
+      // ensure we have a url to use
+      if (prefetchedImageUrls.length < i) {
+        await fetchMoreImages();
+      }
+
+      const pickedUrl = prefetchedImageUrls[i - 1] || prefetchedImageUrls[0] || '';
       if (!pickedUrl) throw new Error('image_endpoint_returned_no_imageUrl');
 
-      const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
+      // Decide if we need overlay
+      const alreadyGenerated =
+        typeof pickedUrl === 'string' &&
+        (pickedUrl.includes('/generated/') || pickedUrl.includes('/api/media/'));
+
       let imageUrl = pickedUrl;
 
       if (!alreadyGenerated) {
-        const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-          imageUrl: pickedUrl,
-          answers,
-          url: seedUrl,
-          regenerateToken: regTok
-        }, { timeout: 240000 });
+        try {
+          const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
+            imageUrl: pickedUrl,
+            answers,
+            url: seedUrl,
+            regenerateToken: regTok
+          }, { timeout: 300000 });
 
-        imageUrl = overlayResp.data?.imageUrl || pickedUrl;
+          const overlayData = overlayResp?.data || {};
+          const overlayPicked = extractImageUrlFromResponse(overlayData, 0);
+          imageUrl = overlayPicked || overlayData?.imageUrl || pickedUrl;
+        } catch (e) {
+          // overlay failed — still allow base image so we don't return 0 assets
+          const msg = e?.response?.data?.error || e?.message || 'overlay_failed';
+          errors.push({ step: 'overlay', attempt: i, message: msg });
+          imageUrl = pickedUrl;
+        }
       }
 
       imageUrl = absolutePublicUrl(imageUrl);
@@ -515,7 +585,6 @@ const generator = {
       }
     }
 
-    // Always surface a useful log line so you can see whether generation happened
     if (debug) {
       const imgs = out.filter(x => x.kind === 'image').length;
       const vids = out.filter(x => x.kind === 'video').length;
@@ -523,8 +592,8 @@ const generator = {
       if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
     }
 
-    // Keep return type backward compatible (array), but expose errors through console + attach for internal use
-    out._errors = errors; // note: not serialized in JSON if you stringify array, but useful to callers in-process
+    // Attach errors for in-process callers
+    out._errors = errors;
     return out;
   },
 
@@ -731,7 +800,7 @@ const deployer = {
         pausedAdsByAdset[adsetId].push(...losers);
       }
 
-      // If dryRun, simulate "created" IDs so your tests can prove the engine produced the right # of variants
+      // If dryRun, simulate "created" IDs so tests prove the right # of variants
       if (dryRun) {
         let n = 0;
         for (const c of creatives || []) {
