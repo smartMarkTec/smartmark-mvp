@@ -183,6 +183,7 @@ async function getJob(runId) {
 // simple concurrency gate so Render doesn’t melt
 let inFlight = 0;
 const MAX_IN_FLIGHT = Number(process.env.SMART_RUN_CONCURRENCY || 1);
+
 async function withConcurrency(fn) {
   while (inFlight >= MAX_IN_FLIGHT) {
     await new Promise(r => setTimeout(r, 250));
@@ -285,6 +286,19 @@ router.post('/enable', async (req, res) => {
 });
 
 /* ------------------------ INTERNAL RUN LOGIC ------------------------ */
+
+function buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors }) {
+  const err = new Error('generation_returned_zero_assets');
+  err.status = 502;
+  err.detail = {
+    error: 'generation_returned_zero_assets',
+    expectedPerType,
+    generatedCounts,
+    generatorErrors: Array.isArray(generatorErrors) ? generatorErrors.slice(-10) : []
+  };
+  return err;
+}
+
 async function runSmartOnceInternal(reqBody) {
   await ensureSmartTables();
 
@@ -306,7 +320,10 @@ async function runSmartOnceInternal(reqBody) {
     championPct: championPctRaw = 0.70,
 
     // IMPORTANT: default dryRun is true for safety
-    dryRun: dryRunRaw = true
+    dryRun: dryRunRaw = true,
+
+    // NEW: pass debug down to generator/deployer
+    debug: debugRaw = false
   } = reqBody;
 
   if (!accountId || !campaignId) {
@@ -317,6 +334,7 @@ async function runSmartOnceInternal(reqBody) {
 
   // Hard safety: if NO_SPEND=1, ALWAYS dryRun
   const dryRun = (process.env.NO_SPEND === '1') ? true : !!dryRunRaw;
+  const debug = !!debugRaw;
 
   await db.read();
   let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
@@ -458,10 +476,22 @@ async function runSmartOnceInternal(reqBody) {
     answers: useAnswers,
     url: useUrl,
     mediaSelection: useMedia,
-    variantPlan
+    variantPlan,
+    debug
   });
 
   const generatedCounts = countCreatives(creatives);
+
+  // ✅ HARD FAIL: if expected > 0 but generated == 0 for that type
+  const expectedPerType = { images: Number(variantPlan.images || 0), videos: Number(variantPlan.videos || 0) };
+  const generatorErrors = creatives?._errors || [];
+
+  if (expectedPerType.images > 0 && generatedCounts.images === 0) {
+    throw buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors });
+  }
+  if (expectedPerType.videos > 0 && generatedCounts.videos === 0) {
+    throw buildGenerationZeroError({ expectedPerType, generatedCounts, generatorErrors });
+  }
 
   // Determine target ad sets from analysis (fallback: fetch)
   let adsetIds = Array.isArray(analysis.adsetIds) ? analysis.adsetIds.slice() : [];
@@ -555,7 +585,8 @@ async function runSmartOnceInternal(reqBody) {
     losersByAdset,
     creatives,
     userToken,
-    dryRun: !!dryRun
+    dryRun: !!dryRun,
+    debug
   });
 
   await db.read();
@@ -586,9 +617,6 @@ async function runSmartOnceInternal(reqBody) {
   if (cfgRef2) { cfgRef2.lastRunAt = nowIso(); cfgRef2.updatedAt = nowIso(); }
   await db.write();
 
-  const wantImages = variantPlan.images || 0;
-  const wantVideos = variantPlan.videos || 0;
-
   const createdCounts = Object.fromEntries(
     Object.entries(deployed.variantMapByAdset || {}).map(([adsetId, vmap]) => {
       const counts = { images: 0, videos: 0 };
@@ -605,8 +633,8 @@ async function runSmartOnceInternal(reqBody) {
     run,
     analysis,
     variantPlan,
-    expectedPerType: { images: wantImages, videos: wantVideos },
-    generatedCounts, // <<< this is what you verify in dryRun
+    expectedPerType,
+    generatedCounts, // <<< verify in dryRun
     createdCountsPerAdset: createdCounts
   };
 }
@@ -648,7 +676,14 @@ router.post('/run-once', async (req, res) => {
         await updateJob(runId, { state: 'done', finishedAt: nowIso(), result });
       } catch (e) {
         const status = e?.status || e?.response?.status || 500;
-        const detail = e?.response?.data?.error || e?.response?.data || e?.message || 'run_failed';
+        // ✅ include our structured err.detail if present
+        const detail =
+          e?.detail ||
+          e?.response?.data?.error ||
+          e?.response?.data ||
+          e?.message ||
+          'run_failed';
+
         await updateJob(runId, {
           state: 'error',
           finishedAt: nowIso(),
