@@ -3,12 +3,10 @@
 
 const axios = require('axios');
 const FormData = require('form-data');
-const path = require('path');
 
 // ===== runtime test toggles (no spend / dry run) =====
 const NO_SPEND = process.env.NO_SPEND === '1';
 const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1';
-const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
 
 // =========================
 // Shared helpers
@@ -20,9 +18,8 @@ function absolutePublicUrl(relativePath) {
     'https://smartmark-mvp.onrender.com';
   if (!relativePath) return '';
   if (relativePath.startsWith('http')) return relativePath;
-  // normalize leading slash
-  const rel = relativePath.startsWith('/') ? relativePath : `/${relativePath}`;
-  return `${base}${rel}`;
+  if (relativePath.startsWith('/')) return `${base}${relativePath}`;
+  return `${base}/${relativePath}`;
 }
 function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
@@ -355,6 +352,43 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
+function pickVideoFromApiResponse(data, variantFallback = 1) {
+  const d = data || {};
+  const variant = Number(d.variant || variantFallback || 1);
+
+  // Most common
+  const videoUrl =
+    d.videoUrl ||
+    d.relativeUrl ||
+    d.video?.relativeUrl ||
+    d.video?.url ||
+    (variant === 1 ? (d.videoUrlA || d.videoA || d.a) : (d.videoUrlB || d.videoB || d.b)) ||
+    '';
+
+  const abs =
+    d.absoluteVideoUrl ||
+    d.absoluteUrl ||
+    d.video?.absoluteUrl ||
+    (variant === 1 ? (d.absoluteVideoUrlA || d.absoluteA) : (d.absoluteVideoUrlB || d.absoluteB)) ||
+    '';
+
+  const fbVideoId =
+    d.fbVideoId ||
+    d.video?.fbVideoId ||
+    (variant === 1 ? d.fbVideoIdA : d.fbVideoIdB) ||
+    null;
+
+  const resolvedRelative = videoUrl || '';
+  const resolvedAbsolute = abs || (resolvedRelative ? absolutePublicUrl(resolvedRelative) : '');
+
+  return {
+    relativeUrl: resolvedRelative,
+    absoluteUrl: resolvedAbsolute,
+    fbVideoId,
+    variant
+  };
+}
+
 const generator = {
   async generateVariants({ form = {}, answers = {}, url = '', mediaSelection = 'both', variantPlan = { images: 2, videos: 2 } }) {
     const api = baseUrl() + '/api';
@@ -383,7 +417,7 @@ const generator = {
             regenerateToken: regTok
           }, { timeout: 45000 });
 
-          const pickedUrl = imgResp.data?.imageUrl;
+          const pickedUrl = imgResp.data?.imageUrl || imgResp.data?.url || imgResp.data?.absoluteUrl;
           if (!pickedUrl) continue;
 
           const alreadyGenerated = typeof pickedUrl === 'string' && pickedUrl.includes('/generated/');
@@ -397,7 +431,7 @@ const generator = {
                 url: url || form?.url || '',
                 regenerateToken: regTok
               }, { timeout: 90000 });
-              imageUrl = overlayResp.data?.imageUrl || pickedUrl;
+              imageUrl = overlayResp.data?.imageUrl || overlayResp.data?.url || imageUrl;
             } catch {}
           }
 
@@ -411,37 +445,20 @@ const generator = {
       for (let i = 0; i < variantPlan.videos; i++) {
         try {
           const regTok = `${Date.now()}_vid_${i}_${Math.random().toString(36).slice(2, 8)}`;
-          const vidResp = await axios.post(`${api}/generate-video-ad`, {
+          const resp = await axios.post(`${api}/generate-video-ad`, {
             url: url || form?.url || '',
             answers: { ...answers, cta: answers?.cta || 'Learn More!' },
             regenerateToken: regTok,
             variant: (i % 2) + 1
-          }, { timeout: 180000 });
+          }, { timeout: 240000 });
 
-          // Accept lots of possible response shapes, including relative URLs
-          const rawRel =
-            vidResp.data?.videoUrl ||
-            vidResp.data?.relativeUrl ||
-            vidResp.data?.url ||
-            vidResp.data?.path ||
-            '';
-          const rawAbs =
-            vidResp.data?.absoluteVideoUrl ||
-            vidResp.data?.absoluteUrl ||
-            '';
-
-          const relativeUrl = rawRel || '';
-          const absoluteUrl = rawAbs || absolutePublicUrl(relativeUrl);
+          const video = pickVideoFromApiResponse(resp.data, (i % 2) + 1);
+          if (!video.absoluteUrl && !video.relativeUrl && !video.fbVideoId) continue;
 
           out.push({
             kind: 'video',
             variantId: `vid_${i + 1}`,
-            video: {
-              relativeUrl,
-              absoluteUrl,
-              fbVideoId: vidResp.data?.fbVideoId || null,
-              variant: vidResp.data?.variant || ((i % 2) + 1)
-            },
+            video,
             adCopy: copy
           });
         } catch {}
@@ -472,22 +489,16 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
 }
 
 async function ensureVideoId({ accountId, userToken, creativeVideo }) {
-  if (!creativeVideo) throw new Error('No video available to upload');
+  if (creativeVideo?.fbVideoId) return creativeVideo.fbVideoId;
 
-  if (creativeVideo.fbVideoId) return creativeVideo.fbVideoId;
+  const fileUrl =
+    creativeVideo?.absoluteUrl ||
+    (creativeVideo?.relativeUrl ? absolutePublicUrl(creativeVideo.relativeUrl) : '');
 
-  // Accept relativeUrl/videoUrl/absoluteUrl and normalize to absolute
-  const abs =
-    creativeVideo.absoluteUrl ||
-    creativeVideo.absoluteVideoUrl ||
-    (creativeVideo.relativeUrl ? absolutePublicUrl(creativeVideo.relativeUrl) : '') ||
-    (creativeVideo.videoUrl ? absolutePublicUrl(creativeVideo.videoUrl) : '') ||
-    '';
-
-  if (!abs) throw new Error('No video available to upload');
+  if (!fileUrl) throw new Error('No video available to upload');
 
   const form = new FormData();
-  form.append('file_url', abs);
+  form.append('file_url', fileUrl);
   form.append('name', 'SmartMark Generated Video');
   form.append('description', 'Generated by SmartMark');
 
@@ -507,7 +518,7 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
   return vid;
 }
 
-async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, userToken, link, dryRun = false }) {
+async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, userToken, link }) {
   const creative = await fbPostV(FB_API_VER, `act_${accountId}/adcreatives`, {
     name: `SmartMark Image ${new Date().toISOString()}`,
     object_story_spec: {
@@ -523,7 +534,7 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
     name: `SmartMark Image Ad ${new Date().toISOString()}`,
     adset_id: adsetId,
     creative: { creative_id: creativeId },
-    status: (NO_SPEND || dryRun) ? 'PAUSED' : 'ACTIVE'
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
   }, { access_token: userToken });
 
   const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
@@ -531,10 +542,13 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
   return adId;
 }
 
-async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imageHash, userToken, link, dryRun = false }) {
+async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
   let image_url = null;
   try {
-    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
+    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, {
+      access_token: userToken,
+      fields: 'uri,is_preferred'
+    });
     image_url = (thumbs.data || [])[0]?.uri || null;
   } catch {}
 
@@ -558,7 +572,7 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, imag
     name: `SmartMark Video Ad ${new Date().toISOString()}`,
     adset_id: adsetId,
     creative: { creative_id: creativeId },
-    status: (NO_SPEND || dryRun) ? 'PAUSED' : 'ACTIVE'
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
   }, { access_token: userToken });
 
   const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
@@ -623,7 +637,7 @@ async function ensureChallengerAdsetClone({
 }
 
 const deployer = {
-  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken, dryRun = false }) {
+  async deploy({ accountId, pageId, campaignLink, adsetIds, winnersByAdset, losersByAdset, creatives, userToken }) {
     const createdAdsByAdset = {};
     const pausedAdsByAdset = {};
     const variantMapByAdset = {};
@@ -634,14 +648,16 @@ const deployer = {
       pausedAdsByAdset[adsetId] = [];
       variantMapByAdset[adsetId] = {};
 
-      const maxNew = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
-      let created = 0;
+      // IMPORTANT: treat MAX_NEW_ADS_PER_RUN_PER_ADSET as "per type" to allow 2 images + 2 videos
+      const maxPerType = policy.LIMITS.MAX_NEW_ADS_PER_RUN_PER_ADSET;
+      let createdImages = 0;
+      let createdVideos = 0;
 
       for (const c of creatives) {
-        if (created >= maxNew) break;
-
         try {
           if (c.kind === 'image' && c.imageUrl) {
+            if (createdImages >= maxPerType) continue;
+
             const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer' });
             const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
 
@@ -654,19 +670,35 @@ const deployer = {
             }
 
             const adId = await createImageAd({
-              pageId, accountId, adsetId, adCopy: c.adCopy, imageHash: hash, userToken, link: campaignLink, dryRun
+              pageId,
+              accountId,
+              adsetId,
+              adCopy: c.adCopy,
+              imageHash: hash,
+              userToken,
+              link: campaignLink
             });
+
             createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
-            created += 1;
+            variantMapByAdset[adsetId][c.variantId || `img_${createdImages + 1}`] = adId;
+            createdImages += 1;
           } else if (c.kind === 'video' && c.video) {
+            if (createdVideos >= maxPerType) continue;
+
             const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
             const adId = await createVideoAd({
-              pageId, accountId, adsetId, adCopy: c.adCopy, videoId, imageHash: null, userToken, link: campaignLink, dryRun
+              pageId,
+              accountId,
+              adsetId,
+              adCopy: c.adCopy,
+              videoId,
+              userToken,
+              link: campaignLink
             });
+
             createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
-            created += 1;
+            variantMapByAdset[adsetId][c.variantId || `vid_${createdVideos + 1}`] = adId;
+            createdVideos += 1;
           }
         } catch (e) {
           console.warn('Create ad failed:', e?.response?.data?.error?.message || e.message);
