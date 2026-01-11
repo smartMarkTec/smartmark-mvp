@@ -12,40 +12,19 @@ const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 // =========================
 // Shared helpers
 // =========================
-function normalizePublicBase(raw) {
-  if (!raw) return '';
-  let s = String(raw).trim();
-  if (!s) return '';
-  // Handle values like "smartmark-mvp.onrender.com" (no scheme)
-  if (!/^https?:\/\//i.test(s)) {
-    // Handle protocol-relative
-    if (s.startsWith('//')) s = `https:${s}`;
-    else s = `https://${s}`;
-  }
-  return s.replace(/\/+$/, '');
-}
-
 function absolutePublicUrl(relativePath) {
   const base =
-    normalizePublicBase(process.env.PUBLIC_BASE_URL) ||
-    normalizePublicBase(process.env.RENDER_EXTERNAL_URL) ||
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
     'https://smartmark-mvp.onrender.com';
-
   if (!relativePath) return '';
-  const p = String(relativePath).trim();
-  if (!p) return '';
-
-  // Already absolute
-  if (/^https?:\/\//i.test(p)) return p;
-
-  // Ensure leading slash
-  const path = p.startsWith('/') ? p : `/${p}`;
-  return `${base}${path}`;
+  const s = String(relativePath);
+  return s.startsWith('http') ? s : `${base}${s.startsWith('/') ? '' : '/'}${s}`;
 }
 
 function baseUrl() {
   const fromEnv = process.env.INTERNAL_BASE_URL;
-  if (fromEnv) return String(fromEnv).replace(/\/+$/, '');
+  if (fromEnv) return fromEnv.replace(/\/+$/, '');
   const port = process.env.PORT || 10000;
   return `http://localhost:${port}`; // safer than 127.0.0.1 in some hosts
 }
@@ -248,6 +227,7 @@ function rankAds(listByAdId, kpi = 'cpc') {
     if (Math.abs(actr - bctr) > EPS) return bctr - actr;
     return String(a.adId).localeCompare(String(b.adId));
   };
+
   const byCtrThenCpc = (a, b) => {
     const actr = a.ctr == null ? Number.NEGATIVE_INFINITY : a.ctr;
     const bctr = b.ctr == null ? Number.NEGATIVE_INFINITY : b.ctr;
@@ -316,6 +296,7 @@ const analyzer = {
 
       const ids = (ads.data || []).map(a => a.id);
       adMapByAdset[adsetId] = ids;
+
       for (const a of (ads.data || [])) {
         adMeta[a.id] = { created_time: a.created_time || null };
       }
@@ -397,32 +378,80 @@ const analyzer = {
 
 // =========================
 /* GENERATOR */
-function pickImageUrlFromResponse(data) {
-  if (!data) return '';
 
-  // Preferred (older shape)
-  if (data.imageUrl && typeof data.imageUrl === 'string') return data.imageUrl;
-
-  // Common new shape from your curl: { ok:true, images:[{absoluteUrl:"..."}] }
-  if (Array.isArray(data.images) && data.images.length > 0) {
-    const first = data.images[0] || {};
-    if (typeof first.absoluteUrl === 'string') return first.absoluteUrl;
-    if (typeof first.url === 'string') return first.url;
-    if (typeof first.imageUrl === 'string') return first.imageUrl;
+// Robust extraction for your real endpoint shapes.
+// - image endpoint: { imageUrl } OR { images:[{absoluteUrl|url|imageUrl}] } OR { absoluteUrl }
+// - video endpoint: { absoluteVideoUrl } OR { videoUrl } OR { relativeUrl } OR { videos:[{absoluteUrl|relativeUrl|url}] } OR { videoUrls:[...] }
+function pickFromObj(o, keys) {
+  if (!o || typeof o !== 'object') return '';
+  for (const k of keys) {
+    const v = o?.[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
   }
+  return '';
+}
 
-  // Alternative shapes
-  if (typeof data.absoluteUrl === 'string') return data.absoluteUrl;
-  if (Array.isArray(data.imageUrls) && data.imageUrls.length > 0) return String(data.imageUrls[0]);
+function pickImageUrl(data, index1Based = 1) {
+  // direct fields
+  let u =
+    pickFromObj(data, ['imageUrl', 'absoluteUrl', 'url']) ||
+    pickFromObj(data?.image, ['imageUrl', 'absoluteUrl', 'url']);
+  if (u) return u;
+
+  const arr =
+    (Array.isArray(data?.images) && data.images) ||
+    (Array.isArray(data?.imageUrls) && data.imageUrls) ||
+    (Array.isArray(data?.urls) && data.urls) ||
+    null;
+
+  if (arr && arr.length) {
+    const idx = Math.max(0, Math.min(arr.length - 1, Number(index1Based || 1) - 1));
+    const item = arr[idx];
+    if (typeof item === 'string') return item;
+    return pickFromObj(item, ['imageUrl', 'absoluteUrl', 'url']);
+  }
 
   return '';
 }
 
-function ensureAbsUrl(maybeRelOrAbs) {
-  const s = String(maybeRelOrAbs || '').trim();
-  if (!s) return '';
-  if (/^https?:\/\//i.test(s)) return s;
-  return absolutePublicUrl(s);
+function pickVideoUrl(data, variantNumber = 1) {
+  // direct fields
+  let u =
+    pickFromObj(data, ['absoluteVideoUrl', 'videoUrl', 'absoluteUrl', 'relativeUrl', 'url']) ||
+    pickFromObj(data?.video, ['absoluteVideoUrl', 'videoUrl', 'absoluteUrl', 'relativeUrl', 'url']);
+
+  // Sometimes endpoint returns A/B in an array or multiple fields
+  const arr =
+    (Array.isArray(data?.videoUrls) && data.videoUrls) ||
+    (Array.isArray(data?.videos) && data.videos) ||
+    (Array.isArray(data?.media) && data.media) ||
+    null;
+
+  if (!u && arr && arr.length) {
+    const idx = Math.max(0, Math.min(arr.length - 1, Number(variantNumber || 1) - 1));
+    const item = arr[idx];
+    if (typeof item === 'string') u = item;
+    else u = pickFromObj(item, ['absoluteVideoUrl', 'videoUrl', 'absoluteUrl', 'relativeUrl', 'url']);
+  }
+
+  // Fall back to explicitly named A/B fields if present
+  if (!u) {
+    const a = pickFromObj(data, ['videoUrlA', 'a', 'urlA', 'relativeUrlA', 'absoluteUrlA']);
+    const b = pickFromObj(data, ['videoUrlB', 'b', 'urlB', 'relativeUrlB', 'absoluteUrlB']);
+    if (a && b) u = (Number(variantNumber) === 2 ? b : a);
+    else u = a || b || '';
+  }
+
+  return u || '';
+}
+
+function normalizeToPublic(u) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (s.startsWith('http')) return s;
+  // normalize common relative forms
+  if (s.startsWith('/')) return absolutePublicUrl(s);
+  return absolutePublicUrl(`/${s}`);
 }
 
 const generator = {
@@ -434,7 +463,9 @@ const generator = {
     variantPlan = { images: 2, videos: 2 },
     debug = false
   }) {
-    const api = baseUrl() + '/api';
+    // IMPORTANT: call our own API using PUBLIC URL so pathing is identical to your curl tests
+    // (prevents mysterious internal "Not found" behavior during Render restarts / routing edge-cases)
+    const api = absolutePublicUrl('/api');
 
     const wantsImage = Number(variantPlan.images || 0) > 0;
     const wantsVideo = Number(variantPlan.videos || 0) > 0;
@@ -443,6 +474,10 @@ const generator = {
     const seedIndustry = answers?.industry || form?.industry || '';
 
     const errors = [];
+
+    // Hard cap total generation time so jobs never “run forever”
+    const maxTotalMs = Number(process.env.SMART_GENERATION_MAX_MS || (12 * 60 * 1000)); // 12 minutes default
+    const deadline = Date.now() + maxTotalMs;
 
     let copy = '';
     try {
@@ -468,31 +503,62 @@ const generator = {
         regenerateToken: regTok
       }, { timeout: 180000 });
 
-      const pickedUrl = pickImageUrlFromResponse(imgResp.data);
-      if (!pickedUrl) throw new Error('image_endpoint_returned_no_imageUrl');
+      const picked = pickImageUrl(imgResp.data, i);
+      if (!picked) throw new Error('image_endpoint_returned_no_image_url');
 
-      // If it already looks like a rendered asset, just make it absolute and return
-      let imageUrl = ensureAbsUrl(pickedUrl);
-      if (!/^https?:\/\//i.test(imageUrl)) throw new Error('imageUrl_not_public');
+      // If endpoint already returns our own generated file, don't re-overlay.
+      const alreadyGenerated = typeof picked === 'string' && (
+        picked.includes('/generated/') || picked.includes('/api/media/')
+      );
 
-      return { kind: 'image', variantId: `img_${i}`, imageUrl, adCopy: copy };
+      let finalUrl = picked;
+
+      if (!alreadyGenerated) {
+        // overlay can return either {imageUrl} or {images:[...]} too
+        const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
+          imageUrl: picked,
+          answers,
+          url: seedUrl,
+          regenerateToken: regTok
+        }, { timeout: 240000 });
+
+        const overlayPicked = pickImageUrl(overlayResp.data, i);
+        finalUrl = overlayPicked || picked;
+      }
+
+      const publicUrl = normalizeToPublic(finalUrl);
+      if (!publicUrl.startsWith('http')) throw new Error('imageUrl_not_public');
+
+      return { kind: 'image', variantId: `img_${i}`, imageUrl: publicUrl, adCopy: copy };
     };
 
     const genVideoOnce = async (i) => {
       const regTok = `${Date.now()}_vid_${i}_${Math.random().toString(36).slice(2, 8)}`;
+      const variant = (i % 2) + 1;
 
       const vidResp = await axios.post(`${api}/generate-video-ad`, {
         url: seedUrl,
         answers: { ...answers, cta: answers?.cta || 'Learn More!' },
         regenerateToken: regTok,
-        variant: (i % 2) + 1
+        variant
       }, { timeout: 420000 });
 
-      const rel = (vidResp.data?.videoUrl || vidResp.data?.relativeUrl || '').trim();
-      const absRaw = (vidResp.data?.absoluteVideoUrl || vidResp.data?.absoluteUrl || '').trim();
+      const raw = pickVideoUrl(vidResp.data, variant);
+      const abs = normalizeToPublic(raw);
 
-      const abs = ensureAbsUrl(absRaw || rel);
-      if (!abs || !/^https?:\/\//i.test(abs)) throw new Error('videoUrl_not_public');
+      if (!abs || !abs.startsWith('http')) {
+        // Add useful context to errors so you see what shape came back
+        const hint = safeJson({
+          keys: Object.keys(vidResp.data || {}),
+          sample: vidResp.data
+        }).slice(0, 600);
+        const err = new Error('videoUrl_not_public');
+        err._hint = hint;
+        throw err;
+      }
+
+      // Preserve relative if present, but guarantee absolute works
+      const rel = (String(raw || '').startsWith('http')) ? '' : String(raw || '');
 
       return {
         kind: 'video',
@@ -501,7 +567,7 @@ const generator = {
           relativeUrl: rel,
           absoluteUrl: abs,
           fbVideoId: vidResp.data?.fbVideoId || null,
-          variant: vidResp.data?.variant || ((i % 2) + 1)
+          variant: vidResp.data?.variant || variant
         },
         adCopy: copy
       };
@@ -515,6 +581,7 @@ const generator = {
       let made = 0;
       let attempts = 0;
       while (made < variantPlan.images && attempts < maxImgAttempts) {
+        if (Date.now() > deadline) break;
         attempts += 1;
         try {
           const c = await genImageOnce(made + 1);
@@ -536,6 +603,7 @@ const generator = {
       let made = 0;
       let attempts = 0;
       while (made < variantPlan.videos && attempts < maxVidAttempts) {
+        if (Date.now() > deadline) break;
         attempts += 1;
         try {
           const c = await genVideoOnce(made + 1);
@@ -543,7 +611,8 @@ const generator = {
           made += 1;
         } catch (e) {
           const msg = e?.response?.data?.error || e?.message || 'video_generate_failed';
-          errors.push({ step: 'video', attempt: attempts, message: msg });
+          const hint = e?._hint ? String(e._hint) : null;
+          errors.push({ step: 'video', attempt: attempts, message: msg, ...(hint ? { hint } : {}) });
           if (debug) console.warn('[smartCampaignEngine] video gen fail:', msg);
           await sleep(500);
         }
@@ -556,11 +625,17 @@ const generator = {
     if (debug) {
       const imgs = out.filter(x => x.kind === 'image').length;
       const vids = out.filter(x => x.kind === 'video').length;
-      console.warn('[smartCampaignEngine] generateVariants done', safeJson({ requested: variantPlan, got: { images: imgs, videos: vids }, errorCount: errors.length }));
+      console.warn('[smartCampaignEngine] generateVariants done', safeJson({
+        requested: variantPlan,
+        got: { images: imgs, videos: vids },
+        errorCount: errors.length,
+        deadlineExceeded: Date.now() > deadline
+      }));
       if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
     }
 
-    out._errors = errors; // in-process only
+    // Attach for in-process callers (smart.js can read this and include in error responses)
+    out._errors = errors;
     return out;
   },
 
