@@ -543,8 +543,20 @@ async function pauseAds({ adIds, userToken }) {
 }
 
 async function setAdsetDailyBudget({ adsetId, dailyBudgetCents, userToken }) {
-  await fbPostV(FB_API_VER, adsetId, { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) }, { access_token: userToken });
+  try {
+    await fbPostV(
+      FB_API_VER,
+      adsetId,
+      { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) },
+      { access_token: userToken }
+    );
+  } catch (e) {
+    const msg = e?.response?.data?.error?.message || e?.message || 'Budget update failed';
+    // Hint only (no behavior change). Callers already catch this in scheduler/routes.
+    throw new Error(`${msg} (Note: if the campaign is using CBO, ad set budgets may be restricted.)`);
+  }
 }
+
 async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, challengerAdsetId, totalBudgetCents, championPct = 0.75, userToken }) {
   const total = Math.max(200, Number(totalBudgetCents || 0));
   const champ = Math.round(total * Math.min(0.95, Math.max(0.05, championPct)));

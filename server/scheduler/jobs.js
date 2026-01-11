@@ -27,6 +27,29 @@ function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   return Math.max(0, Number(fallbackHours || 0));
 }
 
+// NEW: remaining hours left in flight (end - now, or (start + duration) - now)
+function resolveHoursLeft({ startAt, endAt, fallbackHours = 0 }) {
+  const now = Date.now();
+
+  // If explicit end exists, remaining is end - now
+  if (endAt) {
+    const endMs = new Date(endAt).getTime();
+    const left = (endMs - now) / 36e5;
+    return Math.max(0, left);
+  }
+
+  // If we only have a duration (flightHours), estimate end = start + duration
+  const dur = Number(fallbackHours || 0);
+  if (dur > 0) {
+    const startMs = startAt ? new Date(startAt).getTime() : now;
+    const endMs = startMs + dur * 36e5;
+    const left = (endMs - now) / 36e5;
+    return Math.max(0, left);
+  }
+
+  return 0;
+}
+
 function decideVariantPlanFrom(cfg = {}) {
   const assetTypes = cfg.assetTypes || 'both';
   const dailyBudget = Number(cfg.dailyBudget || 0);
@@ -76,7 +99,7 @@ function hasRecentSpawn(cfg) {
 }
 
 function timeLeftOk(cfg) {
-  const hoursLeft = resolveFlightHours({
+  const hoursLeft = resolveHoursLeft({
     startAt: cfg.flightStart,
     endAt: cfg.flightEnd,
     fallbackHours: cfg.flightHours || 0
@@ -324,12 +347,18 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
 
     const deployAdsetIds = [challengerAdsetId || adsetId];
 
-    // Generate challengers (match original assetTypes)
+    // NEW: regenerate from original Typeform seed (not empty {})
+    const seed = cfg.seed || {};
+    const seedForm = (seed.form && typeof seed.form === 'object') ? seed.form : {};
+    const seedAnswers = (seed.answers && typeof seed.answers === 'object') ? seed.answers : {};
+    const seedUrl = seed.url || cfg.link || '';
+    const seedMedia = (seed.mediaSelection || cfg.assetTypes || 'both');
+
     const creatives = await generator.generateVariants({
-      form: {},
-      answers: {},
-      url: cfg.link || '',
-      mediaSelection: cfg.assetTypes || 'both',
+      form: seedForm,
+      answers: seedAnswers,
+      url: seedUrl,
+      mediaSelection: seedMedia,
       variantPlan
     });
 
@@ -337,7 +366,7 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
     const deployed = await deployer.deploy({
       accountId: cfg.accountId,
       pageId: cfg.pageId,
-      campaignLink: cfg.link || 'https://your-smartmark-site.com',
+      campaignLink: cfg.link || seedUrl || 'https://your-smartmark-site.com',
       adsetIds: deployAdsetIds,
       winnersByAdset: {},
       losersByAdset: {},
@@ -356,7 +385,7 @@ async function spawnChallengersIfPlateau({ cfg, analysis, userToken }) {
           userToken
         });
       } catch (e) {
-        console.warn('[SmartScheduler] budget split failed:', e?.message || e);
+        console.warn('[SmartScheduler] budget split failed (possible CBO):', e?.message || e);
       }
     }
 

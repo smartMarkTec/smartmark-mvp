@@ -79,6 +79,23 @@ function normalizeStopRules(cfg = {}) {
   };
 }
 
+// NEW: persist seed inputs (Typeform) so the scheduler can always regenerate correctly
+function mergeSeedIntoCfg(cfg, incoming = {}) {
+  if (!cfg) return;
+  const hasObj = (o) => o && typeof o === 'object' && Object.keys(o).length > 0;
+
+  const next = { ...(cfg.seed || {}) };
+  if (hasObj(incoming.form)) next.form = incoming.form;
+  if (hasObj(incoming.answers)) next.answers = incoming.answers;
+  if (incoming.url) next.url = String(incoming.url);
+  if (incoming.mediaSelection) next.mediaSelection = String(incoming.mediaSelection).toLowerCase();
+
+  // Only write if something meaningful exists
+  if (Object.keys(next).length > 0) {
+    cfg.seed = next;
+  }
+}
+
 /* ----------------------- TEST MOCK ENDPOINTS ----------------------- */
 router.post('/mock-insights', async (req, res) => {
   const { adset = {}, ad = {} } = req.body || {};
@@ -99,7 +116,12 @@ router.post('/enable', async (req, res) => {
       kpi = 'cpc', assetTypes = 'both', dailyBudget = 0,
       flightStart = null, flightEnd = null, flightHours = 0,
       overrideCountPerType = null, forceTwoPerType = false,
-      thresholds = {}, stopRules = {}
+      thresholds = {}, stopRules = {},
+
+      // NEW (optional): allow seeding inputs here too
+      form = null,
+      answers = null,
+      url = ''
     } = req.body;
 
     if (!accountId || !campaignId || !pageId) {
@@ -127,8 +149,16 @@ router.post('/enable', async (req, res) => {
       existing.stopRules = mergedStopRules;
       existing.updatedAt = nowIso();
       existing.state = existing.state || { adsets: {} };
+
+      // NEW: seed persistence (optional here)
+      mergeSeedIntoCfg(existing, {
+        form: form && typeof form === 'object' ? form : null,
+        answers: answers && typeof answers === 'object' ? answers : null,
+        url: url || (form && form.url) || link || existing.link || '',
+        mediaSelection: assetTypes
+      });
     } else {
-      db.data.smart_configs.push({
+      const cfg = {
         id: `sc_${campaignId}`,
         accountId, campaignId, pageId,
         link: link || '',
@@ -139,7 +169,17 @@ router.post('/enable', async (req, res) => {
         thresholds: mergedThresholds, stopRules: mergedStopRules,
         createdAt: nowIso(), updatedAt: nowIso(), lastRunAt: null,
         state: { adsets: {} }
+      };
+
+      // NEW: seed persistence (optional here)
+      mergeSeedIntoCfg(cfg, {
+        form: form && typeof form === 'object' ? form : null,
+        answers: answers && typeof answers === 'object' ? answers : null,
+        url: url || (form && form.url) || link || cfg.link || '',
+        mediaSelection: assetTypes
       });
+
+      db.data.smart_configs.push(cfg);
     }
     await db.write();
     res.json({ success: true });
@@ -154,10 +194,10 @@ router.post('/run-once', async (req, res) => {
     await ensureSmartTables();
     const { simulate = false, simDay = 1 } = req.body;
 
-const userToken = getFbUserToken();
-if (!simulate && !userToken) {
-  return res.status(401).json({ error: 'Not authenticated with Facebook' });
-}
+    const userToken = getFbUserToken();
+    if (!simulate && !userToken) {
+      return res.status(401).json({ error: 'Not authenticated with Facebook' });
+    }
 
     const {
       accountId, campaignId, form = {}, answers = {}, url = '',
@@ -190,65 +230,84 @@ if (!simulate && !userToken) {
         thresholds: {}, stopRules: {}, createdAt: nowIso(), updatedAt: nowIso(), lastRunAt: null,
         state: { adsets: {} }
       };
+
+      // NEW: seed persistence on first create
+      mergeSeedIntoCfg(cfg, {
+        form,
+        answers,
+        url: url || form?.url || cfg.link || '',
+        mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase()
+      });
+
       db.data.smart_configs.push(cfg);
+      await db.write();
+    } else {
+      // NEW: always merge incoming seed if present (so scheduler can regenerate later)
+      mergeSeedIntoCfg(cfg, {
+        form,
+        answers,
+        url: url || form?.url || '',
+        mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase()
+      });
+
+      // persist any seed updates
+      cfg.updatedAt = nowIso();
       await db.write();
     }
 
     function buildSimAnalysis({ day = 1, campaignId }) {
-  const adsetId = `SIM_ADSET_${campaignId}`;
-  const adA = `SIM_AD_A_${campaignId}`;
-  const adB = `SIM_AD_B_${campaignId}`;
+      const adsetId = `SIM_ADSET_${campaignId}`;
+      const adA = `SIM_AD_A_${campaignId}`;
+      const adB = `SIM_AD_B_${campaignId}`;
 
-  const plateau = day >= 8; // plateau starts day 8
+      const plateau = day >= 8; // plateau starts day 8
 
-  const mk = (impressions, clicks, spend, frequency) => ({
-    impressions, clicks, spend, frequency,
-    ctr: impressions ? clicks / impressions : 0
-  });
+      const mk = (impressions, clicks, spend, frequency) => ({
+        impressions, clicks, spend, frequency,
+        ctr: impressions ? clicks / impressions : 0
+      });
 
-  const prior = mk(2200, 30, 14.0, 1.7);
+      const prior = mk(2200, 30, 14.0, 1.7);
 
-  // “recent” gets worse starting day 8 (plateau)
-  const recent = plateau
-    ? mk(2200, 18, 14.5, 2.4)
-    : mk(2200, 36, 14.5, 1.6);
+      // “recent” gets worse starting day 8 (plateau)
+      const recent = plateau
+        ? mk(2200, 18, 14.5, 2.4)
+        : mk(2200, 36, 14.5, 1.6);
 
-  return {
-    adsetIds: [adsetId],
-    adMapByAdset: { [adsetId]: [adA, adB] },
-    adsetInsights: {
-      [adsetId]: {
-        recent,
-        prior,
-        _ranges: {
-          recentRange: { since: `SIM_DAY_${Math.max(1, day - 2)}`, until: `SIM_DAY_${day}` },
-          priorRange: { since: `SIM_DAY_${Math.max(1, day - 5)}`, until: `SIM_DAY_${Math.max(1, day - 3)}` }
-        }
-      }
-    },
-    adInsights: {
-      [adA]: { recent, prior, _ranges: {} },
-      [adB]: { recent, prior, _ranges: {} }
-    },
-    plateauByAdset: { [adsetId]: plateau },
-    winnersByAdset: { [adsetId]: [adA] },
-    losersByAdset: { [adsetId]: [adB] },
-    stopFlagsByAd: {
-      [adA]: { flags: { spend: false, impressions: false, clicks: false, time: false }, any: false },
-      [adB]: { flags: { spend: false, impressions: false, clicks: false, time: false }, any: false }
-    },
-    championByAdset: { [adsetId]: adA },
-    championPlateauByAdset: { [adsetId]: plateau }
-  };
-}
+      return {
+        adsetIds: [adsetId],
+        adMapByAdset: { [adsetId]: [adA, adB] },
+        adsetInsights: {
+          [adsetId]: {
+            recent,
+            prior,
+            _ranges: {
+              recentRange: { since: `SIM_DAY_${Math.max(1, day - 2)}`, until: `SIM_DAY_${day}` },
+              priorRange: { since: `SIM_DAY_${Math.max(1, day - 5)}`, until: `SIM_DAY_${Math.max(1, day - 3)}` }
+            }
+          }
+        },
+        adInsights: {
+          [adA]: { recent, prior, _ranges: {} },
+          [adB]: { recent, prior, _ranges: {} }
+        },
+        plateauByAdset: { [adsetId]: plateau },
+        winnersByAdset: { [adsetId]: [adA] },
+        losersByAdset: { [adsetId]: [adB] },
+        stopFlagsByAd: {
+          [adA]: { flags: { spend: false, impressions: false, clicks: false, time: false }, any: false },
+          [adB]: { flags: { spend: false, impressions: false, clicks: false, time: false }, any: false }
+        },
+        championByAdset: { [adsetId]: adA },
+        championPlateauByAdset: { [adsetId]: plateau }
+      };
+    }
 
-
-   const analysis = simulate
-  ? buildSimAnalysis({ day: Number(simDay) || 1, campaignId })
-  : await analyzer.analyzeCampaign({
-      accountId, campaignId, userToken, kpi: cfg.kpi || 'cpc', stopRules: normalizeStopRules(cfg)
-    });
-
+    const analysis = simulate
+      ? buildSimAnalysis({ day: Number(simDay) || 1, campaignId })
+      : await analyzer.analyzeCampaign({
+          accountId, campaignId, userToken, kpi: cfg.kpi || 'cpc', stopRules: normalizeStopRules(cfg)
+        });
 
     const variantPlan = decideVariantPlanFrom(cfg, {
       assetTypes: mediaSelection, dailyBudget, flightStart, flightEnd, flightHours, overrideCountPerType, forceTwoPerType
@@ -257,31 +316,41 @@ if (!simulate && !userToken) {
     const plateauDetected = Object.values(analysis.plateauByAdset || {}).some(Boolean);
     const shouldForceInitial = !!force || !!initial;
 
-
-if (simulate) {
-  return res.json({
-    success: true,
-    simulate: true,
-    simDay: Number(simDay) || 1,
-    plateauDetected,
-    message: plateauDetected
-      ? 'Plateau detected — would regenerate creatives now (SIM).'
-      : 'No plateau detected (SIM).',
-    analysis,
-    variantPlan,
-    plannedAction: plateauDetected
-      ? { action: 'REGENERATE_CREATIVES', addNewVariants: { images: 2, videos: 0 } }
-      : { action: 'NONE' }
-  });
-}
+    if (simulate) {
+      return res.json({
+        success: true,
+        simulate: true,
+        simDay: Number(simDay) || 1,
+        plateauDetected,
+        message: plateauDetected
+          ? 'Plateau detected — would regenerate creatives now (SIM).'
+          : 'No plateau detected (SIM).',
+        analysis,
+        variantPlan,
+        plannedAction: plateauDetected
+          ? { action: 'REGENERATE_CREATIVES', addNewVariants: { images: 2, videos: 0 } }
+          : { action: 'NONE' }
+      });
+    }
 
     if (!plateauDetected && !shouldForceInitial) {
       return res.json({ success: true, message: 'No plateau detected (and not forced).', analysis, variantPlan });
     }
 
+    // NEW: fallback to stored seed if caller did not send form/answers/url
+    const seed = cfg.seed || {};
+    const useForm = (form && typeof form === 'object' && Object.keys(form).length) ? form : (seed.form || {});
+    const useAnswers = (answers && typeof answers === 'object' && Object.keys(answers).length) ? answers : (seed.answers || {});
+    const useUrl = url || useForm?.url || seed.url || cfg.link || '';
+    const useMedia = (mediaSelection || seed.mediaSelection || cfg.assetTypes || 'both').toLowerCase();
+
     // Generate new creatives (will be placed either in champion ad set or challenger ad set)
     const creatives = await generator.generateVariants({
-      form, answers, url, mediaSelection: (mediaSelection || cfg.assetTypes || 'both').toLowerCase(), variantPlan
+      form: useForm,
+      answers: useAnswers,
+      url: useUrl,
+      mediaSelection: useMedia,
+      variantPlan
     });
 
     // Determine target ad sets from analysis (fallback: fetch)
@@ -352,13 +421,15 @@ if (simulate) {
       }
 
       // apply 70/30 (or override) split across champion/challenger ad sets
-      await deployer.splitBudgetBetweenChampionAndChallengers({
-        championAdsetId,
-        challengerAdsetId,
-        totalBudgetCents,
-        championPct,
-        userToken
-      });
+      try {
+        await deployer.splitBudgetBetweenChampionAndChallengers({
+          championAdsetId,
+          challengerAdsetId,
+          totalBudgetCents,
+          championPct,
+          userToken
+        });
+      } catch {}
 
       // on plateau: create *new* ads only in the challenger ad set (do NOT pause champion here)
       adsetIdsForNewCreatives = [challengerAdsetId];
@@ -373,7 +444,7 @@ if (simulate) {
     const deployed = await deployer.deploy({
       accountId,
       pageId: cfg.pageId,
-      campaignLink: cfg.link || form?.url || url || 'https://your-smartmark-site.com',
+      campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
       adsetIds: adsetIdsForNewCreatives,
       winnersByAdset,
       losersByAdset,
@@ -435,7 +506,6 @@ if (simulate) {
     return res.status(status).json({ error: 'fb_error', detail });
   }
 });
-
 
 /* ------------------------- PERSIST STOP RULES ------------------------- */
 router.post('/config/:campaignId/stop-rules', async (req, res) => {
@@ -566,6 +636,5 @@ router.post('/commit-now', async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
-
 
 module.exports = router;
