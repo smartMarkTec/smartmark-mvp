@@ -1,3 +1,4 @@
+// src/pages/CampaignSetup.js
 /* eslint-disable */
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -7,7 +8,7 @@ const backendUrl = "https://smartmark-mvp.onrender.com";
 
 /* ======================= Visual Theme (polish only) ======================= */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const DARK_BG = "#11161c";           // page background (slightly cooler than landing for variety)
+const DARK_BG = "#11161c";
 const GLOW_TEAL = "rgba(20,231,185,0.22)";
 const CARD_BG = "rgba(27, 32, 37, 0.92)";
 const EDGE_BG = "rgba(35, 39, 42, 0.85)";
@@ -33,6 +34,61 @@ const FORM_DRAFT_KEY = "sm_form_draft_v2";
    there is deliberately NO auth-guard here.
 -------------------------------------------- */
 
+/* ======================= USER NAMESPACE (NEW) ======================= */
+const USER_KEYS = [
+  "smartmark_last_campaign_fields",
+  "smartmark_last_budget",
+  "smartmark_last_selected_account",
+  "smartmark_last_selected_pageId",
+  "smartmark_media_selection",
+  CREATIVE_DRAFT_KEY,
+  FORM_DRAFT_KEY
+];
+const withUser = (u, key) => `u:${u}:${key}`;
+
+function migrateToUserNamespace(user) {
+  try {
+    USER_KEYS.forEach((k) => {
+      const v = localStorage.getItem(withUser(user, k));
+      if (v !== null && v !== undefined) return;
+      const legacy = localStorage.getItem(k);
+      if (legacy !== null && legacy !== undefined) {
+        localStorage.setItem(withUser(user, k), legacy);
+      }
+    });
+
+    const un = localStorage.getItem("smartmark_login_username");
+    const pw = localStorage.getItem("smartmark_login_password");
+    if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
+    if (pw) localStorage.setItem(withUser(user, "smartmark_login_password"), pw);
+  } catch {}
+}
+
+function getCurrentUserFallback(cashapp) {
+  return (localStorage.getItem("sm_current_user") || cashapp || "").trim();
+}
+
+function lsGet(user, key) {
+  try {
+    const u = (user || "").trim();
+    if (u) {
+      const v = localStorage.getItem(withUser(u, key));
+      if (v !== null && v !== undefined) return v;
+    }
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function lsSet(user, key, value) {
+  try {
+    const u = (user || "").trim();
+    if (u) localStorage.setItem(withUser(u, key), value);
+    localStorage.setItem(key, value); // keep legacy for prefill + backwards compat
+  } catch {}
+}
+
 /* Responsive helper (unchanged) */
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
@@ -48,13 +104,15 @@ const useIsMobile = () => {
 const FB_CONN_KEY = "smartmark_fb_connected";
 const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
 
-const CREATIVE_MAP_KEY = (actId) => `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
-const readCreativeMap = (actId) => {
-  try { return JSON.parse(localStorage.getItem(CREATIVE_MAP_KEY(actId)) || "{}"); }
+const CREATIVE_MAP_KEY = (user, actId) =>
+  `u:${String(user || "").trim() || "anon"}:sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
+
+const readCreativeMap = (user, actId) => {
+  try { return JSON.parse(localStorage.getItem(CREATIVE_MAP_KEY(user, actId)) || "{}"); }
   catch { return {}; }
 };
-const writeCreativeMap = (actId, map) => {
-  try { localStorage.setItem(CREATIVE_MAP_KEY(actId), JSON.stringify(map || {})); }
+const writeCreativeMap = (user, actId, map) => {
+  try { localStorage.setItem(CREATIVE_MAP_KEY(user, actId), JSON.stringify(map || {})); }
   catch {}
 };
 
@@ -272,16 +330,25 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /* ---------------------------- State (unchanged) ---------------------------- */
+  // user derived from stored current user OR typed cashapp later
+  const [cashapp, setCashapp] = useState(() => lsGet(localStorage.getItem("sm_current_user") || "", "smartmark_login_username") || "");
+  const [email, setEmail] = useState(() => lsGet(localStorage.getItem("sm_current_user") || "", "smartmark_login_password") || "");
+
+  const currentUser = useMemo(() => getCurrentUserFallback(cashapp), [cashapp]);
+
+  /* ---------------------------- State (namespaced) ---------------------------- */
   const [form, setForm] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("smartmark_last_campaign_fields")) || {}; }
-    catch { return {}; }
+    try {
+      return JSON.parse(lsGet(currentUser, "smartmark_last_campaign_fields") || "{}") || {};
+    } catch {
+      return {};
+    }
   });
-  const [budget, setBudget] = useState(() => localStorage.getItem("smartmark_last_budget") || "");
-  const [cashapp, setCashapp] = useState(() => localStorage.getItem("smartmark_login_username") || "");
-  const [email, setEmail] = useState(() => localStorage.getItem("smartmark_login_password") || "");
-  const [selectedAccount, setSelectedAccount] = useState(() => localStorage.getItem("smartmark_last_selected_account") || "");
-  const [selectedPageId, setSelectedPageId] = useState(() => localStorage.getItem("smartmark_last_selected_pageId") || "");
+
+  const [budget, setBudget] = useState(() => lsGet(currentUser, "smartmark_last_budget") || "");
+  const [selectedAccount, setSelectedAccount] = useState(() => lsGet(currentUser, "smartmark_last_selected_account") || "");
+  const [selectedPageId, setSelectedPageId] = useState(() => lsGet(currentUser, "smartmark_last_selected_pageId") || "");
+
   const [fbConnected, setFbConnected] = useState(() => {
     const conn = localStorage.getItem(FB_CONN_KEY);
     if (conn) {
@@ -293,11 +360,33 @@ const CampaignSetup = () => {
     return false;
   });
 
-  // NO auth-guard useEffect here. You can visit /setup freely.
-
   const touchFbConn = () => {
     try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
   };
+
+  // ensure typed creds are stored + migrated (so login page always has them)
+  useEffect(() => {
+    const u = (cashapp || "").trim();
+    const p = (email || "").trim();
+    if (!u) return;
+
+    // legacy prefill keys
+    try {
+      localStorage.setItem("smartmark_login_username", u);
+      if (p) localStorage.setItem("smartmark_login_password", p);
+    } catch {}
+
+    // user namespace keys
+    try {
+      localStorage.setItem("sm_current_user", u);
+      localStorage.setItem(withUser(u, "smartmark_login_username"), u);
+      if (p) localStorage.setItem(withUser(u, "smartmark_login_password"), p);
+    } catch {}
+
+    migrateToUserNamespace(u);
+  }, [cashapp, email]);
+
+  // NO auth-guard useEffect here. You can visit /setup freely.
 
   useEffect(() => {
     const saved = localStorage.getItem(FB_CONN_KEY);
@@ -337,11 +426,28 @@ const CampaignSetup = () => {
 
   const [expandedId, setExpandedId] = useState(null);
 
-  const [draftCreatives, setDraftCreatives] = useState({
-    images: [],
-    videos: [],
-    fbVideoIds: [],
-    mediaSelection: (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+  const [draftCreatives, setDraftCreatives] = useState(() => {
+    const raw = lsGet(currentUser, CREATIVE_DRAFT_KEY);
+    if (raw) {
+      try {
+        const d = JSON.parse(raw);
+        const ageOk = !d.savedAt || (Date.now() - d.savedAt <= DRAFT_TTL_MS);
+        if (ageOk) {
+          return {
+            images: Array.isArray(d.images) ? d.images.slice(0, 2) : [],
+            videos: Array.isArray(d.videos) ? d.videos.slice(0, 2) : [],
+            fbVideoIds: Array.isArray(d.fbVideoIds) ? d.fbVideoIds.slice(0, 2) : [],
+            mediaSelection: (d.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+          };
+        }
+      } catch {}
+    }
+    return {
+      images: [],
+      videos: [],
+      fbVideoIds: [],
+      mediaSelection: (location.state?.mediaSelection || localStorage.getItem("smartmark_media_selection") || "both").toLowerCase()
+    };
   });
 
   const {
@@ -411,7 +517,7 @@ const CampaignSetup = () => {
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
   useEffect(() => {
-    const lastFields = localStorage.getItem("smartmark_last_campaign_fields");
+    const lastFields = lsGet(currentUser, "smartmark_last_campaign_fields");
     if (lastFields) {
       const f = JSON.parse(lastFields);
       setForm(f);
@@ -437,15 +543,15 @@ const CampaignSetup = () => {
         applyDraft(JSON.parse(sess));
         return;
       }
-      const raw = localStorage.getItem(CREATIVE_DRAFT_KEY);
+      const raw = lsGet(currentUser, CREATIVE_DRAFT_KEY);
       if (!raw) return;
       const draft = JSON.parse(raw);
       const ageOk = !draft.savedAt || (Date.now() - draft.savedAt <= DRAFT_TTL_MS);
       if (ageOk) applyDraft(draft);
-      else localStorage.removeItem(CREATIVE_DRAFT_KEY);
+      else localStorage.removeItem(withUser(currentUser, CREATIVE_DRAFT_KEY));
     } catch {}
     // eslint-disable-next-line
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     const hasDraft =
@@ -454,17 +560,14 @@ const CampaignSetup = () => {
       (draftCreatives.fbVideoIds && draftCreatives.fbVideoIds.length);
     if (!hasDraft) return;
     try {
-      localStorage.setItem(
-        CREATIVE_DRAFT_KEY,
-        JSON.stringify({ ...draftCreatives, savedAt: Date.now() })
-      );
+      lsSet(currentUser, CREATIVE_DRAFT_KEY, JSON.stringify({ ...draftCreatives, savedAt: Date.now() }));
     } catch {}
-  }, [draftCreatives]);
+  }, [draftCreatives, currentUser]);
 
   const handleClearDraft = () => {
     try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
-    try { localStorage.removeItem(CREATIVE_DRAFT_KEY); } catch {}
-    try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
+    try { localStorage.removeItem(withUser(currentUser, CREATIVE_DRAFT_KEY)); } catch {}
+    try { localStorage.removeItem(withUser(currentUser, FORM_DRAFT_KEY)); } catch {}
     try { localStorage.removeItem("smartmark_media_selection"); } catch {}
     setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
     if (expandedId === "__DRAFT__") setExpandedId(null);
@@ -563,12 +666,11 @@ const CampaignSetup = () => {
       .catch(() => setMetricsMap(m => ({ ...m, [expandedId]: { impressions:"--", clicks:"--", ctr:"--" } })));
   }, [expandedId, selectedAccount]);
 
-  useEffect(() => { localStorage.setItem("smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
-  useEffect(() => { localStorage.setItem("smartmark_last_budget", budget); }, [budget]);
-  useEffect(() => { localStorage.setItem("smartmark_login_username", cashapp); }, [cashapp]);
-  useEffect(() => { localStorage.setItem("smartmark_login_password", email); }, [email]);
-  useEffect(() => { localStorage.setItem("smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
-  useEffect(() => { localStorage.setItem("smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
+  // persist user-scoped
+  useEffect(() => { lsSet(currentUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate, currentUser]);
+  useEffect(() => { lsSet(currentUser, "smartmark_last_budget", budget); }, [budget, currentUser]);
+  useEffect(() => { lsSet(currentUser, "smartmark_last_selected_account", selectedAccount); }, [selectedAccount, currentUser]);
+  useEffect(() => { lsSet(currentUser, "smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId, currentUser]);
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
@@ -650,9 +752,73 @@ const CampaignSetup = () => {
     } catch { return { startISO: null, endISO: null }; }
   }
 
+  async function postJSON(url, body, ms = 15000) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ms);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(body || {}),
+        signal: ctrl.signal
+      });
+      const txt = await res.text();
+      let data;
+      try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+      return { ok: res.ok, status: res.status, data };
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
+  async function ensureLoggedIn(username, password) {
+    const u = (username || "").trim();
+    const p = (password || "").trim();
+    if (!u || !p) throw new Error("Please enter your Cashtag and Email first.");
+
+    // Already logged in?
+    try {
+      const who = await fetch(`${backendUrl}/auth/whoami`, { credentials: "include" });
+      if (who.ok) {
+        localStorage.setItem("sm_current_user", u);
+        migrateToUserNamespace(u);
+        return true;
+      }
+    } catch {}
+
+    // Try login
+    let r = await postJSON(`${backendUrl}/auth/login`, { username: u, password: p }, 15000);
+    if (r.ok && r.data?.success) {
+      localStorage.setItem("sm_current_user", u);
+      migrateToUserNamespace(u);
+      return true;
+    }
+
+    // If login fails, register then login (Email is used as password + email field)
+    const reg = await postJSON(`${backendUrl}/auth/register`, { username: u, email: p, password: p }, 15000);
+    if (!reg.ok) {
+      const msg = (reg.data?.error || reg.data?.raw || `Register failed (${reg.status})`).toString();
+      throw new Error(msg);
+    }
+
+    r = await postJSON(`${backendUrl}/auth/login`, { username: u, password: p }, 15000);
+    if (!r.ok || !r.data?.success) {
+      const msg = (r.data?.error || r.data?.raw || `Login failed (${r.status})`).toString();
+      throw new Error(msg);
+    }
+
+    localStorage.setItem("sm_current_user", u);
+    migrateToUserNamespace(u);
+    return true;
+  }
+
   const handleLaunch = async () => {
     setLoading(true);
     try {
+      // ✅ Make sure user credentials become the logged-in identity before anything else
+      await ensureLoggedIn(cashapp, email);
+
       const acctId = String(selectedAccount).replace(/^act_/, "");
       const safeBudget = Math.max(3, Number(budget) || 0);
 
@@ -696,7 +862,9 @@ const CampaignSetup = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      const map = readCreativeMap(acctId);
+      // ✅ Save creatives per-user + per-ad-account
+      const user = getCurrentUserFallback(cashapp);
+      const map = readCreativeMap(user, acctId);
       if (json.campaignId) {
         map[json.campaignId] = {
           images: filteredImages,
@@ -706,12 +874,12 @@ const CampaignSetup = () => {
           time: Date.now(),
           name: form.campaignName || "Untitled"
         };
-        writeCreativeMap(acctId, map);
+        writeCreativeMap(user, acctId, map);
       }
 
       sessionStorage.removeItem("draft_form_creatives");
-      localStorage.removeItem(CREATIVE_DRAFT_KEY);
-      localStorage.removeItem(FORM_DRAFT_KEY);
+      try { localStorage.removeItem(withUser(user, CREATIVE_DRAFT_KEY)); } catch {}
+      try { localStorage.removeItem(withUser(user, FORM_DRAFT_KEY)); } catch {}
       setDraftCreatives({ images: [], videos: [], fbVideoIds: [], mediaSelection: "both" });
 
       setLaunched(true);
@@ -722,6 +890,10 @@ const CampaignSetup = () => {
     } catch (err) {
       alert("Failed to launch campaign: " + (err.message || ""));
       console.error(err);
+      // If auth/cookie is broken in prod, this puts them on login with prefill:
+      if ((err.message || "").toLowerCase().includes("not logged")) {
+        navigate(`/login?return=/setup`);
+      }
     }
     setLoading(false);
   };
@@ -758,7 +930,8 @@ const CampaignSetup = () => {
   const getSavedCreatives = (campaignId) => {
     if (!selectedAccount) return { images:[], videos:[], fbVideoIds:[], mediaSelection:"both" };
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(acctKey);
+    const user = getCurrentUserFallback(cashapp);
+    const map = readCreativeMap(user, acctKey);
     const saved = map[campaignId] || null;
     if (!saved) return { images:[], videos:[], fbVideoIds:[], mediaSelection:"both" };
 
@@ -812,7 +985,6 @@ const CampaignSetup = () => {
         overflowX: "hidden"
       }}
     >
-      {/* subtle teal glow background like other pages */}
       <div
         aria-hidden
         style={{
@@ -828,7 +1000,6 @@ const CampaignSetup = () => {
         }}
       />
 
-      {/* Top bar + centered title */}
       <div style={{ width: "100%", maxWidth: 1180, padding: "22px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <button
@@ -868,7 +1039,6 @@ const CampaignSetup = () => {
           </button>
         </div>
 
-        {/* Centered page heading */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
           <h1
             style={{
@@ -888,7 +1058,6 @@ const CampaignSetup = () => {
         </div>
       </div>
 
-      {/* MAIN LAYOUT */}
       <div
         style={{
           width: "100vw",
@@ -905,7 +1074,6 @@ const CampaignSetup = () => {
           zIndex: 1
         }}
       >
-        {/* LEFT PANE (forms) — visual only */}
         <main style={{
           background: EDGE_BG,
           border: `1px solid ${INPUT_BORDER}`,
@@ -922,12 +1090,8 @@ const CampaignSetup = () => {
           marginBottom: isMobile ? 24 : 0,
           minHeight: "600px",
         }}>
-          {/* Facebook Connect */}
           <button
-          onClick={() => {
-  window.location.href = `${backendUrl}/auth/facebook`;
-}}
-
+            onClick={() => { window.location.href = `${backendUrl}/auth/facebook`; }}
             style={{
               padding: "14px 22px",
               borderRadius: "14px",
@@ -949,7 +1113,6 @@ const CampaignSetup = () => {
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
 
-          {/* Add Payment Method */}
           <button
             onClick={openFbPaymentPopup}
             style={{
@@ -972,7 +1135,6 @@ const CampaignSetup = () => {
             Add Payment Method
           </button>
 
-          {/* Campaign Name */}
           <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
               Campaign Name
@@ -996,12 +1158,10 @@ const CampaignSetup = () => {
             </div>
           </div>
 
-          {/* Campaign Duration */}
           <div style={{ width:"100%", maxWidth:420, display:"flex", flexDirection:"column", gap:10 }}>
             <div style={{ color: WHITE, fontWeight: 900, fontSize: "1.02rem" }}>Campaign Duration</div>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
-              {/* Start */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Start</label>
                 <div style={{
@@ -1016,7 +1176,6 @@ const CampaignSetup = () => {
                 </div>
               </div>
 
-              {/* End */}
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>End</label>
                 <div style={{
@@ -1037,7 +1196,6 @@ const CampaignSetup = () => {
             </div>
           </div>
 
-          {/* Budget + payment + creds */}
           <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
             <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
               Campaign Budget ($)
@@ -1131,7 +1289,6 @@ const CampaignSetup = () => {
             )}
           </div>
 
-          {/* Launch */}
           <button
             onClick={handleLaunch}
             disabled={loading || campaignCount >= 2 || !canLaunch}
@@ -1170,7 +1327,6 @@ const CampaignSetup = () => {
           )}
         </main>
 
-        {/* RIGHT PANE (campaigns & previews) — layout preserved */}
         <aside style={{
           flex: 1,
           display: "flex",
@@ -1198,7 +1354,6 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            {/* Header row */}
             <div style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div style={{ fontSize:"1.08rem", fontWeight: 900, color: WHITE, letterSpacing: 0.3 }}>
                 Active Campaigns
@@ -1271,7 +1426,6 @@ const CampaignSetup = () => {
               </div>
             </div>
 
-            {/* Rows */}
             <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:10 }}>
               {rightPaneCampaigns.map(c => {
                 const isDraft = !!c.__isDraft;
@@ -1291,7 +1445,6 @@ const CampaignSetup = () => {
                     border:`1px solid ${INPUT_BORDER}`,
                     boxShadow: "0 2px 12px rgba(0,0,0,0.25)"
                   }}>
-                    {/* Row header */}
                     <div
                       onClick={() => {
                         setExpandedId(isOpen ? null : id);
@@ -1360,7 +1513,6 @@ const CampaignSetup = () => {
                       )}
                     </div>
 
-                    {/* Row contents */}
                     {isOpen && (
                       <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:10 }}>
                         {!isDraft && (
@@ -1369,7 +1521,6 @@ const CampaignSetup = () => {
                           </div>
                         )}
 
-                        {/* Creatives */}
                         <div style={{
                           width: "100%",
                           background: "#14191e",
@@ -1384,7 +1535,6 @@ const CampaignSetup = () => {
                             Creatives
                           </div>
 
-                          {/* Images Card */}
                           {showImages && (
                             <div style={{
                               background:"#ffffff",
@@ -1414,7 +1564,6 @@ const CampaignSetup = () => {
                             </div>
                           )}
 
-                          {/* Videos Card */}
                           {showVideos && (
                             <div style={{
                               background:"#ffffff",
@@ -1454,7 +1603,6 @@ const CampaignSetup = () => {
               })}
             </div>
 
-            {/* Ad Account & Page Selectors */}
             <div style={{
               width: "100%",
               marginTop: 8,
@@ -1518,7 +1666,6 @@ const CampaignSetup = () => {
             </div>
           </div>
 
-          {/* Image modal viewer */}
           <ImageModal open={showImageModal} imageUrl={modalImg} onClose={() => setShowImageModal(false)} />
         </aside>
       </div>
@@ -1526,7 +1673,6 @@ const CampaignSetup = () => {
   );
 };
 
-/* ---------- tiny UI helpers for compact wheels (unchanged logic) ---------- */
 function Picker({ value, options, onChange }) {
   return (
     <select

@@ -1,6 +1,6 @@
 // src/pages/Login.js
 import React, { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
@@ -73,7 +73,9 @@ const USER_KEYS = [
   "smartmark_last_budget",
   "smartmark_last_selected_account",
   "smartmark_last_selected_pageId",
-  "smartmark_media_selection"
+  "smartmark_media_selection",
+  "draft_form_creatives_v2",
+  "sm_form_draft_v2",
 ];
 const withUser = (u, key) => `u:${u}:${key}`;
 function migrateToUserNamespace(user) {
@@ -86,6 +88,7 @@ function migrateToUserNamespace(user) {
         localStorage.setItem(withUser(user, k), legacy);
       }
     });
+
     const un = localStorage.getItem("smartmark_login_username");
     const pw = localStorage.getItem("smartmark_login_password");
     if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
@@ -95,15 +98,27 @@ function migrateToUserNamespace(user) {
 
 export default function Login() {
   const navigate = useNavigate();
+  const location = useLocation();
+
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState(""); // email field
+  const [password, setPassword] = useState(""); // your app uses "Email" as password
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Prefill from last used values
+  // Prefill from last used values (prefer user namespace if we know current user)
   useEffect(() => {
-    setUsername(localStorage.getItem("smartmark_login_username") || "");
-    setPassword(localStorage.getItem("smartmark_login_password") || "");
+    const u0 = localStorage.getItem("sm_current_user") || "";
+    const u = (u0 || "").trim();
+    const un =
+      (u ? localStorage.getItem(withUser(u, "smartmark_login_username")) : null) ||
+      localStorage.getItem("smartmark_login_username") ||
+      "";
+    const pw =
+      (u ? localStorage.getItem(withUser(u, "smartmark_login_password")) : null) ||
+      localStorage.getItem("smartmark_login_password") ||
+      "";
+    setUsername(un);
+    setPassword(pw);
   }, []);
 
   async function postJSONWithTimeout(url, body, ms = 15000) {
@@ -113,12 +128,17 @@ export default function Login() {
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include", // ✅ REQUIRED so sm_sid cookie is set cross-site
         body: JSON.stringify(body),
         signal: ctrl.signal,
       });
       let data;
       const txt = await res.text();
-      try { data = JSON.parse(txt); } catch { data = { raw: txt }; }
+      try {
+        data = JSON.parse(txt);
+      } catch {
+        data = { raw: txt };
+      }
       return { ok: res.ok, status: res.status, data };
     } finally {
       clearTimeout(t);
@@ -127,7 +147,8 @@ export default function Login() {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
 
     const u = username.trim();
     const p = password.trim();
@@ -154,13 +175,23 @@ export default function Login() {
       localStorage.setItem("smartmark_login_username", u);
       localStorage.setItem("smartmark_login_password", p);
 
+      // Also store in user namespace
+      try {
+        localStorage.setItem(withUser(u, "smartmark_login_username"), u);
+        localStorage.setItem(withUser(u, "smartmark_login_password"), p);
+      } catch {}
+
       migrateToUserNamespace(u);
-      navigate("/setup");
+
+      // redirect support (?return=/setup)
+      const params = new URLSearchParams(location.search);
+      const ret = params.get("return") || "/setup";
+      navigate(ret);
     } catch (err) {
       const msg =
-        err.name === "AbortError"
+        err?.name === "AbortError"
           ? "Login timed out. Server didn’t respond."
-          : err.message || "Server error. Please try again.";
+          : err?.message || "Server error. Please try again.";
       setError(msg);
     } finally {
       setLoading(false);
@@ -174,7 +205,6 @@ export default function Login() {
         <div className="sm-login-glow" />
         <div className="sm-topbar">
           <button onClick={() => navigate("/")}>← Back</button>
-          {/* intentionally no logo → home */}
           <div />
         </div>
 
@@ -191,14 +221,17 @@ export default function Login() {
               autoComplete="username"
               placeholder="Username"
               value={username}
-              onChange={e => { setUsername(e.target.value); setError(""); }}
+              onChange={(e) => {
+                setUsername(e.target.value);
+                setError("");
+              }}
               required
             />
           </div>
 
           <div>
             <label style={{ color: "#cfe9e2", fontWeight: 800, fontSize: ".95rem" }}>
-              Email / Password
+              Email (used as password)
             </label>
             <input
               className="sm-input"
@@ -206,7 +239,10 @@ export default function Login() {
               autoComplete="email"
               placeholder="you@example.com"
               value={password}
-              onChange={e => { setPassword(e.target.value); setError(""); }}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setError("");
+              }}
               required
             />
           </div>

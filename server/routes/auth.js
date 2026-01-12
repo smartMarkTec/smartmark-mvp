@@ -81,7 +81,7 @@ function setSessionCookie(res, sid) {
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   };
   const dom = computeCookieDomain();
-  if (dom) opts.domain = dom;         // ensures cookie is sent on all subrequests
+  if (dom) opts.domain = dom;
   res.cookie(COOKIE_NAME, sid, opts);
 }
 
@@ -181,7 +181,7 @@ router.get('/debug/fbtoken', (_req, res) => {
 });
 
 /* =========================
-   NEW: Defaults helper
+   Defaults helper
    ========================= */
 router.get('/facebook/defaults', async (_req, res) => {
   const userToken = getFbUserToken();
@@ -196,7 +196,6 @@ router.get('/facebook/defaults', async (_req, res) => {
   });
 });
 
-// NEW: Return ad accounts (for CampaignSetup.js)
 router.get('/facebook/adaccounts', async (_req, res) => {
   const userToken = getFbUserToken();
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
@@ -204,14 +203,12 @@ router.get('/facebook/adaccounts', async (_req, res) => {
   return res.json({ data: DEFAULTS.adAccounts || [] });
 });
 
-// NEW: Return pages (for CampaignSetup.js)
 router.get('/facebook/pages', async (_req, res) => {
   const userToken = getFbUserToken();
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   await refreshDefaults(userToken);
   return res.json({ data: DEFAULTS.pages || [] });
 });
-
 
 router.post('/facebook/defaults/select', (req, res) => {
   const { adAccountId, pageId } = req.body || {};
@@ -227,6 +224,26 @@ async function ensureUsersAndSessions() {
   db.data.users = db.data.users || [];
   db.data.sessions = db.data.sessions || [];
   await db.write();
+}
+
+/* ---------------------------- Session helper ---------------------------- */
+async function requireSession(req) {
+  await ensureUsersAndSessions();
+  const auth = req.headers.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : null;
+  const sid =
+    req.cookies?.[COOKIE_NAME] ||
+    req.get('x-sm-sid') ||
+    bearer;
+
+  if (!sid) return { ok: false, status: 401, error: 'Not logged in' };
+  const sess = db.data.sessions.find(s => s.sid === sid);
+  if (!sess) return { ok: false, status: 401, error: 'Session not found' };
+
+  const user = db.data.users.find(u => u.username === sess.username);
+  if (!user) return { ok: false, status: 401, error: 'User not found for session' };
+
+  return { ok: true, sid, sess, user };
 }
 
 /* =========================
@@ -245,17 +262,16 @@ router.post('/register', async (req, res) => {
     }
 
     const passwordHash = bcrypt.hashSync(password, 10);
-    const user = { username, email, passwordHash };
+    const user = { username: String(username).trim(), email: String(email).trim(), passwordHash };
     db.data.users.push(user);
     await db.write();
 
-    // create session immediately
     const sid = `sm_${nanoid(24)}`;
     db.data.sessions.push({ sid, username: user.username });
     await db.write();
 
     setSessionCookie(res, sid);
-    res.json({ success: true, user: { username, email } });
+    res.json({ success: true, user: { username: user.username, email: user.email } });
   } catch (err) {
     res.status(500).json({ error: 'Registration failed', detail: err.message });
   }
@@ -264,15 +280,23 @@ router.post('/register', async (req, res) => {
 router.post('/login', async (req, res) => {
   try {
     const { username, password } = req.body || {};
-    if (!username || !password) {
+    const u = String(username || '').trim();
+    const p = String(password || '').trim();
+
+    if (!u || !p) {
       return res.status(400).json({ error: 'Username and password required' });
     }
 
     await ensureUsersAndSessions();
-    const user = db.data.users.find(u => u.username === username);
+
+    // Allow login by username OR email (nice quality-of-life)
+    const user =
+      db.data.users.find(x => x.username === u) ||
+      db.data.users.find(x => x.email === u);
+
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
-    const match = bcrypt.compareSync(password, user.passwordHash);
+    const match = bcrypt.compareSync(p, user.passwordHash);
     if (!match) return res.status(401).json({ error: 'Invalid username or password' });
 
     const sid = `sm_${nanoid(24)}`;
@@ -315,8 +339,25 @@ router.get('/debug/cookies', (req, res) => {
 });
 
 /* =========================
+   WHOAMI (cookie + header fallback)
+   ========================= */
+router.get('/whoami', async (req, res) => {
+  try {
+    const s = await requireSession(req);
+    if (!s.ok) return res.status(s.status).json({ error: s.error });
+
+    res.json({ success: true, user: { username: s.user.username, email: s.user.email } });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to resolve session', detail: err.message });
+  }
+});
+
+/* =========================
    LAUNCH CAMPAIGN (unchanged core)
    ========================= */
+// NOTE: Your existing launch-campaign route remains below (unchanged).
+// (Kept exactly as you had it so we don’t accidentally break production.)
+
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const userToken = getFbUserToken();
   const { accountId } = req.params;
@@ -581,7 +622,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             facebook_positions: ['feed','video_feeds','marketplace'],
             instagram_positions: ['stream','reels','story'],
             audience_network_positions: [],
-            messenger_positions: []
+            messenger_positions: [],
           }
         },
         { params: mkParams() }
@@ -672,7 +713,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     const campaignStatus = NO_SPEND ? 'PAUSED' : 'ACTIVE';
 
-    await ensureUsersAndSessions(); // reuse lowdb init
+    await ensureUsersAndSessions();
     await db.read();
     db.data.campaign_creatives = db.data.campaign_creatives || [];
     const list = db.data.campaign_creatives;
@@ -715,7 +756,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 });
 
 /* =========================
-   TEST/UTILITY ROUTES
+   TEST/UTILITY ROUTES (unchanged)
    ========================= */
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const userToken = getFbUserToken();
@@ -769,7 +810,6 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   }
 });
 
-/* NEW: Fetch stored creatives + selection for a campaign */
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', async (req, res) => {
   const userToken = getFbUserToken();
   const { campaignId } = req.params;
@@ -796,7 +836,6 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
   }
 });
 
-/* Pause / Unpause / Cancel */
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
   const userToken = getFbUserToken();
   const { campaignId } = req.params;
@@ -842,34 +881,6 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
     res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
-  }
-});
-
-/* =========================
-   WHOAMI (cookie + header fallback)
-   ========================= */
-router.get('/whoami', async (req, res) => {
-  try {
-    await ensureUsersAndSessions();
-
-    const auth = req.headers.authorization || '';
-    const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-    const sid =
-      req.cookies?.[COOKIE_NAME] ||
-      req.get('x-sm-sid') ||
-      bearer;
-
-    if (!sid) return res.status(401).json({ error: 'Not logged in' });
-
-    const sess = db.data.sessions.find(s => s.sid === sid);
-    if (!sess) return res.status(401).json({ error: 'Session not found' });
-
-    const user = db.data.users.find(u => u.username === sess.username);
-    if (!user) return res.status(401).json({ error: 'User not found for session' });
-
-    res.json({ success: true, user: { username: user.username, email: user.email } });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to resolve session', detail: err.message });
   }
 });
 
