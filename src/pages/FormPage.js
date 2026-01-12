@@ -1446,111 +1446,99 @@ export default function FormPage() {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
-      if (!hasGenerated && isGenerateTrigger(value)) {
-        setLoading(true);
-        setGenerating(true);
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: "AI generating..." },
-        ]);
+if (!hasGenerated && isGenerateTrigger(value)) {
+  setLoading(true);
+  setGenerating(true);
 
-        setTimeout(async () => {
-          const token = getRandomString();
+  // 1) Show "AI thinking..." immediately
+  setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
 
-          // Abort any stale in-flight jobs first
-          abortAllVideoFetches();
-
-          // Global soft cap (no abort) – we only warn if it's taking long.
-          // We let the backend finish the generation so the ad is always complete.
-          const hardCap = setTimeout(() => {
-            console.warn(
-              "[Generation] Soft cap (~100s) reached – still waiting for server. Not aborting, just FYI."
-            );
-          }, GENERATION_HARD_CAP_MS);
-
-          // Clear old previews
-          try {
-            setVideoItems([]);
-          } catch {}
-          try {
-            setVideoUrl("");
-            setVideoScript("");
-          } catch {}
-          try {
-            setImageUrls([]);
-            setImageUrl("");
-          } catch {}
-
-          try {
-            await warmBackend();
-
-// 1) IMAGE: Poster B A/B with DIFFERENT COPY per image (consistent layout)
-const wantImage = mediaType !== "video";
-const imagesPromise = (async () => {
-  if (!wantImage) return;
-
-  // This will:
-  // - call GPT twice (A/B)
-  // - render poster_b twice (A/B)
-  // - set imageUrls to exactly two
-  // - store per-image drafts so each slide has its own copy
-  await generatePosterBPair(token);
-})();
-
-// 4) VIDEO: unchanged
-const videosPromise = (async () => {
-  const vs = await fetchVideoPair(token, answers, null, null);
-  await Promise.allSettled([
-    headRangeWarm("VA", vs?.[0]?.url),
-    headRangeWarm("VB", vs?.[1]?.url),
-  ]);
-  try {
-    setVideoItems(vs || []);
-    setActiveVideo(0);
-    setVideoUrl(vs?.[0]?.url || "");
-    setVideoScript(vs?.[0]?.script || "");
-  } catch {}
-})();
-
-// 5) Static Poster B: NO-OP (Poster B is now produced inside generatePosterBPair)
-const staticPromise = Promise.resolve();
-
-
-            // 6) Mark as “done” once any media completes
-            await Promise.any([
-              imagesPromise,
-              videosPromise,
-              staticPromise,
-            ]).catch(() => {});
-            await Promise.allSettled([
-              imagesPromise,
-              videosPromise,
-              staticPromise,
-            ]);
-
-            setChatHistory((ch) => [
-              ...ch,
-              {
-                from: "gpt",
-                text:
-                  "Done! Here are your ad previews. You can regenerate the image or video below.",
-              },
-            ]);
-            setHasGenerated(true);
-          } catch (err) {
-            console.error("generation failed:", err);
-            setError(
-              "Generation failed (server cold or busy). Try again in a few seconds."
-            );
-          } finally {
-            clearTimeout(hardCap);
-            setGenerating(false);
-            setLoading(false);
-          }
-        }, 80);
-
-        return;
+  // 2) After a short moment, replace it with a nicer status line
+  const swapThinkingTimer = setTimeout(() => {
+    setChatHistory((ch) => {
+      const next = [...ch];
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
+          next[i] = { ...next[i], text: "This could take about a minute — generating your previews…" };
+          break;
+        }
       }
+      return next;
+    });
+  }, 700);
+
+  setTimeout(async () => {
+    const token = getRandomString();
+
+    // Abort any stale in-flight jobs first
+    abortAllVideoFetches();
+
+    const hardCap = setTimeout(() => {
+      console.warn(
+        "[Generation] Soft cap (~100s) reached – still waiting for server. Not aborting, just FYI."
+      );
+    }, GENERATION_HARD_CAP_MS);
+
+    // Clear old previews
+    try {
+      setVideoItems([]);
+    } catch {}
+    try {
+      setVideoUrl("");
+      setVideoScript("");
+    } catch {}
+    try {
+      setImageUrls([]);
+      setImageUrl("");
+    } catch {}
+
+    try {
+      await warmBackend();
+
+      // 1) IMAGE: Poster B A/B with DIFFERENT COPY per image (consistent layout)
+      const imagesPromise = (async () => {
+        await generatePosterBPair(token);
+      })();
+
+      // 2) VIDEO: unchanged
+      const videosPromise = (async () => {
+        const vs = await fetchVideoPair(token, answers, null, null);
+        await Promise.allSettled([
+          headRangeWarm("VA", vs?.[0]?.url),
+          headRangeWarm("VB", vs?.[1]?.url),
+        ]);
+        try {
+          setVideoItems(vs || []);
+          setActiveVideo(0);
+          setVideoUrl(vs?.[0]?.url || "");
+          setVideoScript(vs?.[0]?.script || "");
+        } catch {}
+      })();
+
+      const staticPromise = Promise.resolve();
+
+      await Promise.any([imagesPromise, videosPromise, staticPromise]).catch(() => {});
+      await Promise.allSettled([imagesPromise, videosPromise, staticPromise]);
+
+      setChatHistory((ch) => [
+        ...ch,
+        { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
+      ]);
+      setHasGenerated(true);
+    } catch (err) {
+      console.error("generation failed:", err);
+      setError("Generation failed (server cold or busy). Try again in a few seconds.");
+    } finally {
+      clearTimeout(hardCap);
+      clearTimeout(swapThinkingTimer);
+      setGenerating(false);
+      setLoading(false);
+    }
+  }, 80);
+
+  return;
+}
+
 
       if (hasGenerated) {
         await handleSideChat(value, null);
@@ -2854,21 +2842,29 @@ async function handleGenerateStaticAd(
               mediaType
             );
 
-            if (imgA[0])
-              localStorage.setItem(
-                "smartmark_last_image_url",
-                imgA[0]
-              );
-            if (vidA[0])
-              localStorage.setItem(
-                "smartmark_last_video_url",
-                vidA[0]
-              );
-            if (fbIds[0])
-              localStorage.setItem(
-                "smartmark_last_fb_video_id",
-                String(fbIds[0])
-              );
+         // Persist "last" keys ONLY for selected media, and clear the others
+if (mediaType === "image") {
+  if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+
+  // clear stale video keys
+  localStorage.removeItem("smartmark_last_video_url");
+  localStorage.removeItem("smartmark_last_fb_video_id");
+}
+
+if (mediaType === "video") {
+  if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
+  if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+
+  // clear stale image key
+  localStorage.removeItem("smartmark_last_image_url");
+}
+
+if (mediaType === "both") {
+  if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+  if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
+  if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+}
+
 
             navigate("/setup", {
               state: {

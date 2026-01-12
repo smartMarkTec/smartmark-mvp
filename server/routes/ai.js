@@ -30,17 +30,14 @@ router.use((req, res, next) => {
 });
 
 // --- Alias old segment preview URLs to the actual MP4 to avoid 404s ---
-/**
- * Frontend sometimes tries "<id>-seg.mp4". We redirect that to "<id>.mp4".
- * Zero visual change; just avoids 404 noise.
- */
-// was: router.get('/api/media/:idSeg', ...)
-router.get('/media/:idSeg', (req, res, next) => {
+// Support BOTH legacy and new route shapes, regardless of where this router is mounted.
+router.get(['/media/:idSeg', '/api/media/:idSeg'], (req, res, next) => {
   const m = String(req.params.idSeg || '').match(/^([a-f0-9-]+)-seg\.mp4$/i);
   if (!m) return next();
   const id = m[1];
   return res.redirect(302, `/api/media/${id}.mp4`);
 });
+
 
 
 
@@ -1476,7 +1473,8 @@ function resolveTemplateUrl({ body = {}, answers = {} } = {}) {
 
 
 /* --------------------- Range-enabled media streamer --------------------- */
-router.get('/media/:file', async (req, res) => {
+router.get(['/media/:file', '/api/media/:file'], async (req, res) => {
+
   housekeeping();
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
@@ -1533,7 +1531,8 @@ function mediaPath(relativeFilename) {
 }
 
 /* ------------------ New: newest generated video helper ------------------ */
-router.get('/generated-latest', (req, res) => {
+router.get(['/generated-latest', '/api/generated-latest'], (req, res) => {
+
   housekeeping();
   try {
     const dir = ensureGeneratedDir();
