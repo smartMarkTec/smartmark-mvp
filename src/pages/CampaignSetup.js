@@ -29,6 +29,9 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
+/* ======================= NEW: creatives persist until campaign duration ends ======================= */
+const DEFAULT_CAMPAIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // safety fallback if no end is known
+
 /* Responsive helper (unchanged) */
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
@@ -49,7 +52,11 @@ const withUser = (u, key) => `u:${u}:${key}`;
 
 function getUserFromStorage() {
   try {
-    return (localStorage.getItem("sm_current_user") || localStorage.getItem("smartmark_login_username") || "").trim();
+    return (
+      (localStorage.getItem("sm_current_user") ||
+        localStorage.getItem("smartmark_login_username") ||
+        "").trim()
+    );
   } catch {
     return "";
   }
@@ -76,7 +83,9 @@ function lsSet(user, key, value, alsoLegacy = false) {
 
 /* ---- creatives map now scoped per-user ---- */
 const CREATIVE_MAP_KEY = (user, actId) =>
-  (user ? withUser(user, `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`) : `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`);
+  user
+    ? withUser(user, `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`)
+    : `sm_creatives_map_${String(actId || "").replace(/^act_/, "")}`;
 
 const readCreativeMap = (user, actId) => {
   try {
@@ -102,6 +111,30 @@ const writeCreativeMap = (user, actId, map) => {
   } catch {}
 };
 
+/* ------------------ NEW: expire logic (persist only until campaign duration ends) ------------------ */
+function isExpiredSavedCreative(saved) {
+  if (!saved) return true;
+  const now = Date.now();
+
+  // If expiresAt is present, use it (this is the “campaign duration is over” rule)
+  if (saved.expiresAt && Number.isFinite(Number(saved.expiresAt))) {
+    return now > Number(saved.expiresAt);
+  }
+
+  // Back-compat: old entries without expiresAt live for 14 days from when saved
+  const base = Number(saved.time) || now;
+  return now > base + DEFAULT_CAMPAIGN_TTL_MS;
+}
+
+function purgeExpiredCreative(map, campaignId) {
+  if (!map || !campaignId) return false;
+  const saved = map[campaignId];
+  if (!saved) return false;
+  if (!isExpiredSavedCreative(saved)) return false;
+  delete map[campaignId];
+  return true;
+}
+
 const calculateFees = (budget) => {
   const parsed = parseFloat(budget);
   if (isNaN(parsed) || parsed <= 0) return { fee: 0, total: 0 };
@@ -112,10 +145,18 @@ const calculateFees = (budget) => {
 
 function DottyMini() {
   return (
-    <span style={{ display:"inline-block", minWidth:32, letterSpacing:3 }}>
-      <span style={{ animation:"dm 1.2s infinite", display:"inline-block" }}>.</span>
-      <span style={{ animation:"dm 1.2s infinite .15s", display:"inline-block", marginLeft:4 }}>.</span>
-      <span style={{ animation:"dm 1.2s infinite .3s", display:"inline-block", marginLeft:4 }}>.</span>
+    <span style={{ display: "inline-block", minWidth: 32, letterSpacing: 3 }}>
+      <span style={{ animation: "dm 1.2s infinite", display: "inline-block" }}>.</span>
+      <span
+        style={{ animation: "dm 1.2s infinite .15s", display: "inline-block", marginLeft: 4 }}
+      >
+        .
+      </span>
+      <span
+        style={{ animation: "dm 1.2s infinite .3s", display: "inline-block", marginLeft: 4 }}
+      >
+        .
+      </span>
       <style>{`@keyframes dm{0%{transform:translateY(0)}30%{transform:translateY(-5px)}60%{transform:translateY(0)}}`}</style>
     </span>
   );
@@ -125,25 +166,53 @@ function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
   const src = imageUrl && !/^https?:\/\//.test(imageUrl) ? backendUrl + imageUrl : imageUrl;
   return (
-    <div style={{
-      position: "fixed", inset: 0, zIndex: 1005,
-      background: "rgba(10,14,17,0.92)",
-      display: "flex", alignItems: "center", justifyContent: "center"
-    }}>
-      <div style={{
-        position: "relative", maxWidth: "88vw", maxHeight: "88vh",
-        borderRadius: 18, background: "#12171b", padding: 0, boxShadow: "0 10px 60px #000c"
-      }}>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 1005,
+        background: "rgba(10,14,17,0.92)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <div
+        style={{
+          position: "relative",
+          maxWidth: "88vw",
+          maxHeight: "88vh",
+          borderRadius: 18,
+          background: "#12171b",
+          padding: 0,
+          boxShadow: "0 10px 60px #000c",
+        }}
+      >
         <img
           src={src || ""}
           alt="Full-screen"
-          style={{ maxWidth: "84vw", maxHeight: "80vh", display: "block", borderRadius: 14, background: "#0f1215" }}
+          style={{
+            maxWidth: "84vw",
+            maxHeight: "80vh",
+            display: "block",
+            borderRadius: 14,
+            background: "#0f1215",
+          }}
         />
         <button
           style={{
-            position: "absolute", top: 12, right: 18, background: "#1b242a",
-            border: "1px solid rgba(255,255,255,0.06)", color: WHITE, borderRadius: 11, padding: "9px 17px",
-            fontWeight: 800, fontSize: 15, cursor: "pointer", boxShadow: "0 1px 6px #14e7b933"
+            position: "absolute",
+            top: 12,
+            right: 18,
+            background: "#1b242a",
+            border: "1px solid rgba(255,255,255,0.06)",
+            color: WHITE,
+            borderRadius: 11,
+            padding: "9px 17px",
+            fontWeight: 800,
+            fontSize: 15,
+            cursor: "pointer",
+            boxShadow: "0 1px 6px #14e7b933",
           }}
           onClick={onClose}
         >
@@ -156,54 +225,84 @@ function ImageModal({ open, imageUrl, onClose }) {
 
 /* ---- helpers for Image/Video carousels (unchanged logic) ---- */
 const navBtn = (dir) => ({
-  position:"absolute",
-  top:"50%",
-  transform:"translateY(-50%)",
+  position: "absolute",
+  top: "50%",
+  transform: "translateY(-50%)",
   [dir < 0 ? "left" : "right"]: 8,
-  background:"rgba(0,0,0,0.55)",
-  color:"#fff",
-  border:"none",
-  borderRadius:10,
-  width:28, height:28,
-  fontSize:16, fontWeight:900,
-  cursor:"pointer",
-  zIndex: 2
+  background: "rgba(0,0,0,0.55)",
+  color: "#fff",
+  border: "none",
+  borderRadius: 10,
+  width: 28,
+  height: 28,
+  fontSize: 16,
+  fontWeight: 900,
+  cursor: "pointer",
+  zIndex: 2,
 });
 const badge = {
-  position:"absolute", bottom:6, right:6,
-  background:"rgba(0,0,0,0.55)", color:"#fff",
-  borderRadius:8, padding:"2px 6px", fontSize:11, fontWeight:900,
-  zIndex: 2
+  position: "absolute",
+  bottom: 6,
+  right: 6,
+  background: "rgba(0,0,0,0.55)",
+  color: "#fff",
+  borderRadius: 8,
+  padding: "2px 6px",
+  fontSize: 11,
+  fontWeight: 900,
+  zIndex: 2,
 };
 
 function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
   const normalized = (items || [])
-    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
+    .map((u) => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
     .filter(Boolean);
 
-  useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
+  useEffect(() => {
+    if (idx >= normalized.length) setIdx(0);
+  }, [normalized, idx]);
 
   if (!normalized.length) {
-    return <div style={{ height, width: "100%", background: "#e9ecef",
-      color: "#a9abb0", fontWeight: 700, display:"flex", alignItems:"center",
-      justifyContent:"center", fontSize: 18 }}>Images</div>;
+    return (
+      <div
+        style={{
+          height,
+          width: "100%",
+          background: "#e9ecef",
+          color: "#a9abb0",
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 18,
+        }}
+      >
+        Images
+      </div>
+    );
   }
   const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
 
   return (
-    <div style={{ position:"relative", background:"#222" }}>
+    <div style={{ position: "relative", background: "#222" }}>
       <img
         src={normalized[idx]}
         alt="Ad"
-        style={{ width:"100%", maxHeight:height, height, objectFit:"cover", display:"block" }}
+        style={{ width: "100%", maxHeight: height, height, objectFit: "cover", display: "block" }}
         onClick={() => onFullscreen && onFullscreen(normalized[idx])}
       />
       {normalized.length > 1 && (
         <>
-          <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">‹</button>
-          <button onClick={() => go(1)} style={navBtn(1)} aria-label="Next">›</button>
-          <div style={badge}>{idx + 1}/{normalized.length}</div>
+          <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">
+            ‹
+          </button>
+          <button onClick={() => go(1)} style={navBtn(1)} aria-label="Next">
+            ›
+          </button>
+          <div style={badge}>
+            {idx + 1}/{normalized.length}
+          </div>
         </>
       )}
     </div>
@@ -213,24 +312,34 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
 function VideoCarousel({ items = [], height = 220 }) {
   const [idx, setIdx] = useState(0);
   const normalized = (items || [])
-    .map(u => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
+    .map((u) => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
     .filter(Boolean);
 
-  useEffect(() => { if (idx >= normalized.length) setIdx(0); }, [normalized, idx]);
+  useEffect(() => {
+    if (idx >= normalized.length) setIdx(0);
+  }, [normalized, idx]);
 
   if (!normalized.length) {
     return (
-      <div style={{
-        height, width: "100%", background: "#e9ecef",
-        color: "#a9abb0", fontWeight: 700, display: "flex",
-        alignItems: "center", justifyContent: "center", fontSize: 18
-      }}>
+      <div
+        style={{
+          height,
+          width: "100%",
+          background: "#e9ecef",
+          color: "#a9abb0",
+          fontWeight: 700,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 18,
+        }}
+      >
         Videos
       </div>
     );
   }
 
-  const go = (d) => setIdx(p => (p + d + normalized.length) % normalized.length);
+  const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
 
   return (
     <div style={{ position: "relative", background: "#222" }}>
@@ -240,15 +349,28 @@ function VideoCarousel({ items = [], height = 220 }) {
         preload="metadata"
         playsInline
         crossOrigin="anonymous"
-        style={{ width: "100%", maxHeight: height, height, display: "block", objectFit: "cover", background:"#111" }}
+        style={{
+          width: "100%",
+          maxHeight: height,
+          height,
+          display: "block",
+          objectFit: "cover",
+          background: "#111",
+        }}
       >
         <source src={normalized[idx]} type="video/mp4" />
       </video>
       {normalized.length > 1 && (
         <>
-          <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">‹</button>
-          <button onClick={() => go(1)} style={navBtn(1)} aria-label="Next">›</button>
-          <div style={badge}>{idx + 1}/{normalized.length}</div>
+          <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">
+            ‹
+          </button>
+          <button onClick={() => go(1)} style={navBtn(1)} aria-label="Next">
+            ›
+          </button>
+          <div style={badge}>
+            {idx + 1}/{normalized.length}
+          </div>
         </>
       )}
     </div>
@@ -262,7 +384,8 @@ function MetricsRow({ metrics }) {
     const impressions = m.impressions ?? "--";
     const clicks = m.clicks ?? "--";
     const ctr = m.ctr ?? "--";
-    const cpc = (m.spend && m.clicks) ? `$${(Number(m.spend)/Number(m.clicks)).toFixed(2)}` : "--";
+    const cpc =
+      m.spend && m.clicks ? `$${(Number(m.spend) / Number(m.clicks)).toFixed(2)}` : "--";
     return [
       { key: "impressions", label: "Impressions", value: impressions },
       { key: "clicks", label: "Clicks", value: clicks },
@@ -282,25 +405,27 @@ function MetricsRow({ metrics }) {
     flexDirection: "column",
     justifyContent: "center",
     gap: 6,
-    boxShadow: "0 2px 10px rgba(0,0,0,0.25)"
+    boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
   };
 
   return (
-    <div style={{ position:"relative", width:"100%" }}>
+    <div style={{ position: "relative", width: "100%" }}>
       <div
         style={{
-          display:"flex",
-          gap:12,
-          overflowX:"auto",
+          display: "flex",
+          gap: 12,
+          overflowX: "auto",
           padding: "6px 2px",
           scrollSnapType: "x proximity",
-          scrollbarWidth: "none"
+          scrollbarWidth: "none",
         }}
       >
-        {cards.map(c => (
-          <div key={c.key} style={{ ...cardStyle, scrollSnapAlign:"start" }}>
-            <div style={{ fontSize:12, color:TEXT_MUTED, fontWeight:900, letterSpacing:0.3 }}>{c.label}</div>
-            <div style={{ fontSize:20, fontWeight:900 }}>{c.value}</div>
+        {cards.map((c) => (
+          <div key={c.key} style={{ ...cardStyle, scrollSnapAlign: "start" }}>
+            <div style={{ fontSize: 12, color: TEXT_MUTED, fontWeight: 900, letterSpacing: 0.3 }}>
+              {c.label}
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 900 }}>{c.value}</div>
           </div>
         ))}
       </div>
@@ -324,8 +449,11 @@ const CampaignSetup = () => {
 
   /* ---------------------------- State (now user-scoped) ---------------------------- */
   const [form, setForm] = useState(() => {
-    try { return JSON.parse(lsGet(resolvedUser, "smartmark_last_campaign_fields") || "{}") || {}; }
-    catch { return {}; }
+    try {
+      return JSON.parse(lsGet(resolvedUser, "smartmark_last_campaign_fields") || "{}") || {};
+    } catch {
+      return {};
+    }
   });
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
@@ -334,8 +462,12 @@ const CampaignSetup = () => {
   const [cashapp, setCashapp] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
   const [email, setEmail] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
 
-  const [selectedAccount, setSelectedAccount] = useState(() => lsGet(resolvedUser, "smartmark_last_selected_account") || "");
-  const [selectedPageId, setSelectedPageId] = useState(() => lsGet(resolvedUser, "smartmark_last_selected_pageId") || "");
+  const [selectedAccount, setSelectedAccount] = useState(
+    () => lsGet(resolvedUser, "smartmark_last_selected_account") || ""
+  );
+  const [selectedPageId, setSelectedPageId] = useState(
+    () => lsGet(resolvedUser, "smartmark_last_selected_pageId") || ""
+  );
 
   const [fbConnected, setFbConnected] = useState(() => {
     const conn = localStorage.getItem(FB_CONN_KEY);
@@ -349,7 +481,9 @@ const CampaignSetup = () => {
   });
 
   const touchFbConn = () => {
-    try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+    try {
+      localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+    } catch {}
   };
 
   useEffect(() => {
@@ -362,10 +496,16 @@ const CampaignSetup = () => {
       setFbConnected(false);
       return;
     }
-    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(() => { setFbConnected(true); touchFbConn(); })
-      .catch(() => { localStorage.removeItem(FB_CONN_KEY); setFbConnected(false); });
+    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then(() => {
+        setFbConnected(true);
+        touchFbConn();
+      })
+      .catch(() => {
+        localStorage.removeItem(FB_CONN_KEY);
+        setFbConnected(false);
+      });
   }, []);
 
   const [adAccounts, setAdAccounts] = useState([]);
@@ -392,7 +532,8 @@ const CampaignSetup = () => {
     images: [],
     videos: [],
     fbVideoIds: [],
-    mediaSelection: (location.state?.mediaSelection || lsGet(resolvedUser, "smartmark_media_selection") || "both").toLowerCase()
+    mediaSelection: (location.state?.mediaSelection || lsGet(resolvedUser, "smartmark_media_selection") || "both")
+      .toLowerCase(),
   });
 
   const {
@@ -402,7 +543,7 @@ const CampaignSetup = () => {
     headline,
     body,
     answers,
-    mediaSelection: navMediaSelection
+    mediaSelection: navMediaSelection,
   } = location.state || {};
 
   const [startDate, setStartDate] = useState(() => {
@@ -436,7 +577,7 @@ const CampaignSetup = () => {
       const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
       if (!end || end <= start) end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
       if (end > maxEnd) end = maxEnd;
-      end.setSeconds(0,0);
+      end.setSeconds(0, 0);
       return end.toISOString().slice(0, 16);
     } catch {
       return endStr;
@@ -450,12 +591,12 @@ const CampaignSetup = () => {
     };
     const sdMaxDay = clampDay(sMonth, sYear);
     const sD = Math.min(sDay, sdMaxDay);
-    const sISO = new Date(2000 + sYear, sMonth - 1, sD, 9, 0, 0).toISOString().slice(0,16);
+    const sISO = new Date(2000 + sYear, sMonth - 1, sD, 9, 0, 0).toISOString().slice(0, 16);
     setStartDate(sISO);
 
     const edMaxDay = clampDay(eMonth, eYear);
     const eD = Math.min(eDay, edMaxDay);
-    let eISO = new Date(2000 + eYear, eMonth - 1, eD, 18, 0, 0).toISOString().slice(0,16);
+    let eISO = new Date(2000 + eYear, eMonth - 1, eD, 18, 0, 0).toISOString().slice(0, 16);
 
     eISO = clampEndForStart(sISO, eISO);
     setEndDate(eISO);
@@ -475,7 +616,7 @@ const CampaignSetup = () => {
         images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
         videos: Array.isArray(draftObj.videos) ? draftObj.videos.slice(0, 2) : [],
         fbVideoIds: Array.isArray(draftObj.fbVideoIds) ? draftObj.fbVideoIds.slice(0, 2) : [],
-        mediaSelection: (draftObj.mediaSelection || navMediaSelection || "both").toLowerCase()
+        mediaSelection: (draftObj.mediaSelection || navMediaSelection || "both").toLowerCase(),
       });
       if (draftObj.mediaSelection) {
         lsSet(resolvedUser, "smartmark_media_selection", String(draftObj.mediaSelection).toLowerCase(), true);
@@ -491,7 +632,7 @@ const CampaignSetup = () => {
       const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
       if (!raw) return;
       const draft = JSON.parse(raw);
-      const ageOk = !draft.savedAt || (Date.now() - draft.savedAt <= DRAFT_TTL_MS);
+      const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
       if (ageOk) applyDraft(draft);
       else localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
     } catch {}
@@ -505,21 +646,17 @@ const CampaignSetup = () => {
     if (!hasDraft) return;
     try {
       if (resolvedUser) {
-        localStorage.setItem(
-          withUser(resolvedUser, CREATIVE_DRAFT_KEY),
-          JSON.stringify({ ...draftCreatives, savedAt: Date.now() })
-        );
+        localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify({ ...draftCreatives, savedAt: Date.now() }));
       } else {
-        localStorage.setItem(
-          CREATIVE_DRAFT_KEY,
-          JSON.stringify({ ...draftCreatives, savedAt: Date.now() })
-        );
+        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify({ ...draftCreatives, savedAt: Date.now() }));
       }
     } catch {}
   }, [draftCreatives]);
 
   const handleClearDraft = () => {
-    try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+    try {
+      sessionStorage.removeItem("draft_form_creatives");
+    } catch {}
     try {
       if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
@@ -540,27 +677,31 @@ const CampaignSetup = () => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
-      try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+      try {
+        localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+      } catch {}
       window.history.replaceState({}, document.title, "/setup");
     }
   }, [location.search]);
 
   useEffect(() => {
     if (fbConnected) {
-      try { localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() })); } catch {}
+      try {
+        localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+      } catch {}
     }
   }, [fbConnected]);
 
   useEffect(() => {
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     const vids = Array.isArray(navVideoUrls) ? navVideoUrls.slice(0, 2) : [];
-    const ids  = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
+    const ids = Array.isArray(navFbVideoIds) ? navFbVideoIds.slice(0, 2) : [];
     if (imgs.length || vids.length || ids.length || navMediaSelection) {
-      setDraftCreatives(dc => ({
+      setDraftCreatives((dc) => ({
         images: imgs.length ? imgs : dc.images,
         videos: vids.length ? vids : dc.videos,
         fbVideoIds: ids.length ? ids : dc.fbVideoIds,
-        mediaSelection: (navMediaSelection || dc.mediaSelection || "both").toLowerCase()
+        mediaSelection: (navMediaSelection || dc.mediaSelection || "both").toLowerCase(),
       }));
       lsSet(resolvedUser, "smartmark_media_selection", (navMediaSelection || "both").toLowerCase(), true);
     }
@@ -568,28 +709,38 @@ const CampaignSetup = () => {
 
   useEffect(() => {
     if (!fbConnected) return;
-    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(json => { setAdAccounts(json.data || []); touchFbConn(); })
+    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((json) => {
+        setAdAccounts(json.data || []);
+        touchFbConn();
+      })
       .catch(() => {});
   }, [fbConnected]);
 
   useEffect(() => {
     if (!fbConnected) return;
-    fetch(`${backendUrl}/auth/facebook/pages`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(json => { setPages(json.data || []); touchFbConn(); })
+    fetch(`${backendUrl}/auth/facebook/pages`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((json) => {
+        setPages(json.data || []);
+        touchFbConn();
+      })
       .catch(() => {});
   }, [fbConnected]);
 
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        const list = Array.isArray(data) ? data : (data?.data || []);
-        const activeCount = list.filter(c => (c.status || c.effective_status) === "ACTIVE" || (c.status || c.effective_status) === "PAUSED").length;
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        const list = Array.isArray(data) ? data : data?.data || [];
+        const activeCount = list.filter(
+          (c) =>
+            (c.status || c.effective_status) === "ACTIVE" ||
+            (c.status || c.effective_status) === "PAUSED"
+        ).length;
         setCampaignCount(activeCount);
       })
       .catch(() => {});
@@ -598,10 +749,10 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
     const acctId = String(selectedAccount).replace("act_", "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        const list = (data && data.data) ? data.data.slice(0, 2) : [];
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
+      .then((res) => res.json())
+      .then((data) => {
+        const list = data && data.data ? data.data.slice(0, 2) : [];
         setCampaigns(list);
         if (!selectedCampaignId && list.length > 0) {
           setSelectedCampaignId(list[0].id);
@@ -614,28 +765,42 @@ const CampaignSetup = () => {
   useEffect(() => {
     if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
     const acctId = String(selectedAccount).replace(/^act_/, "");
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`, { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        const row = (Array.isArray(data?.data) && data.data[0]) ? data.data[0] : {};
+    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`, {
+      credentials: "include",
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        const row = Array.isArray(data?.data) && data.data[0] ? data.data[0] : {};
         const normalized = {
           impressions: row.impressions ? String(row.impressions) : "--",
           clicks: row.clicks ? String(row.clicks) : "--",
           ctr: row.ctr ? String(row.ctr) : "--",
           spend: row.spend ? Number(row.spend) : undefined,
         };
-        setMetricsMap(m => ({ ...m, [expandedId]: normalized }));
+        setMetricsMap((m) => ({ ...m, [expandedId]: normalized }));
       })
-      .catch(() => setMetricsMap(m => ({ ...m, [expandedId]: { impressions:"--", clicks:"--", ctr:"--" } })));
+      .catch(() => setMetricsMap((m) => ({ ...m, [expandedId]: { impressions: "--", clicks: "--", ctr: "--" } })));
   }, [expandedId, selectedAccount]);
 
   // Persist (user-scoped) + alsoLegacy for creds so Login prefill always works
-  useEffect(() => { lsSet(resolvedUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate })); }, [form, startDate, endDate]);
-  useEffect(() => { lsSet(resolvedUser, "smartmark_last_budget", budget); }, [budget]);
-  useEffect(() => { lsSet(resolvedUser, "smartmark_login_username", cashapp, true); }, [cashapp]);
-  useEffect(() => { lsSet(resolvedUser, "smartmark_login_password", email, true); }, [email]);
-  useEffect(() => { lsSet(resolvedUser, "smartmark_last_selected_account", selectedAccount); }, [selectedAccount]);
-  useEffect(() => { lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId); }, [selectedPageId]);
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate }));
+  }, [form, startDate, endDate]);
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_last_budget", budget);
+  }, [budget]);
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_login_username", cashapp, true);
+  }, [cashapp]);
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_login_password", email, true);
+  }, [email]);
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_last_selected_account", selectedAccount);
+  }, [selectedAccount]);
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId);
+  }, [selectedPageId]);
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
@@ -643,18 +808,18 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       if (isPaused) {
-        const r = await fetch(
-          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
-          { method: "POST", credentials: "include" }
-        );
+        const r = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, {
+          method: "POST",
+          credentials: "include",
+        });
         if (!r.ok) throw new Error("Unpause failed");
         setCampaignStatus("ACTIVE");
         setIsPaused(false);
       } else {
-        const r = await fetch(
-          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
-          { method: "POST", credentials: "include" }
-        );
+        const r = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, {
+          method: "POST",
+          credentials: "include",
+        });
         if (!r.ok) throw new Error("Pause failed");
         setCampaignStatus("PAUSED");
         setIsPaused(true);
@@ -670,19 +835,29 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).replace(/^act_/, "");
     setLoading(true);
     try {
-      const r = await fetch(
-        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
-        { method: "POST", credentials: "include" }
-      );
+      const r = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, {
+        method: "POST",
+        credentials: "include",
+      });
       if (!r.ok) throw new Error("Archive failed");
       setCampaignStatus("ARCHIVED");
       setLaunched(false);
       setLaunchResult(null);
       setSelectedCampaignId("");
-      setMetricsMap(m => {
+      setMetricsMap((m) => {
         const { [selectedCampaignId]: _, ...rest } = m;
         return rest;
       });
+
+      // also remove persisted creatives for this campaign (optional but clean)
+      try {
+        const map = readCreativeMap(resolvedUser, acctId);
+        if (map[selectedCampaignId]) {
+          delete map[selectedCampaignId];
+          writeCreativeMap(resolvedUser, acctId, map);
+        }
+      } catch {}
+
       alert("Campaign deleted.");
     } catch {
       alert("Could not delete campaign.");
@@ -692,7 +867,7 @@ const CampaignSetup = () => {
 
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
-    navigate('/form');
+    navigate("/form");
   };
 
   const canLaunch = !!(
@@ -714,7 +889,9 @@ const CampaignSetup = () => {
       if (end > maxEnd) end = maxEnd;
       if (end <= start) end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
       return { startISO: start.toISOString(), endISO: end.toISOString() };
-    } catch { return { startISO: null, endISO: null }; }
+    } catch {
+      return { startISO: null, endISO: null };
+    }
   }
 
   const handleLaunch = async () => {
@@ -728,19 +905,22 @@ const CampaignSetup = () => {
         endDate ? new Date(endDate).toISOString() : null
       );
 
-      const filteredImages = draftCreatives.mediaSelection === "video" ? [] : (draftCreatives.images || []).slice(0,2);
-      const filteredVideos = draftCreatives.mediaSelection === "image" ? [] : (draftCreatives.videos || []).slice(0,2);
-      const filteredFbIds  = draftCreatives.mediaSelection === "image" ? [] : (draftCreatives.fbVideoIds || []).slice(0,2);
+      const filteredImages =
+        draftCreatives.mediaSelection === "video" ? [] : (draftCreatives.images || []).slice(0, 2);
+      const filteredVideos =
+        draftCreatives.mediaSelection === "image" ? [] : (draftCreatives.videos || []).slice(0, 2);
+      const filteredFbIds =
+        draftCreatives.mediaSelection === "image" ? [] : (draftCreatives.fbVideoIds || []).slice(0, 2);
 
       const payload = {
         form: { ...form },
-        budget: safeBudget,
+        budget: safeBudget, // (this is your daily budget in Meta)
         campaignType: form?.campaignType || "Website Traffic",
         pageId: selectedPageId,
         aiAudience: form?.aiAudience || answers?.aiAudience || "",
         adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
         answers: answers || {},
-        mediaSelection: (draftCreatives.mediaSelection || 'both').toLowerCase(),
+        mediaSelection: (draftCreatives.mediaSelection || "both").toLowerCase(),
         imageVariants: filteredImages,
         videoVariants: filteredVideos,
         fbVideoIds: filteredFbIds,
@@ -749,8 +929,8 @@ const CampaignSetup = () => {
         flightEnd: endISO,
         overrideCountPerType: {
           images: Math.min(2, filteredImages.length),
-          videos: Math.min(2, Math.max(filteredVideos.length, filteredFbIds.length))
-        }
+          videos: Math.min(2, Math.max(filteredVideos.length, filteredFbIds.length)),
+        },
       };
 
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
@@ -763,18 +943,26 @@ const CampaignSetup = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
+      // =================== UPDATED: persist creatives UNTIL campaign duration ends ===================
       const map = readCreativeMap(resolvedUser, acctId);
       if (json.campaignId) {
+        const expiresAt =
+          endISO && !isNaN(new Date(endISO).getTime())
+            ? new Date(endISO).getTime()
+            : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+
         map[json.campaignId] = {
           images: filteredImages,
           videos: filteredVideos,
           fbVideoIds: filteredFbIds,
-          mediaSelection: (draftCreatives.mediaSelection || 'both').toLowerCase(),
+          mediaSelection: (draftCreatives.mediaSelection || "both").toLowerCase(),
           time: Date.now(),
-          name: form.campaignName || "Untitled"
+          expiresAt, // <-- keeps creatives on setup page until the campaign duration ends
+          name: form.campaignName || "Untitled",
         };
         writeCreativeMap(resolvedUser, acctId, map);
       }
+      // =================================================================================================
 
       sessionStorage.removeItem("draft_form_creatives");
       try {
@@ -829,11 +1017,17 @@ const CampaignSetup = () => {
   const { fee, total } = calculateFees(budget);
 
   const getSavedCreatives = (campaignId) => {
-    if (!selectedAccount) return { images:[], videos:[], fbVideoIds:[], mediaSelection:"both" };
+    if (!selectedAccount) return { images: [], videos: [], fbVideoIds: [], mediaSelection: "both" };
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(resolvedUser, acctKey);
+
+    // =================== UPDATED: drop expired creatives automatically ===================
+    const didPurge = purgeExpiredCreative(map, campaignId);
+    if (didPurge) writeCreativeMap(resolvedUser, acctKey, map);
+    // ================================================================================
+
     const saved = map[campaignId] || null;
-    if (!saved) return { images:[], videos:[], fbVideoIds:[], mediaSelection:"both" };
+    if (!saved) return { images: [], videos: [], fbVideoIds: [], mediaSelection: "both" };
 
     let mediaSelection = (saved.mediaSelection || "").toLowerCase();
     if (!mediaSelection) {
@@ -846,7 +1040,7 @@ const CampaignSetup = () => {
       images: saved.images || [],
       videos: saved.videos || [],
       fbVideoIds: saved.fbVideoIds || [],
-      mediaSelection
+      mediaSelection,
     };
   };
 
@@ -866,8 +1060,8 @@ const CampaignSetup = () => {
     (draftCreatives.fbVideoIds && draftCreatives.fbVideoIds.length);
 
   const rightPaneCampaigns = [
-    ...campaigns.map(c => ({ ...c, __isDraft:false })),
-    ...(hasDraft ? [{ id:"__DRAFT__", name: (form.campaignName || "Untitled"), __isDraft:true }] : [])
+    ...campaigns.map((c) => ({ ...c, __isDraft: false })),
+    ...(hasDraft ? [{ id: "__DRAFT__", name: form.campaignName || "Untitled", __isDraft: true }] : []),
   ].slice(0, 2 + (hasDraft ? 1 : 0));
 
   /* ================================ UI ================================ */
@@ -882,7 +1076,7 @@ const CampaignSetup = () => {
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        overflowX: "hidden"
+        overflowX: "hidden",
       }}
     >
       <div
@@ -896,14 +1090,14 @@ const CampaignSetup = () => {
           background: `radial-gradient(40% 40% at 50% 50%, ${GLOW_TEAL}, transparent 70%)`,
           filter: "blur(20px)",
           pointerEvents: "none",
-          zIndex: 0
+          zIndex: 0,
         }}
       />
 
       <div style={{ width: "100%", maxWidth: 1180, padding: "22px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, justifyContent: "space-between" }}>
           <button
-            onClick={() => navigate('/form')}
+            onClick={() => navigate("/form")}
             style={{
               background: "#202824e0",
               color: WHITE,
@@ -914,14 +1108,14 @@ const CampaignSetup = () => {
               fontSize: "1rem",
               letterSpacing: "0.6px",
               cursor: "pointer",
-              boxShadow: "0 2px 10px rgba(0,0,0,0.25)"
+              boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
             }}
           >
             ← Back
           </button>
 
           <button
-            onClick={() => navigate('/')}
+            onClick={() => navigate("/")}
             style={{
               background: "#232828",
               color: WHITE,
@@ -932,7 +1126,7 @@ const CampaignSetup = () => {
               fontSize: "1rem",
               letterSpacing: "0.6px",
               cursor: "pointer",
-              boxShadow: "0 2px 10px rgba(0,0,0,0.25)"
+              boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
             }}
           >
             Home
@@ -950,7 +1144,7 @@ const CampaignSetup = () => {
               background: `linear-gradient(90deg, #ffffff, ${ACCENT})`,
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
-              textAlign: "center"
+              textAlign: "center",
             }}
           >
             Campaign Setup
@@ -971,27 +1165,31 @@ const CampaignSetup = () => {
           padding: isMobile ? "0 4vw 40px" : "0 36px 48px",
           minHeight: "92vh",
           position: "relative",
-          zIndex: 1
+          zIndex: 1,
         }}
       >
-        <main style={{
-          background: EDGE_BG,
-          border: `1px solid ${INPUT_BORDER}`,
-          borderRadius: "22px",
-          boxShadow: "0 16px 48px rgba(0,0,0,0.35)",
-          padding: isMobile ? "24px 16px" : "32px 26px",
-          minWidth: isMobile ? "98vw" : 520,
-          maxWidth: isMobile ? "100vw" : 600,
-          flex: "0 1 590px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "22px",
-          alignItems: "center",
-          marginBottom: isMobile ? 24 : 0,
-          minHeight: "600px",
-        }}>
+        <main
+          style={{
+            background: EDGE_BG,
+            border: `1px solid ${INPUT_BORDER}`,
+            borderRadius: "22px",
+            boxShadow: "0 16px 48px rgba(0,0,0,0.35)",
+            padding: isMobile ? "24px 16px" : "32px 26px",
+            minWidth: isMobile ? "98vw" : 520,
+            maxWidth: isMobile ? "100vw" : 600,
+            flex: "0 1 590px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "22px",
+            alignItems: "center",
+            marginBottom: isMobile ? 24 : 0,
+            minHeight: "600px",
+          }}
+        >
           <button
-            onClick={() => { window.location.href = `${backendUrl}/auth/facebook`; }}
+            onClick={() => {
+              window.location.href = `${backendUrl}/auth/facebook`;
+            }}
             style={{
               padding: "14px 22px",
               borderRadius: "14px",
@@ -1007,8 +1205,8 @@ const CampaignSetup = () => {
               maxWidth: 420,
               transition: "transform 0.15s",
             }}
-            onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-2px)")}
-            onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
           >
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
           </button>
@@ -1029,45 +1227,57 @@ const CampaignSetup = () => {
               boxShadow: "0 2px 10px rgba(12,63,46,0.5)",
               transition: "transform 0.15s",
             }}
-            onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-2px)")}
-            onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
           >
             Add Payment Method
           </button>
 
           <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
-              Campaign Name
-            </label>
-            <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", border: `1px solid ${INPUT_BORDER}` }}>
+            <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>Campaign Name</label>
+            <div
+              style={{
+                background: INPUT_BG,
+                borderRadius: 12,
+                padding: "10px 12px",
+                border: `1px solid ${INPUT_BORDER}`,
+              }}
+            >
               <input
                 type="text"
                 value={form.campaignName || ""}
-                onChange={e => setForm({ ...form, campaignName: e.target.value })}
+                onChange={(e) => setForm({ ...form, campaignName: e.target.value })}
                 placeholder="Type a name..."
                 style={{
-                  background:"transparent",
-                  border:"none",
-                  outline:"none",
-                  width:"100%",
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  width: "100%",
                   color: TEXT_DIM,
-                  fontSize:"1.02rem",
-                  fontWeight:800
+                  fontSize: "1.02rem",
+                  fontWeight: 800,
                 }}
               />
             </div>
           </div>
 
-          <div style={{ width:"100%", maxWidth:420, display:"flex", flexDirection:"column", gap:10 }}>
+          <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
             <div style={{ color: WHITE, fontWeight: 900, fontSize: "1.02rem" }}>Campaign Duration</div>
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
-              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Start</label>
-                <div style={{
-                  display:"flex", gap:10, alignItems:"center",
-                  padding:"8px 10px", borderRadius:12, background:INPUT_BG, border:`1px solid ${INPUT_BORDER}`
-                }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>Start</label>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                    padding: "8px 10px",
+                    borderRadius: 12,
+                    background: INPUT_BG,
+                    border: `1px solid ${INPUT_BORDER}`,
+                  }}
+                >
                   <Picker value={sMonth} options={months} onChange={setSMonth} />
                   <Sep />
                   <Picker value={sDay} options={daysFor(sMonth, sYear)} onChange={setSDay} />
@@ -1076,12 +1286,19 @@ const CampaignSetup = () => {
                 </div>
               </div>
 
-              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
-                <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>End</label>
-                <div style={{
-                  display:"flex", gap:10, alignItems:"center",
-                  padding:"8px 10px", borderRadius:12, background:INPUT_BG, border:`1px solid ${INPUT_BORDER}`
-                }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>End</label>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    alignItems: "center",
+                    padding: "8px 10px",
+                    borderRadius: 12,
+                    background: INPUT_BG,
+                    border: `1px solid ${INPUT_BORDER}`,
+                  }}
+                >
                   <Picker value={eMonth} options={months} onChange={setEMonth} />
                   <Sep />
                   <Picker value={eDay} options={daysFor(eMonth, eYear)} onChange={setEDay} />
@@ -1097,34 +1314,44 @@ const CampaignSetup = () => {
           </div>
 
           <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
+            {/* UPDATED LABEL: daily budget */}
             <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
-              Campaign Budget ($)
+              Daily Budget ($)
             </label>
-            <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", border: `1px solid ${INPUT_BORDER}` }}>
+            <div
+              style={{
+                background: INPUT_BG,
+                borderRadius: 12,
+                padding: "10px 12px",
+                border: `1px solid ${INPUT_BORDER}`,
+              }}
+            >
               <input
                 type="number"
-                placeholder="Enter budget (minimum $3)"
+                placeholder="Enter daily budget (minimum $3/day)"
                 min={3}
                 step={1}
                 value={budget}
-                onChange={e => setBudget(e.target.value)}
+                onChange={(e) => setBudget(e.target.value)}
                 style={{
-                  background:"transparent",
-                  border:"none",
-                  outline:"none",
-                  width:"100%",
+                  background: "transparent",
+                  border: "none",
+                  outline: "none",
+                  width: "100%",
                   color: TEXT_DIM,
-                  fontSize:"1.02rem",
-                  fontWeight:800
+                  fontSize: "1.02rem",
+                  fontWeight: 800,
                 }}
               />
             </div>
+
             <div style={{ color: "#b7f5c2", fontWeight: 800 }}>
-              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total: <span style={{ color: WHITE }}>${total.toFixed(2)}</span>
+              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total:{" "}
+              <span style={{ color: WHITE }}>${total.toFixed(2)}</span>
             </div>
 
             {parseFloat(budget) >= 3 && (
-              <div style={{ width: "100%", display:"flex", flexDirection:"column", gap:10 }}>
+              <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
                 <button
                   onClick={() => window.open("https://cash.app", "_blank")}
                   style={{
@@ -1138,49 +1365,69 @@ const CampaignSetup = () => {
                     boxShadow: "0 2px 12px rgba(12,196,190,0.35)",
                     transition: "transform 0.15s",
                   }}
-                  onMouseEnter={e => (e.currentTarget.style.transform = "translateY(-2px)")}
-                  onMouseLeave={e => (e.currentTarget.style.transform = "translateY(0)")}
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
                 >
                   Pay ${calculateFees(budget).fee.toFixed(0)}
                 </button>
 
                 <div>
-                  <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Cashtag (your username)</label>
-                  <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", marginTop: 6, border:`1px solid ${INPUT_BORDER}` }}>
+                  <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
+                    Cashtag (your username)
+                  </label>
+                  <div
+                    style={{
+                      background: INPUT_BG,
+                      borderRadius: 12,
+                      padding: "10px 12px",
+                      marginTop: 6,
+                      border: `1px solid ${INPUT_BORDER}`,
+                    }}
+                  >
                     <input
                       type="text"
                       value={cashapp}
-                      onChange={e => setCashapp(e.target.value)}
+                      onChange={(e) => setCashapp(e.target.value)}
                       placeholder="$yourcashtag"
                       style={{
-                        background:"transparent",
-                        border:"none",
-                        outline:"none",
-                        width:"100%",
+                        background: "transparent",
+                        border: "none",
+                        outline: "none",
+                        width: "100%",
                         color: TEXT_DIM,
-                        fontSize:"1rem",
-                        fontWeight:800
+                        fontSize: "1rem",
+                        fontWeight: 800,
                       }}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label style={{ color:TEXT_MUTED, fontWeight:800, fontSize:"0.92rem" }}>Email (used as password)</label>
-                  <div style={{ background: INPUT_BG, borderRadius: 12, padding: "10px 12px", marginTop: 6, border:`1px solid ${INPUT_BORDER}` }}>
+                  <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
+                    Email (used as password)
+                  </label>
+                  <div
+                    style={{
+                      background: INPUT_BG,
+                      borderRadius: 12,
+                      padding: "10px 12px",
+                      marginTop: 6,
+                      border: `1px solid ${INPUT_BORDER}`,
+                    }}
+                  >
                     <input
                       type="email"
                       value={email}
-                      onChange={e => setEmail(e.target.value)}
+                      onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@example.com"
                       style={{
-                        background:"transparent",
-                        border:"none",
-                        outline:"none",
-                        width:"100%",
+                        background: "transparent",
+                        border: "none",
+                        outline: "none",
+                        width: "100%",
                         color: TEXT_DIM,
-                        fontSize:"1rem",
-                        fontWeight:800
+                        fontSize: "1rem",
+                        fontWeight: 800,
                       }}
                     />
                   </div>
@@ -1193,7 +1440,7 @@ const CampaignSetup = () => {
             onClick={handleLaunch}
             disabled={loading || campaignCount >= 2 || !canLaunch}
             style={{
-              background: (campaignCount >= 2 || !canLaunch) ? "#8b8d90" : ACCENT,
+              background: campaignCount >= 2 || !canLaunch ? "#8b8d90" : ACCENT,
               color: "#0f1418",
               border: "none",
               borderRadius: 14,
@@ -1202,43 +1449,49 @@ const CampaignSetup = () => {
               padding: "14px 36px",
               marginTop: 6,
               boxShadow: "0 2px 16px rgba(12,196,190,0.25)",
-              cursor: (loading || campaignCount >= 2 || !canLaunch) ? "not-allowed" : "pointer",
-              opacity: (loading || campaignCount >= 2 || !canLaunch) ? 0.6 : 1,
+              cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
+              opacity: loading || campaignCount >= 2 || !canLaunch ? 0.6 : 1,
               transition: "transform 0.15s",
             }}
-            onMouseEnter={e => {
+            onMouseEnter={(e) => {
               if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(-2px)";
             }}
-            onMouseLeave={e => { e.currentTarget.style.transform = "translateY(0)"; }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = "translateY(0)";
+            }}
           >
             {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
           </button>
 
           {launched && launchResult && (
-            <div style={{
-              color: "#1eea78",
-              fontWeight: 900,
-              marginTop: "0.8rem",
-              fontSize: "0.98rem",
-              textShadow: "0 2px 8px #0a893622"
-            }}>
+            <div
+              style={{
+                color: "#1eea78",
+                fontWeight: 900,
+                marginTop: "0.8rem",
+                fontSize: "0.98rem",
+                textShadow: "0 2px 8px #0a893622",
+              }}
+            >
               Campaign launched! ID: {launchResult.campaignId || "--"}
             </div>
           )}
         </main>
 
         {/* RIGHT PANE unchanged below */}
-        <aside style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: isMobile ? "center" : "flex-start",
-          width: isMobile ? "100vw" : "100%",
-          marginTop: isMobile ? 8 : 0,
-          gap: "1.6rem",
-          minWidth: isMobile ? "100vw" : 400,
-          maxWidth: 560,
-        }}>
+        <aside
+          style={{
+            flex: 1,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: isMobile ? "center" : "flex-start",
+            width: isMobile ? "100vw" : "100%",
+            marginTop: isMobile ? 8 : 0,
+            gap: "1.6rem",
+            minWidth: isMobile ? "100vw" : 400,
+            maxWidth: 560,
+          }}
+        >
           <div
             style={{
               background: CARD_BG,
@@ -1255,8 +1508,8 @@ const CampaignSetup = () => {
               minHeight: "600px",
             }}
           >
-            <div style={{ width:"100%", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-              <div style={{ fontSize:"1.08rem", fontWeight: 900, color: WHITE, letterSpacing: 0.3 }}>
+            <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontSize: "1.08rem", fontWeight: 900, color: WHITE, letterSpacing: 0.3 }}>
                 Active Campaigns
               </div>
               <div style={{ display: "flex", gap: "0.6rem" }}>
@@ -1270,12 +1523,13 @@ const CampaignSetup = () => {
                     borderRadius: 10,
                     fontWeight: 900,
                     fontSize: 20,
-                    width: 36, height: 36,
+                    width: 36,
+                    height: 36,
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
                   }}
                   title={isPaused ? "Play" : "Pause"}
                 >
@@ -1291,12 +1545,13 @@ const CampaignSetup = () => {
                     borderRadius: 10,
                     fontWeight: 900,
                     fontSize: 18,
-                    width: 36, height: 36,
+                    width: 36,
+                    height: 36,
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
                   }}
                   title="Delete"
                 >
@@ -1312,12 +1567,13 @@ const CampaignSetup = () => {
                       borderRadius: 10,
                       fontWeight: 900,
                       fontSize: 20,
-                      width: 36, height: 36,
+                      width: 36,
+                      height: 36,
                       cursor: "pointer",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.25)"
+                      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
                     }}
                     title="New Campaign"
                   >
@@ -1327,60 +1583,65 @@ const CampaignSetup = () => {
               </div>
             </div>
 
-            <div style={{ width:"100%", display:"flex", flexDirection:"column", gap:10 }}>
-              {rightPaneCampaigns.map(c => {
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+              {rightPaneCampaigns.map((c) => {
                 const isDraft = !!c.__isDraft;
                 const id = c.id;
                 const isOpen = expandedId === id;
-                const name = isDraft ? (form.campaignName || "Untitled") : (c.name || "Campaign");
+                const name = isDraft ? form.campaignName || "Untitled" : c.name || "Campaign";
                 const creatives = isDraft ? draftCreatives : getSavedCreatives(id);
                 const showImages = creatives.mediaSelection === "image" || creatives.mediaSelection === "both";
                 const showVideos = creatives.mediaSelection === "video" || creatives.mediaSelection === "both";
 
                 return (
-                  <div key={id} style={{
-                    width:"100%",
-                    background:PANEL_BG,
-                    borderRadius:"12px",
-                    padding:"8px",
-                    border:`1px solid ${INPUT_BORDER}`,
-                    boxShadow: "0 2px 12px rgba(0,0,0,0.25)"
-                  }}>
+                  <div
+                    key={id}
+                    style={{
+                      width: "100%",
+                      background: PANEL_BG,
+                      borderRadius: "12px",
+                      padding: "8px",
+                      border: `1px solid ${INPUT_BORDER}`,
+                      boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+                    }}
+                  >
                     <div
                       onClick={() => {
                         setExpandedId(isOpen ? null : id);
                         if (!isDraft) setSelectedCampaignId(id);
                       }}
                       style={{
-                        display:"flex",
-                        alignItems:"center",
-                        justifyContent:"space-between",
-                        cursor:"pointer",
-                        padding:"8px 10px",
-                        borderRadius:10,
-                        background:"#161c21",
-                        border:`1px solid ${INPUT_BORDER}`
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        cursor: "pointer",
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        background: "#161c21",
+                        border: `1px solid ${INPUT_BORDER}`,
                       }}
                     >
-                      <div style={{ display:"flex", alignItems:"center", gap:10, color:WHITE, fontWeight:900 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, color: WHITE, fontWeight: 900 }}>
                         <FaChevronDown
                           style={{
                             transform: isOpen ? "rotate(180deg)" : "rotate(0deg)",
-                            transition: "transform 0.18s"
+                            transition: "transform 0.18s",
                           }}
                         />
                         <span>{name}</span>
                         {isDraft && (
-                          <span style={{
-                            marginLeft:8,
-                            padding:"2px 8px",
-                            borderRadius:999,
-                            background:"#2d5b45",
-                            color:"#aef4da",
-                            fontSize:11,
-                            fontWeight:900,
-                            letterSpacing:0.5
-                          }}>
+                          <span
+                            style={{
+                              marginLeft: 8,
+                              padding: "2px 8px",
+                              borderRadius: 999,
+                              background: "#2d5b45",
+                              color: "#aef4da",
+                              fontSize: 11,
+                              fontWeight: 900,
+                              letterSpacing: 0.5,
+                            }}
+                          >
                             IN&nbsp;PROGRESS
                           </span>
                         )}
@@ -1388,111 +1649,127 @@ const CampaignSetup = () => {
 
                       {isDraft ? (
                         <button
-                          onClick={(e) => { e.stopPropagation(); handleClearDraft(); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleClearDraft();
+                          }}
                           title="Discard draft"
                           aria-label="Discard draft"
                           style={{
-                            background:"#5b2d2d",
-                            color:"#ffecec",
-                            border:"none",
-                            borderRadius:10,
-                            fontWeight:900,
-                            width:28,
-                            height:28,
-                            lineHeight:"28px",
-                            textAlign:"center",
-                            cursor:"pointer",
-                            boxShadow:"0 1px 6px rgba(0,0,0,0.25)"
+                            background: "#5b2d2d",
+                            color: "#ffecec",
+                            border: "none",
+                            borderRadius: 10,
+                            fontWeight: 900,
+                            width: 28,
+                            height: 28,
+                            lineHeight: "28px",
+                            textAlign: "center",
+                            cursor: "pointer",
+                            boxShadow: "0 1px 6px rgba(0,0,0,0.25)",
                           }}
                         >
                           ×
                         </button>
                       ) : (
-                        <div style={{ color:"#89f0cc", fontSize:12, fontWeight:900 }}>
-                          {(c.status || c.effective_status || "ACTIVE")}
+                        <div style={{ color: "#89f0cc", fontSize: 12, fontWeight: 900 }}>
+                          {c.status || c.effective_status || "ACTIVE"}
                         </div>
                       )}
                     </div>
 
                     {isOpen && (
-                      <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:10 }}>
+                      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
                         {!isDraft && (
-                          <div style={{ width:"100%" }}>
+                          <div style={{ width: "100%" }}>
                             <MetricsRow metrics={metricsMap[id]} />
                           </div>
                         )}
 
-                        <div style={{
-                          width: "100%",
-                          background: "#14191e",
-                          borderRadius: "12px",
-                          padding: "10px",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 12,
-                          border:`1px solid ${INPUT_BORDER}`
-                        }}>
+                        <div
+                          style={{
+                            width: "100%",
+                            background: "#14191e",
+                            borderRadius: "12px",
+                            padding: "10px",
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 12,
+                            border: `1px solid ${INPUT_BORDER}`,
+                          }}
+                        >
                           <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
                             Creatives
                           </div>
 
                           {showImages && (
-                            <div style={{
-                              background:"#ffffff",
-                              borderRadius:12,
-                              border:"1.2px solid #eaeaea",
-                              overflow:"hidden",
-                              boxShadow:"0 2px 16px rgba(0,0,0,0.12)"
-                            }}>
-                              <div style={{
-                                background:"#f5f6fa",
-                                padding:"8px 12px",
-                                borderBottom:"1px solid #e0e4eb",
-                                display:"flex",
-                                justifyContent:"space-between",
-                                alignItems:"center",
-                                color:"#495a68",
-                                fontWeight:800,
-                                fontSize: "0.95rem"
-                              }}>
+                            <div
+                              style={{
+                                background: "#ffffff",
+                                borderRadius: 12,
+                                border: "1.2px solid #eaeaea",
+                                overflow: "hidden",
+                                boxShadow: "0 2px 16px rgba(0,0,0,0.12)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  background: "#f5f6fa",
+                                  padding: "8px 12px",
+                                  borderBottom: "1px solid #e0e4eb",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  color: "#495a68",
+                                  fontWeight: 800,
+                                  fontSize: "0.95rem",
+                                }}
+                              >
                                 <span>Images</span>
                               </div>
                               <ImageCarousel
                                 items={creatives.images}
                                 height={CREATIVE_HEIGHT}
-                                onFullscreen={(url) => { setModalImg(url); setShowImageModal(true); }}
+                                onFullscreen={(url) => {
+                                  setModalImg(url);
+                                  setShowImageModal(true);
+                                }}
                               />
                             </div>
                           )}
 
                           {showVideos && (
-                            <div style={{
-                              background:"#ffffff",
-                              borderRadius:12,
-                              border:"1.2px solid #eaeaea",
-                              overflow:"hidden",
-                              boxShadow:"0 2px 16px rgba(0,0,0,0.12)"
-                            }}>
-                              <div style={{
-                                background:"#f5f6fa",
-                                padding:"8px 12px",
-                                borderBottom:"1px solid #e0e4eb",
-                                display:"flex",
-                                justifyContent:"space-between",
-                                alignItems:"center",
-                                color:"#495a68",
-                                fontWeight:800,
-                                fontSize: "0.95rem"
-                              }}>
+                            <div
+                              style={{
+                                background: "#ffffff",
+                                borderRadius: 12,
+                                border: "1.2px solid #eaeaea",
+                                overflow: "hidden",
+                                boxShadow: "0 2px 16px rgba(0,0,0,0.12)",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  background: "#f5f6fa",
+                                  padding: "8px 12px",
+                                  borderBottom: "1px solid #e0e4eb",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  color: "#495a68",
+                                  fontWeight: 800,
+                                  fontSize: "0.95rem",
+                                }}
+                              >
                                 <span>Videos</span>
-                                {(!creatives.videos || creatives.videos.length === 0) ? <DottyMini/> : null}
+                                {!creatives.videos || creatives.videos.length === 0 ? <DottyMini /> : null}
                               </div>
                               <VideoCarousel items={creatives.videos} height={CREATIVE_HEIGHT} />
                             </div>
                           )}
 
                           {!showImages && !showVideos && (
-                            <div style={{ color:"#c9d7d2", fontWeight:800, padding:"8px 4px" }}>
+                            <div style={{ color: "#c9d7d2", fontWeight: 800, padding: "8px 4px" }}>
                               No creatives saved for this campaign yet.
                             </div>
                           )}
@@ -1504,22 +1781,24 @@ const CampaignSetup = () => {
               })}
             </div>
 
-            <div style={{
-              width: "100%",
-              marginTop: 8,
-              background: "#14191e",
-              borderRadius: "12px",
-              padding: "12px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-              border:`1px solid ${INPUT_BORDER}`
-            }}>
+            <div
+              style={{
+                width: "100%",
+                marginTop: 8,
+                background: "#14191e",
+                borderRadius: "12px",
+                padding: "12px",
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+                border: `1px solid ${INPUT_BORDER}`,
+              }}
+            >
               <div>
                 <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Ad Account</div>
                 <select
                   value={selectedAccount}
-                  onChange={e => setSelectedAccount(e.target.value)}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
                   style={{
                     padding: "12px",
                     borderRadius: "12px",
@@ -1530,10 +1809,11 @@ const CampaignSetup = () => {
                     background: "#1a2025",
                     color: TEXT_DIM,
                     marginTop: 6,
-                    fontWeight: 800
-                  }}>
+                    fontWeight: 800,
+                  }}
+                >
                   <option value="">Select an ad account</option>
-                  {adAccounts.map(ac => (
+                  {adAccounts.map((ac) => (
                     <option key={ac.id} value={ac.id.replace("act_", "")}>
                       {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
                     </option>
@@ -1545,7 +1825,7 @@ const CampaignSetup = () => {
                 <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Facebook Page</div>
                 <select
                   value={selectedPageId}
-                  onChange={e => setSelectedPageId(e.target.value)}
+                  onChange={(e) => setSelectedPageId(e.target.value)}
                   style={{
                     padding: "12px",
                     borderRadius: "12px",
@@ -1556,11 +1836,14 @@ const CampaignSetup = () => {
                     background: "#1a2025",
                     color: TEXT_DIM,
                     marginTop: 6,
-                    fontWeight: 800
-                  }}>
+                    fontWeight: 800,
+                  }}
+                >
                   <option value="">Select a page</option>
-                  {pages.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                  {pages.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -1579,7 +1862,7 @@ function Picker({ value, options, onChange }) {
   return (
     <select
       value={value}
-      onChange={e => onChange(Number(e.target.value))}
+      onChange={(e) => onChange(Number(e.target.value))}
       style={{
         appearance: "none",
         WebkitAppearance: "none",
@@ -1593,19 +1876,19 @@ function Picker({ value, options, onChange }) {
         outline: "none",
         maxHeight: 120,
         overflowY: "auto",
-        scrollbarWidth: "none"
+        scrollbarWidth: "none",
       }}
     >
-      {options.map(v => (
+      {options.map((v) => (
         <option key={v} value={v} style={{ background: "#0f1418", color: TEXT_DIM, fontWeight: 900 }}>
-          {String(v).padStart(2,"0")}
+          {String(v).padStart(2, "0")}
         </option>
       ))}
     </select>
   );
 }
 function Sep() {
-  return <div style={{ width:2, height:22, background:"#2a3236", borderRadius:2 }} />;
+  return <div style={{ width: 2, height: 22, background: "#2a3236", borderRadius: 2 }} />;
 }
 
 export default CampaignSetup;
