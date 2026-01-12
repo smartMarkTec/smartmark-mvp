@@ -1,6 +1,6 @@
 // src/pages/Login.js
 import React, { useState, useEffect } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
@@ -76,19 +76,25 @@ const USER_KEYS = [
   "smartmark_media_selection",
   "draft_form_creatives_v2",
   "sm_form_draft_v2",
+  "draft_form_creatives" // sessionStorage key sometimes mirrored
 ];
+
 const withUser = (u, key) => `u:${u}:${key}`;
+
 function migrateToUserNamespace(user) {
   try {
+    // Migrate known “app state” keys into this user’s namespace if not already there
     USER_KEYS.forEach((k) => {
-      const v = localStorage.getItem(withUser(user, k));
-      if (v !== null && v !== undefined) return;
+      const existing = localStorage.getItem(withUser(user, k));
+      if (existing !== null && existing !== undefined) return;
+
       const legacy = localStorage.getItem(k);
       if (legacy !== null && legacy !== undefined) {
         localStorage.setItem(withUser(user, k), legacy);
       }
     });
 
+    // Migrate legacy creds into user scope (for autofill consistency)
     const un = localStorage.getItem("smartmark_login_username");
     const pw = localStorage.getItem("smartmark_login_password");
     if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
@@ -96,62 +102,76 @@ function migrateToUserNamespace(user) {
   } catch {}
 }
 
+function readUserScoped(user, key, fallbackKey = key) {
+  try {
+    if (user) {
+      const v = localStorage.getItem(withUser(user, key));
+      if (v !== null && v !== undefined) return v;
+    }
+    return localStorage.getItem(fallbackKey);
+  } catch {
+    return null;
+  }
+}
+
+async function postJSONWithTimeout(url, body, ms = 15000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include", // CRITICAL: cross-site cookie (sm_sid)
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    let data;
+    const txt = await res.text();
+    try {
+      data = JSON.parse(txt);
+    } catch {
+      data = { raw: txt };
+    }
+    return { ok: res.ok, status: res.status, data };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 export default function Login() {
   const navigate = useNavigate();
-  const location = useLocation();
-
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState(""); // your app uses "Email" as password
+  const [passwordEmail, setPasswordEmail] = useState(""); // MVP: email used as password
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Prefill from last used values (prefer user namespace if we know current user)
+  // Prefill:
+  // 1) if sm_current_user exists, prefer that user’s scoped creds
+  // 2) otherwise fallback to legacy global “last typed” creds (from CampaignSetup)
   useEffect(() => {
-    const u0 = localStorage.getItem("sm_current_user") || "";
-    const u = (u0 || "").trim();
-    const un =
-      (u ? localStorage.getItem(withUser(u, "smartmark_login_username")) : null) ||
-      localStorage.getItem("smartmark_login_username") ||
-      "";
-    const pw =
-      (u ? localStorage.getItem(withUser(u, "smartmark_login_password")) : null) ||
-      localStorage.getItem("smartmark_login_password") ||
-      "";
-    setUsername(un);
-    setPassword(pw);
+    const current = (localStorage.getItem("sm_current_user") || "").trim();
+
+    const u =
+      readUserScoped(current, "smartmark_login_username", "smartmark_login_username") || "";
+    const p =
+      readUserScoped(current, "smartmark_login_password", "smartmark_login_password") || "";
+
+    setUsername(u);
+    setPasswordEmail(p);
   }, []);
 
-  async function postJSONWithTimeout(url, body, ms = 15000) {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), ms);
-    try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // ✅ REQUIRED so sm_sid cookie is set cross-site
-        body: JSON.stringify(body),
-        signal: ctrl.signal,
-      });
-      let data;
-      const txt = await res.text();
-      try {
-        data = JSON.parse(txt);
-      } catch {
-        data = { raw: txt };
-      }
-      return { ok: res.ok, status: res.status, data };
-    } finally {
-      clearTimeout(t);
-    }
-  }
-
+  // MVP behavior:
+  // - Try /auth/login
+  // - If user doesn't exist yet, auto-create via /auth/register (no separate register button)
+  // - Then navigate to /setup
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError("");
 
     const u = username.trim();
-    const p = password.trim();
+    const p = passwordEmail.trim();
+
     if (!u || !p) {
       setError("Please enter both fields.");
       setLoading(false);
@@ -159,34 +179,61 @@ export default function Login() {
     }
 
     try {
-      const { ok, status, data } = await postJSONWithTimeout(
+      // 1) Attempt login
+      let { ok, status, data } = await postJSONWithTimeout(
         `${BACKEND_URL}/auth/login`,
         { username: u, password: p },
         15000
       );
 
+      // 2) If login failed, attempt auto-register once (MVP simplicity)
       if (!ok || !data?.success) {
-        const snippet = (data?.error || data?.raw || "").toString().slice(0, 200);
+        const registerAttempt = await postJSONWithTimeout(
+          `${BACKEND_URL}/auth/register`,
+          { username: u, email: p, password: p },
+          15000
+        );
+
+        if (registerAttempt.ok && registerAttempt.data?.success) {
+          // Auto-register created a session cookie already (register route sets cookie)
+          ok = true;
+          status = 200;
+          data = registerAttempt.data;
+        } else {
+          // If register failed because user exists, re-try login once (covers race / stale cookies)
+          const retry = await postJSONWithTimeout(
+            `${BACKEND_URL}/auth/login`,
+            { username: u, password: p },
+            15000
+          );
+          ok = retry.ok;
+          status = retry.status;
+          data = retry.data;
+        }
+      }
+
+      if (!ok || !data?.success) {
+        const snippet = (data?.error || data?.raw || "").toString().slice(0, 220);
         throw new Error(snippet || `Login failed (HTTP ${status}).`);
       }
 
-      // Persist user + autofill
+      // Persist "current user" + last-used creds
       localStorage.setItem("sm_current_user", u);
+
+      // keep global last-used for simple prefill when user returns
       localStorage.setItem("smartmark_login_username", u);
       localStorage.setItem("smartmark_login_password", p);
 
-      // Also store in user namespace
+      // ensure user-scoped creds exist too
       try {
         localStorage.setItem(withUser(u, "smartmark_login_username"), u);
         localStorage.setItem(withUser(u, "smartmark_login_password"), p);
       } catch {}
 
+      // migrate shared app state into user namespace (first login)
       migrateToUserNamespace(u);
 
-      // redirect support (?return=/setup)
-      const params = new URLSearchParams(location.search);
-      const ret = params.get("return") || "/setup";
-      navigate(ret);
+      navigate("/setup");
     } catch (err) {
       const msg =
         err?.name === "AbortError"
@@ -238,9 +285,9 @@ export default function Login() {
               type="email"
               autoComplete="email"
               placeholder="you@example.com"
-              value={password}
+              value={passwordEmail}
               onChange={(e) => {
-                setPassword(e.target.value);
+                setPasswordEmail(e.target.value);
                 setError("");
               }}
               required
