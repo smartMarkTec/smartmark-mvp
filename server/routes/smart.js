@@ -4,9 +4,22 @@
 const express = require('express');
 const router = express.Router();
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { execFile } = require('child_process');
+
 const db = require('../db');
 const { getFbUserToken } = require('../tokenStore');
 const { policy, analyzer, generator, deployer, testing } = require('../smartCampaignEngine');
+
+/**
+ * If your /api/media serves from a different folder, set MEDIA_DIR to that folder.
+ * Default assumes you already write videos to ./media and /api/media reads from there.
+ */
+const MEDIA_DIR = process.env.MEDIA_DIR || path.join(process.cwd(), 'media');
+const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || 'https://smartmark-mvp.onrender.com';
+
+/* ----------------------- DB TABLES ----------------------- */
 
 async function ensureSmartTables() {
   await db.read();
@@ -24,7 +37,122 @@ async function ensureSmartTables() {
   await db.write();
 }
 
-function nowIso() { return new Date().toISOString(); }
+function nowIso() {
+  return new Date().toISOString();
+}
+
+/* ----------------------- THUMBNAIL HELPERS ----------------------- */
+
+function ensureDir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {}
+}
+
+function fileExists(p) {
+  try {
+    return fs.existsSync(p);
+  } catch {
+    return false;
+  }
+}
+
+function toAbsUrl(u) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s;
+  return `${PUBLIC_BASE_URL}${s.startsWith('/') ? '' : '/'}${s}`;
+}
+
+/**
+ * Extract a first-frame-ish thumbnail (at 0.5s) from a video and store it in MEDIA_DIR
+ * so /api/media/<name>.jpg can serve it publicly.
+ *
+ * Returns a relative URL like: /api/media/thumb_123.jpg
+ */
+function extractFirstFrameThumb({ videoUrl, outBaseName }) {
+  return new Promise((resolve, reject) => {
+    ensureDir(MEDIA_DIR);
+
+    const absVideoUrl = toAbsUrl(videoUrl);
+    const filePart = absVideoUrl.split('/').pop().split('?')[0]; // uuid.mp4
+    const localMp4Path = path.join(MEDIA_DIR, filePart);
+
+    // Prefer local file if it exists (faster + no HTTP); otherwise ffmpeg reads URL
+    const ffmpegInput = fileExists(localMp4Path) ? localMp4Path : absVideoUrl;
+
+    const outName = `${outBaseName || `thumb_${Date.now()}`}.jpg`;
+    const outPath = path.join(MEDIA_DIR, outName);
+
+    // FB-friendly aspect; 0.5s avoids black first frame sometimes.
+    const args = [
+      '-y',
+      '-ss', '0.5',
+      '-i', ffmpegInput,
+      '-frames:v', '1',
+      '-vf',
+      'scale=1200:628:force_original_aspect_ratio=decrease,pad=1200:628:(ow-iw)/2:(oh-ih)/2',
+      '-q:v', '2',
+      outPath
+    ];
+
+    execFile('ffmpeg', args, (err) => {
+      if (err) return reject(err);
+      resolve(`/api/media/${outName}`);
+    });
+  });
+}
+
+/**
+ * Ensure creatives has a usable thumbnail URL for FB video ads.
+ * We set BOTH:
+ *  - creatives.videoThumbnailUrl
+ *  - per-video thumbnailUrl (if video objects)
+ */
+async function ensureVideoThumbnail(creatives, { debug = false } = {}) {
+  if (!creatives) return;
+
+  const vids = Array.isArray(creatives.videos) ? creatives.videos : [];
+  if (!vids.length) return;
+
+  const first = vids[0];
+  const firstUrl =
+    typeof first === 'string'
+      ? first
+      : (first?.url || first?.videoUrl || first?.src || '');
+
+  if (!firstUrl) return;
+
+  // If generator already provided a good thumb, keep it.
+  const existingTop = creatives.videoThumbnailUrl || '';
+  const existingPer =
+    (typeof first === 'object' && first?.thumbnailUrl) ? first.thumbnailUrl : '';
+
+  if (existingTop || existingPer) return;
+
+  try {
+    const thumbRel = await extractFirstFrameThumb({
+      videoUrl: firstUrl,
+      outBaseName: `thumb_${Date.now()}`
+    });
+
+    creatives.videoThumbnailUrl = thumbRel;
+
+    if (typeof vids[0] === 'object') {
+      creatives.videos = vids.map(v => ({
+        ...v,
+        thumbnailUrl: v.thumbnailUrl || thumbRel
+      }));
+    }
+  } catch (e) {
+    if (debug) {
+      console.error('[thumb] Failed to extract video thumbnail:', e?.message || e);
+    }
+  }
+}
+
+/* ----------------------- POLICY HELPERS ----------------------- */
 
 function resolveFlightHours({ startAt, endAt, fallbackHours = 0 }) {
   if (endAt) {
@@ -136,9 +264,16 @@ function newRunId() {
   return `job_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/**
+ * In-memory fallback fixes the occasional "run_not_found" immediately after returning runId
+ * (e.g., during quick restarts or db races).
+ */
+const JOB_MEM = new Map();
+
 async function createJobRecord({ runId, campaignId, accountId, payload }) {
   await db.read();
   db.data.smart_run_jobs = db.data.smart_run_jobs || [];
+
   const job = {
     id: runId,
     campaignId,
@@ -157,23 +292,42 @@ async function createJobRecord({ runId, campaignId, accountId, payload }) {
     result: null,
     error: null
   };
+
   db.data.smart_run_jobs.push(job);
   await db.write();
+
+  JOB_MEM.set(runId, job);
   return job;
 }
 
 async function updateJob(runId, patch) {
   await db.read();
-  const job = (db.data.smart_run_jobs || []).find(j => j.id === runId);
+  db.data.smart_run_jobs = db.data.smart_run_jobs || [];
+
+  let job = (db.data.smart_run_jobs || []).find(j => j.id === runId);
+
+  // fallback: rebuild from memory if db lost it
+  if (!job && JOB_MEM.has(runId)) {
+    job = JOB_MEM.get(runId);
+    db.data.smart_run_jobs.push(job);
+  }
+
   if (!job) return null;
+
   Object.assign(job, patch);
   await db.write();
+
+  JOB_MEM.set(runId, job);
   return job;
 }
 
 async function getJob(runId) {
+  if (JOB_MEM.has(runId)) return JOB_MEM.get(runId);
+
   await db.read();
-  return (db.data.smart_run_jobs || []).find(j => j.id === runId) || null;
+  const job = (db.data.smart_run_jobs || []).find(j => j.id === runId) || null;
+  if (job) JOB_MEM.set(runId, job);
+  return job;
 }
 
 // simple concurrency gate so Render doesn’t melt
@@ -208,27 +362,30 @@ function withTimeout(promise, ms, label = 'timeout') {
 }
 
 /* ----------------------- TEST MOCK ENDPOINTS ----------------------- */
+
 router.post('/mock-insights', async (req, res) => {
   const { adset = {}, ad = {} } = req.body || {};
   testing.setMockInsights({ adset, ad });
   res.json({ ok: true, counts: { adset: Object.keys(adset).length, ad: Object.keys(ad).length } });
 });
+
 router.post('/mock-insights/clear', async (_req, res) => {
   testing.clearMockInsights();
   res.json({ ok: true });
 });
 
 /* ----------------------- ENABLE SMART CONFIG ----------------------- */
+
 router.post('/enable', async (req, res) => {
   try {
     await ensureSmartTables();
+
     const {
       accountId, campaignId, pageId, link,
       kpi = 'cpc', assetTypes = 'both', dailyBudget = 0,
       flightStart = null, flightEnd = null, flightHours = 0,
       overrideCountPerType = null, forceTwoPerType = false,
       thresholds = {}, stopRules = {},
-
       form = null,
       answers = null,
       url = ''
@@ -239,10 +396,11 @@ router.post('/enable', async (req, res) => {
     }
 
     const mergedThresholds = { ...(policy.THRESHOLDS || {}), ...(thresholds || {}) };
-    const mergedStopRules  = { ...(policy.STOP_RULES || {}), ...(stopRules || {}) };
+    const mergedStopRules = { ...(policy.STOP_RULES || {}), ...(stopRules || {}) };
 
     await db.read();
     const existing = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
+
     if (existing) {
       existing.pageId = pageId;
       existing.accountId = accountId;
@@ -275,8 +433,11 @@ router.post('/enable', async (req, res) => {
         dailyBudget: Number(dailyBudget) || 0,
         flightStart, flightEnd, flightHours: Number(flightHours) || 0,
         overrideCountPerType, forceTwoPerType: !!forceTwoPerType,
-        thresholds: mergedThresholds, stopRules: mergedStopRules,
-        createdAt: nowIso(), updatedAt: nowIso(), lastRunAt: null,
+        thresholds: mergedThresholds,
+        stopRules: mergedStopRules,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+        lastRunAt: null,
         state: { adsets: {} }
       };
 
@@ -289,6 +450,7 @@ router.post('/enable', async (req, res) => {
 
       db.data.smart_configs.push(cfg);
     }
+
     await db.write();
     res.json({ success: true });
   } catch (e) {
@@ -297,6 +459,7 @@ router.post('/enable', async (req, res) => {
 });
 
 /* ------------------------ INTERNAL RUN LOGIC ------------------------ */
+
 async function runSmartOnceInternal(reqBody) {
   await ensureSmartTables();
 
@@ -333,14 +496,12 @@ async function runSmartOnceInternal(reqBody) {
     throw err;
   }
 
-  // Hard safety: if NO_SPEND=1, ALWAYS dryRun
-  // NO_SPEND should mean "don't spend" (keep things paused), not "fake run".
-const noSpend = (process.env.NO_SPEND === '1') || !!reqBody.noSpend;
+  // "noSpend" should mean: keep things PAUSED, not "fake run"
+  const noSpend = (process.env.NO_SPEND === '1') || !!reqBody.noSpend;
 
-// Only force dryRun from explicit DRY_RUN env flags (or request).
-const envDryRun = (process.env.SMART_DRY_RUN === '1') || (process.env.DRY_RUN === '1');
-const dryRun = envDryRun ? true : !!dryRunRaw;
-
+  // Only force dryRun from explicit env flags (or request). NO_SPEND no longer forces dryRun.
+  const envDryRun = (process.env.SMART_DRY_RUN === '1') || (process.env.DRY_RUN === '1');
+  const dryRun = envDryRun ? true : !!dryRunRaw;
 
   await db.read();
   let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
@@ -351,6 +512,7 @@ const dryRun = envDryRun ? true : !!dryRunRaw;
       err.status = 400;
       throw err;
     }
+
     cfg = {
       id: `sc_${campaignId}`,
       accountId, campaignId, pageId,
@@ -360,7 +522,11 @@ const dryRun = envDryRun ? true : !!dryRunRaw;
       dailyBudget: Number(dailyBudget) || 0,
       flightStart, flightEnd, flightHours: Number(flightHours) || 0,
       overrideCountPerType, forceTwoPerType: !!forceTwoPerType,
-      thresholds: {}, stopRules: {}, createdAt: nowIso(), updatedAt: nowIso(), lastRunAt: null,
+      thresholds: {},
+      stopRules: {},
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      lastRunAt: null,
       state: { adsets: {} }
     };
 
@@ -382,7 +548,6 @@ const dryRun = envDryRun ? true : !!dryRunRaw;
     });
 
     cfg.updatedAt = nowIso();
-    // keep pageId if provided
     if (pageId) cfg.pageId = pageId;
 
     await db.write();
@@ -496,6 +661,9 @@ const dryRun = envDryRun ? true : !!dryRunRaw;
     'generation_timeout'
   );
 
+  // ✅ KEY FIX: ensure we have a REAL first-frame thumbnail hosted on OUR domain (not dummyimage)
+  await ensureVideoThumbnail(creatives, { debug });
+
   const generatedCounts = countCreatives(creatives);
 
   const wantImages = Number(variantPlan.images || 0);
@@ -597,60 +765,66 @@ const dryRun = envDryRun ? true : !!dryRunRaw;
   }
 
   // For forced/initial runs, DO NOT pause anything.
-// We want to "add" creatives for testing, not replace/kill the baseline ad.
-const initialLike = !!shouldForceInitial || !cfg.lastRunAt;
+  // We want to "add" creatives for testing, not replace/kill the baseline ad.
+  const initialLike = !!shouldForceInitial || !cfg.lastRunAt;
 
-const winnersByAdset =
-  initialLike ? {} : (analysis.winnersByAdset || {});
+  const winnersByAdset = initialLike ? {} : (analysis.winnersByAdset || {});
+  const losersByAdset =
+    (plateauDetected && !shouldForceInitial) ? {} : (initialLike ? {} : (analysis.losersByAdset || {}));
 
-const losersByAdset =
-  (plateauDetected && !shouldForceInitial) ? {} : (initialLike ? {} : (analysis.losersByAdset || {}));
-
-  // Single deploy call (still runs in dryRun, but should NOT spend)
-const deployed = await deployer.deploy({
-  accountId,
-  pageId: cfg.pageId,
-  campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
-  adsetIds: adsetIdsForNewCreatives,
-  winnersByAdset,
-  losersByAdset,
-  creatives,
-  userToken,
-  dryRun: !!dryRun,
-  noSpend,                 // <- NEW
-  initialStatus: noSpend ? 'PAUSED' : undefined, // <- NEW (if deployer supports it)
-  debug
-});
-
-// HARD FAIL if we generated assets but Facebook created 0 ads.
-// This prevents "success" responses that actually did nothing.
-const createdTotals = { images: 0, videos: 0 };
-Object.values(deployed?.variantMapByAdset || {}).forEach(vmap => {
-  Object.keys(vmap || {}).forEach(vid => {
-    if (vid.startsWith('img_')) createdTotals.images += 1;
-    if (vid.startsWith('vid_')) createdTotals.videos += 1;
+  // Single deploy call (supports noSpend + keep paused)
+  const deployed = await deployer.deploy({
+    accountId,
+    pageId: cfg.pageId,
+    campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
+    adsetIds: adsetIdsForNewCreatives,
+    winnersByAdset,
+    losersByAdset,
+    creatives,
+    userToken,
+    dryRun: !!dryRun,
+    noSpend,
+    initialStatus: noSpend ? 'PAUSED' : undefined,
+    debug
   });
-});
 
-if (wantImages > 0 && createdTotals.images === 0) {
-  const err = new Error('deploy_created_zero_image_ads');
-  err.status = 502;
-  err.detail = { wantImages, wantVideos, createdTotals, dryRun, note: 'Generated images but created 0 image ads', deployedMeta: deployed?.meta || null };
-  throw err;
-}
-if (wantVideos > 0 && createdTotals.videos === 0) {
-  const err = new Error('deploy_created_zero_video_ads');
-  err.status = 502;
-  err.detail = { wantImages, wantVideos, createdTotals, dryRun, note: 'Generated videos but created 0 video ads', deployedMeta: deployed?.meta || null };
-  throw err;
-}
+  // HARD FAIL if we generated assets but Facebook created 0 ads.
+  const createdTotals = { images: 0, videos: 0 };
+  Object.values(deployed?.variantMapByAdset || {}).forEach(vmap => {
+    Object.keys(vmap || {}).forEach(vid => {
+      if (vid.startsWith('img_')) createdTotals.images += 1;
+      if (vid.startsWith('vid_')) createdTotals.videos += 1;
+    });
+  });
 
-
+  if (wantImages > 0 && createdTotals.images === 0) {
+    const err = new Error('deploy_created_zero_image_ads');
+    err.status = 502;
+    err.detail = {
+      wantImages, wantVideos, createdTotals, dryRun, noSpend,
+      note: 'Generated images but created 0 image ads',
+      deployedMeta: deployed?.meta || null
+    };
+    throw err;
+  }
+  if (wantVideos > 0 && createdTotals.videos === 0) {
+    const err = new Error('deploy_created_zero_video_ads');
+    err.status = 502;
+    err.detail = {
+      wantImages, wantVideos, createdTotals, dryRun, noSpend,
+      note: 'Generated videos but created 0 video ads',
+      deployedMeta: deployed?.meta || null,
+      hint: 'If this happens, check that creatives.videoThumbnailUrl is a PUBLIC jpg on your domain and deployer uses it.'
+    };
+    throw err;
+  }
 
   await db.read();
   const run = {
     id: `run_${Date.now()}`,
-    campaignId, accountId, startedAt: nowIso(),
+    campaignId,
+    accountId,
+    startedAt: nowIso(),
     mode: plateauDetected && !shouldForceInitial ? 'plateau' : 'initial',
     plateauDetected: plateauDetected || shouldForceInitial,
     variantPlan,
@@ -658,21 +832,30 @@ if (wantVideos > 0 && createdTotals.videos === 0) {
     createdAdsByAdset: deployed.createdAdsByAdset,
     pausedAdsByAdset: deployed.pausedAdsByAdset,
     ...(budgetSplit ? { budgetSplit } : {}),
-    meta: { dryRun: !!dryRun }
+    meta: { dryRun: !!dryRun, noSpend: !!noSpend }
   };
+
   db.data.smart_runs.push(run);
 
   Object.entries(deployed.variantMapByAdset || {}).forEach(([adsetId, vmap]) => {
     Object.entries(vmap || {}).forEach(([variantId, adId]) => {
       db.data.creative_history.push({
-        id: `ch_${adId}`, campaignId, adsetId, adId, variantId, createdAt: nowIso(),
+        id: `ch_${adId}`,
+        campaignId,
+        adsetId,
+        adId,
+        variantId,
+        createdAt: nowIso(),
         kind: (variantId || '').startsWith('img_') ? 'image' : 'video'
       });
     });
   });
 
   const cfgRef2 = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
-  if (cfgRef2) { cfgRef2.lastRunAt = nowIso(); cfgRef2.updatedAt = nowIso(); }
+  if (cfgRef2) {
+    cfgRef2.lastRunAt = nowIso();
+    cfgRef2.updatedAt = nowIso();
+  }
   await db.write();
 
   const createdCounts = Object.fromEntries(
@@ -693,11 +876,20 @@ if (wantVideos > 0 && createdTotals.videos === 0) {
     variantPlan,
     expectedPerType: { images: wantImages, videos: wantVideos },
     generatedCounts,
-    createdCountsPerAdset: createdCounts
+    createdCountsPerAdset: createdCounts,
+    // helpful for debugging thumbnails quickly
+    thumbDebug: {
+      videoThumbnailUrl: creatives?.videoThumbnailUrl || null,
+      firstVideoThumb:
+        (Array.isArray(creatives?.videos) && typeof creatives.videos[0] === 'object')
+          ? (creatives.videos[0].thumbnailUrl || null)
+          : null
+    }
   };
 }
 
 /* ---------------------------- RUN ONCE ---------------------------- */
+
 router.post('/run-once', async (req, res) => {
   try {
     await ensureSmartTables();
@@ -757,10 +949,12 @@ router.post('/run-once', async (req, res) => {
 });
 
 /* ----------------------- RUN STATUS (ASYNC) ----------------------- */
+
 router.get('/run-status/:runId', async (req, res) => {
   try {
     await ensureSmartTables();
     const { runId } = req.params;
+
     const job = await getJob(runId);
     if (!job) return res.status(404).json({ error: 'run_not_found' });
 
@@ -788,9 +982,11 @@ router.get('/status/:campaignId', async (req, res) => {
   try {
     await ensureSmartTables();
     const { campaignId } = req.params;
+
     await db.read();
     const cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
     const runs = (db.data.smart_runs || []).filter(r => r.campaignId === campaignId).slice(-10).reverse();
+
     res.json({ config: cfg || null, recentRuns: runs });
   } catch (e) {
     res.status(500).json({ error: e.message });
