@@ -47,12 +47,13 @@ async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
   const mergedParams = { ...params };
 
-  // Facebook expects execution_options as an ARRAY (often JSON-encoded)
+  // FB expects execution_options as an array (stringified JSON works reliably)
   if (VALIDATE_ONLY) mergedParams.execution_options = '["validate_only"]';
 
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
+
 
 
 const FB_API_VER = 'v23.0';
@@ -738,42 +739,75 @@ async function getVideoThumbnailUrlWithRetry(videoId, userToken, {
 }
 
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
-  const image_url = await getVideoThumbnailUrlWithRetry(videoId, userToken);
+  // FB often needs a moment to generate thumbnails after upload.
+  // Poll thumbnails for up to ~40s to avoid "Your ad needs a video thumbnail".
+  let image_url = null;
 
-  // If thumbnails aren't ready yet, fail loud (don’t silently create 0 ads)
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      const thumbs = await fbGetV(
+        FB_API_VER,
+        `${videoId}/thumbnails`,
+        { access_token: userToken, fields: 'uri,is_preferred' }
+      );
+
+      const list = thumbs?.data || [];
+      const preferred = list.find(t => t?.is_preferred) || list[0] || null;
+      image_url = preferred?.uri || null;
+
+      if (image_url) break;
+    } catch (e) {
+      // ignore and retry
+    }
+
+    await sleep(4000); // 4s * 10 = 40s max
+  }
+
   if (!image_url) {
-    const err = new Error('video_thumbnail_not_ready');
-    err._fb = { videoId };
-    throw err;
+    // If we still don't have a thumb, fail loudly with a useful reason.
+    // This is better than "Invalid parameter" + silent zero ads.
+    throw new Error('video_thumbnail_not_ready');
   }
 
   const video_data = {
     video_id: videoId,
     message: adCopy || '',
     title: 'SmartMark Video',
-    image_url, // ✅ real frame from the uploaded video
-    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } }
+    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } },
+    image_url // REQUIRED by FB for video creatives in many cases
   };
 
-  const creative = await fbPostV(FB_API_VER, `act_${accountId}/adcreatives`, {
-    name: `SmartMark Video ${new Date().toISOString()}`,
-    object_story_spec: { page_id: pageId, video_data }
-  }, { access_token: userToken });
+  const creative = await fbPostV(
+    FB_API_VER,
+    `act_${accountId}/adcreatives`,
+    {
+      name: `SmartMark Video ${new Date().toISOString()}`,
+      object_story_spec: { page_id: pageId, video_data }
+    },
+    { access_token: userToken }
+  );
 
   const creativeId = creative.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_CREATIVE_${Date.now()}` : null);
   if (!creativeId) throw new Error('Creative create failed');
 
-  const ad = await fbPostV(FB_API_VER, `act_${accountId}/ads`, {
-    name: `SmartMark Video Ad ${new Date().toISOString()}`,
-    adset_id: adsetId,
-    creative: { creative_id: creativeId },
-    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
-  }, { access_token: userToken });
+  const ad = await fbPostV(
+    FB_API_VER,
+    `act_${accountId}/ads`,
+    {
+      name: `SmartMark Video Ad ${new Date().toISOString()}`,
+      adset_id: adsetId,
+      creative: { creative_id: creativeId },
+      status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
+    },
+    { access_token: userToken }
+  );
 
   const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
   if (!adId) throw new Error('Ad create failed');
+
   return adId;
 }
+
 
 
 async function pauseAds({ adIds, userToken }) {
