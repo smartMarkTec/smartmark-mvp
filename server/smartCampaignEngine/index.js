@@ -969,9 +969,22 @@ const deployer = {
             variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
             created += 1;
           }
-        } catch (e) {
-          console.warn('Create ad failed:', e?.response?.data?.error?.message || e.message);
-        }
+     } catch (e) {
+  const fb = e?.response?.data?.error;
+  console.warn('Create ad failed:', safeJson({
+    message: fb?.message || e.message,
+    type: fb?.type,
+    code: fb?.code,
+    subcode: fb?.error_subcode,
+    error_user_title: fb?.error_user_title,
+    error_user_msg: fb?.error_user_msg,
+    trace: fb?.fbtrace_id
+  }));
+
+  // FAIL FAST so smart.js returns the REAL reason (instead of "created zero")
+  throw e;
+}
+
       }
     }
 
