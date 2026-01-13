@@ -709,20 +709,46 @@ async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, us
   return adId;
 }
 
+async function getVideoThumbnailUrlWithRetry(videoId, userToken, {
+  tries = 12,          // ~60s total
+  delayMs = 5000
+} = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, {
+        access_token: userToken,
+        fields: 'uri,is_preferred'
+      });
+
+      const arr = Array.isArray(thumbs?.data) ? thumbs.data : [];
+      const preferred = arr.find(t => t?.is_preferred && t?.uri)?.uri;
+      const first = arr.find(t => t?.uri)?.uri;
+
+      if (preferred || first) return preferred || first;
+    } catch {}
+
+    await sleep(delayMs);
+  }
+  return null;
+}
+
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
-  let image_url = null;
-  try {
-    const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, { access_token: userToken, fields: 'uri,is_preferred' });
-    image_url = (thumbs.data || [])[0]?.uri || null;
-  } catch {}
+  const image_url = await getVideoThumbnailUrlWithRetry(videoId, userToken);
+
+  // If thumbnails aren't ready yet, fail loud (don’t silently create 0 ads)
+  if (!image_url) {
+    const err = new Error('video_thumbnail_not_ready');
+    err._fb = { videoId };
+    throw err;
+  }
 
   const video_data = {
     video_id: videoId,
     message: adCopy || '',
     title: 'SmartMark Video',
+    image_url, // ✅ real frame from the uploaded video
     call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } }
   };
-  if (image_url) video_data.image_url = image_url;
 
   const creative = await fbPostV(FB_API_VER, `act_${accountId}/adcreatives`, {
     name: `SmartMark Video ${new Date().toISOString()}`,
@@ -743,6 +769,7 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, user
   if (!adId) throw new Error('Ad create failed');
   return adId;
 }
+
 
 async function pauseAds({ adIds, userToken }) {
   for (const id of adIds) {
