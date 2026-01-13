@@ -33,9 +33,15 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function isFbVideoNotReadyError(e) {
+  const fb = e?.response?.data?.error;
+  return fb?.error_subcode === 1885252;
+}
+
 function safeJson(obj) {
   try { return JSON.stringify(obj); } catch { return '[unserializable]'; }
 }
+
 
 async function fbGetV(apiVersion, endpoint, params) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
@@ -47,25 +53,42 @@ async function waitForVideoReady({ videoId, userToken, timeoutMs = 5 * 60 * 1000
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
+    let info = null;
+
     try {
-      const info = await fbGetV(FB_API_VER, `${videoId}`, {
+      info = await fbGetV(FB_API_VER, `${videoId}`, {
         access_token: userToken,
-        fields: 'status,processing_progress'
+        // status{...} is the most important; processing_progress is sometimes also top-level
+        fields: 'status{video_status,processing_progress},processing_progress'
       });
-
-      const statusRaw =
-        info?.status?.video_status ??
-        info?.status ??
-        info?.video_status ??
-        '';
-
-      const status = String(statusRaw).toLowerCase();
-      const progress = Number(info?.processing_progress ?? info?.status?.processing_progress ?? 0);
-
-      if (status === 'ready' || progress >= 100) return true;
     } catch {
-      // ignore transient read errors and keep polling
+      await sleep(pollMs);
+      continue;
     }
+
+    const statusRaw =
+      info?.status?.video_status ??
+      info?.video_status ??
+      info?.status ??
+      '';
+
+    const status = String(statusRaw || '').toLowerCase();
+
+    const progressRaw =
+      info?.status?.processing_progress ??
+      info?.processing_progress ??
+      0;
+
+    const progress = Number(progressRaw || 0);
+
+    // hard fail if Meta reports processing error
+    if (status.includes('error') || status.includes('fail')) {
+      const err = new Error('video_processing_failed');
+      err.detail = { videoId, status: statusRaw, progress };
+      throw err;
+    }
+
+    if (status === 'ready' || progress >= 100) return true;
 
     await sleep(pollMs);
   }
@@ -74,16 +97,35 @@ async function waitForVideoReady({ videoId, userToken, timeoutMs = 5 * 60 * 1000
 }
 
 
+
 async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
   const mergedParams = { ...params };
 
-  // Meta expects execution_options to be an ARRAY
-  if (VALIDATE_ONLY) mergedParams.execution_options = ['validate_only'];
+  // Normalize execution_options (Meta requires ARRAY)
+  if (mergedParams.execution_options != null) {
+    const eo = mergedParams.execution_options;
+    if (Array.isArray(eo)) mergedParams.execution_options = eo;
+    else if (typeof eo === 'string' && eo.trim()) mergedParams.execution_options = [eo.trim()];
+    else mergedParams.execution_options = [];
+  }
+
+  // If VALIDATE_ONLY, enforce validate_only in execution_options
+  if (VALIDATE_ONLY) {
+    const eo = mergedParams.execution_options;
+    if (!Array.isArray(eo)) mergedParams.execution_options = ['validate_only'];
+    else if (!eo.includes('validate_only')) mergedParams.execution_options = [...eo, 'validate_only'];
+  } else {
+    // If someone passed an empty array, remove it to avoid Graph weirdness
+    if (Array.isArray(mergedParams.execution_options) && mergedParams.execution_options.length === 0) {
+      delete mergedParams.execution_options;
+    }
+  }
 
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
+
 
 
 
@@ -999,22 +1041,46 @@ const deployer = {
             createdAdsByAdset[adsetId].push(adId);
             variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
             created += 1;
-          } else if (c.kind === 'video' && c.video) {
-            const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
-            const adId = await createVideoAd({
-              pageId,
-              accountId,
-              adsetId,
-              adCopy: c.adCopy,
-              videoId,
-              userToken,
-              link: campaignLink
-            });
+         } else if (c.kind === 'video' && c.video) {
+  const maxTries = 5;
 
-            createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
-            created += 1;
-          }
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxTries; attempt++) {
+    try {
+      const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
+
+      const adId = await createVideoAd({
+        pageId,
+        accountId,
+        adsetId,
+        adCopy: c.adCopy,
+        videoId,
+        userToken,
+        link: campaignLink
+      });
+
+      createdAdsByAdset[adsetId].push(adId);
+      variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
+      created += 1;
+
+      lastErr = null;
+      break; // success
+    } catch (e) {
+      lastErr = e;
+
+      // If Meta says "Video not ready", wait and retry
+      if (isFbVideoNotReadyError(e) && attempt < maxTries) {
+        await sleep(8000);
+        continue;
+      }
+
+      throw e; // anything else: fail fast
+    }
+  }
+
+  if (lastErr) throw lastErr;
+}
+
      } catch (e) {
   const fb = e?.response?.data?.error;
   console.warn('Create ad failed:', safeJson({
