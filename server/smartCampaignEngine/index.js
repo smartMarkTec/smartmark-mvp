@@ -34,9 +34,11 @@ function sleep(ms) {
 }
 
 function isFbVideoNotReadyError(e) {
-  const fb = e?.response?.data?.error;
-  return fb?.error_subcode === 1885252;
+  const fb = e?.response?.data?.error || e?.response?.data || null;
+  const sub = fb?.error_subcode ?? fb?.subcode ?? fb?.error_subcode ?? null;
+  return Number(sub) === 1885252;
 }
+
 
 function safeJson(obj) {
   try { return JSON.stringify(obj); } catch { return '[unserializable]'; }
@@ -49,8 +51,16 @@ async function fbGetV(apiVersion, endpoint, params) {
   return res.data;
 }
 
-async function waitForVideoReady({ videoId, userToken, timeoutMs = 5 * 60 * 1000, pollMs = 5000 }) {
+async function waitForVideoReady({
+  videoId,
+  userToken,
+  timeoutMs = 10 * 60 * 1000,
+  pollMs = 5000,
+  stableReadyChecks = 2,     // require READY twice
+  postReadySleepMs = 20000   // cooldown after READY (Meta lag)
+}) {
   const deadline = Date.now() + timeoutMs;
+  let readyHits = 0;
 
   while (Date.now() < deadline) {
     let info = null;
@@ -58,7 +68,6 @@ async function waitForVideoReady({ videoId, userToken, timeoutMs = 5 * 60 * 1000
     try {
       info = await fbGetV(FB_API_VER, `${videoId}`, {
         access_token: userToken,
-        // status{...} is the most important; processing_progress is sometimes also top-level
         fields: 'status{video_status,processing_progress},processing_progress'
       });
     } catch {
@@ -88,8 +97,25 @@ async function waitForVideoReady({ videoId, userToken, timeoutMs = 5 * 60 * 1000
       throw err;
     }
 
-    if (status === 'ready' || progress >= 100) return true;
+    // Treat "ready" OR 100% as a ready signal, but require stability
+    const looksReady = (status === 'ready') || (progress >= 100);
 
+    if (looksReady) {
+      readyHits += 1;
+
+      // require READY twice in a row to reduce flakiness
+      if (readyHits >= stableReadyChecks) {
+        // cooldown because Meta can still throw 1885252 immediately after "ready"
+        await sleep(postReadySleepMs);
+        return true;
+      }
+
+      await sleep(pollMs);
+      continue;
+    }
+
+    // not ready yet
+    readyHits = 0;
     await sleep(pollMs);
   }
 
@@ -1073,13 +1099,30 @@ const deployer = {
             createdAdsByAdset[adsetId].push(adId);
             variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
             created += 1;
-         } else if (c.kind === 'video' && c.video) {
-  const maxTries = 5;
+} else if (c.kind === 'video' && c.video) {
+  // This error is common: Meta says "ready" but still throws 1885252 for a while.
+  // So we retry the *ad creation* step with longer backoff.
+  const maxTries = 10; // gives Meta time without failing the whole run quickly
 
   let lastErr = null;
+  let videoId = null;
+
   for (let attempt = 1; attempt <= maxTries; attempt++) {
     try {
-      const videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
+      // Upload (or reuse) AND wait for processing
+      if (!videoId) {
+        videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
+      }
+
+      // Extra safety: wait again right before creative/ad calls
+      await waitForVideoReady({
+        videoId,
+        userToken,
+        timeoutMs: 6 * 60 * 1000,
+        pollMs: 5000,
+        stableReadyChecks: 2,
+        postReadySleepMs: 20000
+      });
 
       const adId = await createVideoAd({
         pageId,
@@ -1100,9 +1143,11 @@ const deployer = {
     } catch (e) {
       lastErr = e;
 
-      // If Meta says "Video not ready", wait and retry
+      // If Meta says "Video not ready", wait longer and retry
       if (isFbVideoNotReadyError(e) && attempt < maxTries) {
-        await sleep(8000);
+        // exponential-ish backoff: 15s, 25s, 35s... capped
+        const backoffMs = Math.min(90_000, 10_000 + attempt * 10_000);
+        await sleep(backoffMs);
         continue;
       }
 
@@ -1112,6 +1157,7 @@ const deployer = {
 
   if (lastErr) throw lastErr;
 }
+
 
      } catch (e) {
   const fb = e?.response?.data?.error;
