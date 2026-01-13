@@ -47,12 +47,13 @@ async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
   const mergedParams = { ...params };
 
-  // FB expects execution_options as an array (stringified JSON works reliably)
-  if (VALIDATE_ONLY) mergedParams.execution_options = '["validate_only"]';
+  // FB expects execution_options as an ARRAY
+  if (VALIDATE_ONLY) mergedParams.execution_options = ['validate_only'];
 
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
+
 
 
 
@@ -678,9 +679,10 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
       form,
      {
   headers: form.getHeaders(),
-  params: VALIDATE_ONLY
-    ? { access_token: userToken, execution_options: '["validate_only"]' }
-    : { access_token: userToken }
+ params: VALIDATE_ONLY
+  ? { access_token: userToken, execution_options: ['validate_only'] }
+  : { access_token: userToken }
+
 }
 
     );
