@@ -740,7 +740,28 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
 }
 
 async function ensureVideoId({ accountId, userToken, creativeVideo }) {
-  if (creativeVideo?.fbVideoId) return creativeVideo.fbVideoId;
+  // If we already have a fbVideoId (from generator), it can STILL be processing.
+  // So we must poll readiness here too.
+  if (creativeVideo?.fbVideoId) {
+    const vid = creativeVideo.fbVideoId;
+
+    if (!VALIDATE_ONLY) {
+      const ready = await waitForVideoReady({
+        videoId: vid,
+        userToken,
+        timeoutMs: 10 * 60 * 1000, // give Meta more time (10 min)
+        pollMs: 5000
+      });
+
+      if (!ready) {
+        const err = new Error('video_processing_timeout');
+        err.detail = { videoId: vid, note: 'fbVideoId existed but never became ready' };
+        throw err;
+      }
+    }
+
+    return vid;
+  }
 
   const absoluteUrl =
     creativeVideo?.absoluteUrl ||
@@ -765,9 +786,15 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
   const vid = res.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
   if (!vid) throw new Error('Video upload failed');
 
-  // IMPORTANT: wait until the video is processed, or ad creation can fail with subcode 1885252
+  // Wait until processed so ad creation doesn't fail with 1885252
   if (!VALIDATE_ONLY) {
-    const ready = await waitForVideoReady({ videoId: vid, userToken });
+    const ready = await waitForVideoReady({
+      videoId: vid,
+      userToken,
+      timeoutMs: 10 * 60 * 1000, // give Meta more time (10 min)
+      pollMs: 5000
+    });
+
     if (!ready) {
       const err = new Error('video_processing_timeout');
       err.detail = { videoId: vid, file_url: absoluteUrl };
@@ -827,6 +854,9 @@ async function getVideoThumbnailUrlWithRetry(videoId, userToken, {
 }
 
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
+  // Make absolutely sure Meta is done processing before we touch creatives/ads
+await waitForVideoReady({ videoId, userToken, timeoutMs: 10 * 60 * 1000, pollMs: 5000 });
+
   // FB often needs a moment to generate thumbnails after upload.
   // Poll thumbnails for up to ~40s to avoid "Your ad needs a video thumbnail".
   let image_url = null;
