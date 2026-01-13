@@ -46,10 +46,14 @@ async function fbGetV(apiVersion, endpoint, params) {
 async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
   const mergedParams = { ...params };
-  if (VALIDATE_ONLY) mergedParams.execution_options = 'validate_only';
+
+  // Facebook expects execution_options as an ARRAY (often JSON-encoded)
+  if (VALIDATE_ONLY) mergedParams.execution_options = '["validate_only"]';
+
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
+
 
 const FB_API_VER = 'v23.0';
 
@@ -671,12 +675,13 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
     const res = await axios.post(
       `https://graph.facebook.com/${FB_API_VER}/act_${accountId}/advideos`,
       form,
-      {
-        headers: form.getHeaders(),
-        params: VALIDATE_ONLY
-          ? { access_token: userToken, execution_options: 'validate_only' }
-          : { access_token: userToken }
-      }
+     {
+  headers: form.getHeaders(),
+  params: VALIDATE_ONLY
+    ? { access_token: userToken, execution_options: '["validate_only"]' }
+    : { access_token: userToken }
+}
+
     );
     const vid = res.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
     if (!vid) throw new Error('Video upload failed');
