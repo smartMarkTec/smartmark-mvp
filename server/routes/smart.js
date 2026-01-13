@@ -772,21 +772,25 @@ async function runSmartOnceInternal(reqBody) {
   const losersByAdset =
     (plateauDetected && !shouldForceInitial) ? {} : (initialLike ? {} : (analysis.losersByAdset || {}));
 
-  // Single deploy call (supports noSpend + keep paused)
-  const deployed = await deployer.deploy({
-    accountId,
-    pageId: cfg.pageId,
-    campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
-    adsetIds: adsetIdsForNewCreatives,
-    winnersByAdset,
-    losersByAdset,
-    creatives,
-    userToken,
-    dryRun: !!dryRun,
-    noSpend,
-    initialStatus: noSpend ? 'PAUSED' : undefined,
-    debug
-  });
+// "noSpend" means: create real ads, but keep them PAUSED (no spend).
+// IMPORTANT: do NOT pass `noSpend` into deployer (it can cause deploy to skip creation).
+const initialStatus =
+  reqBody.initialStatus || (noSpend ? 'PAUSED' : undefined);
+
+const deployed = await deployer.deploy({
+  accountId,
+  pageId: cfg.pageId,
+  campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
+  adsetIds: adsetIdsForNewCreatives,
+  winnersByAdset,
+  losersByAdset,
+  creatives,
+  userToken,
+  dryRun: !!dryRun,
+  initialStatus,
+  debug
+});
+
 
   // HARD FAIL if we generated assets but Facebook created 0 ads.
   const createdTotals = { images: 0, videos: 0 };
