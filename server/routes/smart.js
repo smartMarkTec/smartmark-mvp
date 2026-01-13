@@ -334,7 +334,13 @@ async function runSmartOnceInternal(reqBody) {
   }
 
   // Hard safety: if NO_SPEND=1, ALWAYS dryRun
-  const dryRun = (process.env.NO_SPEND === '1') ? true : !!dryRunRaw;
+  // NO_SPEND should mean "don't spend" (keep things paused), not "fake run".
+const noSpend = (process.env.NO_SPEND === '1') || !!reqBody.noSpend;
+
+// Only force dryRun from explicit DRY_RUN env flags (or request).
+const envDryRun = (process.env.SMART_DRY_RUN === '1') || (process.env.DRY_RUN === '1');
+const dryRun = envDryRun ? true : !!dryRunRaw;
+
 
   await db.read();
   let cfg = (db.data.smart_configs || []).find(c => c.campaignId === campaignId);
@@ -594,18 +600,21 @@ async function runSmartOnceInternal(reqBody) {
   const winnersByAdset = shouldForceInitial ? {} : analysis.winnersByAdset;
 
   // Single deploy call (still runs in dryRun, but should NOT spend)
-  const deployed = await deployer.deploy({
-    accountId,
-    pageId: cfg.pageId,
-    campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
-    adsetIds: adsetIdsForNewCreatives,
-    winnersByAdset,
-    losersByAdset,
-    creatives,
-    userToken,
-    dryRun: !!dryRun,
-    debug
-  });
+const deployed = await deployer.deploy({
+  accountId,
+  pageId: cfg.pageId,
+  campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
+  adsetIds: adsetIdsForNewCreatives,
+  winnersByAdset,
+  losersByAdset,
+  creatives,
+  userToken,
+  dryRun: !!dryRun,
+  noSpend,                 // <- NEW
+  initialStatus: noSpend ? 'PAUSED' : undefined, // <- NEW (if deployer supports it)
+  debug
+});
+
 
   await db.read();
   const run = {
