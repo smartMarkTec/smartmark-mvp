@@ -596,8 +596,15 @@ const dryRun = envDryRun ? true : !!dryRunRaw;
     budgetSplit = { championAdsetId, challengerAdsetId, totalBudgetCents, championPct };
   }
 
-  const losersByAdset = (plateauDetected && !shouldForceInitial) ? {} : analysis.losersByAdset;
-  const winnersByAdset = shouldForceInitial ? {} : analysis.winnersByAdset;
+  // For forced/initial runs, DO NOT pause anything.
+// We want to "add" creatives for testing, not replace/kill the baseline ad.
+const initialLike = !!shouldForceInitial || !cfg.lastRunAt;
+
+const winnersByAdset =
+  initialLike ? {} : (analysis.winnersByAdset || {});
+
+const losersByAdset =
+  (plateauDetected && !shouldForceInitial) ? {} : (initialLike ? {} : (analysis.losersByAdset || {}));
 
   // Single deploy call (still runs in dryRun, but should NOT spend)
 const deployed = await deployer.deploy({
@@ -614,6 +621,30 @@ const deployed = await deployer.deploy({
   initialStatus: noSpend ? 'PAUSED' : undefined, // <- NEW (if deployer supports it)
   debug
 });
+
+// HARD FAIL if we generated assets but Facebook created 0 ads.
+// This prevents "success" responses that actually did nothing.
+const createdTotals = { images: 0, videos: 0 };
+Object.values(deployed?.variantMapByAdset || {}).forEach(vmap => {
+  Object.keys(vmap || {}).forEach(vid => {
+    if (vid.startsWith('img_')) createdTotals.images += 1;
+    if (vid.startsWith('vid_')) createdTotals.videos += 1;
+  });
+});
+
+if (wantImages > 0 && createdTotals.images === 0) {
+  const err = new Error('deploy_created_zero_image_ads');
+  err.status = 502;
+  err.detail = { wantImages, wantVideos, createdTotals, dryRun, note: 'Generated images but created 0 image ads', deployedMeta: deployed?.meta || null };
+  throw err;
+}
+if (wantVideos > 0 && createdTotals.videos === 0) {
+  const err = new Error('deploy_created_zero_video_ads');
+  err.status = 502;
+  err.detail = { wantImages, wantVideos, createdTotals, dryRun, note: 'Generated videos but created 0 video ads', deployedMeta: deployed?.meta || null };
+  throw err;
+}
+
 
 
   await db.read();
