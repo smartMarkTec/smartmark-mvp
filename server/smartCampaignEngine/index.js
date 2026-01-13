@@ -749,7 +749,8 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
       const ready = await waitForVideoReady({
         videoId: vid,
         userToken,
-        timeoutMs: 10 * 60 * 1000, // give Meta more time (10 min)
+        timeoutMs: 20 * 60 * 1000,
+// give Meta more time (10 min)
         pollMs: 5000
       });
 
@@ -791,7 +792,8 @@ async function ensureVideoId({ accountId, userToken, creativeVideo }) {
     const ready = await waitForVideoReady({
       videoId: vid,
       userToken,
-      timeoutMs: 10 * 60 * 1000, // give Meta more time (10 min)
+      timeoutMs: 20 * 60 * 1000,
+ // give Meta more time (10 min)
       pollMs: 5000
     });
 
@@ -855,7 +857,7 @@ async function getVideoThumbnailUrlWithRetry(videoId, userToken, {
 
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
   // Make absolutely sure Meta is done processing before we touch creatives/ads
-await waitForVideoReady({ videoId, userToken, timeoutMs: 10 * 60 * 1000, pollMs: 5000 });
+
 
   // FB often needs a moment to generate thumbnails after upload.
   // Poll thumbnails for up to ~40s to avoid "Your ad needs a video thumbnail".
