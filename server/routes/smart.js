@@ -270,6 +270,11 @@ function newRunId() {
  */
 const JOB_MEM = new Map();
 
+function instanceTag() {
+  // useful for debugging multi-instance behavior on Render
+  return process.env.RENDER_INSTANCE_ID || `${process.pid}`;
+}
+
 async function createJobRecord({ runId, campaignId, accountId, payload }) {
   await db.read();
   db.data.smart_run_jobs = db.data.smart_run_jobs || [];
@@ -282,6 +287,10 @@ async function createJobRecord({ runId, campaignId, accountId, payload }) {
     createdAt: nowIso(),
     startedAt: null,
     finishedAt: null,
+
+    // ✅ Persist the full payload so ANY instance can pick up and run the job later.
+    payload,
+
     payloadPreview: {
       simulate: !!payload.simulate,
       mediaSelection: payload.mediaSelection || payload.assetTypes || 'both',
@@ -289,6 +298,8 @@ async function createJobRecord({ runId, campaignId, accountId, payload }) {
       overrideCountPerType: payload.overrideCountPerType || null,
       forceTwoPerType: !!payload.forceTwoPerType
     },
+
+    claimedBy: null,
     result: null,
     error: null
   };
@@ -359,6 +370,53 @@ function withTimeout(promise, ms, label = 'timeout') {
   return Promise.race([promise, timeout]).finally(() => {
     if (t) clearTimeout(t);
   });
+}
+
+/**
+ * ✅ Critical fix for "queued forever" (multi-instance / restarts):
+ * If a job is still queued when /run-status is called, the instance handling
+ * that request can "kick" it and run it.
+ */
+async function kickJobIfQueued(runId) {
+  const job = await getJob(runId);
+  if (!job) return false;
+  if (job.state !== 'queued') return false;
+  if (!job.payload) return false;
+
+  // Claim it
+  const claimedBy = instanceTag();
+  const claimed = await updateJob(runId, {
+    state: 'running',
+    startedAt: nowIso(),
+    claimedBy
+  });
+
+  // If something changed (another instance claimed it), do nothing.
+  if (!claimed || claimed.state !== 'running' || claimed.claimedBy !== claimedBy) return false;
+
+  setImmediate(async () => {
+    try {
+      const payload = claimed.payload || job.payload;
+      const result = await withConcurrency(() => runSmartOnceInternal(payload));
+      await updateJob(runId, { state: 'done', finishedAt: nowIso(), result });
+    } catch (e) {
+      const status = e?.status || e?.response?.status || 500;
+      const detail =
+        e?.detail ||
+        e?.response?.data?.error ||
+        e?.response?.data ||
+        e?.message ||
+        'run_failed';
+
+      await updateJob(runId, {
+        state: 'error',
+        finishedAt: nowIso(),
+        error: { status, detail }
+      });
+    }
+  });
+
+  return true;
 }
 
 /* ----------------------- TEST MOCK ENDPOINTS ----------------------- */
@@ -772,25 +830,24 @@ async function runSmartOnceInternal(reqBody) {
   const losersByAdset =
     (plateauDetected && !shouldForceInitial) ? {} : (initialLike ? {} : (analysis.losersByAdset || {}));
 
-// "noSpend" means: create real ads, but keep them PAUSED (no spend).
-// IMPORTANT: do NOT pass `noSpend` into deployer (it can cause deploy to skip creation).
-const initialStatus =
-  reqBody.initialStatus || (noSpend ? 'PAUSED' : undefined);
+  // "noSpend" means: create real ads, but keep them PAUSED (no spend).
+  // IMPORTANT: do NOT pass `noSpend` into deployer (it can cause deploy to skip creation).
+  const initialStatus =
+    reqBody.initialStatus || (noSpend ? 'PAUSED' : undefined);
 
-const deployed = await deployer.deploy({
-  accountId,
-  pageId: cfg.pageId,
-  campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
-  adsetIds: adsetIdsForNewCreatives,
-  winnersByAdset,
-  losersByAdset,
-  creatives,
-  userToken,
-  dryRun: !!dryRun,
-  initialStatus,
-  debug
-});
-
+  const deployed = await deployer.deploy({
+    accountId,
+    pageId: cfg.pageId,
+    campaignLink: cfg.link || useForm?.url || useUrl || 'https://your-smartmark-site.com',
+    adsetIds: adsetIdsForNewCreatives,
+    winnersByAdset,
+    losersByAdset,
+    creatives,
+    userToken,
+    dryRun: !!dryRun,
+    initialStatus,
+    debug
+  });
 
   // HARD FAIL if we generated assets but Facebook created 0 ads.
   const createdTotals = { images: 0, videos: 0 };
@@ -914,13 +971,24 @@ router.post('/run-once', async (req, res) => {
     const runId = newRunId();
     await createJobRecord({ runId, campaignId, accountId, payload: req.body });
 
+    // Best-effort local kick (may not run if different instance serves /run-status)
     setImmediate(async () => {
       try {
-        const result = await withConcurrency(async () => {
-          await updateJob(runId, { state: 'running', startedAt: nowIso() });
-          return await runSmartOnceInternal(req.body);
+        const job = await getJob(runId);
+        if (!job || job.state !== 'queued') return;
+
+        const claimedBy = instanceTag();
+        const claimed = await updateJob(runId, {
+          state: 'running',
+          startedAt: nowIso(),
+          claimedBy
         });
 
+        if (!claimed || claimed.state !== 'running' || claimed.claimedBy !== claimedBy) return;
+
+        const payload = claimed.payload || req.body;
+
+        const result = await withConcurrency(() => runSmartOnceInternal(payload));
         await updateJob(runId, { state: 'done', finishedAt: nowIso(), result });
       } catch (e) {
         const status = e?.status || e?.response?.status || 500;
@@ -959,8 +1027,14 @@ router.get('/run-status/:runId', async (req, res) => {
     await ensureSmartTables();
     const { runId } = req.params;
 
-    const job = await getJob(runId);
+    let job = await getJob(runId);
     if (!job) return res.status(404).json({ error: 'run_not_found' });
+
+    // ✅ If it's queued, kick it on THIS instance so it doesn't sit forever.
+    if (job.state === 'queued') {
+      await kickJobIfQueued(runId);
+      job = await getJob(runId);
+    }
 
     const out = {
       id: job.id,
@@ -970,7 +1044,8 @@ router.get('/run-status/:runId', async (req, res) => {
       createdAt: job.createdAt,
       startedAt: job.startedAt,
       finishedAt: job.finishedAt,
-      payloadPreview: job.payloadPreview
+      payloadPreview: job.payloadPreview,
+      claimedBy: job.claimedBy || null
     };
 
     if (job.state === 'done') out.result = job.result;
