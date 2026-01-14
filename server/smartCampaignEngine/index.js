@@ -34,10 +34,11 @@ function sleep(ms) {
 }
 
 function isFbVideoNotReadyError(e) {
-  const fb = e?.response?.data?.error || e?.response?.data || null;
-  const sub = fb?.error_subcode ?? fb?.subcode ?? fb?.error_subcode ?? null;
+  const fb = e?.response?.data?.error;
+  const sub = fb?.error_subcode ?? fb?.subcode;
   return Number(sub) === 1885252;
 }
+
 
 
 function safeJson(obj) {
@@ -54,68 +55,62 @@ async function fbGetV(apiVersion, endpoint, params) {
 async function waitForVideoReady({
   videoId,
   userToken,
-  timeoutMs = 10 * 60 * 1000,
-  pollMs = 5000,
-  stableReadyChecks = 2,     // require READY twice
-  postReadySleepMs = 20000   // cooldown after READY (Meta lag)
+  timeoutMs = 20 * 60 * 1000, // 20 min default (Meta can be slow)
+  pollMs = 8000               // 8s polling
 }) {
   const deadline = Date.now() + timeoutMs;
-  let readyHits = 0;
+
+  const hasThumb = async () => {
+    try {
+      const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, {
+        access_token: userToken,
+        fields: 'uri,is_preferred',
+        limit: 5
+      });
+      const arr = Array.isArray(thumbs?.data) ? thumbs.data : [];
+      return arr.some(t => t?.uri);
+    } catch {
+      return false;
+    }
+  };
 
   while (Date.now() < deadline) {
-    let info = null;
+    // ✅ Strongest signal: a thumbnail exists
+    if (await hasThumb()) return true;
 
+    // Secondary signal: status/progress says ready
     try {
-      info = await fbGetV(FB_API_VER, `${videoId}`, {
+      const info = await fbGetV(FB_API_VER, `${videoId}`, {
         access_token: userToken,
         fields: 'status{video_status,processing_progress},processing_progress'
       });
-    } catch {
-      await sleep(pollMs);
-      continue;
-    }
 
-    const statusRaw =
-      info?.status?.video_status ??
-      info?.video_status ??
-      info?.status ??
-      '';
+      const statusRaw =
+        info?.status?.video_status ??
+        info?.video_status ??
+        info?.status ??
+        '';
 
-    const status = String(statusRaw || '').toLowerCase();
+      const status = String(statusRaw || '').toLowerCase();
 
-    const progressRaw =
-      info?.status?.processing_progress ??
-      info?.processing_progress ??
-      0;
+      const progressRaw =
+        info?.status?.processing_progress ??
+        info?.processing_progress ??
+        0;
 
-    const progress = Number(progressRaw || 0);
+      const progress = Number(progressRaw || 0);
 
-    // hard fail if Meta reports processing error
-    if (status.includes('error') || status.includes('fail')) {
-      const err = new Error('video_processing_failed');
-      err.detail = { videoId, status: statusRaw, progress };
-      throw err;
-    }
-
-    // Treat "ready" OR 100% as a ready signal, but require stability
-    const looksReady = (status === 'ready') || (progress >= 100);
-
-    if (looksReady) {
-      readyHits += 1;
-
-      // require READY twice in a row to reduce flakiness
-      if (readyHits >= stableReadyChecks) {
-        // cooldown because Meta can still throw 1885252 immediately after "ready"
-        await sleep(postReadySleepMs);
-        return true;
+      if (status.includes('error') || status.includes('fail')) {
+        const err = new Error('video_processing_failed');
+        err.detail = { videoId, status: statusRaw, progress };
+        throw err;
       }
 
-      await sleep(pollMs);
-      continue;
+      if (status === 'ready' || progress >= 100) return true;
+    } catch {
+      // ignore transient Graph issues and keep polling
     }
 
-    // not ready yet
-    readyHits = 0;
     await sleep(pollMs);
   }
 
@@ -882,37 +877,27 @@ async function getVideoThumbnailUrlWithRetry(videoId, userToken, {
 }
 
 async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
-  // Make absolutely sure Meta is done processing before we touch creatives/ads
+  // ✅ Wait until Meta processing is truly done (thumbnail-based readiness)
+  const ready = await waitForVideoReady({
+    videoId,
+    userToken,
+    timeoutMs: 20 * 60 * 1000,
+    pollMs: 8000
+  });
 
-
-  // FB often needs a moment to generate thumbnails after upload.
-  // Poll thumbnails for up to ~40s to avoid "Your ad needs a video thumbnail".
-  let image_url = null;
-
-  for (let attempt = 1; attempt <= 10; attempt++) {
-    try {
-      const thumbs = await fbGetV(
-        FB_API_VER,
-        `${videoId}/thumbnails`,
-        { access_token: userToken, fields: 'uri,is_preferred' }
-      );
-
-      const list = thumbs?.data || [];
-      const preferred = list.find(t => t?.is_preferred) || list[0] || null;
-      image_url = preferred?.uri || null;
-
-      if (image_url) break;
-    } catch (e) {
-      // ignore and retry
-    }
-
-    await sleep(4000); // 4s * 10 = 40s max
+  if (!ready) {
+    const err = new Error('video_processing_timeout');
+    err.detail = { videoId, note: 'Meta never reported ready (no thumbnail/status) before timeout' };
+    throw err;
   }
 
+  // ✅ Now fetch a thumbnail (Meta often needs extra time even after "ready")
+  const image_url = await getVideoThumbnailUrlWithRetry(videoId, userToken, { tries: 18, delayMs: 5000 }); // ~90s
+
   if (!image_url) {
-    // If we still don't have a thumb, fail loudly with a useful reason.
-    // This is better than "Invalid parameter" + silent zero ads.
-    throw new Error('video_thumbnail_not_ready');
+    const err = new Error('video_thumbnail_not_ready');
+    err.detail = { videoId };
+    throw err;
   }
 
   const video_data = {
@@ -920,9 +905,10 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, user
     message: adCopy || '',
     title: 'SmartMark Video',
     call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } },
-    image_url // REQUIRED by FB for video creatives in many cases
+    image_url
   };
 
+  // Create creative
   const creative = await fbPostV(
     FB_API_VER,
     `act_${accountId}/adcreatives`,
@@ -933,9 +919,10 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, user
     { access_token: userToken }
   );
 
-  const creativeId = creative.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_CREATIVE_${Date.now()}` : null);
+  const creativeId = creative.id || (VALIDATE_ONLY ? null : null);
   if (!creativeId) throw new Error('Creative create failed');
 
+  // Create ad (can STILL throw 1885252 rarely; handle it at the caller retry loop)
   const ad = await fbPostV(
     FB_API_VER,
     `act_${accountId}/ads`,
@@ -948,7 +935,7 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, user
     { access_token: userToken }
   );
 
-  const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
+  const adId = ad.id || null;
   if (!adId) throw new Error('Ad create failed');
 
   return adId;
@@ -1041,6 +1028,13 @@ const deployer = {
 
     const generatedCounts = countKinds(creatives);
     if (debug) console.warn('[smartCampaignEngine] deploy input', safeJson({ dryRun, generatedCounts, adsetCount: (adsetIds || []).length }));
+        // ✅ If VALIDATE_ONLY is enabled, NEVER try to create real ads.
+    // Treat it like dryRun so Meta doesn't reject fake creative IDs.
+    if (VALIDATE_ONLY && !dryRun) {
+      dryRun = true;
+      if (debug) console.warn('[smartCampaignEngine] VALIDATE_ONLY=1 => forcing dryRun simulation (no real ads created)');
+    }
+
 
     for (const adsetId of (adsetIds || [])) {
       createdAdsByAdset[adsetId] = [];
