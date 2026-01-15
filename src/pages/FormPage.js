@@ -2764,134 +2764,145 @@ async function handleGenerateStaticAd(
         </div>
       </div>
 
-      {/* Continue */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "center",
-          marginTop: 10,
-          paddingBottom: 28,
-        }}
-      >
-        <button
-          style={{
-            background: TEAL,
-            color: "#0e1519",
-            border: "none",
-            borderRadius: 13,
-            fontWeight: 900,
-            fontSize: "1.08rem",
-            padding: "16px 56px",
-            marginBottom: 4,
-            fontFamily: MODERN_FONT,
-            boxShadow: `0 2px 16px ${TEAL_SOFT}`,
-            cursor: "pointer",
-            transition: "background 0.18s",
-          }}
-          onClick={() => {
-            const activeDraft = currentImageId
-              ? getImageDraftById(currentImageId)
-              : null;
-            const mergedHeadline = (
-              activeDraft?.headline || result?.headline || ""
-            ).slice(0, 55);
-            const mergedBody =
-              activeDraft?.body || result?.body || "";
-            const mergedCTA = normalizeOverlayCTA(
-              activeDraft?.overlay ||
-                result?.image_overlay_text ||
-                answers?.cta ||
-                ""
-            );
+{/* Continue */}
+<div
+  style={{
+    width: "100%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 10,
+    paddingBottom: 28,
+    gap: 10,
+  }}
+>
+  {/* tiny hint (barely visible) */}
+  {!hasGenerated && (
+    <div
+      style={{
+        color: "rgba(255,255,255,0.55)",
+        fontSize: 13,
+        fontWeight: 700,
+        textAlign: "center",
+        maxWidth: 520,
+        lineHeight: 1.35,
+      }}
+    >
+      Say <span style={{ color: "#9dffe9" }}>"yes"</span> when you’re ready and I’ll generate your previews.
+    </div>
+  )}
 
-            let imgA = imageUrls.map(abs).slice(0, 2);
-            let vidA = videoItems
-              .map((v) => abs(v.url))
-              .slice(0, 2);
-            let fbIds = videoItems
-              .map((v) => v.fbVideoId)
-              .filter(Boolean)
-              .slice(0, 2);
+  <button
+    disabled={!hasGenerated}
+    style={{
+      background: TEAL,
+      color: "#0e1519",
+      border: "none",
+      borderRadius: 13,
+      fontWeight: 900,
+      fontSize: "1.08rem",
+      padding: "16px 56px",
+      marginBottom: 4,
+      fontFamily: MODERN_FONT,
+      boxShadow: `0 2px 16px ${TEAL_SOFT}`,
+      cursor: hasGenerated ? "pointer" : "not-allowed",
+      transition: "background 0.18s, opacity 0.18s, transform 0.18s",
+      opacity: hasGenerated ? 1 : 0.45,
+      transform: hasGenerated ? "translateY(0)" : "translateY(0)",
+    }}
+    onClick={() => {
+      // HARD STOP (prevents bypass)
+      if (!hasGenerated) {
+        alert("Generate your previews first. Type 'yes' in the chat.");
+        return;
+      }
 
-            if (mediaType === "image") {
-              vidA = [];
-              fbIds = [];
-            }
-            if (mediaType === "video") {
-              imgA = [];
-            }
+      const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
 
-            const draftForSetup = {
-              images: imgA,
-              videos: vidA,
-              fbVideoIds: fbIds,
-              headline: mergedHeadline,
-              body: mergedBody,
-              imageOverlayCTA: mergedCTA,
-              videoScript:
-                videoItems[0]?.script || videoScript || "",
-              answers,
-              mediaSelection: mediaType,
-              savedAt: Date.now(),
-            };
+      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+      const mergedBody = activeDraft?.body || result?.body || "";
+      const mergedCTA = normalizeOverlayCTA(
+        activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+      );
 
-            sessionStorage.setItem(
-              "draft_form_creatives",
-              JSON.stringify(draftForSetup)
-            );
-            localStorage.setItem(
-              CREATIVE_DRAFT_KEY,
-              JSON.stringify(draftForSetup)
-            );
-            localStorage.setItem(
-              "smartmark_media_selection",
-              mediaType
-            );
+      let imgA = imageUrls.map(abs).slice(0, 2);
+      let vidA = videoItems.map((v) => abs(v.url)).slice(0, 2);
+      let fbIds = videoItems
+        .map((v) => v.fbVideoId)
+        .filter(Boolean)
+        .slice(0, 2);
 
-         // Persist "last" keys ONLY for selected media, and clear the others
-if (mediaType === "image") {
-  if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+      if (mediaType === "image") {
+        vidA = [];
+        fbIds = [];
+      }
+      if (mediaType === "video") {
+        imgA = [];
+      }
 
-  // clear stale video keys
-  localStorage.removeItem("smartmark_last_video_url");
-  localStorage.removeItem("smartmark_last_fb_video_id");
-}
+      const draftForSetup = {
+        images: imgA,
+        videos: vidA,
+        fbVideoIds: fbIds,
+        headline: mergedHeadline,
+        body: mergedBody,
+        imageOverlayCTA: mergedCTA,
+        videoScript: videoItems[0]?.script || videoScript || "",
+        answers,
+        mediaSelection: mediaType,
+        savedAt: Date.now(),
+      };
 
-if (mediaType === "video") {
-  if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
-  if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+      sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+      localStorage.setItem("smartmark_media_selection", mediaType);
 
-  // clear stale image key
-  localStorage.removeItem("smartmark_last_image_url");
-}
+      // Persist "last" keys ONLY for selected media, and clear the others
+      if (mediaType === "image") {
+        if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+        localStorage.removeItem("smartmark_last_video_url");
+        localStorage.removeItem("smartmark_last_fb_video_id");
+      }
 
-if (mediaType === "both") {
-  if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
-  if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
-  if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
-}
+      if (mediaType === "video") {
+        if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
+        if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+        localStorage.removeItem("smartmark_last_image_url");
+      }
 
+      if (mediaType === "both") {
+        if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+        if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
+        if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
+      }
 
-            navigate("/setup", {
-              state: {
-                imageUrls: imgA,
-                videoUrls: vidA,
-                fbVideoIds: fbIds,
-                headline: mergedHeadline,
-                body: mergedBody,
-                imageOverlayCTA: mergedCTA,
-                videoScript:
-                  videoItems[0]?.script || videoScript,
-                answers,
-                mediaSelection: mediaType,
-              },
-            });
-          }}
-        >
-          Continue
-        </button>
-      </div>
+      navigate("/setup", {
+        state: {
+          imageUrls: imgA,
+          videoUrls: vidA,
+          fbVideoIds: fbIds,
+          headline: mergedHeadline,
+          body: mergedBody,
+          imageOverlayCTA: mergedCTA,
+          videoScript: videoItems[0]?.script || videoScript,
+          answers,
+          mediaSelection: mediaType,
+        },
+      });
+    }}
+    onMouseEnter={(e) => {
+      if (!hasGenerated) return;
+      e.currentTarget.style.transform = "translateY(-1px)";
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.transform = "translateY(0)";
+    }}
+  >
+    Continue
+  </button>
+</div>
+
 
       <ImageModal
         open={showModal}
