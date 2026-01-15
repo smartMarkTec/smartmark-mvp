@@ -540,11 +540,18 @@ function isLikelyQuestion(s) {
 }
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
-  const sentimental =
-    /(wow|amazing|awesome|incredible|insane|crazy|cool|great|impressive|unbelievable|never seen|i have never|this is (amazing|awesome|great|insane|incredible)|love (this|it)|thank(s)?|omg)\b/;
+
+  // Only treat as "side chat" if it's clearly a reaction
+  // (avoid classifying normal answers like "great quality makeup")
+  const reactionOnly =
+    /^(wow|omg|thanks?|thank you|awesome|amazing|incredible|insane|crazy|cool|love it|love this)(\b|!|\.|$)/;
+
   const hasBang = t.includes("!");
-  return sentimental.test(t) || hasBang;
+  const veryShort = t.split(/\s+/).filter(Boolean).length <= 4;
+
+  return (veryShort && reactionOnly.test(t)) || (veryShort && hasBang);
 }
+
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
   const t = (s || "").trim();
