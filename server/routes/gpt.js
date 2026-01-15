@@ -4,14 +4,28 @@ const express = require("express");
 const router = express.Router();
 const OpenAI = require("openai"); // npm i openai
 
+// Use your existing security middleware names
+const { secureHeaders, basicRateLimit, basicAuth } = require("../middleware/security");
+
 // ---------- Minimal, safe OpenAI client ----------
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
+// ---------- Global, minimal hardening for this router ----------
+router.use(secureHeaders());
+
+// Optional basic auth (enabled only if BASIC_AUTH_USER + BASIC_AUTH_PASS are set)
+router.use(basicAuth());
+
+// ---------- Per-route rate limits (MVP) ----------
+const limitChat = basicRateLimit({ windowMs: 60 * 1000, max: 30 });
+const limitSubline = basicRateLimit({ windowMs: 60 * 1000, max: 40 });
+const limitSummarize = basicRateLimit({ windowMs: 60 * 1000, max: 20 });
+
 // ---------- Small helpers shared by routes ----------
 const FALLBACK_CHAT =
-  "I'm your AI Ad Manager—ask me anything about launching ads, creatives, or budgets.";
+  "I’m your AI Ad Manager—share your goal and I’ll suggest a clear next move.";
 
 const STOP = new Set(["and","or","the","a","an","of","to","in","on","with","for","by","your","you","is","are","at"]);
 const ENDSTOP = new Set(["and","with","for","to","of","in","on","at","by"]);
@@ -55,92 +69,85 @@ function ensure7to9Words(line = "") {
   }
   return sentenceCase(words.join(" "));
 }
-
-// Soft rewrite to avoid echoing raw user lines
 function softRewrite(line = "") {
   let s = String(line).replace(/\s+/g, " ").trim();
   s = s.replace(/\b(our|we|my|I)\b/gi, "").replace(/\s{2,}/g, " ").trim();
-  // drop trailing punctuation/commas
   s = s.replace(/[.,;:!?-]+$/g, "");
   return s;
 }
-
-// Jaccard similarity over word sets (very crude)
-function similarity(a = "", b = "") {
-  const A = new Set(clean(a).split(" ").filter(Boolean));
-  const B = new Set(clean(b).split(" ").filter(Boolean));
-  if (!A.size || !B.size) return 0;
-  let inter = 0;
-  A.forEach(w => { if (B.has(w)) inter++; });
-  return inter / (A.size + B.size - inter);
-}
-
-// Clamp to max words (rough, keeps meaning)
 function clampWords(s = "", max = 10) {
   const w = String(s).trim().split(/\s+/).filter(Boolean);
   return w.length > max ? w.slice(0, max).join(" ") : s.trim();
 }
 
-// ---------- Simple rule-based fallback composer ----------
-function fallbackCopy(answers = {}) {
-  const ind = (answers.industry || "").toLowerCase();
-  const brand = (answers.businessName || "Your Brand").toString();
-  const city = (answers.location || answers.city || "").toString();
-  const benefit = (answers.mainBenefit || answers.details || answers.valueProp || "").toString();
-  const offer = (answers.offer || answers.saveAmount || "").toString();
-
-  let headline;
-  if (/fashion|apparel|clothing|boutique|shoe|jewel/.test(ind)) {
-    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "New Season Essentials";
-  } else if (/restaurant|food|cafe|pizza|burger|grill|bar/.test(ind)) {
-    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "Fresh. Fast. Crave Worthy";
-  } else if (/floor|carpet|tile|vinyl|hardwood/.test(ind)) {
-    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "Upgrade Your Floors";
-  } else {
-    headline = benefit ? sentenceCase(clampWords(benefit, 6)) : "Quality You Can Feel";
-  }
-
-  const subParts = [];
-  if (answers.idealCustomer) subParts.push(`Made for ${answers.idealCustomer}`);
-  if (city) subParts.push(city);
-  if (!subParts.length) subParts.push("Easy returns • Fast shipping");
-
-  const bullets = [];
-  if (offer) bullets.push(offer);
-  bullets.push("Simple choices • Great value");
-  bullets.push("Hassle free setup");
-
-  return {
-    headline: softRewrite(headline),
-    subline: softRewrite(subParts.join(" • ")),
-    offer: offer || "",
-    secondary: "",
-    bullets,
-    disclaimers: ""
-  };
+// ---------- Chat alignment guards (HARD RULE) ----------
+function normalizeHistory(history) {
+  if (!Array.isArray(history)) return [];
+  return history
+    .filter(m => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+    .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }))
+    .slice(-12);
 }
 
-// ---------- Route: chat (unchanged) ----------
-router.post("/gpt-chat", async (req, res) => {
+function userAllowsAssistantQuestions(userMsg = "") {
+  const s = String(userMsg || "").toLowerCase();
+  // Only allow assistant questions if user explicitly asks for next steps / guidance
+  return /\b(next|what next|next step|steps|what should i do|what do i do|guide me|walk me through|help me decide|ask me|questions)\b/.test(s);
+}
+
+// Remove all question sentences unless allowed
+function stripQuestionsIfNotAllowed(reply = "", allowed = false) {
+  let out = String(reply || "").replace(/\s+/g, " ").trim();
+  if (!out) return FALLBACK_CHAT;
+
+  // Keep 1–3 sentences max
+  const parts = out.split(/(?<=[.!?])\s+/).filter(Boolean);
+  out = parts.slice(0, 3).join(" ").trim();
+
+  if (allowed) return out;
+
+  // Remove any sentence containing '?'
+  const sentences = out.split(/(?<=[.!?])\s+/).filter(Boolean);
+  const filtered = sentences.filter(s => !s.includes("?"));
+  out = (filtered.length ? filtered.join(" ") : "").trim();
+
+  // Remove leftover '?' characters (edge cases)
+  out = out.replace(/\?/g, "").trim();
+
+  // If nothing left, return a short helpful statement (no questions)
+  if (!out) {
+    return "I can help with targeting, creatives, and budgets—share your goal and I’ll recommend a clear next move.";
+  }
+
+  // Avoid dangling punctuation prompts
+  out = out.replace(/[:\-–—]\s*$/g, "").trim();
+
+  return out || FALLBACK_CHAT;
+}
+
+// ---------- Route: chat (reactive + guardrails) ----------
+router.post("/gpt-chat", limitChat, async (req, res) => {
   const { message, history } = req.body || {};
   if (!message || typeof message !== "string") {
     return res.status(400).json({ reply: "Please provide a message." });
   }
 
-  const trimmedHistory = Array.isArray(history) ? history.slice(-12) : [];
+  const trimmedHistory = normalizeHistory(history);
+  const allowQuestions = userAllowsAssistantQuestions(message);
+
   const messages = [
     {
       role: "system",
       content:
-        "You are SmartMark, a concise, friendly AI Ad Manager. Keep replies brief (1-3 sentences). " +
-        "Answer questions about advertising, creatives, targeting, and budgets. " +
-        "DO NOT ask the user the survey questions; the UI handles that. " +
-        "If the user asks something unrelated to ads, still be helpful but brief."
+        "You are SmartMark, a concise AI Ad Manager. " +
+        "You ONLY respond to the user's message and never initiate onboarding or survey questions. " +
+        "The UI handles business name, budget, industry, etc. " +
+        "Do not ask questions unless the user explicitly asked for next steps or guidance. " +
+        "Keep replies 1–3 sentences. " +
+        "If the user is off-topic, be helpful but brief."
     },
     ...trimmedHistory,
-    ...(trimmedHistory.length && trimmedHistory[trimmedHistory.length - 1]?.role === "user"
-      ? []
-      : [{ role: "user", content: message.slice(0, 2000) }])
+    { role: "user", content: message.slice(0, 2000) }
   ];
 
   try {
@@ -148,11 +155,13 @@ router.post("/gpt-chat", async (req, res) => {
     const completion = await client.chat.completions.create({
       model,
       messages,
-      temperature: 0.5,
-      max_tokens: 250
+      temperature: 0.4,
+      max_tokens: 220
     });
 
-    const reply = completion.choices?.[0]?.message?.content?.trim() || FALLBACK_CHAT;
+    let reply = completion.choices?.[0]?.message?.content?.trim() || FALLBACK_CHAT;
+    reply = stripQuestionsIfNotAllowed(reply, allowQuestions);
+
     if (completion.usage) {
       console.log(
         "[SmartMark GPT] tokens:",
@@ -161,15 +170,15 @@ router.post("/gpt-chat", async (req, res) => {
         completion.usage.total_tokens
       );
     }
-    res.json({ reply });
+    return res.json({ reply });
   } catch (err) {
     console.error("GPT error:", err?.message || err);
-    res.json({ reply: FALLBACK_CHAT });
+    return res.json({ reply: FALLBACK_CHAT });
   }
 });
 
-// ---------- NEW: coherent 7–9 word subline generator ----------
-router.post("/coherent-subline", async (req, res) => {
+// ---------- coherent 7–9 word subline generator ----------
+router.post("/coherent-subline", limitSubline, async (req, res) => {
   const { answers = {}, category = "generic" } = req.body || {};
 
   const productTerms = takeTerms(answers.productType || answers.topic || answers.title || "");
@@ -233,8 +242,8 @@ router.post("/coherent-subline", async (req, res) => {
   return res.json({ subline: line });
 });
 
-// ---------- NEW: summarize-ad-copy (JSON) ----------
-router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], async (req, res) => {
+// ---------- summarize-ad-copy (JSON) ----------
+router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, async (req, res) => {
   try {
     const a = (req.body && req.body.answers) || {};
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
@@ -252,7 +261,7 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], async (req, res) =
       `Audience: ${a.idealCustomer || ""}`,
       `Main benefit: ${a.mainBenefit || a.details || ""}`,
       `Offer: ${a.offer || a.saveAmount || ""}`,
-      `Secondary: ${a.secondary || a.financingLine || ""}`,
+      `Secondary: ${a.secondary || a.financingLine || ""}`
     ].join("\n");
 
     const completion = await client.chat.completions.create({
@@ -288,131 +297,6 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], async (req, res) =
     console.error("summarize-ad-copy error:", e?.message || e);
     return res.status(400).json({ ok: false, error: "copy_failed" });
   }
-});
-
-
-/* ========= NEW: summarize answers → structured ad copy (JSON) =========
-   Input:  { answers: {...}, industry?: string }
-   Output: { ok:true, copy:{ headline, subline, offer, secondary, bullets[], disclaimers } }
-*/
-router.post("/summarize-ad-copy", async (req, res) => {
-  const { answers = {}, industry = answers.industry || "generic" } = (req.body || {});
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
-
-  // DEBUG IN: request facts
-  console.log("[SM][summarize-ad-copy:req]", {
-    industry,
-    businessName: answers.businessName,
-    offer: answers.offer,
-    mainBenefit: answers.mainBenefit,
-    idealCustomer: answers.idealCustomer
-  });
-
-  const facts = {
-    businessName: answers.businessName || "",
-    industry: (industry || "").toString(),
-    location: answers.location || answers.city || "",
-    idealCustomer: answers.idealCustomer || answers.audience || "",
-    mainBenefit: answers.mainBenefit || answers.benefit || answers.details || "",
-    offer: answers.offer || answers.saveAmount || "",
-  };
-
-
-  // ---- local helpers (self-contained) ----
-  const titleCase = (s="") =>
-    s.toLowerCase().replace(/\s+/g," ").trim().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase());
-
-  const sanitizeHeadline = (s="") => {
-    let t = String(s)
-      .replace(/https?:\/\/\S+/g," ")
-      .toLowerCase()
-      .replace(/\b(we|our|my|your|they|their|i|promise|guarantee|best|premium|luxury|perfect|cheap)\b/g," ")
-      .replace(/[^\w\s%]/g," ")
-      .replace(/\s+/g," ")
-      .trim();
-    const words = t.split(" ").filter(Boolean).slice(0,6);
-    if (!words.length) return "New Season Essentials";
-    return titleCase(words.join(" "));
-  };
-
-  const tightenOfferText = (s = "") => {
-    let t = String(s || "").toLowerCase()
-      .replace(/https?:\/\/\S+/g," ")
-      .replace(/[^\w\s%$]/g," ")
-      .replace(/\s+/g," ")
-      .trim();
-    if (!t) return "";
-
-    const pct = t.match(/(?:up to\s*)?(\d{1,3})\s*%/i);
-    const upTo = /up to/.test(t);
-    if (pct) {
-      let out = (upTo ? `UP TO ${pct[1]}%` : `${pct[1]}%`) + " OFF";
-      if (/\b(first|1st)\s+(order|purchase)\b/.test(t)) out += " FIRST ORDER";
-      return out;
-    }
-    const dol = t.match(/\$?\s*(\d+)\s*(?:off|discount|rebate)/i);
-    if (dol) return `$${dol[1]} OFF`;
-    if (/buy\s*1\s*get\s*1/i.test(t)) return "BUY 1 GET 1";
-
-    return t
-      .replace(/\b(we|our|you|your|they|their|will|get|receive|customers)\b/g,"")
-      .replace(/\s+/g," ")
-      .trim()
-      .toUpperCase();
-  };
-
-  // ---- HEADLINE (3–6 words, no we/our) ----
-  let aiHeadline = "";
-  try {
-    const sysHead = "Write a short, brand-safe AD HEADLINE of 3–6 words. No 'we/our/my/your'. No punctuation at end. Return only the headline.";
-    const userHead = [
-      `Category: ${facts.industry || "generic"}`,
-      facts.businessName ? `Brand: ${facts.businessName}` : "",
-      facts.mainBenefit ? `Benefit: ${facts.mainBenefit}` : "",
-      facts.idealCustomer ? `Audience: ${facts.idealCustomer}` : "",
-      facts.location ? `Location: ${facts.location}` : ""
-    ].filter(Boolean).join("\n");
-
-    const r = await client.chat.completions.create({
-      model, temperature: 0.2, max_tokens: 20,
-      messages: [{ role: "system", content: sysHead }, { role: "user", content: userHead }]
-    });
-    aiHeadline = (r.choices?.[0]?.message?.content || "").trim();
-  } catch (e) {
-    console.warn("summarize-ad-copy(headline) error:", e?.message);
-  }
-
-  // ---- SUBLINE (7–9 words, sentence case, coherent) ----
-  let aiSubline = "";
-  try {
-    const sysSub = "Write ONE ad subline of 7–9 words, sentence case, no 'we/our', no hype, no website. Return only the subline.";
-    const r = await client.chat.completions.create({
-      model, temperature: 0.2, max_tokens: 24,
-      messages: [{ role: "system", content: sysSub }, { role: "user", content: JSON.stringify(facts) }]
-    });
-    aiSubline = (r.choices?.[0]?.message?.content || "").trim();
-  } catch (e) {
-    console.warn("summarize-ad-copy(subline) error:", e?.message);
-  }
-
-  // ---- Post-process + fallbacks ----
-  const cleanHeadline = sanitizeHeadline(aiHeadline || facts.mainBenefit || facts.businessName || "New Season Essentials")
-    .replace(/[.,!?]+$/,"");
-  const finalSub = sentenceCase(aiSubline || ensure7to9Words(cleanHeadline));
-  const compactOffer = tightenOfferText(facts.offer);
-
-  const copy = {
-    headline: cleanHeadline,
-    subline: finalSub,
-    offer: compactOffer,
-    secondary: "",
-    bullets: [],
-    disclaimers: ""
-  };
-
-    // DEBUG OUT: final copy
-  console.log("[SM][summarize-ad-copy:out]", copy);
-  return res.json({ ok: true, copy });
 });
 
 module.exports = router;
