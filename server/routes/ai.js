@@ -139,6 +139,8 @@ const child_process = require('child_process');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
 const db = require('../db');
+const { muxWithVoiceAndBgm } = require("../services/bgm");
+
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
@@ -372,15 +374,13 @@ function runFfmpegFastQuickCutsWithSubs({
  * - quick concat montage (no xfade)
  * - TTS audio mapped
  * - word-chunked drawtext subtitles (same look as your main path)
- * - keeps ~18–20s bound
+ * - keeps ~18–20s bound (but based on voice length)
+ * - applies background music lightly (Music/music/<industry>/*) via muxWithVoiceAndBgm
  */
-async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18.5 }) {
+async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18.5, industry = "" }) {
   if (!Array.isArray(clipUrls) || clipUrls.length < 3) {
     throw new Error("FAST: need ≥ 3 clip URLs");
   }
-
-  // 0) clamp target
-  const TOTAL = Math.max(18, Math.min(20, Number(targetSec) || 18.5));
 
   // 1) synth voice
   const tts = await synthTTS(script);
@@ -388,14 +388,18 @@ async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18
 
   // 2) derive effective voice duration (respect slowdown) for better sub timing
   let voiceDur = await ffprobeDuration(voicePath);
-  if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = TOTAL - 2;
   const ATEMPO = Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
+  if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
+
   const effVoice = voiceDur / ATEMPO;
 
-  // 3) subtitle word timings from script text (no Whisper roundtrip)
+  // 3) ✅ total duration = (effective voice + 2s), clamped to 18–20s
+  const TOTAL = Math.max(18, Math.min(20, (effVoice + 2)));
+
+  // 4) subtitle word timings from script text (no Whisper roundtrip)
   const subtitleWords = await getSubtitleWords(voicePath, script, effVoice, ATEMPO);
 
-  // 4) download first three clips
+  // 5) download first three clips
   const locals = [];
   try {
     for (let i = 0; i < 3; i++) {
@@ -407,8 +411,10 @@ async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18
     throw e;
   }
 
-  // 5) compose with quick cuts + active subs
+  // 6) compose with quick cuts + active subs (base mp4)
   const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
+  const finalPath = path.join(ensureGeneratedDir(), `${uuidv4()}-bgm.mp4`);
+
   try {
     await runFfmpegFastQuickCutsWithSubs({
       parts: locals,
@@ -417,12 +423,23 @@ async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18
       outPath,
       totalSec: TOTAL,
     });
+
+    // 7) ✅ apply background music lightly + enforce final duration
+    await muxWithVoiceAndBgm({
+      videoIn: outPath,
+      voiceIn: voicePath,
+      industry: industry,
+      outPath: finalPath,
+      tailSeconds: 2.0,
+      bgmVolume: 0.10,
+    });
   } finally {
     locals.forEach((p) => { try { fs.unlinkSync(p); } catch {} });
     try { fs.unlinkSync(voicePath); } catch {}
+    try { fs.unlinkSync(outPath); } catch {}
   }
 
-  return { outPath, duration: TOTAL };
+  return { outPath: finalPath, duration: TOTAL };
 }
 
 
