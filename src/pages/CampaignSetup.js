@@ -1352,28 +1352,32 @@ const CampaignSetup = () => {
 
             {parseFloat(budget) >= 3 && (
               <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-                <button
-                  onClick={() => {
-  const feeAmount = Math.max(1, Math.round(calculateFees(budget).fee || 25));
-  window.open(`https://cash.app/$SmarteMark/${feeAmount}`, "_blank", "noopener,noreferrer");
-}}
+        <button
+  onClick={() => {
+    const feeAmount = Math.max(1, Math.round(calculateFees(budget).fee || 25));
+    window.open(`https://cash.app/$SmarteMark/${feeAmount}`, "_blank", "noopener,noreferrer");
+  }}
+  style={{
+    background: ACCENT,
+    color: "#0f1418",
+    border: "none",
+    borderRadius: 12,
+    fontWeight: 900,
+    padding: "10px 16px",
+    cursor: "pointer",
+    boxShadow: "0 2px 12px rgba(12,196,190,0.35)",
+    transition: "transform 0.15s",
+  }}
+  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+>
+  Pay ${calculateFees(budget).fee.toFixed(0)}
+</button>
 
-                  style={{
-                    background: ACCENT,
-                    color: "#0f1418",
-                    border: "none",
-                    borderRadius: 12,
-                    fontWeight: 900,
-                    padding: "10px 16px",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 12px rgba(12,196,190,0.35)",
-                    transition: "transform 0.15s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-                >
-                  Pay ${calculateFees(budget).fee.toFixed(0)}
-                </button>
+<div style={{ marginTop: 6, color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
+  Cash App: <span style={{ color: WHITE, fontWeight: 900 }}>$SmarteMark</span>
+</div>
+
 
                 <div>
                   <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
