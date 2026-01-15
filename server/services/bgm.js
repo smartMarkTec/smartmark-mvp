@@ -154,8 +154,9 @@ async function muxWithVoiceAndBgm({
 
   // Narration: trim to target
   filterParts.push(
-    `[1:a]atrim=0:${targetDur.toFixed(3)},asetpts=PTS-STARTPTS[voice]`
-  );
+  `[1:a]atrim=0:${targetDur.toFixed(3)},asetpts=PTS-STARTPTS,volume=1.0[voice]`
+);
+
 
   if (bgmPath) {
     // BGM: trim to target, low volume, small fades
@@ -168,7 +169,8 @@ async function muxWithVoiceAndBgm({
     );
 
     // Mix narration + bgm
-    filterParts.push(`[voice][bgm]amix=inputs=2:duration=first:dropout_transition=2[a]`);
+   filterParts.push(`[voice][bgm]amix=inputs=2:duration=longest:dropout_transition=2[a]`);
+
   } else {
     // No bgm found => narration only
     filterParts.push(`[voice]anull[a]`);

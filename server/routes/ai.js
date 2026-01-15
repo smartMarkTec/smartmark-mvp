@@ -377,7 +377,14 @@ function runFfmpegFastQuickCutsWithSubs({
  * - keeps ~18–20s bound (but based on voice length)
  * - applies background music lightly (Music/music/<industry>/*) via muxWithVoiceAndBgm
  */
-async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18.5, industry = "" }) {
+async function makeVideoVariantFast({
+  clipUrls = [],
+  script = "",
+  targetSec = 18.5,
+  industry = "",
+  tailSeconds = 3,
+}) {
+
   if (!Array.isArray(clipUrls) || clipUrls.length < 3) {
     throw new Error("FAST: need ≥ 3 clip URLs");
   }
@@ -4060,14 +4067,13 @@ if (FAST_MODE) {
   const urlsA = planA.map(p => p.url).slice(0, 4);
   const urlsB = planB.map(p => p.url).slice(0, 4);
 
-  // pass industry so Music/music/<industry>/... is used
-  v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec, industry });
-  v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec, industry });
+  v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec, industry, tailSeconds: 3 });
+  v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec, industry, tailSeconds: 3 });
 } else {
-  // standard path (already uses bgm file)
   v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 3, musicPath: bgm });
   v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 3, musicPath: bgm });
 }
+
 
 
     // ---- save exactly two assets ----
