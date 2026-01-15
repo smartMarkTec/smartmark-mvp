@@ -1688,6 +1688,74 @@ function getImageKeyword(industry = '', url = '', answers = {}) {
   if (/\bcomic|manga|graphic\s*novel|book(s)?\b/.test(fields)) return 'comic book store';
   return industry || 'ecommerce products';
 }
+
+/* ---------- VIDEO topic precision (Pexels video query) ---------- */
+
+// Very common industry acronyms / shorthand → expanded phrases Pexels understands
+const VIDEO_ACRONYM_MAP = {
+  hvac: "air conditioning repair, HVAC technician, heating and cooling, AC service, furnace repair, ventilation",
+  ac: "air conditioning repair, AC service, HVAC technician",
+  "a/c": "air conditioning repair, AC service, HVAC technician",
+  plumbing: "plumber fixing sink, pipe repair, leak repair, plumbing tools",
+  electrician: "electrician wiring, electrical repair, electrician tools",
+  roofing: "roof repair, roofing contractor, shingles installation",
+  landscaping: "lawn care, landscaper mowing, yard work, gardening",
+  cleaning: "house cleaning, cleaning service, maid cleaning kitchen",
+  makeup: "makeup artist applying makeup, cosmetics, beauty routine, makeup brush, lipstick, foundation",
+  cosmetics: "makeup artist applying makeup, cosmetics, skincare routine",
+  skincare: "skincare routine, facial serum, applying moisturizer, beauty close-up",
+  barber: "barber cutting hair, fade haircut, barbershop clippers",
+  salon: "hair salon styling, blow dry, hair coloring",
+  nails: "nail salon manicure, nail technician, pedicure",
+  dentist: "dentist office, teeth cleaning, dental checkup",
+  realtor: "real estate agent, house tour, home showing",
+  restaurant: "chef cooking, restaurant kitchen, plated food, dining",
+};
+
+function normIndustry(s = "") {
+  return String(s || "").trim().toLowerCase();
+}
+
+/**
+ * Build a precise video search query for Pexels.
+ * Priority: recognized acronym → category mapping → fallback with “service/action” cues.
+ */
+function getVideoKeyword(industry = "", url = "", answers = {}) {
+  const raw = normIndustry(industry);
+
+  // 1) Exact acronym expansion
+  if (VIDEO_ACRONYM_MAP[raw]) return VIDEO_ACRONYM_MAP[raw];
+
+  // 2) Use your existing category resolver for a tighter default
+  const cat = resolveCategory(answers || {});
+  const byCat = {
+    cosmetics: "makeup artist applying makeup, cosmetics, beauty routine",
+    hair: "hair salon styling, barber cutting hair, hair care routine",
+    food: "chef cooking, restaurant kitchen, plated food",
+    fitness: "gym workout, personal trainer, weight training",
+    home: "home interior, modern home, cleaning service, home improvement",
+    electronics: "tech gadgets, smartphone, laptop, device close-up",
+    pets: "pet grooming, dog walking, pet care",
+    coffee: "coffee shop, espresso machine, barista making coffee",
+    fashion: "fashion model, clothing rack, boutique shopping",
+    books: "bookstore, reading book, comics, graphic novel",
+    generic: "",
+  }[cat] || "";
+
+  // 3) If industry is a normal word/phrase, keep it but add action cues
+  // These cues force Pexels into “people doing the job” instead of random product categories.
+  const actionCues = "professional service, people working, close-up, tools, customer service";
+
+  // Prefer category mapping if we have it, otherwise fallback to industry itself
+  const base = byCat || (raw ? raw : "business");
+
+  // Clamp length so it stays effective (Pexels does better with short concrete phrases)
+  const q = `${base}, ${actionCues}`.slice(0, 160);
+
+  return q;
+}
+
+
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''} ${answers.topic || ''}`.toLowerCase();
   if (/comic|comics|manga|graphic\s*novel|bookstore|book(s)?/.test(txt)) return 'books';
@@ -3900,8 +3968,9 @@ async function runVideoJob(job) {
   const answers = top.answers || top;
   const url = answers.url || top.url || '';
   const industry = answers.industry || top.industry || '';
-  const category = resolveCategory(answers || {});
-  const keyword = getImageKeyword(industry, url, answers);
+ const category = resolveCategory(answers || {});
+const keyword = getVideoKeyword(industry, url, answers); // <-- videos should use video keyword builder
+
   const targetSec = Math.max(18, Math.min(20, Number(top.targetSeconds || 18.5)));
 
   // Script
@@ -4027,14 +4096,9 @@ router.post("/generate-video-ad", async (req, res) => {
       Date.now()
     );
 
-    // One keyword for this request ONLY (prevents double-runs)
-    const industry = (answers.industry || "").toLowerCase();
-    let baseKeyword = "small business";
-    if (industry.includes("restaurant") || industry.includes("food")) baseKeyword = "restaurant";
-    else if (industry.includes("fashion") || industry.includes("clothing")) baseKeyword = "fashion";
-    else if (industry.includes("beauty") || industry.includes("salon")) baseKeyword = "beauty salon";
-    else if (industry.includes("coffee")) baseKeyword = "coffee";
-    else if (industry.includes("electronics") || industry.includes("tech")) baseKeyword = "tech gadgets";
+// One keyword for this request ONLY (precise video query)
+const industryRaw = (answers.industry || "");
+const baseKeyword = getVideoKeyword(industryRaw, url, answers);
 
     const targetSec = Math.max(18, Math.min(20, Number(body.targetSeconds || 18.5)));
 
@@ -4043,8 +4107,9 @@ router.post("/generate-video-ad", async (req, res) => {
     if (!script) script = await generateVideoScriptFromAnswers(answers);
 
     // ---- stock videos (single pool) ----
-   let clips = await fetchPexelsVideos(baseKeyword, 8, `${seedBase}|${baseKeyword}`);
-if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8, `${seedBase}|fallback`);
+let clips = await fetchPexelsVideos(baseKeyword, 8, `${seedBase}|${baseKeyword}`);
+if (!clips.length) clips = await fetchPexelsVideos(getVideoKeyword("business", url, answers), 8, `${seedBase}|fallback`);
+if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8, `${seedBase}|fallback2`);
 
     if (!clips.length) return res.status(500).json({ ok: false, error: "No stock clips found from Pexels." });
 
