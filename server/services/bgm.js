@@ -134,23 +134,30 @@ async function muxWithVoiceAndBgm({
   const videoDur = await getDurationSec(videoIn);
   const padSeconds = Math.max(0, targetDur - videoDur);
 
-  // Inputs:
-  // 0: video
-  // 1: narration
-  // 2: bgm (optional, looped)
-  const args = ["-y", "-i", videoIn, "-i", voiceIn];
+// Inputs:
+// 0: video
+// 1: narration
+// 2: bgm (optional, looped)
+const loopVideo = padSeconds > 0.05; // if we'd pad more than ~1 frame, loop instead (prevents "freeze")
 
-  if (bgmPath) {
-    args.push("-stream_loop", "-1", "-i", bgmPath);
-  }
+const args = ["-y"];
+if (loopVideo) {
+  // loop visuals so we always have motion to the end
+  args.push("-stream_loop", "-1");
+}
+args.push("-i", videoIn, "-i", voiceIn);
 
-  const filterParts = [];
+if (bgmPath) {
+  args.push("-stream_loop", "-1", "-i", bgmPath);
+}
 
-  // Video: trim to target, pad if needed by cloning last frame
-  filterParts.push(
-    `[0:v]trim=0:${targetDur.toFixed(3)},setpts=PTS-STARTPTS` +
-      `,tpad=stop_mode=clone:stop_duration=${padSeconds.toFixed(3)}[v]`
-  );
+const filterParts = [];
+
+// Video: trim to target (no clone-pad). If loopVideo=true, the input repeats automatically.
+filterParts.push(
+  `[0:v]trim=0:${targetDur.toFixed(3)},setpts=PTS-STARTPTS[v]`
+);
+
 
   // Narration: trim to target
   filterParts.push(
