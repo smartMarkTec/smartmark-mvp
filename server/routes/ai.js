@@ -4097,8 +4097,9 @@ router.post("/generate-video-ad", async (req, res) => {
     );
 
 // One keyword for this request ONLY (precise video query)
-const industryRaw = (answers.industry || "");
-const baseKeyword = getVideoKeyword(industryRaw, url, answers);
+const industry = (answers.industry || "").toString();   // ✅ define industry (used later)
+const baseKeyword = getVideoKeyword(industry, url, answers);
+
 
     const targetSec = Math.max(18, Math.min(20, Number(body.targetSeconds || 18.5)));
 
