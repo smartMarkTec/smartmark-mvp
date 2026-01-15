@@ -3449,53 +3449,340 @@ function buildKeywordVariants(base = '') {
 
 /* ============================ VIDEO GENERATION (3–4 clips, ~18s) ============================ */
 
-/* Pexels video + photo fetchers */
-/* Pexels videos with wide pool + seeded randomness + de-dupe */
-async function fetchPexelsVideos(keyword, want = 8, seed = '') {
+/* ============================ VIDEO GENERATION (3–4 clips, ~18s) ============================ */
+
+/* --------- Industry -> query intelligence (HIGH ACCURACY) --------- */
+
+function normText(s = '') {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s&/-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function uniq(arr) {
+  const out = [];
+  const seen = new Set();
+  for (const x of arr || []) {
+    const k = String(x || '').trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(String(x).trim());
+  }
+  return out;
+}
+
+function tokensFromUrl(u = '') {
+  try {
+    const url = new URL(u);
+    const host = (url.hostname || '').replace(/^www\./, '');
+    const base = host.split('.').slice(0, -1).join('.') || host.split('.')[0] || '';
+    const path = (url.pathname || '').replace(/[-_]/g, ' ').replace(/\//g, ' ');
+    return normText(`${base} ${path}`).split(' ').filter(Boolean).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Canonicalize industry strings into known buckets.
+ * Covers common cases + still works for ANY custom industry text.
+ */
+function canonicalIndustry(industry = '') {
+  const t = normText(industry);
+  if (!t) return '';
+
+  // HARD matches first
+  if (/\bhvac\b|\bheating\b|\bcooling\b|\bair cond|ac repair|\bfurnace\b/.test(t)) return 'hvac';
+  if (/\bflorist\b|\bflower\b|\bbouquet\b|\bfloral\b/.test(t)) return 'florist';
+  if (/\bmakeup\b|\bcosmetic\b|\bbeauty\b|\bskincare\b|\blash\b|\bnail\b/.test(t)) return 'beauty';
+  if (/\bdentist\b|\bdental\b|\borthodont\b|\bbraces\b/.test(t)) return 'dental';
+  if (/\bplumb\b|\bdrain\b|\bsewer\b|\bleak\b/.test(t)) return 'plumbing';
+  if (/\belectric\b|\belectrician\b|\bwiring\b|\bbreaker\b/.test(t)) return 'electrician';
+  if (/\blandscap\b|\blawn\b|\bmow\b|\bturf\b|\bgarden\b/.test(t)) return 'landscaping';
+  if (/\bauto\b|\bmechanic\b|\bcar\b|\btruck\b|\btires?\b|\boil change\b/.test(t)) return 'auto repair';
+  if (/\breal estate\b|\brealtor\b|\bproperty\b|\bmortgage\b/.test(t)) return 'real estate';
+  if (/\brestaurant\b|\bfood\b|\bcafe\b|\bbakery\b|\bpizza\b|\bcatering\b/.test(t)) return 'restaurant';
+  if (/\bgym\b|\bfitness\b|\bworkout\b|\btrainer\b/.test(t)) return 'fitness';
+  if (/\bsalon\b|\bbarber\b|\bhair\b|\bfade\b/.test(t)) return 'hair salon';
+  if (/\bphotograph\b|\bphoto\b|\bwedding\b|\bportrait\b/.test(t)) return 'photography';
+  if (/\bclean\b|\bmaid\b|\bjanitor\b|\bhousekeeping\b/.test(t)) return 'cleaning';
+  if (/\broof\b|\broofing\b|\bgutter\b/.test(t)) return 'roofing';
+  if (/\bpest\b|\btermite\b|\bextermin\b/.test(t)) return 'pest control';
+  if (/\binsurance\b/.test(t)) return 'insurance';
+  if (/\blaw\b|\battorney\b|\blawyer\b|\blegal\b/.test(t)) return 'law firm';
+  if (/\bpet\b|\bveterinar\b|\bgroom\b|\bdog\b|\bcat\b/.test(t)) return 'pet';
+  if (/\bspa\b|\bmassage\b|\bwellness\b/.test(t)) return 'spa';
+  if (/\bconstruction\b|\bcontractor\b|\bremodel\b|\brenovat\b/.test(t)) return 'construction';
+  if (/\bretail\b|\becommerce\b|\bonline store\b|\bshop\b/.test(t)) return 'retail';
+
+  // default: return original (still used for query)
+  return t;
+}
+
+function industryQueryPack(canon = '', rawIndustry = '', url = '') {
+  const raw = String(rawIndustry || '').trim();
+  const urlTokens = tokensFromUrl(url);
+
+  // synonym packs (tight + specific)
+  const packs = {
+    'hvac': [
+      'HVAC technician',
+      'air conditioner repair',
+      'AC maintenance',
+      'heating and cooling service',
+      'furnace repair',
+      'thermostat installation'
+    ],
+    'florist': [
+      'flower shop',
+      'florist arranging bouquet',
+      'floral arrangement',
+      'wedding bouquet',
+      'fresh flowers bouquet',
+      'flower delivery'
+    ],
+    'beauty': [
+      'makeup artist applying makeup',
+      'cosmetics product close up',
+      'beauty salon makeup',
+      'skincare routine',
+      'lipstick mascara',
+      'makeup tutorial'
+    ],
+    'dental': [
+      'dentist office',
+      'dental cleaning',
+      'orthodontist braces',
+      'dental clinic',
+      'teeth whitening'
+    ],
+    'plumbing': [
+      'plumber fixing sink',
+      'plumbing repair',
+      'drain cleaning',
+      'pipe leak repair'
+    ],
+    'electrician': [
+      'electrician wiring',
+      'electrical panel repair',
+      'installing light fixture',
+      'electrician at work'
+    ],
+    'landscaping': [
+      'landscaping service',
+      'lawn mowing',
+      'gardener trimming hedge',
+      'garden design'
+    ],
+    'auto repair': [
+      'auto mechanic repairing car',
+      'car service garage',
+      'oil change',
+      'tire shop'
+    ],
+    'restaurant': [
+      'restaurant kitchen cooking',
+      'chef plating food',
+      'food close up',
+      'cafe barista',
+      'restaurant dining'
+    ],
+    'hair salon': [
+      'barber haircut fade',
+      'hair salon styling',
+      'blow dry styling',
+      'barbershop clipper'
+    ],
+    'cleaning': [
+      'house cleaning service',
+      'cleaner wiping counter',
+      'janitorial cleaning',
+      'maid cleaning home'
+    ],
+    'real estate': [
+      'real estate agent showing house',
+      'home tour',
+      'sold sign house',
+      'property viewing'
+    ],
+    'fitness': [
+      'gym workout',
+      'personal trainer coaching',
+      'lifting weights',
+      'fitness class'
+    ],
+    'photography': [
+      'photographer taking photos',
+      'wedding photographer',
+      'portrait photoshoot'
+    ],
+    'roofing': [
+      'roof repair',
+      'roofing contractor',
+      'installing shingles'
+    ],
+    'pest control': [
+      'pest control technician',
+      'exterminator spraying',
+      'termite inspection'
+    ],
+    'law firm': [
+      'lawyer office meeting',
+      'attorney consultation',
+      'legal documents'
+    ],
+    'insurance': [
+      'insurance agent meeting',
+      'insurance paperwork',
+      'customer signing documents'
+    ],
+    'pet': [
+      'veterinary clinic',
+      'dog grooming',
+      'pet care',
+      'vet examining dog'
+    ],
+    'spa': [
+      'spa massage',
+      'facial treatment',
+      'wellness spa'
+    ],
+    'construction': [
+      'construction worker building',
+      'home remodeling',
+      'contractor working',
+      'renovation tools'
+    ],
+    'retail': [
+      'shopping store',
+      'product showcase',
+      'online shopping',
+      'customer unboxing'
+    ],
+  };
+
+  // Build high-accuracy ordered query list:
+  const base = [];
+  if (raw) base.push(raw);
+  if (canon && canon !== normText(raw)) base.push(canon);
+
+  const pack = packs[canon] || [];
+  const urlHint = urlTokens.length ? urlTokens.slice(0, 4).join(' ') : '';
+
+  // Tier 1: exact industry phrase (most relevant)
+  const tier1 = base.filter(Boolean).map((x) => x.slice(0, 70));
+
+  // Tier 2: curated synonyms for known buckets
+  const tier2 = pack;
+
+  // Tier 3: combine industry + “service / technician / product” and url hints (helps custom industries)
+  const t = normText(raw || canon);
+  const tCore = t.split(' ').slice(0, 3).join(' ');
+  const tier3 = uniq([
+    tCore ? `${tCore} service` : '',
+    tCore ? `${tCore} business` : '',
+    tCore ? `${tCore} professional` : '',
+    urlHint ? `${tCore} ${urlHint}`.trim() : '',
+  ]).filter(Boolean);
+
+  return uniq([...tier1, ...tier2, ...tier3]).slice(0, 12);
+}
+
+/** Very light guardrails to avoid obvious wrong verticals */
+function looksUnrelatedToIndustry(videoObj, canon = '') {
+  const hay = normText(
+    [
+      videoObj?.url,
+      videoObj?.image,
+      videoObj?.user?.name,
+      ...(Array.isArray(videoObj?.tags) ? videoObj.tags.map((t) => t?.title || t?.name) : []),
+    ].join(' ')
+  );
+
+  // If user asked HVAC, avoid cars/fashion/etc (common mismatch)
+  if (canon === 'hvac') {
+    if (/\bcar\b|\bauto\b|\bmakeup\b|\bfashion\b|\bflower\b|\brestaurant\b/.test(hay)) return true;
+  }
+  if (canon === 'florist') {
+    if (/\bcar\b|\bauto\b|\bhvac\b|\bconstruction\b|\brestaurant\b/.test(hay)) return true;
+  }
+  if (canon === 'beauty') {
+    if (/\bhvac\b|\bplumb\b|\belectric\b|\bcar\b|\bauto\b|\bflower\b/.test(hay)) return true;
+  }
+  return false;
+}
+
+async function pexelsVideoSearch(query, page = 1) {
+  return ax.get('https://api.pexels.com/videos/search', {
+    headers: { Authorization: PEXELS_API_KEY },
+    params: {
+      query,
+      per_page: 40,
+      page,
+      orientation: 'landscape',
+    },
+    timeout: 12000,
+  }).catch(() => ({ data: {} }));
+}
+
+async function pexelsPhotoSearch(query, page = 1) {
+  return ax.get('https://api.pexels.com/v1/search', {
+    headers: { Authorization: PEXELS_API_KEY },
+    params: { query, per_page: 40, page },
+    timeout: 12000,
+  }).catch(() => ({ data: {} }));
+}
+
+/* Pexels videos (HIGH RELEVANCE FIRST, then variety) */
+async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '') {
   if (!PEXELS_API_KEY) return [];
   const rng = mkRng32(seed || keyword || Date.now());
-  const variants = buildKeywordVariants(keyword);
-  // Randomly pick up to 3 different query variants and 2 random pages each
-  const chosenQueries = shuffleInPlace([...variants], rng).slice(0, Math.min(3, variants.length));
-  const pages = [1, 2, 3, 4, 5];
+
+  const canon = canonicalIndustry(keyword);
+  const queries = industryQueryPack(canon, keyword, urlHint);
+
   const results = [];
   const seen = new Set();
 
   try {
-    for (const q of chosenQueries) {
-      const shuffledPages = shuffleInPlace([...pages], rng).slice(0, 2);
-      for (const page of shuffledPages) {
-        const r = await ax.get('https://api.pexels.com/videos/search', {
-          headers: { Authorization: PEXELS_API_KEY },
-          params: {
-            query: q,
-            per_page: 40,      // big page to widen pool
-            page,              // random page => variety
-            orientation: 'landscape',
-          },
-          timeout: 12000,
-        }).catch(() => ({ data: {} }));
+    // Relevance first: page 1 then page 2 only if needed
+    for (const q of queries) {
+      for (const page of [1, 2]) {
+        const r = await pexelsVideoSearch(q, page);
         const vids = Array.isArray(r.data?.videos) ? r.data.videos : [];
+
         for (const v of vids) {
           const id = v?.id;
           if (id == null || seen.has(id)) continue;
+          if (looksUnrelatedToIndustry(v, canon)) continue;
+
           const files = Array.isArray(v.video_files) ? v.video_files : [];
-          // prefer >= 720p mp4, else any mp4 link
           const f =
             files.find((f) => /mp4/i.test(f.file_type || '') && (f.height || 0) >= 720) ||
             files.find((f) => /mp4/i.test(f.file_type || '')) ||
             files[0];
+
           if (f?.link) {
             seen.add(id);
             results.push({ url: f.link, id, dur: v.duration || 0 });
           }
+
+          // Stop once we have a strong pool (keeps accuracy high)
+          if (results.length >= Math.max(want * 3, 18)) break;
         }
+
+        if (results.length >= Math.max(want * 3, 18)) break;
       }
+      if (results.length >= Math.max(want * 3, 18)) break;
     }
-    // Shuffle the large pool, then take the top 'want'
+
+    // Controlled variety AFTER relevance pool exists
     shuffleInPlace(results, rng);
-    const pick = results.slice(0, Math.max(want, 8)); // keep a generous pool for later slicing
-    console.log('[pexels] videos picked:', pick.length, 'kw=', keyword, 'seed=', seed);
+
+    const pick = results.slice(0, Math.max(want, 8));
+    console.log('[pexels] videos picked:', pick.length, 'kw=', keyword, 'canon=', canon, 'seed=', seed);
     return pick;
   } catch (e) {
     console.warn('[pexels] video search fail:', e.message);
@@ -3503,39 +3790,42 @@ async function fetchPexelsVideos(keyword, want = 8, seed = '') {
   }
 }
 
-
-/* Pexels photos with seeded randomness + de-dupe */
-async function fetchPexelsPhotos(keyword, want = 8, seed = '') {
+/* Pexels photos (fallback) */
+async function fetchPexelsPhotos(keyword, want = 8, seed = '', urlHint = '') {
   if (!PEXELS_API_KEY) return [];
   const rng = mkRng32(seed || keyword || Date.now());
-  const variants = buildKeywordVariants(keyword);
-  const chosenQueries = shuffleInPlace([...variants], rng).slice(0, Math.min(3, variants.length));
-  const pages = [1, 2, 3, 4, 5];
+
+  const canon = canonicalIndustry(keyword);
+  const queries = industryQueryPack(canon, keyword, urlHint);
+
   const results = [];
   const seen = new Set();
 
   try {
-    for (const q of chosenQueries) {
-      const shuffledPages = shuffleInPlace([...pages], rng).slice(0, 2);
-      for (const page of shuffledPages) {
-        const r = await ax.get('https://api.pexels.com/v1/search', {
-          headers: { Authorization: PEXELS_API_KEY },
-          params: { query: q, per_page: 40, page },
-          timeout: 12000,
-        }).catch(() => ({ data: {} }));
+    for (const q of queries) {
+      for (const page of [1, 2]) {
+        const r = await pexelsPhotoSearch(q, page);
         const photos = Array.isArray(r.data?.photos) ? r.data.photos : [];
+
         for (const p of photos) {
           const id = p?.id;
           if (id == null || seen.has(id)) continue;
+
           const src = p?.src || {};
           const u = src.landscape || src.large2x || src.large || src.original;
-          if (u) {
-            seen.add(id);
-            results.push({ url: u, id });
-          }
+          if (!u) continue;
+
+          seen.add(id);
+          results.push({ url: u, id });
+
+          if (results.length >= Math.max(want * 3, 24)) break;
         }
+
+        if (results.length >= Math.max(want * 3, 24)) break;
       }
+      if (results.length >= Math.max(want * 3, 24)) break;
     }
+
     shuffleInPlace(results, rng);
     return results.slice(0, Math.max(want, 12));
   } catch (e) {
@@ -3992,7 +4282,8 @@ const keyword = getVideoKeyword(industry, url, answers); // <-- videos should us
   }
 
   // Media
-  let clips = await fetchPexelsVideos(keyword, 8);
+ let clips = await fetchPexelsVideos(keyword, 8, '', url);
+
   if (!clips.length) clips = await fetchPexelsVideos('product shopping', 8);
 
   const bgm = await prepareBgm();
@@ -4108,7 +4399,8 @@ const baseKeyword = getVideoKeyword(industry, url, answers);
     if (!script) script = await generateVideoScriptFromAnswers(answers);
 
     // ---- stock videos (single pool) ----
-let clips = await fetchPexelsVideos(baseKeyword, 8, `${seedBase}|${baseKeyword}`);
+let clips = await fetchPexelsVideos(baseKeyword, 8, `${seedBase}|${baseKeyword}`, url);
+
 if (!clips.length) clips = await fetchPexelsVideos(getVideoKeyword("business", url, answers), 8, `${seedBase}|fallback`);
 if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8, `${seedBase}|fallback2`);
 
