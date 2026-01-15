@@ -2297,29 +2297,15 @@ const vars = {
     const safeHeadline = applyHeadlineVariety(crafted.headline || "", prof.kind);
     const safeSubline = safeSublineText(crafted.subline || "");
 
-    // --- Offer / promo line ---
-    const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
-    const userOfferRaw = a.offer || a.saveAmount || "";
-    const modelOfferRaw = crafted.offer || "";
-    const rawOffer = userOfferRaw || modelOfferRaw;
+// --- Offer / promo line ---
+// ✅ RULE: Poster B should show an offer ONLY if the user explicitly entered one.
+const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
+const userOfferRaw = (a.offer || a.saveAmount || "").toString().trim();
 
-    const cleanedOffer = NO_OFFER_RE.test(String(rawOffer).trim())
-      ? ""
-      : rawOffer;
+const hasUserOffer = !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw);
 
-    const hasUserOffer =
-      !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw.toString().trim());
-
-    let safeOffer;
-    if (!hasUserOffer) {
-      // user left the offer blank → ignore GPT’s "New Collection"
-      // and instead pick a random neutral promo tag for variety
-      const promoLabel = pickPromoTag(prof.kind);
-      safeOffer = tightenOfferText(promoLabel);
-    } else {
-      // user gave a real deal → tighten that
-      safeOffer = tightenOfferText(cleanedOffer);
-    }
+// If user did NOT provide an offer, do NOT display any promo/offer text at all.
+const safeOffer = hasUserOffer ? tightenOfferText(userOfferRaw) : "";
 
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ""), 10);
 
@@ -2371,9 +2357,11 @@ const vars = {
     ) {
       safeDisclaimers = "";
     }
-    if (!safeDisclaimers && safeOffer) {
-      safeDisclaimers = "Limited time offer.";
-    }
+   // Only add "Limited time offer." if the user actually provided an offer
+if (!safeDisclaimers && hasUserOffer && safeOffer) {
+  safeDisclaimers = "Limited time offer.";
+}
+
 
     crafted = {
       headline: safeHeadline,
@@ -2756,29 +2744,15 @@ router.post("/generate-image-from-prompt", async (req, res) => {
         const dateRangeRaw = overlay.promoLine || overlay.body || "";
         const dateRange = safeSublineText(dateRangeRaw);
 
-        // --- NEW: varied promo line when there is no real offer ---
-        const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
-        const userOfferRaw = overlay.offer || "";
-        const modelOfferRaw = (b.copy && b.copy.offer) || "";
-        const rawOffer = userOfferRaw || modelOfferRaw;
+    // ✅ RULE: Poster B should show an offer ONLY if the user explicitly entered one.
+const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
+const userOfferRaw = (overlay.offer || "").toString().trim();
 
-        const cleanedOffer = NO_OFFER_RE.test(String(rawOffer).trim())
-          ? ""
-          : rawOffer;
+const hasUserOffer = !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw);
 
-        const hasUserOffer =
-          !!userOfferRaw &&
-          !NO_OFFER_RE.test(userOfferRaw.toString().trim());
+// If user did NOT provide an offer, do NOT display any promo/offer text at all.
+const saveAmount = hasUserOffer ? tightenOfferText(userOfferRaw) : "";
 
-        let saveAmount;
-        if (!hasUserOffer) {
-          // user left offer blank → pick a varied promo tag
-          const promoLabel = pickPromoTag(prof.kind);
-          saveAmount = tightenOfferText(promoLabel);
-        } else {
-          // user gave real deal → keep it, but tightened
-          saveAmount = tightenOfferText(cleanedOffer);
-        }
 
         const financingLn = (overlay.secondary || "").trim();
         const qualifiers = "";
@@ -3015,16 +2989,13 @@ router.post("/craft-ad-copy", async (req, res) => {
     const hasUserOffer =
       !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw.toString().trim());
 
-    let safeOffer;
-    if (!hasUserOffer) {
-      // user left offer blank → ignore GPT's "New Collection" repeat
-      // and choose a promo tag for this industry
-      const promoLabel = pickPromoTag(prof.kind);
-      safeOffer = tightenOfferText(promoLabel);
-    } else {
-      // user supplied actual deal
-      safeOffer = tightenOfferText(cleanedOffer);
-    }
+// ✅ RULE: Only include an offer if the user explicitly provided one.
+let safeOffer = "";
+if (hasUserOffer) {
+  safeOffer = tightenOfferText(cleanedOffer);
+}
+
+
 
     // Use the same normalization helper as poster B so copy matches layout behavior
     const safeHeadline = applyHeadlineVariety(
