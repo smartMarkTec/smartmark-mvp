@@ -163,7 +163,8 @@ async function muxWithVoiceAndBgm({
       `[2:a]atrim=0:${targetDur.toFixed(3)},asetpts=PTS-STARTPTS` +
         `,volume=${bgmVolume}` +
         `,afade=t=in:st=0:d=0.8` +
-        `,afade=t=out:st=${Math.max(0, targetDur - 1.0).toFixed(3)}:d=1.0[bgm]`
+        `,afade=t=out:st=${Math.max(0, targetDur - 0.15).toFixed(3)}:d=0.15
+[bgm]`
     );
 
     // Mix narration + bgm

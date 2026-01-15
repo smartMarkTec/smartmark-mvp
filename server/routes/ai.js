@@ -394,7 +394,7 @@ async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18
   const effVoice = voiceDur / ATEMPO;
 
   // 3) ✅ total duration = (effective voice + 2s), clamped to 18–20s
-  const TOTAL = Math.max(18, Math.min(20, (effVoice + 2)));
+  const TOTAL = Math.max(18, Math.min(20, (effVoice + 3)));
 
   // 4) subtitle word timings from script text (no Whisper roundtrip)
   const subtitleWords = await getSubtitleWords(voicePath, script, effVoice, ATEMPO);
@@ -430,7 +430,7 @@ async function makeVideoVariantFast({ clipUrls = [], script = "", targetSec = 18
       voiceIn: voicePath,
       industry: industry,
       outPath: finalPath,
-      tailSeconds: 2.0,
+      tailSeconds: 3.0,
       bgmVolume: 0.10,
     });
   } finally {
@@ -4035,7 +4035,8 @@ if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8, `${see
 
     // ---- fast toggle: ONLY one mode executes ----
     const FAST_MODE = String(body.fast ?? req.query.fast ?? process.env.SM_FAST_MODE ?? "0").trim() === "1";
-const WANT_VARIANTS = Math.max(1, Math.min(2, Number(body.variants || req.query.variants || 2)));
+const WANT_VARIANTS = 2; // ALWAYS generate two videos
+
 
     // Build two deterministic clip plans (A/B) from the SAME pool
     const planA = buildVirtualPlan(clips, 0, `${seedBase}|A`);
@@ -4044,18 +4045,18 @@ const WANT_VARIANTS = Math.max(1, Math.min(2, Number(body.variants || req.query.
 
     const bgm = await prepareBgm();
 
-    // ---- RENDER EXACTLY TWO VARIANTS ----
-  let v1, v2;
+// ---- RENDER EXACTLY TWO VARIANTS ----
+let v1, v2;
+
 if (FAST_MODE) {
   const urlsA = planA.map(p => p.url).slice(0, 4);
   const urlsB = planB.map(p => p.url).slice(0, 4);
 
-  v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec: targetSec });
-  if (WANT_VARIANTS === 2) {
-    v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec: targetSec });
-  }
+  // pass industry so Music/music/<industry>/... is used
+  v1 = await makeVideoVariantFast({ clipUrls: urlsA, script, targetSec, industry });
+  v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec, industry });
 } else {
-  // (keep your existing standard path)
+  // standard path (already uses bgm file)
   v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm });
   v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm });
 }

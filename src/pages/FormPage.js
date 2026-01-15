@@ -424,8 +424,8 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
 
 const CONTROLLER_TIMEOUT_MS = 22000; // single-call guard
 const IMAGE_FETCH_TIMEOUT_MS = 38000; // image job (retry-safe)
-const VIDEO_FETCH_TIMEOUT_MS = 56000; // per-variant POST /generate-video-ad
-const GENERATION_HARD_CAP_MS = 100000; // global cap per run (~1m40s)
+const VIDEO_FETCH_TIMEOUT_MS = 150000; // per-variant POST /generate-video-ad
+const GENERATION_HARD_CAP_MS = 190000; // global cap per run (~1m40s)
 const VIDEO_TARGET_SECONDS = 19; // server still targets ~19s
 const USE_FAST_MODE = true;
 
