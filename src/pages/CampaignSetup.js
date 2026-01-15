@@ -1353,7 +1353,11 @@ const CampaignSetup = () => {
             {parseFloat(budget) >= 3 && (
               <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
                 <button
-                  onClick={() => window.open("https://cash.app", "_blank")}
+                  onClick={() => {
+  const feeAmount = Math.max(1, Math.round(calculateFees(budget).fee || 25));
+  window.open(`https://cash.app/$SmarteMark/${feeAmount}`, "_blank", "noopener,noreferrer");
+}}
+
                   style={{
                     background: ACCENT,
                     color: "#0f1418",
