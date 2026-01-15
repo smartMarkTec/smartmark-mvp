@@ -550,6 +550,43 @@ const Landing = () => {
         </button>
       </div>
 
+      {/* Contact (barely visible, bottom-center) */}
+<div
+  style={{
+    width: "100%",
+    display: "flex",
+    justifyContent: "center",
+    padding: "6px 0 10px",
+    opacity: 0.22, // barely visible
+    fontSize: 12,
+    fontWeight: 700,
+    color: "rgba(255,255,255,0.75)",
+    letterSpacing: 0.2,
+    userSelect: "none",
+    position: "relative",
+    zIndex: 1,
+  }}
+>
+  <span>
+    Contact:{" "}
+    <a
+      href="mailto:knowwilltech@gmail.com"
+      style={{
+        color: "rgba(255,255,255,0.75)",
+        textDecoration: "none",
+        borderBottom: "1px solid rgba(255,255,255,0.12)",
+        paddingBottom: 1,
+      }}
+    >
+      knowwilltech@gmail.com
+    </a>
+  </span>
+</div>
+
+{/* tiny spacer so the bottom gradient never reveals page background */}
+<div style={{ height: 24 }} />
+
+
       {/* tiny spacer so the bottom gradient never reveals page background */}
       <div style={{ height: 24 }} />
     </div>
