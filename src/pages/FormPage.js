@@ -2777,21 +2777,7 @@ async function handleGenerateStaticAd(
     gap: 10,
   }}
 >
-  {/* tiny hint (barely visible) */}
-  {!hasGenerated && (
-    <div
-      style={{
-        color: "rgba(255,255,255,0.55)",
-        fontSize: 13,
-        fontWeight: 700,
-        textAlign: "center",
-        maxWidth: 520,
-        lineHeight: 1.35,
-      }}
-    >
-      Say <span style={{ color: "#9dffe9" }}>"yes"</span> when you’re ready and I’ll generate your previews.
-    </div>
-  )}
+
 
   <button
     disabled={!hasGenerated}
