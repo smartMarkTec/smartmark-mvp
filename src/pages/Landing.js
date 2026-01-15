@@ -1,5 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import smartmarkLogo from "../assets/smartmark-logo.svg";
+
 
 /** Tech palette */
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
@@ -141,38 +143,64 @@ const Landing = () => {
         }}
       />
 
-      {/* Header */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          flexDirection: isMobile ? "column" : "row",
-          justifyContent: isMobile ? "center" : "space-between",
-          alignItems: "center",
-          padding: `18px ${headerPadding} 0`,
-          gap: isMobile ? "0.9rem" : 0,
-          position: "relative",
-          zIndex: 2,
-        }}
-      >
-        <button
-          onClick={scrollToFaq}
-          style={{
-            fontWeight: 700,
-            fontSize: isMobile ? "0.98rem" : "1rem",
-            color: "#e6faff",
-            borderRadius: 999,
-            padding: "0.55rem 1.1rem",
-            cursor: "pointer",
-            transition: "transform .15s ease",
-            ...glass,
-            width: isMobile ? "86vw" : "auto",
-          }}
-          onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-          onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-        >
-          FAQ
-        </button>
+  {/* Header */}
+<div
+  style={{
+    width: "100%",
+    display: "flex",
+    flexDirection: isMobile ? "column" : "row",
+    justifyContent: isMobile ? "center" : "space-between",
+    alignItems: "center",
+    padding: `18px ${headerPadding} 0`,
+    gap: isMobile ? "0.9rem" : 0,
+    position: "relative",
+    zIndex: 2,
+  }}
+>
+  {/* Left: small logo + FAQ */}
+  <div
+    style={{
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      width: isMobile ? "100%" : "auto",
+    }}
+  >
+    <img
+      src={smartmarkLogo}
+      alt="SmarteMark"
+      style={{
+        height: 26,
+        width: 26,
+        borderRadius: 10,
+        opacity: 0.92,
+        flex: "0 0 auto",
+      }}
+    />
+
+    <button
+      onClick={scrollToFaq}
+      style={{
+        fontWeight: 700,
+        fontSize: isMobile ? "0.98rem" : "1rem",
+        color: "#e6faff",
+        borderRadius: 999,
+        padding: "0.55rem 1.1rem",
+        cursor: "pointer",
+        transition: "transform .15s ease",
+        ...glass,
+        width: isMobile ? "86vw" : "auto",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+      onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+    >
+      FAQ
+    </button>
+  </div>
+
+  {/* Right side stays exactly as you already have it below this */}
+  {/* KEEP YOUR EXISTING RIGHT-SIDE BUTTONS / CONTENT HERE */}
 
         <div style={{ display: "flex", gap: "10px" }}>
           <button
