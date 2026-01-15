@@ -3541,7 +3541,9 @@ async function makeVideoVariant({
 
     // effective VO duration after slowdown (atempo < 1 => longer)
     const effVoice = voiceDur / ATEMPO;
-    OUTLEN = Math.max(15, Math.min(20, effVoice + 2));
+const PAD = Math.max(0, Number(tailPadSec || 0));
+OUTLEN = Math.max(18, Math.min(21, effVoice + PAD));
+
 
     // ---------- 1b) Build subtitle word timings (synced to audio) ----------
     const subtitleWords = await getSubtitleWords(
@@ -3608,40 +3610,31 @@ async function makeVideoVariant({
       safeUnlink(tmpIn);
     }
 
-    // ---------- 3) Concat segments -> [vcat] ----------
-    const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
-    const vParts = segs.flatMap((p) => ['-i', p]);
-    const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
+   // ---------- 3) Concat segments -> [vcat] ----------
+const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
+const vParts = segs.flatMap((p) => ['-i', p]);
+const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-    // ---------- 4) Audio graph (voice + optional BGM) ----------
-    const voiceIdx = segs.length;
-    const audioInputs = ['-i', voicePath];
-    let musicArgs = [];
-    let musicIdx = null;
+// ✅ NEW: pad video tail so visuals continue after voice ends
+const padChain =
+  PAD > 0
+    ? `[vcat]tpad=stop_mode=clone:stop_duration=${PAD.toFixed(2)}[vpad]`
+    : `[vcat]null[vpad]`;
 
-    if (musicPath) {
-      musicArgs = ['-i', musicPath];
-      musicIdx = voiceIdx + 1;
-    }
 
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(
-      3
-    )},aresample=48000[vo]`;
 
-    const audioMix =
-      musicIdx !== null
-        ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
-        : `${voiceFilt};[vo]anull[aout]`;
 
     // ---------- 5) Subtitles: SAME black box, but now word-timed ----------
-    const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
-      subtitleWords,
-      '[vcat]',
-      W,
-      H
-    );
+ const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
+  subtitleWords,
+  '[vpad]',
+  W,
+  H
+);
 
-    const fc = [concatChain, subFilter, audioMix].join(';');
+
+    const fc = [concatChain, padChain, subFilter, audioMix].join(';');
+
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
@@ -3724,7 +3717,10 @@ async function makeSlideshowVariantFromPhotos({
       Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
 
     const effVoice = voiceDur / ATEMPO;
-   OUTLEN = Math.max(18, Math.min(20, effVoice + 3));
+  const PAD = Math.max(0, Number(tailPadSec || 0)); // <-- USE tailPadSec
+OUTLEN = Math.max(18, Math.min(21, effVoice + PAD));
+
+
 
 
     // ---------- 1b) Subtitle words (synced to audio) ----------
@@ -3789,10 +3785,17 @@ async function makeSlideshowVariantFromPhotos({
       segs.push(outSeg);
     }
 
-    // ---------- 3) Concat segments -> [vcat] ----------
-    const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
-    const vParts = segs.flatMap((p) => ['-i', p]);
-    const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
+   // ---------- 3) Concat segments -> [vcat] ----------
+const vInputs = segs.map((_, i) => `[${i}:v]`).join('');
+const vParts = segs.flatMap((p) => ['-i', p]);
+const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
+
+// ✅ NEW: pad video tail so visuals continue after voice ends
+const padChain =
+  PAD > 0
+    ? `[vcat]tpad=stop_mode=clone:stop_duration=${PAD.toFixed(2)}[vpad]`
+    : `[vcat]null[vpad]`;
+
 
  // ---------- 4) Audio graph (voice + optional BGM that ALWAYS lasts full OUTLEN) ----------
 const voiceIdx = segs.length;
@@ -3817,14 +3820,16 @@ const audioMix =
 
 
     // ---------- 5) Subtitles: same black box, word-timed ----------
-    const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
-      subtitleWords,
-      '[vcat]',
-      W,
-      H
-    );
+ const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
+  subtitleWords,
+  '[vpad]',
+  W,
+  H
+);
 
-    const fc = [concatChain, subFilter, audioMix].join(';');
+
+    const fc = [concatChain, padChain, subFilter, audioMix].join(';');
+
 
     const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
     await execFile(
@@ -4060,8 +4065,8 @@ if (FAST_MODE) {
   v2 = await makeVideoVariantFast({ clipUrls: urlsB, script, targetSec, industry });
 } else {
   // standard path (already uses bgm file)
-  v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 2, musicPath: bgm });
-  v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 2, musicPath: bgm });
+  v1 = await makeVideoVariant({ clips: planA, script, variant: 0, targetSec, tailPadSec: 3, musicPath: bgm });
+  v2 = await makeVideoVariant({ clips: planB, script, variant: 1, targetSec, tailPadSec: 3, musicPath: bgm });
 }
 
 
