@@ -3724,7 +3724,8 @@ async function makeSlideshowVariantFromPhotos({
       Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
 
     const effVoice = voiceDur / ATEMPO;
-    OUTLEN = Math.max(18, Math.min(20, effVoice + 2));
+   OUTLEN = Math.max(18, Math.min(20, effVoice + 3));
+
 
     // ---------- 1b) Subtitle words (synced to audio) ----------
     const subtitleWords = await getSubtitleWords(
@@ -3793,25 +3794,27 @@ async function makeSlideshowVariantFromPhotos({
     const vParts = segs.flatMap((p) => ['-i', p]);
     const concatChain = `${vInputs}concat=n=${segs.length}:v=1:a=0[vcat]`;
 
-    // ---------- 4) Audio graph ----------
-    const voiceIdx = segs.length;
-    const audioInputs = ['-i', voicePath];
-    let musicArgs = [];
-    let musicIdx = null;
+ // ---------- 4) Audio graph (voice + optional BGM that ALWAYS lasts full OUTLEN) ----------
+const voiceIdx = segs.length;
+const audioInputs = ['-i', voicePath];
+let musicArgs = [];
+let musicIdx = null;
 
-    if (musicPath) {
-      musicArgs = ['-i', musicPath];
-      musicIdx = voiceIdx + 1;
-    }
+if (musicPath) {
+  // IMPORTANT: loop the music forever so it can cover the entire OUTLEN
+  musicArgs = ['-stream_loop', '-1', '-i', musicPath];
+  musicIdx = voiceIdx + 1;
+}
 
-    const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(
-      3
-    )},aresample=48000[vo]`;
+const voiceFilt = `[${voiceIdx}:a]atempo=${ATEMPO.toFixed(3)},aresample=48000[vo]`;
 
-    const audioMix =
-      musicIdx !== null
-        ? `[${musicIdx}:a]volume=0.18[bgm];${voiceFilt};[bgm][vo]amix=inputs=2:duration=first:dropout_transition=2[aout]`
-        : `${voiceFilt};[vo]anull[aout]`;
+const audioMix =
+  musicIdx !== null
+    ? `[${musicIdx}:a]aresample=48000,atrim=0:${OUTLEN.toFixed(2)},volume=0.18[bgm];` +
+      `${voiceFilt};` +
+      `[bgm][vo]amix=inputs=2:duration=longest:dropout_transition=2[aout]`
+    : `${voiceFilt};[vo]anull[aout]`;
+
 
     // ---------- 5) Subtitles: same black box, word-timed ----------
     const { filter: subFilter, out: vOut } = buildWordTimedDrawtextFilter(
