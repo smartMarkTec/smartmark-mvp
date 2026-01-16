@@ -32,43 +32,8 @@ const FORM_DRAFT_KEY = "sm_form_draft_v2";
 /* ======================= NEW: hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
 
-function saveSetupCreativeBackup(user, draftObj) {
-  try {
-    const payload = { ...(draftObj || {}), savedAt: Date.now() };
-    // Save both user-scoped + legacy to be safest
-    if (user) localStorage.setItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY), JSON.stringify(payload));
-    localStorage.setItem(SETUP_CREATIVE_BACKUP_KEY, JSON.stringify(payload));
-  } catch {}
-}
-
-function loadSetupCreativeBackup(user) {
-  try {
-    const raw =
-      (user && localStorage.getItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY))) ||
-      localStorage.getItem(SETUP_CREATIVE_BACKUP_KEY);
-
-    if (!raw) return null;
-
-    const draft = JSON.parse(raw);
-    const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
-    if (!ageOk) return null;
-
-    return draft;
-  } catch {
-    return null;
-  }
-}
-
-function persistDraftCreativesNow(user, draftCreatives) {
-  try {
-    const payload = { ...(draftCreatives || {}), mediaSelection: "image", savedAt: Date.now() };
-    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
-    if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
-    localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
-    saveSetupCreativeBackup(user, payload);
-  } catch {}
-}
-
+/* NEW: flag to detect FB redirect flow and force re-hydration */
+const FB_CONNECT_INFLIGHT_KEY = "sm_fb_connect_inflight_v1";
 
 /* ======================= NEW: creatives persist until campaign duration ends ======================= */
 const DEFAULT_CAMPAIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // safety fallback if no end is known
@@ -174,6 +139,48 @@ function purgeExpiredCreative(map, campaignId) {
   if (!isExpiredSavedCreative(saved)) return false;
   delete map[campaignId];
   return true;
+}
+
+function saveSetupCreativeBackup(user, draftObj) {
+  try {
+    const payload = { ...(draftObj || {}), savedAt: Date.now() };
+    // Save both user-scoped + legacy to be safest
+    if (user)
+      localStorage.setItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY), JSON.stringify(payload));
+    localStorage.setItem(SETUP_CREATIVE_BACKUP_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+function loadSetupCreativeBackup(user) {
+  try {
+    const raw =
+      (user && localStorage.getItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY))) ||
+      localStorage.getItem(SETUP_CREATIVE_BACKUP_KEY);
+
+    if (!raw) return null;
+
+    const draft = JSON.parse(raw);
+    const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
+    if (!ageOk) return null;
+
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+function persistDraftCreativesNow(user, draftCreatives) {
+  try {
+    const payload = {
+      ...(draftCreatives || {}),
+      mediaSelection: "image",
+      savedAt: Date.now(),
+    };
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+    if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+    localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+    saveSetupCreativeBackup(user, payload);
+  } catch {}
 }
 
 const calculateFees = (budget) => {
@@ -487,12 +494,7 @@ const CampaignSetup = () => {
     mediaSelection: "image",
   });
 
-  const {
-    imageUrls: navImageUrls,
-    headline,
-    body,
-    answers,
-  } = location.state || {};
+  const { imageUrls: navImageUrls, headline, body, answers } = location.state || {};
 
   const [startDate, setStartDate] = useState(() => {
     const existing = form.startDate || "";
@@ -550,54 +552,77 @@ const CampaignSetup = () => {
     setEndDate(eISO);
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
- useEffect(() => {
-  const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
-  if (lastFields) {
-    const f = JSON.parse(lastFields);
-    setForm(f);
-    if (f.startDate) setStartDate(f.startDate);
-    if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
-  }
-
-  const applyDraft = (draftObj) => {
-    setDraftCreatives({
-      images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
-      mediaSelection: "image",
-    });
-  };
-
-  try {
-    // 1) Prefer session (best UX during same-tab nav)
-    const sess = sessionStorage.getItem("draft_form_creatives");
-    if (sess) {
-      applyDraft(JSON.parse(sess));
-      return;
+  /* ===================== DRAFT RE-HYDRATION (updated to survive FB connect) ===================== */
+  useEffect(() => {
+    const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
+    if (lastFields) {
+      const f = JSON.parse(lastFields);
+      setForm(f);
+      if (f.startDate) setStartDate(f.startDate);
+      if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
     }
 
-    // 2) Then user/legacy CREATIVE_DRAFT_KEY (FormPage writes this)
-    const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
-    if (raw) {
-      const draft = JSON.parse(raw);
-      const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
-      if (ageOk) {
-        applyDraft(draft);
-        // also store a backup so FB redirect can’t lose it
-        saveSetupCreativeBackup(resolvedUser, draft);
+    const applyDraft = (draftObj) => {
+      setDraftCreatives({
+        images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
+        mediaSelection: "image",
+      });
+    };
+
+    const inflight = (() => {
+      try {
+        const v = localStorage.getItem(FB_CONNECT_INFLIGHT_KEY);
+        if (!v) return false;
+        const parsed = JSON.parse(v);
+        // treat as inflight if saved within 10 minutes
+        return parsed?.t && Date.now() - Number(parsed.t) < 10 * 60 * 1000;
+      } catch {
+        return false;
+      }
+    })();
+
+    try {
+      // 1) Prefer session (best UX during same-tab nav + survives redirect)
+      const sess = sessionStorage.getItem("draft_form_creatives");
+      if (sess) {
+        const sObj = JSON.parse(sess);
+        applyDraft(sObj);
+        // always back it up (helps if something else clears session)
+        saveSetupCreativeBackup(resolvedUser, sObj);
         return;
       }
-    }
 
-    // 3) Last resort: hard backup (survives FB redirect reliably)
-    const backup = loadSetupCreativeBackup(resolvedUser);
-    if (backup) {
-      applyDraft(backup);
-      // re-hydrate session for smoother next navigation
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
-      return;
-    }
-  } catch {}
-}, []);
+      // 2) Then user/legacy CREATIVE_DRAFT_KEY (FormPage writes this)
+      const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
+      if (raw) {
+        const draft = JSON.parse(raw);
+        const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
+        if (ageOk) {
+          applyDraft(draft);
+          saveSetupCreativeBackup(resolvedUser, draft);
+          return;
+        }
+      }
 
+      // 3) If we just came back from FB connect, force backup restore
+      if (inflight) {
+        const backup = loadSetupCreativeBackup(resolvedUser);
+        if (backup) {
+          applyDraft(backup);
+          sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+          return;
+        }
+      }
+
+      // 4) Last resort: hard backup (survives FB redirect reliably)
+      const backup = loadSetupCreativeBackup(resolvedUser);
+      if (backup) {
+        applyDraft(backup);
+        sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+        return;
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const hasDraft = draftCreatives.images && draftCreatives.images.length;
@@ -609,6 +634,8 @@ const CampaignSetup = () => {
       } else {
         localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
       }
+      // keep backup warm so a redirect can’t lose previews
+      saveSetupCreativeBackup(resolvedUser, payload);
     } catch {}
   }, [draftCreatives]);
 
@@ -635,9 +662,30 @@ const CampaignSetup = () => {
       try {
         localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
       } catch {}
+
+      // IMPORTANT: after returning from FB connect, force re-hydrate draft from backup if needed
+      try {
+        const sess = sessionStorage.getItem("draft_form_creatives");
+        if (!sess) {
+          const backup = loadSetupCreativeBackup(resolvedUser);
+          if (backup) {
+            sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+            setDraftCreatives({
+              images: Array.isArray(backup.images) ? backup.images.slice(0, 2) : [],
+              mediaSelection: "image",
+            });
+          }
+        }
+      } catch {}
+
+      // clear inflight marker
+      try {
+        localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
+      } catch {}
+
       window.history.replaceState({}, document.title, "/setup");
     }
-  }, [location.search]);
+  }, [location.search, resolvedUser]);
 
   useEffect(() => {
     if (fbConnected) {
@@ -655,8 +703,12 @@ const CampaignSetup = () => {
         images: imgs.length ? imgs : dc.images,
         mediaSelection: "image",
       }));
+      // keep backup warm
+      try {
+        saveSetupCreativeBackup(resolvedUser, { images: imgs, mediaSelection: "image" });
+      } catch {}
     }
-  }, [navImageUrls]);
+  }, [navImageUrls, resolvedUser]);
 
   useEffect(() => {
     if (!fbConnected) return;
@@ -699,7 +751,7 @@ const CampaignSetup = () => {
 
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace("act_", "");
+    const acctId = String(selectedAccount).replace(/^act_/, "");
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
@@ -730,7 +782,9 @@ const CampaignSetup = () => {
         };
         setMetricsMap((m) => ({ ...m, [expandedId]: normalized }));
       })
-      .catch(() => setMetricsMap((m) => ({ ...m, [expandedId]: { impressions: "--", clicks: "--", ctr: "--" } })));
+      .catch(() =>
+        setMetricsMap((m) => ({ ...m, [expandedId]: { impressions: "--", clicks: "--", ctr: "--" } }))
+      );
   }, [expandedId, selectedAccount]);
 
   // Persist (user-scoped) + alsoLegacy for creds so Login prefill always works
@@ -759,18 +813,24 @@ const CampaignSetup = () => {
     setLoading(true);
     try {
       if (isPaused) {
-        const r = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, {
-          method: "POST",
-          credentials: "include",
-        });
+        const r = await fetch(
+          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
+          {
+            method: "POST",
+            credentials: "include",
+          }
+        );
         if (!r.ok) throw new Error("Unpause failed");
         setCampaignStatus("ACTIVE");
         setIsPaused(false);
       } else {
-        const r = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, {
-          method: "POST",
-          credentials: "include",
-        });
+        const r = await fetch(
+          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
+          {
+            method: "POST",
+            credentials: "include",
+          }
+        );
         if (!r.ok) throw new Error("Pause failed");
         setCampaignStatus("PAUSED");
         setIsPaused(true);
@@ -786,10 +846,13 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).replace(/^act_/, "");
     setLoading(true);
     try {
-      const r = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`, {
-        method: "POST",
-        credentials: "include",
-      });
+      const r = await fetch(
+        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
+        {
+          method: "POST",
+          credentials: "include",
+        }
+      );
       if (!r.ok) throw new Error("Archive failed");
       setCampaignStatus("ARCHIVED");
       setLaunched(false);
@@ -1114,11 +1177,13 @@ const CampaignSetup = () => {
         >
           <button
             onClick={() => {
-  // IMPORTANT: persist creatives BEFORE leaving to Render (cross-origin redirect)
-  persistDraftCreativesNow(resolvedUser, draftCreatives);
-  window.location.href = `${backendUrl}/auth/facebook`;
-}}
-
+              // IMPORTANT: persist creatives BEFORE leaving to Render (cross-origin redirect)
+              persistDraftCreativesNow(resolvedUser, draftCreatives);
+              try {
+                localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
+              } catch {}
+              window.location.href = `${backendUrl}/auth/facebook`;
+            }}
             style={{
               padding: "14px 22px",
               borderRadius: "14px",
@@ -1283,7 +1348,11 @@ const CampaignSetup = () => {
                 <button
                   onClick={() => {
                     const feeAmount = Math.max(1, Math.round(calculateFees(budget).fee || 25));
-                    window.open(`https://cash.app/$SmarteMark/${feeAmount}`, "_blank", "noopener,noreferrer");
+                    window.open(
+                      `https://cash.app/$SmarteMark/${feeAmount}`,
+                      "_blank",
+                      "noopener,noreferrer"
+                    );
                   }}
                   style={{
                     background: ACCENT,

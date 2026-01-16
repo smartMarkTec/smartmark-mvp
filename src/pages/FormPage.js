@@ -76,7 +76,6 @@ function quotaMessage() {
   return `Image generation limit reached for today. Remaining runs: ${remaining}. Try again in about ${mins} minutes.`;
 }
 
-
 /* -------- Image copy edit store -------- */
 const IMAGE_DRAFTS_KEY = "smartmark.imageDrafts.v1";
 const ALLOWED_CTAS = [
@@ -330,10 +329,7 @@ function newControllerFor(key) {
 }
 
 // legacy helper (still here in case something else uses it)
-async function fetchJSON(
-  url,
-  { key = "GEN", timeoutMs = 15000, opts = {} } = {}
-) {
+async function fetchJSON(url, { key = "GEN", timeoutMs = 15000, opts = {} } = {}) {
   const c = newControllerFor(key);
   const t = setTimeout(() => {
     try {
@@ -352,21 +348,14 @@ async function fetchJSON(
 /* ===== helpers ===== */
 
 /* ===== derivePosterFieldsFromAnswers ===== */
-
 function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const safe = (s) => String(s || "").trim();
 
-  const headline =
-    a.headline || a.eventTitle || a.mainBenefit || a.businessName || "";
-
+  const headline = a.headline || a.eventTitle || a.mainBenefit || a.businessName || "";
   const promoLine = a.promoLine || a.subline || a.idealCustomer || "";
-
   const offer = a.offer || a.saveAmount || "";
-
   const secondary = a.secondary || a.financingLine || "";
-
   const adCopy = a.adCopy || a.details || a.mainBenefit || "";
-
   const legal = a.legal || "";
   const backgroundUrl = a.backgroundUrl || fallback.backgroundUrl || "";
 
@@ -407,25 +396,16 @@ async function fetchJsonWithRetry(
   }
   while (attempt < tries) {
     try {
-      const res = await fetchWithTimeout(
-        url,
-        { mode: "cors", credentials: "omit", ...opts },
-        timeoutMs
-      );
+      const res = await fetchWithTimeout(url, { mode: "cors", credentials: "omit", ...opts }, timeoutMs);
       if (!res.ok) {
-        // Cold start / throttling -> retry only when it makes sense
-        if ([429, 502, 503, 504].includes(res.status)) {
-          throw new Error(String(res.status));
-        }
+        if ([429, 502, 503, 504].includes(res.status)) throw new Error(String(res.status));
         const text = await res.text().catch(() => "");
         throw new Error(`${res.status} ${res.statusText} ${text}`.trim());
       }
       return await res.json();
     } catch (e) {
       lastErr = e;
-      // modest backoff so total stays under our hard cap
-      const backoff =
-        400 * Math.pow(1.7, attempt) + Math.floor(Math.random() * 180);
+      const backoff = 400 * Math.pow(1.7, attempt) + Math.floor(Math.random() * 180);
       await new Promise((r) => setTimeout(r, backoff));
       attempt++;
     }
@@ -434,23 +414,13 @@ async function fetchJsonWithRetry(
 }
 
 async function warmBackend() {
-  // Quick warmup so first hit isn't slow; don't block too long
   try {
-    const res = await fetchWithTimeout(
-      `${API_BASE}/test`,
-      { mode: "cors", credentials: "omit" },
-      5000
-    );
+    const res = await fetchWithTimeout(`${API_BASE}/test`, { mode: "cors", credentials: "omit" }, 5000);
     if (!res.ok) throw new Error(`warmup ${res.status}`);
     return true;
   } catch {
-    // one short retry
     try {
-      await fetchWithTimeout(
-        `${API_BASE}/test`,
-        { mode: "cors", credentials: "omit" },
-        5000
-      );
+      await fetchWithTimeout(`${API_BASE}/test`, { mode: "cors", credentials: "omit" }, 5000);
     } catch {}
     return false;
   }
@@ -460,9 +430,7 @@ function getRandomString() {
   return Math.random().toString(36).substring(2, 12) + Date.now();
 }
 function isGenerateTrigger(input) {
-  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(
-    input.trim()
-  );
+  return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
 }
 async function safeJson(res) {
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -486,26 +454,17 @@ function isLikelyQuestion(s) {
   if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
   const textWithoutUrls = stripUrls(t);
   const hasQMark = textWithoutUrls.includes("?");
-  const startsWithQword =
-    /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(
-      t
-    );
+  const startsWithQword = /^(who|what|why|how|when|where|which|can|do|does|is|are|should|help)\b/.test(t);
   return hasQMark || startsWithQword;
 }
 function isLikelySideStatement(s) {
   const t = (s || "").trim().toLowerCase();
-
-  // Only treat as "side chat" if it's clearly a reaction
-  // (avoid classifying normal answers like "great quality makeup")
   const reactionOnly =
     /^(wow|omg|thanks?|thank you|awesome|amazing|incredible|insane|crazy|cool|love it|love this)(\b|!|\.|$)/;
-
   const hasBang = t.includes("!");
   const veryShort = t.split(/\s+/).filter(Boolean).length <= 4;
-
   return (veryShort && reactionOnly.test(t)) || (veryShort && hasBang);
 }
-
 function isLikelySideChat(s, currentQ) {
   if (isLikelyQuestion(s) || isLikelySideStatement(s)) return true;
   const t = (s || "").trim();
@@ -540,15 +499,10 @@ function buildImagePrompt(answers = {}, overlay = {}) {
   if (offer) parts.push(`Offer: ${offer}`);
   if (audience) parts.push(`Audience: ${audience}`);
 
-  // Nudge toward your overlay copy so the image fits your text
   if (overlay?.headline) parts.push(`Headline theme: ${overlay.headline}`);
   if (overlay?.cta) parts.push(`CTA: ${overlay.cta}`);
 
-  // Photo guidance
-  parts.push(
-    "Style: clean commercial photo, centered subject, negative space for text, uncluttered background"
-  );
-
+  parts.push("Style: clean commercial photo, centered subject, negative space for text, uncluttered background");
   return parts.filter(Boolean).join(" | ");
 }
 
@@ -602,13 +556,9 @@ function toAbsoluteMedia(u) {
 function proxyImg(u = "") {
   if (!u) return "";
   const s = String(u).trim();
-  // Already same-origin or already proxied
   if (s.startsWith("/")) return s;
   if (s.startsWith(`${API_BASE}/proxy-img?u=`)) return s;
-  if (/^https?:\/\//i.test(s)) {
-    return `${API_BASE}/proxy-img?u=${encodeURIComponent(s)}`;
-  }
-  // relative like "media/x" (server will serve it), leave as-is but normalize later
+  if (/^https?:\/\//i.test(s)) return `${API_BASE}/proxy-img?u=${encodeURIComponent(s)}`;
   return s;
 }
 
@@ -621,11 +571,7 @@ async function headRangeWarm(label, url) {
     await fetch(finalUrl, { method: "HEAD", signal: c1.signal });
 
     const c2 = new AbortController();
-    const r = await fetch(finalUrl, {
-      method: "GET",
-      headers: { Range: "bytes=0-1023" },
-      signal: c2.signal,
-    });
+    const r = await fetch(finalUrl, { method: "GET", headers: { Range: "bytes=0-1023" }, signal: c2.signal });
     if (!r.ok) throw new Error(`RANGE ${r.status}`);
     return true;
   } catch (e) {
@@ -640,46 +586,23 @@ const parseImageResults = (data) => {
 
   const push = (u0) => {
     if (!u0) return;
-    const raw =
-      typeof u0 === "string" ? u0 : u0?.absoluteUrl || u0?.url || u0?.filename;
+    const raw = typeof u0 === "string" ? u0 : u0?.absoluteUrl || u0?.url || u0?.filename;
     if (!raw) return;
-    // If it’s absolute http(s), send through our proxy to avoid CORS in <img/> and warmers
     const maybeProxied = /^https?:\/\//i.test(raw) ? proxyImg(raw) : raw;
-    // Normalize to same-origin (/api/media/.. etc.)
-    out.push(
-      toAbsoluteMedia(
-        maybeProxied.startsWith("/api/") ? maybeProxied : maybeProxied
-      )
-    );
+    out.push(toAbsoluteMedia(maybeProxied.startsWith("/api/") ? maybeProxied : maybeProxied));
   };
 
-  if (Array.isArray(data?.imageVariations)) {
-    for (const v of data.imageVariations) push(v);
-  }
-  if (Array.isArray(data?.images)) {
-    for (const u0 of data.images) push(u0);
-  }
-  if (out.length === 0) {
-    push(
-      data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename
-    );
-  }
+  if (Array.isArray(data?.imageVariations)) for (const v of data.imageVariations) push(v);
+  if (Array.isArray(data?.images)) for (const u0 of data.images) push(u0);
+  if (out.length === 0) push(data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename);
 
   const uniq = Array.from(new Set(out));
   return uniq.slice(0, 2);
 };
 
 async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
-  const fallbackA = proxyImg(
-    `https://picsum.photos/seed/sm-${encodeURIComponent(
-      token
-    )}-A/1200/628`
-  );
-  const fallbackB = proxyImg(
-    `https://picsum.photos/seed/sm-${encodeURIComponent(
-      token
-    )}-B/1200/628`
-  );
+  const fallbackA = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`);
+  const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`);
 
   try {
     await warmBackend();
@@ -687,20 +610,15 @@ async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
     const payload = {
       answers: answersParam || {},
       regenerateToken: token,
-      // Strong guidance so backend doesn’t choose a random category
       prompt: prompt || buildImagePrompt(answersParam, overlay),
-
-      // Ask backend to actually COMPOSE the overlay onto the image it returns
       composeOverlay: 1,
       overlayHeadline: overlay?.headline || "",
       overlayBody: overlay?.body || "",
       overlayCTA: overlay?.cta || "",
-
-      // Optional hints many servers accept (ignored safely if unknown)
       count: 2,
       width: 1200,
       height: 628,
-      styleHint: "photo", // keep as 'photo' (you can switch to 'illustration' later)
+      styleHint: "photo",
       negative: "busy cluttered background, low-contrast, text cut-off",
     };
 
@@ -778,8 +696,7 @@ export default function FormPage() {
 
   /* Scroll chat to bottom */
   useEffect(() => {
-    if (chatBoxRef.current)
-      chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
+    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory]);
 
   /* Warm backend on mount */
@@ -795,18 +712,14 @@ export default function FormPage() {
       const { savedAt, data } = JSON.parse(raw);
       if (savedAt && Date.now() - savedAt > DRAFT_TTL_MS) {
         localStorage.removeItem(FORM_DRAFT_KEY);
-        localStorage.removeItem(CREATIVE_DRAFT_KEY);
+        // IMPORTANT: keep creatives if you want long persistence; TTL still governs FORM draft.
+        // We do NOT clear CREATIVE_DRAFT_KEY here anymore (so creatives persist across /setup and back).
         return;
       }
       if (data) {
         setAnswers(data.answers || {});
         setStep(data.step ?? 0);
-        setChatHistory(
-          Array.isArray(data.chatHistory) && data.chatHistory.length
-            ? data.chatHistory
-            : chatHistory
-        );
-        // Video removed: keep mediaType image
+        setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
         setMediaType("image");
         setResult(data.result || null);
         setImageUrls(data.imageUrls || []);
@@ -831,11 +744,7 @@ export default function FormPage() {
         answers?.mainBenefit ??
         ""
     );
-    setEditCTA(
-      normalizeOverlayCTA(
-        draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""
-      )
-    );
+    setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
   }, [currentImageId, result, answers]);
 
   /* Debounced autosave of image edits */
@@ -852,41 +761,35 @@ export default function FormPage() {
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
   // Live fallback copy from answers (so preview never looks empty)
-const fallbackCopy = useMemo(() => {
-  const f = derivePosterFieldsFromAnswers(answers || {}, {});
-  return {
-    headline:
-      (f.headline ||
-        (answers?.mainBenefit || "") ||
-        (answers?.businessName || "") ||
-        "Your headline will appear here").toString(),
-    body:
-      (f.adCopy ||
-        (answers?.details || "") ||
-        (answers?.mainBenefit || "") ||
-        (answers?.idealCustomer ? `Perfect for: ${answers.idealCustomer}` : "") ||
-        "Your ad description will appear here").toString(),
-  };
-}, [answers]);
+  const fallbackCopy = useMemo(() => {
+    const f = derivePosterFieldsFromAnswers(answers || {}, {});
+    return {
+      headline:
+        (f.headline ||
+          (answers?.mainBenefit || "") ||
+          (answers?.businessName || "") ||
+          "Your headline will appear here").toString(),
+      body:
+        (f.adCopy ||
+          (answers?.details || "") ||
+          (answers?.mainBenefit || "") ||
+          (answers?.idealCustomer ? `Perfect for: ${answers.idealCustomer}` : "") ||
+          "Your ad description will appear here").toString(),
+    };
+  }, [answers]);
 
-const displayHeadline = (editHeadline || result?.headline || fallbackCopy.headline || "")
-  .toString()
-  .trim()
-  .slice(0, 55);
+  const displayHeadline = (editHeadline || result?.headline || fallbackCopy.headline || "")
+    .toString()
+    .trim()
+    .slice(0, 55);
 
-const displayBody = (editBody || result?.body || fallbackCopy.body || "")
-  .toString()
-  .trim();
+  const displayBody = (editBody || result?.body || fallbackCopy.body || "").toString().trim();
 
-const displayCTA = normalizeOverlayCTA(
-  editCTA || result?.image_overlay_text || answers?.cta || "Learn more"
-);
-
+  const displayCTA = normalizeOverlayCTA(editCTA || result?.image_overlay_text || answers?.cta || "Learn more");
 
   /* Hard reset chat + draft */
   function hardResetChat() {
-    if (!window.confirm("Reset the chat and clear saved progress for this form?"))
-      return;
+    if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
     try {
       localStorage.removeItem(FORM_DRAFT_KEY);
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
@@ -924,10 +827,7 @@ const displayCTA = normalizeOverlayCTA(
   useEffect(() => {
     const t = setTimeout(() => {
       const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
-      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(
-        0,
-        55
-      );
+      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
       const mergedBody = activeDraft?.body || result?.body || "";
 
       const payload = {
@@ -935,11 +835,7 @@ const displayCTA = normalizeOverlayCTA(
         step,
         chatHistory,
         mediaType: "image",
-        result: {
-          ...(result || {}),
-          headline: mergedHeadline,
-          body: mergedBody,
-        },
+        result: { ...(result || {}), headline: mergedHeadline, body: mergedBody },
         imageUrls,
         activeImage,
         awaitingReady,
@@ -947,25 +843,21 @@ const displayCTA = normalizeOverlayCTA(
         sideChatCount,
         hasGenerated,
       };
-      localStorage.setItem(
-        FORM_DRAFT_KEY,
-        JSON.stringify({ savedAt: Date.now(), data: payload })
-      );
+      localStorage.setItem(FORM_DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: payload }));
 
-      let imgs = imageUrls.slice(0, 2).map(abs);
+      const imgs = imageUrls.slice(0, 2).map(abs);
 
       const draftForSetup = {
         images: imgs,
         headline: mergedHeadline,
         body: mergedBody,
-        imageOverlayCTA: normalizeOverlayCTA(
-          activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-        ),
+        imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
         answers,
         mediaSelection: "image",
         savedAt: Date.now(),
       };
 
+      // Persist for /setup AND for returning back to /form (no wiping on reload anymore)
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
       sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
     }, 150);
@@ -988,6 +880,33 @@ const displayCTA = normalizeOverlayCTA(
     editBody,
     editCTA,
   ]);
+
+  // NEW: extra safety so latest creatives are written before navigating away/reload
+  useEffect(() => {
+    const handler = () => {
+      try {
+        const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
+        const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+        const mergedBody = activeDraft?.body || result?.body || "";
+        const imgs = imageUrls.slice(0, 2).map(abs);
+
+        const draftForSetup = {
+          images: imgs,
+          headline: mergedHeadline,
+          body: mergedBody,
+          imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
+          answers,
+          mediaSelection: "image",
+          savedAt: Date.now(),
+        };
+
+        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+        sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+      } catch {}
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [answers, imageUrls, activeImage, currentImageId, result, abs]);
 
   function handleImageClick(url) {
     setShowModal(true);
@@ -1025,15 +944,13 @@ const displayCTA = normalizeOverlayCTA(
 
   async function handleSideChat(userText, followUpPrompt) {
     if (sideChatCount >= SIDE_CHAT_LIMIT) {
-      if (followUpPrompt)
-        setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
+      if (followUpPrompt) setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
       return;
     }
     setSideChatCount((c) => c + 1);
     const reply = await askGPT(userText);
     if (reply) setChatHistory((ch) => [...ch, { from: "gpt", text: reply }]);
-    if (followUpPrompt)
-      setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
+    if (followUpPrompt) setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
   /* ---- Chat flow ---- */
@@ -1047,35 +964,16 @@ const displayCTA = normalizeOverlayCTA(
     setInput("");
 
     if (awaitingReady) {
-      if (
-        /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
-          value
-        )
-      ) {
+      if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
         setAwaitingReady(false);
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: CONVO_QUESTIONS[0].question },
-        ]);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: CONVO_QUESTIONS[0].question }]);
         setStep(0);
         return;
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
-        setChatHistory((ch) => [
-          ...ch,
-          {
-            from: "gpt",
-            text: "No problem! Just say 'ready' when you want to start.",
-          },
-        ]);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }]);
         return;
       } else {
-        setChatHistory((ch) => [
-          ...ch,
-          {
-            from: "gpt",
-            text: "Please reply 'yes' when you're ready to start!",
-          },
-        ]);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }]);
         return;
       }
     }
@@ -1083,8 +981,7 @@ const displayCTA = normalizeOverlayCTA(
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
-       if (!hasGenerated && isGenerateTrigger(value)) {
-        // Spend guard (counts the initial generation too)
+      if (!hasGenerated && isGenerateTrigger(value)) {
         if (!canRunImageGen()) {
           const msg = quotaMessage();
           setError(msg);
@@ -1097,19 +994,14 @@ const displayCTA = normalizeOverlayCTA(
         setLoading(true);
         setGenerating(true);
 
-        // 1) Show "AI thinking..." immediately
         setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
 
-        // 2) After a short moment, replace it with a nicer status line
         const swapThinkingTimer = setTimeout(() => {
           setChatHistory((ch) => {
             const next = [...ch];
             for (let i = next.length - 1; i >= 0; i--) {
               if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
-                next[i] = {
-                  ...next[i],
-                  text: "This could take about a minute — generating your previews…",
-                };
+                next[i] = { ...next[i], text: "This could take about a minute — generating your previews…" };
                 break;
               }
             }
@@ -1120,7 +1012,6 @@ const displayCTA = normalizeOverlayCTA(
         setTimeout(async () => {
           const token = getRandomString();
 
-          // Clear old previews
           try {
             setImageUrls([]);
             setImageUrl("");
@@ -1129,7 +1020,6 @@ const displayCTA = normalizeOverlayCTA(
           try {
             await warmBackend();
 
-            // IMAGE: Poster B A/B with DIFFERENT COPY per image
             const imagesPromise = (async () => {
               await generatePosterBPair(token);
             })();
@@ -1154,7 +1044,6 @@ const displayCTA = normalizeOverlayCTA(
 
         return;
       }
-
 
       if (hasGenerated) {
         await handleSideChat(value, null);
@@ -1183,20 +1072,13 @@ const displayCTA = normalizeOverlayCTA(
       while (
         CONVO_QUESTIONS[nextStep] &&
         CONVO_QUESTIONS[nextStep].conditional &&
-        newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !==
-          CONVO_QUESTIONS[nextStep].conditional.value
+        newAnswers[CONVO_QUESTIONS[nextStep].conditional.key] !== CONVO_QUESTIONS[nextStep].conditional.value
       ) {
         nextStep += 1;
       }
 
       if (!CONVO_QUESTIONS[nextStep]) {
-        setChatHistory((ch) => [
-          ...ch,
-          {
-            from: "gpt",
-            text: "Are you ready for me to generate your campaign? (yes/no)",
-          },
-        ]);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
         setStep(nextStep);
         return;
       }
@@ -1210,14 +1092,12 @@ const displayCTA = normalizeOverlayCTA(
     const tA = `${runToken}-A`;
     const tB = `${runToken}-B`;
 
-    // 1) Two independent GPT calls -> different copy
     const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
     const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
 
     const copyA = normalizeSmartCopy(rawA, answers);
     let copyB = normalizeSmartCopy(rawB, answers);
 
-    // If copy accidentally matches, try one more time for B (cheap + effective)
     const same =
       (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
       (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
@@ -1227,7 +1107,6 @@ const displayCTA = normalizeOverlayCTA(
       copyB = normalizeSmartCopy(rawB2, answers);
     }
 
-    // 2) Two independent poster_b renders -> different background + correct Shaw layout
     const [urlA, urlB] = await Promise.all([
       handleGenerateStaticAd("poster_b", copyA, { regenerateToken: tA, silent: true }),
       handleGenerateStaticAd("poster_b", copyB, { regenerateToken: tB, silent: true }),
@@ -1235,7 +1114,6 @@ const displayCTA = normalizeOverlayCTA(
 
     const urls = [urlA, urlB].filter(Boolean).slice(0, 2);
 
-    // 3) Save per-image drafts so switching images shows the correct copy
     if (urls[0]) {
       saveImageDraftById(creativeIdFromUrl(urls[0]), {
         headline: (copyA.headline || "").slice(0, 55),
@@ -1251,12 +1129,10 @@ const displayCTA = normalizeOverlayCTA(
       });
     }
 
-    // 4) Update UI
     setImageUrls(urls);
     setActiveImage(0);
     setImageUrl(urls[0] || "");
 
-    // Show A’s copy in the preview card initially (switching images will load drafts)
     setResult({
       headline: copyA.headline,
       body: copyA.subline,
@@ -1271,7 +1147,6 @@ const displayCTA = normalizeOverlayCTA(
 
   /* Regenerations (sequential with warmup/backoff) */
   async function handleRegenerateImage() {
-    // Spend guard
     if (!canRunImageGen()) {
       const msg = quotaMessage();
       setError(msg);
@@ -1284,8 +1159,6 @@ const displayCTA = normalizeOverlayCTA(
       bumpImageGenCount();
       await warmBackend();
       const token = getRandomString();
-
-      // Generate a consistent Poster B A/B pair
       await generatePosterBPair(token);
     } catch (e) {
       console.error("handleRegenerateImage failed:", e?.message || e);
@@ -1295,33 +1168,12 @@ const displayCTA = normalizeOverlayCTA(
     }
   }
 
-
-    /* If user refreshes, wipe cached creatives (per your request) */
-  useEffect(() => {
-    try {
-      const nav = performance.getEntriesByType?.("navigation")?.[0];
-      const isReload = nav?.type === "reload";
-      if (isReload) {
-        localStorage.removeItem(CREATIVE_DRAFT_KEY);
-        sessionStorage.removeItem("draft_form_creatives");
-        // keep answers/chat draft if you want, but remove image drafts to avoid stale preview mismatch
-        // localStorage.removeItem(IMAGE_DRAFTS_KEY);
-        setImageUrls([]);
-        setActiveImage(0);
-        setImageUrl("");
-        setHasGenerated(false);
-      }
-    } catch {}
-    // eslint-disable-next-line
-  }, []);
-
+  // ✅ CHANGE YOU ASKED FOR:
+  // We NO LONGER wipe cached creatives on refresh/reload.
+  // (This is what was causing previews to disappear after /setup and when navigating back.)
 
   // --- Static Ad Generator (Templates A/B) — UPDATED TO PASS FULL COPY (WITH BULLETS) ---
-  async function handleGenerateStaticAd(
-    template = "poster_b",
-    assetsData = null,
-    { regenerateToken = "", silent = false } = {}
-  ) {
+  async function handleGenerateStaticAd(template = "poster_b", assetsData = null, { regenerateToken = "", silent = false } = {}) {
     const a = answers || {};
 
     const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
@@ -1335,20 +1187,8 @@ const displayCTA = normalizeOverlayCTA(
         : []) || [];
 
     const craftedCopy = {
-      headline: (
-        fromAssets.headline ||
-        displayHeadline ||
-        a.mainBenefit ||
-        a.businessName ||
-        ""
-      ).toString(),
-      subline: (
-        fromAssets.subline ||
-        displayBody ||
-        a.details ||
-        a.mainBenefit ||
-        ""
-      ).toString(),
+      headline: (fromAssets.headline || displayHeadline || a.mainBenefit || a.businessName || "").toString(),
+      subline: (fromAssets.subline || displayBody || a.details || a.mainBenefit || "").toString(),
       offer: (fromAssets.offer || a.offer || a.saveAmount || "").toString(),
       secondary: (fromAssets.secondary || "").toString(),
       bullets: baseBullets,
@@ -1360,7 +1200,6 @@ const displayCTA = normalizeOverlayCTA(
       craftedCopy.bullets = ["High quality", "Loved by dogs"];
     }
 
-    // IMPORTANT: clamp these to avoid your 400 validation errors
     const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
     const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);
     const safeLocation = (a.location || "Your City").toString().trim().slice(0, 60);
@@ -1378,15 +1217,7 @@ const displayCTA = normalizeOverlayCTA(
         },
         lists: {
           left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-          right:
-            a.servicesList || [
-              "Kitchen",
-              "Bathrooms",
-              "Offices",
-              "Dusting",
-              "Mopping",
-              "Vacuuming",
-            ],
+          right: a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
         },
         coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
         showIcons: true,
@@ -1404,7 +1235,7 @@ const displayCTA = normalizeOverlayCTA(
 
     const payload = {
       template,
-      regenerateToken, // <-- lets backend randomize background deterministically per variant
+      regenerateToken,
       inputs: {
         industry: safeIndustry,
         businessName: safeBiz,
@@ -1448,10 +1279,7 @@ const displayCTA = normalizeOverlayCTA(
       }
 
       const png = toAbsoluteMedia(
-        data.pngUrl ||
-          data.absoluteUrl ||
-          data.url ||
-          (data.filename ? `/api/media/${data.filename}` : "")
+        data.pngUrl || data.absoluteUrl || data.url || (data.filename ? `/api/media/${data.filename}` : "")
       );
 
       if (!png) {
@@ -1462,10 +1290,7 @@ const displayCTA = normalizeOverlayCTA(
       }
 
       if (!silent) {
-        setChatHistory((ch) => [
-          ...ch,
-          { from: "gpt", text: `Static ad generated with template "${template}".` },
-        ]);
+        setChatHistory((ch) => [...ch, { from: "gpt", text: `Static ad generated with template "${template}".` }]);
       }
 
       return png;
@@ -1505,8 +1330,7 @@ const displayCTA = normalizeOverlayCTA(
           right: "-10vw",
           width: 640,
           height: 640,
-          background:
-            "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
+          background: "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
           filter: "blur(18px)",
           pointerEvents: "none",
           zIndex: 0,
@@ -1514,14 +1338,7 @@ const displayCTA = normalizeOverlayCTA(
       />
 
       {/* Top row */}
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 980,
-          padding: "24px 20px 0",
-          boxSizing: "border-box",
-        }}
-      >
+      <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
             onClick={() => navigate("/")}
@@ -1548,13 +1365,7 @@ const displayCTA = normalizeOverlayCTA(
         </div>
 
         {/* Centered title */}
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "center",
-            marginTop: 16,
-          }}
-        >
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
           <h1
             style={{
               margin: 0,
@@ -1632,9 +1443,7 @@ const displayCTA = normalizeOverlayCTA(
                   color: isGPT ? "#d6fff8" : "#0e1519",
                   background: isGPT ? "#0f151a" : TEAL,
                   border: isGPT ? `1px solid ${EDGE}` : "none",
-                  borderRadius: isGPT
-                    ? "14px 16px 16px 8px"
-                    : "16px 12px 8px 16px",
+                  borderRadius: isGPT ? "14px 16px 16px 8px" : "16px 12px 8px 16px",
                   padding: "10px 14px",
                   maxWidth: "85%",
                   whiteSpace: "pre-wrap",
@@ -1650,15 +1459,7 @@ const displayCTA = normalizeOverlayCTA(
 
         {/* prompt bar */}
         {!loading && (
-          <form
-            onSubmit={handleUserInput}
-            style={{
-              width: "100%",
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-            }}
-          >
+          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
             <button
               type="button"
               onClick={hardResetChat}
@@ -1725,63 +1526,24 @@ const displayCTA = normalizeOverlayCTA(
         )}
 
         {loading && (
-          <div
-            style={{
-              color: "#15efb8",
-              marginTop: 10,
-              fontWeight: 700,
-              textAlign: "center",
-            }}
-          >
+          <div style={{ color: "#15efb8", marginTop: 10, fontWeight: 700, textAlign: "center" }}>
             AI generating...
           </div>
         )}
         {error && (
-          <div
-            style={{
-              color: "#f35e68",
-              marginTop: 18,
-              textAlign: "center",
-            }}
-          >
+          <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>
             {error}
           </div>
         )}
       </div>
 
       {/* Ad Previews label */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "center",
-          marginTop: 4,
-          marginBottom: 10,
-        }}
-      >
-        <div
-          style={{
-            color: "#bdfdf0",
-            fontWeight: 900,
-            letterSpacing: 0.6,
-            opacity: 0.9,
-          }}
-        >
-          Ad Previews
-        </div>
+      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
+        <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>Ad Previews</div>
       </div>
 
       {/* ---- Ad Preview Cards ---- */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          gap: 34,
-          flexWrap: "wrap",
-          width: "100%",
-          paddingBottom: 8,
-        }}
-      >
+      <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
         {/* IMAGE CARD */}
         <div
           style={{
@@ -1855,15 +1617,7 @@ const displayCTA = normalizeOverlayCTA(
             }}
           >
             {imageLoading || generating ? (
-              <div
-                style={{
-                  width: "100%",
-                  height: 220,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
+              <div style={{ width: "100%", height: 220, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 <Dotty />
               </div>
             ) : imageUrls.length > 0 ? (
@@ -1871,29 +1625,17 @@ const displayCTA = normalizeOverlayCTA(
                 <img
                   src={toAbsoluteMedia(imageUrls[activeImage] || "")}
                   alt="Ad Preview"
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    objectFit: "cover",
-                    borderRadius: 0,
-                    cursor: "pointer",
-                  }}
+                  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
                   onClick={() => handleImageClick(imageUrls[activeImage])}
                 />
                 <Arrow
                   side="left"
-                  onClick={() =>
-                    setActiveImage(
-                      (activeImage + imageUrls.length - 1) % imageUrls.length
-                    )
-                  }
+                  onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)}
                   disabled={imageUrls.length <= 1}
                 />
                 <Arrow
                   side="right"
-                  onClick={() =>
-                    setActiveImage((activeImage + 1) % imageUrls.length)
-                  }
+                  onClick={() => setActiveImage((activeImage + 1) % imageUrls.length)}
                   disabled={imageUrls.length <= 1}
                 />
                 <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
@@ -1919,27 +1661,11 @@ const displayCTA = normalizeOverlayCTA(
 
           {/* Copy block */}
           <div style={{ padding: "17px 18px 4px 18px" }}>
-            <div
-              style={{
-                color: "#191c1e",
-                fontWeight: 800,
-                fontSize: 17,
-                marginBottom: 5,
-                fontFamily: AD_FONT,
-              }}
-            >
+            <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {displayHeadline}
             </div>
 
-            <div
-              style={{
-                color: "#3a4149",
-                fontSize: 15,
-                fontWeight: 600,
-                marginBottom: 3,
-                minHeight: 18,
-              }}
-            >
+            <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
               {displayBody}
             </div>
           </div>
@@ -1987,80 +1713,40 @@ const displayCTA = normalizeOverlayCTA(
           </button>
 
           {imageEditing && (
-            <div
-              style={{
-                padding: "10px 18px 4px 18px",
-                display: "grid",
-                gap: 10,
-              }}
-            >
+            <div style={{ padding: "10px 18px 4px 18px", display: "grid", gap: 10 }}>
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>
-                  Headline (max 55 chars)
-                </div>
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Headline (max 55 chars)</div>
                 <input
                   value={editHeadline}
                   onChange={(e) => setEditHeadline(e.target.value.slice(0, 55))}
-                  onBlur={() =>
-                    saveImageDraftById(currentImageId, {
-                      headline: (editHeadline || "").trim(),
-                    })
-                  }
+                  onBlur={() => saveImageDraftById(currentImageId, { headline: (editHeadline || "").trim() })}
                   placeholder="Headline"
                   maxLength={55}
-                  style={{
-                    width: "100%",
-                    borderRadius: 10,
-                    border: "1px solid #e4e7ec",
-                    padding: "10px 12px",
-                    fontWeight: 700,
-                  }}
+                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
                 />
-                <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>
-                  {editHeadline.length}/55
-                </div>
+                <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>{editHeadline.length}/55</div>
               </label>
 
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>
-                  Body (18–30 words)
-                </div>
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Body (18–30 words)</div>
                 <textarea
                   value={editBody}
                   onChange={(e) => setEditBody(e.target.value)}
-                  onBlur={() =>
-                    saveImageDraftById(currentImageId, {
-                      body: (editBody || "").trim(),
-                    })
-                  }
+                  onBlur={() => saveImageDraftById(currentImageId, { body: (editBody || "").trim() })}
                   rows={3}
                   placeholder="Body copy"
-                  style={{
-                    width: "100%",
-                    borderRadius: 10,
-                    border: "1px solid #e4e7ec",
-                    padding: "10px 12px",
-                    fontWeight: 600,
-                  }}
+                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 600 }}
                 />
               </label>
 
               <label style={{ display: "block" }}>
-                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>
-                  CTA (e.g., Shop now, Learn more)
-                </div>
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
                 <input
                   value={editCTA}
                   onChange={(e) => setEditCTA(e.target.value)}
                   onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
                   placeholder="CTA"
-                  style={{
-                    width: "100%",
-                    borderRadius: 10,
-                    border: "1px solid #e4e7ec",
-                    padding: "10px 12px",
-                    fontWeight: 700,
-                  }}
+                  style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 700 }}
                 />
               </label>
             </div>
@@ -2082,8 +1768,7 @@ const displayCTA = normalizeOverlayCTA(
         }}
       >
         <button
-         disabled={false}
-
+          disabled={false}
           style={{
             background: TEAL,
             color: "#0e1519",
@@ -2098,10 +1783,9 @@ const displayCTA = normalizeOverlayCTA(
             cursor: "pointer",
             transition: "background 0.18s, opacity 0.18s, transform 0.18s",
             opacity: 1,
-transform: "translateY(0)",
+            transform: "translateY(0)",
           }}
           onClick={() => {
-            // HARD STOP (prevents bypass)
             if (!hasGenerated) {
               alert("Generate your previews first. Type 'yes' in the chat.");
               return;
@@ -2111,11 +1795,9 @@ transform: "translateY(0)",
 
             const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
             const mergedBody = activeDraft?.body || result?.body || "";
-            const mergedCTA = normalizeOverlayCTA(
-              activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-            );
+            const mergedCTA = normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || "");
 
-            let imgA = imageUrls.map(abs).slice(0, 2);
+            const imgA = imageUrls.map(abs).slice(0, 2);
 
             const draftForSetup = {
               images: imgA,
@@ -2127,11 +1809,11 @@ transform: "translateY(0)",
               savedAt: Date.now(),
             };
 
+            // Persist so /setup shows it AND coming back to /form still has it
             sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem("smartmark_media_selection", "image");
 
-            // Persist "last" keys ONLY for image
             if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
             localStorage.removeItem("smartmark_last_video_url");
             localStorage.removeItem("smartmark_last_fb_video_id");
@@ -2169,21 +1851,8 @@ const CONVO_QUESTIONS = [
   { key: "url", question: "What's your website URL?" },
   { key: "industry", question: "What industry is your business in?" },
   { key: "businessName", question: "What's your business name?" },
-  {
-    key: "idealCustomer",
-    question: "Describe your ideal customer in one sentence.",
-  },
-  {
-    key: "hasOffer",
-    question: "Do you have a special offer or promo? (yes/no)",
-  },
-  {
-    key: "offer",
-    question: "What is your offer/promo?",
-    conditional: { key: "hasOffer", value: "yes" },
-  },
-  {
-    key: "mainBenefit",
-    question: "What's the main benefit or transformation you promise?",
-  },
+  { key: "idealCustomer", question: "Describe your ideal customer in one sentence." },
+  { key: "hasOffer", question: "Do you have a special offer or promo? (yes/no)" },
+  { key: "offer", question: "What is your offer/promo?", conditional: { key: "hasOffer", value: "yes" } },
+  { key: "mainBenefit", question: "What's the main benefit or transformation you promise?" },
 ];
