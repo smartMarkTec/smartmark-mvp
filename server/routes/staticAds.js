@@ -1460,6 +1460,16 @@ function compactBullet(s = "") {
   return kept.join(" ");
 }
 
+function stripDealLanguage(s = "") {
+  return String(s || "")
+    .replace(/\b(sale|deals?|discounts?|discounted|save|savings|offer|limited\s*time)\b/gi, "")
+    .replace(/\b(\d{1,3}\s*%|%\s*off|off)\b/gi, "")
+    .replace(/\$+\s*\d+/g, "") // remove "$20" style claims if they sneak in
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+
 
 /* ------------------------ SVG templates ------------------------ */
 
@@ -1708,13 +1718,15 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
                ${bannerX + bannerW * 0.28} ${bannerY + bannerH * 0.78},
                ${bannerX + bannerW * 0.10} ${bannerY + bannerH * 0.88}
              Z"
-          fill="#fde4cf"/>
+          fill="{{leafL}}"/>
+
     <path d="M ${bannerX + bannerW - 26} ${bannerY + 40}
              C ${bannerX + bannerW * 0.72} ${bannerY - 6},
                ${bannerX + bannerW * 0.72} ${bannerY + bannerH * 0.78},
                ${bannerX + bannerW * 0.90} ${bannerY + bannerH * 0.88}
              Z"
-          fill="#fde1cd"/>
+          fill="{{leafR}}"/>
+
 
     <text class="brand t-center" x="${centerX}" y="${brandY}">
       {{brandName}}
@@ -1743,7 +1755,8 @@ function tplPosterBCard({ cardW, cardH, fsTitle, fsH2, fsSave, fsBody }) {
   </text>
 
   {{#legal}}
-  <text class="legal t-center" x="${centerX}" y="${legalY}}">
+  <text class="legal t-center" x="${centerX}" y="${legalY}">
+
     {{legal}}
   </text>
   {{/legal}}
@@ -2301,11 +2314,25 @@ const vars = {
 // ✅ RULE: Poster B should show an offer ONLY if the user explicitly entered one.
 const NO_OFFER_RE = /^(no offer|none|n\/a|null|no deal)$/i;
 const userOfferRaw = (a.offer || a.saveAmount || "").toString().trim();
-
 const hasUserOffer = !!userOfferRaw && !NO_OFFER_RE.test(userOfferRaw);
 
+// ✅ If no offer, strip any deal-ish language from ALL fields
+if (!hasUserOffer) {
+  crafted.headline = stripDealLanguage(crafted.headline || "");
+  crafted.subline = stripDealLanguage(crafted.subline || "");
+  crafted.secondary = stripDealLanguage(crafted.secondary || "");
+  crafted.disclaimers = ""; // never show offer disclaimers
+  if (Array.isArray(crafted.bullets)) {
+    crafted.bullets = crafted.bullets.map(stripDealLanguage);
+  }
+}
+
 // If user did NOT provide an offer, do NOT display any promo/offer text at all.
-const safeOffer = hasUserOffer ? tightenOfferText(userOfferRaw) : "";
+// If no user offer, still fill the promo slot with a neutral tag (NOT a discount)
+const safeOffer = hasUserOffer
+  ? tightenOfferText(userOfferRaw)
+  : pickPromoTag(prof.kind).toUpperCase();
+
 
     const safeSecondary = clampWords(cleanLine(crafted.secondary || ""), 10);
 
@@ -2529,14 +2556,21 @@ if (!safeDisclaimers && hasUserOffer && safeOffer) {
       2
     );
 
-    const cardVars = {
-      brandName: ellipsize(mergedInputsB.businessName, 22),
-      eventTitleLines,
-      saveLines,
-      subLines,
-      qualifierLines,
-      legal: mergedKnobsB.legal,
-    };
+  const palB = varyPalette(prof.palette, seed);
+const leafL = tweakHex(palB.body, -6);
+const leafR = tweakHex(palB.body, -14);
+
+const cardVars = {
+  brandName: ellipsize(mergedInputsB.businessName, 22),
+  eventTitleLines,
+  saveLines,
+  subLines,
+  qualifierLines,
+  legal: mergedKnobsB.legal,
+  leafL,
+  leafR,
+};
+
 
     const cardSvg = mustache.render(
       tplPosterBCard({
@@ -2817,14 +2851,21 @@ const saveAmount = hasUserOffer ? tightenOfferText(userOfferRaw) : "";
           2
         );
 
-        const cardVars = {
-          brandName: ellipsize(businessName, 22),
-          eventTitleLines,
-          saveLines,
-          subLines,
-          qualifierLines,
-          legal,
-        };
+       const palB = varyPalette(prof.palette, seed);
+const leafL = tweakHex(palB.body, -6);
+const leafR = tweakHex(palB.body, -14);
+
+const cardVars = {
+  brandName: ellipsize(businessName, 22),
+  eventTitleLines,
+  saveLines,
+  subLines,
+  qualifierLines,
+  legal,
+  leafL,
+  leafR,
+};
+
         const cardSvg = mustache.render(
           tplPosterBCard({
             cardW,
