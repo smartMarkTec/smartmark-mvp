@@ -521,7 +521,21 @@ const CampaignSetup = () => {
     mediaSelection: "image",
   });
 
-  const { imageUrls: navImageUrls, headline, body, answers } = location.state || {};
+ const state = location.state || {};
+const navImageUrls = Array.isArray(state.imageUrls)
+  ? state.imageUrls
+  : Array.isArray(state.imageVariants)
+    ? state.imageVariants
+    : Array.isArray(state.images)
+      ? state.images
+      : Array.isArray(state.urls)
+        ? state.urls
+        : [];
+
+const headline = state.headline || "";
+const body = state.body || "";
+const answers = state.answers || {};
+
 
   const [startDate, setStartDate] = useState(() => {
     const existing = form.startDate || "";
@@ -722,19 +736,21 @@ const ageOk =
   }, [fbConnected]);
 
   // Accept navImageUrls
-  useEffect(() => {
-    const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
-    if (imgs.length) {
-      setDraftCreatives((dc) => ({
-        images: imgs.length ? imgs : dc.images,
-        mediaSelection: "image",
-      }));
-      try {
-        saveSetupCreativeBackup(resolvedUser, { images: imgs, mediaSelection: "image" });
-        sessionStorage.setItem("draft_form_creatives", JSON.stringify({ images: imgs, mediaSelection: "image", savedAt: Date.now() }));
-      } catch {}
-    }
-  }, [navImageUrls, resolvedUser]);
+useEffect(() => {
+  const imgs = (Array.isArray(navImageUrls) ? navImageUrls : []).filter(Boolean).slice(0, 2);
+  if (!imgs.length) return;
+
+  setDraftCreatives({ images: imgs, mediaSelection: "image" });
+
+  try {
+    const payload = { images: imgs, mediaSelection: "image", savedAt: Date.now() };
+    saveSetupCreativeBackup(resolvedUser, payload);
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+    if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+    localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+  } catch {}
+}, [navImageUrls, resolvedUser]);
+
 
   useEffect(() => {
     if (!fbConnected) return;

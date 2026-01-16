@@ -655,26 +655,31 @@ router.post('/generate-campaign-assets', async (req, res) => {
     const forbidFashionLine =
       category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
 
-    const prompt = `
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}You are a senior direct-response copywriter for e-commerce.
-Write JSON ONLY:
+const prompt = `
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}You are a senior direct-response copywriter.
 
+Return JSON ONLY:
 {
-  "headline": "max 55 characters, plain and neutral (no assumptions)",
-  "body": "18-30 words, friendly and value-focused, neutral claims only, no emojis/hashtags",
-  "image_overlay_text": "4 words max, simple CTA in ALL CAPS"
+  "headline": "max 55 characters",
+  "body": "18-30 words",
+  "image_overlay_text": "2-4 words in ALL CAPS"
 }
 
 Rules:
-- Keep copy specific to the category: ${category}.
+- NEVER quote the user's wording verbatim; always paraphrase.
+- Keep it specific to the category: ${category}.
 ${forbidFashionLine}
-- Never include a website or domain.
+- Neutral and accurate. Do NOT invent shipping, returns, guarantees, pricing, discounts, or inventory.
+- No emojis. No hashtags. No website/domain.
+
 Context:
 Brand: ${brand}
-Industry: ${industry || '[general ecommerce]'}
+Industry: ${industry || '[general]'}
 Main benefit: ${mainBenefit || '[unspecified]'}
-Offer: ${offer || '[none]'}
-Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim();
+Offer (verbatim user input, if any): ${offer || '[none]'}
+Website text (context only): """${(websiteText || '').slice(0, 1200)}"""
+`.trim();
+
 
     const TIMEOUT_MS = 5000;
     const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error('assets-timeout')), ms))]);
@@ -855,16 +860,30 @@ router.post('/generate-static-ad', async (req, res) => {
       });
     }
 
-    // Build a strict "copy" map — ONLY user-provided fields, no defaults.
-    const copy = {
-      brand:     answers.brand || answers.businessName || '',
-      headline:  answers.posterHeadline || answers.headline || '',
-      subhead:   answers.subhead || answers.tagline || answers.dateRange || '',
-      valueLine: answers.valueLine || answers.offer || '',
-      body:      answers.body || answers.bodyCopy || answers.adCopy || answers.copy || '',
-      legal:     answers.legal || answers.disclaimers || '',
-      cta:       answers.cta || ''
-    };
+  // Generate real ad copy (headline + body) instead of pasting user text
+let generated = null;
+try {
+  generated = await craftAdCopyFromAnswers(
+    {
+      industry: answers.industry || "",
+      businessName: answers.businessName || answers.brand || "",
+      brand: {},
+      answers
+    },
+    openai
+  );
+} catch {}
+
+const copy = {
+  brand: answers.businessName || answers.brand || "",
+  headline: (generated?.headline || "").trim(),
+  subhead: (generated?.subline || "").trim(),
+  valueLine: (generated?.offer || (generated?.bullets || []).slice(0, 2).join(" • ") || "").trim(),
+  body: ((generated?.bullets || []).slice(0, 3).join(" • ") || generated?.subline || "").trim(),
+  legal: (generated?.disclaimers || "").trim(),
+  cta: (generated?.cta || answers.cta || "LEARN MORE").trim()
+};
+
 
     // Prefer a user-supplied image if provided.
     const photoUrl = answers.imageUrl || imageUrl || '';
