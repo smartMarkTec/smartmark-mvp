@@ -180,51 +180,6 @@ function ImageModal({ open, imageUrl, onClose }) {
   );
 }
 
-function MediaTypeToggle({ mediaType, setMediaType }) {
-  const choices = [
-    { key: "image", label: "Image" },
-    { key: "both", label: "Both" },
-    { key: "video", label: "Video" },
-  ];
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 16,
-        justifyContent: "center",
-        alignItems: "center",
-        margin: "18px 0 8px 0",
-      }}
-    >
-      {choices.map((choice) => (
-        <button
-          key={choice.key}
-          onClick={() => setMediaType(choice.key)}
-          style={{
-            fontWeight: 900,
-            fontSize: "1.06rem",
-            padding: "10px 24px",
-            borderRadius: 12,
-            border: `1px solid ${EDGE}`,
-            background: mediaType === choice.key ? TEAL : "#23292c",
-            color: mediaType === choice.key ? "#0e1418" : "#bcfff6",
-            cursor: "pointer",
-            boxShadow:
-              mediaType === choice.key ? `0 2px 18px ${TEAL_SOFT}` : "none",
-            transform: mediaType === choice.key ? "scale(1.06)" : "scale(1)",
-            transition: "all 0.15s",
-            outline:
-              mediaType === choice.key ? `3px solid ${TEAL_SOFT}` : "none",
-            willChange: "transform",
-          }}
-        >
-          {choice.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function Arrow({ side = "left", onClick, disabled }) {
   return (
     <button
@@ -352,43 +307,6 @@ async function fetchJSON(
   }
 }
 
-/* NEW: single-attempt JSON fetch that *respects* abort keys for big video jobs */
-async function fetchJsonOnceWithAbortKey(
-  url,
-  fetchOpts = {},
-  { key = "GEN", timeoutMs } = {}
-) {
-  const ms =
-    typeof timeoutMs === "number" && timeoutMs > 0 ? timeoutMs : 20000; // tighter per-call default
-  const controller = newControllerFor(key);
-  const timer = setTimeout(() => {
-    try {
-      controller.abort();
-    } catch {}
-  }, ms);
-
-  try {
-    const res = await fetch(url, { ...fetchOpts, signal: controller.signal });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`${res.status} ${res.statusText} ${text}`.trim());
-    }
-    return await res.json().catch(() => ({}));
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/* Call when unmounting or when starting a brand new run */
-function abortAllVideoFetches() {
-  for (const [key, c] of _controllers.entries()) {
-    try {
-      c.abort();
-    } catch {}
-  }
-  _controllers.clear();
-}
-
 /* ===== helpers ===== */
 
 /* ===== derivePosterFieldsFromAnswers ===== */
@@ -399,8 +317,7 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const headline =
     a.headline || a.eventTitle || a.mainBenefit || a.businessName || "";
 
-  const promoLine =
-    a.promoLine || a.subline || a.idealCustomer || "";
+  const promoLine = a.promoLine || a.subline || a.idealCustomer || "";
 
   const offer = a.offer || a.saveAmount || "";
 
@@ -424,13 +341,8 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
 
 const CONTROLLER_TIMEOUT_MS = 22000; // single-call guard
 const IMAGE_FETCH_TIMEOUT_MS = 38000; // image job (retry-safe)
-const VIDEO_FETCH_TIMEOUT_MS = 150000; // per-variant POST /generate-video-ad
-const GENERATION_HARD_CAP_MS = 190000; // global cap per run (~1m40s)
-const VIDEO_TARGET_SECONDS = 19; // server still targets ~19s
-const USE_FAST_MODE = true;
 
-const FORCE_HARD_CUTS = true; // straight cuts (no xfade)
-const FORCE_SUBTITLES = true; // on (burn if possible)
+/* (video constants removed) */
 
 function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -772,300 +684,6 @@ async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
   }
 }
 
-/* ===== poll latest video (fallback) ===== */
-async function pollLatestVideo({ tries = 5, delayMs = 900 } = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const latest = await fetchJsonWithRetry(
-        `${API_BASE}/generated-latest`,
-        { method: "GET" },
-        { tries: 1, warm: false, timeoutMs: 6000 }
-      );
-
-      // Accept multiple shapes
-      let u =
-        latest?.absoluteUrl ||
-        latest?.url ||
-        (latest?.filename ? `/api/media/${latest.filename}` : "");
-      if (!u && Array.isArray(latest?.variants) && latest.variants.length) {
-        // pick first usable variant
-        const v0 = latest.variants.find(
-          (v) => v?.absoluteUrl || v?.url || v?.filename
-        );
-        if (v0)
-          u =
-            v0.absoluteUrl ||
-            v0.url ||
-            (v0.filename ? `/api/media/${v0.filename}` : "");
-      }
-
-      if (u && /\.mp4(\?|$)/i.test(u)) {
-        const finalUrl = toAbsoluteMedia(u);
-        try {
-          await headRangeWarm("LATEST", finalUrl);
-        } catch {}
-        return {
-          url: finalUrl,
-          script: latest?.script || "",
-          fbVideoId: latest?.fbVideoId || null,
-        };
-      }
-    } catch {
-      /* ignore and retry */
-    }
-
-    await new Promise((r) => setTimeout(r, delayMs));
-  }
-  return null;
-}
-
-/* ---------- VIDEO helpers: direct sync calls to /generate-video-ad (A/B or single-call pair) ---------- */
-
-// Try a single-call request that returns BOTH variants in one response.
-// If backend doesn't support it, we fall back to the two-call (A/B) method.
-async function fetchVideoPairSingleCall(
-  token,
-  answers,
-  result,
-  timeoutMs = VIDEO_FETCH_TIMEOUT_MS
-) {
-  const triggerKey = `VIDEO_PAIR_${token}`;
-
-  try {
-    await warmBackend();
-
-    const data = await fetchJsonOnceWithAbortKey(
-      `${API_BASE}/generate-video-ad`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers?.url || "",
-          answers: { ...answers, targetSeconds: VIDEO_TARGET_SECONDS },
-          regenerateToken: token,
-
-          // Hints — backend can safely ignore unknown fields
-          fast: USE_FAST_MODE ? 1 : 0,
-          targetSeconds: VIDEO_TARGET_SECONDS,
-          hardCuts: FORCE_HARD_CUTS ? 1 : 0,
-          xfade: 0,
-          subtitles: FORCE_SUBTITLES ? 1 : 0,
-          burnSubtitles: 1,
-
-          // NEW: tell backend we only want a single call that returns exactly two
-          expectPair: 1,
-        }),
-      },
-      { key: triggerKey, timeoutMs }
-    );
-
-    // Normalize two returned videos if available
-    let pair = [];
-    if (Array.isArray(data?.videos) && data.videos.length) {
-      pair = data.videos
-        .map((v) => {
-          let u =
-            v?.absoluteUrl ||
-            v?.url ||
-            (v?.filename ? `/api/media/${v.filename}` : "");
-          if (!u) return null;
-          const captionsVtt =
-            v?.captionsVtt ||
-            v?.vtt ||
-            v?.captionsUrl ||
-            (v?.captionsFilename
-              ? `/api/media/${v.captionsFilename}`
-              : "");
-          return {
-            url: toAbsoluteMedia(u),
-            script: v?.script || data?.script || "",
-            fbVideoId: v?.fbVideoId || null,
-            captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null,
-          };
-        })
-        .filter(Boolean)
-        .slice(0, 2);
-    } else {
-      // Some servers return a single object; normalize if so
-      const maybeSingle =
-        data?.absoluteUrl ||
-        data?.url ||
-        (data?.filename ? `/api/media/${data.filename}` : "");
-      if (maybeSingle) {
-        pair = [
-          {
-            url: toAbsoluteMedia(maybeSingle),
-            script: data?.script || "",
-            fbVideoId: data?.fbVideoId || null,
-            captionsVtt: data?.captionsVtt
-              ? toAbsoluteMedia(data.captionsVtt)
-              : null,
-          },
-        ];
-      }
-    }
-
-    // Warm whatever URLs we have so the <video> starts instantly
-    await Promise.allSettled(
-      pair.map((p, i) => headRangeWarm(i === 0 ? "A" : "B", p?.url))
-    );
-
-    // Return up to two videos from the single call (no more)
-    return pair.slice(0, 2);
-  } catch (e) {
-    // If we timeout/abort or server can't do pair, fall through to A/B path
-    if (e?.name !== "AbortError")
-      console.warn("fetchVideoPairSingleCall fallback:", e?.message || e);
-    return [];
-  }
-}
-
-// Old single-variant call remains for fallback
-async function fetchVideoOnce(
-  token,
-  answers,
-  result,
-  BACKEND_URL_UNUSED,
-  variant = "A",
-  timeoutMs = VIDEO_FETCH_TIMEOUT_MS
-) {
-  const triggerKey = `VIDEO_${variant}_${token}`;
-
-  try {
-    await warmBackend();
-
-    const data = await fetchJsonOnceWithAbortKey(
-      `${API_BASE}/generate-video-ad`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: answers?.url || "",
-          answers: { ...answers, targetSeconds: VIDEO_TARGET_SECONDS },
-          regenerateToken: token,
-          abVariant: variant,
-
-          // SPEED + STYLE HINTS
-          fast: USE_FAST_MODE ? 1 : 0,
-          targetSeconds: VIDEO_TARGET_SECONDS,
-          hardCuts: FORCE_HARD_CUTS ? 1 : 0,
-          xfade: 0,
-          subtitles: FORCE_SUBTITLES ? 1 : 0,
-          burnSubtitles: 1,
-        }),
-      },
-      { key: triggerKey, timeoutMs }
-    );
-
-    let u =
-      data?.url ||
-      data?.videoUrl ||
-      data?.absoluteUrl ||
-      (data?.filename ? `/api/media/${data.filename}` : "");
-
-    if (!u && Array.isArray(data?.variants) && data.variants.length) {
-      const pick = data.variants.find(
-        (v) => v?.absoluteUrl || v?.url || v?.filename
-      );
-      if (pick)
-        u =
-          pick.absoluteUrl ||
-          pick.url ||
-          (pick.filename ? `/api/media/${pick.filename}` : "");
-    }
-    if (!u) throw new Error("No video URL in response");
-
-    const captionsVtt =
-      data?.captionsVtt ||
-      data?.vtt ||
-      data?.captionsUrl ||
-      (data?.captionsFilename
-        ? `/api/media/${data.captionsFilename}`
-        : "");
-
-    const finalUrl = toAbsoluteMedia(u);
-    try {
-      await headRangeWarm(variant, finalUrl);
-    } catch {}
-
-    return {
-      url: finalUrl,
-      script:
-        data?.script ||
-        data?.narration ||
-        (result?.body ? `Narration: ${result.body}` : ""),
-      fbVideoId: data?.fbVideoId || null,
-      captionsVtt: captionsVtt ? toAbsoluteMedia(captionsVtt) : null,
-    };
-  } catch (e) {
-    // Try to recover from a completed job
-    try {
-      const recovered = await pollLatestVideo({ tries: 5, delayMs: 900 });
-      if (recovered?.url) return recovered;
-    } catch {}
-    if (e?.name === "AbortError") {
-      console.debug(`fetchVideoOnce(${variant}) aborted (superseded)`);
-    } else {
-      console.error(`fetchVideoOnce(${variant}) failed:`, e);
-    }
-    return { url: "", script: "", fbVideoId: null, captionsVtt: null };
-  }
-}
-
-// Public entry: returns EXACTLY up to two videos.
-// 1) Try single-call pair (preferred — guarantees we never spawn 4)
-// 2) If not supported, fall back to A & B (two separate calls)
-//    and still clamp to two.
-async function fetchVideoPair(token, answers, result, BACKEND_URL_UNUSED) {
-  // First attempt: single-call pair
-  const pair = await fetchVideoPairSingleCall(
-    token,
-    answers,
-    result,
-    VIDEO_FETCH_TIMEOUT_MS
-  );
-  if (pair.length >= 2) {
-    // De-dup (defensive) and clamp to two
-    const seen = new Set();
-    const dedup = [];
-    for (const v of pair) {
-      if (v?.url && !seen.has(v.url)) {
-        seen.add(v.url);
-        dedup.push(v);
-      }
-      if (dedup.length === 2) break;
-    }
-    return dedup;
-  }
-
-  // Fallback path: explicit A/B (still returns at most two)
-  const [a, b] = await Promise.allSettled([
-    fetchVideoOnce(`${token}-A`, answers, result, null, "A", VIDEO_FETCH_TIMEOUT_MS),
-    fetchVideoOnce(`${token}-B`, answers, result, null, "B", VIDEO_FETCH_TIMEOUT_MS),
-  ]);
-
-  const vids = [];
-  const pushIfGood = (x) => {
-    if (x && x.url) vids.push(x);
-  };
-
-  if (a.status === "fulfilled") pushIfGood(a.value);
-  if (b.status === "fulfilled") pushIfGood(b.value);
-
-  // de-dup + clamp to two
-  const dedup = [];
-  const seen = new Set();
-  for (const v of vids) {
-    if (v?.url && !seen.has(v.url)) {
-      seen.add(v.url);
-      dedup.push(v);
-    }
-    if (dedup.length === 2) break;
-  }
-
-  return dedup;
-}
-
 /* ========================= Main Component ========================= */
 export default function FormPage() {
   const navigate = useNavigate();
@@ -1087,18 +705,15 @@ export default function FormPage() {
   const [sideChatCount, setSideChatCount] = useState(0);
   const [hasGenerated, setHasGenerated] = useState(false);
 
-  const [mediaType, setMediaType] = useState("both");
+  // Video removed: force image-only
+  const [mediaType, setMediaType] = useState("image");
+
   const [result, setResult] = useState(null);
   const [imageUrls, setImageUrls] = useState([]);
   const [activeImage, setActiveImage] = useState(0);
-  const [videoItems, setVideoItems] = useState([]);
-  const [activeVideo, setActiveVideo] = useState(0);
   const [imageUrl, setImageUrl] = useState("");
-  const [videoUrl, setVideoUrl] = useState("");
-  const [videoScript, setVideoScript] = useState("");
 
   const [imageLoading, setImageLoading] = useState(false);
-  const [videoLoading, setVideoLoading] = useState(false);
   const [error, setError] = useState("");
   const [showModal, setShowModal] = useState(false);
   const [modalImg, setModalImg] = useState("");
@@ -1149,12 +764,11 @@ export default function FormPage() {
             ? data.chatHistory
             : chatHistory
         );
-        setMediaType(data.mediaType || "both");
+        // Video removed: keep mediaType image
+        setMediaType("image");
         setResult(data.result || null);
         setImageUrls(data.imageUrls || []);
-        setVideoItems(data.videoItems || []);
         setActiveImage(data.activeImage || 0);
-        setActiveVideo(data.activeVideo || 0);
         setAwaitingReady(data.awaitingReady ?? true);
         setInput(data.input || "");
         setSideChatCount(data.sideChatCount || 0);
@@ -1166,9 +780,7 @@ export default function FormPage() {
 
   useEffect(() => {
     const draft = currentImageId ? getImageDraftById(currentImageId) : null;
-    setEditHeadline(
-      (draft?.headline ?? result?.headline ?? "").slice(0, 55)
-    );
+    setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
     setEditBody(
       draft?.body ??
         result?.body ??
@@ -1179,10 +791,7 @@ export default function FormPage() {
     );
     setEditCTA(
       normalizeOverlayCTA(
-        draft?.overlay ??
-          result?.image_overlay_text ??
-          answers?.cta ??
-          ""
+        draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""
       )
     );
   }, [currentImageId, result, answers]);
@@ -1200,24 +809,15 @@ export default function FormPage() {
     return () => clearTimeout(t);
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
-  const displayHeadline = (editHeadline || result?.headline || "").slice(
-    0,
-    55
-  );
-
+  const displayHeadline = (editHeadline || result?.headline || "").slice(0, 55);
   const displayBody = (editBody || result?.body || "").trim();
-
   const displayCTA = normalizeOverlayCTA(
     editCTA || result?.image_overlay_text || answers?.cta || ""
   );
 
   /* Hard reset chat + draft */
   function hardResetChat() {
-    if (
-      !window.confirm(
-        "Reset the chat and clear saved progress for this form?"
-      )
-    )
+    if (!window.confirm("Reset the chat and clear saved progress for this form?"))
       return;
     try {
       localStorage.removeItem(FORM_DRAFT_KEY);
@@ -1237,12 +837,8 @@ export default function FormPage() {
     setInput("");
     setResult(null);
     setImageUrls([]);
-    setVideoItems([]);
     setActiveImage(0);
-    setActiveVideo(0);
     setImageUrl("");
-    setVideoUrl("");
-    setVideoScript("");
     setAwaitingReady(true);
     setError("");
     setGenerating(false);
@@ -1253,33 +849,31 @@ export default function FormPage() {
     setEditHeadline("");
     setEditBody("");
     setEditCTA("");
+    setMediaType("image");
   }
 
   /* Autosave whole session + creatives (throttled) */
   useEffect(() => {
     const t = setTimeout(() => {
-      const activeDraft = currentImageId
-        ? getImageDraftById(currentImageId)
-        : null;
-      const mergedHeadline = (
-        activeDraft?.headline || result?.headline || ""
-      ).slice(0, 55);
+      const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
+      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(
+        0,
+        55
+      );
       const mergedBody = activeDraft?.body || result?.body || "";
 
       const payload = {
         answers,
         step,
         chatHistory,
-        mediaType,
+        mediaType: "image",
         result: {
           ...(result || {}),
           headline: mergedHeadline,
           body: mergedBody,
         },
         imageUrls,
-        videoItems,
         activeImage,
-        activeVideo,
         awaitingReady,
         input,
         sideChatCount,
@@ -1291,50 +885,21 @@ export default function FormPage() {
       );
 
       let imgs = imageUrls.slice(0, 2).map(abs);
-      let vids = videoItems
-        .map((v) => v?.url)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map(abs);
-      let fbIds = videoItems
-        .map((v) => v?.fbVideoId)
-        .filter(Boolean)
-        .slice(0, 2);
-
-      if (mediaType === "image") {
-        vids = [];
-        fbIds = [];
-      }
-      if (mediaType === "video") {
-        imgs = [];
-      }
 
       const draftForSetup = {
         images: imgs,
-        videos: vids,
-        fbVideoIds: fbIds,
         headline: mergedHeadline,
         body: mergedBody,
         imageOverlayCTA: normalizeOverlayCTA(
-          activeDraft?.overlay ||
-            result?.image_overlay_text ||
-            answers?.cta ||
-            ""
+          activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
         ),
-        videoScript: videoItems[activeVideo]?.script || "",
         answers,
-        mediaSelection: mediaType,
+        mediaSelection: "image",
         savedAt: Date.now(),
       };
 
-      localStorage.setItem(
-        CREATIVE_DRAFT_KEY,
-        JSON.stringify(draftForSetup)
-      );
-      sessionStorage.setItem(
-        "draft_form_creatives",
-        JSON.stringify(draftForSetup)
-      );
+      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+      sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
     }, 150);
 
     return () => clearTimeout(t);
@@ -1345,9 +910,7 @@ export default function FormPage() {
     mediaType,
     result,
     imageUrls,
-    videoItems,
     activeImage,
-    activeVideo,
     awaitingReady,
     input,
     sideChatCount,
@@ -1400,8 +963,7 @@ export default function FormPage() {
     }
     setSideChatCount((c) => c + 1);
     const reply = await askGPT(userText);
-    if (reply)
-      setChatHistory((ch) => [...ch, { from: "gpt", text: reply }]);
+    if (reply) setChatHistory((ch) => [...ch, { from: "gpt", text: reply }]);
     if (followUpPrompt)
       setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
@@ -1453,116 +1015,78 @@ export default function FormPage() {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
-if (!hasGenerated && isGenerateTrigger(value)) {
-  setLoading(true);
-  setGenerating(true);
+      if (!hasGenerated && isGenerateTrigger(value)) {
+        setLoading(true);
+        setGenerating(true);
 
-  // 1) Show "AI thinking..." immediately
-  setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
+        // 1) Show "AI thinking..." immediately
+        setChatHistory((ch) => [...ch, { from: "gpt", text: "AI thinking..." }]);
 
-  // 2) After a short moment, replace it with a nicer status line
-  const swapThinkingTimer = setTimeout(() => {
-    setChatHistory((ch) => {
-      const next = [...ch];
-      for (let i = next.length - 1; i >= 0; i--) {
-        if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
-          next[i] = { ...next[i], text: "This could take about a minute — generating your previews…" };
-          break;
-        }
+        // 2) After a short moment, replace it with a nicer status line
+        const swapThinkingTimer = setTimeout(() => {
+          setChatHistory((ch) => {
+            const next = [...ch];
+            for (let i = next.length - 1; i >= 0; i--) {
+              if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
+                next[i] = {
+                  ...next[i],
+                  text: "This could take about a minute — generating your previews…",
+                };
+                break;
+              }
+            }
+            return next;
+          });
+        }, 700);
+
+        setTimeout(async () => {
+          const token = getRandomString();
+
+          // Clear old previews
+          try {
+            setImageUrls([]);
+            setImageUrl("");
+          } catch {}
+
+          try {
+            await warmBackend();
+
+            // IMAGE: Poster B A/B with DIFFERENT COPY per image (consistent layout)
+            const imagesPromise = (async () => {
+              await generatePosterBPair(token);
+            })();
+
+            await Promise.any([imagesPromise]).catch(() => {});
+            await Promise.allSettled([imagesPromise]);
+
+            setChatHistory((ch) => [
+              ...ch,
+              { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image below." },
+            ]);
+            setHasGenerated(true);
+          } catch (err) {
+            console.error("generation failed:", err);
+            setError("Generation failed (server cold or busy). Try again in a few seconds.");
+          } finally {
+            clearTimeout(swapThinkingTimer);
+            setGenerating(false);
+            setLoading(false);
+          }
+        }, 80);
+
+        return;
       }
-      return next;
-    });
-  }, 700);
-
-  setTimeout(async () => {
-    const token = getRandomString();
-
-    // Abort any stale in-flight jobs first
-    abortAllVideoFetches();
-
-    const hardCap = setTimeout(() => {
-      console.warn(
-        "[Generation] Soft cap (~100s) reached – still waiting for server. Not aborting, just FYI."
-      );
-    }, GENERATION_HARD_CAP_MS);
-
-    // Clear old previews
-    try {
-      setVideoItems([]);
-    } catch {}
-    try {
-      setVideoUrl("");
-      setVideoScript("");
-    } catch {}
-    try {
-      setImageUrls([]);
-      setImageUrl("");
-    } catch {}
-
-    try {
-      await warmBackend();
-
-      // 1) IMAGE: Poster B A/B with DIFFERENT COPY per image (consistent layout)
-      const imagesPromise = (async () => {
-        await generatePosterBPair(token);
-      })();
-
-      // 2) VIDEO: unchanged
-      const videosPromise = (async () => {
-        const vs = await fetchVideoPair(token, answers, null, null);
-        await Promise.allSettled([
-          headRangeWarm("VA", vs?.[0]?.url),
-          headRangeWarm("VB", vs?.[1]?.url),
-        ]);
-        try {
-          setVideoItems(vs || []);
-          setActiveVideo(0);
-          setVideoUrl(vs?.[0]?.url || "");
-          setVideoScript(vs?.[0]?.script || "");
-        } catch {}
-      })();
-
-      const staticPromise = Promise.resolve();
-
-      await Promise.any([imagesPromise, videosPromise, staticPromise]).catch(() => {});
-      await Promise.allSettled([imagesPromise, videosPromise, staticPromise]);
-
-      setChatHistory((ch) => [
-        ...ch,
-        { from: "gpt", text: "Done! Here are your ad previews. You can regenerate the image or video below." },
-      ]);
-      setHasGenerated(true);
-    } catch (err) {
-      console.error("generation failed:", err);
-      setError("Generation failed (server cold or busy). Try again in a few seconds.");
-    } finally {
-      clearTimeout(hardCap);
-      clearTimeout(swapThinkingTimer);
-      setGenerating(false);
-      setLoading(false);
-    }
-  }, 80);
-
-  return;
-}
-
 
       if (hasGenerated) {
         await handleSideChat(value, null);
       } else {
-        await handleSideChat(
-          value,
-          "Ready to generate your campaign? (yes/no)"
-        );
+        await handleSideChat(value, "Ready to generate your campaign? (yes/no)");
       }
       return;
     }
 
     if (currentQ && isLikelySideChat(value, currentQ)) {
-      await handleSideChat(
-        value,
-        `Ready for the next question?\n${currentQ.question}`
-      );
+      await handleSideChat(value, `Ready for the next question?\n${currentQ.question}`);
       return;
     }
 
@@ -1591,8 +1115,7 @@ if (!hasGenerated && isGenerateTrigger(value)) {
           ...ch,
           {
             from: "gpt",
-            text:
-              "Are you ready for me to generate your campaign? (yes/no)",
+            text: "Are you ready for me to generate your campaign? (yes/no)",
           },
         ]);
         setStep(nextStep);
@@ -1600,19 +1123,9 @@ if (!hasGenerated && isGenerateTrigger(value)) {
       }
 
       setStep(nextStep);
-      setChatHistory((ch) => [
-        ...ch,
-        { from: "gpt", text: CONVO_QUESTIONS[nextStep].question },
-      ]);
+      setChatHistory((ch) => [...ch, { from: "gpt", text: CONVO_QUESTIONS[nextStep].question }]);
     }
   }
-
-  // Cancel any in-flight fetches when component unmounts (or route changes)
-  useEffect(() => {
-    return () => {
-      abortAllVideoFetches();
-    };
-  }, []);
 
   async function generatePosterBPair(runToken) {
     const tA = `${runToken}-A`;
@@ -1677,219 +1190,187 @@ if (!hasGenerated && isGenerateTrigger(value)) {
     return urls;
   }
 
-
-
   /* Regenerations (sequential with warmup/backoff) */
-/* Regenerations (sequential with warmup/backoff) */
-async function handleRegenerateImage() {
-  setImageLoading(true);
-  try {
-    await warmBackend();
-    const token = getRandomString();
-
-    // NEW: Generate a consistent Poster B A/B pair
-    // - different copy per image
-    // - different background/photo per image
-    // - consistent layout across both images
-    await generatePosterBPair(token);
-  } catch (e) {
-    console.error("handleRegenerateImage failed:", e?.message || e);
-    setError("Image regeneration failed. Please try again.");
-  } finally {
-    setImageLoading(false);
-  }
-}
-
-  async function handleRegenerateVideo() {
-    setVideoLoading(true);
-    abortAllVideoFetches();
-    try {
-      setVideoItems([]);
-      setVideoUrl("");
-      setVideoScript("");
-    } catch {}
-
-    const hardCap = setTimeout(() => {
-      console.warn("Hard cap reached; aborting regen video fetches");
-      abortAllVideoFetches();
-      setVideoLoading(false);
-      setError("Video regeneration took too long. Try again.");
-    }, GENERATION_HARD_CAP_MS);
-
+  async function handleRegenerateImage() {
+    setImageLoading(true);
     try {
       await warmBackend();
       const token = getRandomString();
 
-      const vids = await fetchVideoPair(token, answers, result, null);
-
-      await Promise.allSettled([
-        headRangeWarm("VA", vids?.[0]?.url),
-        headRangeWarm("VB", vids?.[1]?.url),
-      ]);
-
-      try {
-        setVideoItems(vids || []);
-        setActiveVideo(0);
-        setVideoUrl(vids?.[0]?.url || "");
-        setVideoScript(vids?.[0]?.script || "");
-      } catch {}
+      // Generate a consistent Poster B A/B pair
+      // - different copy per image
+      // - different background/photo per image
+      // - consistent layout across both images
+      await generatePosterBPair(token);
     } catch (e) {
-      console.error("regenerate video failed:", e?.message || e);
-      setError("Video regeneration failed. Please try again.");
+      console.error("handleRegenerateImage failed:", e?.message || e);
+      setError("Image regeneration failed. Please try again.");
     } finally {
-      clearTimeout(hardCap);
-      setVideoLoading(false);
+      setImageLoading(false);
     }
   }
 
   // --- Static Ad Generator (Templates A/B) — UPDATED TO PASS FULL COPY (WITH BULLETS) ---
-async function handleGenerateStaticAd(
-  template = "poster_b",
-  assetsData = null,
-  { regenerateToken = "", silent = false } = {}
-) {
-  const a = answers || {};
+  async function handleGenerateStaticAd(
+    template = "poster_b",
+    assetsData = null,
+    { regenerateToken = "", silent = false } = {}
+  ) {
+    const a = answers || {};
 
-  const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
-  const fromResult = result || {};
+    const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
+    const fromResult = result || {};
 
-  const baseBullets =
-    (Array.isArray(fromAssets.bullets) && fromAssets.bullets.length
-      ? fromAssets.bullets
-      : Array.isArray(fromResult.bullets) && fromResult.bullets.length
-      ? fromResult.bullets
-      : []) || [];
+    const baseBullets =
+      (Array.isArray(fromAssets.bullets) && fromAssets.bullets.length
+        ? fromAssets.bullets
+        : Array.isArray(fromResult.bullets) && fromResult.bullets.length
+        ? fromResult.bullets
+        : []) || [];
 
-  const craftedCopy = {
-    headline: (
-      fromAssets.headline ||
-      displayHeadline ||
-      a.mainBenefit ||
-      a.businessName ||
-      ""
-    ).toString(),
-    subline: (
-      fromAssets.subline ||
-      displayBody ||
-      a.details ||
-      a.mainBenefit ||
-      ""
-    ).toString(),
-    offer: (fromAssets.offer || a.offer || a.saveAmount || "").toString(),
-    secondary: (fromAssets.secondary || "").toString(),
-    bullets: baseBullets,
-    disclaimers: (fromAssets.disclaimers || "").toString(),
-    cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
-  };
-
-  if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
-    craftedCopy.bullets = ["High quality", "Loved by dogs"];
-  }
-
-  // IMPORTANT: clamp these to avoid your 400 validation errors
-  const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
-  const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);
-  const safeLocation = (a.location || "Your City").toString().trim().slice(0, 60);
-
-  let knobs;
-  if (template === "flyer_a") {
-    knobs = {
-      size: "1080x1080",
-      palette: {
-        header: "#0d3b66",
-        body: "#dff3f4",
-        accent: "#ff8b4a",
-        textOnDark: "#ffffff",
-        textOnLight: "#2b3a44",
-      },
-      lists: {
-        left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-        right: a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
-      },
-      coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
-      showIcons: true,
-      headerSplitDiagonal: true,
-      roundedOuter: true,
-      backgroundHint: safeIndustry,
+    const craftedCopy = {
+      headline: (
+        fromAssets.headline ||
+        displayHeadline ||
+        a.mainBenefit ||
+        a.businessName ||
+        ""
+      ).toString(),
+      subline: (
+        fromAssets.subline ||
+        displayBody ||
+        a.details ||
+        a.mainBenefit ||
+        ""
+      ).toString(),
+      offer: (fromAssets.offer || a.offer || a.saveAmount || "").toString(),
+      secondary: (fromAssets.secondary || "").toString(),
+      bullets: baseBullets,
+      disclaimers: (fromAssets.disclaimers || "").toString(),
+      cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
     };
-  } else {
-    knobs = {
-      size: "1080x1080",
-      backgroundHint: safeIndustry,
-      backgroundUrl: a.backgroundUrl || "",
+
+    if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
+      craftedCopy.bullets = ["High quality", "Loved by dogs"];
+    }
+
+    // IMPORTANT: clamp these to avoid your 400 validation errors
+    const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
+    const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);
+    const safeLocation = (a.location || "Your City").toString().trim().slice(0, 60);
+
+    let knobs;
+    if (template === "flyer_a") {
+      knobs = {
+        size: "1080x1080",
+        palette: {
+          header: "#0d3b66",
+          body: "#dff3f4",
+          accent: "#ff8b4a",
+          textOnDark: "#ffffff",
+          textOnLight: "#2b3a44",
+        },
+        lists: {
+          left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
+          right:
+            a.servicesList || [
+              "Kitchen",
+              "Bathrooms",
+              "Offices",
+              "Dusting",
+              "Mopping",
+              "Vacuuming",
+            ],
+        },
+        coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
+        showIcons: true,
+        headerSplitDiagonal: true,
+        roundedOuter: true,
+        backgroundHint: safeIndustry,
+      };
+    } else {
+      knobs = {
+        size: "1080x1080",
+        backgroundHint: safeIndustry,
+        backgroundUrl: a.backgroundUrl || "",
+      };
+    }
+
+    const payload = {
+      template,
+      regenerateToken, // <-- lets backend randomize background deterministically per variant
+      inputs: {
+        industry: safeIndustry,
+        businessName: safeBiz,
+        location: safeLocation,
+      },
+      knobs,
+      copy: {
+        headline: craftedCopy.headline,
+        subline: craftedCopy.subline,
+        offer: craftedCopy.offer,
+        secondary: craftedCopy.secondary,
+        bullets: craftedCopy.bullets,
+        disclaimers: craftedCopy.disclaimers,
+      },
+      answers: {
+        ...a,
+        industry: safeIndustry,
+        businessName: safeBiz,
+        location: safeLocation,
+        offer: a.offer || a.saveAmount || craftedCopy.offer || "",
+      },
     };
-  }
 
-  const payload = {
-    template,
-    regenerateToken, // <-- NEW: lets backend randomize background deterministically per variant
-    inputs: {
-      industry: safeIndustry,
-      businessName: safeBiz,
-      location: safeLocation,
-    },
-    knobs,
-    copy: {
-      headline: craftedCopy.headline,
-      subline: craftedCopy.subline,
-      offer: craftedCopy.offer,
-      secondary: craftedCopy.secondary,
-      bullets: craftedCopy.bullets,
-      disclaimers: craftedCopy.disclaimers,
-    },
-    answers: {
-      ...a,
-      industry: safeIndustry,
-      businessName: safeBiz,
-      location: safeLocation,
-      offer: a.offer || a.saveAmount || craftedCopy.offer || "",
-    },
-  };
+    console.debug("[SM][static-ad:payload]", payload);
 
-  console.debug("[SM][static-ad:payload]", payload);
+    try {
+      const res = await fetch(`${API_BASE}/generate-static-ad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-  try {
-    const res = await fetch(`${API_BASE}/generate-static-ad`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+      const data = await res.json().catch(() => ({}));
+      console.debug("[SM][static-ad:status]", res.status, data);
 
-    const data = await res.json().catch(() => ({}));
-    console.debug("[SM][static-ad:status]", res.status, data);
+      if (!res.ok || !data?.ok) {
+        const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
+        setError(msg);
+        if (!silent) alert(msg);
+        return "";
+      }
 
-    if (!res.ok || !data?.ok) {
-      const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
+      const png = toAbsoluteMedia(
+        data.pngUrl ||
+          data.absoluteUrl ||
+          data.url ||
+          (data.filename ? `/api/media/${data.filename}` : "")
+      );
+
+      if (!png) {
+        const msg = "Static ad returned without a URL.";
+        setError(msg);
+        if (!silent) alert(msg);
+        return "";
+      }
+
+      if (!silent) {
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: `Static ad generated with template "${template}".` },
+        ]);
+      }
+
+      return png;
+    } catch (e) {
+      console.error("[SM][static-ad:ERR]", e?.message || e);
+      const msg = "Static ad failed. Please try again.";
       setError(msg);
       if (!silent) alert(msg);
       return "";
     }
-
-    const png = toAbsoluteMedia(
-      data.pngUrl || data.absoluteUrl || data.url || (data.filename ? `/api/media/${data.filename}` : "")
-    );
-
-    if (!png) {
-      const msg = "Static ad returned without a URL.";
-      setError(msg);
-      if (!silent) alert(msg);
-      return "";
-    }
-
-    if (!silent) {
-      setChatHistory((ch) => [...ch, { from: "gpt", text: `Static ad generated with template "${template}".` }]);
-    }
-
-    return png;
-  } catch (e) {
-    console.error("[SM][static-ad:ERR]", e?.message || e);
-    const msg = "Static ad failed. Please try again.";
-    setError(msg);
-    if (!silent) alert(msg);
-    return "";
   }
-}
-
 
   /* ---------------------- Render ---------------------- */
   return (
@@ -1935,9 +1416,7 @@ async function handleGenerateStaticAd(
           boxSizing: "border-box",
         }}
       >
-        <div
-          style={{ display: "flex", alignItems: "center", gap: 12 }}
-        >
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
             onClick={() => navigate("/")}
             style={{
@@ -2164,12 +1643,6 @@ async function handleGenerateStaticAd(
         )}
       </div>
 
-      {/* MediaType Toggle */}
-      <MediaTypeToggle
-        mediaType={mediaType}
-        setMediaType={setMediaType}
-      />
-
       {/* Ad Previews label */}
       <div
         style={{
@@ -2211,12 +1684,12 @@ async function handleGenerateStaticAd(
             boxShadow: "0 2px 24px #16242714",
             minWidth: 340,
             maxWidth: 390,
-            flex: mediaType === "video" ? 0 : 1,
+            flex: 1,
             marginBottom: 20,
             padding: "0px 0px 14px 0px",
             border: "1.5px solid #eaeaea",
             fontFamily: AD_FONT,
-            display: mediaType === "video" ? "none" : "flex",
+            display: "flex",
             flexDirection: "column",
             overflow: "hidden",
             position: "relative",
@@ -2237,8 +1710,7 @@ async function handleGenerateStaticAd(
             }}
           >
             <span>
-              Sponsored ·{" "}
-              <span style={{ color: "#12cbb8" }}>SmartMark</span>
+              Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
             </span>
             <button
               style={{
@@ -2300,16 +1772,13 @@ async function handleGenerateStaticAd(
                     borderRadius: 0,
                     cursor: "pointer",
                   }}
-                  onClick={() =>
-                    handleImageClick(imageUrls[activeImage])
-                  }
+                  onClick={() => handleImageClick(imageUrls[activeImage])}
                 />
                 <Arrow
                   side="left"
                   onClick={() =>
                     setActiveImage(
-                      (activeImage + imageUrls.length - 1) %
-                        imageUrls.length
+                      (activeImage + imageUrls.length - 1) % imageUrls.length
                     )
                   }
                   disabled={imageUrls.length <= 1}
@@ -2317,17 +1786,11 @@ async function handleGenerateStaticAd(
                 <Arrow
                   side="right"
                   onClick={() =>
-                    setActiveImage(
-                      (activeImage + 1) % imageUrls.length
-                    )
+                    setActiveImage((activeImage + 1) % imageUrls.length)
                   }
                   disabled={imageUrls.length <= 1}
                 />
-                <Dots
-                  count={imageUrls.length}
-                  active={activeImage}
-                  onClick={setActiveImage}
-                />
+                <Dots count={imageUrls.length} active={activeImage} onClick={setActiveImage} />
               </>
             ) : (
               <div
@@ -2426,20 +1889,12 @@ async function handleGenerateStaticAd(
               }}
             >
               <label style={{ display: "block" }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#6b7785",
-                    marginBottom: 4,
-                  }}
-                >
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>
                   Headline (max 55 chars)
                 </div>
                 <input
                   value={editHeadline}
-                  onChange={(e) =>
-                    setEditHeadline(e.target.value.slice(0, 55))
-                  }
+                  onChange={(e) => setEditHeadline(e.target.value.slice(0, 55))}
                   onBlur={() =>
                     saveImageDraftById(currentImageId, {
                       headline: (editHeadline || "").trim(),
@@ -2455,25 +1910,13 @@ async function handleGenerateStaticAd(
                     fontWeight: 700,
                   }}
                 />
-                <div
-                  style={{
-                    fontSize: 11,
-                    color: "#9aa6b2",
-                    marginTop: 4,
-                  }}
-                >
+                <div style={{ fontSize: 11, color: "#9aa6b2", marginTop: 4 }}>
                   {editHeadline.length}/55
                 </div>
               </label>
 
               <label style={{ display: "block" }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#6b7785",
-                    marginBottom: 4,
-                  }}
-                >
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>
                   Body (18–30 words)
                 </div>
                 <textarea
@@ -2497,21 +1940,13 @@ async function handleGenerateStaticAd(
               </label>
 
               <label style={{ display: "block" }}>
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: "#6b7785",
-                    marginBottom: 4,
-                  }}
-                >
+                <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>
                   CTA (e.g., Shop now, Learn more)
                 </div>
                 <input
                   value={editCTA}
                   onChange={(e) => setEditCTA(e.target.value)}
-                  onBlur={() =>
-                    setEditCTA(normalizeOverlayCTA(editCTA))
-                  }
+                  onBlur={() => setEditCTA(normalizeOverlayCTA(editCTA))}
                   placeholder="CTA"
                   style={{
                     width: "100%",
@@ -2525,376 +1960,99 @@ async function handleGenerateStaticAd(
             </div>
           )}
         </div>
-
-        {/* VIDEO CARD */}
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 13,
-            boxShadow: "0 2px 24px #16242714",
-            minWidth: 340,
-            maxWidth: 390,
-            flex: mediaType === "image" ? 0 : 1,
-            marginBottom: 20,
-            padding: "0px 0px 14px 0px",
-            border: "1.5px solid #eaeaea",
-            fontFamily: AD_FONT,
-            display: mediaType === "image" ? "none" : "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
-          <div
-            style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <span>
-              Sponsored ·{" "}
-              <span style={{ color: "#12cbb8" }}>SmartMark</span>
-            </span>
-            <button
-              style={{
-                background: "#1ad6b7",
-                color: "#222",
-                border: "none",
-                borderRadius: 12,
-                fontWeight: 700,
-                fontSize: "1.01rem",
-                padding: "6px 20px",
-                cursor: videoLoading ? "not-allowed" : "pointer",
-                marginLeft: 8,
-                boxShadow: "0 2px 7px #19e5b733",
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-              }}
-              onClick={handleRegenerateVideo}
-              disabled={videoLoading}
-              title="Regenerate Video Ad"
-            >
-              <FaSyncAlt style={{ fontSize: 16 }} />
-              {videoLoading || generating ? <Dotty /> : "Regenerate"}
-            </button>
-          </div>
-
-          {/* Carousel body */}
-          <div
-            style={{
-              background: "#222",
-              position: "relative",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              minHeight: 220,
-            }}
-          >
-            {videoLoading || generating ? (
-              <div
-                style={{
-                  width: "100%",
-                  height: 220,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <Dotty />
-              </div>
-            ) : videoItems.length > 0 ? (
-              <>
-                <video
-                  key={`${
-                    videoItems[activeVideo]?.url || "video"
-                  }-${activeVideo}`}
-                  src={toAbsoluteMedia(
-                    videoItems[activeVideo]?.url || ""
-                  )}
-                  controls
-                  playsInline
-                  muted
-                  preload="metadata"
-                  style={{
-                    width: "100%",
-                    maxHeight: 220,
-                    borderRadius: 0,
-                    background: "#111",
-                  }}
-                >
-                  {videoItems[activeVideo]?.captionsVtt && (
-                    <track
-                      src={toAbsoluteMedia(
-                        videoItems[activeVideo].captionsVtt
-                      )}
-                      kind="captions"
-                      srcLang="en"
-                      label="English"
-                      default
-                    />
-                  )}
-                </video>
-
-                <Arrow
-                  side="left"
-                  onClick={() => {
-                    const next =
-                      (activeVideo +
-                        videoItems.length -
-                        1) %
-                      videoItems.length;
-                    setActiveVideo(next);
-                    setVideoUrl(videoItems[next]?.url || "");
-                    setVideoScript(
-                      videoItems[next]?.script || ""
-                    );
-                  }}
-                  disabled={videoItems.length <= 1}
-                />
-                <Arrow
-                  side="right"
-                  onClick={() => {
-                    const next =
-                      (activeVideo + 1) % videoItems.length;
-                    setActiveVideo(next);
-                    setVideoUrl(videoItems[next]?.url || "");
-                    setVideoScript(
-                      videoItems[next]?.script || ""
-                    );
-                  }}
-                  disabled={videoItems.length <= 1}
-                />
-                <Dots
-                  count={videoItems.length}
-                  active={activeVideo}
-                  onClick={(i) => {
-                    setActiveVideo(i);
-                    setVideoUrl(
-                      videoItems[i]?.url || ""
-                    );
-                    setVideoScript(
-                      videoItems[i]?.script || ""
-                    );
-                  }}
-                />
-              </>
-            ) : (
-              <div
-                style={{
-                  height: 220,
-                  width: "100%",
-                  background: "#e9ecef",
-                  color: "#a9abb0",
-                  fontWeight: 700,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 22,
-                }}
-              >
-                Video goes here
-              </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              padding: "17px 18px 4px 18px",
-            }}
-          >
-            <div
-              style={{
-                color: "#191c1e",
-                fontWeight: 800,
-                fontSize: 17,
-                marginBottom: 5,
-                fontFamily: AD_FONT,
-              }}
-            >
-              {result?.headline || "Welcome New Customers Instantly!"}
-            </div>
-            {videoItems.length > 0 &&
-              (videoItems[activeVideo]?.script ||
-                videoScript) && (
-                <div
-                  style={{
-                    color: "#3a4149",
-                    fontSize: 15,
-                    fontWeight: 600,
-                    marginBottom: 3,
-                    minHeight: 18,
-                  }}
-                >
-                  <b>Script:</b>{" "}
-                  {videoItems[activeVideo]?.script ||
-                    videoScript}
-                </div>
-              )}
-          </div>
-          <div
-            style={{
-              padding: "8px 18px",
-              marginTop: 2,
-            }}
-          >
-            <button
-              style={{
-                background: "#14e7b9",
-                color: "#181b20",
-                fontWeight: 700,
-                border: "none",
-                borderRadius: 9,
-                padding: "8px 20px",
-                fontSize: 15,
-                cursor: "pointer",
-              }}
-            >
-              Learn More
-            </button>
-          </div>
-        </div>
       </div>
 
-{/* Continue */}
-<div
-  style={{
-    width: "100%",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 10,
-    paddingBottom: 28,
-    gap: 10,
-  }}
->
+      {/* Continue */}
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          marginTop: 10,
+          paddingBottom: 28,
+          gap: 10,
+        }}
+      >
+        <button
+          disabled={!hasGenerated}
+          style={{
+            background: TEAL,
+            color: "#0e1519",
+            border: "none",
+            borderRadius: 13,
+            fontWeight: 900,
+            fontSize: "1.08rem",
+            padding: "16px 56px",
+            marginBottom: 4,
+            fontFamily: MODERN_FONT,
+            boxShadow: `0 2px 16px ${TEAL_SOFT}`,
+            cursor: hasGenerated ? "pointer" : "not-allowed",
+            transition: "background 0.18s, opacity 0.18s, transform 0.18s",
+            opacity: hasGenerated ? 1 : 0.45,
+            transform: hasGenerated ? "translateY(0)" : "translateY(0)",
+          }}
+          onClick={() => {
+            // HARD STOP (prevents bypass)
+            if (!hasGenerated) {
+              alert("Generate your previews first. Type 'yes' in the chat.");
+              return;
+            }
 
+            const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
 
-  <button
-    disabled={!hasGenerated}
-    style={{
-      background: TEAL,
-      color: "#0e1519",
-      border: "none",
-      borderRadius: 13,
-      fontWeight: 900,
-      fontSize: "1.08rem",
-      padding: "16px 56px",
-      marginBottom: 4,
-      fontFamily: MODERN_FONT,
-      boxShadow: `0 2px 16px ${TEAL_SOFT}`,
-      cursor: hasGenerated ? "pointer" : "not-allowed",
-      transition: "background 0.18s, opacity 0.18s, transform 0.18s",
-      opacity: hasGenerated ? 1 : 0.45,
-      transform: hasGenerated ? "translateY(0)" : "translateY(0)",
-    }}
-    onClick={() => {
-      // HARD STOP (prevents bypass)
-      if (!hasGenerated) {
-        alert("Generate your previews first. Type 'yes' in the chat.");
-        return;
-      }
+            const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+            const mergedBody = activeDraft?.body || result?.body || "";
+            const mergedCTA = normalizeOverlayCTA(
+              activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+            );
 
-      const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
+            let imgA = imageUrls.map(abs).slice(0, 2);
 
-      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
-      const mergedBody = activeDraft?.body || result?.body || "";
-      const mergedCTA = normalizeOverlayCTA(
-        activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-      );
+            const draftForSetup = {
+              images: imgA,
+              headline: mergedHeadline,
+              body: mergedBody,
+              imageOverlayCTA: mergedCTA,
+              answers,
+              mediaSelection: "image",
+              savedAt: Date.now(),
+            };
 
-      let imgA = imageUrls.map(abs).slice(0, 2);
-      let vidA = videoItems.map((v) => abs(v.url)).slice(0, 2);
-      let fbIds = videoItems
-        .map((v) => v.fbVideoId)
-        .filter(Boolean)
-        .slice(0, 2);
+            sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+            localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+            localStorage.setItem("smartmark_media_selection", "image");
 
-      if (mediaType === "image") {
-        vidA = [];
-        fbIds = [];
-      }
-      if (mediaType === "video") {
-        imgA = [];
-      }
+            // Persist "last" keys ONLY for image
+            if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+            localStorage.removeItem("smartmark_last_video_url");
+            localStorage.removeItem("smartmark_last_fb_video_id");
 
-      const draftForSetup = {
-        images: imgA,
-        videos: vidA,
-        fbVideoIds: fbIds,
-        headline: mergedHeadline,
-        body: mergedBody,
-        imageOverlayCTA: mergedCTA,
-        videoScript: videoItems[0]?.script || videoScript || "",
-        answers,
-        mediaSelection: mediaType,
-        savedAt: Date.now(),
-      };
+            navigate("/setup", {
+              state: {
+                imageUrls: imgA,
+                headline: mergedHeadline,
+                body: mergedBody,
+                imageOverlayCTA: mergedCTA,
+                answers,
+                mediaSelection: "image",
+              },
+            });
+          }}
+          onMouseEnter={(e) => {
+            if (!hasGenerated) return;
+            e.currentTarget.style.transform = "translateY(-1px)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "translateY(0)";
+          }}
+        >
+          Continue
+        </button>
+      </div>
 
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
-      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-      localStorage.setItem("smartmark_media_selection", mediaType);
-
-      // Persist "last" keys ONLY for selected media, and clear the others
-      if (mediaType === "image") {
-        if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
-        localStorage.removeItem("smartmark_last_video_url");
-        localStorage.removeItem("smartmark_last_fb_video_id");
-      }
-
-      if (mediaType === "video") {
-        if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
-        if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
-        localStorage.removeItem("smartmark_last_image_url");
-      }
-
-      if (mediaType === "both") {
-        if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
-        if (vidA[0]) localStorage.setItem("smartmark_last_video_url", vidA[0]);
-        if (fbIds[0]) localStorage.setItem("smartmark_last_fb_video_id", String(fbIds[0]));
-      }
-
-      navigate("/setup", {
-        state: {
-          imageUrls: imgA,
-          videoUrls: vidA,
-          fbVideoIds: fbIds,
-          headline: mergedHeadline,
-          body: mergedBody,
-          imageOverlayCTA: mergedCTA,
-          videoScript: videoItems[0]?.script || videoScript,
-          answers,
-          mediaSelection: mediaType,
-        },
-      });
-    }}
-    onMouseEnter={(e) => {
-      if (!hasGenerated) return;
-      e.currentTarget.style.transform = "translateY(-1px)";
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.transform = "translateY(0)";
-    }}
-  >
-    Continue
-  </button>
-</div>
-
-
-      <ImageModal
-        open={showModal}
-        imageUrl={modalImg}
-        onClose={handleModalClose}
-      />
+      <ImageModal open={showModal} imageUrl={modalImg} onClose={handleModalClose} />
     </div>
   );
 }
@@ -2919,7 +2077,6 @@ const CONVO_QUESTIONS = [
   },
   {
     key: "mainBenefit",
-    question:
-      "What's the main benefit or transformation you promise?",
+    question: "What's the main benefit or transformation you promise?",
   },
 ];

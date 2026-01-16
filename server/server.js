@@ -1,8 +1,6 @@
 // server/server.js
 // --- GLOBAL ERROR HANDLERS (keep these at the very top!) ---
 
-// Keep Node's V8 heap under the Render free 512MB ceiling.
-// You can override with env MAX_HEAP_MB (e.g. 320 or 384).
 const MAX_HEAP_MB = Number(process.env.MAX_HEAP_MB || 320);
 if (!process.env.NODE_OPTIONS || !/max-old-space-size/.test(process.env.NODE_OPTIONS)) {
   process.env.NODE_OPTIONS = `--max-old-space-size=${MAX_HEAP_MB}`;
@@ -39,7 +37,7 @@ const app = express();
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
-    res.setHeader('Access-Control-Allow-Origin', origin); // reflect caller
+    res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -49,8 +47,7 @@ app.use((req, res, next) => {
     'Content-Type, Authorization, X-Requested-With, X-FB-AD-ACCOUNT-ID, X-SM-SID, Range'
   );
   res.setHeader('Access-Control-Max-Age', '86400');
-  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'); // media can be embedded
-  // expose size/range so your headRangeWarm() can read them
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
   if (req.method === 'OPTIONS') return res.status(204).end();
   next();
@@ -60,10 +57,9 @@ app.use((req, res, next) => {
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
-// Prevent long image/video jobs from being killed by idle timeouts
 app.use((req, res, next) => {
   try {
-    if (typeof req.setTimeout === 'function') req.setTimeout(180000); // 3 min
+    if (typeof req.setTimeout === 'function') req.setTimeout(180000);
     if (typeof res.setTimeout === 'function') res.setTimeout(180000);
   } catch {}
   next();
@@ -88,22 +84,18 @@ if (process.env.RENDER) {
 }
 process.env.GENERATED_DIR = generatedPath;
 
-// Serve generated files (images/videos) with friendly headers
+// Serve generated files (static AI image ads)
 const staticOpts = {
   maxAge: '1y',
   immutable: true,
-  setHeaders(res, filePath) {
+  setHeaders(res, _filePath) {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Access-Control-Expose-Headers', 'Content-Length');
-    if (filePath.endsWith('.mp4')) res.setHeader('Content-Type', 'video/mp4');
   }
 };
 
-// Primary path
 app.use('/generated', express.static(generatedPath, staticOpts));
-// Alias used by the frontend’s toAbsoluteMedia() normalizer
 app.use('/api/media', express.static(generatedPath, staticOpts));
-// Optional extra alias if needed anywhere else
 app.use('/media', express.static(generatedPath, staticOpts));
 
 /** Local fallback image for testing */
@@ -131,15 +123,13 @@ app.use((req, res, next) => {
 });
 
 /* --------------------------------- ROUTES --------------------------------- */
-// Minimal warmup route used by frontend warmBackend() -> `${API_BASE}/test`
 app.get('/api/test', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({ ok: true, ts: Date.now() });
 });
 
 /**
- * Lightweight copy-crafting route to avoid verbatim echo.
- * (Rule-based so it works instantly; you can later swap in your OpenAI version.)
+ * Lightweight copy-crafting route (optional, fine to keep)
  */
 app.post('/api/craft-ad-copy', (req, res) => {
   try {
@@ -148,7 +138,6 @@ app.post('/api/craft-ad-copy', (req, res) => {
     const industry = (b.industry || a.industry || 'Local Services').toString().toLowerCase();
     const businessName = (b.businessName || a.businessName || 'Your Brand').toString();
 
-    // Simple industry presets
     const presets = {
       fashion: {
         headline: "Fresh Styles, Just Dropped",
@@ -190,7 +179,6 @@ app.post('/api/craft-ad-copy', (req, res) => {
        industry.includes('electr') ? presets.electronics :
        presets.default);
 
-    // Build copy, ensuring we don't echo raw user sentence
     const copy = {
       headline: p.headline,
       subline: p.subline,
@@ -211,24 +199,14 @@ app.post('/api/craft-ad-copy', (req, res) => {
 const authRoutes = require('./routes/auth');
 app.use('/auth', authRoutes);
 
-/* IMPORTANT: mount staticAds BEFORE ai so /api/generate-static-ad hits the new templates */
+/* IMPORTANT: staticAds is your ONLY generation path now */
 const staticAdsRoutes = require('./routes/staticAds');
 app.use('/api', staticAdsRoutes);
 
-// 👉 Root-level alias for legacy clients calling `/proxy-img`
-// (handlers are exported from staticAds.js)
+/* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require('./routes/staticAds');
 app.get('/proxy-img', proxyImgHandler);
 app.head('/proxy-img', proxyHeadHandler);
-
-const aiRoutes = require('./routes/ai');
-app.use('/api', aiRoutes);
-
-const campaignRoutes = require('./routes/campaigns');
-app.use('/api', campaignRoutes);
-
-const gptChatRoutes = require('./routes/gpt');
-app.use('/api', gptChatRoutes);
 
 // Simple ping that echoes headers (debug CORS quickly)
 app.all('/api/ping', (req, res) => {
@@ -241,13 +219,6 @@ app.all('/api/ping', (req, res) => {
     time: Date.now()
   });
 });
-
-// Mount MOCK routes FIRST
-const smartMockRoutes = require('./routes/smartMock');
-app.use(smartMockRoutes);
-
-const smartRoutes = require('./routes/smart');
-app.use('/smart', smartRoutes);
 
 /* --------------------------------- HEALTH -------------------------------- */
 app.get(['/healthz', '/api/health', '/health'], (_req, res) => {

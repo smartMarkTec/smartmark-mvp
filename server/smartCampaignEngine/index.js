@@ -2,12 +2,11 @@
 'use strict';
 
 const axios = require('axios');
-const FormData = require('form-data');
 
 // ===== runtime test toggles (no spend / dry run) =====
 const NO_SPEND = process.env.NO_SPEND === '1';
 const VALIDATE_ONLY = process.env.VALIDATE_ONLY === '1';
-const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days
+const SAFE_START = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // +7 days (kept for compatibility if used elsewhere)
 
 // =========================
 // Shared helpers
@@ -33,91 +32,65 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function isFbVideoNotReadyError(e) {
-  const fb = e?.response?.data?.error;
-  const sub = fb?.error_subcode ?? fb?.subcode;
-  return Number(sub) === 1885252;
-}
-
-
-
 function safeJson(obj) {
-  try { return JSON.stringify(obj); } catch { return '[unserializable]'; }
+  try {
+    return JSON.stringify(obj);
+  } catch {
+    return '[unserializable]';
+  }
 }
 
+function pickFromObj(o, keys) {
+  if (!o || typeof o !== 'object') return '';
+  for (const k of keys) {
+    const v = o?.[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+// Robust extraction for your static image endpoint shapes.
+// Supports:
+// - { imageUrl }
+// - { url }
+// - { absoluteUrl }
+// - { images: [ "url" ] } or { images: [ { url|imageUrl|absoluteUrl } ] }
+// - { image: { url|imageUrl|absoluteUrl } }
+function pickImageUrl(data, index1Based = 1) {
+  let u =
+    pickFromObj(data, ['imageUrl', 'absoluteUrl', 'url']) ||
+    pickFromObj(data?.image, ['imageUrl', 'absoluteUrl', 'url']);
+  if (u) return u;
+
+  const arr =
+    (Array.isArray(data?.images) && data.images) ||
+    (Array.isArray(data?.imageUrls) && data.imageUrls) ||
+    (Array.isArray(data?.urls) && data.urls) ||
+    null;
+
+  if (arr && arr.length) {
+    const idx = Math.max(0, Math.min(arr.length - 1, Number(index1Based || 1) - 1));
+    const item = arr[idx];
+    if (typeof item === 'string') return item;
+    return pickFromObj(item, ['imageUrl', 'absoluteUrl', 'url']);
+  }
+
+  return '';
+}
+
+function normalizeToPublic(u) {
+  if (!u) return '';
+  const s = String(u).trim();
+  if (s.startsWith('http')) return s;
+  if (s.startsWith('/')) return absolutePublicUrl(s);
+  return absolutePublicUrl(`/${s}`);
+}
 
 async function fbGetV(apiVersion, endpoint, params) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
   const res = await axios.get(url, { params });
   return res.data;
 }
-
-async function waitForVideoReady({
-  videoId,
-  userToken,
-  timeoutMs = 20 * 60 * 1000, // 20 min default (Meta can be slow)
-  pollMs = 8000               // 8s polling
-}) {
-  const deadline = Date.now() + timeoutMs;
-
-  const hasThumb = async () => {
-    try {
-      const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, {
-        access_token: userToken,
-        fields: 'uri,is_preferred',
-        limit: 5
-      });
-      const arr = Array.isArray(thumbs?.data) ? thumbs.data : [];
-      return arr.some(t => t?.uri);
-    } catch {
-      return false;
-    }
-  };
-
-  while (Date.now() < deadline) {
-    // ✅ Strongest signal: a thumbnail exists
-    if (await hasThumb()) return true;
-
-    // Secondary signal: status/progress says ready
-    try {
-      const info = await fbGetV(FB_API_VER, `${videoId}`, {
-        access_token: userToken,
-        fields: 'status{video_status,processing_progress},processing_progress'
-      });
-
-      const statusRaw =
-        info?.status?.video_status ??
-        info?.video_status ??
-        info?.status ??
-        '';
-
-      const status = String(statusRaw || '').toLowerCase();
-
-      const progressRaw =
-        info?.status?.processing_progress ??
-        info?.processing_progress ??
-        0;
-
-      const progress = Number(progressRaw || 0);
-
-      if (status.includes('error') || status.includes('fail')) {
-        const err = new Error('video_processing_failed');
-        err.detail = { videoId, status: statusRaw, progress };
-        throw err;
-      }
-
-      if (status === 'ready' || progress >= 100) return true;
-    } catch {
-      // ignore transient Graph issues and keep polling
-    }
-
-    await sleep(pollMs);
-  }
-
-  return false;
-}
-
-
 
 async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const url = `https://graph.facebook.com/${apiVersion}/${endpoint}`;
@@ -146,11 +119,6 @@ async function fbPostV(apiVersion, endpoint, body, params = {}) {
   const res = await axios.post(url, body, { params: mergedParams });
   return res.data;
 }
-
-
-
-
-
 
 const FB_API_VER = 'v23.0';
 
@@ -198,27 +166,23 @@ const policy = {
     return false;
   },
 
+  // Scope change: STATIC IMAGE ADS ONLY.
+  // We keep the same signature so callers don’t break, but we only return "images".
   decideVariantPlan({
-    assetTypes = 'both',
+    assetTypes = 'image',
     dailyBudget = 0,
     flightHours = 0,
     overrideCountPerType = null,
     forceTwoPerType = false
   }) {
-    const at = String(assetTypes || 'both').toLowerCase();
-    const wantsImage = at === 'image' || at === 'both';
-    const wantsVideo = at === 'video' || at === 'both';
-
     if (overrideCountPerType && typeof overrideCountPerType === 'object') {
       return {
-        images: wantsImage ? Math.max(0, Number(overrideCountPerType.images || 0)) : 0,
-        videos: wantsVideo ? Math.max(0, Number(overrideCountPerType.videos || 0)) : 0
+        images: Math.max(0, Number(overrideCountPerType.images ?? overrideCountPerType.image ?? 0))
       };
     }
 
     if (forceTwoPerType) {
-      const count = this.VARIANTS.DEFAULT_COUNT_PER_TYPE;
-      return { images: wantsImage ? count : 0, videos: wantsVideo ? count : 0 };
+      return { images: this.VARIANTS.DEFAULT_COUNT_PER_TYPE };
     }
 
     const canAB =
@@ -226,7 +190,7 @@ const policy = {
       Number(flightHours) >= this.VARIANTS.MIN_FLIGHT_HOURS_FOR_AB;
 
     const count = canAB ? this.VARIANTS.DEFAULT_COUNT_PER_TYPE : this.VARIANTS.FALLBACK_COUNT_PER_TYPE;
-    return { images: wantsImage ? count : 0, videos: wantsVideo ? count : 0 };
+    return { images: count };
   }
 };
 
@@ -238,8 +202,8 @@ function _norm(m = {}) {
   const imp = Number(m.impressions || 0);
   const clk = Number(m.clicks || 0);
   const sp = Number(m.spend || 0);
-  const ctr = (typeof m.ctr === 'number') ? m.ctr : (imp ? (clk / imp) * 100 : 0);
-  const cpm = (typeof m.cpm === 'number') ? m.cpm : (imp ? (sp / imp) * 1000 : 0);
+  const ctr = typeof m.ctr === 'number' ? m.ctr : imp ? (clk / imp) * 100 : 0;
+  const cpm = typeof m.cpm === 'number' ? m.cpm : imp ? (sp / imp) * 1000 : 0;
   const freq = Number(m.frequency || 1);
   const cpc = clk > 0 ? sp / clk : null;
   return { impressions: imp, clicks: clk, spend: sp, ctr, cpm, frequency: freq, cpc };
@@ -302,8 +266,18 @@ async function getWindowInsights(id, token, level, windows) {
   const priorRange = dateRange(RECENT_DAYS, PRIOR_DAYS);
 
   const [recent, prior] = await Promise.all([
-    fbGetV(FB_API_VER, `${id}/insights`, { access_token: token, fields: FIELDS, time_range: JSON.stringify(recentRange), level }),
-    fbGetV(FB_API_VER, `${id}/insights`, { access_token: token, fields: FIELDS, time_range: JSON.stringify(priorRange), level })
+    fbGetV(FB_API_VER, `${id}/insights`, {
+      access_token: token,
+      fields: FIELDS,
+      time_range: JSON.stringify(recentRange),
+      level
+    }),
+    fbGetV(FB_API_VER, `${id}/insights`, {
+      access_token: token,
+      fields: FIELDS,
+      time_range: JSON.stringify(priorRange),
+      level
+    })
   ]);
 
   return { recent: parseMetrics(recent), prior: parseMetrics(prior), _ranges: { recentRange, priorRange } };
@@ -340,7 +314,7 @@ function rankAds(listByAdId, kpi = 'cpc') {
   };
 
   rows.sort(kpi === 'ctr' ? byCtrThenCpc : byCpcThenCtr);
-  return rows.map(r => ({ adId: r.adId, value: kpi === 'ctr' ? r.ctr : r.cpc, windows: r.windows }));
+  return rows.map((r) => ({ adId: r.adId, value: kpi === 'ctr' ? r.ctr : r.cpc, windows: r.windows }));
 }
 
 function hoursSince(iso) {
@@ -368,7 +342,7 @@ const analyzer = {
       limit: 200
     });
 
-    let adsetIds = (adsetsResp.data || []).map(a => a.id);
+    let adsetIds = (adsetsResp.data || []).map((a) => a.id);
 
     if (adsetIds.length === 0) {
       const adsFallback = await fbGetV(FB_API_VER, `${campaignId}/ads`, {
@@ -376,7 +350,7 @@ const analyzer = {
         fields: 'id,adset_id',
         limit: 200
       });
-      const set = new Set((adsFallback.data || []).map(a => a.adset_id).filter(Boolean));
+      const set = new Set((adsFallback.data || []).map((a) => a.adset_id).filter(Boolean));
       adsetIds = Array.from(set);
     }
 
@@ -395,10 +369,10 @@ const analyzer = {
         limit: 200
       });
 
-      const ids = (ads.data || []).map(a => a.id);
+      const ids = (ads.data || []).map((a) => a.id);
       adMapByAdset[adsetId] = ids;
 
-      for (const a of (ads.data || [])) {
+      for (const a of ads.data || []) {
         adMeta[a.id] = { created_time: a.created_time || null };
       }
 
@@ -424,7 +398,7 @@ const analyzer = {
       });
 
       const subset = {};
-      ids.forEach(id => (subset[id] = adInsights[id]));
+      ids.forEach((id) => (subset[id] = adInsights[id]));
       const ranking = rankAds(subset, 'cpc');
 
       if (ranking.length > 0) {
@@ -478,114 +452,34 @@ const analyzer = {
 };
 
 // =========================
-/* GENERATOR */
-
-// Robust extraction for your real endpoint shapes.
-// - image endpoint: { imageUrl } OR { images:[{absoluteUrl|url|imageUrl}] } OR { absoluteUrl }
-// - video endpoint: { absoluteVideoUrl } OR { videoUrl } OR { relativeUrl } OR { videos:[{absoluteUrl|relativeUrl|url}] } OR { videoUrls:[...] }
-function pickFromObj(o, keys) {
-  if (!o || typeof o !== 'object') return '';
-  for (const k of keys) {
-    const v = o?.[k];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return '';
-}
-
-function pickImageUrl(data, index1Based = 1) {
-  // direct fields
-  let u =
-    pickFromObj(data, ['imageUrl', 'absoluteUrl', 'url']) ||
-    pickFromObj(data?.image, ['imageUrl', 'absoluteUrl', 'url']);
-  if (u) return u;
-
-  const arr =
-    (Array.isArray(data?.images) && data.images) ||
-    (Array.isArray(data?.imageUrls) && data.imageUrls) ||
-    (Array.isArray(data?.urls) && data.urls) ||
-    null;
-
-  if (arr && arr.length) {
-    const idx = Math.max(0, Math.min(arr.length - 1, Number(index1Based || 1) - 1));
-    const item = arr[idx];
-    if (typeof item === 'string') return item;
-    return pickFromObj(item, ['imageUrl', 'absoluteUrl', 'url']);
-  }
-
-  return '';
-}
-
-function pickVideoUrl(data, variantNumber = 1) {
-  // direct fields
-  let u =
-    pickFromObj(data, ['absoluteVideoUrl', 'videoUrl', 'absoluteUrl', 'relativeUrl', 'url']) ||
-    pickFromObj(data?.video, ['absoluteVideoUrl', 'videoUrl', 'absoluteUrl', 'relativeUrl', 'url']);
-
-  // Sometimes endpoint returns A/B in an array or multiple fields
-  const arr =
-    (Array.isArray(data?.videoUrls) && data.videoUrls) ||
-    (Array.isArray(data?.videos) && data.videos) ||
-    (Array.isArray(data?.media) && data.media) ||
-    null;
-
-  if (!u && arr && arr.length) {
-    const idx = Math.max(0, Math.min(arr.length - 1, Number(variantNumber || 1) - 1));
-    const item = arr[idx];
-    if (typeof item === 'string') u = item;
-    else u = pickFromObj(item, ['absoluteVideoUrl', 'videoUrl', 'absoluteUrl', 'relativeUrl', 'url']);
-  }
-
-  // Fall back to explicitly named A/B fields if present
-  if (!u) {
-    const a = pickFromObj(data, ['videoUrlA', 'a', 'urlA', 'relativeUrlA', 'absoluteUrlA']);
-    const b = pickFromObj(data, ['videoUrlB', 'b', 'urlB', 'relativeUrlB', 'absoluteUrlB']);
-    if (a && b) u = (Number(variantNumber) === 2 ? b : a);
-    else u = a || b || '';
-  }
-
-  return u || '';
-}
-
-function normalizeToPublic(u) {
-  if (!u) return '';
-  const s = String(u).trim();
-  if (s.startsWith('http')) return s;
-  // normalize common relative forms
-  if (s.startsWith('/')) return absolutePublicUrl(s);
-  return absolutePublicUrl(`/${s}`);
-}
-
+/* GENERATOR (STATIC IMAGE ADS ONLY) */
 const generator = {
   async generateVariants({
     form = {},
     answers = {},
     url = '',
-    mediaSelection = 'both',
-    variantPlan = { images: 2, videos: 2 },
+    mediaSelection = 'image', // kept for compatibility; ignored
+    variantPlan = { images: 2 },
     debug = false
   }) {
     // IMPORTANT: call our own API using PUBLIC URL so pathing is identical to your curl tests
-    // (prevents mysterious internal "Not found" behavior during Render restarts / routing edge-cases)
     const api = absolutePublicUrl('/api');
 
-    const wantsImage = Number(variantPlan.images || 0) > 0;
-    const wantsVideo = Number(variantPlan.videos || 0) > 0;
-
-    const seedUrl = url || form?.url || '';
-    const seedIndustry = answers?.industry || form?.industry || '';
-
+    const requestedImages = Math.max(0, Number(variantPlan?.images || 0));
     const errors = [];
 
-    // Hard cap total generation time so jobs never “run forever”
-    const maxTotalMs = Number(process.env.SMART_GENERATION_MAX_MS || (12 * 60 * 1000)); // 12 minutes default
+    const seedUrl = url || form?.url || '';
+    const maxTotalMs = Number(process.env.SMART_GENERATION_MAX_MS || 12 * 60 * 1000); // 12 minutes default
     const deadline = Date.now() + maxTotalMs;
 
+    // Optional: fetch copy if endpoint exists; generation should still work without it.
     let copy = '';
     try {
-      const copyResp = await axios.post(`${api}/generate-campaign-assets`, {
-        answers,
-        url: seedUrl
-      }, { timeout: 120000 });
+      const copyResp = await axios.post(
+        `${api}/generate-campaign-assets`,
+        { answers, url: seedUrl },
+        { timeout: 120000 }
+      );
       copy = `${copyResp.data?.headline || ''}\n\n${copyResp.data?.body || ''}`.trim();
     } catch (e) {
       errors.push({ step: 'copy', message: e?.response?.data?.error || e?.message || 'copy_failed' });
@@ -594,154 +488,92 @@ const generator = {
 
     const out = [];
 
-    const genImageOnce = async (i) => {
+    // This is your new single path: answers -> prompt -> OpenAI image -> saved png -> /api/media/<file>.png
+    // Allow env override if your route name differs.
+    const STATIC_ENDPOINT = process.env.SMART_STATIC_AD_ENDPOINT || '/generate-static-ad';
+
+    const genStaticOnce = async (i) => {
       const regTok = `${Date.now()}_img_${i}_${Math.random().toString(36).slice(2, 8)}`;
 
-      const imgResp = await axios.post(`${api}/generate-image-from-prompt`, {
-        url: seedUrl,
-        industry: seedIndustry,
-        answers,
-        regenerateToken: regTok
-      }, { timeout: 180000 });
-
-      const picked = pickImageUrl(imgResp.data, i);
-      if (!picked) throw new Error('image_endpoint_returned_no_image_url');
-
-      // If endpoint already returns our own generated file, don't re-overlay.
-      const alreadyGenerated = typeof picked === 'string' && (
-        picked.includes('/generated/') || picked.includes('/api/media/')
-      );
-
-      let finalUrl = picked;
-
-      if (!alreadyGenerated) {
-        // overlay can return either {imageUrl} or {images:[...]} too
-        const overlayResp = await axios.post(`${api}/generate-image-with-overlay`, {
-          imageUrl: picked,
+      const resp = await axios.post(
+        `${api}${STATIC_ENDPOINT.startsWith('/') ? '' : '/'}${STATIC_ENDPOINT}`,
+        {
           answers,
           url: seedUrl,
           regenerateToken: regTok
-        }, { timeout: 240000 });
+        },
+        { timeout: 240000 }
+      );
 
-        const overlayPicked = pickImageUrl(overlayResp.data, i);
-        finalUrl = overlayPicked || picked;
+      const picked = pickImageUrl(resp.data, i);
+      if (!picked) {
+        const hint = safeJson({ keys: Object.keys(resp.data || {}), sample: resp.data }).slice(0, 800);
+        const err = new Error('static_image_endpoint_returned_no_image_url');
+        err._hint = hint;
+        throw err;
       }
 
-      const publicUrl = normalizeToPublic(finalUrl);
+      const publicUrl = normalizeToPublic(picked);
       if (!publicUrl.startsWith('http')) throw new Error('imageUrl_not_public');
 
       return { kind: 'image', variantId: `img_${i}`, imageUrl: publicUrl, adCopy: copy };
     };
 
-    const genVideoOnce = async (i) => {
-      const regTok = `${Date.now()}_vid_${i}_${Math.random().toString(36).slice(2, 8)}`;
-      const variant = (i % 2) + 1;
+    // Retry strategy: attempt up to 3x per requested image.
+    const maxAttempts = requestedImages > 0 ? Math.max(requestedImages * 3, requestedImages) : 0;
 
-      const vidResp = await axios.post(`${api}/generate-video-ad`, {
-        url: seedUrl,
-        answers: { ...answers, cta: answers?.cta || 'Learn More!' },
-        regenerateToken: regTok,
-        variant
-      }, { timeout: 420000 });
+    let made = 0;
+    let attempts = 0;
+    while (made < requestedImages && attempts < maxAttempts) {
+      if (Date.now() > deadline) break;
+      attempts += 1;
 
-      const raw = pickVideoUrl(vidResp.data, variant);
-      const abs = normalizeToPublic(raw);
-
-      if (!abs || !abs.startsWith('http')) {
-        // Add useful context to errors so you see what shape came back
-        const hint = safeJson({
-          keys: Object.keys(vidResp.data || {}),
-          sample: vidResp.data
-        }).slice(0, 600);
-        const err = new Error('videoUrl_not_public');
-        err._hint = hint;
-        throw err;
-      }
-
-      // Preserve relative if present, but guarantee absolute works
-      const rel = (String(raw || '').startsWith('http')) ? '' : String(raw || '');
-
-      return {
-        kind: 'video',
-        variantId: `vid_${i}`,
-        video: {
-          relativeUrl: rel,
-          absoluteUrl: abs,
-          fbVideoId: vidResp.data?.fbVideoId || null,
-          variant: vidResp.data?.variant || variant
-        },
-        adCopy: copy
-      };
-    };
-
-    // Retry strategy: attempt up to 3x per requested creative.
-    const maxImgAttempts = wantsImage ? Math.max(variantPlan.images * 3, variantPlan.images) : 0;
-    const maxVidAttempts = wantsVideo ? Math.max(variantPlan.videos * 3, variantPlan.videos) : 0;
-
-    if (wantsImage) {
-      let made = 0;
-      let attempts = 0;
-      while (made < variantPlan.images && attempts < maxImgAttempts) {
-        if (Date.now() > deadline) break;
-        attempts += 1;
-        try {
-          const c = await genImageOnce(made + 1);
-          out.push(c);
-          made += 1;
-        } catch (e) {
-          const msg = e?.response?.data?.error || e?.message || 'image_generate_failed';
-          errors.push({ step: 'image', attempt: attempts, message: msg });
-          if (debug) console.warn('[smartCampaignEngine] image gen fail:', msg);
-          await sleep(250);
-        }
-      }
-      if (made < variantPlan.images) {
-        console.warn(`[smartCampaignEngine] images generated ${made}/${variantPlan.images}. errors=${errors.filter(x => x.step === 'image').length}`);
+      try {
+        const c = await genStaticOnce(made + 1);
+        out.push(c);
+        made += 1;
+      } catch (e) {
+        const msg = e?.response?.data?.error || e?.message || 'image_generate_failed';
+        const hint = e?._hint ? String(e._hint) : null;
+        errors.push({ step: 'image', attempt: attempts, message: msg, ...(hint ? { hint } : {}) });
+        if (debug) console.warn('[smartCampaignEngine] static image gen fail:', msg);
+        await sleep(300);
       }
     }
 
-    if (wantsVideo) {
-      let made = 0;
-      let attempts = 0;
-      while (made < variantPlan.videos && attempts < maxVidAttempts) {
-        if (Date.now() > deadline) break;
-        attempts += 1;
-        try {
-          const c = await genVideoOnce(made + 1);
-          out.push(c);
-          made += 1;
-        } catch (e) {
-          const msg = e?.response?.data?.error || e?.message || 'video_generate_failed';
-          const hint = e?._hint ? String(e._hint) : null;
-          errors.push({ step: 'video', attempt: attempts, message: msg, ...(hint ? { hint } : {}) });
-          if (debug) console.warn('[smartCampaignEngine] video gen fail:', msg);
-          await sleep(500);
-        }
-      }
-      if (made < variantPlan.videos) {
-        console.warn(`[smartCampaignEngine] videos generated ${made}/${variantPlan.videos}. errors=${errors.filter(x => x.step === 'video').length}`);
-      }
+    if (made < requestedImages) {
+      console.warn(
+        `[smartCampaignEngine] images generated ${made}/${requestedImages}. errors=${errors.filter((x) => x.step === 'image').length}`
+      );
     }
 
     if (debug) {
-      const imgs = out.filter(x => x.kind === 'image').length;
-      const vids = out.filter(x => x.kind === 'video').length;
-      console.warn('[smartCampaignEngine] generateVariants done', safeJson({
-        requested: variantPlan,
-        got: { images: imgs, videos: vids },
-        errorCount: errors.length,
-        deadlineExceeded: Date.now() > deadline
-      }));
+      console.warn(
+        '[smartCampaignEngine] generateVariants done',
+        safeJson({
+          requested: { images: requestedImages },
+          got: { images: out.length },
+          errorCount: errors.length,
+          deadlineExceeded: Date.now() > deadline
+        })
+      );
       if (errors.length) console.warn('[smartCampaignEngine] generateVariants errors', safeJson(errors.slice(-10)));
     }
 
-    // Attach for in-process callers (smart.js can read this and include in error responses)
     out._errors = errors;
     return out;
   },
 
-  async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'both', debug = false }) {
-    return this.generateVariants({ form, answers, url, mediaSelection, variantPlan: { images: 1, videos: 2 }, debug });
+  // Kept for compatibility: now means "generate two image creatives"
+  async generateTwoCreatives({ form = {}, answers = {}, url = '', mediaSelection = 'image', debug = false }) {
+    return this.generateVariants({
+      form,
+      answers,
+      url,
+      mediaSelection,
+      variantPlan: { images: 2 },
+      debug
+    });
   }
 };
 
@@ -751,183 +583,44 @@ async function uploadImageToAccount({ accountId, userToken, dataUrl }) {
   const m = /^data:(image\/\w+);base64,(.+)$/.exec(dataUrl || '');
   if (!m) throw new Error('Invalid image data URL');
   const base64 = m[2];
-  const resp = await fbPostV(FB_API_VER, `act_${accountId}/adimages`, new URLSearchParams({ bytes: base64 }), {
-    access_token: userToken
-  });
+  const resp = await fbPostV(
+    FB_API_VER,
+    `act_${accountId}/adimages`,
+    new URLSearchParams({ bytes: base64 }),
+    { access_token: userToken }
+  );
   let hash = Object.values(resp.images || {})[0]?.hash || null;
   if (!hash && VALIDATE_ONLY) hash = 'VALIDATION_ONLY_HASH';
   if (!hash) throw new Error('Image upload failed');
   return hash;
 }
 
-async function ensureVideoId({ accountId, userToken, creativeVideo }) {
-  // If we already have a fbVideoId (from generator), it can STILL be processing.
-  // So we must poll readiness here too.
-  if (creativeVideo?.fbVideoId) {
-    const vid = creativeVideo.fbVideoId;
-
-    if (!VALIDATE_ONLY) {
-      const ready = await waitForVideoReady({
-        videoId: vid,
-        userToken,
-        timeoutMs: 20 * 60 * 1000,
-// give Meta more time (10 min)
-        pollMs: 5000
-      });
-
-      if (!ready) {
-        const err = new Error('video_processing_timeout');
-        err.detail = { videoId: vid, note: 'fbVideoId existed but never became ready' };
-        throw err;
-      }
-    }
-
-    return vid;
-  }
-
-  const absoluteUrl =
-    creativeVideo?.absoluteUrl ||
-    (creativeVideo?.relativeUrl ? absolutePublicUrl(creativeVideo.relativeUrl) : '');
-
-  if (!absoluteUrl) throw new Error('No video available to upload');
-
-  const form = new FormData();
-  form.append('file_url', absoluteUrl);
-  form.append('name', 'SmartMark Generated Video');
-  form.append('description', 'Generated by SmartMark');
-
-  const params = { access_token: userToken };
-  if (VALIDATE_ONLY) params.execution_options = ['validate_only'];
-
-  const res = await axios.post(
-    `https://graph.facebook.com/${FB_API_VER}/act_${accountId}/advideos`,
-    form,
-    { headers: form.getHeaders(), params }
-  );
-
-  const vid = res.data?.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_VIDEO_${Date.now()}` : null);
-  if (!vid) throw new Error('Video upload failed');
-
-  // Wait until processed so ad creation doesn't fail with 1885252
-  if (!VALIDATE_ONLY) {
-    const ready = await waitForVideoReady({
-      videoId: vid,
-      userToken,
-      timeoutMs: 20 * 60 * 1000,
- // give Meta more time (10 min)
-      pollMs: 5000
-    });
-
-    if (!ready) {
-      const err = new Error('video_processing_timeout');
-      err.detail = { videoId: vid, file_url: absoluteUrl };
-      throw err;
-    }
-  }
-
-  return vid;
-}
-
-
 async function createImageAd({ pageId, accountId, adsetId, adCopy, imageHash, userToken, link }) {
-  const creative = await fbPostV(FB_API_VER, `act_${accountId}/adcreatives`, {
-    name: `SmartMark Image ${new Date().toISOString()}`,
-    object_story_spec: {
-      page_id: pageId,
-      link_data: { message: adCopy || '', link: link || 'https://your-smartmark-site.com', image_hash: imageHash }
-    }
-  }, { access_token: userToken });
-
-  const creativeId = creative.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_CREATIVE_${Date.now()}` : null);
-  if (!creativeId) throw new Error('Creative create failed');
-
-  const ad = await fbPostV(FB_API_VER, `act_${accountId}/ads`, {
-    name: `SmartMark Image Ad ${new Date().toISOString()}`,
-    adset_id: adsetId,
-    creative: { creative_id: creativeId },
-    status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
-  }, { access_token: userToken });
-
-  const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
-  if (!adId) throw new Error('Ad create failed');
-  return adId;
-}
-
-async function getVideoThumbnailUrlWithRetry(videoId, userToken, {
-  tries = 12,          // ~60s total
-  delayMs = 5000
-} = {}) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      const thumbs = await fbGetV(FB_API_VER, `${videoId}/thumbnails`, {
-        access_token: userToken,
-        fields: 'uri,is_preferred'
-      });
-
-      const arr = Array.isArray(thumbs?.data) ? thumbs.data : [];
-      const preferred = arr.find(t => t?.is_preferred && t?.uri)?.uri;
-      const first = arr.find(t => t?.uri)?.uri;
-
-      if (preferred || first) return preferred || first;
-    } catch {}
-
-    await sleep(delayMs);
-  }
-  return null;
-}
-
-async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, userToken, link }) {
-  // ✅ Wait until Meta processing is truly done (thumbnail-based readiness)
-  const ready = await waitForVideoReady({
-    videoId,
-    userToken,
-    timeoutMs: 20 * 60 * 1000,
-    pollMs: 8000
-  });
-
-  if (!ready) {
-    const err = new Error('video_processing_timeout');
-    err.detail = { videoId, note: 'Meta never reported ready (no thumbnail/status) before timeout' };
-    throw err;
-  }
-
-  // ✅ Now fetch a thumbnail (Meta often needs extra time even after "ready")
-  const image_url = await getVideoThumbnailUrlWithRetry(videoId, userToken, { tries: 18, delayMs: 5000 }); // ~90s
-
-  if (!image_url) {
-    const err = new Error('video_thumbnail_not_ready');
-    err.detail = { videoId };
-    throw err;
-  }
-
-  const video_data = {
-    video_id: videoId,
-    message: adCopy || '',
-    title: 'SmartMark Video',
-    call_to_action: { type: 'LEARN_MORE', value: { link: link || 'https://your-smartmark-site.com' } },
-    image_url
-  };
-
-  // Create creative
   const creative = await fbPostV(
     FB_API_VER,
     `act_${accountId}/adcreatives`,
     {
-      name: `SmartMark Video ${new Date().toISOString()}`,
-      object_story_spec: { page_id: pageId, video_data }
+      name: `SmartMark Image ${new Date().toISOString()}`,
+      object_story_spec: {
+        page_id: pageId,
+        link_data: {
+          message: adCopy || '',
+          link: link || 'https://your-smartmark-site.com',
+          image_hash: imageHash
+        }
+      }
     },
     { access_token: userToken }
   );
 
-  const creativeId = creative.id || (VALIDATE_ONLY ? null : null);
+  const creativeId = creative.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_CREATIVE_${Date.now()}` : null);
   if (!creativeId) throw new Error('Creative create failed');
 
-  // Create ad (can STILL throw 1885252 rarely; handle it at the caller retry loop)
   const ad = await fbPostV(
     FB_API_VER,
     `act_${accountId}/ads`,
     {
-      name: `SmartMark Video Ad ${new Date().toISOString()}`,
+      name: `SmartMark Image Ad ${new Date().toISOString()}`,
       adset_id: adsetId,
       creative: { creative_id: creativeId },
       status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
@@ -935,13 +628,10 @@ async function createVideoAd({ pageId, accountId, adsetId, adCopy, videoId, user
     { access_token: userToken }
   );
 
-  const adId = ad.id || null;
+  const adId = ad.id || (VALIDATE_ONLY ? `VALIDATION_ONLY_AD_${Date.now()}` : null);
   if (!adId) throw new Error('Ad create failed');
-
   return adId;
 }
-
-
 
 async function pauseAds({ adIds, userToken }) {
   for (const id of adIds) {
@@ -954,10 +644,21 @@ async function pauseAds({ adIds, userToken }) {
 }
 
 async function setAdsetDailyBudget({ adsetId, dailyBudgetCents, userToken }) {
-  await fbPostV(FB_API_VER, adsetId, { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) }, { access_token: userToken });
+  await fbPostV(
+    FB_API_VER,
+    adsetId,
+    { daily_budget: Math.max(100, Number(dailyBudgetCents || 0)) },
+    { access_token: userToken }
+  );
 }
 
-async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, challengerAdsetId, totalBudgetCents, championPct = 0.75, userToken }) {
+async function splitBudgetBetweenChampionAndChallengers({
+  championAdsetId,
+  challengerAdsetId,
+  totalBudgetCents,
+  championPct = 0.75,
+  userToken
+}) {
   const total = Math.max(200, Number(totalBudgetCents || 0));
   const champ = Math.round(total * Math.min(0.95, Math.max(0.05, championPct)));
   const chall = Math.max(100, total - champ);
@@ -967,15 +668,28 @@ async function splitBudgetBetweenChampionAndChallengers({ championAdsetId, chall
 
 async function getAdsetDetails({ adsetId, userToken }) {
   const FIELDS = [
-    'name','campaign_id','daily_budget','billing_event','optimization_goal','bid_strategy',
-    'targeting','promoted_object','attribution_spec','start_time','end_time'
+    'name',
+    'campaign_id',
+    'daily_budget',
+    'billing_event',
+    'optimization_goal',
+    'bid_strategy',
+    'targeting',
+    'promoted_object',
+    'attribution_spec',
+    'start_time',
+    'end_time'
   ].join(',');
   return fbGetV(FB_API_VER, adsetId, { access_token: userToken, fields: FIELDS });
 }
 
 async function ensureChallengerAdsetClone({
-  accountId, campaignId, sourceAdsetId, userToken,
-  nameSuffix = 'Challengers', dailyBudgetCents = 300
+  accountId,
+  campaignId,
+  sourceAdsetId,
+  userToken,
+  nameSuffix = 'Challengers',
+  dailyBudgetCents = 300
 }) {
   const src = await getAdsetDetails({ adsetId: sourceAdsetId, userToken });
 
@@ -1001,10 +715,9 @@ async function ensureChallengerAdsetClone({
 }
 
 function countKinds(creatives) {
-  const counts = { images: 0, videos: 0 };
+  const counts = { images: 0 };
   for (const c of creatives || []) {
     if (c?.kind === 'image' && c?.imageUrl) counts.images += 1;
-    if (c?.kind === 'video' && c?.video?.absoluteUrl) counts.videos += 1;
   }
   return counts;
 }
@@ -1027,16 +740,21 @@ const deployer = {
     const variantMapByAdset = {};
 
     const generatedCounts = countKinds(creatives);
-    if (debug) console.warn('[smartCampaignEngine] deploy input', safeJson({ dryRun, generatedCounts, adsetCount: (adsetIds || []).length }));
-        // ✅ If VALIDATE_ONLY is enabled, NEVER try to create real ads.
+    if (debug) {
+      console.warn(
+        '[smartCampaignEngine] deploy input',
+        safeJson({ dryRun, generatedCounts, adsetCount: (adsetIds || []).length })
+      );
+    }
+
+    // ✅ If VALIDATE_ONLY is enabled, NEVER try to create real ads.
     // Treat it like dryRun so Meta doesn't reject fake creative IDs.
     if (VALIDATE_ONLY && !dryRun) {
       dryRun = true;
       if (debug) console.warn('[smartCampaignEngine] VALIDATE_ONLY=1 => forcing dryRun simulation (no real ads created)');
     }
 
-
-    for (const adsetId of (adsetIds || [])) {
+    for (const adsetId of adsetIds || []) {
       createdAdsByAdset[adsetId] = [];
       pausedAdsByAdset[adsetId] = [];
       variantMapByAdset[adsetId] = {};
@@ -1048,7 +766,7 @@ const deployer = {
         pausedAdsByAdset[adsetId].push(...losers);
       }
 
-      // If dryRun, simulate "created" IDs so your tests can prove the engine produced the right # of variants
+      // If dryRun, simulate "created" IDs so tests can prove the engine produced the right # of variants
       if (dryRun) {
         let n = 0;
         for (const c of creatives || []) {
@@ -1057,11 +775,6 @@ const deployer = {
             const fake = `DRYRUN_IMG_AD_${Date.now()}_${n}`;
             createdAdsByAdset[adsetId].push(fake);
             variantMapByAdset[adsetId][c.variantId || `image_${n}`] = fake;
-          } else if (c.kind === 'video' && c.video?.absoluteUrl) {
-            n += 1;
-            const fake = `DRYRUN_VID_AD_${Date.now()}_${n}`;
-            createdAdsByAdset[adsetId].push(fake);
-            variantMapByAdset[adsetId][c.variantId || `video_${n}`] = fake;
           }
         }
         continue;
@@ -1075,100 +788,51 @@ const deployer = {
         if (created >= maxNew) break;
 
         try {
-          if (c.kind === 'image' && c.imageUrl) {
-            const imgRes = await axios.get(c.imageUrl, { responseType: 'arraybuffer', timeout: 120000 });
-            const dataUrl = `data:image/jpeg;base64,${Buffer.from(imgRes.data).toString('base64')}`;
+          if (c.kind !== 'image' || !c.imageUrl) continue;
 
-            const hash = await uploadImageToAccount({ accountId, userToken, dataUrl });
-            const adId = await createImageAd({
-              pageId,
-              accountId,
-              adsetId,
-              adCopy: c.adCopy,
-              imageHash: hash,
-              userToken,
-              link: campaignLink
-            });
+          // Fetch the generated PNG/JPG and upload to Meta
+          const imgRes = await axios.get(c.imageUrl, {
+            responseType: 'arraybuffer',
+            timeout: 120000
+          });
 
-            createdAdsByAdset[adsetId].push(adId);
-            variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
-            created += 1;
-} else if (c.kind === 'video' && c.video) {
-  // This error is common: Meta says "ready" but still throws 1885252 for a while.
-  // So we retry the *ad creation* step with longer backoff.
-  const maxTries = 10; // gives Meta time without failing the whole run quickly
+          // Prefer actual Content-Type, but default to png.
+          const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+          const mime = ct.includes('jpeg') || ct.includes('jpg') ? 'image/jpeg' : 'image/png';
+          const dataUrl = `data:${mime};base64,${Buffer.from(imgRes.data).toString('base64')}`;
 
-  let lastErr = null;
-  let videoId = null;
+          const hash = await uploadImageToAccount({ accountId, userToken, dataUrl });
+          const adId = await createImageAd({
+            pageId,
+            accountId,
+            adsetId,
+            adCopy: c.adCopy,
+            imageHash: hash,
+            userToken,
+            link: campaignLink
+          });
 
-  for (let attempt = 1; attempt <= maxTries; attempt++) {
-    try {
-      // Upload (or reuse) AND wait for processing
-      if (!videoId) {
-        videoId = await ensureVideoId({ accountId, userToken, creativeVideo: c.video });
-      }
+          createdAdsByAdset[adsetId].push(adId);
+          variantMapByAdset[adsetId][c.variantId || `image_${created + 1}`] = adId;
+          created += 1;
+        } catch (e) {
+          const fb = e?.response?.data?.error;
+          console.warn(
+            'Create ad failed:',
+            safeJson({
+              message: fb?.message || e.message,
+              type: fb?.type,
+              code: fb?.code,
+              subcode: fb?.error_subcode,
+              error_user_title: fb?.error_user_title,
+              error_user_msg: fb?.error_user_msg,
+              trace: fb?.fbtrace_id
+            })
+          );
 
-      // Extra safety: wait again right before creative/ad calls
-      await waitForVideoReady({
-        videoId,
-        userToken,
-        timeoutMs: 6 * 60 * 1000,
-        pollMs: 5000,
-        stableReadyChecks: 2,
-        postReadySleepMs: 20000
-      });
-
-      const adId = await createVideoAd({
-        pageId,
-        accountId,
-        adsetId,
-        adCopy: c.adCopy,
-        videoId,
-        userToken,
-        link: campaignLink
-      });
-
-      createdAdsByAdset[adsetId].push(adId);
-      variantMapByAdset[adsetId][c.variantId || `video_${created + 1}`] = adId;
-      created += 1;
-
-      lastErr = null;
-      break; // success
-    } catch (e) {
-      lastErr = e;
-
-      // If Meta says "Video not ready", wait longer and retry
-      if (isFbVideoNotReadyError(e) && attempt < maxTries) {
-        // exponential-ish backoff: 15s, 25s, 35s... capped
-        const backoffMs = Math.min(90_000, 10_000 + attempt * 10_000);
-        await sleep(backoffMs);
-        continue;
-      }
-
-      throw e; // anything else: fail fast
-    }
-  }
-
-  if (lastErr) throw lastErr;
-}
-
-
-     } catch (e) {
-  const fb = e?.response?.data?.error;
-  console.warn('Create ad failed:', safeJson({
-    message: fb?.message || e.message,
-    type: fb?.type,
-    code: fb?.code,
-    subcode: fb?.error_subcode,
-    error_user_title: fb?.error_user_title,
-    error_user_msg: fb?.error_user_msg,
-    trace: fb?.fbtrace_id
-  }));
-
-  // FAIL FAST so smart.js returns the REAL reason (instead of "created zero")
-  throw e;
-}
-
+          // FAIL FAST so smart.js returns the REAL reason (instead of "created zero")
+          throw e;
+        }
       }
     }
 

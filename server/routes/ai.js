@@ -1,11 +1,8 @@
 'use strict';
 /**
- * SmartMark AI routes — static ads with glassmorphism chips + video gen
- * - Video ads: 3–4 stock clips, crossfades, AI voiceover, optional BGM
- * - Word-by-word subtitle pop (ASS karaoke-style), timed to TTS duration
- * - Ensures total play ≥ (voice duration + 2s)
- * - Returns TWO video variants per request
- * - Image pipeline left intact
+ * SmartMark AI routes — static ads (images only)
+ * - Static image generation pipelines
+ * - Image templates + copy generation
  */
 
 const express = require('express');
@@ -28,18 +25,6 @@ router.use((req, res, next) => {
   if (req.method === 'OPTIONS') return res.sendStatus(204);
   next();
 });
-
-// --- Alias old segment preview URLs to the actual MP4 to avoid 404s ---
-// Support BOTH legacy and new route shapes, regardless of where this router is mounted.
-router.get(['/media/:idSeg', '/api/media/:idSeg'], (req, res, next) => {
-  const m = String(req.params.idSeg || '').match(/^([a-f0-9-]+)-seg\.mp4$/i);
-  if (!m) return next();
-  const id = m[1];
-  return res.redirect(302, `/api/media/${id}.mp4`);
-});
-
-
-
 
 /* ---------------- Memory discipline + concurrency gate --------------- */
 const sharp = require('sharp');
@@ -69,7 +54,7 @@ function release() {
 
 // Gate only the heavy generation routes; always release on finish/close
 function heavyRoute(req, res, next) {
-  const heavy = /^\/(generate-image-from-prompt|generate-video-ad|generate-campaign-assets)\b/.test(req.path);
+  const heavy = /^\/(generate-image-from-prompt|generate-campaign-assets|generate-static-ad)\b/.test(req.path);
   if (!heavy) return next();
   if (req.method === 'OPTIONS') return res.sendStatus(204);
 
@@ -82,7 +67,6 @@ function heavyRoute(req, res, next) {
   });
 }
 router.use(heavyRoute);
-
 
 /* ------------------------ Security & rate limit ---------------------- */
 const { secureHeaders, basicRateLimit } = require('../middleware/security');
@@ -104,7 +88,6 @@ const ax = axios.create({
 });
 router.ax = ax;
 
-
 const fs = require('fs');
 async function cleanupMany(paths = []) {
   const fsp = fs.promises;
@@ -116,7 +99,7 @@ async function cleanupMany(paths = []) {
 }
 
 const path = require('path');
-// Where we store generated images/videos
+// Where we store generated images
 const GENERATED_DIR =
   process.env.GENERATED_DIR ||
   path.join(require('os').tmpdir(), 'generated');
@@ -131,38 +114,13 @@ function ensureGeneratedDir() {
   return GEN_DIR;
 }
 
-
-
 const { v4: uuidv4 } = require('uuid');
 const FormData = require('form-data');
-const child_process = require('child_process');
 const { OpenAI } = require('openai');
 const { getFbUserToken } = require('../tokenStore');
 const db = require('../db');
-const { muxWithVoiceAndBgm } = require("../services/bgm");
-
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
-const BACKGROUND_MUSIC_URL = process.env.BACKGROUND_MUSIC_URL || ''; // optional
-const OPENAI_TTS_MODEL = process.env.OPENAI_TTS_MODEL || 'gpt-4o-mini-tts';
-const OPENAI_TTS_VOICE = process.env.OPENAI_TTS_VOICE || 'alloy';
-// Slow the voice slightly for readability (0.85–1.00). 0.92 ≈ 8% slower.
-const TTS_SLOWDOWN = Number(process.env.TTS_SLOWDOWN || 0.92);
-
-// --- FAST VIDEO PROFILE (≤ 75s wall time) — quick cuts + active subs ---
-const { spawn } = require("child_process");
-
-const FAST = {
-  WIDTH: 960,          // match your non-FAST pipeline (960x540)
-  HEIGHT: 540,
-  FPS: 24,             // keeps encode light
-  PRESET: "superfast",
-  CRF: "30",           // slightly higher CRF => faster/smaller
-  GOP: "48",
-  AUDIO_BR: "112k",
-  TIMEOUT_MS: 65000,   // kill ffmpeg if it lingers (65s)
-};
 
 /* ---------- Template Compatibility Shim (non-overwriting) ---------- */
 (() => {
@@ -247,8 +205,6 @@ const FAST = {
       return `${norm.replace(/\/+$/,'')}${rel.startsWith('/') ? '' : '/'}${rel}`;
     };
   }
-
-
 })();
 
 function safeUnlink(p) {
@@ -258,1077 +214,11 @@ function safeUnlink(p) {
   } catch {}
 }
 
-function cleanupMany(paths) {
+function cleanupManyLegacy(paths) {
   try {
     (paths || []).filter(Boolean).forEach(safeUnlink);
   } catch {}
 }
-
-
-
-
-/**
- * Build the concat part of the filter (no transitions) and normalize each clip.
- * Input streams mapping:
- *   - Inputs 0..N-1: video clips
- *   - Input N: voice (audio)
- * Returns a filter string that:
- *   1) normalizes each clip to FAST.WIDTH x FAST.HEIGHT @ FAST.FPS with a fixed duration 'per'
- *   2) concatenates them to [vcat]
- */
-function buildQuickCutConcatFilter({ clipCount, per }) {
-  const norm = (i) =>
-    `[${i}:v]scale=${FAST.WIDTH}:${FAST.HEIGHT}:force_original_aspect_ratio=increase,` +
-    `crop=${FAST.WIDTH}:${FAST.HEIGHT},fps=${FAST.FPS},trim=duration=${per.toFixed(
-      2
-    )},setpts=PTS-STARTPTS[v${i}]`;
-
-  const labels = Array.from({ length: clipCount }, (_, i) => `[v${i}]`).join("");
-  const concat = `${labels}concat=n=${clipCount}:v=1:a=0[vcat]`;
-
-  return Array.from({ length: clipCount }, (_, i) => norm(i)).concat(concat).join(";");
-}
-
-/** Run ffmpeg with a single pass graph:
- *  - normalize & concat N clips -> [vcat]
- *  - overlay word-timed drawtext subs over [vcat] -> [vsub]
- *  - map audio (voice), trim/pad to target duration
- */
-function runFfmpegFastQuickCutsWithSubs({
-  parts,
-  voicePath,
-  words,          // word timings for subs
-  outPath,
-  totalSec,
-}) {
-  return new Promise((resolve, reject) => {
-    const clipCount = parts.length;
-    const per = Math.max(4.8, (totalSec / clipCount)); // ~3 clips → ~6.1s each @18.5s total
-
-    // 1) concat section (no transitions) -> [vcat]
-    const concatSection = buildQuickCutConcatFilter({ clipCount, per });
-
-    // 2) subs section over [vcat] -> [vsub]
-    //    Reuse your existing appearance via buildWordTimedDrawtextFilter
-    const { filter: subsSection, out: subOutLabel } = buildWordTimedDrawtextFilter(
-      words,
-      '[vcat]',
-      FAST.WIDTH,
-      FAST.HEIGHT
-    );
-
-    // 3) audio: trim/pad voice to totalSec -> [aout]
-    const voiceIdx = clipCount; // after N video inputs, the voice is next input
-    const audioSection = `[${voiceIdx}:a]atrim=duration=${totalSec.toFixed(
-      2
-    )},asetpts=PTS-STARTPTS[aout]`;
-
-    // 4) full graph
-    const filterComplex = [concatSection, subsSection, audioSection].join(";");
-
-    const args = [
-      "-y",
-      "-nostdin",
-      "-loglevel", "error",
-
-      // inputs: N video clips + voice
-      ...parts.flatMap((p) => ["-i", p]),
-      "-i", voicePath,
-
-      "-filter_complex", filterComplex,
-      "-map", subOutLabel,
-      "-map", "[aout]",
-
-      "-c:v", "libx264",
-      "-preset", FAST.PRESET,
-      "-tune", "fastdecode,zerolatency",
-      "-crf", FAST.CRF,
-      "-g", FAST.GOP,
-      "-pix_fmt", "yuv420p",
-      "-movflags", "+faststart",
-
-      "-c:a", "aac",
-      "-b:a", FAST.AUDIO_BR,
-
-      "-t", totalSec.toFixed(2),  // hard bound
-      outPath,
-    ];
-
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
-    let err = "";
-    const killer = setTimeout(() => { try { ff.kill("SIGKILL"); } catch {} }, FAST.TIMEOUT_MS);
-
-    ff.stderr.on("data", (d) => (err += d.toString()));
-    ff.on("close", (code) => {
-      clearTimeout(killer);
-      if (code === 0) return resolve();
-      reject(new Error(`ffmpeg exited ${code}\n${err}`));
-    });
-    ff.on("error", (e) => { clearTimeout(killer); reject(e); });
-  });
-}
-
-/**
- * FAST variant (now with QUICK CUTS + ACTIVE SUBS)
- * - downloads 3 clips locally
- * - quick concat montage (no xfade)
- * - TTS audio mapped
- * - word-chunked drawtext subtitles (same look as your main path)
- * - keeps ~18–20s bound (but based on voice length)
- * - applies background music lightly (Music/music/<industry>/*) via muxWithVoiceAndBgm
- */
-async function makeVideoVariantFast({
-  clipUrls = [],
-  script = "",
-  targetSec = 18.5,
-  industry = "",
-  tailSeconds = 3,
-}) {
-
-  if (!Array.isArray(clipUrls) || clipUrls.length < 3) {
-    throw new Error("FAST: need ≥ 3 clip URLs");
-  }
-
-  // 1) synth voice
-  const tts = await synthTTS(script);
-  const voicePath = tts.path;
-
-  // 2) derive effective voice duration (respect slowdown) for better sub timing
-  let voiceDur = await ffprobeDuration(voicePath);
-  const ATEMPO = Number.isFinite(TTS_SLOWDOWN) && TTS_SLOWDOWN > 0 ? TTS_SLOWDOWN : 1.0;
-  if (!Number.isFinite(voiceDur) || voiceDur <= 0) voiceDur = 14.0;
-
-  const effVoice = voiceDur / ATEMPO;
-
-  // 3) ✅ total duration = (effective voice + 2s), clamped to 18–20s
-  const TOTAL = Math.max(18, Math.min(20, (effVoice + 3)));
-
-  // 4) subtitle word timings from script text (no Whisper roundtrip)
-  const subtitleWords = await getSubtitleWords(voicePath, script, effVoice, ATEMPO);
-
-  // 5) download first three clips
-  const locals = [];
-  try {
-    for (let i = 0; i < 3; i++) {
-      locals.push(await downloadToTmp(clipUrls[i], ".mp4"));
-    }
-  } catch (e) {
-    locals.forEach((p) => { try { fs.unlinkSync(p); } catch {} });
-    try { fs.unlinkSync(voicePath); } catch {}
-    throw e;
-  }
-
-  // 6) compose with quick cuts + active subs (base mp4)
-  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.mp4`);
-  const finalPath = path.join(ensureGeneratedDir(), `${uuidv4()}-bgm.mp4`);
-
-  try {
-    await runFfmpegFastQuickCutsWithSubs({
-      parts: locals,
-      voicePath,
-      words: subtitleWords,
-      outPath,
-      totalSec: TOTAL,
-    });
-
-    // 7) ✅ apply background music lightly + enforce final duration
-    await muxWithVoiceAndBgm({
-      videoIn: outPath,
-      voiceIn: voicePath,
-      industry: industry,
-      outPath: finalPath,
-      tailSeconds: 3.0,
-      bgmVolume: 0.10,
-    });
-  } finally {
-    locals.forEach((p) => { try { fs.unlinkSync(p); } catch {} });
-    try { fs.unlinkSync(voicePath); } catch {}
-    try { fs.unlinkSync(outPath); } catch {}
-  }
-
-  return { outPath: finalPath, duration: TOTAL };
-}
-
-
-
-/* ---------------------- FFmpeg + subtitle helpers ---------------------- */
-
-function runFFmpeg(args, label = "ffmpeg") {
-  return new Promise((resolve, reject) => {
-    const proc = child_process.spawn("ffmpeg", ["-y", ...args], {
-      stdio: ["ignore", "inherit", "inherit"],
-    });
-    proc.on("exit", (code) => {
-      if (code === 0) return resolve();
-      reject(new Error(`${label} exited ${code || "unknown"}`));
-    });
-  });
-}
-
-function runFFprobe(args) {
-  return new Promise((resolve, reject) => {
-    const proc = child_process.spawn("ffprobe", args, {
-      stdio: ["ignore", "pipe", "inherit"],
-    });
-    let out = "";
-    proc.stdout.on("data", (d) => (out += d.toString()));
-    proc.on("exit", (code) => {
-      if (code !== 0) return reject(new Error(`ffprobe exited ${code}`));
-      resolve(out);
-    });
-  });
-}
-
-async function getMediaDurationSeconds(filePath) {
-  try {
-    const raw = await runFFprobe([
-      "-v",
-      "error",
-      "-show_entries",
-      "format=duration",
-      "-of",
-      "default=nk=1:nw=1",
-      filePath,
-    ]);
-    const val = parseFloat(String(raw).trim());
-    if (!isFinite(val) || val <= 0) throw new Error("bad duration");
-    return val;
-  } catch (e) {
-    console.warn("[ffprobe] duration fail:", e.message);
-    return null;
-  }
-}
-
-/** Group word timings into 3–4 word chunks that stay tight to the VO */
-/** Group word timings into 4–6 word chunks, no gaps, tight to VO */
-function chunkWords(words = [], { minWords = 4, maxWords = 6, maxDur = 3.0 } = {}) {
-  const safe = (Array.isArray(words) ? words : [])
-    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && (w.end > w.start))
-    .map(w => ({ start: +w.start, end: +w.end, word: String(w.word || '').trim() }))
-    .filter(w => w.word);
-
-  const chunks = [];
-  let cur = [];
-
-  for (let i = 0; i < safe.length; i++) {
-    cur.push(safe[i]);
-
-    const have = cur.length;
-    const dur  = cur[cur.length - 1].end - cur[0].start;
-    const next = safe[i + 1];
-    const nextWouldDur = next ? (next.end - cur[0].start) : 0;
-
-    const tooMany   = have >= maxWords;
-    const tooLong   = dur >= maxDur;
-    const wouldLong = next ? (nextWouldDur > maxDur) : false;
-    const lastWord  = i === safe.length - 1;
-
-    if (tooMany || tooLong || wouldLong || (lastWord && have >= minWords)) {
-      // ensure minimum count
-      if (have < minWords && next) { cur.push(next); i++; }
-      const text = cur.map(w => w.word).join(' ');
-      chunks.push({ start: cur[0].start, end: cur[cur.length - 1].end, text });
-      cur = [];
-    }
-  }
-
-  // merge any leftover words (rare)
-  if (cur.length) {
-    const text = cur.map(w => w.word).join(' ');
-    chunks.push({ start: cur[0].start, end: cur[cur.length - 1].end, text });
-  }
-
-  // make all chunks back-to-back with tiny overlap so there are ZERO gaps
-  for (let i = 0; i < chunks.length - 1; i++) {
-    const a = chunks[i], b = chunks[i + 1];
-    if (b.start > a.end) a.end = Math.max(a.end, b.start - 0.01);
-    // also clamp b.start so it never precedes a.start
-    if (b.start < a.start) b.start = a.start + 0.01;
-  }
-  return chunks;
-}
-
-
-/** Build boxed, bottom-center ASS from 3–4 word chunks */
-function buildAssChunks(words, opts = {}) {
-  const {
-    W = 960,
-    H = 540,
-    styleName = 'SmartSub',
-    fontName = 'DejaVu Sans',
-    fontSize = 46,
-    marginV = 68,
-    minWords = 3,
-    maxWords = 4,
-    maxDur = 2.2,       // seconds cap per tile
-  } = opts;
-
-  const fmt = (t) => {
-    if (!Number.isFinite(t) || t < 0) t = 0;
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = Math.floor(t % 60);
-    const cs = Math.round((t - Math.floor(t)) * 100);
-    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
-  };
-
-  const tiles = chunkWords(words, { minWords, maxWords, maxDur });
-
-  // ASS boxed style (opaque background; outline=2; shadow=0), bottom-center
-  const header = [
-    '[Script Info]',
-    'ScriptType: v4.00+',
-    `PlayResX: ${W}`,
-    `PlayResY: ${H}`,
-    'WrapStyle: 2',
-    '',
-    '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    // Primary=white, Outline=black, BackColour=semi-black, BorderStyle=3 (box), Alignment=2 (bottom-center)
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
-    '',
-    '[Events]',
-    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-  ];
-
-  const lines = tiles.map(t => {
-    // strip braces that break ASS
-    const txt = String(t.text).replace(/[{}]/g, '');
-    // slight tracking for a clean look; keep it single line centered
-    const assText = `{\\an2\\q2\\fsp2}${txt}`;
-    return `Dialogue: 0,${fmt(Math.max(0, t.start - 0.02))},${fmt(t.end + 0.06)},${styleName},,0,0,${marginV},,${assText}`;
-  });
-
-  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
-  return outPath;
-}
-
-/** Estimate single-line text width in “em” terms (same 0.54 coef you use elsewhere) */
-function estWidthSerifAss(text, fs, letterSpacing = 0) {
-  const t = String(text || ''), n = t.length || 1;
-  return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing;
-}
-
-/**
- * Build flowing, one-line ASS subtitles with width & duration limits.
- * - No hard word cap; we pack words until width OR duration would overflow.
- * - Zero gaps between tiles; short tiles are extended/merged to avoid flicker.
- * - Always uses EVERY word in order (no drops).
- */
-function buildAssFlow(words, opts = {}) {
-  const {
-    W = 960, H = 540,
-    styleName = 'SmartSub',
- fontName = 'DejaVu Sans',
-fontSize = 42,     // slightly smaller
-marginV = 72,      // a hair lower from bottom edge
-
-    // flow controls:
-    maxDur = 2.8,      // hard cap per tile (s)
-    minDur = 0.60,     // minimum on-screen time for any tile (s)
-    maxWidthRatio = 0.86, // tile text must fit within this fraction of W
-    letterSpacing = 0.02  // in “em” for width estimation only
-  } = opts || {};
-
-  const safe = (Array.isArray(words) ? words : [])
-    .filter(w => Number.isFinite(w.start) && Number.isFinite(w.end) && w.end > w.start)
-    .map(w => ({ start: +w.start, end: +w.end, word: String(w.word || '').trim() }))
-    .filter(w => w.word);
-
-  // Time formatter for ASS
-  const fmt = (t) => {
-    if (!Number.isFinite(t) || t < 0) t = 0;
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = Math.floor(t % 60);
-    const cs = Math.round((t - Math.floor(t)) * 100);
-    return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
-  };
-
- if (!safe.length) {
-  const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  const header = [
-    '[Script Info]',
-    'ScriptType: v4.00+',
-    `PlayResX: ${W}`,
-    `PlayResY: ${H}`,
-    'WrapStyle: 2',
-    '',
-    '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,1,0,0,0,100,100,0.2,0,3,3,1,2,40,40,${marginV},1`,
-    '',
-    '[Events]',
-    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
-  ].join('\n');
-  fs.writeFileSync(p, header + '\n', 'utf8');
-  return p;
-}
-
-
-  const maxTextW = W * maxWidthRatio;
-  const tiles = [];
-  let cur = [];
-  let curStart = safe[0].start;
-  let curEnd = safe[0].end;
-  let curText = '';
-
-  const flush = (force = false) => {
-    if (!cur.length) return;
-    // finalize current tile
-    tiles.push({
-      start: curStart,
-      end:   curEnd,
-      text:  curText.trim()
-    });
-    cur = [];
-  };
-
-  for (let i = 0; i < safe.length; i++) {
-    const w = safe[i];
-
-    // propose adding word
-    const nextText = (curText ? (curText + ' ' + w.word) : w.word);
-    const nextEnd  = w.end;
-    const durIfAdd = nextEnd - curStart;
-    const widthIfAdd = estWidthSerifAss(nextText, fontSize, letterSpacing);
-
-    const wouldOverflowDur   = durIfAdd > maxDur;
-    const wouldOverflowWidth = widthIfAdd > maxTextW;
-
-    if (!cur.length) {
-      // start a fresh tile with current word even if it alone is wide; we still keep it (rare)
-      cur.push(w);
-      curText = w.word;
-      curStart = w.start;
-      curEnd = w.end;
-      continue;
-    }
-
-    if (wouldOverflowDur || wouldOverflowWidth) {
-      // flush the previous tile, start new from this word
-      flush(true);
-      cur.push(w);
-      curText = w.word;
-      curStart = w.start;
-      curEnd = w.end;
-    } else {
-      // safe to add
-      cur.push(w);
-      curText = nextText;
-      curEnd  = nextEnd;
-    }
-  }
-  flush(true);
-
-  // Normalize timings: zero gaps, enforce minDur, merge ultra-short tiles
-  for (let i = 0; i < tiles.length - 1; i++) {
-    const a = tiles[i], b = tiles[i + 1];
-    // remove gaps
-    if (b.start > a.end) a.end = Math.max(a.end, b.start - 0.01);
-  }
-
-  // Enforce minDur; if we can’t extend (because of next tile), merge forward
-  for (let i = 0; i < tiles.length; i++) {
-    const t = tiles[i];
-    let dur = t.end - t.start;
-    if (dur + 1e-6 < minDur) {
-      // try extend into next tile boundary
-      const next = tiles[i + 1];
-      if (next) {
-        const canExtendTo = Math.max(t.end, next.start - 0.02);
-        if (canExtendTo - t.start >= minDur) {
-          t.end = canExtendTo;
-        } else {
-          // merge into next
-          next.start = t.start;
-          next.text = (t.text + ' ' + next.text).replace(/\s+/g, ' ').trim();
-          tiles.splice(i, 1);
-          i -= 1;
-        }
-      }
-    }
-  }
-
-  // ASS header + style (boxed, bottom-center)
-  const header = [
-    '[Script Info]',
-    'ScriptType: v4.00+',
-    `PlayResX: ${W}`,
-    `PlayResY: ${H}`,
-    'WrapStyle: 2',
-    '',
-    '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, ' +
-      'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, ' +
-      'Alignment, MarginL, MarginR, MarginV, Encoding',
-    // Primary=white, Outline=black, BackColour=semi-black, BorderStyle=3 (boxed), Alignment=2 (bottom-center)
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&HAA000000,0,0,0,0,100,100,0,0,3,2,0,2,40,40,${marginV},1`,
-    '',
-    '[Events]',
-    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text'
-  ];
-
-  const lines = tiles.map(t => {
-    const txt = String(t.text || '').replace(/[{}]/g, ''); // strip braces
-    // bottom-center, slight tracking
-    const assText = `{\\an2\\q2\\fsp2}${txt}`;
-    return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
-  });
-
-  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
-  return outPath;
-}
-
-
-function wordsFromScript(script = '', totalSec = 14.0) {
-  const clean = String(script || '').replace(/\s+/g, ' ').trim();
-  if (!clean) return [];
-  // Tokenize but KEEP punctuation tokens; merge % onto the number before it.
-  const raw = clean.match(/[\w’'-]+|[%.,!?;:]/g) || [];
-  // Merge "%" to previous token (e.g., "20" + "%" -> "20%")
-  const tokens = [];
-  for (const t of raw) {
-    if (t === '%' && tokens.length) tokens[tokens.length - 1] = tokens[tokens.length - 1] + '%';
-    else tokens.push(t);
-  }
-  // Distribute timings evenly across tokens (TTS pace is close enough for display)
-  const n = Math.max(1, tokens.length);
-  const step = totalSec / n;
-  const out = [];
-  for (let i = 0; i < tokens.length; i++) {
-    const s = Math.max(0, i * step);
-    const e = Math.max(s + Math.min(step * 0.9, 0.6), (i + 1) * step); // keep overlap minimal
-    out.push({ start: s, end: e, word: tokens[i] });
-  }
-  return out;
-}
-
-/** Flexible chunker: fills tiles up to maxChars or maxDur, never drops words */
-function chunkWordsFlexible(
-  words = [],
-  {
-    maxChars = 24,   // visual width limiter
-    maxDur   = 2.4,  // cap each tile’s on-screen time
-  } = {}
-) {
-  const safe = (Array.isArray(words) ? words : [])
-    .filter(
-      (w) =>
-        Number.isFinite(w.start) &&
-        Number.isFinite(w.end) &&
-        w.end > w.start &&
-        String(w.word || '').trim()
-    );
-
-  const chunks = [];
-  let cur = [];
-  let curChars = 0;
-  let curStart = null;
-
-  const pushChunk = () => {
-    if (!cur.length) return;
-    const text = cur
-      .map((w) => w.word)
-      .join(' ')
-      .replace(/\s+([.,!?;:])/g, '$1');
-    const start = curStart;
-    const end = cur[cur.length - 1].end;
-    chunks.push({ start, end, text });
-    cur = [];
-    curChars = 0;
-    curStart = null;
-  };
-
-  for (let i = 0; i < safe.length; i++) {
-    const w = safe[i];
-    const nextDur =
-      curStart === null ? w.end - w.start : w.end - curStart;
-    const nextChars =
-      curChars + (curChars ? 1 : 0) + w.word.length; // +1 space
-
-    // If adding this word would overflow visual/duration constraints, close current tile first
-    if (cur.length && (nextChars > maxChars || nextDur > maxDur)) {
-      pushChunk();
-    }
-
-    // Start new tile if empty
-    if (!cur.length) {
-      curStart = w.start;
-    }
-
-    cur.push(w);
-    curChars = (curChars ? curChars + 1 : 0) + w.word.length; // +1 space
-  }
-
-  if (cur.length) pushChunk();
-
-  // === TIMING CLEANUP ===
-  // 1) Remove overlaps between tiles
-  for (let i = 0; i < chunks.length - 1; i++) {
-    const a = chunks[i];
-    const b = chunks[i + 1];
-
-    // if next starts before current ends, split the difference
-    if (b.start < a.end) {
-      const mid = (a.end + b.start) / 2;
-      const newEnd = Math.max(a.start + 0.05, mid - 0.02);
-      const newStartNext = newEnd + 0.02;
-      a.end = newEnd;
-      b.start = newStartNext;
-    }
-  }
-
-  // 2) Avoid big gaps (> ~0.08s) by slightly stretching previous tile
-  for (let i = 0; i < chunks.length - 1; i++) {
-    const a = chunks[i];
-    const b = chunks[i + 1];
-    if (b.start > a.end + 0.08) {
-      const newEnd = b.start - 0.02;
-      if (newEnd > a.start) a.end = newEnd;
-    }
-  }
-
-  return chunks;
-}
-
-/** Build boxed bottom-center ASS from chunks (keeps punctuation & symbols)
- *  – smaller font, unbold text
- *  – translucent black box (&H77000000)
- *  – extra padding so text isn’t stuffed
- */
-function buildAssFromChunks(chunks, {
-  W = 960, H = 540,
-  styleName = 'SmartSub',
-  fontName = 'DejaVu Sans',
-  fontSize = 34,       // ↓ smaller than before (was ~40–42)
-  marginV = 76,        // a hair lower from bottom
-} = {}) {
-  const fmt = (t) => {
-    if (!Number.isFinite(t) || t < 0) t = 0;
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = Math.floor(t % 60);
-    const cs = Math.round((t - Math.floor(t)) * 100);
-    return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(cs).padStart(2,'0')}`;
-  };
-
-  // ASS header:
-  //  - PrimaryColour = white
-  //  - BackColour = &H77000000  (77 alpha → translucent black)
-  //  - BorderStyle = 3 (boxed)
-  //  - Outline = 4 gives comfy padding inside the box
-  //  - Bold = 0 (unbold)
-  const header = [
-    '[Script Info]',
-    'ScriptType: v4.00+',
-    `PlayResX: ${W}`,
-    `PlayResY: ${H}`,
-    'WrapStyle: 2',
-    '',
-    '[V4+ Styles]',
-    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H55000000,0,0,0,0,100,100,0,0,3,3,0,2,40,40,${marginV},1`,
-    '',
-    '[Events]',
-    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
-  ];
-
-  const lines = (chunks || []).map(t => {
-    const txt = String(t.text || '').replace(/[{}]/g, ''); // strip ASS braces
-    // \b0 = make sure it's not bold; \an2 bottom-center; \q2 smart line wrapping
-    const assText = `{\\an2\\q2\\b0}${txt}`;
-    return `Dialogue: 0,${fmt(t.start)},${fmt(t.end)},${styleName},,0,0,${marginV},,${assText}`;
-  });
-
-  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(outPath, [...header, ...lines].join('\n'), 'utf8');
-  return outPath;
-}
-
-
-
-
-
-
-/* ---------- Word-level transcription (OpenAI) with robust fallbacks ---------- */
-/** Returns [{start:number, end:number, word:string}, ...] */
-async function transcribeWords(voicePath) {
-  try {
-    const model =
-      process.env.OPENAI_TRANSCRIBE_MODEL ||
-      "whisper-1";
-
-    // Prefer verbose JSON with words/segments if available
-    const resp = await openai.audio.transcriptions.create({
-      model,
-      file: fs.createReadStream(voicePath),
-      response_format: "verbose_json",
-      timestamp_granularities: ["word"],
-      temperature: 0.0,
-    });
-
-    const data = resp;
-
-    // 1) Use explicit word timings if present
-    if (Array.isArray(data?.words) && data.words.length) {
-      return data.words
-        .filter((w) => Number.isFinite(w?.start) && Number.isFinite(w?.end) && w?.word)
-        .map((w) => ({ start: +w.start, end: +w.end, word: String(w.word).trim() }))
-        .filter((w) => w.end > w.start);
-    }
-
-    // 2) Interpolate inside segments
-    const out = [];
-    const segs = Array.isArray(data?.segments) ? data.segments : [];
-    for (const s of segs) {
-      const text = String(s?.text || "").trim();
-      const st = +s?.start, et = +s?.end;
-      if (!text || !isFinite(st) || !isFinite(et) || et <= st) continue;
-      const words = text.replace(/\s+/g, " ").split(" ").filter(Boolean);
-      if (!words.length) continue;
-      const per = (et - st) / words.length;
-      for (let i = 0; i < words.length; i++) {
-        const ws = st + i * per;
-        const we = i === words.length - 1 ? et : st + (i + 1) * per;
-        out.push({ start: ws, end: we, word: words[i] });
-      }
-    }
-    if (out.length) return out;
-
-    // 3) Last resort: equal split across full duration
-    const whole = (data?.text || "").trim();
-    if (whole) {
-      const words = whole.replace(/\s+/g, " ").split(" ").filter(Boolean);
-      const dur = (await ffprobeDuration(voicePath)) || 14.0;
-      const per = dur / Math.max(1, words.length);
-      return words.map((w, i) => ({ start: i * per, end: (i + 1) * per, word: w }));
-    }
-  } catch (e) {
-    console.warn("[transcribeWords] failed:", e?.message || e);
-  }
-  const dur = (await ffprobeDuration(voicePath)) || 14.0;
-  return [{ start: 0, end: dur, word: "" }];
-}
-
-/* ---------- Build ASS word-by-word (one Dialogue per word) ---------- */
-/** Writes a .ass file and returns its absolute path */
-function buildAssKaraoke(words, opts = {}) {
-  const {
-    W = 960,
-    H = 540,
-    styleName = "SmartWord",
-    fontName = "DejaVu Sans",
-    fontSize = 42,
-    marginV = 64, // distance from bottom
-  } = opts || {};
-
-  const safe = (Array.isArray(words) ? words : []).filter(
-    (w) => Number.isFinite(w.start) && Number.isFinite(w.end)
-  );
-
-  const fmt = (t) => {
-    if (!Number.isFinite(t) || t < 0) t = 0;
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = Math.floor(t % 60);
-    const cs = Math.round((t - Math.floor(t)) * 100);
-    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${String(cs).padStart(2, "0")}`;
-  };
-
-  // Header + style: bottom-center, white text, soft dark box behind each word
-   const header = [
-    "[Script Info]",
-    "ScriptType: v4.00+",
-    `PlayResX: ${W}`,
-    `PlayResY: ${H}`,
-    "",
-    "[V4+ Styles]",
-    "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-    `Style: ${styleName},${fontName},${fontSize},&H00FFFFFF,&H00FFFFFF,&H00000000,&H77000000,1,0,0,0,100,100,0.2,0,3,3,1,2,40,40,${marginV},1`,
-    "",
-    "[Events]",
-    "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
-  ].join("\n");
-
-
-  // If we somehow have no timing data, emit an empty track
-  if (!safe.length) {
-    const p = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-    fs.writeFileSync(p, header + "\n", "utf8");
-    return p;
-  }
-
-  // One Dialogue per word (no {\k}); only the current word is on screen
-  const lines = [];
-  for (const w of safe) {
-    const start = Math.max(0, w.start - 0.02);
-    const end   = Math.max(start + 0.10, w.end + 0.02);
-    const txt   = String(w.word || "").replace(/[{}]/g, "").trim();
-    if (!txt) continue;
-    lines.push(`Dialogue: 0,${fmt(start)},${fmt(end)},${styleName},,0,0,${marginV},,${txt}`);
-  }
-
-  const outPath = path.join(ensureGeneratedDir(), `${uuidv4()}.ass`);
-  fs.writeFileSync(outPath, header + "\n" + lines.join("\n"), "utf8");
-  return outPath;
-}
-
-
-/** Escape a filesystem path for ffmpeg filter values */
-function escapeFilterPath(p) {
-  return String(p).replace(/\\/g, "\\\\").replace(/:/g, "\\:");
-}
-
-/** Multiply all word start/end times by a factor derived from the audio tempo.
- *  audioTempo = the atempo you use in ffmpeg (e.g. 0.92).
- *  ffmpeg atempo < 1.0 => slower audio => LONGER timings => factor = 1/audioTempo.
- */
-function stretchWordTimings(words = [], audioTempo = 1.0) {
-  if (!Array.isArray(words) || !Number.isFinite(audioTempo) || audioTempo <= 0) {
-    return words || [];
-  }
-  const factor = 1 / audioTempo; // e.g. atempo 0.92 -> factor ≈ 1.087
-
-  return words.map((w) => ({
-    start: Math.max(0, (w.start ?? 0) * factor),
-    end:   Math.max(0.01, (w.end ?? 0.01) * factor),
-    word:  String(w.word || '').trim(),
-  }));
-}
-
-
-// Build subtitle word timings purely from the script text
-// so NO words are ever dropped (e.g., "At" in "At Test Bistro").
-async function getSubtitleWords(voicePath, script, displayDurSec, _atempo = 1.0) {
-  try {
-    let dur;
-
-    if (Number.isFinite(displayDurSec) && displayDurSec > 0) {
-      // we already passed in the effective voice length (after slowdown)
-      dur = displayDurSec;
-    } else {
-      // fall back to actual audio duration if needed
-      dur = await ffprobeDuration(voicePath);
-      if (!Number.isFinite(dur) || dur <= 0) dur = 14.0;
-    }
-
-    // Evenly distribute timing over the full script
-    return wordsFromScript(script, dur);
-  } catch (e) {
-    console.warn('[subtitles] getSubtitleWords fallback:', e?.message || e);
-    const dur =
-      Number.isFinite(displayDurSec) && displayDurSec > 0
-        ? displayDurSec
-        : 14.0;
-    return wordsFromScript(script, dur);
-  }
-}
-
-
-/**
- * Build a modern, timed subtitles filter for ffmpeg.
- * - Splits the script into up to ~6 chunks
- * - Shows each chunk for a slice of the total duration
- * - White text, black outline, dark box, bottom-center
- */
-function buildSubtitleFilter(script, totalDurationSec) {
-  const clean = String(script || "").replace(/\s+/g, " ").trim();
-  if (!clean) {
-    // just pass video through unchanged
-    return "[0:v]scale=1280:-2,format=yuv420p[vout]";
-  }
-
-  // Split into sentences / chunks
-  const sentences = clean
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  const parts = sentences.slice(0, 6); // up to 6 caption blocks
-  const count = parts.length || 1;
-  const total = Math.max(6, Math.min(40, totalDurationSec || 18)); // clamp 6–40s
-  const chunk = total / count;
-
-  let inLabel = "[0:v]";
-  const filters = [];
-
-  for (let i = 0; i < parts.length; i++) {
-    // strip characters that break ffmpeg quoting
-    const line = parts[i].replace(/[':\\]/g, "").trim();
-    if (!line) continue;
-
-    const start = i * chunk;
-    const end = Math.min(total, (i + 1) * chunk + 0.25);
-    const outLabel = i === parts.length - 1 ? "[vout]" : `[v${i + 1}]`;
-
-    const f =
-      `${inLabel}drawtext=` +
-      `text='${line}':` +
-      `fontcolor=white:` +
-      `fontsize=40:` +
-      `line_spacing=6:` +
-      `bordercolor=black:` +
-      `borderw=3:` +
-      `box=1:` +
-      `boxcolor=black@0.55:` +
-      `boxborderw=12:` +
-      `x=(w-text_w)/2:` +
-      `y=h-140:` +
-      `shadowcolor=black@0.8:` +
-      `shadowx=0:` +
-      `shadowy=0:` +
-      `enable='between(t,${start.toFixed(2)},${end.toFixed(2)})'` +
-      outLabel;
-
-    filters.push(f);
-    inLabel = outLabel;
-  }
-
-  if (!filters.length) {
-    return "[0:v]scale=1280:-2,format=yuv420p[vout]";
-  }
-  return filters.join(";");
-}
-
-/**
- * Combine a silent montage + voiceover + timed drawtext subtitles (quick cuts).
- * - Trims final to targetSeconds
- * - No xfade here (you already concat’d segments upstream)
- */
-async function addVoiceAndSubtitles({
-  silentVideoPath,
-  audioPath,
-  script,
-  outPath,
-  targetSeconds = 18,
-}) {
-  const totalDur = Math.max(6, Math.min(40, targetSeconds || 18));
-
-  // Normalize base video first → [v0]
-  const pre = `[0:v]scale=960:540:force_original_aspect_ratio=increase,crop=960:540,format=yuv420p[v0]`;
-
-  // Build safe drawtext overlay chain from [v0] → [vsub]
-  const { filter: subF, out: vOut } = buildTimedDrawtextFilter(script, totalDur, '[v0]', 960, 540);
-
-  const args = [
-    '-i', silentVideoPath,
-    '-i', audioPath,
-
-    // filter graph: pre-normalize, then drawtext subtitles
-    '-filter_complex', `${pre};${subF}`,
-    '-map', vOut,
-    '-map', '1:a:0',
-
-    // codecs
-    '-c:v', 'libx264',
-    '-preset', 'veryfast',
-    '-crf', '23',
-    '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac',
-    '-b:a', '128k',
-
-    // pad audio if short; hard trim output to targetSeconds
-    '-af', `apad=pad_dur=${(totalDur + 0.5).toFixed(1)}`,
-    '-t', totalDur.toFixed(2),
-
-    // fast start for web playback
-    '-movflags', '+faststart',
-    outPath,
-  ];
-
-  await runFFmpeg(args, 'ffmpeg-subtitled');
-}
-
-
-
-async function buildSilentMontage(clipPaths, outPath, totalSeconds = 18) {
-  const listPath = path.join(GENERATED_DIR, `${uuidv4()}-list.txt`);
-  const listTxt = clipPaths
-    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
-    .join("\n");
-  fs.writeFileSync(listPath, listTxt, "utf8");
-
-  const trimDur = Math.max(6, Math.min(40, totalSeconds));
-
-  const args = [
-    "-f",
-    "concat",
-    "-safe",
-    "0",
-    "-i",
-    listPath,
-    "-an",
-    "-vf",
-    `scale=1280:-2,format=yuv420p,trim=duration=${trimDur.toFixed(
-      2
-    )},setpts=PTS-STARTPTS`,
-    outPath,
-  ];
-
-  await runFFmpeg(args, "ffmpeg-concat");
-}
-
-async function downloadClipToTmp(url, prefix = "clip") {
-  const id = uuidv4();
-  const outPath = path.join(GENERATED_DIR, `${prefix}-${id}.mp4`);
-  const resp = await ax.get(url, {
-    responseType: "arraybuffer",
-    timeout: 25000,
-  });
-  fs.writeFileSync(outPath, Buffer.from(resp.data));
-  return outPath;
-}
-
-async function generateVideoScriptFromAnswers(answers = {}) {
-  const industry = (answers.industry || "local business").toString();
-  const offer =
-    (answers.offer || answers.mainBenefit || "a limited-time special").toString();
-  const name = (answers.businessName || "your brand").toString();
-
-  const prompt = [
-    {
-      role: "system",
-      content:
-        "You write short, punchy 18-second voiceover scripts for Facebook/Instagram video ads. " +
-        "Use 35–45 words, 3–4 short sentences, present tense, speak directly to the viewer (using 'you'). " +
-        "No hashtags, no emojis, no scene directions – just the spoken words.",
-    },
-    {
-      role: "user",
-      content:
-        `Brand name: ${name}\n` +
-        `Industry: ${industry}\n` +
-        `Offer / main benefit: ${offer}\n\n` +
-        "Write ONE 18-second voiceover script.",
-    },
-  ];
-
-  const r = await openai.chat.completions.create({
-  model: "gpt-4o-mini",
-  temperature: 0.35,
-  max_tokens: 220,
-  messages: prompt
-});
-const text =
-  r.choices?.[0]?.message?.content?.trim() ||
-  `Discover ${name}. Enjoy ${offer}. Tap to learn more today.`;
-
-  return text;
-}
-
-async function synthesizeVoiceToFile(text, outPath) {
-  const speech = await openai.audio.speech.create({
-    model: OPENAI_TTS_MODEL,
-    voice: OPENAI_TTS_VOICE,
-    input: text,
-  });
-  const buf = Buffer.from(await speech.arrayBuffer());
-  fs.writeFileSync(outPath, buf);
-}
-
 
 /* ---------------------- Disk / tmp housekeeping --------------------- */
 function dirStats(p) {
@@ -1340,32 +230,6 @@ function dirStats(p) {
     const bytes = files.reduce((n, x) => n + x.st.size, 0);
     return { files, bytes };
   } catch { return { files: [], bytes: 0 }; }
-}
-
-/**
- * VIDEO_STITCH_BUILD
- * - Normalize inputs into a 3–5 clip plan totaling ~targetSeconds
- * - You pass in: { clipPaths: string[], targetSeconds: number }
- * - Returns: { selected: string[], durations: number[] }
- */
-function buildStitchPlan({ clipPaths = [], targetSeconds = 17 }) {
-  const CLEAN = (arr) => (arr || []).filter(Boolean);
-  const clips = CLEAN(clipPaths);
-
-  // Ensure we can always montage
-  while (clips.length < 3 && clips.length > 0) clips.push(clips[clips.length - 1]);
-
-  const maxClips = Math.min(5, Math.max(3, Math.min(clips.length, 5)));
-  const selected = clips.slice(0, maxClips);
-
-  const base = Math.max(6, Math.min(28, targetSeconds || 17));
-  const parts = selected.length;
-  const weights = selected.map((_, i) => (i === 0 || i === parts - 1) ? 1.2 : 1.0);
-  const totalW = weights.reduce((a, b) => a + b, 0);
-  const raw = weights.map(w => (base * w) / totalW);
-
-  const durations = raw.map(s => Math.max(2.2, Math.min(7.0, s)));
-  return { selected, durations };
 }
 
 const MAX_TMP_BYTES = Number(process.env.MAX_TMP_BYTES || 300 * 1024 * 1024);
@@ -1423,24 +287,6 @@ function getUserToken(req) {
   return getFbUserToken() || null;
 }
 
-async function uploadVideoToAdAccount(
-  adAccountId, userAccessToken, fileUrl,
-  name = 'SmartMark Video', description = 'Generated by SmartMark'
-) {
-  const id = String(adAccountId || '').replace(/^act_/, '').replace(/\D/g, '');
-  const url = `https://graph.facebook.com/v23.0/act_${id}/advideos`;
-  const form = new FormData();
-  form.append('file_url', fileUrl);
-  form.append('name', name);
-  form.append('description', description);
-  const resp = await ax.post(url, form, {
-    headers: form.getHeaders(),
-    params: { access_token: userAccessToken },
-    timeout: 15000,
-  });
-  return resp.data;
-}
-
 // Pick a drawtext-capable font that exists on Render/Debian or fall back.
 function pickFontFile() {
   const candidates = [
@@ -1452,7 +298,6 @@ function pickFontFile() {
   // last resort: omit fontfile (may still work locally)
   return '';
 }
-
 
 /* ---------- IMAGE TEMPLATE RESOLVER (no more Pexels for images) ---------- */
 /**
@@ -1494,11 +339,8 @@ function resolveTemplateUrl({ body = {}, answers = {} } = {}) {
   return TEMPLATE_MAP.generic;
 }
 
-
-
 /* --------------------- Range-enabled media streamer --------------------- */
 router.get(['/media/:file', '/api/media/:file'], async (req, res) => {
-
   housekeeping();
   try {
     const file = String(req.params.file || '').replace(/[^a-zA-Z0-9._-]/g, '');
@@ -1508,7 +350,6 @@ router.get(['/media/:file', '/api/media/:file'], async (req, res) => {
     const stat = fs.statSync(full);
     const ext = path.extname(full).toLowerCase();
     const type =
-      ext === '.mp4' ? 'video/mp4' :
       ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
       ext === '.png' ? 'image/png' :
       ext === '.webp' ? 'image/webp' :
@@ -1522,28 +363,9 @@ router.get(['/media/:file', '/api/media/:file'], async (req, res) => {
     res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
 
-    const range = req.headers.range;
-    if (range && ext === '.mp4') {
-      const m = /bytes=(\d+)-(\d*)/.exec(range);
-      let start = m ? parseInt(m[1], 10) : 0;
-      let end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
-
-      // Clamp bad values so we don't spam 416s
-      if (!Number.isFinite(start) || start < 0) start = 0;
-      if (!Number.isFinite(end) || end >= stat.size) end = stat.size - 1;
-
-      if (start >= stat.size) {
-        return res.status(416).set('Content-Range', `bytes */${stat.size}`).end();
-      }
-
-      res.status(206);
-      res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
-      res.setHeader('Content-Length', end - start + 1);
-      fs.createReadStream(full, { start, end }).pipe(res);
-    } else {
-      res.setHeader('Content-Length', stat.size);
-      fs.createReadStream(full).pipe(res);
-    }
+    // (Images: no partial-range special casing required)
+    res.setHeader('Content-Length', stat.size);
+    fs.createReadStream(full).pipe(res);
   } catch (e) {
     console.error('[media] stream error:', e);
     res.status(500).end();
@@ -1553,70 +375,6 @@ router.get(['/media/:file', '/api/media/:file'], async (req, res) => {
 function mediaPath(relativeFilename) {
   return `/api/media/${relativeFilename}`;
 }
-
-/* ------------------ New: newest generated video helper ------------------ */
-router.get(['/generated-latest', '/api/generated-latest'], (req, res) => {
-
-  housekeeping();
-  try {
-    const dir = ensureGeneratedDir();
-    let bestFile = null;
-    let bestMtime = 0;
-
-    try {
-      const files = fs.readdirSync(dir);
-      for (const f of files) {
-        if (!f.toLowerCase().endsWith('.mp4')) continue;
-        const full = path.join(dir, f);
-        let st;
-        try {
-          st = fs.statSync(full);
-        } catch {
-          continue;
-        }
-        if (!st.isFile?.()) continue;
-        if (st.mtimeMs > bestMtime) {
-          bestMtime = st.mtimeMs;
-          bestFile = f;
-        }
-      }
-    } catch (e) {
-      console.warn('[generated-latest] readdir failed:', e.message);
-    }
-
-    // Nothing ready yet — this is NOT an error, frontend will keep polling
-    if (!bestFile) {
-      return res.json({
-        url: null,
-        absoluteUrl: null,
-        filename: null,
-        type: null,
-        ready: false,
-      });
-    }
-
-    const url = mediaPath(bestFile);
-    const base =
-      process.env.PUBLIC_BASE_URL ||
-      process.env.RENDER_EXTERNAL_URL ||
-      '';
-    const absoluteUrl = base ? new URL(url, base).toString() : url;
-
-    return res.json({
-      url,
-      absoluteUrl,
-      filename: bestFile,
-      type: 'video/mp4',
-      ready: true,
-    });
-  } catch (e) {
-    console.error('[generated-latest] error:', e);
-    return res.status(500).json({
-      error: 'internal_error',
-      message: e.message || 'failed',
-    });
-  }
-});
 
 /* ---------- Persist generated assets (24h TTL) ---------- */
 const ASSET_TTL_MS = Number(process.env.ASSET_TTL_MS || 24 * 60 * 60 * 1000);
@@ -1689,73 +447,6 @@ function getImageKeyword(industry = '', url = '', answers = {}) {
   return industry || 'ecommerce products';
 }
 
-/* ---------- VIDEO topic precision (Pexels video query) ---------- */
-
-// Very common industry acronyms / shorthand → expanded phrases Pexels understands
-const VIDEO_ACRONYM_MAP = {
-  hvac: "air conditioning repair, HVAC technician, heating and cooling, AC service, furnace repair, ventilation",
-  ac: "air conditioning repair, AC service, HVAC technician",
-  "a/c": "air conditioning repair, AC service, HVAC technician",
-  plumbing: "plumber fixing sink, pipe repair, leak repair, plumbing tools",
-  electrician: "electrician wiring, electrical repair, electrician tools",
-  roofing: "roof repair, roofing contractor, shingles installation",
-  landscaping: "lawn care, landscaper mowing, yard work, gardening",
-  cleaning: "house cleaning, cleaning service, maid cleaning kitchen",
-  makeup: "makeup artist applying makeup, cosmetics, beauty routine, makeup brush, lipstick, foundation",
-  cosmetics: "makeup artist applying makeup, cosmetics, skincare routine",
-  skincare: "skincare routine, facial serum, applying moisturizer, beauty close-up",
-  barber: "barber cutting hair, fade haircut, barbershop clippers",
-  salon: "hair salon styling, blow dry, hair coloring",
-  nails: "nail salon manicure, nail technician, pedicure",
-  dentist: "dentist office, teeth cleaning, dental checkup",
-  realtor: "real estate agent, house tour, home showing",
-  restaurant: "chef cooking, restaurant kitchen, plated food, dining",
-};
-
-function normIndustry(s = "") {
-  return String(s || "").trim().toLowerCase();
-}
-
-/**
- * Build a precise video search query for Pexels.
- * Priority: recognized acronym → category mapping → fallback with “service/action” cues.
- */
-function getVideoKeyword(industry = "", url = "", answers = {}) {
-  const raw = normIndustry(industry);
-
-  // 1) Exact acronym expansion
-  if (VIDEO_ACRONYM_MAP[raw]) return VIDEO_ACRONYM_MAP[raw];
-
-  // 2) Use your existing category resolver for a tighter default
-  const cat = resolveCategory(answers || {});
-  const byCat = {
-    cosmetics: "makeup artist applying makeup, cosmetics, beauty routine",
-    hair: "hair salon styling, barber cutting hair, hair care routine",
-    food: "chef cooking, restaurant kitchen, plated food",
-    fitness: "gym workout, personal trainer, weight training",
-    home: "home interior, modern home, cleaning service, home improvement",
-    electronics: "tech gadgets, smartphone, laptop, device close-up",
-    pets: "pet grooming, dog walking, pet care",
-    coffee: "coffee shop, espresso machine, barista making coffee",
-    fashion: "fashion model, clothing rack, boutique shopping",
-    books: "bookstore, reading book, comics, graphic novel",
-    generic: "",
-  }[cat] || "";
-
-  // 3) If industry is a normal word/phrase, keep it but add action cues
-  // These cues force Pexels into “people doing the job” instead of random product categories.
-  const actionCues = "professional service, people working, close-up, tools, customer service";
-
-  // Prefer category mapping if we have it, otherwise fallback to industry itself
-  const base = byCat || (raw ? raw : "business");
-
-  // Clamp length so it stays effective (Pexels does better with short concrete phrases)
-  const q = `${base}, ${actionCues}`.slice(0, 160);
-
-  return q;
-}
-
-
 function resolveCategory(answers = {}) {
   const txt = `${answers.industry || ''} ${answers.productType || ''} ${answers.description || ''} ${answers.topic || ''}`.toLowerCase();
   if (/comic|comics|manga|graphic\s*novel|bookstore|book(s)?/.test(txt)) return 'books';
@@ -1770,6 +461,7 @@ function resolveCategory(answers = {}) {
   if (/coffee|café|espresso|latte|roast/.test(txt)) return 'coffee';
   return 'generic';
 }
+
 const FASHION_TERMS = /\b(style|styles|outfit|outfits|wardrobe|pieces|fits?|colors?|sizes?)\b/gi;
 function stripFashionIfNotApplicable(text, category) {
   if (category === 'fashion') return String(text || '');
@@ -1903,13 +595,13 @@ router.post('/generate-ad-copy', async (req, res) => {
     category === 'fashion' ? '' : `- Do NOT mention clothing terms like styles, fits, colors, sizes, outfits, wardrobe.`;
 
   let prompt = `You are an expert direct-response ad copywriter for e-commerce/online businesses.
-${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write only the exact words for a spoken video ad script (about 46–72 words ≈ 15–17 seconds).
+${customContext ? `TRAINING CONTEXT:\n${customContext}\n\n` : ''}Write short ad copy for a static social ad.
 - Keep it neutral and accurate; avoid assumptions about shipping, returns, guarantees, or inventory.
 - Keep it specific to the industry/category: ${category}.
 ${forbidFashionLine}
 - Hook → value → simple CTA (from: “Shop now”, “Buy now”, “Learn more”, “Visit us”, “Check us out”, “Take a look”, “Get started”).
 - Do NOT mention a website or domain.
-Output ONLY the script text.`;
+Output ONLY the ad copy text.`;
   if (description) prompt += `\nBusiness Description: ${description}`;
   if (businessName) prompt += `\nBusiness Name: ${businessName}`;
   if (answers?.industry) prompt += `\nIndustry: ${answers.industry}`;
@@ -2034,7 +726,6 @@ Website text (may be empty): """${(websiteText || '').slice(0, 1200)}"""`.trim()
 });
 
 /* === GPT: craftAdCopyFromAnswers === */
-/* === GPT: craftAdCopyFromAnswers === */
 async function craftAdCopyFromAnswers({ industry, businessName, brand = {}, answers = {} }, openai) {
   const brandName = businessName || answers.businessName || "Your Business";
   const details = {
@@ -2051,20 +742,10 @@ async function craftAdCopyFromAnswers({ industry, businessName, brand = {}, answ
     "Never quote user text verbatim; always paraphrase.",
     "Keep it short, bold, and skimmable. No hashtags. No emojis.",
     "Conform to the JSON schema exactly. Do not add extra keys.",
-    // 🔒 NEW: no hallucinated promos
     "Do NOT invent offers, discounts, shipping, returns, guarantees, or inventory claims that were not clearly provided in the inputs.",
     "If the user did not mention shipping, returns, guarantees, or inventory, you must NOT mention them at all.",
     "If no explicit promo/discount is mentioned, keep the 'offer' short and generic or empty, but do not invent percentages or 'free' anything.",
   ].join(" ");
-
-  const schema = {
-    headline: "≤ 5 words, punchy, no punctuation unless needed",
-    subline: "≤ 12 words, clarifies benefit for the audience",
-    cta: "2–3 words action phrase (e.g., Get Quote, Shop Now)",
-    offer: "Short promo if provided; else empty string",
-    bullets: "3 short bullets; sentence fragments only",
-    disclaimers: "One short line or empty string",
-  };
 
   const userPrompt = `
 Brand: ${brandName}
@@ -2102,7 +783,6 @@ Return JSON only:
     response_format: { type: "json_object" },
   });
 
-  // scrub helper to remove any sneaky hallucinated promises
   const scrubAssumptive = (s = "") => {
     let out = String(s || "");
     const banned = [
@@ -2138,7 +818,6 @@ Return JSON only:
     };
   }
 
-  // Normalization + scrub
   if (!Array.isArray(parsed.bullets)) parsed.bullets = [];
 
   parsed.headline     = scrubAssumptive(parsed.headline || "");
@@ -2153,19 +832,17 @@ Return JSON only:
 
 /* === buildStaticAdPayload (uses crafted copy) === */
 async function buildStaticAdPayload({ answers = {}, brand = {}, industry = "" }) {
-  // If your craftAdCopyFromAnswers helper signature expects (.., openai) like we added earlier, keep the second arg:
   const copy = await craftAdCopyFromAnswers(
     { industry: industry || answers.industry, businessName: answers.businessName, brand, answers },
     openai
   );
 
   return {
-    copy,          // <-- this is what staticads.js will prefer
+    copy,
     brand,
     meta: { industry: industry || answers.industry || "" }
   };
 }
-
 
 /* === ROUTE: /api/generate-static-ad (templates: flyer_a, poster_b) ======================= */
 router.post('/generate-static-ad', async (req, res) => {
@@ -2197,7 +874,6 @@ router.post('/generate-static-ad', async (req, res) => {
     if (/^flyer_a$/i.test(template)) {
       out = await renderTemplateA_FlyerPNG({ answers });
     } else {
-      // STRICT: only use what the user typed. No defaults or auto text.
       out = await renderTemplateB_PosterPNG({
         answers,
         imageUrl: photoUrl,
@@ -2235,9 +911,6 @@ router.post('/generate-static-ad', async (req, res) => {
   }
 });
 
-
-
-
 /* ---------------------- IMAGE OVERLAYS (fit-to-box + coherent copy) ---------------------- */
 function escSVG(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function estWidthSerif(text, fs, letterSpacing = 0) { const t = String(text || ''), n = t.length || 1; return n * fs * 0.54 + Math.max(0, n - 1) * letterSpacing; }
@@ -2251,16 +924,7 @@ function cleanHeadline(h) {
 }
 const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
 
-/* === STATIC IMAGE TEMPLATES (A: Flyer, B: Poster) =========================================
-   Locked visual templates for static PNG ads.
-   - Template A ("flyer_a"): teal header bar, diagonal split, left checklist, right bullets,
-     coverage strip w/ location pin, bottom CTA + phone; rounded corners.
-   - Template B ("poster_b"): full-bleed lifestyle photo, centered white card w/ stacked headline,
-     save % / limited time line / small legal, white frame + shadow; optional seasonal accent.
-   Wiring:
-     call via POST /api/generate-static-ad { template: "flyer_a"|"poster_b", answers, imageUrl? }
-     returns a PNG saved into /api/media, persisted to DB via saveAsset().
-*/
+/* === STATIC IMAGE TEMPLATES (A: Flyer, B: Poster) ========================================= */
 
 function _normPhone(p='') {
   const s = String(p).replace(/[^\d]/g,'');
@@ -2297,11 +961,9 @@ function _ctaNormFromAnswers(answers={}) {
 function _industryLabel(answers={}) {
   const raw = String(answers.industry || answers.category || '').trim();
   if (!raw) return 'SALE';
-  // “FALL FLOORING SALE!” style
   return `${_upperSafe(raw, 18)} SALE!`;
 }
 function _offerLine(answers={}) {
-  // e.g., "Up to 30% Off" or fallback
   const offer = String(answers.offer || answers.mainBenefit || '').trim();
   if (offer) return _titleCaps(offer).replace(/\s+/g,' ').slice(0, 36);
   return 'Limited Time Offer';
@@ -2320,24 +982,15 @@ function _savePercentFromText(s='') {
   const m = String(s).match(/\b(\d{1,2})\s*%/);
   return m ? `${m[1]}%` : '';
 }
-function _seasonAccentLeaves() {
-  // very light corner accent (optional)
-  return `
-  <g opacity="0.20">
-    <path d="M60,70 C90,20 130,18 170,50 C140,52 120,72 110,96 C94,92 78,82 60,70 Z" fill="#F29F05"/>
-    <path d="M170,50 C220,60 240,90 220,130 C210,100 190,80 160,78 C165,68 168,58 170,50 Z" fill="#E85D04"/>
-  </g>`;
-}
 
 /* ---------------- Template A: Flyer (teal header, diagonal split) ---------------- */
 async function renderTemplateA_FlyerPNG({ answers = {} }) {
   const W = 1200, H = 628, R = 28;
 
-  // Palette & type
   const colors = {
-    teal: '#0d3b66',       // header
-    aqua: '#e6f3f8',       // light body panel
-    accent: '#ffc857',     // accent
+    teal: '#0d3b66',
+    aqua: '#e6f3f8',
+    accent: '#ffc857',
     textDark: '#0f141a',
     textLight: '#ffffff',
     pinRed: '#e63946',
@@ -2361,7 +1014,6 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
     ['Deep Clean', 'Standard Clean', 'Move-In/Out', 'Windows', 'Carpet']
   );
 
-  // Build SVG
   const svg = `
   <svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
     <defs>
@@ -2374,7 +1026,6 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
 
     <rect x="0" y="0" width="${W}" height="${H}" rx="${R}" fill="#ffffff" />
     <g clip-path="url(#card)">
-      <!-- Header bar -->
       <rect x="0" y="0" width="${W}" height="132" fill="${colors.teal}"/>
       <text x="36" y="86" font-family="Inter,Segoe UI,Arial" font-size="46" font-weight="800" fill="${colors.textLight}">
         ${escSVG2(headline)}
@@ -2383,10 +1034,8 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
         ${escSVG2(offerLine)}
       </text>
 
-      <!-- Diagonal split panel -->
       <path d="M0,132 L${W},132 L${W},${H} L0,${H-90} Z" fill="url(#diag)"/>
 
-      <!-- Left column: checklist -->
       <g transform="translate(48, 190)">
         <text x="0" y="0" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="${colors.textDark}">
           ${escSVG2('Plans')}
@@ -2402,7 +1051,6 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
         `).join('')}
       </g>
 
-      <!-- Right column: services -->
       <g transform="translate(${W-520}, 190)">
         <text x="0" y="0" font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="${colors.textDark}">
           ${escSVG2('Services Offered')}
@@ -2417,7 +1065,6 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
         `).join('')}
       </g>
 
-      <!-- Coverage strip -->
       <g transform="translate(0, ${H-160})">
         <rect x="0" y="0" width="${W}" height="70" fill="#ffffff" />
         <rect x="0" y="70" width="${W}" height="2" fill="${colors.grid}"/>
@@ -2430,11 +1077,9 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
         </g>
       </g>
 
-      <!-- Bottom CTA row -->
       <g transform="translate(0, ${H-86})">
         <rect x="0" y="0" width="${W}" height="86" fill="${colors.teal}" />
         <rect x="0" y="-2" width="${W}" height="2" fill="rgba(0,0,0,0.12)"/>
-        <!-- CTA pill -->
         <g transform="translate(${W-260}, 43)">
           ${btnSolidDark(0, 0, cta || 'CALL NOW', 26)}
         </g>
@@ -2445,7 +1090,6 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
     </g>
   </svg>`;
 
-  // Rasterize SVG straight to PNG
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.png`;
   await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
@@ -2454,12 +1098,10 @@ async function renderTemplateA_FlyerPNG({ answers = {} }) {
   return { publicUrl: `/api/media/${file}`, absoluteUrl: absolutePublicUrl(`/api/media/${file}`), filename: file };
 }
 
-
 /* ---------------- Template B: Poster (photo bg + centered white card) --------------- */
 async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict = false, copy = {} }) {
   const W = 1200, H = 628, R = 28;
 
-  // background photo
   const bgUrl = imageUrl || resolveTemplateUrl({ answers });
   const imgRes = await ax.get(bgUrl, { responseType: 'arraybuffer', timeout: 12000 });
   const bgBuf = await sharp(imgRes.data)
@@ -2467,7 +1109,6 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
     .jpeg({ quality: 92, chromaSubsampling: '4:4:4' })
     .toBuffer();
 
-  // Strict = only user text; non-strict = legacy fallbacks
   const brand = strict ? (copy.brand || '') : _brandText(answers);
   const cta   = strict ? cleanCTA(copy.cta || '', brand)
                        : (_ctaNormFromAnswers(answers) || '');
@@ -2485,8 +1126,7 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
   const legal       = strict ? (copy.legal || '') : _legalLine(answers);
   const body        = strict ? (copy.body || '')  : (answers.body || '');
 
-  // centered white card
-  const CARD_W = 760, CARD_H = 400; // +20 to make room for body copy
+  const CARD_W = 760, CARD_H = 400;
   const CX = Math.round(W/2), CY = Math.round(H/2) + 8;
   const cardX = Math.round(CX - CARD_W/2), cardY = Math.round(CY - CARD_H/2);
 
@@ -2499,7 +1139,6 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
       </filter>
     </defs>
 
-    <!-- full-bleed bg + subtle vignette -->
     <use href="#bg"/>
     <radialGradient id="vig" cx="50%" cy="50%" r="70%">
       <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
@@ -2507,56 +1146,44 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
     </radialGradient>
     <rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)" opacity="0.22"/>
 
-    <!-- white frame -->
     <rect x="12" y="12" width="${W-24}" height="${H-24}" rx="${R}" fill="none" stroke="#ffffff" stroke-opacity="0.92" stroke-width="3"/>
 
-    ${strict ? '' : _seasonAccentLeaves()}
-
-    <!-- centered white card -->
     <g filter="url(#shadow)">
       <rect x="${cardX}" y="${cardY}" width="${CARD_W}" height="${CARD_H}" rx="18" fill="#ffffff"/>
     </g>
 
-    <!-- brand (optional) -->
     ${_maybe(brand, `
     <text x="${CX}" y="${cardY + 58}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="22" font-weight="800" fill="#0f141a" opacity="0.85">
       ${escSVG(brand)}
     </text>`)}
 
-    <!-- big headline -->
     ${_maybe(bigHeadline, `
     <text x="${CX}" y="${cardY + 130}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="54" font-weight="900" fill="#0f141a" letter-spacing="0.04em">
       ${escSVG(bigHeadline)}
     </text>`)}
 
-    <!-- secondary line 1 -->
     ${_maybe(secondary1, `
     <text x="${CX}" y="${cardY + 180}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="26" font-weight="700" fill="#0f141a">
       ${escSVG(secondary1)}
     </text>`)}
 
-    <!-- secondary line 2 -->
     ${_maybe(secondary2, `
     <text x="${CX}" y="${cardY + 214}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="28" font-weight="800" fill="#0d3b66">
       ${escSVG(secondary2)}
     </text>`)}
 
-    <!-- body/ad copy -->
     ${_maybe(body, `
     <text x="${CX}" y="${cardY + 250}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="18" font-weight="600" fill="#6b7280" opacity="0.95">
       ${escSVG(body)}
     </text>`)}
 
-        <!-- CTA (only if present) -->
     ${_maybe(cta, pillBtn(CX, cardY + CARD_H + 56, cta, 28))}
 
-
-    <!-- legal -->
     ${_maybe(legal, `
     <text x="${CX}" y="${cardY + CARD_H - 18}" text-anchor="middle"
           font-family="Inter,Segoe UI,Arial" font-size="16" font-weight="600" fill="#4b5563" opacity="0.95">
@@ -2564,7 +1191,6 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
     </text>`)}
   </svg>`;
 
-  // Rasterize to PNG
   const outDir = ensureGeneratedDir();
   const file = `${uuidv4()}.png`;
   await sharp(Buffer.from(svg, 'utf8'), { density: 180 })
@@ -2577,7 +1203,6 @@ async function renderTemplateB_PosterPNG({ answers = {}, imageUrl = '', strict =
     filename: file
   };
 }
-
 
 /* ---------- CTA normalization + variants (single source of truth) ---------- */
 const CTA = Object.freeze({
@@ -2593,8 +1218,8 @@ const ALLOWED_CTAS = new Set(CTA.VARIANTS);
 function normalizeCTA(s = '') {
   return String(s)
     .toUpperCase()
-    .replace(/[\u2019']/g, '')      // normalize apostrophes
-    .replace(/[^A-Z0-9 ]+/g, ' ')   // strip non-alphanumerics
+    .replace(/[\u2019']/g, '')
+    .replace(/[^A-Z0-9 ]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -2612,126 +1237,10 @@ function cleanCTA(c, seed = '') {
   return pickCtaVariant(seed);
 }
 
-
-/* ---------- Coherent subline (7–9 words) via GPT, with fallbacks ---------- */
-async function getCoherentSubline(answers = {}, category = 'generic', seed = '') {
-  function _hash32(str = '') { let h = 2166136261 >>> 0; for (let i=0;i<str.length;i++){ h ^= str.charCodeAt(i); h = Math.imul(h,16777619);} return h>>>0; }
-  function _rng(s=''){ let h=_hash32(String(s||'')); return ()=>{ h=(h+0x6D2B79F5)>>>0; let t=Math.imul(h^(h>>>15),1|h); t^=t+Math.imul(t^(t>>>7),61|t); t=(t^(t>>>14))>>>0; return t/4294967296; }; }
-  const rnd = _rng(seed || (Date.now()+':subline'));
-
-  const STOP = new Set(['and','or','the','a','an','of','to','in','on','with','for','by','your','you','is','are','at']);
-  const ENDSTOP = new Set(['and','with','for','to','of','in','on','at','by']);
-  const sentenceCase = (s='') => { s = String(s).toLowerCase().replace(/\s+/g,' ').trim(); return s ? s[0].toUpperCase()+s.slice(1) : s; };
-  const clean = (s='') => String(s)
-    .replace(/https?:\/\/\S+/g,' ')
-    .replace(/[^\w\s'-]/g,' ')
-    .replace(/\b(best|premium|luxury|#1|guarantee|perfect|revolutionary|magic|cheap|fastest|ultimate|our|we)\b/gi,' ')
-    .replace(/\s+/g,' ')
-    .trim()
-    .toLowerCase();
-  const trimEnd = (arr)=>{ while (arr.length && ENDSTOP.has(arr[arr.length-1])) arr.pop(); return arr; };
-  const takeTerms = (src='', max=3) => {
-    const words = clean(src).split(' ').filter(Boolean).filter(w=>!STOP.has(w));
-    return words.slice(0, Math.max(1, Math.min(max, words.length)));
-  };
-
-  function polishTail(line='') {
-    let s = clean(line);
-    s = s.replace(/\b(\w+)\s+\1\b/g, '$1');
-    s = s.replace(/\b(daily|always|now|today|tonight)\s*$/i, '');
-    s = s.replace(/\b(wear|use|shop|enjoy|appreciate|love|choose)\s+daily\b$/i, '$1');
-    s = s.replace(/\beveryday\s*$/i, '');
-    s = s.replace(/\bfashion\s+(daily|always)\b$/i, 'fashion');
-    s = s.replace(/\b(and|with|for|to|of|in|on|at|by)\s*$/i, '');
-    s = s.replace(/\s+/g, ' ').trim();
-    return s;
-  }
-  function ensure7to9(line='') {
-    let words = clean(line).split(' ').filter(Boolean);
-    const safeTails = [['built','to','last'],['made','simple'],['for','busy','days']];
-    while (words.length > 9) words.pop();
-    words = trimEnd(words);
-    while (words.length < 7) {
-      const t = safeTails[Math.floor(rnd()*safeTails.length)];
-      for (const w of t) if (words.length < 9) words.push(w);
-      words = trimEnd(words);
-    }
-    return sentenceCase(words.join(' '));
-  }
-
-  const MAP = {
-    fashion: ['Modern fashion built for everyday wear','Natural materials for everyday wear made simple','Simple pieces built to last every day'],
-    books: ['New stories and classic runs to explore','Graphic novels and comics for quiet nights'],
-    cosmetics: ['Gentle formulas for daily care and glow','A simple routine for better skin daily'],
-    hair: ['Better hair care with less effort daily','Clean formulas for easy styling each day'],
-    food: ['Great taste with less hassle every day','Fresh flavor made easy for busy nights'],
-    pets: ['Everyday care for happy pets made simple','Simple treats your pet will love daily'],
-    electronics: ['Reliable tech for everyday use and value','Simple design with solid performance daily'],
-    home: ['Upgrade your space the simple practical way','Clean looks with everyday useful function'],
-    coffee: ['Balanced flavor for better breaks each day','Smooth finish in every cup every day'],
-    fitness: ['Made for daily training sessions that stick','Durable gear built for consistent workouts'],
-    generic: ['Made for everyday use with less hassle','Simple design that is built to last']
-  };
-
-  const productTerms  = takeTerms(answers.productType || answers.topic || answers.title || '');
-  const benefitTerms  = takeTerms(answers.mainBenefit || answers.description || '');
-  const audienceTerms = takeTerms(answers.audience || answers.target || answers.customer || '', 2);
-  const locationTerm  = takeTerms(answers.location || answers.city || answers.region || '', 1)[0] || '';
-
-  let productHead = productTerms[0] || '';
-  if ((category||'').toLowerCase() === 'fashion' && !/shirt|tee|top|dress|skirt|jean|pant|jacket|hoodie|outfit|wear|clothing|fashion/i.test(productHead)) {
-    productHead = 'fashion';
-  }
-  if (productHead === 'quality') productHead = 'products';
-
-  const cues = ['use “built for”, everyday tone','use “made for”, utility tone','use “designed for”, comfort tone','use “crafted for”, style tone'];
-  const cue = cues[Math.floor(rnd()*cues.length)];
-
-  let line = '';
-  try {
-    const system = [
-      "You are SmartMark's subline composer.",
-      "Write ONE ad subline of 7–9 words, sentence case, plain language.",
-      "Must be coherent English. No buzzwords. No domains.",
-      "Avoid ending with fillers like: daily, always, now, today, tonight.",
-      "Do NOT end with: to, for, with, of, in, on, at, by."
-    ].join(' ');
-    const user = [
-      `Category: ${category || 'generic'}. Cue: ${cue}.`,
-      productHead ? `Product/topic: ${productHead}.` : '',
-      benefitTerms.length ? `Main benefit: ${benefitTerms.join(' ')}.` : '',
-      audienceTerms.length ? `Audience: ${audienceTerms.join(' ')}.` : '',
-      locationTerm ? `Location: ${locationTerm}.` : '',
-      `Variation seed: ${seed}.`,
-      'Return ONLY the line.'
-    ].join(' ');
-    const r = await openai.chat.completions.create({
-      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
-      temperature: 0.40,
-      max_tokens: 24,
-      messages: [{ role: 'system', content: system }, { role: 'user', content: user }]
-    });
-    line = (r.choices?.[0]?.message?.content || '').trim().replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g,'');
-  } catch {}
-
-  if (!line) {
-    const arr = MAP[category] || MAP.generic;
-    line = arr[Math.floor(rnd()*arr.length)];
-  }
-
-  line = line.replace(/\bfashion modern\b/gi, 'modern fashion');
-  line = polishTail(line);
-  const wc = clean(line).split(' ').filter(Boolean).length;
-  if (wc < 7) line = ensure7to9(line);
-  line = polishTail(line);
-  return sentenceCase(line);
-}
-
 /* ---------- required helpers for subline + SVG (UPDATED) ---------- */
 function escRegExp(s = '') {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
 
 /* ------------------------------ UTILS: conditional SVG helpers ------------------------------ */
 function _nonEmpty(s) { return !!String(s || '').trim(); }
@@ -2740,41 +1249,6 @@ function _maybe(line, svg) { return _nonEmpty(line) ? svg : ''; }
 /* Optional seasonal garnish (disabled in strict flow) */
 function _seasonAccentLeaves() { return ''; }
 
-/* --- Color utils for contrast-safe text on chips/cards --- */
-function _hexToRgb(hex = '') {
-  const m = String(hex).replace('#', '').trim();
-  if (m.length === 3) {
-    const r = m[0] + m[0], g = m[1] + m[1], b = m[2] + m[2];
-    return { r: parseInt(r, 16), g: parseInt(g, 16), b: parseInt(b, 16) };
-  }
-  if (m.length === 6) {
-    return { r: parseInt(m.slice(0, 2), 16), g: parseInt(m.slice(2, 4), 16), b: parseInt(m.slice(4, 6), 16) };
-  }
-  return { r: 0, g: 0, b: 0 };
-}
-function _relLuminance(hex = '#000000') {
-  const { r, g, b } = _hexToRgb(hex);
-  const srgb = [r, g, b].map(v => v / 255);
-  const lin = srgb.map(c => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)));
-  return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2];
-}
-function contrastRatio(bg = '#000000', fg = '#ffffff') {
-  const L1 = _relLuminance(bg);
-  const L2 = _relLuminance(fg);
-  const hi = Math.max(L1, L2), lo = Math.min(L1, L2);
-  return (hi + 0.05) / (lo + 0.05);
-}
-function pickTextColor(bg = '#000000') {
-  // choose black or white for best contrast on bg
-  const cBlack = contrastRatio(bg, '#000000');
-  const cWhite = contrastRatio(bg, '#ffffff');
-  return cBlack > cWhite ? '#000000' : '#ffffff';
-}
-function safeHex(hex = '', fallback = '#111111') {
-  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(String(hex).trim()) ? hex : fallback;
-}
-
-/* --- CTA normalizers — NO DEFAULTS --- */
 /* --- CTA normalizers — NO DEFAULTS (RENAMED to avoid duplicates) --- */
 function normalizeCTA_noDefaults(s = '') {
   const base = String(s).replace(/\s+/g, ' ').trim();
@@ -2784,20 +1258,13 @@ function cleanCTA_noDefaults(s = '', brand = '') {
   let t = String(s || '');
   if (brand) t = t.replace(new RegExp(escRegExp(brand), 'i'), '');
   t = t.replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  return normalizeCTA_noDefaults(t); // returns '' when empty
-}
-
-
-/* --- Centering helpers for SVG text alignment (use with text-anchor="middle") --- */
-function centerAnchorAttrs() {
-  return { 'text-anchor': 'middle', 'dominant-baseline': 'middle' };
+  return normalizeCTA_noDefaults(t);
 }
 
 /* --- CTA pill (pure black, white text; same geometry) --- */
 function pillBtn(cx, cy, label, fs = 34) {
- const txt = normalizeCTA_noDefaults(label || '');
-
-  if (!txt) return ''; // do not draw when no CTA
+  const txt = normalizeCTA_noDefaults(label || '');
+  if (!txt) return '';
   const padX = 32;
   const estTextW = Math.round(txt.length * fs * 0.60);
   const estW = Math.max(182, Math.min(estTextW + padX * 2, 1000));
@@ -2825,7 +1292,6 @@ function pillBtn(cx, cy, label, fs = 34) {
     </g>`;
 }
 
-
 /* =========================================
    IMAGE NORMALIZATION (bake as background)
    ========================================= */
@@ -2839,176 +1305,6 @@ async function loadAndCover(imageUrl, W, H) {
   return { baseBuf: buf, W: meta.width || W, H: meta.height || H };
 }
 
-/* ======================================================
-   TEMPLATE A — PHOTO POSTER (industry-agnostic version)
-   Structure: baked photo bg + centered white card + big
-   headline + date range + value line + supporting lines.
-   ====================================================== */
-function svgPhotoPoster({
-  W, H, baseImageDataURL,
-  brandLogos = [], // [{href, x, y, w, h}]
-  headline = 'BIG SALE',
-  dateRange = '',
-  valueLine = 'SAVE $500',
-  supportTop = 'PLUS SPECIAL FINANCING*',
-  supportMid = 'ON SELECT PRODUCTS',
-  supportBot = 'SEE STORE FOR DETAILS',
-  leafBadges = [], // [{href,x,y,w,h}] optional decorative
-}) {
-  const CARD_W = Math.round(W * 0.66);
-  const CARD_H = Math.round(H * 0.26);
-  const CARD_X = Math.round((W - CARD_W)/2);
-  const CARD_Y = Math.round(H * 0.16);
-
-  const VALUE_Y = Math.round(CARD_Y + CARD_H + H*0.12);
-  const SUPPORT_Y1 = VALUE_Y + 56;
-  const SUPPORT_Y2 = SUPPORT_Y1 + 34;
-  const SUPPORT_Y3 = SUPPORT_Y2 + 28;
-
-  return `
-<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <image id="bg" href="${baseImageDataURL}" x="0" y="0" width="${W}" height="${H}" preserveAspectRatio="xMidYMid slice"/>
-  </defs>
-
-  <!-- baked background -->
-  <use href="#bg"/>
-
-  <!-- outer soft card shadow -->
-  <g opacity="0.35">
-    <rect x="${CARD_X-8}" y="${CARD_Y-8}" width="${CARD_W+16}" height="${CARD_H+16}" rx="14" fill="#000000" />
-  </g>
-
-  <!-- white headline card -->
-  <rect x="${CARD_X}" y="${CARD_Y}" width="${CARD_W}" height="${CARD_H}" rx="12" fill="#FFFFFF" />
-  ${leafBadges.map(b=>`<image href="${b.href}" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" />`).join('')}
-
-  <!-- tiny brand row (optional) -->
-  ${brandLogos.map(l=>`<image href="${l.href}" x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}" />`).join('')}
-
-  <!-- headline -->
-  <text x="${W/2}" y="${CARD_Y + CARD_H/2 - 8}" text-anchor="middle" dominant-baseline="middle"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.065)}" font-weight="900" fill="#CC2C2C" letter-spacing="1.5">
-    ${escSVG(headline.toUpperCase())}
-  </text>
-
-  <!-- date range -->
-  <text x="${W/2}" y="${CARD_Y + CARD_H - 18}" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.022)}" font-weight="700" fill="#BB4D3A" letter-spacing="1">
-    ${escSVG(dateRange.toUpperCase())}
-  </text>
-
-  <!-- BIG value line over photo -->
-  <text x="${W*0.14}" y="${VALUE_Y}" text-anchor="start"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.095)}" font-weight="900" fill="#FFFFFF" letter-spacing="1.5">
-    ${escSVG(valueLine.toUpperCase())}
-  </text>
-
-  <!-- supporting lines -->
-  <text x="${W/2}" y="${SUPPORT_Y1}" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.034)}" font-weight="800" fill="#FFFFFF" letter-spacing="1">
-    ${escSVG(supportTop.toUpperCase())}
-  </text>
-  <text x="${W/2}" y="${SUPPORT_Y2}" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.024)}" font-weight="700" fill="#FFFFFF" letter-spacing="0.8">
-    ${escSVG(supportMid.toUpperCase())}
-  </text>
-  <text x="${W/2}" y="${SUPPORT_Y3}" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.018)}" font-weight="600" fill="#FFFFFF" letter-spacing="0.6">
-    ${escSVG(supportBot.toUpperCase())}
-  </text>
-
-  <!-- tiny legal at bottom -->
-  <text x="${W/2}" y="${H-18}" text-anchor="middle"
-        font-family="Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.016)}" font-weight="500" fill="rgba(255,255,255,0.85)">
-    *With approved credit. Ask for details.
-  </text>
-</svg>`;
-}
-
-
-/* ===================================================
-   TEMPLATE B — ILLUSTRATED FLYER (industry-agnostic)
-   Structure: dark top banner + diagonal split + ticks,
-   services list, coverage line, and big phone CTA row.
-   =================================================== */
-function svgIllustratedFlyer({
-  W, H, illustrationDataURL,
-  headline = 'HOME CLEANING SERVICES',
-  subHead = 'APARTMENT • HOME • OFFICE',
-  leftChecks = ['ONE TIME','WEEKLY','BI-WEEKLY','MONTHLY'],
-  rightServices = ['Kitchen','Bathrooms','Offices','Dusting','Mopping','Vacuuming'],
-  coverage = 'Coverage area ~25 miles around city',
-  callNow = 'CALL NOW!',
-  phone = '1300-135-1616'
-}) {
-  const TOP_H = Math.round(H*0.28);
-
-  return `
-<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <image id="illustr" href="${illustrationDataURL}" x="0" y="${TOP_H-10}" width="${W}" height="${H-TOP_H+10}" preserveAspectRatio="xMidYMid meet"/>
-    <linearGradient id="btnGradient" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#ff8a00"/><stop offset="100%" stop-color="#ffb84d"/>
-    </linearGradient>
-  </defs>
-
-  <!-- top banner -->
-  <rect x="0" y="0" width="${W}" height="${TOP_H}" fill="#0C4A5B"/>
-  <text x="${W/2}" y="${Math.round(TOP_H*0.46)}" text-anchor="middle"
-        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.072)}" font-weight="900" fill="#FFFFFF" letter-spacing="1.2">
-    ${escSVG(headline.toUpperCase())}
-  </text>
-  <text x="${W/2}" y="${Math.round(TOP_H*0.78)}" text-anchor="middle"
-        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.028)}" font-weight="700" fill="#CDEBF2" letter-spacing="2.5">
-    ${escSVG(subHead.toUpperCase())}
-  </text>
-
-  <!-- diagonal split bg -->
-  <path d="M0 ${TOP_H} L ${W} ${Math.round(TOP_H*0.85)} L ${W} ${H} L 0 ${H} Z" fill="#E8F6FA"/>
-  <use href="#illustr"/>
-
-  <!-- left checks -->
-  ${leftChecks.map((t,i)=>{
-    const y = TOP_H + 70 + i*44;
-    return `
-      <circle cx="${Math.round(W*0.10)}" cy="${y}" r="10" fill="none" stroke="#11A37F" stroke-width="3"/>
-      <path d="M ${Math.round(W*0.10)-6} ${y} l 4 4 l 7 -9" stroke="#11A37F" stroke-width="3" fill="none" />
-      <text x="${Math.round(W*0.10)+26}" y="${y+6}" font-family="Poppins, Helvetica, Arial, sans-serif"
-            font-size="${Math.round(H*0.028)}" font-weight="700" fill="#0B3B4A">${escSVG(t)}</text>`;
-  }).join('')}
-
-  <!-- right services -->
-  <text x="${Math.round(W*0.58)}" y="${TOP_H + 52}" font-family="Poppins, Helvetica, Arial, sans-serif"
-        font-size="${Math.round(H*0.032)}" font-weight="800" fill="#0B3B4A">Services Offered</text>
-  ${rightServices.map((t,i)=>{
-    const y = TOP_H + 88 + i*36;
-    return `
-      <circle cx="${Math.round(W*0.56)}" cy="${y-12}" r="5" fill="#11A37F"/>
-      <text x="${Math.round(W*0.58)}" y="${y}" font-family="Poppins, Helvetica, Arial, sans-serif"
-            font-size="${Math.round(H*0.026)}" font-weight="600" fill="#1C5A6B">${escSVG(t)}</text>`;
-  }).join('')}
-
-  <!-- coverage line -->
-  <g opacity="0.85">
-    <path d="M ${Math.round(W*0.08)} ${H-112} h 14" stroke="#F59E0B" stroke-width="4"/>
-    <text x="${Math.round(W*0.12)}" y="${H-105}" font-family="Poppins, Helvetica, Arial, sans-serif"
-          font-size="${Math.round(H*0.022)}" font-weight="600" fill="#1C5A6B">${escSVG(coverage)}</text>
-  </g>
-
-  <!-- call now row -->
-  <rect x="${Math.round(W*0.06)}" y="${H-88}" width="${Math.round(W*0.88)}" height="58" rx="12" fill="url(#btnGradient)"/>
-  <text x="${Math.round(W*0.12)}" y="${H-50}" text-anchor="start"
-        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.030)}" font-weight="900" fill="#1B2838">
-    ${escSVG(callNow)}
-  </text>
-  <text x="${Math.round(W*0.50)}" y="${H-50}" text-anchor="start"
-        font-family="Poppins, Helvetica, Arial, sans-serif" font-size="${Math.round(H*0.036)}" font-weight="900" fill="#1B2838">
-    ${escSVG(phone)}
-  </text>
-</svg>`;
-}
-
 /* ==========================================================
    COMPOSERS — bake background + render SVG → raster → save
    ========================================================== */
@@ -3017,6 +1313,9 @@ async function composePhotoPoster({
   answers = {},
   dims = { W: 1080, H: 1080 },
 }) {
+  // ... your remaining image-only code continues below (not included in your paste)
+}
+
   const { W, H } = dims;
   const { baseBuf } = await loadAndCover(imageUrl, W, H);
   const base64 = `data:image/jpeg;base64,${baseBuf.toString('base64')}`;
@@ -3051,7 +1350,7 @@ async function composePhotoPoster({
 
   const rel = mediaPath(file);
   return { publicUrl: rel, absoluteUrl: absolutePublicUrl(rel), filename: file };
-}
+
 
 async function composeIllustratedFlyer({
   illustrationUrl,
