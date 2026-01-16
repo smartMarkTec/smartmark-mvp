@@ -3715,17 +3715,25 @@ function looksUnrelatedToIndustry(videoObj, canon = '') {
 }
 
 async function pexelsVideoSearch(query, page = 1) {
-  return ax.get('https://api.pexels.com/videos/search', {
-    headers: { Authorization: PEXELS_API_KEY },
-    params: {
-      query,
-      per_page: 40,
-      page,
-      orientation: 'landscape',
-    },
-    timeout: 12000,
-  }).catch(() => ({ data: {} }));
+  try {
+    return await ax.get('https://api.pexels.com/videos/search', {
+      headers: { Authorization: PEXELS_API_KEY },
+      params: {
+        query,
+        per_page: 40,
+        page,
+        orientation: 'landscape',
+      },
+      timeout: 12000,
+    });
+  } catch (e) {
+    const status = e?.response?.status;
+    const msg = e?.response?.data || e?.message;
+    console.warn('[pexels] video search error:', { query, page, status, msg });
+    return { data: {} };
+  }
 }
+
 
 async function pexelsPhotoSearch(query, page = 1) {
   return ax.get('https://api.pexels.com/v1/search', {
@@ -3738,32 +3746,39 @@ async function pexelsPhotoSearch(query, page = 1) {
 /* Pexels videos (HIGH RELEVANCE FIRST, then variety) */
 // ================== REPLACE fetchPexelsVideos + fetchPexelsPhotos WITH THIS ==================
 
-async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '', industryRaw = '') {
-  if (!PEXELS_API_KEY) return [];
-  const rng = mkRng32(seed || keyword || Date.now());
+async function fetchPexelsVideos(keywordOrQueries, want = 8, seed = '', urlHint = '', industryRaw = '') {
+  if (!PEXELS_API_KEY) {
+    console.warn('[pexels] missing PEXELS_API_KEY');
+    return [];
+  }
 
-  // ✅ FIX: canon MUST come from the user's industry, not the keyword builder/fallback
-  const targetIndustry = (industryRaw || keyword || '').toString();
+  const rng = mkRng32(seed || String(keywordOrQueries) || Date.now());
+
+  // Accept either a string keyword OR an array of queries (prevents accidental breakage)
+  const isArray = Array.isArray(keywordOrQueries);
+  const targetIndustry = String(industryRaw || (isArray ? (keywordOrQueries[0] || '') : (keywordOrQueries || ''))).trim();
   const canon = canonicalIndustry(targetIndustry);
 
-  // ✅ Queries MUST be built from user's industry
-  const queries = industryQueryPack(canon, targetIndustry, urlHint);
+  const queries = isArray
+    ? uniq(keywordOrQueries.map(x => String(x || '').trim()).filter(Boolean)).slice(0, 12)
+    : industryQueryPack(canon, targetIndustry, urlHint);
 
   const results = [];
   const seen = new Set();
 
   try {
-    // Relevance-first: page 1..2 per query, stop once pool is strong
     for (const q of queries) {
       for (const page of [1, 2]) {
         const r = await pexelsVideoSearch(q, page);
         const vids = Array.isArray(r.data?.videos) ? r.data.videos : [];
 
+        // Helpful debug
+        if (!vids.length) console.warn('[pexels] empty videos:', { q, page, canon, targetIndustry });
+
         for (const v of vids) {
           const id = v?.id;
           if (id == null || seen.has(id)) continue;
 
-          // ✅ Hard filter against wrong verticals using the CORRECT canon
           if (looksUnrelatedToIndustry(v, canon)) continue;
 
           const files = Array.isArray(v.video_files) ? v.video_files : [];
@@ -3776,7 +3791,6 @@ async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '', ind
             seen.add(id);
             results.push({ url: f.link, id, dur: v.duration || 0 });
           }
-
           if (results.length >= Math.max(want * 4, 24)) break;
         }
 
@@ -3785,17 +3799,44 @@ async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '', ind
       if (results.length >= Math.max(want * 4, 24)) break;
     }
 
-    // ✅ Variety AFTER accuracy: shuffle large pool then slice
+    // LAST resort that still won’t bleed into another vertical:
+    // only use neutral “small business” if EVERYTHING fails (prevents total 500)
+    if (!results.length) {
+      console.warn('[pexels] zero results after queries; using neutral last resort:', { canon, targetIndustry });
+      for (const page of [1, 2]) {
+        const r = await pexelsVideoSearch('small business', page);
+        const vids = Array.isArray(r.data?.videos) ? r.data.videos : [];
+        for (const v of vids) {
+          const id = v?.id;
+          if (id == null || seen.has(id)) continue;
+
+          const files = Array.isArray(v.video_files) ? v.video_files : [];
+          const f =
+            files.find((f) => /mp4/i.test(f.file_type || '') && (f.height || 0) >= 720) ||
+            files.find((f) => /mp4/i.test(f.file_type || '')) ||
+            files[0];
+
+          if (f?.link) {
+            seen.add(id);
+            results.push({ url: f.link, id, dur: v.duration || 0 });
+          }
+          if (results.length >= Math.max(want * 2, 12)) break;
+        }
+        if (results.length >= Math.max(want * 2, 12)) break;
+      }
+    }
+
     shuffleInPlace(results, rng);
     const pick = results.slice(0, Math.max(want, 8));
 
-    console.log('[pexels] videos picked:', pick.length, 'industry=', targetIndustry, 'canon=', canon, 'kw=', keyword);
+    console.log('[pexels] videos picked:', pick.length, { canon, targetIndustry, queries: queries.slice(0, 5) });
     return pick;
   } catch (e) {
-    console.warn('[pexels] video search fail:', e.message);
+    console.warn('[pexels] video search fail:', e?.message || e);
     return [];
   }
 }
+
 
 async function fetchPexelsPhotos(keyword, want = 8, seed = '', urlHint = '', industryRaw = '') {
   if (!PEXELS_API_KEY) return [];
