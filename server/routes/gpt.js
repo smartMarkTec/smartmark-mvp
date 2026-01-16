@@ -9,7 +9,7 @@ const { secureHeaders, basicRateLimit, basicAuth } = require("../middleware/secu
 
 // ---------- Minimal, safe OpenAI client ----------
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
 });
 
 // ---------- Global, minimal hardening for this router ----------
@@ -27,7 +27,9 @@ const limitSummarize = basicRateLimit({ windowMs: 60 * 1000, max: 20 });
 const FALLBACK_CHAT =
   "I’m your AI Ad Manager—share your goal and I’ll suggest a clear next move.";
 
-const STOP = new Set(["and","or","the","a","an","of","to","in","on","with","for","by","your","you","is","are","at"]);
+const STOP = new Set([
+  "and","or","the","a","an","of","to","in","on","with","for","by","your","you","is","are","at"
+]);
 const ENDSTOP = new Set(["and","with","for","to","of","in","on","at","by"]);
 
 function sentenceCase(s = "") {
@@ -125,7 +127,61 @@ function stripQuestionsIfNotAllowed(reply = "", allowed = false) {
   return out || FALLBACK_CHAT;
 }
 
-// ---------- Route: chat (reactive + guardrails) ----------
+/* ====================== NEW: anti-copy + copywriter helpers ====================== */
+function normText(s = "") {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+function jaccard(a = "", b = "") {
+  const A = new Set(normText(a).split(" ").filter(Boolean));
+  const B = new Set(normText(b).split(" ").filter(Boolean));
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const x of A) if (B.has(x)) inter++;
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+function containsLongSubstring(a = "", b = "", minLen = 24) {
+  const A = normText(a);
+  const B = normText(b);
+  if (!A || !B) return false;
+  if (A.length < minLen || B.length < minLen) return false;
+  return A.includes(B.slice(0, minLen)) || B.includes(A.slice(0, minLen)) || A.includes(B) || B.includes(A);
+}
+
+// Builds a fallback headline/description that is NOT copied verbatim
+function fallbackCopyFromAnswers(a = {}) {
+  const industry = String(a.industry || "").trim();
+  const biz = String(a.businessName || a.brand || "").trim();
+  const benefit = String(a.mainBenefit || a.details || "").trim();
+  const offer = String(a.offer || a.saveAmount || "").trim();
+
+  const heads = [];
+  if (offer) heads.push(offer);
+  if (benefit) heads.push(benefit);
+  if (industry) heads.push(industry);
+
+  let headline = heads.find(Boolean) || "New Offers Available";
+  headline = sentenceCase(clampWords(softRewrite(headline), 8));
+
+  let descriptionParts = [];
+  if (benefit) descriptionParts.push(sentenceCase(softRewrite(benefit)));
+  if (offer) descriptionParts.push(sentenceCase(softRewrite(offer)));
+  if (!descriptionParts.length && industry) descriptionParts.push(`Designed for ${industry.toLowerCase()} customers.`);
+  if (!descriptionParts.length) descriptionParts.push("Clean, simple, and made for everyday use.");
+
+  if (biz) descriptionParts.push(`Explore ${biz} today.`);
+  let description = descriptionParts.join(" ").replace(/\s+/g, " ").trim();
+  description = description.slice(0, 160);
+
+  return { headline, description };
+}
+
+/* ====================== Route: chat ====================== */
 router.post("/gpt-chat", limitChat, async (req, res) => {
   const { message, history } = req.body || {};
   if (!message || typeof message !== "string") {
@@ -177,7 +233,7 @@ router.post("/gpt-chat", limitChat, async (req, res) => {
   }
 });
 
-// ---------- coherent 7–9 word subline generator ----------
+/* ====================== coherent 7–9 word subline generator ====================== */
 router.post("/coherent-subline", limitSubline, async (req, res) => {
   const { answers = {}, category = "generic" } = req.body || {};
 
@@ -242,32 +298,52 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
   return res.json({ subline: line });
 });
 
-// ---------- summarize-ad-copy (JSON) ----------
+/* ====================== summarize-ad-copy (JSON) ====================== */
 router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, async (req, res) => {
   try {
     const a = (req.body && req.body.answers) || {};
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
+    // Create a single string representing all user-provided text we must not copy verbatim
+    const inputText = [
+      a.industry,
+      a.businessName || a.brand,
+      a.idealCustomer,
+      a.mainBenefit || a.details,
+      a.offer || a.saveAmount,
+      a.secondary || a.financingLine,
+      a.description,
+      a.topic,
+      a.title,
+    ].filter(Boolean).join(" ");
+
     const system =
-      "You write concise ad copy. Return strict JSON with keys: " +
-      "headline (<=8 words), subline (7–14 words), offer (short, optional), " +
-      "bullets (array of up to 3 short items), disclaimers (short, optional), cta (2–3 words). " +
-      "No brand-superlatives (best, #1, premium, luxury). No URLs. No 'our/we' language.";
+      "You are a senior direct-response copywriter. " +
+      "Write a fresh headline + description that SELL the offer. " +
+      "ABSOLUTE RULES: " +
+      "1) Do NOT copy phrases verbatim from the input. Rephrase everything. " +
+      "2) No 'our/we' language. " +
+      "3) No brand-superlatives (best, #1, premium, luxury). " +
+      "4) No URLs. " +
+      "Return STRICT JSON with keys: headline (<=8 words), subline (7–14 words), offer (optional short), " +
+      "bullets (array up to 3), disclaimers (optional), cta (2–3 words).";
 
     const user = [
       `Industry: ${a.industry || ""}`,
-      `Business: ${a.businessName || ""}`,
+      `Business: ${a.businessName || a.brand || ""}`,
       `Location: ${a.city ? (a.state ? `${a.city}, ${a.state}` : a.city) : (a.location || "")}`,
       `Audience: ${a.idealCustomer || ""}`,
       `Main benefit: ${a.mainBenefit || a.details || ""}`,
       `Offer: ${a.offer || a.saveAmount || ""}`,
-      `Secondary: ${a.secondary || a.financingLine || ""}`
+      `Secondary: ${a.secondary || a.financingLine || ""}`,
+      "",
+      "Write new copy that is NOT a paraphrase-by-copy. Use different wording."
     ].join("\n");
 
     const completion = await client.chat.completions.create({
       model,
-      temperature: 0.2,
-      max_tokens: 220,
+      temperature: 0.35, // slight creativity helps variation
+      max_tokens: 240,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
@@ -283,16 +359,58 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
     const clamp = (s, n) => String(s || "").trim().slice(0, n);
     const arr = (x) => Array.isArray(x) ? x : (x ? [String(x)] : []);
 
+    let headline = clamp(parsed.headline || "", 55);
+    let subline = clamp(parsed.subline || "", 160);
+    let offer = clamp(parsed.offer || "", 50);
+    let bullets = arr(parsed.bullets || []).slice(0, 3).map(b => clamp(b, 46));
+    let disclaimers = clamp(parsed.disclaimers || "", 160);
+    let cta = clamp(parsed.cta || "Learn more", 24);
+
+    // Post-guard: if model copied input too closely, force a clean fallback
+    const tooSimilar =
+      jaccard(headline, inputText) > 0.65 ||
+      jaccard(subline, inputText) > 0.65 ||
+      containsLongSubstring(headline, inputText, 18) ||
+      containsLongSubstring(subline, inputText, 24);
+
+    if (tooSimilar || !headline || !subline) {
+      const fb = fallbackCopyFromAnswers(a);
+      headline = fb.headline;
+      subline = fb.description;
+      // Keep other fields simple
+      if (!cta) cta = "Learn more";
+      if (!bullets || !bullets.length) bullets = [];
+      offer = offer || "";
+      disclaimers = disclaimers || "";
+    }
+
+    // Additional: prevent headline == subline
+    if (jaccard(headline, subline) > 0.55 || containsLongSubstring(headline, subline, 16)) {
+      const fb = fallbackCopyFromAnswers(a);
+      // Keep headline, rewrite subline
+      subline = fb.description;
+    }
+
+    // Clean/shape
+    headline = sentenceCase(clampWords(softRewrite(headline), 8));
+    subline = sentenceCase(softRewrite(subline)).slice(0, 160);
+
     const copy = {
-      headline: clamp(parsed.headline || "", 55),
-      subline: clamp(parsed.subline || "", 140),
-      offer: clamp(parsed.offer || "", 40),
-      bullets: arr(parsed.bullets || []).slice(0, 3).map(b => clamp(b, 40)),
-      disclaimers: clamp(parsed.disclaimers || "", 160),
-      cta: clamp(parsed.cta || "Learn more", 24)
+      headline: clamp(headline, 55),
+      subline: clamp(subline, 160),
+      offer: clamp(offer, 50),
+      bullets: (bullets || []).slice(0, 3).map(b => clamp(sentenceCase(softRewrite(b)), 46)),
+      disclaimers: clamp(disclaimers, 160),
+      cta: clamp(sentenceCase(softRewrite(cta)), 24),
     };
 
-    return res.json({ ok: true, copy });
+    // IMPORTANT: return headline/description directly too (easy frontend wiring)
+    return res.json({
+      ok: true,
+      copy,
+      headline: copy.headline,
+      description: copy.subline,
+    });
   } catch (e) {
     console.error("summarize-ad-copy error:", e?.message || e);
     return res.status(400).json({ ok: false, error: "copy_failed" });

@@ -541,6 +541,96 @@ function normalizeSmartCopy(raw = {}, answers = {}) {
   };
 }
 
+function _normText(s = "") {
+  return String(s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function _tokenSet(s = "") {
+  const t = _normText(s).split(" ").filter(Boolean);
+  return new Set(t);
+}
+
+function _jaccard(a = "", b = "") {
+  const A = _tokenSet(a);
+  const B = _tokenSet(b);
+  if (!A.size || !B.size) return 0;
+  let inter = 0;
+  for (const x of A) if (B.has(x)) inter++;
+  const union = A.size + B.size - inter;
+  return union ? inter / union : 0;
+}
+
+// if body repeats headline (or starts with it), rewrite body smartly
+function _dedupeBodyFromHeadline(headline = "", body = "", answers = {}) {
+  const h = String(headline || "").trim();
+  let b = String(body || "").trim();
+
+  // Remove exact headline prefix
+  if (h && b.toLowerCase().startsWith(h.toLowerCase())) {
+    b = b.slice(h.length).trim();
+    b = b.replace(/^[-–—:,\s]+/, "").trim();
+  }
+
+  // If still too similar, generate a “human” body from answers
+  const sim = _jaccard(h, b);
+  if (!b || b.length < 18 || sim > 0.55) {
+    const biz = (answers.businessName || "your brand").toString().trim();
+    const benefit = (answers.mainBenefit || "").toString().trim();
+    const offer = (answers.offer || "").toString().trim();
+    const audience = (answers.idealCustomer || "").toString().trim();
+    const industry = (answers.industry || "").toString().trim();
+
+    // Copywriter-ish, but simple and non-repeating
+    const parts = [];
+    if (benefit) parts.push(benefit);
+    if (audience) parts.push(`Made for ${audience}.`);
+    if (offer) parts.push(`Limited offer: ${offer}.`);
+    if (!parts.length && industry) parts.push(`Premium ${industry} made to fit your style and your budget.`);
+    if (!parts.length) parts.push(`Quality you can feel — designed to look great and last.`);
+
+    // Add brand anchor, but not repeating the headline
+    b = `${parts.join(" ")} ${biz ? `Explore ${biz} today.` : ""}`.trim();
+  }
+
+  // Final clamp
+  b = b.replace(/\s+/g, " ").trim();
+  if (b.length > 180) b = b.slice(0, 177).trim() + "...";
+  return b;
+}
+
+// ensure A and B are truly different
+function _forceVariantDifference(copyA, copyB, answers = {}) {
+  const hSim = _jaccard(copyA.headline, copyB.headline);
+  const bSim = _jaccard(copyA.subline, copyB.subline);
+  const tooClose = hSim > 0.65 && bSim > 0.6;
+
+  if (!tooClose) return copyB;
+
+  // “Human” fallback B if GPT gave same-ish copy
+  const industry = (answers.industry || "local").toString().trim();
+  const offer = (answers.offer || "").toString().trim();
+  const benefit = (answers.mainBenefit || "").toString().trim();
+
+  const altHead =
+    offer ? `Limited-Time: ${offer}` :
+    benefit ? `A Better Way to ${benefit}` :
+    industry ? `Trusted ${industry} That Stands Out` :
+    `Built to Impress`;
+
+  const altBody = _dedupeBodyFromHeadline(
+    altHead,
+    copyB.subline || "",
+    answers
+  );
+
+  return { ...copyB, headline: altHead.slice(0, 55), subline: altBody };
+}
+
+
 /* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
 function toAbsoluteMedia(u) {
   if (!u) return "";
@@ -1095,8 +1185,15 @@ export default function FormPage() {
     const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
     const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
 
-    const copyA = normalizeSmartCopy(rawA, answers);
-    let copyB = normalizeSmartCopy(rawB, answers);
+   let copyA = normalizeSmartCopy(rawA, answers);
+let copyB = normalizeSmartCopy(rawB, answers);
+
+// Make sure body doesn't repeat headline (copywriter-clean)
+copyA = { ...copyA, subline: _dedupeBodyFromHeadline(copyA.headline, copyA.subline, answers) };
+copyB = { ...copyB, subline: _dedupeBodyFromHeadline(copyB.headline, copyB.subline, answers) };
+
+// Make sure B is truly different from A
+copyB = _forceVariantDifference(copyA, copyB, answers);
 
     const same =
       (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
@@ -1112,7 +1209,24 @@ export default function FormPage() {
       handleGenerateStaticAd("poster_b", copyB, { regenerateToken: tB, silent: true }),
     ]);
 
-    const urls = [urlA, urlB].filter(Boolean).slice(0, 2);
+    let urls = [urlA, urlB].filter(Boolean).slice(0, 2);
+
+// If one timed out, retry once for the missing one
+if (urls.length === 1) {
+  try {
+    const missingToken = `${runToken}-B-retry`;
+    const rawBRetry = await summarizeAdCopy(answers, { regenerateToken: missingToken, variant: "B_RETRY_NO_REPEAT" });
+    let copyBRetry = normalizeSmartCopy(rawBRetry, answers);
+    copyBRetry = { ...copyBRetry, subline: _dedupeBodyFromHeadline(copyBRetry.headline, copyBRetry.subline, answers) };
+    const urlRetry = await handleGenerateStaticAd("poster_b", copyBRetry, { regenerateToken: missingToken, silent: true });
+    if (urlRetry) urls = [urls[0], urlRetry];
+  } catch {}
+}
+
+// Hard guarantee: always 2 entries (fallback duplicates if server is dying)
+if (urls.length === 1) urls = [urls[0], urls[0]];
+if (urls.length === 0) urls = [];
+
 
     if (urls[0]) {
       saveImageDraftById(creativeIdFromUrl(urls[0]), {

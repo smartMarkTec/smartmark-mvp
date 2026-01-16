@@ -32,13 +32,13 @@ const FORM_DRAFT_KEY = "sm_form_draft_v2";
 /* ======================= hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
 
-/* NEW: flag to detect FB redirect flow and force re-hydration */
+/* flag to detect FB redirect flow and force re-hydration */
 const FB_CONNECT_INFLIGHT_KEY = "sm_fb_connect_inflight_v1";
 
-/* ======================= creatives persist until campaign duration ends ======================= */
-const DEFAULT_CAMPAIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // safety fallback if no end is known
+/* creatives persist until campaign duration ends */
+const DEFAULT_CAMPAIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
-/* Responsive helper (unchanged) */
+/* Responsive helper */
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 900);
   React.useEffect(() => {
@@ -49,7 +49,7 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-/* FB connection flag (unchanged) */
+/* FB connection flag */
 const FB_CONN_KEY = "smartmark_fb_connected";
 const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
 
@@ -122,12 +122,10 @@ function isExpiredSavedCreative(saved) {
   if (!saved) return true;
   const now = Date.now();
 
-  // If expiresAt is present, use it (this is the “campaign duration is over” rule)
   if (saved.expiresAt && Number.isFinite(Number(saved.expiresAt))) {
     return now > Number(saved.expiresAt);
   }
 
-  // Back-compat: old entries without expiresAt live for 14 days from when saved
   const base = Number(saved.time) || now;
   return now > base + DEFAULT_CAMPAIGN_TTL_MS;
 }
@@ -144,9 +142,7 @@ function purgeExpiredCreative(map, campaignId) {
 function saveSetupCreativeBackup(user, draftObj) {
   try {
     const payload = { ...(draftObj || {}), savedAt: Date.now() };
-    // Save both user-scoped + legacy to be safest
-    if (user)
-      localStorage.setItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY), JSON.stringify(payload));
+    if (user) localStorage.setItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY), JSON.stringify(payload));
     localStorage.setItem(SETUP_CREATIVE_BACKUP_KEY, JSON.stringify(payload));
   } catch {}
 }
@@ -183,7 +179,7 @@ function persistDraftCreativesNow(user, draftCreatives) {
   } catch {}
 }
 
-/* NEW: attach draft creatives to a campaign slot if that campaign has none saved yet */
+/* ======================= NEW: attach draft creatives into active campaign slot after FB connect ======================= */
 function attachDraftToCampaignIfEmpty({ user, acctId, campaignId, draftImages, expiresAt, name }) {
   try {
     if (!acctId || !campaignId) return false;
@@ -193,6 +189,7 @@ function attachDraftToCampaignIfEmpty({ user, acctId, campaignId, draftImages, e
     const purged = purgeExpiredCreative(map, campaignId);
     if (purged) writeCreativeMap(user, acctId, map);
 
+    // never overwrite existing creatives
     if (map[campaignId] && Array.isArray(map[campaignId].images) && map[campaignId].images.length) {
       return false;
     }
@@ -374,7 +371,8 @@ function MetricsRow({ metrics }) {
     const impressions = m.impressions ?? "--";
     const clicks = m.clicks ?? "--";
     const ctr = m.ctr ?? "--";
-    const cpc = m.spend && m.clicks ? `$${(Number(m.spend) / Number(m.clicks)).toFixed(2)}` : "--";
+    const cpc =
+      m.spend && m.clicks ? `$${(Number(m.spend) / Number(m.clicks)).toFixed(2)}` : "--";
     return [
       { key: "impressions", label: "Impressions", value: impressions },
       { key: "clicks", label: "Clicks", value: clicks },
@@ -433,7 +431,6 @@ const CampaignSetup = () => {
   const initialUser = useMemo(() => getUserFromStorage(), []);
   const resolvedUser = useMemo(() => initialUser, [initialUser]);
 
-  /* ---------------------------- State ---------------------------- */
   const [form, setForm] = useState(() => {
     try {
       return JSON.parse(lsGet(resolvedUser, "smartmark_last_campaign_fields") || "{}") || {};
@@ -444,13 +441,16 @@ const CampaignSetup = () => {
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
-  // creds (MVP): ALSO write legacy so Login prefill works even before first login.
   const [cashapp, setCashapp] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
   const [email, setEmail] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
 
-  const [selectedAccount, setSelectedAccount] = useState(
-    () => lsGet(resolvedUser, "smartmark_last_selected_account") || ""
-  );
+  // IMPORTANT: normalize stored account ID to "act_..."
+  const [selectedAccount, setSelectedAccount] = useState(() => {
+    const v = (lsGet(resolvedUser, "smartmark_last_selected_account") || "").trim();
+    if (!v) return "";
+    return v.startsWith("act_") ? v : `act_${v}`;
+  });
+
   const [selectedPageId, setSelectedPageId] = useState(
     () => lsGet(resolvedUser, "smartmark_last_selected_pageId") || ""
   );
@@ -516,7 +516,6 @@ const CampaignSetup = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
-  // images only
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
     mediaSelection: "image",
@@ -580,7 +579,7 @@ const CampaignSetup = () => {
     setEndDate(eISO);
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
-  /* ===================== DRAFT RE-HYDRATION (survive FB connect) ===================== */
+  /* ===================== DRAFT RE-HYDRATION ===================== */
   useEffect(() => {
     const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
     if (lastFields) {
@@ -609,7 +608,7 @@ const CampaignSetup = () => {
     })();
 
     try {
-      // 1) session (best UX)
+      // 1) session
       const sess = sessionStorage.getItem("draft_form_creatives");
       if (sess) {
         const sObj = JSON.parse(sess);
@@ -618,7 +617,7 @@ const CampaignSetup = () => {
         return;
       }
 
-      // 2) user/legacy CREATIVE_DRAFT_KEY
+      // 2) local draft
       const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
       if (raw) {
         const draft = JSON.parse(raw);
@@ -630,7 +629,7 @@ const CampaignSetup = () => {
         }
       }
 
-      // 3) if we just came back from FB connect, force backup restore
+      // 3) if inflight, force backup
       if (inflight) {
         const backup = loadSetupCreativeBackup(resolvedUser);
         if (backup) {
@@ -640,14 +639,14 @@ const CampaignSetup = () => {
         }
       }
 
-      // 4) last resort backup
+      // 4) backup
       const backup = loadSetupCreativeBackup(resolvedUser);
       if (backup) {
         applyDraft(backup);
         sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+        return;
       }
     } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -655,16 +654,17 @@ const CampaignSetup = () => {
     if (!hasDraft) return;
     try {
       const payload = { ...draftCreatives, savedAt: Date.now() };
-      if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
-      else localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+      if (resolvedUser) {
+        localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+      } else {
+        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+      }
       saveSetupCreativeBackup(resolvedUser, payload);
     } catch {}
   }, [draftCreatives, resolvedUser]);
 
   const handleClearDraft = () => {
-    try {
-      sessionStorage.removeItem("draft_form_creatives");
-    } catch {}
+    try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
     try {
       if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
@@ -682,11 +682,12 @@ const CampaignSetup = () => {
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
       setCameFromFbConnect(true);
+
       try {
         localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
       } catch {}
 
-      // After returning from FB connect, force re-hydrate draft from backup if needed
+      // Force restore draft if session got cleared
       try {
         const sess = sessionStorage.getItem("draft_form_creatives");
         if (!sess) {
@@ -701,9 +702,7 @@ const CampaignSetup = () => {
         }
       } catch {}
 
-      try {
-        localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
-      } catch {}
+      try { localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY); } catch {}
 
       window.history.replaceState({}, document.title, "/setup");
     }
@@ -717,16 +716,17 @@ const CampaignSetup = () => {
     }
   }, [fbConnected]);
 
-  // only accept navImageUrls
+  // Accept navImageUrls
   useEffect(() => {
     const imgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
     if (imgs.length) {
-      setDraftCreatives(() => ({
-        images: imgs,
+      setDraftCreatives((dc) => ({
+        images: imgs.length ? imgs : dc.images,
         mediaSelection: "image",
       }));
       try {
         saveSetupCreativeBackup(resolvedUser, { images: imgs, mediaSelection: "image" });
+        sessionStorage.setItem("draft_form_creatives", JSON.stringify({ images: imgs, mediaSelection: "image", savedAt: Date.now() }));
       } catch {}
     }
   }, [navImageUrls, resolvedUser]);
@@ -755,13 +755,15 @@ const CampaignSetup = () => {
 
   useEffect(() => {
     if (!selectedAccount) return;
-    const acctId = String(selectedAccount).replace("act_", "");
+    const acctId = String(selectedAccount).replace(/^act_/, "");
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
         const list = Array.isArray(data) ? data : data?.data || [];
         const activeCount = list.filter(
-          (c) => (c.status || c.effective_status) === "ACTIVE" || (c.status || c.effective_status) === "PAUSED"
+          (c) =>
+            (c.status || c.effective_status) === "ACTIVE" ||
+            (c.status || c.effective_status) === "PAUSED"
         ).length;
         setCampaignCount(activeCount);
       })
@@ -782,24 +784,22 @@ const CampaignSetup = () => {
         }
       })
       .catch(() => {});
-  }, [fbConnected, selectedAccount, launched, selectedCampaignId]);
+  }, [fbConnected, selectedAccount, launched]);
 
-  /* NEW: After FB connect, attach the draft creatives into the current ACTIVE campaign slot (so they show in the right pane) */
+  /* ===================== THE KEY FIX: after FB connect, attach draft images to active campaign ===================== */
   useEffect(() => {
     if (!cameFromFbConnect) return;
     if (!fbConnected) return;
-
-    const acctId = String(selectedAccount || "").replace(/^act_/, "");
-    if (!acctId) return;
+    if (!selectedAccount) return;
 
     const draftImages = (draftCreatives.images || []).slice(0, 2);
     if (!draftImages.length) return;
 
+    const acctId = String(selectedAccount).replace(/^act_/, "");
     const targetCampaignId = selectedCampaignId || (campaigns && campaigns[0] && campaigns[0].id);
     if (!targetCampaignId || targetCampaignId === "__DRAFT__") return;
 
-    const endMillis =
-      endDate && !isNaN(new Date(endDate).getTime()) ? new Date(endDate).getTime() : null;
+    const endMillis = endDate && !isNaN(new Date(endDate).getTime()) ? new Date(endDate).getTime() : null;
     const expiresAt = endMillis || Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
     const didAttach = attachDraftToCampaignIfEmpty({
@@ -851,25 +851,27 @@ const CampaignSetup = () => {
       );
   }, [expandedId, selectedAccount]);
 
-  // Persist user-scoped + alsoLegacy for creds
+  // Persist
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate }));
-  }, [form, startDate, endDate, resolvedUser]);
+  }, [form, startDate, endDate]);
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_budget", budget);
-  }, [budget, resolvedUser]);
+  }, [budget]);
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_login_username", cashapp, true);
-  }, [cashapp, resolvedUser]);
+  }, [cashapp]);
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_login_password", email, true);
-  }, [email, resolvedUser]);
+  }, [email]);
   useEffect(() => {
-    lsSet(resolvedUser, "smartmark_last_selected_account", selectedAccount);
-  }, [selectedAccount, resolvedUser]);
+    // store act_ form always
+    const v = selectedAccount ? (selectedAccount.startsWith("act_") ? selectedAccount : `act_${selectedAccount}`) : "";
+    lsSet(resolvedUser, "smartmark_last_selected_account", v);
+  }, [selectedAccount]);
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId);
-  }, [selectedPageId, resolvedUser]);
+  }, [selectedPageId]);
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
@@ -918,7 +920,6 @@ const CampaignSetup = () => {
         return rest;
       });
 
-      // also remove persisted creatives for this campaign
       try {
         const map = readCreativeMap(resolvedUser, acctId);
         if (map[selectedCampaignId]) {
@@ -988,9 +989,7 @@ const CampaignSetup = () => {
         imageVariants: filteredImages,
         flightStart: startISO,
         flightEnd: endISO,
-        overrideCountPerType: {
-          images: Math.min(2, filteredImages.length),
-        },
+        overrideCountPerType: { images: Math.min(2, filteredImages.length) },
       };
 
       const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
@@ -1003,7 +1002,6 @@ const CampaignSetup = () => {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      // persist creatives until end
       const map = readCreativeMap(resolvedUser, acctId);
       if (json.campaignId) {
         const expiresAt =
@@ -1021,6 +1019,8 @@ const CampaignSetup = () => {
         writeCreativeMap(resolvedUser, acctId, map);
       }
 
+      // IMPORTANT: DO NOT clear draft here unless you want it gone after launch.
+      // You asked it to persist through connect/back; launch is a separate action.
       sessionStorage.removeItem("draft_form_creatives");
       try {
         if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
@@ -1359,7 +1359,9 @@ const CampaignSetup = () => {
           </div>
 
           <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
-            <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>Daily Budget ($)</label>
+            <label style={{ color: WHITE, fontWeight: 800, fontSize: "1.02rem" }}>
+              Daily Budget ($)
+            </label>
             <div
               style={{
                 background: INPUT_BG,
@@ -1391,98 +1393,6 @@ const CampaignSetup = () => {
               SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total:{" "}
               <span style={{ color: WHITE }}>${total.toFixed(2)}</span>
             </div>
-
-            {parseFloat(budget) >= 3 && (
-              <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-                <button
-                  onClick={() => {
-                    const feeAmount = Math.max(1, Math.round(calculateFees(budget).fee || 25));
-                    window.open(`https://cash.app/$SmarteMark/${feeAmount}`, "_blank", "noopener,noreferrer");
-                  }}
-                  style={{
-                    background: ACCENT,
-                    color: "#0f1418",
-                    border: "none",
-                    borderRadius: 12,
-                    fontWeight: 900,
-                    padding: "10px 16px",
-                    cursor: "pointer",
-                    boxShadow: "0 2px 12px rgba(12,196,190,0.35)",
-                    transition: "transform 0.15s",
-                  }}
-                  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-                >
-                  Pay ${calculateFees(budget).fee.toFixed(0)}
-                </button>
-
-                <div style={{ marginTop: 6, color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
-                  Cash App: <span style={{ color: WHITE, fontWeight: 900 }}>$SmarteMark</span>
-                </div>
-
-                <div>
-                  <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
-                    Cashtag (your username)
-                  </label>
-                  <div
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      marginTop: 6,
-                      border: `1px solid ${INPUT_BORDER}`,
-                    }}
-                  >
-                    <input
-                      type="text"
-                      value={cashapp}
-                      onChange={(e) => setCashapp(e.target.value)}
-                      placeholder="$yourcashtag"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        outline: "none",
-                        width: "100%",
-                        color: TEXT_DIM,
-                        fontSize: "1rem",
-                        fontWeight: 800,
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>
-                    Email (used as password)
-                  </label>
-                  <div
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      marginTop: 6,
-                      border: `1px solid ${INPUT_BORDER}`,
-                    }}
-                  >
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      placeholder="you@example.com"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        outline: "none",
-                        width: "100%",
-                        color: TEXT_DIM,
-                        fontSize: "1rem",
-                        fontWeight: 800,
-                      }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
 
           <button
@@ -1501,12 +1411,6 @@ const CampaignSetup = () => {
               cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
               opacity: loading || campaignCount >= 2 || !canLaunch ? 0.6 : 1,
               transition: "transform 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              if (!e.currentTarget.disabled) e.currentTarget.style.transform = "translateY(-2px)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.transform = "translateY(0)";
             }}
           >
             {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
@@ -1562,6 +1466,11 @@ const CampaignSetup = () => {
                 Active Campaigns
               </div>
               <div style={{ display: "flex", gap: "0.6rem" }}>
+                <button
+                  onClick={() => {}}
+                  disabled={true}
+                  style={{ display: "none" }}
+                />
                 <button
                   onClick={handlePauseUnpause}
                   disabled={loading || !selectedCampaignId}
@@ -1830,7 +1739,7 @@ const CampaignSetup = () => {
                   <option value="">Select an ad account</option>
                   {adAccounts.map((ac) => (
                     <option key={ac.id} value={ac.id}>
-                      {ac.name ? `${ac.name} (${ac.id.replace("act_", "")})` : ac.id.replace("act_", "")}
+                      {ac.name ? `${ac.name} (${String(ac.id).replace("act_", "")})` : String(ac.id).replace("act_", "")}
                     </option>
                   ))}
                 </select>
