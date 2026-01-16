@@ -312,11 +312,11 @@ function Dots({ count, active, onClick }) {
 function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const safe = (s) => String(s || "").trim();
 
-  const headline = a.headline || a.eventTitle || a.mainBenefit || a.businessName || "";
+  const headline = a.headline || a.eventTitle || a.businessName || "";
   const promoLine = a.promoLine || a.subline || a.idealCustomer || "";
   const offer = a.offer || a.saveAmount || "";
   const secondary = a.secondary || a.financingLine || "";
-  const adCopy = a.adCopy || a.details || a.mainBenefit || "";
+const adCopy = a.adCopy || a.details || "";
   const legal = a.legal || "";
   const backgroundUrl = a.backgroundUrl || fallback.backgroundUrl || "";
 
@@ -584,7 +584,8 @@ export default function FormPage() {
   useEffect(() => {
     const draft = currentImageId ? getImageDraftById(currentImageId) : null;
     setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
-    setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? answers?.mainBenefit ?? "");
+   setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? "");
+
     setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
   }, [currentImageId, result, answers]);
 
@@ -601,22 +602,24 @@ export default function FormPage() {
     return () => clearTimeout(t);
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
-  const fallbackCopy = useMemo(() => {
-    const f = derivePosterFieldsFromAnswers(answers || {}, {});
-    return {
-      headline:
-        (f.headline ||
-          (answers?.mainBenefit || "") ||
-          (answers?.businessName || "") ||
-          "Your headline will appear here").toString(),
-      body:
-        (f.adCopy ||
-          (answers?.details || "") ||
-          (answers?.mainBenefit || "") ||
-          (answers?.idealCustomer ? `Made for ${answers.idealCustomer}` : "") ||
-          "Your ad description will appear here").toString(),
-    };
-  }, [answers]);
+const fallbackCopy = useMemo(() => {
+  const biz = (answers?.businessName || "Your Business").toString().trim();
+  const industry = (answers?.industry || "").toString().trim();
+  const offer = (answers?.offer || "").toString().trim();
+
+  const headline =
+    offer ? offer.slice(0, 55)
+    : industry ? `${industry} Specials`.slice(0, 55)
+    : `${biz} Specials`.slice(0, 55);
+
+  const body =
+    offer
+      ? `Limited-time offer from ${biz}. Tap to learn more.`
+      : `Discover what ${biz} can do for you. Tap to learn more.`;
+
+  return { headline, body };
+}, [answers]);
+
 
   const displayHeadline = (editHeadline || result?.headline || fallbackCopy.headline || "")
     .toString()
