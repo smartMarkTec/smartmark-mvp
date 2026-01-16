@@ -35,6 +35,48 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 
+/* -------- Image generation spend guard -------- */
+const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
+const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
+// Cost-effective default: 1 initial + 2 regenerations = 3 total runs/day (~$1.20/day if $0.40/run)
+const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 3;
+
+function loadGenQuota() {
+  try {
+    const raw = localStorage.getItem(IMAGE_GEN_QUOTA_KEY);
+    const now = Date.now();
+    if (!raw) return { used: 0, resetAt: now + IMAGE_GEN_WINDOW_MS };
+    const q = JSON.parse(raw);
+    if (!q?.resetAt || now > q.resetAt) return { used: 0, resetAt: now + IMAGE_GEN_WINDOW_MS };
+    return { used: Number(q.used || 0), resetAt: Number(q.resetAt) };
+  } catch {
+    const now = Date.now();
+    return { used: 0, resetAt: now + IMAGE_GEN_WINDOW_MS };
+  }
+}
+function saveGenQuota(q) {
+  try {
+    localStorage.setItem(IMAGE_GEN_QUOTA_KEY, JSON.stringify(q));
+  } catch {}
+}
+function canRunImageGen() {
+  const q = loadGenQuota();
+  return q.used < IMAGE_GEN_MAX_RUNS_PER_WINDOW;
+}
+function bumpImageGenCount() {
+  const q = loadGenQuota();
+  const next = { ...q, used: (q.used || 0) + 1 };
+  saveGenQuota(next);
+  return next;
+}
+function quotaMessage() {
+  const q = loadGenQuota();
+  const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
+  const mins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
+  return `Image generation limit reached for today. Remaining runs: ${remaining}. Try again in about ${mins} minutes.`;
+}
+
+
 /* -------- Image copy edit store -------- */
 const IMAGE_DRAFTS_KEY = "smartmark.imageDrafts.v1";
 const ALLOWED_CTAS = [
@@ -809,11 +851,37 @@ export default function FormPage() {
     return () => clearTimeout(t);
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
-  const displayHeadline = (editHeadline || result?.headline || "").slice(0, 55);
-  const displayBody = (editBody || result?.body || "").trim();
-  const displayCTA = normalizeOverlayCTA(
-    editCTA || result?.image_overlay_text || answers?.cta || ""
-  );
+  // Live fallback copy from answers (so preview never looks empty)
+const fallbackCopy = useMemo(() => {
+  const f = derivePosterFieldsFromAnswers(answers || {}, {});
+  return {
+    headline:
+      (f.headline ||
+        (answers?.mainBenefit || "") ||
+        (answers?.businessName || "") ||
+        "Your headline will appear here").toString(),
+    body:
+      (f.adCopy ||
+        (answers?.details || "") ||
+        (answers?.mainBenefit || "") ||
+        (answers?.idealCustomer ? `Perfect for: ${answers.idealCustomer}` : "") ||
+        "Your ad description will appear here").toString(),
+  };
+}, [answers]);
+
+const displayHeadline = (editHeadline || result?.headline || fallbackCopy.headline || "")
+  .toString()
+  .trim()
+  .slice(0, 55);
+
+const displayBody = (editBody || result?.body || fallbackCopy.body || "")
+  .toString()
+  .trim();
+
+const displayCTA = normalizeOverlayCTA(
+  editCTA || result?.image_overlay_text || answers?.cta || "Learn more"
+);
+
 
   /* Hard reset chat + draft */
   function hardResetChat() {
@@ -1015,7 +1083,17 @@ export default function FormPage() {
     const currentQ = CONVO_QUESTIONS[step];
 
     if (step >= CONVO_QUESTIONS.length) {
-      if (!hasGenerated && isGenerateTrigger(value)) {
+       if (!hasGenerated && isGenerateTrigger(value)) {
+        // Spend guard (counts the initial generation too)
+        if (!canRunImageGen()) {
+          const msg = quotaMessage();
+          setError(msg);
+          setChatHistory((ch) => [...ch, { from: "gpt", text: msg }]);
+          return;
+        }
+
+        bumpImageGenCount();
+
         setLoading(true);
         setGenerating(true);
 
@@ -1051,7 +1129,7 @@ export default function FormPage() {
           try {
             await warmBackend();
 
-            // IMAGE: Poster B A/B with DIFFERENT COPY per image (consistent layout)
+            // IMAGE: Poster B A/B with DIFFERENT COPY per image
             const imagesPromise = (async () => {
               await generatePosterBPair(token);
             })();
@@ -1076,6 +1154,7 @@ export default function FormPage() {
 
         return;
       }
+
 
       if (hasGenerated) {
         await handleSideChat(value, null);
@@ -1192,15 +1271,21 @@ export default function FormPage() {
 
   /* Regenerations (sequential with warmup/backoff) */
   async function handleRegenerateImage() {
+    // Spend guard
+    if (!canRunImageGen()) {
+      const msg = quotaMessage();
+      setError(msg);
+      alert(msg);
+      return;
+    }
+
     setImageLoading(true);
     try {
+      bumpImageGenCount();
       await warmBackend();
       const token = getRandomString();
 
       // Generate a consistent Poster B A/B pair
-      // - different copy per image
-      // - different background/photo per image
-      // - consistent layout across both images
       await generatePosterBPair(token);
     } catch (e) {
       console.error("handleRegenerateImage failed:", e?.message || e);
@@ -1209,6 +1294,27 @@ export default function FormPage() {
       setImageLoading(false);
     }
   }
+
+
+    /* If user refreshes, wipe cached creatives (per your request) */
+  useEffect(() => {
+    try {
+      const nav = performance.getEntriesByType?.("navigation")?.[0];
+      const isReload = nav?.type === "reload";
+      if (isReload) {
+        localStorage.removeItem(CREATIVE_DRAFT_KEY);
+        sessionStorage.removeItem("draft_form_creatives");
+        // keep answers/chat draft if you want, but remove image drafts to avoid stale preview mismatch
+        // localStorage.removeItem(IMAGE_DRAFTS_KEY);
+        setImageUrls([]);
+        setActiveImage(0);
+        setImageUrl("");
+        setHasGenerated(false);
+      }
+    } catch {}
+    // eslint-disable-next-line
+  }, []);
+
 
   // --- Static Ad Generator (Templates A/B) — UPDATED TO PASS FULL COPY (WITH BULLETS) ---
   async function handleGenerateStaticAd(
@@ -1976,7 +2082,8 @@ export default function FormPage() {
         }}
       >
         <button
-          disabled={!hasGenerated}
+         disabled={false}
+
           style={{
             background: TEAL,
             color: "#0e1519",
@@ -1988,10 +2095,10 @@ export default function FormPage() {
             marginBottom: 4,
             fontFamily: MODERN_FONT,
             boxShadow: `0 2px 16px ${TEAL_SOFT}`,
-            cursor: hasGenerated ? "pointer" : "not-allowed",
+            cursor: "pointer",
             transition: "background 0.18s, opacity 0.18s, transform 0.18s",
-            opacity: hasGenerated ? 1 : 0.45,
-            transform: hasGenerated ? "translateY(0)" : "translateY(0)",
+            opacity: 1,
+transform: "translateY(0)",
           }}
           onClick={() => {
             // HARD STOP (prevents bypass)

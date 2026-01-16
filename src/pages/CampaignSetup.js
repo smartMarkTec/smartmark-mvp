@@ -29,6 +29,47 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
+/* ======================= NEW: hard backup so creatives survive FB redirect ======================= */
+const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
+
+function saveSetupCreativeBackup(user, draftObj) {
+  try {
+    const payload = { ...(draftObj || {}), savedAt: Date.now() };
+    // Save both user-scoped + legacy to be safest
+    if (user) localStorage.setItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY), JSON.stringify(payload));
+    localStorage.setItem(SETUP_CREATIVE_BACKUP_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+function loadSetupCreativeBackup(user) {
+  try {
+    const raw =
+      (user && localStorage.getItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY))) ||
+      localStorage.getItem(SETUP_CREATIVE_BACKUP_KEY);
+
+    if (!raw) return null;
+
+    const draft = JSON.parse(raw);
+    const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
+    if (!ageOk) return null;
+
+    return draft;
+  } catch {
+    return null;
+  }
+}
+
+function persistDraftCreativesNow(user, draftCreatives) {
+  try {
+    const payload = { ...(draftCreatives || {}), mediaSelection: "image", savedAt: Date.now() };
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+    if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+    localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+    saveSetupCreativeBackup(user, payload);
+  } catch {}
+}
+
+
 /* ======================= NEW: creatives persist until campaign duration ends ======================= */
 const DEFAULT_CAMPAIGN_TTL_MS = 14 * 24 * 60 * 60 * 1000; // safety fallback if no end is known
 
@@ -509,36 +550,54 @@ const CampaignSetup = () => {
     setEndDate(eISO);
   }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
 
-  useEffect(() => {
-    const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
-    if (lastFields) {
-      const f = JSON.parse(lastFields);
-      setForm(f);
-      if (f.startDate) setStartDate(f.startDate);
-      if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
+ useEffect(() => {
+  const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
+  if (lastFields) {
+    const f = JSON.parse(lastFields);
+    setForm(f);
+    if (f.startDate) setStartDate(f.startDate);
+    if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
+  }
+
+  const applyDraft = (draftObj) => {
+    setDraftCreatives({
+      images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
+      mediaSelection: "image",
+    });
+  };
+
+  try {
+    // 1) Prefer session (best UX during same-tab nav)
+    const sess = sessionStorage.getItem("draft_form_creatives");
+    if (sess) {
+      applyDraft(JSON.parse(sess));
+      return;
     }
 
-    const applyDraft = (draftObj) => {
-      setDraftCreatives({
-        images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
-        mediaSelection: "image",
-      });
-    };
-
-    try {
-      const sess = sessionStorage.getItem("draft_form_creatives");
-      if (sess) {
-        applyDraft(JSON.parse(sess));
-        return;
-      }
-      const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
-      if (!raw) return;
+    // 2) Then user/legacy CREATIVE_DRAFT_KEY (FormPage writes this)
+    const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
+    if (raw) {
       const draft = JSON.parse(raw);
       const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
-      if (ageOk) applyDraft(draft);
-      else localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
-    } catch {}
-  }, []);
+      if (ageOk) {
+        applyDraft(draft);
+        // also store a backup so FB redirect can’t lose it
+        saveSetupCreativeBackup(resolvedUser, draft);
+        return;
+      }
+    }
+
+    // 3) Last resort: hard backup (survives FB redirect reliably)
+    const backup = loadSetupCreativeBackup(resolvedUser);
+    if (backup) {
+      applyDraft(backup);
+      // re-hydrate session for smoother next navigation
+      sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+      return;
+    }
+  } catch {}
+}, []);
+
 
   useEffect(() => {
     const hasDraft = draftCreatives.images && draftCreatives.images.length;
@@ -1055,8 +1114,11 @@ const CampaignSetup = () => {
         >
           <button
             onClick={() => {
-              window.location.href = `${backendUrl}/auth/facebook`;
-            }}
+  // IMPORTANT: persist creatives BEFORE leaving to Render (cross-origin redirect)
+  persistDraftCreativesNow(resolvedUser, draftCreatives);
+  window.location.href = `${backendUrl}/auth/facebook`;
+}}
+
             style={{
               padding: "14px 22px",
               borderRadius: "14px",
