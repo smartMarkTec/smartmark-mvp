@@ -39,7 +39,8 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
 const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
 // Cost-effective default: 1 initial + 2 regenerations = 3 total runs/day (~$1.20/day if $0.40/run)
-const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 3;
+const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 9999; // TEMP: disable limit while testing
+
 
 function loadGenQuota() {
   try {
