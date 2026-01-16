@@ -4435,12 +4435,12 @@ router.post("/generate-video-ad", async (req, res) => {
     const body     = req.body || {};
     const answers  = body.answers || {};
     const url      = body.url || "";
-    const seedBase = String(
-      body.regenerateToken ||
-      answers.regenerateToken ||
-      answers.businessName ||
-      Date.now()
-    );
+   const seedBase = String(
+  body.regenerateToken ||
+  answers.regenerateToken ||
+  Date.now()
+);
+
 
 // One keyword for this request ONLY (precise video query)
 const industry = (answers.industry || "").toString();   // ✅ define industry (used later)
@@ -4472,6 +4472,15 @@ const inferredIndustry = rawIndustry || (inferText.split(' ').slice(0, 5).join('
 const canon = canonicalIndustry(inferredIndustry);
 
 // ✅ STRICT: search always locked to inferredIndustry
+// ---- stock videos (single pool) ----
+console.log('[regen] /generate-video-ad', {
+  industry: answers?.industry,
+  inferredIndustry,
+  canon,
+  seedBase,
+  url
+});
+
 let clips = await fetchPexelsVideos(
   inferredIndustry,
   12,
@@ -4479,6 +4488,7 @@ let clips = await fetchPexelsVideos(
   url,
   inferredIndustry
 );
+
 
 // still locked, no generic vertical fallbacks
 if (!clips.length) {
