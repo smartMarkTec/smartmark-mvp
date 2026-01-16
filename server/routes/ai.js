@@ -3736,18 +3736,24 @@ async function pexelsPhotoSearch(query, page = 1) {
 }
 
 /* Pexels videos (HIGH RELEVANCE FIRST, then variety) */
-async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '') {
+// ================== REPLACE fetchPexelsVideos + fetchPexelsPhotos WITH THIS ==================
+
+async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '', industryRaw = '') {
   if (!PEXELS_API_KEY) return [];
   const rng = mkRng32(seed || keyword || Date.now());
 
-  const canon = canonicalIndustry(keyword);
-  const queries = industryQueryPack(canon, keyword, urlHint);
+  // ✅ FIX: canon MUST come from the user's industry, not the keyword builder/fallback
+  const targetIndustry = (industryRaw || keyword || '').toString();
+  const canon = canonicalIndustry(targetIndustry);
+
+  // ✅ Queries MUST be built from user's industry
+  const queries = industryQueryPack(canon, targetIndustry, urlHint);
 
   const results = [];
   const seen = new Set();
 
   try {
-    // Relevance first: page 1 then page 2 only if needed
+    // Relevance-first: page 1..2 per query, stop once pool is strong
     for (const q of queries) {
       for (const page of [1, 2]) {
         const r = await pexelsVideoSearch(q, page);
@@ -3756,6 +3762,8 @@ async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '') {
         for (const v of vids) {
           const id = v?.id;
           if (id == null || seen.has(id)) continue;
+
+          // ✅ Hard filter against wrong verticals using the CORRECT canon
           if (looksUnrelatedToIndustry(v, canon)) continue;
 
           const files = Array.isArray(v.video_files) ? v.video_files : [];
@@ -3769,20 +3777,19 @@ async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '') {
             results.push({ url: f.link, id, dur: v.duration || 0 });
           }
 
-          // Stop once we have a strong pool (keeps accuracy high)
-          if (results.length >= Math.max(want * 3, 18)) break;
+          if (results.length >= Math.max(want * 4, 24)) break;
         }
 
-        if (results.length >= Math.max(want * 3, 18)) break;
+        if (results.length >= Math.max(want * 4, 24)) break;
       }
-      if (results.length >= Math.max(want * 3, 18)) break;
+      if (results.length >= Math.max(want * 4, 24)) break;
     }
 
-    // Controlled variety AFTER relevance pool exists
+    // ✅ Variety AFTER accuracy: shuffle large pool then slice
     shuffleInPlace(results, rng);
-
     const pick = results.slice(0, Math.max(want, 8));
-    console.log('[pexels] videos picked:', pick.length, 'kw=', keyword, 'canon=', canon, 'seed=', seed);
+
+    console.log('[pexels] videos picked:', pick.length, 'industry=', targetIndustry, 'canon=', canon, 'kw=', keyword);
     return pick;
   } catch (e) {
     console.warn('[pexels] video search fail:', e.message);
@@ -3790,13 +3797,13 @@ async function fetchPexelsVideos(keyword, want = 8, seed = '', urlHint = '') {
   }
 }
 
-/* Pexels photos (fallback) */
-async function fetchPexelsPhotos(keyword, want = 8, seed = '', urlHint = '') {
+async function fetchPexelsPhotos(keyword, want = 8, seed = '', urlHint = '', industryRaw = '') {
   if (!PEXELS_API_KEY) return [];
   const rng = mkRng32(seed || keyword || Date.now());
 
-  const canon = canonicalIndustry(keyword);
-  const queries = industryQueryPack(canon, keyword, urlHint);
+  const targetIndustry = (industryRaw || keyword || '').toString();
+  const canon = canonicalIndustry(targetIndustry);
+  const queries = industryQueryPack(canon, targetIndustry, urlHint);
 
   const results = [];
   const seen = new Set();
@@ -3817,13 +3824,12 @@ async function fetchPexelsPhotos(keyword, want = 8, seed = '', urlHint = '') {
 
           seen.add(id);
           results.push({ url: u, id });
-
-          if (results.length >= Math.max(want * 3, 24)) break;
+          if (results.length >= Math.max(want * 4, 32)) break;
         }
 
-        if (results.length >= Math.max(want * 3, 24)) break;
+        if (results.length >= Math.max(want * 4, 32)) break;
       }
-      if (results.length >= Math.max(want * 3, 24)) break;
+      if (results.length >= Math.max(want * 4, 32)) break;
     }
 
     shuffleInPlace(results, rng);
@@ -3832,7 +3838,7 @@ async function fetchPexelsPhotos(keyword, want = 8, seed = '', urlHint = '') {
     return [];
   }
 }
-
+// =============================================================================================
 
 /** Ensure 3–4 clips with random order/choices per seed */
 function buildVirtualPlan(rawClips, variant = 0, seed = '') {
@@ -4281,10 +4287,12 @@ const keyword = getVideoKeyword(industry, url, answers); // <-- videos should us
     }
   }
 
-  // Media
- let clips = await fetchPexelsVideos(keyword, 8, '', url);
-
-  if (!clips.length) clips = await fetchPexelsVideos('product shopping', 8);
+// ================== REPLACE THAT BLOCK WITH THIS ==================
+  // Media (industry-locked + more variety)
+  let clips = await fetchPexelsVideos(keyword, 12, `${Date.now()}|${keyword}`, url, industry);
+  if (!clips.length) clips = await fetchPexelsVideos(keyword, 12, `${Date.now()}|${keyword}|p2`, url, industry);
+  if (!clips.length) clips = await fetchPexelsVideos('business', 10, `${Date.now()}|fallback`, url, industry);
+// ================== END REPLACEMENT ==================
 
   const bgm = await prepareBgm();
   let v1, v2;
