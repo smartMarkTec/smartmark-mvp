@@ -48,13 +48,13 @@ router.use((req, res, next) => {
 
 /* ------------------------ HTTP helpers ------------------------ */
 
-function fetchUpstream(method, url, extraHeaders = {}, bodyBuf = null) {
+function fetchUpstream(method, url, extraHeaders = {}, bodyBuf = null, timeoutMs = 120000) {
   return new Promise((resolve, reject) => {
     try {
       const lib = url.startsWith("https") ? https : http;
       const r = lib.request(
         url,
-        { method, timeout: 45000, headers: extraHeaders },
+        { method, timeout: timeoutMs, headers: extraHeaders },
         (res) => {
           const chunks = [];
           res.on("data", (d) => chunks.push(d));
@@ -79,14 +79,15 @@ function fetchUpstream(method, url, extraHeaders = {}, bodyBuf = null) {
 
 /* ------------------------ OpenAI Image (DIRECT AD) ------------------------ */
 /**
- * This generates the FINAL ad image directly from the model (no templates, no compositing).
- * We still have to decode base64 and save to disk so we can return a URL to your frontend.
+ * Generates FINAL ad images directly from the model (no templates, no compositing).
+ * Returns an array of Buffers (length n).
  */
-async function generateOpenAIAdImageBuffer({
+async function generateOpenAIAdImageBuffers({
   prompt,
   size = "1024x1024",
   output_format = "png",
   quality = "auto",
+  n = 2,
 }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
@@ -101,48 +102,70 @@ async function generateOpenAIAdImageBuffer({
     size, // keep square
     quality, // "auto" behaves closest to "just do it"
     output_format, // "png"
-    n: 1,
+    n: Math.max(1, Math.min(4, Number(n) || 1)), // safety clamp
   });
 
-  const { status, body: respBuf } = await fetchUpstream(
-    "POST",
-    "https://api.openai.com/v1/images/generations",
-    {
-      Authorization: `Bearer ${key}`,
-      "Content-Type": "application/json",
-    },
-    Buffer.from(body)
-  );
+  // one retry on transient failures/timeouts
+  const attempt = async () => {
+    const { status, body: respBuf } = await fetchUpstream(
+      "POST",
+      "https://api.openai.com/v1/images/generations",
+      {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      Buffer.from(body),
+      120000
+    );
 
-  if (status !== 200) {
-    let msg = `OpenAI image HTTP ${status}`;
-    try {
-      msg += " " + respBuf.toString("utf8").slice(0, 1000);
-    } catch {}
-    throw new Error(msg);
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(respBuf.toString("utf8"));
-  } catch (e) {
-    throw new Error("OpenAI image: failed to parse JSON response");
-  }
-
-  // GPT image models return base64 via b64_json
-  const b64 = parsed?.data?.[0]?.b64_json;
-  if (!b64) {
-    // If OpenAI ever returns URLs for your model/account, this will catch it.
-    const maybeUrl = parsed?.data?.[0]?.url;
-    if (maybeUrl) {
-      throw new Error(
-        "OpenAI image returned a URL, but this server expects b64_json. Update code to fetch the URL."
-      );
+    if (status !== 200) {
+      let msg = `OpenAI image HTTP ${status}`;
+      try {
+        msg += " " + respBuf.toString("utf8").slice(0, 1200);
+      } catch {}
+      throw new Error(msg);
     }
-    throw new Error("OpenAI image: missing b64_json");
-  }
 
-  return Buffer.from(b64, "base64");
+    let parsed;
+    try {
+      parsed = JSON.parse(respBuf.toString("utf8"));
+    } catch {
+      throw new Error("OpenAI image: failed to parse JSON response");
+    }
+
+    const arr = Array.isArray(parsed?.data) ? parsed.data : [];
+    if (!arr.length) throw new Error("OpenAI image: empty data array");
+
+    const bufs = [];
+    for (const item of arr) {
+      const b64 = item?.b64_json;
+      if (b64) {
+        bufs.push(Buffer.from(b64, "base64"));
+        continue;
+      }
+      // If OpenAI ever returns URLs for your model/account, catch it loudly
+      const maybeUrl = item?.url;
+      if (maybeUrl) {
+        throw new Error(
+          "OpenAI image returned a URL, but this server expects b64_json. Update code to fetch the URL."
+        );
+      }
+    }
+
+    if (!bufs.length) throw new Error("OpenAI image: missing b64_json");
+    return bufs;
+  };
+
+  try {
+    return await attempt();
+  } catch (e) {
+    // retry once
+    try {
+      return await attempt();
+    } catch (e2) {
+      throw e2;
+    }
+  }
 }
 
 /* ------------------------ Prompt builder ------------------------ */
@@ -212,29 +235,51 @@ router.post("/generate-static-ad", async (req, res) => {
 
     const prompt = buildAdPromptFromAnswers(a);
 
-    // Generate the FINAL ad image directly from OpenAI (no resizing, no compositing).
-    const imgBuf = await generateOpenAIAdImageBuffer({
+    // Default: ALWAYS generate 2 images for your A/B flow.
+    // Allow override, but clamp 1..2 unless you purposely change it.
+    const requestedCount = Number(body.count || body.n || 2);
+    const count = Math.max(1, Math.min(2, requestedCount || 2));
+
+    const bufs = await generateOpenAIAdImageBuffers({
       prompt,
       size: "1024x1024",
       output_format: "png",
       quality: "auto",
+      n: count,
     });
 
     const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    const pngName = `${base}.png`;
 
-    await fs.promises.writeFile(path.join(GEN_DIR, pngName), imgBuf);
+    const filenames = [];
+    const urls = [];
 
-    const mediaPng = makeMediaUrl(req, pngName);
+    for (let i = 0; i < Math.min(count, bufs.length); i++) {
+      const pngName = `${base}-${i + 1}.png`;
+      await fs.promises.writeFile(path.join(GEN_DIR, pngName), bufs[i]);
+      filenames.push(pngName);
+      urls.push(makeMediaUrl(req, pngName));
+    }
+
+    // Hard guarantee for frontend: always return 2 entries if count=2
+    // If upstream returned only 1 buffer (rare), duplicate it as fallback.
+    if (count === 2 && urls.length === 1) {
+      urls.push(urls[0]);
+      filenames.push(filenames[0]);
+    }
 
     return res.json({
       ok: true,
       type: "image",
       template: "openai_direct",
-      url: mediaPng,
-      absoluteUrl: mediaPng,
-      pngUrl: mediaPng,
-      filename: pngName,
+      // legacy fields (keep old callers working)
+      url: urls[0] || null,
+      absoluteUrl: urls[0] || null,
+      pngUrl: urls[0] || null,
+      filename: filenames[0] || null,
+      // new stable fields (preferred)
+      imageUrls: urls,
+      imageVariants: urls,
+      filenames,
       promptUsed: process.env.RETURN_PROMPTS === "1" ? prompt : undefined,
       ready: true,
     });
@@ -256,12 +301,12 @@ async function proxyImgHandler(req, res) {
     const passHeaders = {};
     if (req.headers["range"]) passHeaders["Range"] = req.headers["range"];
 
-    const { status, headers, body } = await fetchUpstream("GET", u, passHeaders);
+    const { status, headers, body } = await fetchUpstream("GET", u, passHeaders, null, 120000);
 
     res.status(status || 200);
     Object.entries(headers || {}).forEach(([k, v]) => {
       if (!k) return;
-      const key = k.toLowerCase();
+      const key = String(k).toLowerCase();
       if (["transfer-encoding", "connection"].includes(key)) return;
       res.setHeader(k, v);
     });
@@ -283,12 +328,12 @@ async function proxyHeadHandler(req, res) {
     const passHeaders = {};
     if (req.headers["range"]) passHeaders["Range"] = req.headers["range"];
 
-    const { status, headers } = await fetchUpstream("HEAD", u, passHeaders);
+    const { status, headers } = await fetchUpstream("HEAD", u, passHeaders, null, 120000);
 
     res.status(status || 200);
     Object.entries(headers || {}).forEach(([k, v]) => {
       if (!k) return;
-      const key = k.toLowerCase();
+      const key = String(k).toLowerCase();
       if (["transfer-encoding", "connection"].includes(key)) return;
       res.setHeader(k, v);
     });
