@@ -6,7 +6,6 @@ const router = express.Router();
 
 const fs = require("fs");
 const path = require("path");
-const sharp = require("sharp");
 const http = require("http");
 const https = require("https");
 
@@ -78,26 +77,30 @@ function fetchUpstream(method, url, extraHeaders = {}, bodyBuf = null) {
   });
 }
 
-/* ------------------------ OpenAI Image (FINAL AD) ------------------------ */
-
-// IMPORTANT: correct endpoint is /v1/images/generations (not /v1/images)
+/* ------------------------ OpenAI Image (DIRECT AD) ------------------------ */
+/**
+ * This generates the FINAL ad image directly from the model (no templates, no compositing).
+ * We still have to decode base64 and save to disk so we can return a URL to your frontend.
+ */
 async function generateOpenAIAdImageBuffer({
   prompt,
   size = "1024x1024",
   output_format = "png",
-  quality = "high",
+  quality = "auto",
 }) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
+  // Best default per your request (you can override via env):
+  // - OPENAI_IMAGE_MODEL=gpt-image-1.5
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1.5";
 
   const body = JSON.stringify({
     model,
     prompt,
-    size,
-    quality,
-    output_format, // supported for GPT image models
+    size, // keep square
+    quality, // "auto" behaves closest to "just do it"
+    output_format, // "png"
     n: 1,
   });
 
@@ -114,14 +117,31 @@ async function generateOpenAIAdImageBuffer({
   if (status !== 200) {
     let msg = `OpenAI image HTTP ${status}`;
     try {
-      msg += " " + respBuf.toString("utf8").slice(0, 600);
+      msg += " " + respBuf.toString("utf8").slice(0, 1000);
     } catch {}
     throw new Error(msg);
   }
 
-  const parsed = JSON.parse(respBuf.toString("utf8"));
+  let parsed;
+  try {
+    parsed = JSON.parse(respBuf.toString("utf8"));
+  } catch (e) {
+    throw new Error("OpenAI image: failed to parse JSON response");
+  }
+
+  // GPT image models return base64 via b64_json
   const b64 = parsed?.data?.[0]?.b64_json;
-  if (!b64) throw new Error("OpenAI image: missing b64_json");
+  if (!b64) {
+    // If OpenAI ever returns URLs for your model/account, this will catch it.
+    const maybeUrl = parsed?.data?.[0]?.url;
+    if (maybeUrl) {
+      throw new Error(
+        "OpenAI image returned a URL, but this server expects b64_json. Update code to fetch the URL."
+      );
+    }
+    throw new Error("OpenAI image: missing b64_json");
+  }
+
   return Buffer.from(b64, "base64");
 }
 
@@ -138,28 +158,43 @@ function buildAdPromptFromAnswers(a = {}) {
   const idealCustomer = clean(a.idealCustomer || "");
   const offer = clean(a.offer || a.promo || "");
   const benefit = clean(a.mainBenefit || a.benefit || "");
-  const cta = clean(a.cta || (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More"));
+  const cta = clean(
+    a.cta ||
+      (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
+  );
 
-  // “Direct OpenAI static ad” = generate the whole finished creative (with text)
-  // We also tell it to keep typography legible + no random logos/watermarks.
-  const lines = [
-    `Create a high-converting square (1:1) social media static advertisement image for a real business.`,
-    `Business name: "${businessName}". Industry: "${industry}".`,
-    website ? `Website to include (small, subtle): "${website}".` : `No website line if none provided.`,
-    idealCustomer ? `Target customer: "${idealCustomer}".` : `Target customer: general audience for this industry.`,
-    benefit ? `Core promise/benefit: "${benefit}".` : `Highlight a clear, believable benefit for this business.`,
-    offer ? `Special offer/promo to feature prominently: "${offer}".` : `No discount. Instead highlight a neutral promo like "New Arrivals" / "Featured Collection" / "Limited Drop" depending on industry.`,
+  // Goal: generate the finished paid-ad creative directly from the model.
+  // No templates, no overlays, no “baked” layouts in code.
+  return [
+    `Create a finished, high-converting square (1:1) social media static advertisement image.`,
+    `It must look like a real paid Facebook/Instagram ad creative a brand would run.`,
     ``,
-    `Design requirements:`,
-    `- Modern, premium, clean layout. Strong hierarchy.`,
-    `- Include readable text in the image: business name, short headline (3–7 words), 1 supporting line, the offer (or neutral promo), and a clear CTA button text: "${cta}".`,
+    `Business name: "${businessName}"`,
+    `Industry: "${industry}"`,
+    website ? `Website (small, subtle): "${website}"` : `No website line.`,
+    idealCustomer
+      ? `Target customer: "${idealCustomer}"`
+      : `Target customer: typical buyers for this industry.`,
+    benefit
+      ? `Core promise/benefit: "${benefit}"`
+      : `Include a clear believable benefit appropriate to this industry.`,
+    offer
+      ? `Promo/offer to feature prominently: "${offer}"`
+      : `No discount given. Use a neutral promo tag appropriate to the industry (e.g., "New Arrivals", "Featured Collection", "Limited Drop").`,
+    ``,
+    `Layout & typography requirements:`,
+    `- Use modern, premium, clean design with strong visual hierarchy.`,
+    `- Include readable on-image text: business name, a short headline (3–7 words), one supporting line, the offer/promo, and a clear CTA button that says: "${cta}".`,
     `- Keep typography crisp and legible on mobile. Avoid tiny text.`,
-    `- Use industry-appropriate imagery (photo-realistic or polished commercial style).`,
-    `- NO third-party logos, NO watermarks, NO QR codes, NO fake certifications, NO policy-violating claims.`,
-    `- Output should look like a real paid ad creative that a brand would run on Facebook/Instagram.`,
-  ];
-
-  return lines.join("\n");
+    `- Use industry-appropriate imagery (commercial photo-real or polished brand style).`,
+    ``,
+    `Strict constraints:`,
+    `- NO third-party logos, NO watermarks, NO QR codes.`,
+    `- NO fake certifications, NO policy-violating claims.`,
+    `- Do not include any unrelated brand names.`,
+    ``,
+    `Output: a single square static ad image.`,
+  ].join("\n");
 }
 
 /* ------------------------ /generate-static-ad ------------------------ */
@@ -167,29 +202,28 @@ function buildAdPromptFromAnswers(a = {}) {
 router.post("/generate-static-ad", async (req, res) => {
   try {
     const body = req.body || {};
+    // accept answers, inputs, or direct body
     const a =
       body.answers && typeof body.answers === "object"
         ? body.answers
-        : (body.inputs && typeof body.inputs === "object" ? body.inputs : body);
+        : body.inputs && typeof body.inputs === "object"
+        ? body.inputs
+        : body;
 
     const prompt = buildAdPromptFromAnswers(a);
 
-    // Generate at 1024 then upscale to 1080 (FB-friendly)
+    // Generate the FINAL ad image directly from OpenAI (no resizing, no compositing).
     const imgBuf = await generateOpenAIAdImageBuffer({
       prompt,
       size: "1024x1024",
       output_format: "png",
-      quality: "high",
+      quality: "auto",
     });
-
-    const finalPng = await sharp(imgBuf)
-      .resize(1080, 1080, { fit: "cover" })
-      .png({ quality: 92 })
-      .toBuffer();
 
     const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     const pngName = `${base}.png`;
-    await fs.promises.writeFile(path.join(GEN_DIR, pngName), finalPng);
+
+    await fs.promises.writeFile(path.join(GEN_DIR, pngName), imgBuf);
 
     const mediaPng = makeMediaUrl(req, pngName);
 
