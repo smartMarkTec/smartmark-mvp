@@ -128,6 +128,46 @@ function fetchBuffer(url, extraHeaders = {}) {
   });
 }
 
+async function generateOpenAIImageBuffer({
+  prompt,
+  size = "1024x1024",
+  output_format = "png",
+}) {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new Error("OPENAI_API_KEY missing");
+
+  const body = JSON.stringify({
+    model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+    prompt,
+    size,
+    output_format,
+  });
+
+  const { status, body: respBuf } = await fetchUpstream(
+    "POST",
+    "https://api.openai.com/v1/images",
+    {
+      Authorization: `Bearer ${key}`,
+      "Content-Type": "application/json",
+    },
+    Buffer.from(body)
+  );
+
+  if (status !== 200) {
+    let msg = `OpenAI image HTTP ${status}`;
+    try {
+      msg += " " + respBuf.toString("utf8").slice(0, 400);
+    } catch {}
+    throw new Error(msg);
+  }
+
+  const parsed = JSON.parse(respBuf.toString("utf8"));
+  const b64 = parsed?.data?.[0]?.b64_json;
+  if (!b64) throw new Error("OpenAI image: missing b64_json");
+  return Buffer.from(b64, "base64");
+}
+
+
 /* ------------------------ Industry profiles ------------------------ */
 
 function isServiceFixIndustry(s = "") {
@@ -2463,17 +2503,35 @@ if (!safeDisclaimers && hasUserOffer && safeOffer) {
         );
       }
     }
-    if (!photoBuf) {
-      try {
-        const q = pexelsQueryForKind(
-          classifyIndustry(industry),
-          mergedKnobsB.backgroundHint
-        );
-        photoBuf = await fetchPexelsPhotoBuffer(q, seed);
-      } catch (e) {
-        console.warn("[poster_b] Pexels fetch failed:", e.message);
-      }
-    }
+   if (!photoBuf) {
+  try {
+    const kind = classifyIndustry(industry);
+    const benefit =
+      (a.mainBenefit || a.benefit || a.idealCustomer || "").toString().trim();
+
+    // IMPORTANT: tell the model "no text" so it doesn't try to write words on the image
+    const prompt = [
+      `A high-quality professional photo background for a social media ad.`,
+      `Industry: ${industry}. Business: ${(mergedInputsB.businessName || "").toString()}.`,
+      benefit ? `Context: ${benefit}.` : ``,
+      `Style: natural lighting, modern, clean, realistic, neutral tones, shallow depth of field.`,
+      `Scene must be strictly relevant to the industry.`,
+      `NO text, NO logos, NO watermarks, NO UI, NO typography.`,
+      `Square composition, centered subject, good negative space for overlay.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    photoBuf = await generateOpenAIImageBuffer({
+      prompt,
+      size: "1024x1024",
+      output_format: "png",
+    });
+  } catch (e) {
+    console.warn("[poster_b] OpenAI background failed:", e.message);
+  }
+}
+
     if (!photoBuf) {
       const localPath = pickLocalStockPath(classifyIndustry(industry), seed);
       if (localPath) {
@@ -2735,17 +2793,33 @@ router.post("/generate-image-from-prompt", async (req, res) => {
             photoBuf = await fetchBuffer(backgroundUrl);
           } catch {}
         }
-        if (!photoBuf) {
-          try {
-            const q = pexelsQueryForKind(prof.kind, prof.bgHint);
-            photoBuf = await fetchPexelsPhotoBuffer(q, seed);
-          } catch (e) {
-            console.warn(
-              "[generate-image-from-prompt] Pexels failed:",
-              e.message
-            );
-          }
-        }
+       if (!photoBuf) {
+  try {
+    const benefit =
+      (a.mainBenefit || a.benefit || a.idealCustomer || "").toString().trim();
+
+    const prompt = [
+      `A high-quality professional photo background for a social media ad.`,
+      `Industry: ${industry}. Business: ${businessName}.`,
+      benefit ? `Context: ${benefit}.` : ``,
+      `Style: natural lighting, modern, clean, realistic, neutral tones.`,
+      `Scene must be strictly relevant to the industry.`,
+      `NO text, NO logos, NO watermarks, NO typography.`,
+      `Square composition, good negative space for overlay.`,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    photoBuf = await generateOpenAIImageBuffer({
+      prompt,
+      size: "1024x1024",
+      output_format: "png",
+    });
+  } catch (e) {
+    console.warn("[generate-image-from-prompt] OpenAI background failed:", e.message);
+  }
+}
+
         if (!photoBuf) {
           const localPath = pickLocalStockPath(prof.kind, seed);
           if (localPath) {
