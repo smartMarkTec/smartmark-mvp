@@ -4265,34 +4265,81 @@ async function runVideoJob(job) {
   const url = answers.url || top.url || '';
   const industry = answers.industry || top.industry || '';
  const category = resolveCategory(answers || {});
-const keyword = getVideoKeyword(industry, url, answers); // <-- videos should use video keyword builder
 
-  const targetSec = Math.max(18, Math.min(20, Number(top.targetSeconds || 18.5)));
+// ✅ STRICT industry source (never let getVideoKeyword drive stock video)
+const rawIndustry = String(answers.industry || top.industry || industry || '').trim();
 
-  // Script
-  let script = (top.adCopy || '').trim();
-  if (!script) {
-    try {
-      const prompt = `Write only the exact words for a spoken ad script (~46–65 words, 14–16s) for category "${category}". Hook → value → simple CTA. Neutral; no website.`;
-      const r = await openai.chat.completions.create({
-        model: 'gpt-4o',
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 200,
-        temperature: 0.35,
-      });
-      script = cleanFinalText(r.choices?.[0]?.message?.content || '');
-      script = enforceCategoryPresence(stripFashionIfNotApplicable(script, category), category);
-    } catch {
-      script = 'A simple way to get started with less hassle and more value. Learn more.';
-    }
+// Use answers + url to help when user puts something vague, but STILL industry-locked
+const inferText = normText([
+  rawIndustry,
+  answers.businessName,
+  answers.offer,
+  answers.mainBenefit,
+  answers.service,
+  answers.services,
+  answers.product,
+  answers.description,
+  answers.prompt,
+  url
+].filter(Boolean).join(' '));
+
+// If industry blank/vague, infer a tight phrase from their inputs (still stays in that vertical)
+const inferredIndustry = rawIndustry || (inferText.split(' ').slice(0, 5).join(' ') || 'local business');
+const canon = canonicalIndustry(inferredIndustry);
+
+// ✅ keyword becomes the actual industry phrase we want videos for
+const keyword = inferredIndustry;
+
+const targetSec = Math.max(18, Math.min(20, Number(top.targetSeconds || 18.5)));
+
+// Script
+let script = (top.adCopy || '').trim();
+if (!script) {
+  try {
+    const prompt = `Write only the exact words for a spoken ad script (~46–65 words, 14–16s) for category "${category}". Hook → value → simple CTA. Neutral; no website.`;
+    const r = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 200,
+      temperature: 0.35,
+    });
+    script = cleanFinalText(r.choices?.[0]?.message?.content || '');
+    script = enforceCategoryPresence(stripFashionIfNotApplicable(script, category), category);
+  } catch {
+    script = 'A simple way to get started with less hassle and more value. Learn more.';
   }
+}
 
-// ================== REPLACE THAT BLOCK WITH THIS ==================
-  // Media (industry-locked + more variety)
-  let clips = await fetchPexelsVideos(keyword, 12, `${Date.now()}|${keyword}`, url, industry);
-  if (!clips.length) clips = await fetchPexelsVideos(keyword, 12, `${Date.now()}|${keyword}|p2`, url, industry);
-  if (!clips.length) clips = await fetchPexelsVideos('business', 10, `${Date.now()}|fallback`, url, industry);
-// ================== END REPLACEMENT ==================
+// ---- Media (STRICT industry; NO generic fallbacks like "product shopping") ----
+let clips = await fetchPexelsVideos(
+  keyword,
+  12,
+  `${Date.now()}|${canon}|p1`,
+  url,
+  inferredIndustry
+);
+
+// Page/seed retry (still industry-locked)
+if (!clips.length) {
+  clips = await fetchPexelsVideos(
+    keyword,
+    12,
+    `${Date.now()}|${canon}|p2`,
+    url,
+    inferredIndustry
+  );
+}
+
+// Last resort: safer “industry service” variant (still industry-locked)
+if (!clips.length) {
+  clips = await fetchPexelsVideos(
+    `${keyword} service`,
+    10,
+    `${Date.now()}|${canon}|svc`,
+    url,
+    inferredIndustry
+  );
+}
 
   const bgm = await prepareBgm();
   let v1, v2;
@@ -4407,10 +4454,53 @@ const baseKeyword = getVideoKeyword(industry, url, answers);
     if (!script) script = await generateVideoScriptFromAnswers(answers);
 
     // ---- stock videos (single pool) ----
-let clips = await fetchPexelsVideos(baseKeyword, 8, `${seedBase}|${baseKeyword}`, url);
+const rawIndustry = String(answers.industry || '').trim();
+const inferText = normText([
+  rawIndustry,
+  answers.businessName,
+  answers.offer,
+  answers.mainBenefit,
+  answers.service,
+  answers.services,
+  answers.product,
+  answers.description,
+  answers.prompt,
+  url
+].filter(Boolean).join(' '));
 
-if (!clips.length) clips = await fetchPexelsVideos(getVideoKeyword("business", url, answers), 8, `${seedBase}|fallback`);
-if (!clips.length) clips = await fetchPexelsVideos("product shopping", 8, `${seedBase}|fallback2`);
+const inferredIndustry = rawIndustry || (inferText.split(' ').slice(0, 5).join(' ') || 'local business');
+const canon = canonicalIndustry(inferredIndustry);
+
+// ✅ STRICT: search always locked to inferredIndustry
+let clips = await fetchPexelsVideos(
+  inferredIndustry,
+  12,
+  `${seedBase}|${canon}|p1`,
+  url,
+  inferredIndustry
+);
+
+// still locked, no generic vertical fallbacks
+if (!clips.length) {
+  clips = await fetchPexelsVideos(
+    inferredIndustry,
+    12,
+    `${seedBase}|${canon}|p2`,
+    url,
+    inferredIndustry
+  );
+}
+
+// last resort, still locked
+if (!clips.length) {
+  clips = await fetchPexelsVideos(
+    `${inferredIndustry} service`,
+    10,
+    `${seedBase}|${canon}|svc`,
+    url,
+    inferredIndustry
+  );
+}
 
     if (!clips.length) return res.status(500).json({ ok: false, error: "No stock clips found from Pexels." });
 
