@@ -621,7 +621,12 @@ const CampaignSetup = () => {
       const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
       if (raw) {
         const draft = JSON.parse(raw);
-        const ageOk = !draft.savedAt || Date.now() - draft.savedAt <= DRAFT_TTL_MS;
+      const now = Date.now();
+const expiresAt = Number(draft.expiresAt);
+const ageOk =
+  (Number.isFinite(expiresAt) && now <= expiresAt) ||
+  (!draft.savedAt || now - draft.savedAt <= DEFAULT_CAMPAIGN_TTL_MS);
+
         if (ageOk) {
           applyDraft(draft);
           saveSetupCreativeBackup(resolvedUser, draft);
@@ -787,47 +792,60 @@ const CampaignSetup = () => {
   }, [fbConnected, selectedAccount, launched]);
 
   /* ===================== THE KEY FIX: after FB connect, attach draft images to active campaign ===================== */
-  useEffect(() => {
-    if (!cameFromFbConnect) return;
-    if (!fbConnected) return;
-    if (!selectedAccount) return;
+/* ===================== FIX #3: after FB connect, attach draft images into selected campaign creatives map ===================== */
+useEffect(() => {
+  if (!cameFromFbConnect) return;
+  if (!fbConnected) return;
+  if (!selectedAccount) return;
 
-    const draftImages = (draftCreatives.images || []).slice(0, 2);
-    if (!draftImages.length) return;
-
-    const acctId = String(selectedAccount).replace(/^act_/, "");
-    const targetCampaignId = selectedCampaignId || (campaigns && campaigns[0] && campaigns[0].id);
-    if (!targetCampaignId || targetCampaignId === "__DRAFT__") return;
-
-    const endMillis = endDate && !isNaN(new Date(endDate).getTime()) ? new Date(endDate).getTime() : null;
-    const expiresAt = endMillis || Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
-
-    const didAttach = attachDraftToCampaignIfEmpty({
-      user: resolvedUser,
-      acctId,
-      campaignId: targetCampaignId,
-      draftImages,
-      expiresAt,
-      name: form.campaignName || "Untitled",
-    });
-
-    if (didAttach) {
-      setExpandedId(targetCampaignId);
-      setSelectedCampaignId(targetCampaignId);
-    }
-
+  const draftImages = (draftCreatives?.images || []).slice(0, 2);
+  if (!draftImages.length) {
+    // no draft to attach; stop retrying
     setCameFromFbConnect(false);
-  }, [
-    cameFromFbConnect,
-    fbConnected,
-    selectedAccount,
-    selectedCampaignId,
-    campaigns,
-    draftCreatives,
-    endDate,
-    form?.campaignName,
-    resolvedUser,
-  ]);
+    return;
+  }
+
+  // IMPORTANT: campaigns may not be loaded yet right after redirect
+  // so we "wait" until we have either selectedCampaignId or campaigns[0].id
+  const targetCampaignId =
+    (selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? selectedCampaignId : "") ||
+    (Array.isArray(campaigns) && campaigns[0]?.id ? campaigns[0].id : "");
+
+  if (!targetCampaignId) return; // keep effect alive until campaigns arrive
+
+  const acctId = String(selectedAccount).replace(/^act_/, "");
+  const endMillis =
+    endDate && !isNaN(new Date(endDate).getTime())
+      ? new Date(endDate).getTime()
+      : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+
+  const didAttach = attachDraftToCampaignIfEmpty({
+    user: resolvedUser,
+    acctId,
+    campaignId: targetCampaignId,
+    draftImages,
+    expiresAt: endMillis,
+    name: form?.campaignName || "Untitled",
+  });
+
+  // Either way (attached or already had creatives), select/expand the target campaign
+  setExpandedId(targetCampaignId);
+  setSelectedCampaignId(targetCampaignId);
+
+  // done: prevent re-runs
+  setCameFromFbConnect(false);
+}, [
+  cameFromFbConnect,
+  fbConnected,
+  selectedAccount,
+  selectedCampaignId,
+  campaigns,
+  draftCreatives?.images,
+  endDate,
+  form?.campaignName,
+  resolvedUser,
+]);
+
 
   useEffect(() => {
     if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
@@ -1229,7 +1247,27 @@ const CampaignSetup = () => {
           <button
             onClick={() => {
               // persist creatives BEFORE leaving to Render (cross-origin redirect)
-              persistDraftCreativesNow(resolvedUser, draftCreatives);
+              const imagesToPersist =
+  (draftCreatives?.images?.length ? draftCreatives.images : []) ||
+  [];
+
+const fallbackFromNav =
+  Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
+
+const finalImages =
+  imagesToPersist.length ? imagesToPersist.slice(0, 2) : fallbackFromNav;
+
+const endMillis =
+  endDate && !isNaN(new Date(endDate).getTime())
+    ? new Date(endDate).getTime()
+    : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+
+persistDraftCreativesNow(resolvedUser, {
+  images: finalImages,
+  mediaSelection: "image",
+  expiresAt: endMillis,
+});
+
               try {
                 localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
               } catch {}

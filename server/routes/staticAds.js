@@ -78,10 +78,6 @@ function fetchUpstream(method, url, extraHeaders = {}, bodyBuf = null, timeoutMs
 }
 
 /* ------------------------ OpenAI Image (DIRECT AD) ------------------------ */
-/**
- * Generates FINAL ad images directly from the model (no templates, no compositing).
- * Returns an array of Buffers (length n).
- */
 async function generateOpenAIAdImageBuffers({
   prompt,
   size = "1024x1024",
@@ -92,20 +88,17 @@ async function generateOpenAIAdImageBuffers({
   const key = process.env.OPENAI_API_KEY;
   if (!key) throw new Error("OPENAI_API_KEY missing");
 
-  // Best default per your request (you can override via env):
-  // - OPENAI_IMAGE_MODEL=gpt-image-1.5
   const model = process.env.OPENAI_IMAGE_MODEL || "gpt-image-1.5";
 
   const body = JSON.stringify({
     model,
     prompt,
-    size, // keep square
-    quality, // "auto" behaves closest to "just do it"
-    output_format, // "png"
-    n: Math.max(1, Math.min(4, Number(n) || 1)), // safety clamp
+    size,
+    quality,
+    output_format,
+    n: Math.max(1, Math.min(4, Number(n) || 1)),
   });
 
-  // one retry on transient failures/timeouts
   const attempt = async () => {
     const { status, body: respBuf } = await fetchUpstream(
       "POST",
@@ -120,9 +113,7 @@ async function generateOpenAIAdImageBuffers({
 
     if (status !== 200) {
       let msg = `OpenAI image HTTP ${status}`;
-      try {
-        msg += " " + respBuf.toString("utf8").slice(0, 1200);
-      } catch {}
+      try { msg += " " + respBuf.toString("utf8").slice(0, 1200); } catch {}
       throw new Error(msg);
     }
 
@@ -139,16 +130,9 @@ async function generateOpenAIAdImageBuffers({
     const bufs = [];
     for (const item of arr) {
       const b64 = item?.b64_json;
-      if (b64) {
-        bufs.push(Buffer.from(b64, "base64"));
-        continue;
-      }
-      // If OpenAI ever returns URLs for your model/account, catch it loudly
-      const maybeUrl = item?.url;
-      if (maybeUrl) {
-        throw new Error(
-          "OpenAI image returned a URL, but this server expects b64_json. Update code to fetch the URL."
-        );
+      if (b64) bufs.push(Buffer.from(b64, "base64"));
+      else if (item?.url) {
+        throw new Error("OpenAI image returned URL but server expects b64_json.");
       }
     }
 
@@ -158,13 +142,8 @@ async function generateOpenAIAdImageBuffers({
 
   try {
     return await attempt();
-  } catch (e) {
-    // retry once
-    try {
-      return await attempt();
-    } catch (e2) {
-      throw e2;
-    }
+  } catch {
+    return await attempt(); // retry once
   }
 }
 
@@ -174,7 +153,7 @@ function clean(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
 }
 
-function buildAdPromptFromAnswers(a = {}) {
+function buildAdPromptFromAnswers(a = {}, variationToken = "") {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = clean(a.industry || "Business");
   const website = clean(a.website || a.url || "");
@@ -186,8 +165,18 @@ function buildAdPromptFromAnswers(a = {}) {
       (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
   );
 
-  // Goal: generate the finished paid-ad creative directly from the model.
-  // No templates, no overlays, no “baked” layouts in code.
+  // Strong variation guidance to avoid “same looking” ads across runs
+  const variationBlock = [
+    `Variation token: "${variationToken || Date.now()}"`,
+    `Make this creative clearly different from previous runs:`,
+    `- Change setting (indoor/outdoor), color palette, composition, and typography.`,
+    `- Change camera angle (close-up, mid-shot, wide).`,
+    `- Change layout (text placement + CTA style).`,
+    `- Use different props/background elements appropriate to the industry.`,
+    `- If people appear, vary gender + ethnicity across variants when appropriate.`,
+    `- Avoid repeating the same model/pose/outfit/setting across variants.`,
+  ].join("\n");
+
   return [
     `Create a finished, high-converting square (1:1) social media static advertisement image.`,
     `It must look like a real paid Facebook/Instagram ad creative a brand would run.`,
@@ -216,6 +205,8 @@ function buildAdPromptFromAnswers(a = {}) {
     `- NO fake certifications, NO policy-violating claims.`,
     `- Do not include any unrelated brand names.`,
     ``,
+    variationBlock,
+    ``,
     `Output: a single square static ad image.`,
   ].join("\n");
 }
@@ -225,7 +216,6 @@ function buildAdPromptFromAnswers(a = {}) {
 router.post("/generate-static-ad", async (req, res) => {
   try {
     const body = req.body || {};
-    // accept answers, inputs, or direct body
     const a =
       body.answers && typeof body.answers === "object"
         ? body.answers
@@ -233,10 +223,11 @@ router.post("/generate-static-ad", async (req, res) => {
         ? body.inputs
         : body;
 
-    const prompt = buildAdPromptFromAnswers(a);
+    // Use regenerateToken/variant to force variation across runs
+    const variationToken = String(body.regenerateToken || body.variant || `${Date.now()}-${Math.random()}`);
 
-    // Default: ALWAYS generate 2 images for your A/B flow.
-    // Allow override, but clamp 1..2 unless you purposely change it.
+    const prompt = buildAdPromptFromAnswers(a, variationToken);
+
     const requestedCount = Number(body.count || body.n || 2);
     const count = Math.max(1, Math.min(2, requestedCount || 2));
 
@@ -260,8 +251,7 @@ router.post("/generate-static-ad", async (req, res) => {
       urls.push(makeMediaUrl(req, pngName));
     }
 
-    // Hard guarantee for frontend: always return 2 entries if count=2
-    // If upstream returned only 1 buffer (rare), duplicate it as fallback.
+    // Guarantee 2 if requested
     if (count === 2 && urls.length === 1) {
       urls.push(urls[0]);
       filenames.push(filenames[0]);
@@ -271,12 +261,10 @@ router.post("/generate-static-ad", async (req, res) => {
       ok: true,
       type: "image",
       template: "openai_direct",
-      // legacy fields (keep old callers working)
       url: urls[0] || null,
       absoluteUrl: urls[0] || null,
       pngUrl: urls[0] || null,
       filename: filenames[0] || null,
-      // new stable fields (preferred)
       imageUrls: urls,
       imageVariants: urls,
       filenames,

@@ -9,27 +9,23 @@ const { secureHeaders, basicRateLimit, basicAuth } = require("../middleware/secu
 
 // ---------- Minimal, safe OpenAI client ----------
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.OPENAI_API_KEY
 });
 
 // ---------- Global, minimal hardening for this router ----------
 router.use(secureHeaders());
-
-// Optional basic auth (enabled only if BASIC_AUTH_USER + BASIC_AUTH_PASS are set)
 router.use(basicAuth());
 
 // ---------- Per-route rate limits (MVP) ----------
 const limitChat = basicRateLimit({ windowMs: 60 * 1000, max: 30 });
 const limitSubline = basicRateLimit({ windowMs: 60 * 1000, max: 40 });
-const limitSummarize = basicRateLimit({ windowMs: 60 * 1000, max: 20 });
+const limitSummarize = basicRateLimit({ windowMs: 60 * 1000, max: 40 });
 
 // ---------- Small helpers shared by routes ----------
 const FALLBACK_CHAT =
   "I’m your AI Ad Manager—share your goal and I’ll suggest a clear next move.";
 
-const STOP = new Set([
-  "and","or","the","a","an","of","to","in","on","with","for","by","your","you","is","are","at"
-]);
+const STOP = new Set(["and","or","the","a","an","of","to","in","on","with","for","by","your","you","is","are","at"]);
 const ENDSTOP = new Set(["and","with","for","to","of","in","on","at","by"]);
 
 function sentenceCase(s = "") {
@@ -71,18 +67,8 @@ function ensure7to9Words(line = "") {
   }
   return sentenceCase(words.join(" "));
 }
-function softRewrite(line = "") {
-  let s = String(line).replace(/\s+/g, " ").trim();
-  s = s.replace(/\b(our|we|my|I)\b/gi, "").replace(/\s{2,}/g, " ").trim();
-  s = s.replace(/[.,;:!?-]+$/g, "");
-  return s;
-}
-function clampWords(s = "", max = 10) {
-  const w = String(s).trim().split(/\s+/).filter(Boolean);
-  return w.length > max ? w.slice(0, max).join(" ") : s.trim();
-}
 
-// ---------- Chat alignment guards (HARD RULE) ----------
+// ---------- Chat alignment guards ----------
 function normalizeHistory(history) {
   if (!Array.isArray(history)) return [];
   return history
@@ -90,98 +76,26 @@ function normalizeHistory(history) {
     .map(m => ({ role: m.role, content: m.content.slice(0, 2000) }))
     .slice(-12);
 }
-
 function userAllowsAssistantQuestions(userMsg = "") {
   const s = String(userMsg || "").toLowerCase();
-  // Only allow assistant questions if user explicitly asks for next steps / guidance
   return /\b(next|what next|next step|steps|what should i do|what do i do|guide me|walk me through|help me decide|ask me|questions)\b/.test(s);
 }
-
-// Remove all question sentences unless allowed
 function stripQuestionsIfNotAllowed(reply = "", allowed = false) {
   let out = String(reply || "").replace(/\s+/g, " ").trim();
   if (!out) return FALLBACK_CHAT;
-
-  // Keep 1–3 sentences max
   const parts = out.split(/(?<=[.!?])\s+/).filter(Boolean);
   out = parts.slice(0, 3).join(" ").trim();
-
   if (allowed) return out;
-
-  // Remove any sentence containing '?'
   const sentences = out.split(/(?<=[.!?])\s+/).filter(Boolean);
   const filtered = sentences.filter(s => !s.includes("?"));
   out = (filtered.length ? filtered.join(" ") : "").trim();
-
-  // Remove leftover '?' characters (edge cases)
   out = out.replace(/\?/g, "").trim();
-
-  // If nothing left, return a short helpful statement (no questions)
-  if (!out) {
-    return "I can help with targeting, creatives, and budgets—share your goal and I’ll recommend a clear next move.";
-  }
-
-  // Avoid dangling punctuation prompts
+  if (!out) return "I can help with targeting, creatives, and budgets—share your goal and I’ll recommend a clear next move.";
   out = out.replace(/[:\-–—]\s*$/g, "").trim();
-
   return out || FALLBACK_CHAT;
 }
 
-/* ====================== NEW: anti-copy + copywriter helpers ====================== */
-function normText(s = "") {
-  return String(s || "")
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, " ")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-function jaccard(a = "", b = "") {
-  const A = new Set(normText(a).split(" ").filter(Boolean));
-  const B = new Set(normText(b).split(" ").filter(Boolean));
-  if (!A.size || !B.size) return 0;
-  let inter = 0;
-  for (const x of A) if (B.has(x)) inter++;
-  const union = A.size + B.size - inter;
-  return union ? inter / union : 0;
-}
-function containsLongSubstring(a = "", b = "", minLen = 24) {
-  const A = normText(a);
-  const B = normText(b);
-  if (!A || !B) return false;
-  if (A.length < minLen || B.length < minLen) return false;
-  return A.includes(B.slice(0, minLen)) || B.includes(A.slice(0, minLen)) || A.includes(B) || B.includes(A);
-}
-
-// Builds a fallback headline/description that is NOT copied verbatim
-function fallbackCopyFromAnswers(a = {}) {
-  const industry = String(a.industry || "").trim();
-  const biz = String(a.businessName || a.brand || "").trim();
-  const benefit = String(a.mainBenefit || a.details || "").trim();
-  const offer = String(a.offer || a.saveAmount || "").trim();
-
-  const heads = [];
-  if (offer) heads.push(offer);
-  if (benefit) heads.push(benefit);
-  if (industry) heads.push(industry);
-
-  let headline = heads.find(Boolean) || "New Offers Available";
-  headline = sentenceCase(clampWords(softRewrite(headline), 8));
-
-  let descriptionParts = [];
-  if (benefit) descriptionParts.push(sentenceCase(softRewrite(benefit)));
-  if (offer) descriptionParts.push(sentenceCase(softRewrite(offer)));
-  if (!descriptionParts.length && industry) descriptionParts.push(`Designed for ${industry.toLowerCase()} customers.`);
-  if (!descriptionParts.length) descriptionParts.push("Clean, simple, and made for everyday use.");
-
-  if (biz) descriptionParts.push(`Explore ${biz} today.`);
-  let description = descriptionParts.join(" ").replace(/\s+/g, " ").trim();
-  description = description.slice(0, 160);
-
-  return { headline, description };
-}
-
-/* ====================== Route: chat ====================== */
+// ---------- Route: chat ----------
 router.post("/gpt-chat", limitChat, async (req, res) => {
   const { message, history } = req.body || {};
   if (!message || typeof message !== "string") {
@@ -233,7 +147,7 @@ router.post("/gpt-chat", limitChat, async (req, res) => {
   }
 });
 
-/* ====================== coherent 7–9 word subline generator ====================== */
+// ---------- coherent 7–9 word subline generator ----------
 router.post("/coherent-subline", limitSubline, async (req, res) => {
   const { answers = {}, category = "generic" } = req.body || {};
 
@@ -289,128 +203,200 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
   line = line.replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "");
   line = ensure7to9Words(line);
 
-  if ((category || "").toLowerCase() === "fashion") {
-    const badCombo = /\b(fashion)\s+modern\b/i.test(line) || /\bmodern\s+built\b/i.test(line);
-    if (badCombo) line = "Modern fashion built for everyday wear";
-    line = line.replace(/\bfashion modern built into\b/i, "Modern fashion built for");
-  }
-
   return res.json({ subline: line });
 });
 
-/* ====================== summarize-ad-copy (JSON) ====================== */
+// ---------- summarize-ad-copy (JSON) ----------
 router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, async (req, res) => {
   try {
     const a = (req.body && req.body.answers) || {};
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
 
-    // Create a single string representing all user-provided text we must not copy verbatim
-    const inputText = [
-      a.industry,
-      a.businessName || a.brand,
-      a.idealCustomer,
-      a.mainBenefit || a.details,
-      a.offer || a.saveAmount,
-      a.secondary || a.financingLine,
-      a.description,
-      a.topic,
-      a.title,
-    ].filter(Boolean).join(" ");
+    // --- local helpers ---
+    const norm = (s = "") =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const tokenSet = (s = "") => new Set(norm(s).split(" ").filter(Boolean));
+
+    const jaccard = (x = "", y = "") => {
+      const A = tokenSet(x);
+      const B = tokenSet(y);
+      if (!A.size || !B.size) return 0;
+      let inter = 0;
+      for (const w of A) if (B.has(w)) inter++;
+      const union = A.size + B.size - inter;
+      return union ? inter / union : 0;
+    };
+
+    const clamp = (s, n) => String(s || "").trim().slice(0, n);
+    const clampWords = (s = "", maxWords = 8) => {
+      const w = String(s || "").trim().split(/\s+/).filter(Boolean);
+      return w.length > maxWords ? w.slice(0, maxWords).join(" ") : w.join(" ");
+    };
+
+    const stripWeOur = (s = "") =>
+      String(s || "")
+        .replace(/\b(our|we|us|i|my)\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+    const safeHeadline = (s = "") => {
+      s = stripWeOur(s);
+      s = s.replace(/[“”"']/g, "").replace(/[.,;:!?]+$/g, "").trim();
+      s = clampWords(s, 8);
+      if (!s) return "";
+      return s[0].toUpperCase() + s.slice(1);
+    };
+
+    const safeSubline = (s = "") => {
+      s = stripWeOur(s);
+      s = s.replace(/[“”"']/g, "").replace(/[.]+$/g, "").trim();
+      s = String(s || "").replace(/\s+/g, " ").trim();
+      const words = s.split(/\s+/).filter(Boolean);
+      if (words.length > 14) return words.slice(0, 14).join(" ");
+      return s;
+    };
+
+    const buildFallbackHeadline = () => {
+      const industry = String(a.industry || "").trim();
+      const benefit = String(a.mainBenefit || a.details || "").trim();
+      const offer = String(a.offer || a.saveAmount || "").trim();
+
+      const benefitTerms = takeTerms(benefit, 3).join(" ");
+      const indTerms = takeTerms(industry, 2).join(" ");
+
+      if (offer) return safeHeadline(`Limited-time ${offer}`);
+      if (benefitTerms) return safeHeadline(`${benefitTerms} made simple`);
+      if (indTerms) return safeHeadline(`Better ${indTerms} for busy days`);
+      return "Made for everyday use";
+    };
+
+    const buildFallbackSubline = (headline) => {
+      const industry = String(a.industry || "").trim();
+      const audience = String(a.idealCustomer || "").trim();
+      const benefit = String(a.mainBenefit || a.details || "").trim();
+      const offer = String(a.offer || a.saveAmount || "").trim();
+
+      const chunks = [];
+      if (benefit) chunks.push(benefit);
+      else if (industry) chunks.push(`Clean, modern ${industry} that fits your needs`);
+      else chunks.push("Clean, modern design that fits your needs");
+
+      if (audience) chunks.push(`Built for ${audience}.`);
+      if (offer) chunks.push(`Offer: ${offer}.`);
+
+      let out = chunks.join(" ").replace(/\s+/g, " ").trim();
+      if (headline && norm(out).startsWith(norm(headline))) out = out.slice(headline.length).trim();
+      return safeSubline(out);
+    };
 
     const system =
-      "You are a senior direct-response copywriter. " +
-      "Write a fresh headline + description that SELL the offer. " +
-      "ABSOLUTE RULES: " +
-      "1) Do NOT copy phrases verbatim from the input. Rephrase everything. " +
-      "2) No 'our/we' language. " +
-      "3) No brand-superlatives (best, #1, premium, luxury). " +
-      "4) No URLs. " +
-      "Return STRICT JSON with keys: headline (<=8 words), subline (7–14 words), offer (optional short), " +
-      "bullets (array up to 3), disclaimers (optional), cta (2–3 words).";
+      "You are a professional direct-response copywriter. " +
+      "Return strict JSON with keys: headline (<=8 words), subline (7–14 words), offer (short, optional), " +
+      "bullets (array up to 3), disclaimers (short, optional), cta (2–3 words). " +
+      "Hard rules: NO URLs. NO 'our/we' language. NO brand-superlatives (best, #1, premium, luxury). " +
+      "Do NOT copy phrases verbatim from inputs; paraphrase and summarize. " +
+      "Headline and subline must not repeat each other.";
 
     const user = [
       `Industry: ${a.industry || ""}`,
-      `Business: ${a.businessName || a.brand || ""}`,
+      `Business: ${a.businessName || ""}`,
       `Location: ${a.city ? (a.state ? `${a.city}, ${a.state}` : a.city) : (a.location || "")}`,
       `Audience: ${a.idealCustomer || ""}`,
       `Main benefit: ${a.mainBenefit || a.details || ""}`,
       `Offer: ${a.offer || a.saveAmount || ""}`,
       `Secondary: ${a.secondary || a.financingLine || ""}`,
-      "",
-      "Write new copy that is NOT a paraphrase-by-copy. Use different wording."
     ].join("\n");
 
     const completion = await client.chat.completions.create({
       model,
-      temperature: 0.35, // slight creativity helps variation
+      temperature: 0.45, // more variety, less echo
       max_tokens: 240,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user },
-        { role: "user", content: "Return ONLY compact JSON object with those keys." }
-      ]
+        { role: "user", content: "Return ONLY compact JSON object with those keys." },
+      ],
     });
 
     let txt = completion.choices?.[0]?.message?.content?.trim() || "{}";
     txt = txt.replace(/^```json\s*|\s*```$/g, "");
     let parsed = {};
-    try { parsed = JSON.parse(txt); } catch { parsed = {}; }
-
-    const clamp = (s, n) => String(s || "").trim().slice(0, n);
-    const arr = (x) => Array.isArray(x) ? x : (x ? [String(x)] : []);
-
-    let headline = clamp(parsed.headline || "", 55);
-    let subline = clamp(parsed.subline || "", 160);
-    let offer = clamp(parsed.offer || "", 50);
-    let bullets = arr(parsed.bullets || []).slice(0, 3).map(b => clamp(b, 46));
-    let disclaimers = clamp(parsed.disclaimers || "", 160);
-    let cta = clamp(parsed.cta || "Learn more", 24);
-
-    // Post-guard: if model copied input too closely, force a clean fallback
-    const tooSimilar =
-      jaccard(headline, inputText) > 0.65 ||
-      jaccard(subline, inputText) > 0.65 ||
-      containsLongSubstring(headline, inputText, 18) ||
-      containsLongSubstring(subline, inputText, 24);
-
-    if (tooSimilar || !headline || !subline) {
-      const fb = fallbackCopyFromAnswers(a);
-      headline = fb.headline;
-      subline = fb.description;
-      // Keep other fields simple
-      if (!cta) cta = "Learn more";
-      if (!bullets || !bullets.length) bullets = [];
-      offer = offer || "";
-      disclaimers = disclaimers || "";
+    try {
+      parsed = JSON.parse(txt);
+    } catch {
+      parsed = {};
     }
 
-    // Additional: prevent headline == subline
-    if (jaccard(headline, subline) > 0.55 || containsLongSubstring(headline, subline, 16)) {
-      const fb = fallbackCopyFromAnswers(a);
-      // Keep headline, rewrite subline
-      subline = fb.description;
+    // sanitize
+    let headline = safeHeadline(parsed.headline || "");
+    let subline = safeSubline(parsed.subline || "");
+    const offer = clamp(parsed.offer || "", 40);
+    let bullets = (Array.isArray(parsed.bullets) ? parsed.bullets : []).slice(0, 3).map((b) => clamp(stripWeOur(b), 40));
+    const disclaimers = clamp(stripWeOur(parsed.disclaimers || ""), 160);
+    let cta = clamp(stripWeOur(parsed.cta || "Learn more"), 24);
+
+    // HARD anti-echo against inputs
+    const source = [
+      a.mainBenefit || "",
+      a.details || "",
+      a.idealCustomer || "",
+      a.offer || "",
+      a.saveAmount || "",
+      a.industry || "",
+      a.businessName || "",
+    ].join(" ");
+
+    const mainBenefit = String(a.mainBenefit || a.details || "").trim();
+
+    if (!headline) headline = buildFallbackHeadline();
+
+    // kill “our/we” beginnings if any slipped
+    headline = headline.replace(/^\s*(our|we)\b\s*/i, "").trim();
+    subline = subline.replace(/^\s*(our|we)\b\s*/i, "").trim();
+
+    // if headline echoes benefit too closely, regenerate fallback
+    if (mainBenefit && (jaccard(headline, mainBenefit) > 0.75 || norm(headline) === norm(mainBenefit))) {
+      headline = buildFallbackHeadline();
     }
 
-    // Clean/shape
-    headline = sentenceCase(clampWords(softRewrite(headline), 8));
-    subline = sentenceCase(softRewrite(subline)).slice(0, 160);
+    if (!subline) subline = buildFallbackSubline(headline);
+
+    // prevent repeats between headline and subline
+    if (jaccard(headline, subline) > 0.55 || norm(subline).startsWith(norm(headline))) {
+      subline = buildFallbackSubline(headline);
+    }
+
+    // if still too close to full source, force fallbacks
+    if (jaccard(headline, source) > 0.65) headline = buildFallbackHeadline();
+    if (jaccard(subline, source) > 0.70) subline = buildFallbackSubline(headline);
+
+    // bullets fallback
+    if (!bullets.length) {
+      const ind = String(a.industry || "services").trim().toLowerCase();
+      if (ind.includes("fashion")) bullets = ["New arrivals weekly", "Everyday fits", "Easy returns"];
+      else if (ind.includes("restaurant") || ind.includes("food")) bullets = ["Fresh ingredients", "Fast pickup", "Local favorites"];
+      else bullets = ["Clear offer", "Clean design", "Strong call to action"];
+      bullets = bullets.map((b) => clamp(b, 40));
+    }
+
+    cta = cta.replace(/[.]+$/g, "").trim();
+    if (!cta) cta = "Learn more";
 
     const copy = {
       headline: clamp(headline, 55),
-      subline: clamp(subline, 160),
-      offer: clamp(offer, 50),
-      bullets: (bullets || []).slice(0, 3).map(b => clamp(sentenceCase(softRewrite(b)), 46)),
-      disclaimers: clamp(disclaimers, 160),
-      cta: clamp(sentenceCase(softRewrite(cta)), 24),
+      subline: clamp(subline, 140),
+      offer,
+      bullets,
+      disclaimers,
+      cta,
     };
 
-    // IMPORTANT: return headline/description directly too (easy frontend wiring)
-    return res.json({
-      ok: true,
-      copy,
-      headline: copy.headline,
-      description: copy.subline,
-    });
+    return res.json({ ok: true, copy });
   } catch (e) {
     console.error("summarize-ad-copy error:", e?.message || e);
     return res.status(400).json({ ok: false, error: "copy_failed" });

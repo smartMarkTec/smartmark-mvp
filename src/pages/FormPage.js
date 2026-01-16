@@ -38,9 +38,8 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 /* -------- Image generation spend guard -------- */
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
 const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
-// Cost-effective default: 1 initial + 2 regenerations = 3 total runs/day (~$1.20/day if $0.40/run)
-const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 9999; // TEMP: disable limit while testing
-
+// TEMP TESTING: disable gen limit
+const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 9999;
 
 function loadGenQuota() {
   try {
@@ -308,47 +307,8 @@ function Dots({ count, active, onClick }) {
   );
 }
 
-/* --- Abort-safe fetch helpers --- */
-const _controllers = new Map(); // key -> AbortController
-
-function abortKey(key) {
-  const c = _controllers.get(key);
-  if (c) {
-    try {
-      c.abort();
-    } catch {}
-  }
-  _controllers.delete(key);
-}
-
-function newControllerFor(key) {
-  // cancel any previous of same kind
-  abortKey(key);
-  const c = new AbortController();
-  _controllers.set(key, c);
-  return c;
-}
-
-// legacy helper (still here in case something else uses it)
-async function fetchJSON(url, { key = "GEN", timeoutMs = 15000, opts = {} } = {}) {
-  const c = newControllerFor(key);
-  const t = setTimeout(() => {
-    try {
-      c.abort();
-    } catch {}
-  }, timeoutMs);
-  try {
-    const res = await fetch(url, { signal: c.signal, ...opts });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json().catch(() => ({}));
-  } finally {
-    clearTimeout(t);
-  }
-}
-
 /* ===== helpers ===== */
 
-/* ===== derivePosterFieldsFromAnswers ===== */
 function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const safe = (s) => String(s || "").trim();
 
@@ -371,10 +331,8 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   };
 }
 
-const CONTROLLER_TIMEOUT_MS = 22000; // single-call guard
-const IMAGE_FETCH_TIMEOUT_MS = 38000; // image job (retry-safe)
-
-/* (video constants removed) */
+const CONTROLLER_TIMEOUT_MS = 22000;
+const IMAGE_FETCH_TIMEOUT_MS = 38000;
 
 function fetchWithTimeout(url, opts = {}, ms = CONTROLLER_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -433,14 +391,6 @@ function getRandomString() {
 function isGenerateTrigger(input) {
   return /^(yes|y|i'?m ready|lets? do it|generate|go ahead|start|sure|ok)$/i.test(input.trim());
 }
-async function safeJson(res) {
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  try {
-    return await res.json();
-  } catch {
-    throw new Error("Bad JSON");
-  }
-}
 
 const URL_REGEX = /(https?:\/\/|www\.)[^\s]+/gi;
 function stripUrls(s = "") {
@@ -484,44 +434,16 @@ function isLikelySideChat(s, currentQ) {
   return false;
 }
 
-/* === buildImagePrompt (images) — UPDATED === */
-function buildImagePrompt(answers = {}, overlay = {}) {
-  const parts = [];
-
-  const industry = (answers.industry || "local services").toString().trim();
-  const biz = (answers.businessName || "").toString().trim();
-  const benefit = (answers.mainBenefit || "").toString().trim();
-  const offer = (answers.offer || "").toString().trim();
-  const audience = (answers.idealCustomer || "").toString().trim();
-
-  if (industry) parts.push(`Industry: ${industry}`);
-  if (biz) parts.push(`Brand: ${biz}`);
-  if (benefit) parts.push(`Main benefit: ${benefit}`);
-  if (offer) parts.push(`Offer: ${offer}`);
-  if (audience) parts.push(`Audience: ${audience}`);
-
-  if (overlay?.headline) parts.push(`Headline theme: ${overlay.headline}`);
-  if (overlay?.cta) parts.push(`CTA: ${overlay.cta}`);
-
-  parts.push("Style: clean commercial photo, centered subject, negative space for text, uncluttered background");
-  return parts.filter(Boolean).join(" | ");
-}
-
-// --- GPT copy summarizer ---
+/* --- GPT copy summarizer --- */
 async function summarizeAdCopy(answers, { regenerateToken = "", variant = "" } = {}) {
   const url = `${API_BASE}/summarize-ad-copy`;
-  console.debug("[SM][summarizeAdCopy:POST]", url, { answers, regenerateToken, variant });
-
   try {
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ answers, regenerateToken, variant }),
     });
-
     const json = await res.json().catch(() => ({}));
-    console.debug("[SM][summarizeAdCopy:RES]", res.status, json);
-
     if (!res.ok || !json?.ok) throw new Error(`summarize failed ${res.status}`);
     return json.copy || {};
   } catch (e) {
@@ -538,201 +460,19 @@ function normalizeSmartCopy(raw = {}, answers = {}) {
     secondary: String(raw?.secondary || "").trim(),
     bullets: Array.isArray(raw?.bullets) ? raw.bullets : [],
     disclaimers: String(raw?.disclaimers || "").trim(),
-    cta: String(raw?.cta || answers?.cta || "Shop now").trim(),
+    cta: String(raw?.cta || answers?.cta || "Learn more").trim(),
   };
 }
 
-function _normText(s = "") {
-  return String(s || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function _tokenSet(s = "") {
-  const t = _normText(s).split(" ").filter(Boolean);
-  return new Set(t);
-}
-
-function _jaccard(a = "", b = "") {
-  const A = _tokenSet(a);
-  const B = _tokenSet(b);
-  if (!A.size || !B.size) return 0;
-  let inter = 0;
-  for (const x of A) if (B.has(x)) inter++;
-  const union = A.size + B.size - inter;
-  return union ? inter / union : 0;
-}
-
-// if body repeats headline (or starts with it), rewrite body smartly
-function _dedupeBodyFromHeadline(headline = "", body = "", answers = {}) {
-  const h = String(headline || "").trim();
-  let b = String(body || "").trim();
-
-  // Remove exact headline prefix
-  if (h && b.toLowerCase().startsWith(h.toLowerCase())) {
-    b = b.slice(h.length).trim();
-    b = b.replace(/^[-–—:,\s]+/, "").trim();
-  }
-
-  // If still too similar, generate a “human” body from answers
-  const sim = _jaccard(h, b);
-  if (!b || b.length < 18 || sim > 0.55) {
-    const biz = (answers.businessName || "your brand").toString().trim();
-    const benefit = (answers.mainBenefit || "").toString().trim();
-    const offer = (answers.offer || "").toString().trim();
-    const audience = (answers.idealCustomer || "").toString().trim();
-    const industry = (answers.industry || "").toString().trim();
-
-    // Copywriter-ish, but simple and non-repeating
-    const parts = [];
-    if (benefit) parts.push(benefit);
-    if (audience) parts.push(`Made for ${audience}.`);
-    if (offer) parts.push(`Limited offer: ${offer}.`);
-    if (!parts.length && industry) parts.push(`Premium ${industry} made to fit your style and your budget.`);
-    if (!parts.length) parts.push(`Quality you can feel — designed to look great and last.`);
-
-    // Add brand anchor, but not repeating the headline
-    b = `${parts.join(" ")} ${biz ? `Explore ${biz} today.` : ""}`.trim();
-  }
-
-  // Final clamp
-  b = b.replace(/\s+/g, " ").trim();
-  if (b.length > 180) b = b.slice(0, 177).trim() + "...";
-  return b;
-}
-
-// ensure A and B are truly different
-function _forceVariantDifference(copyA, copyB, answers = {}) {
-  const hSim = _jaccard(copyA.headline, copyB.headline);
-  const bSim = _jaccard(copyA.subline, copyB.subline);
-  const tooClose = hSim > 0.65 && bSim > 0.6;
-
-  if (!tooClose) return copyB;
-
-  // “Human” fallback B if GPT gave same-ish copy
-  const industry = (answers.industry || "local").toString().trim();
-  const offer = (answers.offer || "").toString().trim();
-  const benefit = (answers.mainBenefit || "").toString().trim();
-
-  const altHead =
-    offer ? `Limited-Time: ${offer}` :
-    benefit ? `A Better Way to ${benefit}` :
-    industry ? `Trusted ${industry} That Stands Out` :
-    `Built to Impress`;
-
-  const altBody = _dedupeBodyFromHeadline(
-    altHead,
-    copyB.subline || "",
-    answers
-  );
-
-  return { ...copyB, headline: altHead.slice(0, 55), subline: altBody };
-}
-
-
-/* ===== robust URL normalizer (works for /api/media and absolute URLs) ===== */
+/* ===== robust URL normalizer ===== */
 function toAbsoluteMedia(u) {
   if (!u) return "";
   const s = String(u).trim();
-  if (/^https?:\/\//i.test(s)) return s; // already absolute
-  if (s.startsWith("/")) return s; // same-origin absolute path
-  if (s.startsWith("api/")) return "/" + s; // "api/media/x" -> "/api/media/x"
-  if (s.startsWith("media/")) return "/api/" + s; // "media/x" -> "/api/media/x"
-  return s; // last resort
-}
-
-/* Route any external IMAGE url through our server proxy to avoid CORS */
-function proxyImg(u = "") {
-  if (!u) return "";
-  const s = String(u).trim();
+  if (/^https?:\/\//i.test(s)) return s;
   if (s.startsWith("/")) return s;
-  if (s.startsWith(`${API_BASE}/proxy-img?u=`)) return s;
-  if (/^https?:\/\//i.test(s)) return `${API_BASE}/proxy-img?u=${encodeURIComponent(s)}`;
+  if (s.startsWith("api/")) return "/" + s;
+  if (s.startsWith("media/")) return "/api/" + s;
   return s;
-}
-
-/* --- headRangeWarm: self-contained, no shared controllers --- */
-async function headRangeWarm(label, url) {
-  if (!url) return false;
-  const finalUrl = toAbsoluteMedia(url);
-  try {
-    const c1 = new AbortController();
-    await fetch(finalUrl, { method: "HEAD", signal: c1.signal });
-
-    const c2 = new AbortController();
-    const r = await fetch(finalUrl, { method: "GET", headers: { Range: "bytes=0-1023" }, signal: c2.signal });
-    if (!r.ok) throw new Error(`RANGE ${r.status}`);
-    return true;
-  } catch (e) {
-    console.warn(`headRangeWarm(${label}) failed:`, e?.message || e);
-    return false;
-  }
-}
-
-/* ---------- IMAGE helpers (prefer baked variations) ---------- */
-const parseImageResults = (data) => {
-  const out = [];
-
-  const push = (u0) => {
-    if (!u0) return;
-    const raw = typeof u0 === "string" ? u0 : u0?.absoluteUrl || u0?.url || u0?.filename;
-    if (!raw) return;
-    const maybeProxied = /^https?:\/\//i.test(raw) ? proxyImg(raw) : raw;
-    out.push(toAbsoluteMedia(maybeProxied.startsWith("/api/") ? maybeProxied : maybeProxied));
-  };
-
-  if (Array.isArray(data?.imageVariations)) for (const v of data.imageVariations) push(v);
-  if (Array.isArray(data?.images)) for (const u0 of data.images) push(u0);
-  if (out.length === 0) push(data?.absoluteImageUrl || data?.imageUrl || data?.url || data?.filename);
-
-  const uniq = Array.from(new Set(out));
-  return uniq.slice(0, 2);
-};
-
-async function fetchImagesOnce(token, answersParam, overlay = {}, prompt = "") {
-  const fallbackA = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-A/1200/628`);
-  const fallbackB = proxyImg(`https://picsum.photos/seed/sm-${encodeURIComponent(token)}-B/1200/628`);
-
-  try {
-    await warmBackend();
-
-    const payload = {
-      answers: answersParam || {},
-      regenerateToken: token,
-      prompt: prompt || buildImagePrompt(answersParam, overlay),
-      composeOverlay: 1,
-      overlayHeadline: overlay?.headline || "",
-      overlayBody: overlay?.body || "",
-      overlayCTA: overlay?.cta || "",
-      count: 2,
-      width: 1200,
-      height: 628,
-      styleHint: "photo",
-      negative: "busy cluttered background, low-contrast, text cut-off",
-    };
-
-    const data = await fetchJsonWithRetry(
-      `${API_BASE}/generate-image-from-prompt`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      },
-      { tries: 3, warm: true, timeoutMs: IMAGE_FETCH_TIMEOUT_MS }
-    ).catch(() => ({}));
-
-    let urls = parseImageResults(data);
-    if (urls.length === 1) urls = [urls[0], fallbackB];
-    if (urls.length === 0) urls = [fallbackA, fallbackB];
-
-    await Promise.allSettled(urls.map((u, i) => headRangeWarm(`IMG${i}`, u)));
-    return urls;
-  } catch (e) {
-    console.warn("image fetch failed:", e?.message || e);
-    return [fallbackA, fallbackB];
-  }
 }
 
 /* ========================= Main Component ========================= */
@@ -743,10 +483,7 @@ export default function FormPage() {
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
   const [chatHistory, setChatHistory] = useState([
-    {
-      from: "gpt",
-      text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.`,
-    },
+    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
     { from: "gpt", text: "Are you ready to get started? (yes/no)" },
   ]);
 
@@ -782,7 +519,6 @@ export default function FormPage() {
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
 
-  /* Use the robust absolute converter everywhere */
   const abs = toAbsoluteMedia;
 
   /* Scroll chat to bottom */
@@ -795,30 +531,51 @@ export default function FormPage() {
     warmBackend();
   }, []);
 
-  /* Restore draft */
+  /* ✅ Restore draft: FORM first, then CREATIVE draft fallback (survives OAuth reloads) */
   useEffect(() => {
     try {
       const raw = localStorage.getItem(FORM_DRAFT_KEY);
-      if (!raw) return;
-      const { savedAt, data } = JSON.parse(raw);
-      if (savedAt && Date.now() - savedAt > DRAFT_TTL_MS) {
-        localStorage.removeItem(FORM_DRAFT_KEY);
-        // IMPORTANT: keep creatives if you want long persistence; TTL still governs FORM draft.
-        // We do NOT clear CREATIVE_DRAFT_KEY here anymore (so creatives persist across /setup and back).
-        return;
+      if (raw) {
+        const { savedAt, data } = JSON.parse(raw);
+        if (savedAt && Date.now() - savedAt > DRAFT_TTL_MS) {
+          localStorage.removeItem(FORM_DRAFT_KEY);
+        } else if (data) {
+          setAnswers(data.answers || {});
+          setStep(data.step ?? 0);
+          setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
+          setMediaType("image");
+          setResult(data.result || null);
+          setImageUrls(data.imageUrls || []);
+          setActiveImage(data.activeImage || 0);
+          setAwaitingReady(data.awaitingReady ?? true);
+          setInput(data.input || "");
+          setSideChatCount(data.sideChatCount || 0);
+          setHasGenerated(!!data.hasGenerated);
+          return;
+        }
       }
-      if (data) {
-        setAnswers(data.answers || {});
-        setStep(data.step ?? 0);
-        setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
-        setMediaType("image");
-        setResult(data.result || null);
-        setImageUrls(data.imageUrls || []);
-        setActiveImage(data.activeImage || 0);
-        setAwaitingReady(data.awaitingReady ?? true);
-        setInput(data.input || "");
-        setSideChatCount(data.sideChatCount || 0);
-        setHasGenerated(!!data.hasGenerated);
+
+      const rawC =
+        localStorage.getItem(CREATIVE_DRAFT_KEY) ||
+        sessionStorage.getItem("draft_form_creatives");
+
+      if (rawC) {
+        const c = JSON.parse(rawC);
+        const imgs = Array.isArray(c?.images) ? c.images.filter(Boolean).slice(0, 2) : [];
+        if (imgs.length) {
+          setImageUrls(imgs);
+          setActiveImage(0);
+          setImageUrl(imgs[0] || "");
+          setResult((prev) => ({
+            ...(prev || {}),
+            headline: String(c?.headline || prev?.headline || "").slice(0, 55),
+            body: String(c?.body || prev?.body || "").trim(),
+            image_overlay_text: String(c?.imageOverlayCTA || prev?.image_overlay_text || "").trim(),
+          }));
+          if (c?.answers && typeof c.answers === "object") setAnswers(c.answers);
+          setHasGenerated(true);
+          setAwaitingReady(false);
+        }
       }
     } catch {}
     // eslint-disable-next-line
@@ -827,14 +584,7 @@ export default function FormPage() {
   useEffect(() => {
     const draft = currentImageId ? getImageDraftById(currentImageId) : null;
     setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
-    setEditBody(
-      draft?.body ??
-        result?.body ??
-        answers?.details ??
-        answers?.adCopy ??
-        answers?.mainBenefit ??
-        ""
-    );
+    setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? answers?.mainBenefit ?? "");
     setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
   }, [currentImageId, result, answers]);
 
@@ -851,7 +601,6 @@ export default function FormPage() {
     return () => clearTimeout(t);
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
-  // Live fallback copy from answers (so preview never looks empty)
   const fallbackCopy = useMemo(() => {
     const f = derivePosterFieldsFromAnswers(answers || {}, {});
     return {
@@ -864,7 +613,7 @@ export default function FormPage() {
         (f.adCopy ||
           (answers?.details || "") ||
           (answers?.mainBenefit || "") ||
-          (answers?.idealCustomer ? `Perfect for: ${answers.idealCustomer}` : "") ||
+          (answers?.idealCustomer ? `Made for ${answers.idealCustomer}` : "") ||
           "Your ad description will appear here").toString(),
     };
   }, [answers]);
@@ -878,7 +627,6 @@ export default function FormPage() {
 
   const displayCTA = normalizeOverlayCTA(editCTA || result?.image_overlay_text || answers?.cta || "Learn more");
 
-  /* Hard reset chat + draft */
   function hardResetChat() {
     if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
     try {
@@ -886,14 +634,12 @@ export default function FormPage() {
       localStorage.removeItem(CREATIVE_DRAFT_KEY);
       sessionStorage.removeItem("draft_form_creatives");
       localStorage.removeItem(IMAGE_DRAFTS_KEY);
+      localStorage.removeItem(IMAGE_GEN_QUOTA_KEY); // helpful during testing
     } catch {}
     setAnswers({});
     setStep(0);
     setChatHistory([
-      {
-        from: "gpt",
-        text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.`,
-      },
+      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
       { from: "gpt", text: "Are you ready to get started? (yes/no)" },
     ]);
     setInput("");
@@ -914,7 +660,7 @@ export default function FormPage() {
     setMediaType("image");
   }
 
-  /* Autosave whole session + creatives (throttled) */
+  /* Autosave */
   useEffect(() => {
     const t = setTimeout(() => {
       const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
@@ -948,7 +694,6 @@ export default function FormPage() {
         savedAt: Date.now(),
       };
 
-      // Persist for /setup AND for returning back to /form (no wiping on reload anymore)
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
       sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
     }, 150);
@@ -970,9 +715,10 @@ export default function FormPage() {
     editHeadline,
     editBody,
     editCTA,
+    abs,
   ]);
 
-  // NEW: extra safety so latest creatives are written before navigating away/reload
+  /* Write latest draft before unload/navigation */
   useEffect(() => {
     const handler = () => {
       try {
@@ -1008,7 +754,7 @@ export default function FormPage() {
     setModalImg("");
   }
 
-  /* ---- Ask OpenAI (side chat / FAQs) ---- */
+  /* ---- Ask OpenAI (side chat) ---- */
   async function askGPT(userText) {
     try {
       const history = chatHistory.slice(-8).map((m) => ({
@@ -1044,7 +790,6 @@ export default function FormPage() {
     if (followUpPrompt) setChatHistory((ch) => [...ch, { from: "gpt", text: followUpPrompt }]);
   }
 
-  /* ---- Chat flow ---- */
   async function handleUserInput(e) {
     e.preventDefault();
     if (loading) return;
@@ -1102,7 +847,6 @@ export default function FormPage() {
 
         setTimeout(async () => {
           const token = getRandomString();
-
           try {
             setImageUrls([]);
             setImageUrl("");
@@ -1110,13 +854,7 @@ export default function FormPage() {
 
           try {
             await warmBackend();
-
-            const imagesPromise = (async () => {
-              await generatePosterBPair(token);
-            })();
-
-            await Promise.any([imagesPromise]).catch(() => {});
-            await Promise.allSettled([imagesPromise]);
+            await generatePosterBPair(token);
 
             setChatHistory((ch) => [
               ...ch,
@@ -1186,16 +924,10 @@ export default function FormPage() {
     const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
     const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
 
-   let copyA = normalizeSmartCopy(rawA, answers);
-let copyB = normalizeSmartCopy(rawB, answers);
+    let copyA = normalizeSmartCopy(rawA, answers);
+    let copyB = normalizeSmartCopy(rawB, answers);
 
-// Make sure body doesn't repeat headline (copywriter-clean)
-copyA = { ...copyA, subline: _dedupeBodyFromHeadline(copyA.headline, copyA.subline, answers) };
-copyB = { ...copyB, subline: _dedupeBodyFromHeadline(copyB.headline, copyB.subline, answers) };
-
-// Make sure B is truly different from A
-copyB = _forceVariantDifference(copyA, copyB, answers);
-
+    // If B comes back too close, just request a second B immediately
     const same =
       (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
       (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
@@ -1212,22 +944,20 @@ copyB = _forceVariantDifference(copyA, copyB, answers);
 
     let urls = [urlA, urlB].filter(Boolean).slice(0, 2);
 
-// If one timed out, retry once for the missing one
-if (urls.length === 1) {
-  try {
-    const missingToken = `${runToken}-B-retry`;
-    const rawBRetry = await summarizeAdCopy(answers, { regenerateToken: missingToken, variant: "B_RETRY_NO_REPEAT" });
-    let copyBRetry = normalizeSmartCopy(rawBRetry, answers);
-    copyBRetry = { ...copyBRetry, subline: _dedupeBodyFromHeadline(copyBRetry.headline, copyBRetry.subline, answers) };
-    const urlRetry = await handleGenerateStaticAd("poster_b", copyBRetry, { regenerateToken: missingToken, silent: true });
-    if (urlRetry) urls = [urls[0], urlRetry];
-  } catch {}
-}
+    // retry missing once
+    if (urls.length === 1) {
+      try {
+        const missingToken = `${runToken}-B-retry`;
+        const rawBRetry = await summarizeAdCopy(answers, { regenerateToken: missingToken, variant: "B_RETRY" });
+        const copyBRetry = normalizeSmartCopy(rawBRetry, answers);
+        const urlRetry = await handleGenerateStaticAd("poster_b", copyBRetry, { regenerateToken: missingToken, silent: true });
+        if (urlRetry) urls = [urls[0], urlRetry];
+      } catch {}
+    }
 
-// Hard guarantee: always 2 entries (fallback duplicates if server is dying)
-if (urls.length === 1) urls = [urls[0], urls[0]];
-if (urls.length === 0) urls = [];
-
+    // hard guarantee 2 entries
+    if (urls.length === 1) urls = [urls[0], urls[0]];
+    if (urls.length === 0) urls = [];
 
     if (urls[0]) {
       saveImageDraftById(creativeIdFromUrl(urls[0]), {
@@ -1260,7 +990,6 @@ if (urls.length === 0) urls = [];
     return urls;
   }
 
-  /* Regenerations (sequential with warmup/backoff) */
   async function handleRegenerateImage() {
     if (!canRunImageGen()) {
       const msg = quotaMessage();
@@ -1283,14 +1012,9 @@ if (urls.length === 0) urls = [];
     }
   }
 
-  // ✅ CHANGE YOU ASKED FOR:
-  // We NO LONGER wipe cached creatives on refresh/reload.
-  // (This is what was causing previews to disappear after /setup and when navigating back.)
-
-  // --- Static Ad Generator (Templates A/B) — UPDATED TO PASS FULL COPY (WITH BULLETS) ---
+  // --- Static Ad Generator (UPDATED: no weird fallback bullets) ---
   async function handleGenerateStaticAd(template = "poster_b", assetsData = null, { regenerateToken = "", silent = false } = {}) {
     const a = answers || {};
-
     const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
     const fromResult = result || {};
 
@@ -1311,42 +1035,27 @@ if (urls.length === 0) urls = [];
       cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
     };
 
+    // sensible bullet fallback (never “dogs”)
     if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
-      craftedCopy.bullets = ["High quality", "Loved by dogs"];
+      const ind = (a.industry || "services").toString().trim().toLowerCase();
+      if (ind.includes("fashion")) {
+        craftedCopy.bullets = ["New arrivals weekly", "Everyday fits", "Easy returns"];
+      } else if (ind.includes("restaurant") || ind.includes("food")) {
+        craftedCopy.bullets = ["Fresh ingredients", "Fast pickup", "Local favorites"];
+      } else {
+        craftedCopy.bullets = ["Clear offer", "Clean design", "Strong call to action"];
+      }
     }
 
     const safeIndustry = (a.industry || "Local Services").toString().trim().slice(0, 60);
     const safeBiz = (a.businessName || "Your Business").toString().trim().slice(0, 60);
     const safeLocation = (a.location || "Your City").toString().trim().slice(0, 60);
 
-    let knobs;
-    if (template === "flyer_a") {
-      knobs = {
-        size: "1080x1080",
-        palette: {
-          header: "#0d3b66",
-          body: "#dff3f4",
-          accent: "#ff8b4a",
-          textOnDark: "#ffffff",
-          textOnLight: "#2b3a44",
-        },
-        lists: {
-          left: a.frequencyList || ["One Time", "Weekly", "Bi-Weekly", "Monthly"],
-          right: a.servicesList || ["Kitchen", "Bathrooms", "Offices", "Dusting", "Mopping", "Vacuuming"],
-        },
-        coverage: (a.coverage || "Coverage area 25 Miles around your city").toString(),
-        showIcons: true,
-        headerSplitDiagonal: true,
-        roundedOuter: true,
-        backgroundHint: safeIndustry,
-      };
-    } else {
-      knobs = {
-        size: "1080x1080",
-        backgroundHint: safeIndustry,
-        backgroundUrl: a.backgroundUrl || "",
-      };
-    }
+    const knobs = {
+      size: "1080x1080",
+      backgroundHint: safeIndustry,
+      backgroundUrl: a.backgroundUrl || "",
+    };
 
     const payload = {
       template,
@@ -1364,6 +1073,7 @@ if (urls.length === 0) urls = [];
         secondary: craftedCopy.secondary,
         bullets: craftedCopy.bullets,
         disclaimers: craftedCopy.disclaimers,
+        cta: craftedCopy.cta,
       },
       answers: {
         ...a,
@@ -1374,8 +1084,6 @@ if (urls.length === 0) urls = [];
       },
     };
 
-    console.debug("[SM][static-ad:payload]", payload);
-
     try {
       const res = await fetch(`${API_BASE}/generate-static-ad`, {
         method: "POST",
@@ -1384,8 +1092,6 @@ if (urls.length === 0) urls = [];
       });
 
       const data = await res.json().catch(() => ({}));
-      console.debug("[SM][static-ad:status]", res.status, data);
-
       if (!res.ok || !data?.ok) {
         const msg = data?.error || `Static ad generation failed (HTTP ${res.status})`;
         setError(msg);
@@ -1418,7 +1124,6 @@ if (urls.length === 0) urls = [];
     }
   }
 
-  /* ---------------------- Render ---------------------- */
   return (
     <div
       style={{
@@ -1430,13 +1135,13 @@ if (urls.length === 0) urls = [];
         alignItems: "center",
       }}
     >
-      {/* global smooth scroll & subtle glow */}
       <style>{`
         html, body { scroll-behavior: smooth; }
         .chat-scroll::-webkit-scrollbar { width: 8px; }
         .chat-scroll::-webkit-scrollbar-thumb { background: #2a3138; border-radius: 8px; }
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
+
       <div
         aria-hidden
         style={{
@@ -1452,7 +1157,6 @@ if (urls.length === 0) urls = [];
         }}
       />
 
-      {/* Top row */}
       <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
@@ -1479,7 +1183,6 @@ if (urls.length === 0) urls = [];
           </button>
         </div>
 
-        {/* Centered title */}
         <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
           <h1
             style={{
@@ -1497,7 +1200,6 @@ if (urls.length === 0) urls = [];
         </div>
       </div>
 
-      {/* Chat panel */}
       <div
         style={{
           width: "100%",
@@ -1529,7 +1231,6 @@ if (urls.length === 0) urls = [];
           AI Ad Manager
         </div>
 
-        {/* history */}
         <div
           ref={chatBoxRef}
           className="chat-scroll"
@@ -1572,7 +1273,6 @@ if (urls.length === 0) urls = [];
           })}
         </div>
 
-        {/* prompt bar */}
         {!loading && (
           <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
             <button
@@ -1645,21 +1345,14 @@ if (urls.length === 0) urls = [];
             AI generating...
           </div>
         )}
-        {error && (
-          <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>
-            {error}
-          </div>
-        )}
+        {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
-      {/* Ad Previews label */}
       <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
         <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>Ad Previews</div>
       </div>
 
-      {/* ---- Ad Preview Cards ---- */}
       <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
-        {/* IMAGE CARD */}
         <div
           style={{
             background: "#fff",
@@ -1720,7 +1413,6 @@ if (urls.length === 0) urls = [];
             </button>
           </div>
 
-          {/* Carousel body */}
           <div
             style={{
               background: "#222",
@@ -1774,12 +1466,10 @@ if (urls.length === 0) urls = [];
             )}
           </div>
 
-          {/* Copy block */}
           <div style={{ padding: "17px 18px 4px 18px" }}>
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {displayHeadline}
             </div>
-
             <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
               {displayBody}
             </div>
@@ -1802,7 +1492,6 @@ if (urls.length === 0) urls = [];
             </button>
           </div>
 
-          {/* Image Edit toggle + fields */}
           <button
             style={{
               position: "absolute",
@@ -1869,7 +1558,6 @@ if (urls.length === 0) urls = [];
         </div>
       </div>
 
-      {/* Continue */}
       <div
         style={{
           width: "100%",
@@ -1924,7 +1612,6 @@ if (urls.length === 0) urls = [];
               savedAt: Date.now(),
             };
 
-            // Persist so /setup shows it AND coming back to /form still has it
             sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
             localStorage.setItem("smartmark_media_selection", "image");
