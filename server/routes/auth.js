@@ -120,16 +120,45 @@ const FB_SCOPES = [
   'public_profile','read_insights','business_management','ads_management','ads_read'
 ];
 
-router.get('/facebook', (_req, res) => {
+router.get('/facebook', (req, res) => {
   const state = 'smartmark_state_1';
+
+  // where to send user back after OAuth
+  const fallback = `${FRONTEND_URL}/setup`;
+  const rawReturnTo = String(req.query.return_to || '').trim();
+  const returnTo = rawReturnTo || fallback;
+
+  // basic open-redirect safety: only allow your own frontends
+  let safeReturnTo = fallback;
+  try {
+    const u = new URL(returnTo);
+    const host = u.hostname.toLowerCase();
+    const allowed =
+      host.endsWith('smartemark.com') ||
+      host.endsWith('vercel.app') ||
+      host === 'localhost';
+    if (allowed) safeReturnTo = u.toString();
+  } catch {}
+
+  // cookie is only read by backend in callback
+  res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 10 * 60 * 1000, // 10 min
+  });
+
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
     `?client_id=${FACEBOOK_APP_ID}` +
     `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
     `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
     `&response_type=code&state=${state}`;
+
   res.redirect(fbUrl);
 });
+
 
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
@@ -169,7 +198,18 @@ router.get('/facebook/callback', async (req, res) => {
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
-    res.redirect(`${FRONTEND_URL}/setup?facebook_connected=1`);
+    const fallback = `${FRONTEND_URL}/setup`;
+const returnTo = req.cookies?.[RETURN_TO_COOKIE] || fallback;
+
+res.clearCookie(RETURN_TO_COOKIE, {
+  path: '/',
+  secure: isProd,
+  sameSite: 'lax',
+  domain: computeCookieDomain(),
+});
+
+res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}facebook_connected=1`);
+
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
     res.status(500).send('Failed to authenticate with Facebook.');

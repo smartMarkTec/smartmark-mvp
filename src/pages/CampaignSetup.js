@@ -1287,7 +1287,10 @@ persistDraftCreativesNow(resolvedUser, {
               try {
                 localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
               } catch {}
-              window.location.href = `${backendUrl}/auth/facebook`;
+       const returnTo = `${window.location.origin}/setup`;
+window.location.href = `/api/auth/facebook?return_to=${encodeURIComponent(returnTo)}`;
+
+
             }}
             style={{
               padding: "14px 22px",
