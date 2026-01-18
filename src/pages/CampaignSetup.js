@@ -1287,8 +1287,8 @@ persistDraftCreativesNow(resolvedUser, {
               try {
                 localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
               } catch {}
-       const returnTo = `${window.location.origin}/setup`;
-window.location.href = `/api/auth/facebook?return_to=${encodeURIComponent(returnTo)}`;
+const returnTo = window.location.origin + "/setup"; // stable landing page
+window.location.assign(`${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`);
 
 
             }}

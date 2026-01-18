@@ -62,6 +62,8 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const COOKIE_NAME = 'sm_sid';
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
+const RETURN_TO_COOKIE = 'sm_return_to';
+
 
 function computeCookieDomain() {
   if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN; // e.g. smartmark-mvp.onrender.com
@@ -121,7 +123,8 @@ const FB_SCOPES = [
 ];
 
 router.get('/facebook', (req, res) => {
-  const state = 'smartmark_state_1';
+  const state = `sm_${Date.now()}`;
+
 
   // where to send user back after OAuth
   const fallback = `${FRONTEND_URL}/setup`;
@@ -142,12 +145,13 @@ router.get('/facebook', (req, res) => {
 
   // cookie is only read by backend in callback
   res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: 'lax',
-    path: '/',
-    maxAge: 10 * 60 * 1000, // 10 min
-  });
+  httpOnly: true,
+  secure: isProd,
+  sameSite: 'lax',
+  path: '/',
+  maxAge: 10 * 60 * 1000, // 10 min
+});
+
 
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
@@ -198,17 +202,24 @@ router.get('/facebook/callback', async (req, res) => {
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
-    const fallback = `${FRONTEND_URL}/setup`;
-const returnTo = req.cookies?.[RETURN_TO_COOKIE] || fallback;
+const fallback = `${FRONTEND_URL}/setup`;
+let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
 
-res.clearCookie(RETURN_TO_COOKIE, {
-  path: '/',
-  secure: isProd,
-  sameSite: 'lax',
-  domain: computeCookieDomain(),
-});
+res.clearCookie(RETURN_TO_COOKIE, { path: '/' }); // keep this simple; domain mismatch breaks clears
+
+// Safety: only allow your own frontend origin
+try {
+  const u = new URL(returnTo || fallback);
+  const front = new URL(FRONTEND_URL);
+
+  if (u.origin !== front.origin) returnTo = fallback; // prevent open redirect
+  else returnTo = u.toString();
+} catch {
+  returnTo = fallback;
+}
 
 res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}facebook_connected=1`);
+
 
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
