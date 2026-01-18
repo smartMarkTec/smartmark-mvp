@@ -24,6 +24,10 @@ const WHITE = "#ffffff";
 
 const CREATIVE_HEIGHT = 150;
 
+const CASHAPP_TAG = "$SmarteMark";
+const CASHAPP_URL = "https://cash.app/" + CASHAPP_TAG.replace("$", "");
+
+
 /* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
@@ -490,6 +494,23 @@ const CampaignSetup = () => {
       return {};
     }
   });
+
+  const copyCashTag = async () => {
+  try {
+    await navigator.clipboard.writeText(CASHAPP_TAG);
+    alert(`Copied: ${CASHAPP_TAG}`);
+  } catch {
+    // fallback
+    const ta = document.createElement("textarea");
+    ta.value = CASHAPP_TAG;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    alert(`Copied: ${CASHAPP_TAG}`);
+  }
+};
+
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
@@ -1537,6 +1558,81 @@ window.location.assign(`${backendUrl}/auth/facebook?return_to=${encodeURICompone
               SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span> &nbsp;|&nbsp; Total:{" "}
               <span style={{ color: WHITE }}>${total.toFixed(2)}</span>
             </div>
+
+            {(() => {
+  const n = Number(budget);
+  const show = Number.isFinite(n) && n >= 3;
+  if (!show) return null;
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        background: "#12201b",
+        border: "1px solid rgba(20,231,185,0.18)",
+        borderRadius: 14,
+        padding: "12px 12px",
+        boxShadow: "0 2px 14px rgba(20,231,185,0.10)",
+        color: WHITE,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ fontWeight: 900, color: "#bdfdf0" }}>
+        Send payment via Cash App
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <div style={{ fontWeight: 900, fontSize: "1.05rem", color: ACCENT }}>
+          {CASHAPP_TAG}
+        </div>
+
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={copyCashTag}
+            style={{
+              background: ACCENT,
+              color: "#0f1418",
+              border: "none",
+              borderRadius: 12,
+              fontWeight: 900,
+              padding: "9px 12px",
+              cursor: "pointer",
+            }}
+          >
+            Copy
+          </button>
+
+          <a
+            href={CASHAPP_URL}
+            target="_blank"
+            rel="noreferrer"
+            style={{
+              background: "#1b242a",
+              color: WHITE,
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: 12,
+              fontWeight: 900,
+              padding: "9px 12px",
+              textDecoration: "none",
+              display: "inline-flex",
+              alignItems: "center",
+            }}
+          >
+            Open Cash App
+          </a>
+        </div>
+      </div>
+
+      <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, lineHeight: 1.35 }}>
+        Pay the <span style={{ color: WHITE }}>${total.toFixed(2)}</span> total to continue. (Budget + SmartMark fee)
+      </div>
+    </div>
+  );
+})()}
+
           </div>
 
           <button
