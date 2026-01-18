@@ -27,6 +27,44 @@ const CREATIVE_HEIGHT = 150;
 /* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+function getLatestDraftImageUrlsFromImageDrafts() {
+  try {
+    const raw = localStorage.getItem("smartmark.imageDrafts.v1");
+    if (!raw) return [];
+    const obj = JSON.parse(raw);
+
+    const items = Object.entries(obj)
+      .filter(([k, v]) => k.startsWith("img:http") && v && v._updatedAt)
+      .sort((a, b) => (a[1]._updatedAt || 0) - (b[1]._updatedAt || 0));
+
+    const urls = items.slice(-2).map(([k]) => k.replace(/^img:/, ""));
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
+useEffect(() => {
+  const hasDraftImages = draftCreatives?.images?.length > 0;
+  if (hasDraftImages) return;
+
+  const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
+  if (!fallbackUrls.length) return;
+
+  const patched = { ...draftCreatives, images: fallbackUrls, savedAt: Date.now() };
+  setDraftCreatives(patched);
+
+  try {
+    localStorage.setItem("draft_form_creatives_v2", JSON.stringify(patched));
+    localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(patched));
+  } catch {}
+  // optional: keep the draft visible
+  setSelectedCampaignId("__DRAFT__");
+  setExpandedId("__DRAFT__");
+}, [draftCreatives]);
+
+
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 
 /* ======================= hard backup so creatives survive FB redirect ======================= */

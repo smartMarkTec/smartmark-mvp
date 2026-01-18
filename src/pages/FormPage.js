@@ -475,6 +475,33 @@ function toAbsoluteMedia(u) {
   return s;
 }
 
+function syncCreativesToDraftKeys({ imageUrls, headline, body, overlay, answers, mediaSelection }) {
+  try {
+    const imgs = (imageUrls || [])
+      .filter(Boolean)
+      .slice(0, 2)
+      .map(toAbsoluteMedia);
+
+    const payload = {
+      images: imgs,
+      headline: (headline || "").toString().trim().slice(0, 55),
+      body: (body || "").toString().trim(),
+      imageOverlayCTA: (overlay || "").toString().trim(),
+      answers: answers && typeof answers === "object" ? answers : {},
+      mediaSelection: mediaSelection || "image",
+      savedAt: Date.now(),
+    };
+
+    localStorage.setItem("draft_form_creatives_v2", JSON.stringify(payload));
+    localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(payload));
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+  } catch (e) {
+    console.warn("syncCreativesToDraftKeys failed:", e);
+  }
+}
+
+
+
 /* ========================= Main Component ========================= */
 export default function FormPage() {
   const navigate = useNavigate();
@@ -685,20 +712,25 @@ const fallbackCopy = useMemo(() => {
       };
       localStorage.setItem(FORM_DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: payload }));
 
-      const imgs = imageUrls.slice(0, 2).map(abs);
+ const imgs = imageUrls.slice(0, 2).map(abs);
 
-      const draftForSetup = {
-        images: imgs,
-        headline: mergedHeadline,
-        body: mergedBody,
-        imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
-        answers,
-        mediaSelection: "image",
-        savedAt: Date.now(),
-      };
+// ✅ DON'T overwrite creatives with empty images
+if (imgs.length) {
+  const draftForSetup = {
+    images: imgs,
+    headline: mergedHeadline,
+    body: mergedBody,
+    imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
+    answers,
+    mediaSelection: "image",
+    savedAt: Date.now(),
+  };
 
-      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+  localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+  localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+  sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+}
+
     }, 150);
 
     return () => clearTimeout(t);
@@ -989,6 +1021,16 @@ const fallbackCopy = useMemo(() => {
       disclaimers: copyA.disclaimers,
       image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
     });
+
+    syncCreativesToDraftKeys({
+  imageUrls: urls,
+  headline: copyA.headline,
+  body: copyA.subline,
+  overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+  answers,
+  mediaSelection: "image",
+});
+
 
     return urls;
   }
