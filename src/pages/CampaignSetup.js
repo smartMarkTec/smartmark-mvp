@@ -668,19 +668,24 @@ const ageOk =
     } catch {}
   }, []);
 
-  useEffect(() => {
-    const hasDraft = draftCreatives.images && draftCreatives.images.length;
-    if (!hasDraft) return;
-    try {
-      const payload = { ...draftCreatives, savedAt: Date.now() };
-      if (resolvedUser) {
-        localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
-      } else {
-        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
-      }
-      saveSetupCreativeBackup(resolvedUser, payload);
-    } catch {}
-  }, [draftCreatives, resolvedUser]);
+useEffect(() => {
+  const hasDraft = draftCreatives.images && draftCreatives.images.length;
+  if (!hasDraft) return;
+  try {
+    const payload = { ...draftCreatives, savedAt: Date.now() };
+
+    // ✅ ADD THIS:
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+
+    if (resolvedUser) {
+      localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+    } else {
+      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+    }
+    saveSetupCreativeBackup(resolvedUser, payload);
+  } catch {}
+}, [draftCreatives, resolvedUser]);
+
 
   const handleClearDraft = () => {
     try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
@@ -701,6 +706,10 @@ const ageOk =
     if (params.get("facebook_connected") === "1") {
       setFbConnected(true);
       setCameFromFbConnect(true);
+
+      setExpandedId("__DRAFT__");
+setSelectedCampaignId("__DRAFT__");
+
 
       try {
         localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
@@ -799,10 +808,14 @@ useEffect(() => {
       .then((data) => {
         const list = data && data.data ? data.data.slice(0, 2) : [];
         setCampaigns(list);
-        if (!selectedCampaignId && list.length > 0) {
-          setSelectedCampaignId(list[0].id);
-          setExpandedId(list[0].id);
-        }
+       const hasDraft = !!(draftCreatives?.images && draftCreatives.images.length);
+
+// ✅ don't auto-select FB campaigns if we have a draft (keeps creatives visible)
+if (!selectedCampaignId && list.length > 0 && !hasDraft) {
+  setSelectedCampaignId(list[0].id);
+  setExpandedId(list[0].id);
+}
+
       })
       .catch(() => {});
   }, [fbConnected, selectedAccount, launched]);
