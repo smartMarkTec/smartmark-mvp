@@ -44,25 +44,7 @@ function getLatestDraftImageUrlsFromImageDrafts() {
   }
 }
 
-useEffect(() => {
-  const hasDraftImages = draftCreatives?.images?.length > 0;
-  if (hasDraftImages) return;
 
-  const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
-  if (!fallbackUrls.length) return;
-
-  const patched = { ...draftCreatives, images: fallbackUrls, savedAt: Date.now() };
-  setDraftCreatives(patched);
-
-  try {
-    localStorage.setItem("draft_form_creatives_v2", JSON.stringify(patched));
-    localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
-    sessionStorage.setItem("draft_form_creatives", JSON.stringify(patched));
-  } catch {}
-  // optional: keep the draft visible
-  setSelectedCampaignId("__DRAFT__");
-  setExpandedId("__DRAFT__");
-}, [draftCreatives]);
 
 
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
@@ -558,6 +540,28 @@ const CampaignSetup = () => {
     images: [],
     mediaSelection: "image",
   });
+
+  useEffect(() => {
+  const hasDraftImages = draftCreatives?.images?.length > 0;
+  if (hasDraftImages) return;
+
+  const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
+  if (!fallbackUrls.length) return;
+
+  const patched = { ...draftCreatives, images: fallbackUrls, savedAt: Date.now() };
+  setDraftCreatives(patched);
+
+  try {
+    localStorage.setItem("draft_form_creatives_v2", JSON.stringify(patched));
+    localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(patched));
+  } catch {}
+
+  // keep the draft visible
+  setSelectedCampaignId("__DRAFT__");
+  setExpandedId("__DRAFT__");
+}, [draftCreatives]);
+
 
  const state = location.state || {};
 const navImageUrls = Array.isArray(state.imageUrls)
