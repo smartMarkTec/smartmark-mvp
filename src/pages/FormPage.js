@@ -34,6 +34,9 @@ const WARMUP_URL = `${API_BASE}/test`;
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+// Creatives should stick around longer than the chat draft
+const CREATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 
 /* -------- Image generation spend guard -------- */
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
@@ -482,15 +485,17 @@ function syncCreativesToDraftKeys({ imageUrls, headline, body, overlay, answers,
       .slice(0, 2)
       .map(toAbsoluteMedia);
 
-    const payload = {
-      images: imgs,
-      headline: (headline || "").toString().trim().slice(0, 55),
-      body: (body || "").toString().trim(),
-      imageOverlayCTA: (overlay || "").toString().trim(),
-      answers: answers && typeof answers === "object" ? answers : {},
-      mediaSelection: mediaSelection || "image",
-      savedAt: Date.now(),
-    };
+ const payload = {
+  images: imgs,
+  headline: (headline || "").toString().trim().slice(0, 55),
+  body: (body || "").toString().trim(),
+  imageOverlayCTA: (overlay || "").toString().trim(),
+  answers: answers && typeof answers === "object" ? answers : {},
+  mediaSelection: mediaSelection || "image",
+  savedAt: Date.now(),
+  expiresAt: Date.now() + CREATIVE_TTL_MS, // ✅ persist for a while
+};
+
 
     localStorage.setItem("draft_form_creatives_v2", JSON.stringify(payload));
     localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(payload));
@@ -571,14 +576,25 @@ export default function FormPage() {
           setStep(data.step ?? 0);
           setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
           setMediaType("image");
-          setResult(data.result || null);
-          setImageUrls(data.imageUrls || []);
-          setActiveImage(data.activeImage || 0);
-          setAwaitingReady(data.awaitingReady ?? true);
-          setInput(data.input || "");
-          setSideChatCount(data.sideChatCount || 0);
-          setHasGenerated(!!data.hasGenerated);
-          return;
+         const restoredImgs = Array.isArray(data.imageUrls) ? data.imageUrls.filter(Boolean) : [];
+
+setImageUrls(restoredImgs);
+setActiveImage(data.activeImage || 0);
+setAwaitingReady(data.awaitingReady ?? true);
+setInput(data.input || "");
+setSideChatCount(data.sideChatCount || 0);
+
+// ✅ Only restore result/copy if we actually have creatives.
+// If no images, we force neutral defaults (prevents "makeup" stale copy).
+if (restoredImgs.length) {
+  setResult(data.result || null);
+  setHasGenerated(true);
+} else {
+  setResult(null);
+  setHasGenerated(false);
+}
+return;
+
         }
       }
 
@@ -586,24 +602,33 @@ export default function FormPage() {
         localStorage.getItem(CREATIVE_DRAFT_KEY) ||
         sessionStorage.getItem("draft_form_creatives");
 
-      if (rawC) {
-        const c = JSON.parse(rawC);
-        const imgs = Array.isArray(c?.images) ? c.images.filter(Boolean).slice(0, 2) : [];
-        if (imgs.length) {
-          setImageUrls(imgs);
-          setActiveImage(0);
-          setImageUrl(imgs[0] || "");
-          setResult((prev) => ({
-            ...(prev || {}),
-            headline: String(c?.headline || prev?.headline || "").slice(0, 55),
-            body: String(c?.body || prev?.body || "").trim(),
-            image_overlay_text: String(c?.imageOverlayCTA || prev?.image_overlay_text || "").trim(),
-          }));
-          if (c?.answers && typeof c.answers === "object") setAnswers(c.answers);
-          setHasGenerated(true);
-          setAwaitingReady(false);
-        }
-      }
+    if (rawC) {
+  const c = JSON.parse(rawC);
+
+  // ✅ expire creatives cleanly
+  if (c?.expiresAt && Date.now() > Number(c.expiresAt)) {
+    localStorage.removeItem(CREATIVE_DRAFT_KEY);
+    localStorage.removeItem("sm_setup_creatives_backup_v1");
+    sessionStorage.removeItem("draft_form_creatives");
+  } else {
+    const imgs = Array.isArray(c?.images) ? c.images.filter(Boolean).slice(0, 2) : [];
+    if (imgs.length) {
+      setImageUrls(imgs);
+      setActiveImage(0);
+      setImageUrl(imgs[0] || "");
+      setResult((prev) => ({
+        ...(prev || {}),
+        headline: String(c?.headline || prev?.headline || "").slice(0, 55),
+        body: String(c?.body || prev?.body || "").trim(),
+        image_overlay_text: String(c?.imageOverlayCTA || prev?.image_overlay_text || "").trim(),
+      }));
+      if (c?.answers && typeof c.answers === "object") setAnswers(c.answers);
+      setHasGenerated(true);
+      setAwaitingReady(false);
+    }
+  }
+}
+
     } catch {}
     // eslint-disable-next-line
   }, []);
@@ -689,6 +714,22 @@ const fallbackCopy = useMemo(() => {
     setEditCTA("");
     setMediaType("image");
   }
+
+  function clearPreviewStateForNewBusiness() {
+  try {
+    localStorage.removeItem(CREATIVE_DRAFT_KEY);
+    localStorage.removeItem("sm_setup_creatives_backup_v1");
+    sessionStorage.removeItem("draft_form_creatives");
+    localStorage.removeItem("smartmark_last_image_url");
+  } catch {}
+  setResult(null);
+  setImageUrls([]);
+  setActiveImage(0);
+  setImageUrl("");
+  setHasGenerated(false);
+  setImageEditing(false);
+}
+
 
   /* Autosave */
   useEffect(() => {
@@ -925,9 +966,17 @@ if (imgs.length) {
     if (currentQ) {
       let answerToSave = value;
       if (currentQ.key === "url") {
-        const firstUrl = extractFirstUrl(value);
-        if (firstUrl) answerToSave = firstUrl;
-      }
+  const firstUrl = extractFirstUrl(value);
+  if (firstUrl) answerToSave = firstUrl;
+
+  // ✅ If URL changed from last run, reset previews so no stale industry/copy shows.
+  const prevUrl = (answers?.url || "").toString().trim();
+  const nextUrl = (answerToSave || "").toString().trim();
+  if (prevUrl && nextUrl && prevUrl !== nextUrl) {
+    clearPreviewStateForNewBusiness();
+  }
+}
+
 
       const newAnswers = { ...answers, [currentQ.key]: answerToSave };
       setAnswers(newAnswers);
