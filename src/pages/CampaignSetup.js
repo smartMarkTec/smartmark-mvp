@@ -27,6 +27,7 @@ const CREATIVE_HEIGHT = 150;
 /* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+
 function getLatestDraftImageUrlsFromImageDrafts() {
   try {
     const raw = localStorage.getItem("smartmark.imageDrafts.v1");
@@ -34,10 +35,22 @@ function getLatestDraftImageUrlsFromImageDrafts() {
     const obj = JSON.parse(raw);
 
     const items = Object.entries(obj)
-      .filter(([k, v]) => k.startsWith("img:http") && v && v._updatedAt)
+      .filter(([k, v]) => k.startsWith("img:") && v && v._updatedAt) // ✅ accept img:/api/... too
       .sort((a, b) => (a[1]._updatedAt || 0) - (b[1]._updatedAt || 0));
 
-    const urls = items.slice(-2).map(([k]) => k.replace(/^img:/, ""));
+    const urls = items
+      .slice(-2)
+      .map(([k]) => k.replace(/^img:/, ""))
+      .map((u) => {
+        const s = String(u || "").trim();
+        if (!s) return "";
+        // normalize legacy /media/* to Vercel proxy
+        if (s.startsWith("/media/")) return "/api" + s;
+        if (s.startsWith("media/")) return "/api/" + s;
+        return s; // keep /api/media/* or https://... as-is
+      })
+      .filter(Boolean);
+
     return urls;
   } catch {
     return [];
@@ -237,9 +250,29 @@ const calculateFees = (budget) => {
   return { fee, total };
 };
 
+function toAbsoluteMedia(u) {
+  if (!u) return "";
+  const s = String(u).trim();
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // ✅ keep Vercel same-origin proxy paths
+  if (s.startsWith("/api/")) return s;
+
+  // ✅ normalize legacy /media/* into /api/media/*
+  if (s.startsWith("/media/")) return "/api" + s;
+  if (s.startsWith("media/")) return "/api/" + s;
+
+  // fallback
+  if (s.startsWith("/")) return s;
+  if (s.startsWith("api/")) return "/" + s;
+  return s;
+}
+
+
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
-  const src = imageUrl && !/^https?:\/\//.test(imageUrl) ? backendUrl + imageUrl : imageUrl;
+  const src = toAbsoluteMedia(imageUrl);
+
   return (
     <div
       style={{
@@ -330,9 +363,8 @@ const badge = {
 
 function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
-  const normalized = (items || [])
-    .map((u) => (u && !/^https?:\/\//.test(u) ? `${backendUrl}${u}` : String(u || "").trim()))
-    .filter(Boolean);
+ const normalized = (items || []).map(toAbsoluteMedia).filter(Boolean);
+
 
   useEffect(() => {
     if (idx >= normalized.length) setIdx(0);
