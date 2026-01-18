@@ -478,6 +478,52 @@ function MetricsRow({ metrics }) {
   );
 }
 
+/* ---- date dropdown helpers ---- */
+function Sep() {
+  return (
+    <span
+      style={{
+        width: 1,
+        height: 22,
+        background: "rgba(255,255,255,0.08)",
+        display: "inline-block",
+        borderRadius: 2,
+      }}
+    />
+  );
+}
+
+function Picker({ value, options = [], onChange }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(Number(e.target.value))}
+      style={{
+        appearance: "none",
+        WebkitAppearance: "none",
+        MozAppearance: "none",
+        background: "#141a1f",
+        color: "#bdfdf0",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 10,
+        padding: "8px 10px",
+        fontWeight: 900,
+        fontSize: 14,
+        outline: "none",
+        cursor: "pointer",
+        minWidth: 74,
+      }}
+    >
+      {options.map((o) => (
+        <option key={String(o)} value={o}>
+          {o}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+
 /* ======================================================================= */
 /* ============================== MAIN =================================== */
 /* ======================================================================= */
