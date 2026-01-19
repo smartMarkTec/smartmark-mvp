@@ -729,7 +729,8 @@ const CampaignSetup = () => {
 
 const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
 const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
-const [authLoading, setAuthLoading] = useState(false);
+const [authStatus, setAuthStatus] = useState("");
+
 
 
   // IMPORTANT: normalize stored account ID to "act_..."
@@ -1320,6 +1321,7 @@ useEffect(() => {
 }, [loginPass, resolvedUser]);
 
 const handleLogin = async () => {
+  setAuthStatus("");
   const u = String(loginUser || "").trim();
   const p = String(loginPass || "").trim();
   if (!u || !p) return alert("Enter username/email + password.");
@@ -1336,10 +1338,14 @@ const handleLogin = async () => {
     if (!r.ok) throw new Error(j?.error || "Login failed");
 
     try { localStorage.setItem("sm_current_user", u); } catch {}
+    setAuthStatus("Logged in ✅");
     alert("Logged in ✅");
   } catch (e) {
-    alert(e?.message || "Login failed");
-  }
+  const msg = e?.message || "Login failed";
+  setAuthStatus(msg);
+  alert(msg);
+}
+
   setAuthLoading(false);
 };
 
