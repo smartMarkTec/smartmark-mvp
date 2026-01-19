@@ -719,13 +719,59 @@ const CampaignSetup = () => {
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
-  const [feePaid, setFeePaid] = useState(() => {
+   const [feePaid, setFeePaid] = useState(() => {
     try {
       return localStorage.getItem(withUser(resolvedUser, FEE_PAID_KEY)) === "1";
     } catch {
       return false;
     }
   });
+
+  /* ===================== LOGIN (simple + works) ===================== */
+  const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
+  const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
+  const [authLoading, setAuthLoading] = useState(false);
+  const [authStatus, setAuthStatus] = useState({ ok: false, msg: "" });
+
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_login_username", loginUser, true);
+  }, [loginUser, resolvedUser]);
+
+  useEffect(() => {
+    lsSet(resolvedUser, "smartmark_login_password", loginPass, true);
+  }, [loginPass, resolvedUser]);
+
+  const handleLogin = async () => {
+    const u = String(loginUser || "").trim();
+    const p = String(loginPass || "").trim();
+    if (!u || !p) {
+      setAuthStatus({ ok: false, msg: "Enter email/username + password." });
+      return;
+    }
+
+    setAuthLoading(true);
+    setAuthStatus({ ok: false, msg: "Logging in..." });
+
+    try {
+      const r = await fetch(`${backendUrl}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ username: u, password: p }),
+      });
+
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "Login failed");
+
+      try { localStorage.setItem("sm_current_user", u); } catch {}
+      setAuthStatus({ ok: true, msg: "Logged in ✅" });
+    } catch (e) {
+      setAuthStatus({ ok: false, msg: e?.message || "Login failed" });
+    }
+
+    setAuthLoading(false);
+  };
+
 
 
 
@@ -1404,15 +1450,17 @@ useEffect(() => {
     navigate("/form");
   };
 
-  const canLaunch = !!(
+   const canLaunch = !!(
     fbConnected &&
     selectedAccount &&
     selectedPageId &&
     budget &&
     !isNaN(parseFloat(budget)) &&
     parseFloat(budget) >= 3 &&
-    feePaid
+    feePaid &&
+    authStatus.ok
   );
+
 
   function capTwoWeeksISO(startISO, endISO) {
     try {
@@ -1956,18 +2004,76 @@ onClick={() => {
                     gap: 10,
                   }}
                 >
-                  <div style={{ fontWeight: 900, color: "#bdfdf0" }}>
+                                 <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>
                     Pay SmartMark Fee to Launch
                   </div>
 
+                  {/* Login (basic) */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <input
+                      type="text"
+                      value={loginUser}
+                      onChange={(e) => setLoginUser(e.target.value)}
+                      placeholder="Email / Username"
+                      style={{
+                        background: INPUT_BG,
+                        borderRadius: 12,
+                        padding: "10px 12px",
+                        border: `1px solid ${INPUT_BORDER}`,
+                        width: "100%",
+                        color: TEXT_DIM,
+                        fontSize: "1.02rem",
+                        fontWeight: 800,
+                        outline: "none",
+                      }}
+                    />
 
+                    <input
+                      type="password"
+                      value={loginPass}
+                      onChange={(e) => setLoginPass(e.target.value)}
+                      placeholder="Password"
+                      style={{
+                        background: INPUT_BG,
+                        borderRadius: 12,
+                        padding: "10px 12px",
+                        border: `1px solid ${INPUT_BORDER}`,
+                        width: "100%",
+                        color: TEXT_DIM,
+                        fontSize: "1.02rem",
+                        fontWeight: 800,
+                        outline: "none",
+                      }}
+                    />
 
+                    <button
+                      type="button"
+                      onClick={handleLogin}
+                      disabled={authLoading}
+                      style={{
+                        background: authStatus.ok ? "#2f7a5d" : "#232828",
+                        color: WHITE,
+                        border: `1px solid ${INPUT_BORDER}`,
+                        borderRadius: 12,
+                        fontWeight: 900,
+                        padding: "10px 14px",
+                        cursor: authLoading ? "not-allowed" : "pointer",
+                        opacity: authLoading ? 0.7 : 1,
+                        width: "100%",
+                      }}
+                    >
+                      {authLoading ? "Logging in..." : authStatus.ok ? "Logged In ✅" : "Login"}
+                    </button>
 
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ fontWeight: 900, fontSize: "1.05rem", color: ACCENT }}>
-                      $SmarteMark
-                    </div>
+                    {!!authStatus.msg && (
+                      <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, textAlign: "center" }}>
+                        {authStatus.msg}
+                      </div>
+                    )}
+                  </div>
 
+                  {/* Setup Fee button (centered) */}
+                  <div style={{ display: "flex", justifyContent: "center" }}>
                     <button
                       type="button"
                       onClick={handlePayFee}
@@ -1977,18 +2083,15 @@ onClick={() => {
                         border: "none",
                         borderRadius: 12,
                         fontWeight: 900,
-                        padding: "10px 14px",
+                        padding: "10px 18px",
                         cursor: "pointer",
-                        minWidth: 150,
+                        minWidth: 170,
                       }}
                     >
-                      {feePaid ? "Fee Paid ✅" : "Pay $25 Fee"}
+                      {feePaid ? "Fee Paid ✅" : "Setup Fee"}
                     </button>
                   </div>
 
-                  <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, lineHeight: 1.35 }}>
-                    You only pay SmartMark’s <span style={{ color: WHITE }}>$25</span> fee here. Your ad spend is handled inside Facebook.
-                  </div>
                 </div>
               );
             })()}
