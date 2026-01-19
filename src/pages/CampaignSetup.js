@@ -1534,7 +1534,19 @@ const CampaignSetup = () => {
         >
           <button
             onClick={() => {
+
               // persist creatives BEFORE leaving to Render (cross-origin redirect)
+
+              const qs = new URLSearchParams(location.search || "");
+const ctxKey =
+  getActiveCtx() ||
+  (location.state?.ctxKey ? String(location.state.ctxKey).trim() : "") ||
+  (qs.get("ctxKey") || "").trim();
+
+const safeCtx = ctxKey || `${Date.now()}|||setup`;
+setActiveCtx(safeCtx);
+
+
               const imagesToPersist = (draftCreatives?.images?.length ? draftCreatives.images : []) || [];
               const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
 
@@ -1558,13 +1570,7 @@ const CampaignSetup = () => {
                 localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
               } catch {}
 
-              const qs = new URLSearchParams(location.search || "");
-const ctxKey =
-  getActiveCtx() ||
-  (location.state?.ctxKey ? String(location.state.ctxKey).trim() : "") ||
-  (qs.get("ctxKey") || "").trim();
-
-if (ctxKey) setActiveCtx(ctxKey);
+          
 
               const returnTo =
                 window.location.origin +
