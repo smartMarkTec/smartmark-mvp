@@ -769,13 +769,14 @@ Write ad copy that fits the schema below. Do NOT copy user phrases ≥3 words. P
 
 Return JSON only:
 {
-  "headline": "...",
-  "subline": "...",
-  "cta": "...",
-  "offer": "...",
-  "bullets": ["...", "...", "..."],
-  "disclaimers": "..."
+  "headline": "4–7 words. Must clearly relate to the Industry + Main Benefit (paraphrase user inputs). No generic titles like 'Specials' or 'New Arrivals'.",
+  "subline": "2–3 short sentences (30–55 words total). Explain the value + what they get + simple next step. Neutral claims only. No emojis/hashtags.",
+  "cta": "One of: Shop now, Buy now, Learn more, Visit us, Check us out, Take a look, Get started",
+  "offer": "If the user gave a real offer, paraphrase it. Otherwise empty string.",
+  "bullets": ["3 short benefit bullets (2–5 words each) based on user inputs"],
+  "disclaimers": "Optional. Only if user provided something. Otherwise empty string."
 }
+
 `;
 
   const resp = await openai.chat.completions.create({
