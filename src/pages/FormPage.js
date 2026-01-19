@@ -32,11 +32,13 @@ const WARMUP_URL = `${API_BASE}/test`;
 
 /* -------- Draft persistence -------- */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
-const FORM_DRAFT_KEY = "sm_form_draft_v2";
-const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+const FORM_DRAFT_KEY = "sm_form_draft_v3";
+const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
+
 
 // ✅ Active run context (prevents old industry/copy bleeding across back/forward/OAuth)
-const ACTIVE_CTX_KEY = "sm_active_ctx_v1";
+const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
+
 
 function getActiveCtx() {
   return (
@@ -69,6 +71,42 @@ function purgeCreativeDraftKeys() {
     sessionStorage.removeItem("draft_form_creatives_v2");
   } catch {}
 }
+
+function purgeLegacyDraftKeys() {
+  try {
+    // Remove old exact keys (non-namespaced)
+    [
+      "sm_form_draft_v2",
+      "draft_form_creatives_v2",
+      "sm_setup_creatives_backup_v1",
+      "sm_active_ctx_v1",
+    ].forEach((k) => {
+      localStorage.removeItem(k);
+      sessionStorage.removeItem(k);
+    });
+
+    // Remove namespaced keys like: u:$willkan:sm_form_draft_v2
+    const killSuffixes = [
+      ":sm_form_draft_v2",
+      ":draft_form_creatives_v2",
+      ":sm_setup_creatives_backup_v1",
+      ":sm_active_ctx_v1",
+    ];
+
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (!key) continue;
+      if (killSuffixes.some((s) => key.endsWith(s))) localStorage.removeItem(key);
+    }
+
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (!key) continue;
+      if (killSuffixes.some((s) => key.endsWith(s))) sessionStorage.removeItem(key);
+    }
+  } catch {}
+}
+
 
 // Creatives should stick around longer than the chat draft
 const CREATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
@@ -597,6 +635,8 @@ export default function FormPage() {
   /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
   useEffect(() => {
     try {
+            purgeLegacyDraftKeys();
+
       const existing = String(getActiveCtx() || "").trim();
 
       // Read raw drafts
@@ -611,6 +651,13 @@ export default function FormPage() {
       if (rawForm) {
         try {
           const parsed = JSON.parse(rawForm || "{}");
+          // ✅ If form draft has no ctxKey, it's legacy/unsafe: delete it and stop restore
+const parsedCtx = String(parsed?.ctxKey || "").trim();
+if (!parsedCtx) {
+  try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
+  return;
+}
+
           const savedAt = Number(parsed?.savedAt || 0);
           const isExpired = savedAt && Date.now() - savedAt > DRAFT_TTL_MS;
           if (!isExpired) formWrap = parsed;
