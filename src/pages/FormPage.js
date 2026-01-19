@@ -46,9 +46,11 @@ function getActiveCtx() {
   );
 }
 function setActiveCtx(ctxKey) {
+  const k = String(ctxKey || "").trim();
+  if (!k) return;
   try {
-    sessionStorage.setItem(ACTIVE_CTX_KEY, ctxKey);
-    localStorage.setItem(ACTIVE_CTX_KEY, ctxKey); // survives OAuth reload
+    sessionStorage.setItem(ACTIVE_CTX_KEY, k);
+    localStorage.setItem(ACTIVE_CTX_KEY, k); // survives OAuth reload
   } catch {}
 }
 function buildCtxKey(a = {}) {
@@ -68,10 +70,8 @@ function purgeCreativeDraftKeys() {
   } catch {}
 }
 
-
 // Creatives should stick around longer than the chat draft
 const CREATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
-
 
 /* -------- Image generation spend guard -------- */
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
@@ -199,6 +199,17 @@ function dotStyle(n) {
     color: TEAL,
     animationDelay: `${n * 0.13}s`,
   };
+}
+
+/* ===== robust URL normalizer ===== */
+function toAbsoluteMedia(u) {
+  if (!u) return "";
+  const s = String(u).trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("/")) return s;
+  if (s.startsWith("api/")) return "/" + s;
+  if (s.startsWith("media/")) return "/api/" + s;
+  return s;
 }
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -346,7 +357,6 @@ function Dots({ count, active, onClick }) {
 }
 
 /* ===== helpers ===== */
-
 function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const safe = (s) => String(s || "").trim();
 
@@ -354,7 +364,7 @@ function derivePosterFieldsFromAnswers(a = {}, fallback = {}) {
   const promoLine = a.promoLine || a.subline || a.idealCustomer || "";
   const offer = a.offer || a.saveAmount || "";
   const secondary = a.secondary || a.financingLine || "";
-const adCopy = a.adCopy || a.details || "";
+  const adCopy = a.adCopy || a.details || "";
   const legal = a.legal || "";
   const backgroundUrl = a.backgroundUrl || fallback.backgroundUrl || "";
 
@@ -502,37 +512,21 @@ function normalizeSmartCopy(raw = {}, answers = {}) {
   };
 }
 
-/* ===== robust URL normalizer ===== */
-function toAbsoluteMedia(u) {
-  if (!u) return "";
-  const s = String(u).trim();
-  if (/^https?:\/\//i.test(s)) return s;
-  if (s.startsWith("/")) return s;
-  if (s.startsWith("api/")) return "/" + s;
-  if (s.startsWith("media/")) return "/api/" + s;
-  return s;
-}
-
 function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, answers, mediaSelection }) {
-
   try {
-    const imgs = (imageUrls || [])
-      .filter(Boolean)
-      .slice(0, 2)
-      .map(toAbsoluteMedia);
+    const imgs = (imageUrls || []).filter(Boolean).slice(0, 2).map(toAbsoluteMedia);
 
- const payload = {
-  ctxKey: ctxKey || getActiveCtx(),
-  images: imgs,
-  headline: (headline || "").toString().trim().slice(0, 55),
-  body: (body || "").toString().trim(),
-  imageOverlayCTA: (overlay || "").toString().trim(),
-  answers: answers && typeof answers === "object" ? answers : {},
-  mediaSelection: mediaSelection || "image",
-  savedAt: Date.now(),
-  expiresAt: Date.now() + CREATIVE_TTL_MS, // ✅ persist for a while
-};
-
+    const payload = {
+      ctxKey: ctxKey || getActiveCtx(),
+      images: imgs,
+      headline: (headline || "").toString().trim().slice(0, 55),
+      body: (body || "").toString().trim(),
+      imageOverlayCTA: (overlay || "").toString().trim(),
+      answers: answers && typeof answers === "object" ? answers : {},
+      mediaSelection: mediaSelection || "image",
+      savedAt: Date.now(),
+      expiresAt: Date.now() + CREATIVE_TTL_MS, // ✅ persist for a while
+    };
 
     localStorage.setItem("draft_form_creatives_v2", JSON.stringify(payload));
     localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(payload));
@@ -542,7 +536,10 @@ function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, 
   }
 }
 
-
+const INITIAL_CHAT = [
+  { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
+  { from: "gpt", text: "Are you ready to get started? (yes/no)" },
+];
 
 /* ========================= Main Component ========================= */
 export default function FormPage() {
@@ -551,10 +548,7 @@ export default function FormPage() {
 
   const [answers, setAnswers] = useState({});
   const [step, setStep] = useState(0);
-  const [chatHistory, setChatHistory] = useState([
-    { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
-    { from: "gpt", text: "Are you ready to get started? (yes/no)" },
-  ]);
+  const [chatHistory, setChatHistory] = useState(INITIAL_CHAT);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -600,62 +594,77 @@ export default function FormPage() {
     warmBackend();
   }, []);
 
-  /* ✅ Restore draft: FORM first, then CREATIVE draft fallback (survives OAuth reloads) */
+  /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
   useEffect(() => {
     try {
-      // ✅ Ensure we always have an active ctx (survives OAuth reload)
-      const existingActive = getActiveCtx();
-      if (!existingActive) setActiveCtx(buildCtxKey({}));
+      const existing = String(getActiveCtx() || "").trim();
 
-      const activeCtxNow = getActiveCtx();
+      // Read raw drafts
+      const rawForm = localStorage.getItem(FORM_DRAFT_KEY);
+      const rawCreative =
+        sessionStorage.getItem("draft_form_creatives") ||
+        localStorage.getItem(CREATIVE_DRAFT_KEY) ||
+        localStorage.getItem("sm_setup_creatives_backup_v1");
 
-      const raw = localStorage.getItem(FORM_DRAFT_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw || "{}");
-        const { savedAt, data } = parsed || {};
+      // Parse form wrapper (if valid + not expired)
+      let formWrap = null;
+      if (rawForm) {
+        try {
+          const parsed = JSON.parse(rawForm || "{}");
+          const savedAt = Number(parsed?.savedAt || 0);
+          const isExpired = savedAt && Date.now() - savedAt > DRAFT_TTL_MS;
+          if (!isExpired) formWrap = parsed;
+          else localStorage.removeItem(FORM_DRAFT_KEY);
+        } catch {}
+      }
 
-        // TTL
-        if (savedAt && Date.now() - savedAt > DRAFT_TTL_MS) {
-          localStorage.removeItem(FORM_DRAFT_KEY);
-        } else if (data) {
-          // ✅ ctx gating for FORM draft too (prevents old chat bleeding back after OAuth)
-         const draftCtx = String(parsed?.ctxKey || "").trim();
-
-
-          // If draft has ctxKey and it doesn't match active, ignore it (stale)
-          if (draftCtx && activeCtxNow && draftCtx !== activeCtxNow) {
-            localStorage.removeItem(FORM_DRAFT_KEY);
+      // Parse creative draft (if valid + not expired)
+      let creativeObj = null;
+      if (rawCreative) {
+        try {
+          const c = JSON.parse(rawCreative || "{}");
+          if (c?.expiresAt && Date.now() > Number(c.expiresAt)) {
+            // expired creatives should be purged
             purgeCreativeDraftKeys();
-            return;
+          } else {
+            creativeObj = c;
           }
+        } catch {}
+      }
 
-          // If active is missing but draft has one, adopt it
-          if (!activeCtxNow && draftCtx) setActiveCtx(draftCtx);
+      // ✅ Decide active ctx WITHOUT minting a new one prematurely
+      const ctxFromForm = String(formWrap?.ctxKey || formWrap?.data?.ctxKey || "").trim();
+      const ctxFromCreative = String(creativeObj?.ctxKey || "").trim();
+      const ctxCandidate = existing || ctxFromForm || ctxFromCreative || buildCtxKey({});
+      setActiveCtx(ctxCandidate);
 
-          // If neither has ctxKey, mint one from draft answers
-          if (!getActiveCtx()) setActiveCtx(buildCtxKey(data.answers || {}));
+      const activeCtxNow = String(getActiveCtx() || ctxCandidate).trim();
+
+      // ================= FORM restore (only if ctx matches) =================
+      if (formWrap?.data) {
+        const draftCtx = String(formWrap?.ctxKey || formWrap?.data?.ctxKey || "").trim();
+
+        // If draft has ctxKey and it doesn't match active, ignore it (stale)
+        if (draftCtx && activeCtxNow && draftCtx !== activeCtxNow) {
+          // remove ONLY the stale form draft; do NOT nuke creatives for current ctx
+          localStorage.removeItem(FORM_DRAFT_KEY);
+        } else {
+          const data = formWrap.data || {};
 
           setAnswers(data.answers || {});
           setStep(data.step ?? 0);
           setChatHistory(
-            Array.isArray(data.chatHistory) && data.chatHistory.length
-              ? data.chatHistory
-              : chatHistory
+            Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : INITIAL_CHAT
           );
           setMediaType("image");
 
-          const restoredImgs = Array.isArray(data.imageUrls)
-            ? data.imageUrls.filter(Boolean)
-            : [];
-
+          const restoredImgs = Array.isArray(data.imageUrls) ? data.imageUrls.filter(Boolean) : [];
           setImageUrls(restoredImgs);
           setActiveImage(data.activeImage || 0);
           setAwaitingReady(data.awaitingReady ?? true);
           setInput(data.input || "");
           setSideChatCount(data.sideChatCount || 0);
 
-          // ✅ Only restore result/copy if we actually have creatives.
-          // If no images, force neutral defaults (prevents stale copy)
           if (restoredImgs.length) {
             setResult(data.result || null);
             setHasGenerated(true);
@@ -663,37 +672,23 @@ export default function FormPage() {
             setResult(null);
             setHasGenerated(false);
           }
+
+          // If we successfully restored FORM state, we're done.
           return;
         }
       }
 
-      // ✅ Creative draft fallback — must be ctx-gated
-      const rawC =
-        localStorage.getItem(CREATIVE_DRAFT_KEY) ||
-        localStorage.getItem("sm_setup_creatives_backup_v1") ||
-        sessionStorage.getItem("draft_form_creatives");
-
-      if (rawC) {
-        const c = JSON.parse(rawC || "{}");
-
-        // expire creatives cleanly
-        if (c?.expiresAt && Date.now() > Number(c.expiresAt)) {
+      // ================= CREATIVE fallback restore (ctx-gated) =================
+      if (creativeObj) {
+        const draftCtx = String(creativeObj?.ctxKey || "").trim();
+        if (!draftCtx || (activeCtxNow && draftCtx !== activeCtxNow)) {
+          // wrong ctx or legacy missing ctx => purge creatives only
           purgeCreativeDraftKeys();
           return;
         }
 
-        // ✅ ctx gating
-        const activeCtx = getActiveCtx();
-        const draftCtx = String(c?.ctxKey || "").trim();
-
-        // If no ctxKey on draft (legacy) OR it doesn't match active ctx => purge + ignore
-        if (!draftCtx || (activeCtx && draftCtx !== activeCtx)) {
-          purgeCreativeDraftKeys();
-          return;
-        }
-
-        const imgs = Array.isArray(c?.images)
-          ? c.images.filter(Boolean).slice(0, 2)
+        const imgs = Array.isArray(creativeObj?.images)
+          ? creativeObj.images.filter(Boolean).slice(0, 2)
           : [];
 
         if (imgs.length) {
@@ -702,17 +697,16 @@ export default function FormPage() {
           setImageUrl(imgs[0] || "");
           setResult((prev) => ({
             ...(prev || {}),
-            headline: String(c?.headline || prev?.headline || "").slice(0, 55),
-            body: String(c?.body || prev?.body || "").trim(),
+            headline: String(creativeObj?.headline || prev?.headline || "").slice(0, 55),
+            body: String(creativeObj?.body || prev?.body || "").trim(),
             image_overlay_text: String(
-              c?.imageOverlayCTA || prev?.image_overlay_text || ""
+              creativeObj?.imageOverlayCTA || prev?.image_overlay_text || ""
             ).trim(),
           }));
-          if (c?.answers && typeof c.answers === "object") setAnswers(c.answers);
+          if (creativeObj?.answers && typeof creativeObj.answers === "object") setAnswers(creativeObj.answers);
           setHasGenerated(true);
           setAwaitingReady(false);
         } else {
-          // no images => neutral
           setResult(null);
           setHasGenerated(false);
         }
@@ -721,12 +715,10 @@ export default function FormPage() {
     // eslint-disable-next-line
   }, []);
 
-
   useEffect(() => {
     const draft = currentImageId ? getImageDraftById(currentImageId) : null;
     setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
-   setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? "");
-
+    setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? "");
     setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
   }, [currentImageId, result, answers]);
 
@@ -743,24 +735,24 @@ export default function FormPage() {
     return () => clearTimeout(t);
   }, [currentImageId, editHeadline, editBody, editCTA]);
 
-const fallbackCopy = useMemo(() => {
-  const biz = (answers?.businessName || "Your Business").toString().trim();
-  const industry = (answers?.industry || "").toString().trim();
-  const offer = (answers?.offer || "").toString().trim();
+  const fallbackCopy = useMemo(() => {
+    const biz = (answers?.businessName || "Your Business").toString().trim();
+    const industry = (answers?.industry || "").toString().trim();
+    const offer = (answers?.offer || "").toString().trim();
 
-  const headline =
-    offer ? offer.slice(0, 55)
-    : industry ? `${industry} Specials`.slice(0, 55)
-    : `${biz} Specials`.slice(0, 55);
+    const headline =
+      offer
+        ? offer.slice(0, 55)
+        : industry
+        ? `${industry} Specials`.slice(0, 55)
+        : `${biz} Specials`.slice(0, 55);
 
-  const body =
-    offer
+    const body = offer
       ? `Limited-time offer from ${biz}. Tap to learn more.`
       : `Discover what ${biz} can do for you. Tap to learn more.`;
 
-  return { headline, body };
-}, [answers]);
-
+    return { headline, body };
+  }, [answers]);
 
   const displayHeadline = (editHeadline || result?.headline || fallbackCopy.headline || "")
     .toString()
@@ -769,7 +761,9 @@ const fallbackCopy = useMemo(() => {
 
   const displayBody = (editBody || result?.body || fallbackCopy.body || "").toString().trim();
 
-  const displayCTA = normalizeOverlayCTA(editCTA || result?.image_overlay_text || answers?.cta || "Learn more");
+  const displayCTA = normalizeOverlayCTA(
+    editCTA || result?.image_overlay_text || answers?.cta || "Learn more"
+  );
 
   function hardResetChat() {
     if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
@@ -779,13 +773,13 @@ const fallbackCopy = useMemo(() => {
       sessionStorage.removeItem("draft_form_creatives");
       localStorage.removeItem(IMAGE_DRAFTS_KEY);
       localStorage.removeItem(IMAGE_GEN_QUOTA_KEY); // helpful during testing
+      // keep ACTIVE_CTX_KEY? no, reset run
+      sessionStorage.removeItem(ACTIVE_CTX_KEY);
+      localStorage.removeItem(ACTIVE_CTX_KEY);
     } catch {}
     setAnswers({});
     setStep(0);
-    setChatHistory([
-      { from: "gpt", text: `👋 Hey, I'm your AI Ad Manager. We'll go through a few quick questions to create your ad campaign.` },
-      { from: "gpt", text: "Are you ready to get started? (yes/no)" },
-    ]);
+    setChatHistory(INITIAL_CHAT);
     setInput("");
     setResult(null);
     setImageUrls([]);
@@ -805,20 +799,19 @@ const fallbackCopy = useMemo(() => {
   }
 
   function clearPreviewStateForNewBusiness() {
-  try {
-    localStorage.removeItem(CREATIVE_DRAFT_KEY);
-    localStorage.removeItem("sm_setup_creatives_backup_v1");
-    sessionStorage.removeItem("draft_form_creatives");
-    localStorage.removeItem("smartmark_last_image_url");
-  } catch {}
-  setResult(null);
-  setImageUrls([]);
-  setActiveImage(0);
-  setImageUrl("");
-  setHasGenerated(false);
-  setImageEditing(false);
-}
-
+    try {
+      localStorage.removeItem(CREATIVE_DRAFT_KEY);
+      localStorage.removeItem("sm_setup_creatives_backup_v1");
+      sessionStorage.removeItem("draft_form_creatives");
+      localStorage.removeItem("smartmark_last_image_url");
+    } catch {}
+    setResult(null);
+    setImageUrls([]);
+    setActiveImage(0);
+    setImageUrl("");
+    setHasGenerated(false);
+    setImageEditing(false);
+  }
 
   /* Autosave */
   useEffect(() => {
@@ -843,37 +836,36 @@ const fallbackCopy = useMemo(() => {
       };
 
       localStorage.setItem(
-  FORM_DRAFT_KEY,
-  JSON.stringify({
-    savedAt: Date.now(),
-    ctxKey: getActiveCtx(),
-    data: payload,
-  })
-);
+        FORM_DRAFT_KEY,
+        JSON.stringify({
+          savedAt: Date.now(),
+          ctxKey: getActiveCtx(),
+          data: payload,
+        })
+      );
 
+      const imgs = imageUrls.slice(0, 2).map(abs);
 
- const imgs = imageUrls.slice(0, 2).map(abs);
+      // ✅ DON'T overwrite creatives with empty images
+      if (imgs.length) {
+        const draftForSetup = {
+          ctxKey: getActiveCtx(),
+          images: imgs,
+          headline: mergedHeadline,
+          body: mergedBody,
+          imageOverlayCTA: normalizeOverlayCTA(
+            activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+          ),
+          answers,
+          mediaSelection: "image",
+          savedAt: Date.now(),
+          expiresAt: Date.now() + CREATIVE_TTL_MS,
+        };
 
-// ✅ DON'T overwrite creatives with empty images
-if (imgs.length) {
-    const draftForSetup = {
-    ctxKey: getActiveCtx(),
-    images: imgs,
-    headline: mergedHeadline,
-    body: mergedBody,
-    imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
-    answers,
-    mediaSelection: "image",
-    savedAt: Date.now(),
-    expiresAt: Date.now() + CREATIVE_TTL_MS,
-  };
-
-
-  localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-  localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
-  sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
-}
-
+        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+        localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+        sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+      }
     }, 150);
 
     return () => clearTimeout(t);
@@ -903,7 +895,7 @@ if (imgs.length) {
         const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
         const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
         const mergedBody = activeDraft?.body || result?.body || "";
-              const imgs = imageUrls.slice(0, 2).map(abs);
+        const imgs = imageUrls.slice(0, 2).map(abs);
 
         // ✅ DON'T overwrite creatives with empty images
         if (!imgs.length) return;
@@ -925,7 +917,6 @@ if (imgs.length) {
         localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
         localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
         sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
-
       } catch {}
     };
     window.addEventListener("beforeunload", handler);
@@ -987,13 +978,20 @@ if (imgs.length) {
     setInput("");
 
     if (awaitingReady) {
-      if (/^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(value)) {
+      if (
+        /^(yes|yep|ready|start|go|let'?s (go|start)|ok|okay|yea|yeah|alright|i'?m ready|im ready|lets do it|sure)$/i.test(
+          value
+        )
+      ) {
         setAwaitingReady(false);
         setChatHistory((ch) => [...ch, { from: "gpt", text: CONVO_QUESTIONS[0].question }]);
         setStep(0);
         return;
       } else if (/^(no|not yet|wait|hold on|nah|later)$/i.test(value)) {
-        setChatHistory((ch) => [...ch, { from: "gpt", text: "No problem! Just say 'ready' when you want to start." }]);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "No problem! Just say 'ready' when you want to start." },
+        ]);
         return;
       } else {
         setChatHistory((ch) => [...ch, { from: "gpt", text: "Please reply 'yes' when you're ready to start!" }]);
@@ -1014,7 +1012,7 @@ if (imgs.length) {
 
         bumpImageGenCount();
 
-                // ✅ NEW RUN: mint ctxKey + purge any old creative drafts immediately
+        // ✅ NEW RUN: mint ctxKey + purge any old creative drafts immediately
         const nextCtx = buildCtxKey(answers || {});
         setActiveCtx(nextCtx);
         purgeCreativeDraftKeys();
@@ -1027,7 +1025,6 @@ if (imgs.length) {
         setHasGenerated(false);
         setImageEditing(false);
 
-
         setLoading(true);
         setGenerating(true);
 
@@ -1038,7 +1035,10 @@ if (imgs.length) {
             const next = [...ch];
             for (let i = next.length - 1; i >= 0; i--) {
               if (next[i]?.from === "gpt" && next[i]?.text === "AI thinking...") {
-                next[i] = { ...next[i], text: "This could take about a minute — generating your previews…" };
+                next[i] = {
+                  ...next[i],
+                  text: "This could take about a minute — generating your previews…",
+                };
                 break;
               }
             }
@@ -1091,17 +1091,16 @@ if (imgs.length) {
     if (currentQ) {
       let answerToSave = value;
       if (currentQ.key === "url") {
-  const firstUrl = extractFirstUrl(value);
-  if (firstUrl) answerToSave = firstUrl;
+        const firstUrl = extractFirstUrl(value);
+        if (firstUrl) answerToSave = firstUrl;
 
-  // ✅ If URL changed from last run, reset previews so no stale industry/copy shows.
-  const prevUrl = (answers?.url || "").toString().trim();
-  const nextUrl = (answerToSave || "").toString().trim();
-  if (prevUrl && nextUrl && prevUrl !== nextUrl) {
-    clearPreviewStateForNewBusiness();
-  }
-}
-
+        // ✅ If URL changed from last run, reset previews so no stale industry/copy shows.
+        const prevUrl = (answers?.url || "").toString().trim();
+        const nextUrl = (answerToSave || "").toString().trim();
+        if (prevUrl && nextUrl && prevUrl !== nextUrl) {
+          clearPreviewStateForNewBusiness();
+        }
+      }
 
       const newAnswers = { ...answers, [currentQ.key]: answerToSave };
       setAnswers(newAnswers);
@@ -1116,7 +1115,10 @@ if (imgs.length) {
       }
 
       if (!CONVO_QUESTIONS[nextStep]) {
-        setChatHistory((ch) => [...ch, { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" }]);
+        setChatHistory((ch) => [
+          ...ch,
+          { from: "gpt", text: "Are you ready for me to generate your campaign? (yes/no)" },
+        ]);
         setStep(nextStep);
         return;
       }
@@ -1136,7 +1138,6 @@ if (imgs.length) {
     let copyA = normalizeSmartCopy(rawA, answers);
     let copyB = normalizeSmartCopy(rawB, answers);
 
-    // If B comes back too close, just request a second B immediately
     const same =
       (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
       (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
@@ -1153,18 +1154,19 @@ if (imgs.length) {
 
     let urls = [urlA, urlB].filter(Boolean).slice(0, 2);
 
-    // retry missing once
     if (urls.length === 1) {
       try {
         const missingToken = `${runToken}-B-retry`;
         const rawBRetry = await summarizeAdCopy(answers, { regenerateToken: missingToken, variant: "B_RETRY" });
         const copyBRetry = normalizeSmartCopy(rawBRetry, answers);
-        const urlRetry = await handleGenerateStaticAd("poster_b", copyBRetry, { regenerateToken: missingToken, silent: true });
+        const urlRetry = await handleGenerateStaticAd("poster_b", copyBRetry, {
+          regenerateToken: missingToken,
+          silent: true,
+        });
         if (urlRetry) urls = [urls[0], urlRetry];
       } catch {}
     }
 
-    // hard guarantee 2 entries
     if (urls.length === 1) urls = [urls[0], urls[0]];
     if (urls.length === 0) urls = [];
 
@@ -1196,19 +1198,17 @@ if (imgs.length) {
       image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
     });
 
-  const ctxKey = getActiveCtx();
+    const ctxKey = getActiveCtx();
 
-syncCreativesToDraftKeys({
-  ctxKey,
-  imageUrls: urls,
-  headline: copyA.headline,
-  body: copyA.subline,
-  overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
-  answers,
-  mediaSelection: "image",
-});
-
-
+    syncCreativesToDraftKeys({
+      ctxKey,
+      imageUrls: urls,
+      headline: copyA.headline,
+      body: copyA.subline,
+      overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+      answers,
+      mediaSelection: "image",
+    });
 
     return urls;
   }
@@ -1236,7 +1236,11 @@ syncCreativesToDraftKeys({
   }
 
   // --- Static Ad Generator (UPDATED: no weird fallback bullets) ---
-  async function handleGenerateStaticAd(template = "poster_b", assetsData = null, { regenerateToken = "", silent = false } = {}) {
+  async function handleGenerateStaticAd(
+    template = "poster_b",
+    assetsData = null,
+    { regenerateToken = "", silent = false } = {}
+  ) {
     const a = answers || {};
     const fromAssets = assetsData && typeof assetsData === "object" ? assetsData : {};
     const fromResult = result || {};
@@ -1258,7 +1262,6 @@ syncCreativesToDraftKeys({
       cta: (fromAssets.cta || displayCTA || a.cta || "").toString(),
     };
 
-    // sensible bullet fallback (never “dogs”)
     if (!Array.isArray(craftedCopy.bullets) || !craftedCopy.bullets.length) {
       const ind = (a.industry || "services").toString().trim().toLowerCase();
       if (ind.includes("fashion")) {
@@ -1821,11 +1824,13 @@ syncCreativesToDraftKeys({
 
             const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
             const mergedBody = activeDraft?.body || result?.body || "";
-            const mergedCTA = normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || "");
+            const mergedCTA = normalizeOverlayCTA(
+              activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+            );
 
             const imgA = imageUrls.map(abs).slice(0, 2);
 
-                      const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
+            const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
             setActiveCtx(ctxKey);
 
             const draftForSetup = {
@@ -1839,7 +1844,6 @@ syncCreativesToDraftKeys({
               savedAt: Date.now(),
               expiresAt: Date.now() + CREATIVE_TTL_MS,
             };
-
 
             sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
