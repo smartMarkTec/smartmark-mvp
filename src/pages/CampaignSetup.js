@@ -34,6 +34,35 @@ const FEE_PAID_KEY = "sm_fee_paid_v1";
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
 
+// ✅ Active run context (prevents old creatives bleeding across back/forward/OAuth)
+const ACTIVE_CTX_KEY = "sm_active_ctx_v1";
+
+function getActiveCtx() {
+  return (
+    sessionStorage.getItem(ACTIVE_CTX_KEY) ||
+    localStorage.getItem(ACTIVE_CTX_KEY) ||
+    ""
+  );
+}
+
+function isDraftForActiveCtx(draftObj) {
+  const active = getActiveCtx();
+  const dk = (draftObj && draftObj.ctxKey ? String(draftObj.ctxKey) : "").trim();
+  if (!active) return true;          // if no active ctx set, allow (safe fallback)
+  if (!dk) return false;             // active ctx exists but draft has no ctxKey => reject
+  return dk === active;              // must match exactly
+}
+
+function purgeDraftStorages(user) {
+  try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+  try {
+    if (user) localStorage.removeItem(withUser(user, CREATIVE_DRAFT_KEY));
+    localStorage.removeItem(CREATIVE_DRAFT_KEY);
+    localStorage.removeItem("sm_setup_creatives_backup_v1");
+  } catch {}
+}
+
+
 function getLatestDraftImageUrlsFromImageDrafts() {
   try {
     const raw = localStorage.getItem("smartmark.imageDrafts.v1");
@@ -206,11 +235,13 @@ function loadSetupCreativeBackup(user) {
 
 function persistDraftCreativesNow(user, draftCreatives) {
   try {
-    const payload = {
+      const payload = {
       ...(draftCreatives || {}),
+      ctxKey: (draftCreatives && draftCreatives.ctxKey) || getActiveCtx() || "",
       mediaSelection: "image",
       savedAt: Date.now(),
     };
+
     sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
     if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
     localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
@@ -652,11 +683,24 @@ const CampaignSetup = () => {
   });
 
   useEffect(() => {
-  const hasDraftImages = draftCreatives?.images?.length > 0;
+   const hasDraftImages = draftCreatives?.images?.length > 0;
   if (hasDraftImages) return;
+
+  // ✅ Only allow fallback if we have a valid draft matching the active ctxKey
+  let baseDraft = null;
+  try {
+    const raw =
+      sessionStorage.getItem("draft_form_creatives") ||
+      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+      localStorage.getItem("sm_setup_creatives_backup_v1");
+    if (raw) baseDraft = JSON.parse(raw);
+  } catch {}
+
+  if (!baseDraft || !isDraftForActiveCtx(baseDraft)) return;
 
   const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
   if (!fallbackUrls.length) return;
+
 
   const patched = { ...draftCreatives, images: fallbackUrls, savedAt: Date.now() };
   setDraftCreatives(patched);
@@ -755,12 +799,20 @@ const answers = state.answers || {};
       if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
     }
 
-    const applyDraft = (draftObj) => {
+      const applyDraft = (draftObj) => {
+      // ✅ reject drafts not tied to the active ctxKey
+      if (!isDraftForActiveCtx(draftObj)) {
+        purgeDraftStorages(resolvedUser);
+        return false;
+      }
+
       setDraftCreatives({
         images: Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [],
         mediaSelection: "image",
       });
+      return true;
     };
+
 
     const inflight = (() => {
       try {
@@ -775,13 +827,17 @@ const answers = state.answers || {};
 
     try {
       // 1) session
-      const sess = sessionStorage.getItem("draft_form_creatives");
+        const sess = sessionStorage.getItem("draft_form_creatives");
       if (sess) {
         const sObj = JSON.parse(sess);
-        applyDraft(sObj);
-        saveSetupCreativeBackup(resolvedUser, sObj);
-        return;
+        const ok = applyDraft(sObj);
+        if (ok) {
+          saveSetupCreativeBackup(resolvedUser, sObj);
+          return;
+        }
+        // if rejected, continue to other sources
       }
+
 
       // 2) local draft
       const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
@@ -794,9 +850,12 @@ const ageOk =
   (!draft.savedAt || now - draft.savedAt <= DEFAULT_CAMPAIGN_TTL_MS);
 
         if (ageOk) {
-          applyDraft(draft);
-          saveSetupCreativeBackup(resolvedUser, draft);
-          return;
+                   const ok = applyDraft(draft);
+          if (ok) {
+            saveSetupCreativeBackup(resolvedUser, draft);
+            return;
+          }
+
         }
       }
 
@@ -804,18 +863,24 @@ const ageOk =
       if (inflight) {
         const backup = loadSetupCreativeBackup(resolvedUser);
         if (backup) {
-          applyDraft(backup);
-          sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
-          return;
+         const ok = applyDraft(backup);
+if (ok) {
+  sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+  return;
+}
+
         }
       }
 
       // 4) backup
       const backup = loadSetupCreativeBackup(resolvedUser);
       if (backup) {
-        applyDraft(backup);
-        sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
-        return;
+       const ok = applyDraft(backup);
+if (ok) {
+  sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+  return;
+}
+
       }
     } catch {}
   }, []);
@@ -904,7 +969,13 @@ useEffect(() => {
   setDraftCreatives({ images: imgs, mediaSelection: "image" });
 
   try {
-    const payload = { images: imgs, mediaSelection: "image", savedAt: Date.now() };
+       const payload = {
+      ctxKey: getActiveCtx() || "",
+      images: imgs,
+      mediaSelection: "image",
+      savedAt: Date.now(),
+    };
+
     saveSetupCreativeBackup(resolvedUser, payload);
     sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
     if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
