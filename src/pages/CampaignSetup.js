@@ -34,10 +34,9 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
 
 
 // ✅ Active run context (prevents old creatives bleeding across back/forward/OAuth)
+const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
 const ACTIVE_CTX_KEY_LEGACY = "sm_active_ctx_v1";
 const CREATIVE_DRAFT_KEY_LEGACY = "draft_form_creatives_v2";
-
-
 
 
 const SM_DEBUG_KEY = "sm_debug_log_v1";
