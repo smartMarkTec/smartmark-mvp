@@ -727,10 +727,6 @@ const CampaignSetup = () => {
     }
   });
 
-const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
-const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
-const [authStatus, setAuthStatus] = useState("");
-
 
 
   // IMPORTANT: normalize stored account ID to "act_..."
@@ -1165,27 +1161,46 @@ try {
     } catch {}
   }, [navImageUrls, resolvedUser]);
 
-  useEffect(() => {
-    if (!fbConnected) return;
-    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: "include" })
-      .then((res) => res.json())
-      .then((json) => {
-        setAdAccounts(json.data || []);
-        touchFbConn();
-      })
-      .catch(() => {});
-  }, [fbConnected]);
+useEffect(() => {
+  if (!fbConnected) return;
 
-  useEffect(() => {
-    if (!fbConnected) return;
-    fetch(`${backendUrl}/auth/facebook/pages`, { credentials: "include" })
-      .then((res) => res.json())
-      .then((json) => {
-        setPages(json.data || []);
-        touchFbConn();
-      })
-      .catch(() => {});
-  }, [fbConnected]);
+  fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: "include" })
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((json) => {
+      const list = json.data || [];
+      setAdAccounts(list);
+      touchFbConn();
+
+      // ✅ auto pick first account if none selected
+      if (!selectedAccount && list.length) {
+        const first = String(list[0].id || "").trim();
+        setSelectedAccount(first.startsWith("act_") ? first : `act_${first}`);
+      }
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [fbConnected]);
+
+
+useEffect(() => {
+  if (!fbConnected) return;
+
+  fetch(`${backendUrl}/auth/facebook/pages`, { credentials: "include" })
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((json) => {
+      const list = json.data || [];
+      setPages(list);
+      touchFbConn();
+
+      // ✅ auto pick first page if none selected
+      if (!selectedPageId && list.length) {
+        setSelectedPageId(String(list[0].id || ""));
+      }
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [fbConnected]);
+
 
   useEffect(() => {
     if (!selectedAccount) return;
@@ -1311,43 +1326,6 @@ try {
     setFeePaid(false);
   }, [budget, resolvedUser]);
 
-  // Persist cashapp
- useEffect(() => {
-  lsSet(resolvedUser, "smartmark_login_username", loginUser, true);
-}, [loginUser, resolvedUser]);
-
-useEffect(() => {
-  lsSet(resolvedUser, "smartmark_login_password", loginPass, true);
-}, [loginPass, resolvedUser]);
-
-const handleLogin = async () => {
-  setAuthStatus("");
-  const u = String(loginUser || "").trim();
-  const p = String(loginPass || "").trim();
-  if (!u || !p) return alert("Enter username/email + password.");
-
-  setAuthLoading(true);
-  try {
-    const r = await fetch(`${backendUrl}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ username: u, password: p }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error || "Login failed");
-
-    try { localStorage.setItem("sm_current_user", u); } catch {}
-    setAuthStatus("Logged in ✅");
-    alert("Logged in ✅");
-  } catch (e) {
-  const msg = e?.message || "Login failed";
-  setAuthStatus(msg);
-  alert(msg);
-}
-
-  setAuthLoading(false);
-};
 
 
   useEffect(() => {
@@ -1982,71 +1960,6 @@ onClick={() => {
                     Pay SmartMark Fee to Launch
                   </div>
 
-{/* Simple Login (works) */}
-<div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-    <div style={{ flex: "1 1 180px", background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
-      <input
-        type="text"
-        value={loginUser}
-        onChange={(e) => setLoginUser(e.target.value)}
-        placeholder="Username or email"
-        style={{
-          background: "transparent",
-          border: "none",
-          outline: "none",
-          width: "100%",
-          color: TEXT_DIM,
-          fontSize: "1.02rem",
-          fontWeight: 800,
-        }}
-      />
-    </div>
-
-    <div style={{ flex: "1 1 180px", background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
-      <input
-        type="password"
-        value={loginPass}
-        onChange={(e) => setLoginPass(e.target.value)}
-        placeholder="Password"
-        style={{
-          background: "transparent",
-          border: "none",
-          outline: "none",
-          width: "100%",
-          color: TEXT_DIM,
-          fontSize: "1.02rem",
-          fontWeight: 800,
-        }}
-      />
-    </div>
-  </div>
-
-  <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
-    <button
-      type="button"
-      onClick={handleLogin}
-      disabled={authStatus.loading}
-      style={{
-        background: authStatus.ok ? "#2f7a5d" : ACCENT,
-        color: authStatus.ok ? WHITE : "#0f1418",
-        border: "none",
-        borderRadius: 12,
-        fontWeight: 900,
-        padding: "10px 14px",
-        cursor: authStatus.loading ? "not-allowed" : "pointer",
-        minWidth: 150,
-        opacity: authStatus.loading ? 0.7 : 1,
-      }}
-    >
-      {authStatus.loading ? "Logging in..." : authStatus.ok ? "Logged In ✅" : "Login"}
-    </button>
-
-    <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12 }}>
-      {authStatus.msg || "Login is required before launch."}
-    </div>
-  </div>
-</div>
 
 
 
