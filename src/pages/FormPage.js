@@ -799,6 +799,10 @@ export default function FormPage() {
       const ctx = getActiveCtx();
       const c = loadImageCache(ctx);
       if (c?.dataUrls?.length) setImageDataUrls(c.dataUrls.filter(Boolean).slice(0, 2));
+      if (c?.urls?.length && (!imageUrls || imageUrls.length === 0)) {
+  setImageUrls(c.urls.slice(0, 2));
+}
+
     } catch {}
     // eslint-disable-next-line
   }, []);
