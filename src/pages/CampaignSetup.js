@@ -4,7 +4,11 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 
-const backendUrl = "https://smartmark-mvp.onrender.com";
+// Render origin ONLY for media files (images, fallback jpg)
+const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
+
+// Same-origin auth routes (so cookies work)
+const AUTH_BASE = "/auth";
 
 /* ======================= Visual Theme (polish only) ======================= */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -32,12 +36,10 @@ const FEE_PAID_KEY = "sm_fee_paid_v1";
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
 
-
 // ✅ Active run context (prevents old creatives bleeding across back/forward/OAuth)
 const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
 const ACTIVE_CTX_KEY_LEGACY = "sm_active_ctx_v1";
 const CREATIVE_DRAFT_KEY_LEGACY = "draft_form_creatives_v2";
-
 
 const SM_DEBUG_KEY = "sm_debug_log_v1";
 
@@ -97,7 +99,6 @@ function smDumpDraftSnapshot({ FORM_DRAFT_KEY, CREATIVE_DRAFT_KEY, FB_CONNECT_IN
   } catch {}
   return snap;
 }
-
 
 /* ======================= hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
@@ -317,8 +318,8 @@ function getLatestDraftImageUrlsFromImageDrafts() {
 
         // force backend absolute for any path-ish url
         if (/^https?:\/\//i.test(s)) return s;
-        if (s.startsWith("/")) return backendUrl + s;
-        return backendUrl + "/" + s;
+        if (s.startsWith("/")) return MEDIA_ORIGIN + s;
+        return MEDIA_ORIGIN + "/" + s;
       })
       .filter(Boolean);
 
@@ -353,7 +354,6 @@ function persistDraftCreativesNow(user, draftCreatives) {
     saveSetupCreativeBackup(user, payload);
   } catch {}
 }
-
 
 /* ======================= NEW: attach draft creatives into active campaign slot after FB connect ======================= */
 function attachDraftToCampaignIfEmpty({ user, acctId, campaignId, draftImages, expiresAt, name }) {
@@ -399,11 +399,10 @@ function toAbsoluteMedia(u) {
   if (!s) return "";
   if (/^https?:\/\//i.test(s)) return s;
 
-  // Any path-ish URL should be backend absolute so it doesn't break on Vercel
-  if (s.startsWith("/")) return backendUrl + s;
+  // Any path-ish URL should be Render absolute (media host)
+  if (s.startsWith("/")) return MEDIA_ORIGIN + s;
 
-  // handle "media/..." or "api/..."
-  return backendUrl + "/" + s;
+  return MEDIA_ORIGIN + "/" + s;
 }
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -532,12 +531,12 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   return (
     <div style={{ position: "relative", background: "#222" }}>
       <img
-        src={broken ? `${backendUrl}/__fallback/1200.jpg` : normalized[idx]}
+        src={broken ? `${MEDIA_ORIGIN}/__fallback/1200.jpg` : normalized[idx]}
         alt="Ad"
         style={{ width: "100%", maxHeight: height, height, objectFit: "cover", display: "block" }}
         onClick={() =>
           onFullscreen &&
-          onFullscreen(broken ? `${backendUrl}/__fallback/1200.jpg` : normalized[idx])
+          onFullscreen(broken ? `${MEDIA_ORIGIN}/__fallback/1200.jpg` : normalized[idx])
         }
         onError={() => setBroken(true)}
       />
@@ -667,7 +666,7 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
-    // ===================== DEBUG: error + storage snapshots =====================
+  // ===================== DEBUG: error + storage snapshots =====================
   useEffect(() => {
     const onErr = (e) =>
       smLog("window.error", {
@@ -701,23 +700,21 @@ const CampaignSetup = () => {
     // eslint-disable-next-line
   }, []);
 
-
   // ✅ Bootstrap ctxKey early (on first render + on OAuth return)
- useEffect(() => {
-  const qs = new URLSearchParams(location.search || "");
-  const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
-  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+  useEffect(() => {
+    const qs = new URLSearchParams(location.search || "");
+    const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+    const ctxFromUrl = (qs.get("ctxKey") || "").trim();
 
-  const user = getUserFromStorage();
-  const active = (getActiveCtx(user) || "").trim();
+    const user = getUserFromStorage();
+    const active = (getActiveCtx(user) || "").trim();
 
-  // ✅ DO NOT rotate ctxKey on OAuth return.
-  // Only set ctxKey if we have one from state/url, or if none exists at all.
-  if (ctxFromState) return setActiveCtx(ctxFromState, user);
-  if (ctxFromUrl) return setActiveCtx(ctxFromUrl, user);
-  if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
-}, [location.search]);
-
+    // ✅ DO NOT rotate ctxKey on OAuth return.
+    // Only set ctxKey if we have one from state/url, or if none exists at all.
+    if (ctxFromState) return setActiveCtx(ctxFromState, user);
+    if (ctxFromUrl) return setActiveCtx(ctxFromUrl, user);
+    if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
+  }, [location.search]);
 
   const initialUser = useMemo(() => getUserFromStorage(), []);
   const resolvedUser = useMemo(() => initialUser, [initialUser]);
@@ -747,7 +744,7 @@ const CampaignSetup = () => {
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
-   const [feePaid, setFeePaid] = useState(() => {
+  const [feePaid, setFeePaid] = useState(() => {
     try {
       return localStorage.getItem(withUser(resolvedUser, FEE_PAID_KEY)) === "1";
     } catch {
@@ -781,7 +778,7 @@ const CampaignSetup = () => {
     setAuthStatus({ ok: false, msg: "Logging in..." });
 
     try {
-      const r = await fetch(`${backendUrl}/auth/login`, {
+      const r = await fetch(`${AUTH_BASE}/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -800,16 +797,12 @@ const CampaignSetup = () => {
     setAuthLoading(false);
   };
 
-
-
-
   // IMPORTANT: normalize stored account ID to "act_..."
-    const [selectedAccount, setSelectedAccount] = useState(() => {
+  const [selectedAccount, setSelectedAccount] = useState(() => {
     const v = (lsGet(resolvedUser, "smartmark_last_selected_account") || "").trim();
     if (!v) return "";
     return String(v).replace(/^act_/, ""); // store digits only
   });
-
 
   const [selectedPageId, setSelectedPageId] = useState(
     () => lsGet(resolvedUser, "smartmark_last_selected_pageId") || ""
@@ -844,7 +837,7 @@ const CampaignSetup = () => {
       setFbConnected(false);
       return;
     }
-    fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: "include" })
+    fetch(`${AUTH_BASE}/facebook/adaccounts`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then(() => {
         setFbConnected(true);
@@ -921,7 +914,6 @@ const CampaignSetup = () => {
 
     try {
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(patched));
-
       localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
       sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
     } catch {}
@@ -998,11 +990,11 @@ const CampaignSetup = () => {
     }
 
     const applyDraft = (draftObj) => {
-  // ✅ reject drafts not tied to the active ctxKey
-  // IMPORTANT: do NOT purge here (OAuth return can temporarily mismatch)
-  if (!isDraftForActiveCtx(draftObj, resolvedUser)) {
-    return false;
-  }
+      // ✅ reject drafts not tied to the active ctxKey
+      // IMPORTANT: do NOT purge here (OAuth return can temporarily mismatch)
+      if (!isDraftForActiveCtx(draftObj, resolvedUser)) {
+        return false;
+      }
 
       const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
       const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
@@ -1042,15 +1034,14 @@ const CampaignSetup = () => {
         }
       }
 
-      // 2) local draft
       // 2) local draft (v3 first, then legacy v2)
-const raw =
-  lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-  lsGet(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY) ||
-  localStorage.getItem(CREATIVE_DRAFT_KEY_LEGACY);
+      const raw =
+        lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+        lsGet(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY) ||
+        localStorage.getItem(CREATIVE_DRAFT_KEY_LEGACY);
 
-if (raw) {
-  const draft = JSON.parse(raw);
+      if (raw) {
+        const draft = JSON.parse(raw);
 
         const now = Date.now();
         const expiresAt = Number(draft.expiresAt);
@@ -1127,7 +1118,7 @@ if (raw) {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
-            smLog(
+      smLog(
         "oauth.return.before",
         smDumpDraftSnapshot({
           FORM_DRAFT_KEY,
@@ -1138,12 +1129,12 @@ if (raw) {
       );
 
       // ✅ Restore ctxKey from inflight so draft doesn't get rejected after OAuth
-try {
-  const raw = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
-  const inflight = raw ? JSON.parse(raw) : null;
-  const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
-  if (k) setActiveCtx(k, resolvedUser);
-} catch {}
+      try {
+        const raw = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
+        const inflight = raw ? JSON.parse(raw) : null;
+        const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
+        if (k) setActiveCtx(k, resolvedUser);
+      } catch {}
 
       setFbConnected(true);
       setCameFromFbConnect(true);
@@ -1183,7 +1174,7 @@ try {
 
       try { localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser)); } catch {}
 
-            smLog(
+      smLog(
         "oauth.return.after",
         smDumpDraftSnapshot({
           FORM_DRAFT_KEY,
@@ -1192,7 +1183,6 @@ try {
           ACTIVE_CTX_KEY,
         })
       );
-
 
       // remove oauth flag from URL (keep path only)
       window.history.replaceState({}, document.title, "/setup");
@@ -1237,53 +1227,50 @@ try {
     } catch {}
   }, [navImageUrls, resolvedUser]);
 
-useEffect(() => {
-  if (!fbConnected) return;
+  useEffect(() => {
+    if (!fbConnected) return;
 
-  fetch(`${backendUrl}/auth/facebook/adaccounts`, { credentials: "include" })
-    .then((r) => (r.ok ? r.json() : Promise.reject()))
-    .then((json) => {
-      const list = json.data || [];
-      setAdAccounts(list);
-      touchFbConn();
+    fetch(`${AUTH_BASE}/facebook/adaccounts`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        const list = json.data || [];
+        setAdAccounts(list);
+        touchFbConn();
 
-      // ✅ auto pick first account if none selected
-          if (!selectedAccount && list.length) {
-        const first = String(list[0].id || "").trim();
-        setSelectedAccount(first.replace(/^act_/, "")); // digits only
-      }
+        // ✅ auto pick first account if none selected
+        if (!selectedAccount && list.length) {
+          const first = String(list[0].id || "").trim();
+          setSelectedAccount(first.replace(/^act_/, "")); // digits only
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line
+  }, [fbConnected]);
 
-    })
-    .catch(() => {});
-  // eslint-disable-next-line
-}, [fbConnected]);
+  useEffect(() => {
+    if (!fbConnected) return;
 
+    fetch(`${AUTH_BASE}/facebook/pages`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((json) => {
+        const list = json.data || [];
+        setPages(list);
+        touchFbConn();
 
-useEffect(() => {
-  if (!fbConnected) return;
-
-  fetch(`${backendUrl}/auth/facebook/pages`, { credentials: "include" })
-    .then((r) => (r.ok ? r.json() : Promise.reject()))
-    .then((json) => {
-      const list = json.data || [];
-      setPages(list);
-      touchFbConn();
-
-      // ✅ auto pick first page if none selected
-      if (!selectedPageId && list.length) {
-        setSelectedPageId(String(list[0].id || ""));
-      }
-    })
-    .catch(() => {});
-  // eslint-disable-next-line
-}, [fbConnected]);
-
+        // ✅ auto pick first page if none selected
+        if (!selectedPageId && list.length) {
+          setSelectedPageId(String(list[0].id || ""));
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line
+  }, [fbConnected]);
 
   useEffect(() => {
     if (!selectedAccount) return;
     const acctId = String(selectedAccount).trim();
 
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
+    fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
         const list = Array.isArray(data) ? data : data?.data || [];
@@ -1301,7 +1288,7 @@ useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
     const acctId = String(selectedAccount).trim();
 
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
+    fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
         const list = data && data.data ? data.data.slice(0, 2) : [];
@@ -1372,7 +1359,7 @@ useEffect(() => {
     if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
     const acctId = String(selectedAccount).trim();
 
-    fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`, {
+    fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`, {
       credentials: "include",
     })
       .then((res) => res.json())
@@ -1407,13 +1394,10 @@ useEffect(() => {
     setFeePaid(false);
   }, [budget, resolvedUser]);
 
-
-
-   useEffect(() => {
+  useEffect(() => {
     const v = selectedAccount ? String(selectedAccount).replace(/^act_/, "") : "";
     lsSet(resolvedUser, "smartmark_last_selected_account", v);
   }, [selectedAccount]);
-
 
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId);
@@ -1427,7 +1411,7 @@ useEffect(() => {
     try {
       if (isPaused) {
         const r = await fetch(
-          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
+          `${AUTH_BASE}/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`,
           { method: "POST", credentials: "include" }
         );
         if (!r.ok) throw new Error("Unpause failed");
@@ -1435,7 +1419,7 @@ useEffect(() => {
         setIsPaused(false);
       } else {
         const r = await fetch(
-          `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
+          `${AUTH_BASE}/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`,
           { method: "POST", credentials: "include" }
         );
         if (!r.ok) throw new Error("Pause failed");
@@ -1455,7 +1439,7 @@ useEffect(() => {
     setLoading(true);
     try {
       const r = await fetch(
-        `${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
+        `${AUTH_BASE}/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
         { method: "POST", credentials: "include" }
       );
       if (!r.ok) throw new Error("Archive failed");
@@ -1489,16 +1473,14 @@ useEffect(() => {
   };
 
   const canLaunch = !!(
-  fbConnected &&
-  selectedAccount &&
-  selectedPageId &&
-  budget &&
-  !isNaN(parseFloat(budget)) &&
-  parseFloat(budget) >= 3 &&
-  feePaid
-);
-
-
+    fbConnected &&
+    selectedAccount &&
+    selectedPageId &&
+    budget &&
+    !isNaN(parseFloat(budget)) &&
+    parseFloat(budget) >= 3 &&
+    feePaid
+  );
 
   function capTwoWeeksISO(startISO, endISO) {
     try {
@@ -1552,7 +1534,7 @@ useEffect(() => {
         overrideCountPerType: { images: Math.min(2, filteredImages.length) },
       };
 
-      const res = await fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/launch-campaign`, {
+      const res = await fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -1785,105 +1767,103 @@ useEffect(() => {
             minHeight: "600px",
           }}
         >
-      <button
-onClick={() => {
-  // 1) get a non-empty ctxKey (never blank)
-  const qs = new URLSearchParams(location.search || "");
-  const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
-  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-  const active = (getActiveCtx(resolvedUser) || "").trim();
+          <button
+            onClick={() => {
+              // 1) get a non-empty ctxKey (never blank)
+              const qs = new URLSearchParams(location.search || "");
+              const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+              const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+              const active = (getActiveCtx(resolvedUser) || "").trim();
 
-  const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
-  setActiveCtx(safeCtx, resolvedUser);
+              const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
+              setActiveCtx(safeCtx, resolvedUser);
 
-  // 2) ALWAYS mark inflight so OAuth return restores the same run
-  try {
-    localStorage.setItem(
-      LS_INFLIGHT_KEY(resolvedUser),
-      JSON.stringify({ t: Date.now(), ctxKey: safeCtx })
-    );
-  } catch {}
+              // 2) ALWAYS mark inflight so OAuth return restores the same run
+              try {
+                localStorage.setItem(
+                  LS_INFLIGHT_KEY(resolvedUser),
+                  JSON.stringify({ t: Date.now(), ctxKey: safeCtx })
+                );
+              } catch {}
 
-  // 3) figure out which images to persist (prefer current UI images)
-  let finalImagesAbs = [];
+              // 3) figure out which images to persist (prefer current UI images)
+              let finalImagesAbs = [];
 
-  try {
-    const imagesToPersist = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
-    const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls : [];
+              try {
+                const imagesToPersist = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
+                const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls : [];
 
-    const candidate = (imagesToPersist.length ? imagesToPersist : fallbackFromNav)
-      .slice(0, 2);
+                const candidate = (imagesToPersist.length ? imagesToPersist : fallbackFromNav)
+                  .slice(0, 2);
 
-    finalImagesAbs = (candidate || [])
-      .map(toAbsoluteMedia)
-      .filter(Boolean)
-      .slice(0, 2);
-  } catch {}
+                finalImagesAbs = (candidate || [])
+                  .map(toAbsoluteMedia)
+                  .filter(Boolean)
+                  .slice(0, 2);
+              } catch {}
 
-  // 4) IMPORTANT: if UI images are empty, DO NOT overwrite storage with []
-  //    Instead, try to reuse the last saved draft images.
-  if (!finalImagesAbs.length) {
-    try {
-      const raw =
-        sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
-        lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-        localStorage.getItem("sm_setup_creatives_backup_v1");
+              // 4) IMPORTANT: if UI images are empty, DO NOT overwrite storage with []
+              //    Instead, try to reuse the last saved draft images.
+              if (!finalImagesAbs.length) {
+                try {
+                  const raw =
+                    sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
+                    lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+                    localStorage.getItem("sm_setup_creatives_backup_v1");
 
-      if (raw) {
-        const d = JSON.parse(raw || "{}");
-        const savedImgs = Array.isArray(d?.images) ? d.images : [];
-        finalImagesAbs = savedImgs.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
-      }
-    } catch {}
-  }
+                  if (raw) {
+                    const d = JSON.parse(raw || "{}");
+                    const savedImgs = Array.isArray(d?.images) ? d.images : [];
+                    finalImagesAbs = savedImgs.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+                  }
+                } catch {}
+              }
 
-  // 5) persist creatives ONLY if we actually have images
-  if (finalImagesAbs.length) {
-    const endMillis =
-      endDate && !isNaN(new Date(endDate).getTime())
-        ? new Date(endDate).getTime()
-        : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+              // 5) persist creatives ONLY if we actually have images
+              if (finalImagesAbs.length) {
+                const endMillis =
+                  endDate && !isNaN(new Date(endDate).getTime())
+                    ? new Date(endDate).getTime()
+                    : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
-    persistDraftCreativesNow(resolvedUser, {
-      ctxKey: safeCtx,
-      images: finalImagesAbs,
-      mediaSelection: "image",
-      expiresAt: endMillis,
-    });
-  }
+                persistDraftCreativesNow(resolvedUser, {
+                  ctxKey: safeCtx,
+                  images: finalImagesAbs,
+                  mediaSelection: "image",
+                  expiresAt: endMillis,
+                });
+              }
 
-  // 6) return back to THIS SAME origin with ctxKey
-  const returnTo =
-    window.location.origin +
-    "/setup" +
-    `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
+              // 6) return back to THIS SAME origin with ctxKey
+              const returnTo =
+                window.location.origin +
+                "/setup" +
+                `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
-  window.location.assign(
-    `${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`
-  );
-}}
-
-  style={{
-    padding: "14px 22px",
-    borderRadius: "14px",
-    border: "none",
-    background: fbConnected ? ACCENT_ALT : "#1877F2",
-    color: WHITE,
-    fontWeight: 900,
-    fontSize: "1.08rem",
-    boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
-    letterSpacing: "0.4px",
-    cursor: "pointer",
-    width: "100%",
-    maxWidth: 420,
-    transition: "transform 0.15s",
-  }}
-  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
->
-  {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-</button>
-
+              window.location.assign(
+                `${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`
+              );
+            }}
+            style={{
+              padding: "14px 22px",
+              borderRadius: "14px",
+              border: "none",
+              background: fbConnected ? ACCENT_ALT : "#1877F2",
+              color: WHITE,
+              fontWeight: 900,
+              fontSize: "1.08rem",
+              boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
+              letterSpacing: "0.4px",
+              cursor: "pointer",
+              width: "100%",
+              maxWidth: 420,
+              transition: "transform 0.15s",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+          >
+            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
+          </button>
 
           <button
             onClick={openFbPaymentPopup}
@@ -2044,7 +2024,7 @@ onClick={() => {
                     gap: 10,
                   }}
                 >
-                                 <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>
+                  <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>
                     Pay SmartMark Fee to Launch
                   </div>
 
@@ -2086,12 +2066,11 @@ onClick={() => {
                       }}
                     />
 
-                                    {!!authStatus.msg && (
+                    {!!authStatus.msg && (
                       <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, textAlign: "center" }}>
                         {authStatus.msg}
                       </div>
                     )}
-
                   </div>
 
                   {/* Setup Fee button (centered) */}
@@ -2110,11 +2089,9 @@ onClick={() => {
                         minWidth: 170,
                       }}
                     >
-                                            Setup Fee
-
+                      Setup Fee
                     </button>
                   </div>
-
                 </div>
               );
             })()}
