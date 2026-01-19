@@ -37,6 +37,66 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
 const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
 
 
+const SM_DEBUG_KEY = "sm_debug_log_v1";
+
+function smLog(tag, data = {}) {
+  try {
+    const entry = { t: new Date().toISOString(), tag, data };
+    console.log("[SMDBG]", tag, data);
+
+    const raw = localStorage.getItem(SM_DEBUG_KEY);
+    const arr = raw ? JSON.parse(raw) : [];
+    arr.push(entry);
+    while (arr.length > 200) arr.shift();
+    localStorage.setItem(SM_DEBUG_KEY, JSON.stringify(arr));
+  } catch {}
+}
+
+function smDumpDebug() {
+  try {
+    const raw = localStorage.getItem(SM_DEBUG_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function smDumpDraftSnapshot({ FORM_DRAFT_KEY, CREATIVE_DRAFT_KEY, FB_CONNECT_INFLIGHT_KEY, ACTIVE_CTX_KEY }) {
+  const snap = {};
+  try {
+    snap.activeCtx_ss = sessionStorage.getItem(ACTIVE_CTX_KEY) || "";
+    snap.activeCtx_ls = localStorage.getItem(ACTIVE_CTX_KEY) || "";
+
+    snap.formDraft = localStorage.getItem(FORM_DRAFT_KEY) || null;
+    snap.creativeDraft = localStorage.getItem(CREATIVE_DRAFT_KEY) || null;
+    snap.creativeBackup = localStorage.getItem("sm_setup_creatives_backup_v1") || null;
+    snap.creativeSession = sessionStorage.getItem("draft_form_creatives") || null;
+    snap.inflight = localStorage.getItem(FB_CONNECT_INFLIGHT_KEY) || null;
+
+    // keep it readable (sizes + ctx keys)
+    const pickCtx = (raw) => {
+      try { return (JSON.parse(raw || "{}")?.ctxKey || JSON.parse(raw || "{}")?.data?.ctxKey || "") + ""; }
+      catch { return ""; }
+    };
+
+    snap.ctx_form = snap.formDraft ? pickCtx(snap.formDraft) : "";
+    snap.ctx_creative = snap.creativeDraft ? pickCtx(snap.creativeDraft) : "";
+    snap.ctx_backup = snap.creativeBackup ? pickCtx(snap.creativeBackup) : "";
+    snap.ctx_session = snap.creativeSession ? pickCtx(snap.creativeSession) : "";
+    snap.ctx_inflight = snap.inflight ? pickCtx(snap.inflight) : "";
+
+    snap.len = {
+      form: snap.formDraft ? snap.formDraft.length : 0,
+      creative: snap.creativeDraft ? snap.creativeDraft.length : 0,
+      backup: snap.creativeBackup ? snap.creativeBackup.length : 0,
+      session: snap.creativeSession ? snap.creativeSession.length : 0,
+      inflight: snap.inflight ? snap.inflight.length : 0,
+    };
+  } catch {}
+  return snap;
+}
+
+
 function getActiveCtx() {
   return (
     sessionStorage.getItem(ACTIVE_CTX_KEY) ||
@@ -560,6 +620,41 @@ const CampaignSetup = () => {
   const navigate = useNavigate();
   const location = useLocation();
 
+    // ===================== DEBUG: error + storage snapshots =====================
+  useEffect(() => {
+    const onErr = (e) =>
+      smLog("window.error", {
+        message: e?.message,
+        src: e?.filename,
+        line: e?.lineno,
+        col: e?.colno,
+      });
+
+    const onRej = (e) =>
+      smLog("unhandledrejection", { reason: String(e?.reason || "") });
+
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onRej);
+
+    smLog("setup.mount", { href: window.location.href, state: location.state || null });
+    smLog(
+      "setup.mount.snapshot",
+      smDumpDraftSnapshot({
+        FORM_DRAFT_KEY,
+        CREATIVE_DRAFT_KEY,
+        FB_CONNECT_INFLIGHT_KEY,
+        ACTIVE_CTX_KEY,
+      })
+    );
+
+    return () => {
+      window.removeEventListener("error", onErr);
+      window.removeEventListener("unhandledrejection", onRej);
+    };
+    // eslint-disable-next-line
+  }, []);
+
+
   // ✅ Bootstrap ctxKey early (on first render + on OAuth return)
  useEffect(() => {
   const qs = new URLSearchParams(location.search || "");
@@ -930,6 +1025,16 @@ const CampaignSetup = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
+            smLog(
+        "oauth.return.before",
+        smDumpDraftSnapshot({
+          FORM_DRAFT_KEY,
+          CREATIVE_DRAFT_KEY,
+          FB_CONNECT_INFLIGHT_KEY,
+          ACTIVE_CTX_KEY,
+        })
+      );
+
       // ✅ Restore ctxKey from inflight so draft doesn't get rejected after OAuth
 try {
   const raw = localStorage.getItem(FB_CONNECT_INFLIGHT_KEY);
@@ -975,6 +1080,17 @@ try {
       } catch {}
 
       try { localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY); } catch {}
+
+            smLog(
+        "oauth.return.after",
+        smDumpDraftSnapshot({
+          FORM_DRAFT_KEY,
+          CREATIVE_DRAFT_KEY,
+          FB_CONNECT_INFLIGHT_KEY,
+          ACTIVE_CTX_KEY,
+        })
+      );
+
 
       // remove oauth flag from URL (keep path only)
       window.history.replaceState({}, document.title, "/setup");
@@ -1543,77 +1659,76 @@ try {
             minHeight: "600px",
           }}
         >
-          <button
-            onClick={() => {
+      <button
+  onClick={() => {
+    // ✅ pick ctxKey and make it non-empty
+    const qs = new URLSearchParams(location.search || "");
+    const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+    const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+    const active = (getActiveCtx() || "").trim();
 
-              // persist creatives BEFORE leaving to Render (cross-origin redirect)
+    const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
+    setActiveCtx(safeCtx);
 
-              const qs = new URLSearchParams(location.search || "");
-const ctxKey =
-  getActiveCtx() ||
-  (location.state?.ctxKey ? String(location.state.ctxKey).trim() : "") ||
-  (qs.get("ctxKey") || "").trim();
+    // ✅ persist creatives BEFORE leaving to backend OAuth
+    const imagesToPersist = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
+    const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls : [];
 
-const safeCtx = ctxKey || `${Date.now()}|||setup`;
-setActiveCtx(safeCtx);
+    const finalImages = (imagesToPersist.length ? imagesToPersist : fallbackFromNav)
+      .slice(0, 2)
+      .map(toAbsoluteMedia)
+      .filter(Boolean)
+      .slice(0, 2);
 
+    const endMillis =
+      endDate && !isNaN(new Date(endDate).getTime())
+        ? new Date(endDate).getTime()
+        : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
-              const imagesToPersist = (draftCreatives?.images?.length ? draftCreatives.images : []) || [];
-              const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
+    persistDraftCreativesNow(resolvedUser, {
+      ctxKey: safeCtx,
+      images: finalImages,
+      mediaSelection: "image",
+      expiresAt: endMillis,
+    });
 
-              const finalImages = imagesToPersist.length ? imagesToPersist.slice(0, 2) : fallbackFromNav;
-              const finalImagesAbs = (finalImages || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+    // ✅ mark inflight WITH ctxKey so OAuth return restores same run
+    try {
+      localStorage.setItem(
+        FB_CONNECT_INFLIGHT_KEY,
+        JSON.stringify({ t: Date.now(), ctxKey: safeCtx })
+      );
+    } catch {}
 
-              const endMillis =
-                endDate && !isNaN(new Date(endDate).getTime())
-                  ? new Date(endDate).getTime()
-                  : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+    // ✅ return to /setup with ctxKey so it doesn't reject the draft after OAuth
+    const returnTo =
+      window.location.origin + "/setup" + `?ctxKey=${encodeURIComponent(safeCtx)}`;
 
-persistDraftCreativesNow(resolvedUser, {
-  ctxKey: safeCtx,
-  images: finalImagesAbs,
-  mediaSelection: "image",
-  expiresAt: endMillis,
-});
+    window.location.assign(
+      `${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`
+    );
+  }}
+  style={{
+    padding: "14px 22px",
+    borderRadius: "14px",
+    border: "none",
+    background: fbConnected ? ACCENT_ALT : "#1877F2",
+    color: WHITE,
+    fontWeight: 900,
+    fontSize: "1.08rem",
+    boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
+    letterSpacing: "0.4px",
+    cursor: "pointer",
+    width: "100%",
+    maxWidth: 420,
+    transition: "transform 0.15s",
+  }}
+  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+>
+  {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
+</button>
 
-
-
-              try {
-                localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now(), ctxKey }));
-
-              } catch {}
-
-          
-
-              const returnTo =
-                window.location.origin +
-                "/setup" +
-                (ctxKey ? `?ctxKey=${encodeURIComponent(ctxKey)}` : "");
-
-              window.location.assign(
-                `${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`
-              );
-            }}
-            style={{
-              padding: "14px 22px",
-              borderRadius: "14px",
-              border: "none",
-              background: fbConnected ? ACCENT_ALT : "#1877F2",
-              color: WHITE,
-              fontWeight: 900,
-              fontSize: "1.08rem",
-              boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
-              letterSpacing: "0.4px",
-              cursor: "pointer",
-              width: "100%",
-              maxWidth: 420,
-              transition: "transform 0.15s",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-          >
-            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-          </button>
 
           <button
             onClick={openFbPaymentPopup}
