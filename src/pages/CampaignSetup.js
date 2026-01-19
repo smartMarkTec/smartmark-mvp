@@ -727,8 +727,10 @@ const CampaignSetup = () => {
     }
   });
 
-  const [cashapp, setCashapp] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
-  const [email, setEmail] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
+const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
+const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
+const [authLoading, setAuthLoading] = useState(false);
+
 
   // IMPORTANT: normalize stored account ID to "act_..."
   const [selectedAccount, setSelectedAccount] = useState(() => {
@@ -1309,13 +1311,38 @@ try {
   }, [budget, resolvedUser]);
 
   // Persist cashapp
-  useEffect(() => {
-    lsSet(resolvedUser, "smartmark_login_username", cashapp, true);
-  }, [cashapp, resolvedUser]);
+ useEffect(() => {
+  lsSet(resolvedUser, "smartmark_login_username", loginUser, true);
+}, [loginUser, resolvedUser]);
 
-  useEffect(() => {
-    lsSet(resolvedUser, "smartmark_login_password", email, true);
-  }, [email]);
+useEffect(() => {
+  lsSet(resolvedUser, "smartmark_login_password", loginPass, true);
+}, [loginPass, resolvedUser]);
+
+const handleLogin = async () => {
+  const u = String(loginUser || "").trim();
+  const p = String(loginPass || "").trim();
+  if (!u || !p) return alert("Enter username/email + password.");
+
+  setAuthLoading(true);
+  try {
+    const r = await fetch(`${backendUrl}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "Login failed");
+
+    try { localStorage.setItem("sm_current_user", u); } catch {}
+    alert("Logged in ✅");
+  } catch (e) {
+    alert(e?.message || "Login failed");
+  }
+  setAuthLoading(false);
+};
+
 
   useEffect(() => {
     const v = selectedAccount ? (selectedAccount.startsWith("act_") ? selectedAccount : `act_${selectedAccount}`) : "";
@@ -1949,45 +1976,72 @@ onClick={() => {
                     Pay SmartMark Fee to Launch
                   </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-  <div style={{ color: TEXT_MUTED, fontWeight: 900, fontSize: 12 }}>Cash App Username</div>
-  <div style={{ background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
-    <input
-      type="text"
-      value={cashapp}
-      onChange={(e) => setCashapp(e.target.value)}
-      placeholder="$yourcashtag"
-      style={{
-        background: "transparent",
-        border: "none",
-        outline: "none",
-        width: "100%",
-        color: TEXT_DIM,
-        fontSize: "1.02rem",
-        fontWeight: 800,
-      }}
-    />
+{/* Simple Login (works) */}
+<div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+    <div style={{ flex: "1 1 180px", background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
+      <input
+        type="text"
+        value={loginUser}
+        onChange={(e) => setLoginUser(e.target.value)}
+        placeholder="Username or email"
+        style={{
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          width: "100%",
+          color: TEXT_DIM,
+          fontSize: "1.02rem",
+          fontWeight: 800,
+        }}
+      />
+    </div>
+
+    <div style={{ flex: "1 1 180px", background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
+      <input
+        type="password"
+        value={loginPass}
+        onChange={(e) => setLoginPass(e.target.value)}
+        placeholder="Password"
+        style={{
+          background: "transparent",
+          border: "none",
+          outline: "none",
+          width: "100%",
+          color: TEXT_DIM,
+          fontSize: "1.02rem",
+          fontWeight: 800,
+        }}
+      />
+    </div>
   </div>
 
-  <div style={{ color: TEXT_MUTED, fontWeight: 900, fontSize: 12 }}>Email</div>
-  <div style={{ background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
-    <input
-      type="email"
-      value={email}
-      onChange={(e) => setEmail(e.target.value)}
-      placeholder="you@email.com"
+  <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between" }}>
+    <button
+      type="button"
+      onClick={handleLogin}
+      disabled={authStatus.loading}
       style={{
-        background: "transparent",
+        background: authStatus.ok ? "#2f7a5d" : ACCENT,
+        color: authStatus.ok ? WHITE : "#0f1418",
         border: "none",
-        outline: "none",
-        width: "100%",
-        color: TEXT_DIM,
-        fontSize: "1.02rem",
-        fontWeight: 800,
+        borderRadius: 12,
+        fontWeight: 900,
+        padding: "10px 14px",
+        cursor: authStatus.loading ? "not-allowed" : "pointer",
+        minWidth: 150,
+        opacity: authStatus.loading ? 0.7 : 1,
       }}
-    />
+    >
+      {authStatus.loading ? "Logging in..." : authStatus.ok ? "Logged In ✅" : "Login"}
+    </button>
+
+    <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12 }}>
+      {authStatus.msg || "Login is required before launch."}
+    </div>
   </div>
 </div>
+
 
 
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
