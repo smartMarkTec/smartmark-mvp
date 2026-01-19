@@ -30,10 +30,12 @@ const FEE_PAID_KEY = "sm_fee_paid_v1";
 
 /* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
-const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
+
 
 // ✅ Active run context (prevents old creatives bleeding across back/forward/OAuth)
-const ACTIVE_CTX_KEY = "sm_active_ctx_v1";
+const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
+
 
 function getActiveCtx() {
   return (
@@ -97,7 +99,8 @@ function getLatestDraftImageUrlsFromImageDrafts() {
   }
 }
 
-const FORM_DRAFT_KEY = "sm_form_draft_v2";
+const FORM_DRAFT_KEY = "sm_form_draft_v3";
+
 
 /* ======================= hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
@@ -724,7 +727,8 @@ const CampaignSetup = () => {
     setDraftCreatives(patched);
 
     try {
-      localStorage.setItem("draft_form_creatives_v2", JSON.stringify(patched));
+      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(patched));
+
       localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
       sessionStorage.setItem("draft_form_creatives", JSON.stringify(patched));
     } catch {}
@@ -1542,17 +1546,26 @@ const CampaignSetup = () => {
                   ? new Date(endDate).getTime()
                   : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
-              persistDraftCreativesNow(resolvedUser, {
-                images: finalImagesAbs,
-                mediaSelection: "image",
-                expiresAt: endMillis,
-              });
+             persistDraftCreativesNow(resolvedUser, {
+  ctxKey,
+  images: finalImagesAbs,
+  mediaSelection: "image",
+  expiresAt: endMillis,
+});
+
 
               try {
                 localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
               } catch {}
 
-              const ctxKey = getActiveCtx();
+              const qs = new URLSearchParams(location.search || "");
+const ctxKey =
+  getActiveCtx() ||
+  (location.state?.ctxKey ? String(location.state.ctxKey).trim() : "") ||
+  (qs.get("ctxKey") || "").trim();
+
+if (ctxKey) setActiveCtx(ctxKey);
+
               const returnTo =
                 window.location.origin +
                 "/setup" +
@@ -1745,6 +1758,47 @@ const CampaignSetup = () => {
                   <div style={{ fontWeight: 900, color: "#bdfdf0" }}>
                     Pay SmartMark Fee to Launch
                   </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+  <div style={{ color: TEXT_MUTED, fontWeight: 900, fontSize: 12 }}>Cash App Username</div>
+  <div style={{ background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
+    <input
+      type="text"
+      value={cashapp}
+      onChange={(e) => setCashapp(e.target.value)}
+      placeholder="$yourcashtag"
+      style={{
+        background: "transparent",
+        border: "none",
+        outline: "none",
+        width: "100%",
+        color: TEXT_DIM,
+        fontSize: "1.02rem",
+        fontWeight: 800,
+      }}
+    />
+  </div>
+
+  <div style={{ color: TEXT_MUTED, fontWeight: 900, fontSize: 12 }}>Email</div>
+  <div style={{ background: "#0f1519", border: `1px solid ${INPUT_BORDER}`, borderRadius: 12, padding: "10px 12px" }}>
+    <input
+      type="email"
+      value={email}
+      onChange={(e) => setEmail(e.target.value)}
+      placeholder="you@email.com"
+      style={{
+        background: "transparent",
+        border: "none",
+        outline: "none",
+        width: "100%",
+        color: TEXT_DIM,
+        fontSize: "1.02rem",
+        fontWeight: 800,
+      }}
+    />
+  </div>
+</div>
+
 
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                     <div style={{ fontWeight: 900, fontSize: "1.05rem", color: ACCENT }}>
