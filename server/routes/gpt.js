@@ -471,14 +471,30 @@ const system =
     cta = cta.replace(/[.]+$/g, "").trim();
     if (!cta) cta = "Learn more";
 
-    const copy = {
-      headline: clamp(headline, 55),
-      subline: clamp(subline, 140),
-      offer,
-      bullets,
-      disclaimers,
-      cta,
-    };
+ 
+const finalizeSubline = (s = "", maxWords = 45) => {
+  let out = String(s || "").replace(/\s+/g, " ").trim();
+
+  // cap by WORDS (not characters) so we never cut mid-word
+  let words = out.split(/\s+/).filter(Boolean);
+  if (words.length > maxWords) words = words.slice(0, maxWords);
+
+  out = words.join(" ").trim();
+
+  // ensure clean ending punctuation
+  if (out && !/[.!?]$/.test(out)) out += ".";
+
+  return out;
+};
+
+const copy = {
+  headline: clamp(headline, 55),
+  subline: finalizeSubline(subline, 45), // <= change this number if you want (ex: 35, 50)
+  offer,
+  bullets,
+  disclaimers,
+  cta,
+};
 
     return res.json({ ok: true, copy });
   } catch (e) {
