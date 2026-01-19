@@ -137,9 +137,10 @@ router.get('/facebook', (req, res) => {
     const u = new URL(returnTo);
     const host = u.hostname.toLowerCase();
     const allowed =
-      host.endsWith('smartemark.com') ||
-      host.endsWith('vercel.app') ||
-      host === 'localhost';
+  host === 'www.smartemark.com' ||
+  host === 'smartemark.com' ||
+  host === 'localhost';
+
     if (allowed) safeReturnTo = u.toString();
   } catch {}
 
