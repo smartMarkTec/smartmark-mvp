@@ -279,9 +279,14 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
     benefit
       ? `Core promise/benefit: "${benefit}"`
       : `Include a clear believable benefit appropriate to this industry.`,
-    offer
-      ? `Promo/offer to feature prominently: "${offer}"`
-      : `No discount given. Use a neutral promo tag appropriate to the industry (e.g., "New Arrivals", "Featured Collection", "Limited Drop").`,
+   offer
+  ? `Promo/offer to feature prominently: "${offer}"`
+  : [
+      `No promo/discount was provided.`,
+      `DO NOT use promo language like "Featured Collection", "New Arrivals", "Limited Drop", "Sale", "Special Offer", "Deal", "Limited Time".`,
+      `Keep the small pill/label area in the design, but fill it with a neutral descriptor that is NOT a promotion.`,
+      `Neutral descriptor examples (choose ONE, fit to industry/benefit): "Made With Care", "Fresh Daily", "Everyday Essential", "Trusted Service", "Local Favorite", "Crafted By Experts", "Quality You Can Feel", "Simple & Reliable", "Book Today", "Shop The Look" (only if fashion).`
+    ].join(" "),
     ``,
     `Layout & typography requirements:`,
     `- Use modern, premium, clean design with strong visual hierarchy.`,
@@ -293,6 +298,7 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
     `- NO third-party logos, NO watermarks, NO QR codes.`,
     `- NO fake certifications, NO policy-violating claims.`,
     `- Do not include any unrelated brand names.`,
+    `- If no offer/promo is provided above, you MUST NOT include promo phrases (Featured Collection/New Arrivals/Sale/etc). Use a neutral descriptor label instead.`,
     ``,
     variationBlock,
     ``,

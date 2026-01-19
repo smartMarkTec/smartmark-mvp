@@ -293,21 +293,58 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
 
 const safeSubline = (s = "") => {
   s = stripWeOur(s);
-  s = s.replace(/[“”"']/g, "").trim();
-  s = String(s || "").replace(/\s+/g, " ").trim();
+  s = String(s || "")
+    .replace(/[“”"']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 
-  // Enforce 28–60 words
-  let words = s.split(/\s+/).filter(Boolean);
-  if (words.length > 60) words = words.slice(0, 60);
-  let out = words.join(" ").trim();
+  if (!s) return "";
 
+  const words = (t) => String(t || "").trim().split(/\s+/).filter(Boolean);
+
+  // Prefer whole sentences so we never "cut off" mid-thought
+  const sentences = s
+    .split(/(?<=[.!?])\s+/)
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  let out = "";
+  let total = 0;
+
+  for (const sent of sentences) {
+    const w = words(sent);
+    if (!w.length) continue;
+    if (total + w.length > 50) break; // hard cap
+    out = out ? `${out} ${sent}` : sent;
+    total += w.length;
+  }
+
+  // If model returned no punctuation at all, fall back to a clean 50-word slice
+  if (!out) {
+    const w = words(s);
+    out = w.slice(0, 50).join(" ").trim();
+  }
+
+  // Ensure it ends like a complete sentence
+  out = out.replace(/[,:;—–-]\s*$/g, "").trim();
   if (out && !/[.!?]$/.test(out)) out += ".";
 
-  if (out.split(/\s+/).filter(Boolean).length < 28) {
-    out = `${out} See what’s included, compare your options, and take the next step today.`;
-    words = out.split(/\s+/).filter(Boolean);
-    if (words.length > 60) out = words.slice(0, 60).join(" ").trim();
-    if (out && !/[.!?]$/.test(out)) out += ".";
+  // Ensure minimum length (20 words) WITHOUT inventing offers
+  if (words(out).length < 20) {
+    const addon = "Learn what’s included and take the next step today.";
+    const remaining = 50 - words(out).length;
+    if (remaining > 0) {
+      const addWords = words(addon).slice(0, remaining).join(" ");
+      out = `${out} ${addWords}`.replace(/\s+/g, " ").trim();
+      if (!/[.!?]$/.test(out)) out += ".";
+    }
+  }
+
+  // Final guard: never exceed 50 words
+  const final = words(out);
+  if (final.length > 50) {
+    out = final.slice(0, 50).join(" ").trim();
+    if (!/[.!?]$/.test(out)) out += ".";
   }
 
   return out;
@@ -340,11 +377,13 @@ const buildFallbackSubline = (headline) => {
 
 const system =
   "You are a professional direct-response copywriter. " +
-  "Return strict JSON with keys: headline (<=8 words), subline (2–4 sentences, 28–60 words), offer (short, optional), " +
+  "Return strict JSON with keys: headline (<=8 words), subline (2–3 sentences, 20–45 words), offer (short, optional), " +
   "bullets (array up to 3), disclaimers (short, optional), cta (2–3 words). " +
   "Hard rules: NO URLs. NO 'our/we' language. NO brand-superlatives (best, #1, premium, luxury). " +
-  "Do NOT copy phrases verbatim from inputs; paraphrase and summarize. " +
-  "Headline and subline must not repeat each other.";
+  "Write simple, specific copy (not corny). " +
+  "Do NOT copy phrases verbatim from inputs; paraphrase. " +
+  "Headline and subline must not repeat each other. " +
+  "Subline MUST end with complete sentences (no cut-off words).";
 
 
     const user = [
