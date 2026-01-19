@@ -35,6 +35,75 @@ const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v3";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
 
+/* -------- Image preview cache (24h) --------
+   Goal: keep previews visible even if /generated files disappear after deploy/restart.
+   We store Data URLs for the 2 images so the UI doesn't need to regenerate.
+*/
+const IMAGE_CACHE_KEY = "sm_image_cache_v1";
+const IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+function loadImageCache(ctxKey = "") {
+  try {
+    const raw = localStorage.getItem(IMAGE_CACHE_KEY);
+    if (!raw) return null;
+    const c = JSON.parse(raw);
+    if (!c?.savedAt) return null;
+    if (Date.now() - Number(c.savedAt) > IMAGE_CACHE_TTL_MS) return null;
+    if (ctxKey && c.ctxKey && String(c.ctxKey) !== String(ctxKey)) return null;
+    return c;
+  } catch {
+    return null;
+  }
+}
+
+function saveImageCache(payload) {
+  try {
+    localStorage.setItem(IMAGE_CACHE_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+async function urlToDataUrl(url) {
+  const absUrl = toAbsoluteMedia(url);
+  if (!absUrl) throw new Error("no url");
+  // Note: for same-origin /api/media this works fine.
+  const res = await fetch(absUrl, { cache: "force-cache" });
+  if (!res.ok) throw new Error(`fetch ${res.status}`);
+  const blob = await res.blob();
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onerror = reject;
+    r.onloadend = () => resolve(r.result);
+    r.readAsDataURL(blob);
+  });
+}
+
+async function cacheImagesFor24h(ctxKey, urls) {
+  const cleanUrls = (urls || []).filter(Boolean).slice(0, 2);
+  if (!cleanUrls.length) return null;
+
+  // If already cached for this ctx, keep it
+  const existing = loadImageCache(ctxKey);
+  if (existing?.dataUrls?.filter(Boolean)?.length) return existing;
+
+  const dataUrls = await Promise.all(
+    cleanUrls.map(async (u) => {
+      try { return await urlToDataUrl(u); } catch { return null; }
+    })
+  );
+
+  const payload = {
+    ctxKey,
+    urls: cleanUrls.map(toAbsoluteMedia),
+    dataUrls, // preferred for preview + for passing to /setup + FB upload
+    savedAt: Date.now(),
+    expiresAt: Date.now() + IMAGE_CACHE_TTL_MS,
+  };
+
+  saveImageCache(payload);
+  return payload;
+}
+
+
 
 // ✅ Active run context (prevents old industry/copy bleeding across back/forward/OAuth)
 const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
@@ -594,6 +663,9 @@ export default function FormPage() {
   const [generating, setGenerating] = useState(false);
   const [sideChatCount, setSideChatCount] = useState(0);
   const [hasGenerated, setHasGenerated] = useState(false);
+    const [imageDataUrls, setImageDataUrls] = useState([]); // 2 items max
+  const [imgFail, setImgFail] = useState({}); // {0:true,1:true}
+
 
   // Video removed: force image-only
   const [mediaType, setMediaType] = useState("image");
@@ -639,6 +711,15 @@ export default function FormPage() {
             purgeLegacyDraftKeys();
 
       const existing = String(getActiveCtx() || "").trim();
+
+
+        useEffect(() => {
+    try {
+      const ctx = getActiveCtx();
+      const c = loadImageCache(ctx);
+      if (c?.dataUrls?.length) setImageDataUrls(c.dataUrls.filter(Boolean).slice(0, 2));
+    } catch {}
+  }, []);
 
       // Read raw drafts
       const rawForm = localStorage.getItem(FORM_DRAFT_KEY);
@@ -1237,6 +1318,15 @@ if (!parsedCtx) {
     setActiveImage(0);
     setImageUrl(urls[0] || "");
 
+        // Cache previews for 24h (so they don't go blank after deploy/restart)
+    try {
+      const ctx = getActiveCtx();
+      const c = await cacheImagesFor24h(ctx, urls);
+      const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
+      if (cached.length) setImageDataUrls(cached);
+    } catch {}
+
+
     setResult({
       headline: copyA.headline,
       body: copyA.subline,
@@ -1645,47 +1735,65 @@ if (!parsedCtx) {
             position: "relative",
           }}
         >
-          <div
-            style={{
-              background: "#f5f6fa",
-              padding: "11px 20px",
-              borderBottom: "1px solid #e0e4eb",
-              fontWeight: 700,
-              color: "#495a68",
-              fontSize: 16,
-              letterSpacing: 0.08,
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
-          >
-            <span>
-              Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
-            </span>
-            <button
-              style={{
-                background: "#1ad6b7",
-                color: "#222",
-                border: "none",
-                borderRadius: 12,
-                fontWeight: 700,
-                fontSize: "1.01rem",
-                padding: "6px 20px",
-                cursor: imageLoading ? "not-allowed" : "pointer",
-                marginLeft: 8,
-                boxShadow: "0 2px 7px #19e5b733",
-                display: "flex",
-                alignItems: "center",
-                gap: 7,
-              }}
-              onClick={handleRegenerateImage}
-              disabled={imageLoading}
-              title="Regenerate Image Ad"
-            >
-              <FaSyncAlt style={{ fontSize: 16 }} />
-              {imageLoading || generating ? <Dotty /> : "Regenerate"}
-            </button>
-          </div>
+    <div
+  style={{
+    background: "#f5f6fa",
+    padding: "11px 20px",
+    borderBottom: "1px solid #e0e4eb",
+    fontWeight: 700,
+    color: "#495a68",
+    fontSize: 16,
+    letterSpacing: 0.08,
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    }}
+  >
+    <span>
+      Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
+    </span>
+
+    <button
+      style={{
+        background: "#1ad6b7",
+        color: "#222",
+        border: "none",
+        borderRadius: 12,
+        fontWeight: 700,
+        fontSize: "1.01rem",
+        padding: "6px 20px",
+        cursor: imageLoading ? "not-allowed" : "pointer",
+        marginLeft: 8,
+        boxShadow: "0 2px 7px #19e5b733",
+        display: "flex",
+        alignItems: "center",
+        gap: 7,
+      }}
+      onClick={handleRegenerateImage}
+      disabled={imageLoading}
+      title="Regenerate Image Ad"
+    >
+      <FaSyncAlt style={{ fontSize: 16 }} />
+      {imageLoading || generating ? <Dotty /> : "Regenerate"}
+    </button>
+  </div>
+
+  {/* ✅ put this OUTSIDE the button */}
+  <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
+    {(() => {
+      const q = loadGenQuota();
+      const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
+      const mins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
+      return `Generations left today: ${remaining}/${IMAGE_GEN_MAX_RUNS_PER_WINDOW} (resets in ~${mins} min)`;
+    })()}
+  </div>
+</div>
+
 
           <div
             style={{
@@ -1703,12 +1811,21 @@ if (!parsedCtx) {
               </div>
             ) : imageUrls.length > 0 ? (
               <>
-                <img
-                  src={toAbsoluteMedia(imageUrls[activeImage] || "")}
-                  alt="Ad Preview"
-                  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
-                  onClick={() => handleImageClick(imageUrls[activeImage])}
-                />
+             <img
+  src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
+  alt="Ad Preview"
+  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
+  onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
+  onError={() => {
+    // If the hosted URL died (deploy/restart), try to use cached Data URL.
+    setImgFail((p) => ({ ...p, [activeImage]: true }));
+    const ctx = getActiveCtx();
+    const c = loadImageCache(ctx);
+    const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
+    if (cached.length) setImageDataUrls(cached);
+  }}
+/>
+
                 <Arrow
                   side="left"
                   onClick={() => setActiveImage((activeImage + imageUrls.length - 1) % imageUrls.length)}
@@ -1876,7 +1993,9 @@ if (!parsedCtx) {
               activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
             );
 
-            const imgA = imageUrls.map(abs).slice(0, 2);
+           const cached = (imageDataUrls || []).filter(Boolean).slice(0, 2);
+const imgA = cached.length ? cached : imageUrls.map(abs).slice(0, 2);
+
 
             const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
             setActiveCtx(ctxKey);
