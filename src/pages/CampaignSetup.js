@@ -312,8 +312,16 @@ function loadSetupCreativeBackup(user) {
 
 function persistDraftCreativesNow(user, draftCreatives) {
   try {
+    const imgs = Array.isArray(draftCreatives?.images)
+      ? draftCreatives.images.map(toAbsoluteMedia).filter(Boolean).slice(0, 2)
+      : [];
+
+    // ✅ DO NOT overwrite stored creatives with empty images
+    if (!imgs.length) return;
+
     const payload = {
       ...(draftCreatives || {}),
+      images: imgs,
       ctxKey: (draftCreatives && draftCreatives.ctxKey) || getActiveCtx() || "",
       mediaSelection: "image",
       savedAt: Date.now(),
@@ -322,11 +330,10 @@ function persistDraftCreativesNow(user, draftCreatives) {
     sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
     if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
     localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
-    try { localStorage.setItem(CREATIVE_DRAFT_KEY_LEGACY, JSON.stringify(payload)); } catch {}
-
     saveSetupCreativeBackup(user, payload);
   } catch {}
 }
+
 
 /* ======================= NEW: attach draft creatives into active campaign slot after FB connect ======================= */
 function attachDraftToCampaignIfEmpty({ user, acctId, campaignId, draftImages, expiresAt, name }) {
@@ -1680,26 +1687,59 @@ try {
           }}
         >
       <button
-  onClick={() => {
-    // ✅ pick ctxKey and make it non-empty
-    const qs = new URLSearchParams(location.search || "");
-    const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
-    const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-    const active = (getActiveCtx() || "").trim();
+onClick={() => {
+  // 1) get a non-empty ctxKey (never blank)
+  const qs = new URLSearchParams(location.search || "");
+  const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+  const active = (getActiveCtx() || "").trim();
 
-    const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
-    setActiveCtx(safeCtx);
+  const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
+  setActiveCtx(safeCtx);
 
-    // ✅ persist creatives BEFORE leaving to backend OAuth
+  // 2) ALWAYS mark inflight so OAuth return restores the same run
+  try {
+    localStorage.setItem(
+      FB_CONNECT_INFLIGHT_KEY,
+      JSON.stringify({ t: Date.now(), ctxKey: safeCtx })
+    );
+  } catch {}
+
+  // 3) figure out which images to persist (prefer current UI images)
+  let finalImagesAbs = [];
+
+  try {
     const imagesToPersist = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
     const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls : [];
 
-    const finalImages = (imagesToPersist.length ? imagesToPersist : fallbackFromNav)
-      .slice(0, 2)
+    const candidate = (imagesToPersist.length ? imagesToPersist : fallbackFromNav)
+      .slice(0, 2);
+
+    finalImagesAbs = (candidate || [])
       .map(toAbsoluteMedia)
       .filter(Boolean)
       .slice(0, 2);
+  } catch {}
 
+  // 4) IMPORTANT: if UI images are empty, DO NOT overwrite storage with []
+  //    Instead, try to reuse the last saved draft images.
+  if (!finalImagesAbs.length) {
+    try {
+      const raw =
+        sessionStorage.getItem("draft_form_creatives") ||
+        lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+        localStorage.getItem("sm_setup_creatives_backup_v1");
+
+      if (raw) {
+        const d = JSON.parse(raw || "{}");
+        const savedImgs = Array.isArray(d?.images) ? d.images : [];
+        finalImagesAbs = savedImgs.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+      }
+    } catch {}
+  }
+
+  // 5) persist creatives ONLY if we actually have images
+  if (finalImagesAbs.length) {
     const endMillis =
       endDate && !isNaN(new Date(endDate).getTime())
         ? new Date(endDate).getTime()
@@ -1707,27 +1747,23 @@ try {
 
     persistDraftCreativesNow(resolvedUser, {
       ctxKey: safeCtx,
-      images: finalImages,
+      images: finalImagesAbs,
       mediaSelection: "image",
       expiresAt: endMillis,
     });
+  }
 
-    // ✅ mark inflight WITH ctxKey so OAuth return restores same run
-    try {
-      localStorage.setItem(
-        FB_CONNECT_INFLIGHT_KEY,
-        JSON.stringify({ t: Date.now(), ctxKey: safeCtx })
-      );
-    } catch {}
+  // 6) return back to THIS SAME origin with ctxKey
+  const returnTo =
+    window.location.origin +
+    "/setup" +
+    `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
-    // ✅ return to /setup with ctxKey so it doesn't reject the draft after OAuth
-    const returnTo =
-      window.location.origin + "/setup" + `?ctxKey=${encodeURIComponent(safeCtx)}`;
+  window.location.assign(
+    `${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`
+  );
+}}
 
-    window.location.assign(
-      `${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`
-    );
-  }}
   style={{
     padding: "14px 22px",
     borderRadius: "14px",
