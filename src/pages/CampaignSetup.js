@@ -2046,30 +2046,12 @@ onClick={() => {
                       }}
                     />
 
-                    <button
-                      type="button"
-                      onClick={handleLogin}
-                      disabled={authLoading}
-                      style={{
-                        background: authStatus.ok ? "#2f7a5d" : "#232828",
-                        color: WHITE,
-                        border: `1px solid ${INPUT_BORDER}`,
-                        borderRadius: 12,
-                        fontWeight: 900,
-                        padding: "10px 14px",
-                        cursor: authLoading ? "not-allowed" : "pointer",
-                        opacity: authLoading ? 0.7 : 1,
-                        width: "100%",
-                      }}
-                    >
-                      {authLoading ? "Logging in..." : authStatus.ok ? "Logged In ✅" : "Login"}
-                    </button>
-
-                    {!!authStatus.msg && (
+                                    {!!authStatus.msg && (
                       <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, textAlign: "center" }}>
                         {authStatus.msg}
                       </div>
                     )}
+
                   </div>
 
                   {/* Setup Fee button (centered) */}
@@ -2088,7 +2070,8 @@ onClick={() => {
                         minWidth: 170,
                       }}
                     >
-                      {feePaid ? "Fee Paid ✅" : "Setup Fee"}
+                                            Setup Fee
+
                     </button>
                   </div>
 
