@@ -1459,16 +1459,16 @@ useEffect(() => {
     navigate("/form");
   };
 
-   const canLaunch = !!(
-    fbConnected &&
-    selectedAccount &&
-    selectedPageId &&
-    budget &&
-    !isNaN(parseFloat(budget)) &&
-    parseFloat(budget) >= 3 &&
-    feePaid &&
-    authStatus.ok
-  );
+  const canLaunch = !!(
+  fbConnected &&
+  selectedAccount &&
+  selectedPageId &&
+  budget &&
+  !isNaN(parseFloat(budget)) &&
+  parseFloat(budget) >= 3 &&
+  feePaid
+);
+
 
 
   function capTwoWeeksISO(startISO, endISO) {
