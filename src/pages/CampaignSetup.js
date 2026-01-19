@@ -99,81 +99,6 @@ function smDumpDraftSnapshot({ FORM_DRAFT_KEY, CREATIVE_DRAFT_KEY, FB_CONNECT_IN
 }
 
 
-function getActiveCtx() {
-  // primary (v2)
-  const v2 =
-    (sessionStorage.getItem(ACTIVE_CTX_KEY) || localStorage.getItem(ACTIVE_CTX_KEY) || "").trim();
-  if (v2) return v2;
-
-  // legacy migrate (v1 -> v2)
-  const v1 =
-    (sessionStorage.getItem(ACTIVE_CTX_KEY_LEGACY) || localStorage.getItem(ACTIVE_CTX_KEY_LEGACY) || "").trim();
-  if (v1) {
-    setActiveCtx(v1); // writes into v2 keys
-    return v1;
-  }
-
-  return "";
-}
-
-
-function setActiveCtx(ctxKey) {
-  const k = String(ctxKey || "").trim();
-  if (!k) return;
-  try { sessionStorage.setItem(ACTIVE_CTX_KEY, k); } catch {}
-  try { localStorage.setItem(ACTIVE_CTX_KEY, k); } catch {}
-}
-
-function isDraftForActiveCtx(draftObj) {
-  const active = getActiveCtx();
-  const dk = (draftObj && draftObj.ctxKey ? String(draftObj.ctxKey) : "").trim();
-  if (!active) return true;          // if no active ctx set, allow (safe fallback)
-  if (!dk) return false;             // active ctx exists but draft has no ctxKey => reject
-  return dk === active;              // must match exactly
-}
-
-function purgeDraftStorages(user) {
-  try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
-  try {
-    if (user) localStorage.removeItem(withUser(user, CREATIVE_DRAFT_KEY));
-    localStorage.removeItem(CREATIVE_DRAFT_KEY);
-    localStorage.removeItem("sm_setup_creatives_backup_v1");
-  } catch {}
-}
-
-function getLatestDraftImageUrlsFromImageDrafts() {
-  try {
-    const raw = localStorage.getItem("smartmark.imageDrafts.v1");
-    if (!raw) return [];
-    const obj = JSON.parse(raw);
-
-    const items = Object.entries(obj)
-      .filter(([k, v]) => k.startsWith("img:") && v && v._updatedAt)
-      .sort((a, b) => (a[1]._updatedAt || 0) - (b[1]._updatedAt || 0));
-
-    const urls = items
-      .slice(-2)
-      .map(([k]) => k.replace(/^img:/, ""))
-      .map((u) => {
-        const s = String(u || "").trim();
-        if (!s) return "";
-
-        // force backend absolute for any path-ish url
-        if (/^https?:\/\//i.test(s)) return s;
-        if (s.startsWith("/")) return backendUrl + s;
-        return backendUrl + "/" + s;
-      })
-      .filter(Boolean);
-
-    return urls;
-  } catch {
-    return [];
-  }
-}
-
-const FORM_DRAFT_KEY = "sm_form_draft_v3";
-
-
 /* ======================= hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
 
@@ -200,6 +125,14 @@ const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
 
 /* ------------------ SIMPLE USER NAMESPACE (MVP isolation) ------------------ */
 const withUser = (u, key) => `u:${u}:${key}`;
+
+// ---- per-user session keys (prevents same-browser multi-user bleed) ----
+const SS_DRAFT_KEY = (u) => (u ? `u:${u}:draft_form_creatives` : "draft_form_creatives");
+const SS_ACTIVE_CTX_KEY = (u) => (u ? `u:${u}:${ACTIVE_CTX_KEY}` : ACTIVE_CTX_KEY);
+
+// Local keys that should also be per-user
+const LS_INFLIGHT_KEY = (u) => (u ? withUser(u, FB_CONNECT_INFLIGHT_KEY) : FB_CONNECT_INFLIGHT_KEY);
+const LS_BACKUP_KEY = (u) => (u ? withUser(u, SETUP_CREATIVE_BACKUP_KEY) : SETUP_CREATIVE_BACKUP_KEY);
 
 function getUserFromStorage() {
   try {
@@ -287,17 +220,14 @@ function purgeExpiredCreative(map, campaignId) {
 function saveSetupCreativeBackup(user, draftObj) {
   try {
     const payload = { ...(draftObj || {}), savedAt: Date.now() };
-    if (user) localStorage.setItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY), JSON.stringify(payload));
-    localStorage.setItem(SETUP_CREATIVE_BACKUP_KEY, JSON.stringify(payload));
+    localStorage.setItem(LS_BACKUP_KEY(user), JSON.stringify(payload));
+    localStorage.setItem(SETUP_CREATIVE_BACKUP_KEY, JSON.stringify(payload)); // legacy safety
   } catch {}
 }
 
 function loadSetupCreativeBackup(user) {
   try {
-    const raw =
-      (user && localStorage.getItem(withUser(user, SETUP_CREATIVE_BACKUP_KEY))) ||
-      localStorage.getItem(SETUP_CREATIVE_BACKUP_KEY);
-
+    const raw = localStorage.getItem(LS_BACKUP_KEY(user)) || localStorage.getItem(SETUP_CREATIVE_BACKUP_KEY);
     if (!raw) return null;
 
     const draft = JSON.parse(raw);
@@ -309,6 +239,96 @@ function loadSetupCreativeBackup(user) {
     return null;
   }
 }
+
+function getActiveCtx(user) {
+  const kSS = SS_ACTIVE_CTX_KEY(user);
+
+  // primary (v2)
+  const v2 =
+    (sessionStorage.getItem(kSS) ||
+      (user ? localStorage.getItem(withUser(user, ACTIVE_CTX_KEY)) : null) ||
+      localStorage.getItem(ACTIVE_CTX_KEY) ||
+      "").trim();
+
+  if (v2) return v2;
+
+  // legacy migrate (v1 -> v2)
+  const v1 =
+    (sessionStorage.getItem(ACTIVE_CTX_KEY_LEGACY) ||
+      (user ? localStorage.getItem(withUser(user, ACTIVE_CTX_KEY_LEGACY)) : null) ||
+      localStorage.getItem(ACTIVE_CTX_KEY_LEGACY) ||
+      "").trim();
+
+  if (v1) {
+    setActiveCtx(v1, user);
+    return v1;
+  }
+
+  return "";
+}
+
+function setActiveCtx(ctxKey, user) {
+  const k = String(ctxKey || "").trim();
+  if (!k) return;
+
+  const kSS = SS_ACTIVE_CTX_KEY(user);
+
+  try { sessionStorage.setItem(kSS, k); } catch {}
+  try {
+    if (user) localStorage.setItem(withUser(user, ACTIVE_CTX_KEY), k);
+    localStorage.setItem(ACTIVE_CTX_KEY, k); // keep legacy/global too for safety
+  } catch {}
+}
+
+function isDraftForActiveCtx(draftObj, user) {
+  const active = getActiveCtx(user);
+  const dk = (draftObj && draftObj.ctxKey ? String(draftObj.ctxKey) : "").trim();
+  if (!active) return true;          // if no active ctx set, allow (safe fallback)
+  if (!dk) return false;             // active ctx exists but draft has no ctxKey => reject
+  return dk === active;              // must match exactly
+}
+
+function purgeDraftStorages(user) {
+  try { sessionStorage.removeItem(SS_DRAFT_KEY(user)); } catch {}
+  try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+  try {
+    if (user) localStorage.removeItem(withUser(user, CREATIVE_DRAFT_KEY));
+    localStorage.removeItem(CREATIVE_DRAFT_KEY);
+    localStorage.removeItem("sm_setup_creatives_backup_v1");
+  } catch {}
+}
+
+function getLatestDraftImageUrlsFromImageDrafts() {
+  try {
+    const raw = localStorage.getItem("smartmark.imageDrafts.v1");
+    if (!raw) return [];
+    const obj = JSON.parse(raw);
+
+    const items = Object.entries(obj)
+      .filter(([k, v]) => k.startsWith("img:") && v && v._updatedAt)
+      .sort((a, b) => (a[1]._updatedAt || 0) - (b[1]._updatedAt || 0));
+
+    const urls = items
+      .slice(-2)
+      .map(([k]) => k.replace(/^img:/, ""))
+      .map((u) => {
+        const s = String(u || "").trim();
+        if (!s) return "";
+
+        // force backend absolute for any path-ish url
+        if (/^https?:\/\//i.test(s)) return s;
+        if (s.startsWith("/")) return backendUrl + s;
+        return backendUrl + "/" + s;
+      })
+      .filter(Boolean);
+
+    return urls;
+  } catch {
+    return [];
+  }
+}
+
+const FORM_DRAFT_KEY = "sm_form_draft_v3";
 
 function persistDraftCreativesNow(user, draftCreatives) {
   try {
@@ -322,12 +342,12 @@ function persistDraftCreativesNow(user, draftCreatives) {
     const payload = {
       ...(draftCreatives || {}),
       images: imgs,
-      ctxKey: (draftCreatives && draftCreatives.ctxKey) || getActiveCtx() || "",
+      ctxKey: (draftCreatives && draftCreatives.ctxKey) || getActiveCtx(user) || "",
       mediaSelection: "image",
       savedAt: Date.now(),
     };
 
-    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+    sessionStorage.setItem(SS_DRAFT_KEY(user), JSON.stringify(payload));
     if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
     localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
     saveSetupCreativeBackup(user, payload);
@@ -480,10 +500,12 @@ const badge = {
 
 function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
+  const [broken, setBroken] = useState(false);
   const normalized = (items || []).map(toAbsoluteMedia).filter(Boolean);
 
   useEffect(() => {
     if (idx >= normalized.length) setIdx(0);
+    setBroken(false);
   }, [normalized, idx]);
 
   if (!normalized.length) {
@@ -510,10 +532,14 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   return (
     <div style={{ position: "relative", background: "#222" }}>
       <img
-        src={normalized[idx]}
+        src={broken ? `${backendUrl}/__fallback/1200.jpg` : normalized[idx]}
         alt="Ad"
         style={{ width: "100%", maxHeight: height, height, objectFit: "cover", display: "block" }}
-        onClick={() => onFullscreen && onFullscreen(normalized[idx])}
+        onClick={() =>
+          onFullscreen &&
+          onFullscreen(broken ? `${backendUrl}/__fallback/1200.jpg` : normalized[idx])
+        }
+        onError={() => setBroken(true)}
       />
       {normalized.length > 1 && (
         <>
@@ -681,13 +707,15 @@ const CampaignSetup = () => {
   const qs = new URLSearchParams(location.search || "");
   const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
   const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-  const active = (getActiveCtx() || "").trim();
+
+  const user = getUserFromStorage();
+  const active = (getActiveCtx(user) || "").trim();
 
   // ✅ DO NOT rotate ctxKey on OAuth return.
   // Only set ctxKey if we have one from state/url, or if none exists at all.
-  if (ctxFromState) return setActiveCtx(ctxFromState);
-  if (ctxFromUrl) return setActiveCtx(ctxFromUrl);
-  if (!active) setActiveCtx(`${Date.now()}|||setup`);
+  if (ctxFromState) return setActiveCtx(ctxFromState, user);
+  if (ctxFromUrl) return setActiveCtx(ctxFromUrl, user);
+  if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
 }, [location.search]);
 
 
@@ -877,13 +905,13 @@ const CampaignSetup = () => {
     let baseDraft = null;
     try {
       const raw =
-        sessionStorage.getItem("draft_form_creatives") ||
+        sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
         lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
         localStorage.getItem("sm_setup_creatives_backup_v1");
       if (raw) baseDraft = JSON.parse(raw);
     } catch {}
 
-    if (!baseDraft || !isDraftForActiveCtx(baseDraft)) return;
+    if (!baseDraft || !isDraftForActiveCtx(baseDraft, resolvedUser)) return;
 
     const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
     if (!fallbackUrls.length) return;
@@ -895,7 +923,7 @@ const CampaignSetup = () => {
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(patched));
 
       localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(patched));
+      sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
     } catch {}
 
     // keep the draft visible
@@ -972,7 +1000,7 @@ const CampaignSetup = () => {
     const applyDraft = (draftObj) => {
   // ✅ reject drafts not tied to the active ctxKey
   // IMPORTANT: do NOT purge here (OAuth return can temporarily mismatch)
-  if (!isDraftForActiveCtx(draftObj)) {
+  if (!isDraftForActiveCtx(draftObj, resolvedUser)) {
     return false;
   }
 
@@ -993,7 +1021,7 @@ const CampaignSetup = () => {
 
     const inflight = (() => {
       try {
-        const v = localStorage.getItem(FB_CONNECT_INFLIGHT_KEY);
+        const v = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
         if (!v) return false;
         const parsed = JSON.parse(v);
         return parsed?.t && Date.now() - Number(parsed.t) < 10 * 60 * 1000;
@@ -1004,7 +1032,7 @@ const CampaignSetup = () => {
 
     try {
       // 1) session
-      const sess = sessionStorage.getItem("draft_form_creatives");
+      const sess = sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser));
       if (sess) {
         const sObj = JSON.parse(sess);
         const ok = applyDraft(sObj);
@@ -1045,7 +1073,7 @@ if (raw) {
         if (backup) {
           const ok = applyDraft(backup);
           if (ok) {
-            sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+            sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(backup));
             return;
           }
         }
@@ -1056,7 +1084,7 @@ if (raw) {
       if (backup) {
         const ok = applyDraft(backup);
         if (ok) {
-          sessionStorage.setItem("draft_form_creatives", JSON.stringify(backup));
+          sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(backup));
           return;
         }
       }
@@ -1068,8 +1096,8 @@ if (raw) {
     const hasDraft = draftCreatives.images && draftCreatives.images.length;
     if (!hasDraft) return;
     try {
-      const payload = { ...draftCreatives, ctxKey: getActiveCtx() || "", savedAt: Date.now() };
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+      const payload = { ...draftCreatives, ctxKey: getActiveCtx(resolvedUser) || "", savedAt: Date.now() };
+      sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payload));
 
       if (resolvedUser) {
         localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
@@ -1081,6 +1109,7 @@ if (raw) {
   }, [draftCreatives, resolvedUser]);
 
   const handleClearDraft = () => {
+    try { sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser)); } catch {}
     try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
     try {
       if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
@@ -1110,10 +1139,10 @@ if (raw) {
 
       // ✅ Restore ctxKey from inflight so draft doesn't get rejected after OAuth
 try {
-  const raw = localStorage.getItem(FB_CONNECT_INFLIGHT_KEY);
+  const raw = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
   const inflight = raw ? JSON.parse(raw) : null;
   const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
-  if (k) setActiveCtx(k);
+  if (k) setActiveCtx(k, resolvedUser);
 } catch {}
 
       setFbConnected(true);
@@ -1128,10 +1157,10 @@ try {
 
       // Force restore draft if session got cleared
       try {
-        const sess = sessionStorage.getItem("draft_form_creatives");
+        const sess = sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser));
         if (!sess) {
           const backup = loadSetupCreativeBackup(resolvedUser);
-          if (backup && isDraftForActiveCtx(backup)) {
+          if (backup && isDraftForActiveCtx(backup, resolvedUser)) {
             const imgs = (Array.isArray(backup.images) ? backup.images : [])
               .slice(0, 2)
               .map(toAbsoluteMedia)
@@ -1139,7 +1168,7 @@ try {
 
             const patched = { ...backup, images: imgs };
 
-            sessionStorage.setItem("draft_form_creatives", JSON.stringify(patched));
+            sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
             setDraftCreatives({
               images: imgs,
               mediaSelection: "image",
@@ -1152,7 +1181,7 @@ try {
         }
       } catch {}
 
-      try { localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY); } catch {}
+      try { localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser)); } catch {}
 
             smLog(
         "oauth.return.after",
@@ -1195,14 +1224,14 @@ try {
 
     try {
       const payload = {
-        ctxKey: getActiveCtx() || "",
+        ctxKey: getActiveCtx(resolvedUser) || "",
         images: imgs,
         mediaSelection: "image",
         savedAt: Date.now(),
       };
 
       saveSetupCreativeBackup(resolvedUser, payload);
-      sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+      sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payload));
       if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
     } catch {}
@@ -1550,7 +1579,8 @@ useEffect(() => {
         writeCreativeMap(resolvedUser, acctId, map);
       }
 
-      sessionStorage.removeItem("draft_form_creatives");
+      sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser));
+      try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
       try {
         if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
         localStorage.removeItem(CREATIVE_DRAFT_KEY);
@@ -1761,15 +1791,15 @@ onClick={() => {
   const qs = new URLSearchParams(location.search || "");
   const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
   const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-  const active = (getActiveCtx() || "").trim();
+  const active = (getActiveCtx(resolvedUser) || "").trim();
 
   const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
-  setActiveCtx(safeCtx);
+  setActiveCtx(safeCtx, resolvedUser);
 
   // 2) ALWAYS mark inflight so OAuth return restores the same run
   try {
     localStorage.setItem(
-      FB_CONNECT_INFLIGHT_KEY,
+      LS_INFLIGHT_KEY(resolvedUser),
       JSON.stringify({ t: Date.now(), ctxKey: safeCtx })
     );
   } catch {}
@@ -1795,7 +1825,7 @@ onClick={() => {
   if (!finalImagesAbs.length) {
     try {
       const raw =
-        sessionStorage.getItem("draft_form_creatives") ||
+        sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
         lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
         localStorage.getItem("sm_setup_creatives_backup_v1");
 
