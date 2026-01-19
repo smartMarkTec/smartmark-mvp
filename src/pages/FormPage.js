@@ -42,9 +42,108 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
 const IMAGE_CACHE_KEY = "sm_image_cache_v1";
 const IMAGE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
+// ✅ Active run context (prevents old industry/copy bleeding across back/forward/OAuth)
+const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
+
+/* -------- Per-user storage namespacing (prevents shared-browser mixing) -------- */
+const USER_NS_KEY = "sm_user_ns_v1"; // stores username/email for namespacing
+
+function getUserNS() {
+  try {
+    return (
+      sessionStorage.getItem(USER_NS_KEY) ||
+      localStorage.getItem(USER_NS_KEY) ||
+      "anon"
+    );
+  } catch {
+    return "anon";
+  }
+}
+
+function setUserNS(v) {
+  const s = String(v || "").trim() || "anon";
+  try {
+    sessionStorage.setItem(USER_NS_KEY, s);
+    localStorage.setItem(USER_NS_KEY, s);
+  } catch {}
+}
+
+// Namespaced key: u:<user>:<baseKey>
+function nsKey(baseKey) {
+  return `u:${getUserNS()}:${baseKey}`;
+}
+
+// LocalStorage wrappers (read falls back to legacy key once, write/remove is namespaced)
+function lsGet(baseKey) {
+  try {
+    return localStorage.getItem(nsKey(baseKey)) ?? localStorage.getItem(baseKey);
+  } catch {
+    return null;
+  }
+}
+function lsSet(baseKey, value) {
+  try {
+    localStorage.setItem(nsKey(baseKey), value);
+  } catch {}
+}
+function lsRemove(baseKey) {
+  try {
+    localStorage.removeItem(nsKey(baseKey));
+    // do NOT remove baseKey here — that could wipe another user on shared browser
+  } catch {}
+}
+
+// SessionStorage wrappers
+function ssGet(baseKey) {
+  try {
+    return sessionStorage.getItem(nsKey(baseKey)) ?? sessionStorage.getItem(baseKey);
+  } catch {
+    return null;
+  }
+}
+function ssSet(baseKey, value) {
+  try {
+    sessionStorage.setItem(nsKey(baseKey), value);
+  } catch {}
+}
+function ssRemove(baseKey) {
+  try {
+    sessionStorage.removeItem(nsKey(baseKey));
+  } catch {}
+}
+
+function getActiveCtx() {
+  return ssGet(ACTIVE_CTX_KEY) || lsGet(ACTIVE_CTX_KEY) || "";
+}
+function setActiveCtx(ctxKey) {
+  const k = String(ctxKey || "").trim();
+  if (!k) return;
+  ssSet(ACTIVE_CTX_KEY, k);
+  lsSet(ACTIVE_CTX_KEY, k); // survives OAuth reload
+}
+
+function buildCtxKey(a = {}) {
+  const bn = String(a.businessName || "").trim().toLowerCase();
+  const ind = String(a.industry || "").trim().toLowerCase();
+  const url = String(a.url || "").trim().toLowerCase();
+  return `${Date.now()}|${bn}|${ind}|${url}`;
+}
+
+/* ===== robust URL normalizer ===== */
+function toAbsoluteMedia(u) {
+  if (!u) return "";
+  const s = String(u).trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (s.startsWith("/")) return s;
+  if (s.startsWith("api/")) return "/" + s;
+  if (s.startsWith("media/")) return "/api/" + s;
+  return s;
+}
+
+/* -------- Image preview cache helpers (namespaced) -------- */
 function loadImageCache(ctxKey = "") {
   try {
-    const raw = localStorage.getItem(IMAGE_CACHE_KEY);
+    const raw = lsGet(IMAGE_CACHE_KEY);
     if (!raw) return null;
     const c = JSON.parse(raw);
     if (!c?.savedAt) return null;
@@ -58,7 +157,7 @@ function loadImageCache(ctxKey = "") {
 
 function saveImageCache(payload) {
   try {
-    localStorage.setItem(IMAGE_CACHE_KEY, JSON.stringify(payload));
+    lsSet(IMAGE_CACHE_KEY, JSON.stringify(payload));
   } catch {}
 }
 
@@ -87,7 +186,11 @@ async function cacheImagesFor24h(ctxKey, urls) {
 
   const dataUrls = await Promise.all(
     cleanUrls.map(async (u) => {
-      try { return await urlToDataUrl(u); } catch { return null; }
+      try {
+        return await urlToDataUrl(u);
+      } catch {
+        return null;
+      }
     })
   );
 
@@ -103,41 +206,18 @@ async function cacheImagesFor24h(ctxKey, urls) {
   return payload;
 }
 
-
-
-// ✅ Active run context (prevents old industry/copy bleeding across back/forward/OAuth)
-const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
-
-
-function getActiveCtx() {
-  return (
-    sessionStorage.getItem(ACTIVE_CTX_KEY) ||
-    localStorage.getItem(ACTIVE_CTX_KEY) ||
-    ""
-  );
-}
-function setActiveCtx(ctxKey) {
-  const k = String(ctxKey || "").trim();
-  if (!k) return;
-  try {
-    sessionStorage.setItem(ACTIVE_CTX_KEY, k);
-    localStorage.setItem(ACTIVE_CTX_KEY, k); // survives OAuth reload
-  } catch {}
-}
-function buildCtxKey(a = {}) {
-  const bn = String(a.businessName || "").trim().toLowerCase();
-  const ind = String(a.industry || "").trim().toLowerCase();
-  const url = String(a.url || "").trim().toLowerCase();
-  return `${Date.now()}|${bn}|${ind}|${url}`;
-}
-
-// ✅ If saved creatives don't match activeCtx, purge them
+// ✅ If saved creatives don't match activeCtx, purge them (NAMESPACED)
 function purgeCreativeDraftKeys() {
   try {
-    localStorage.removeItem(CREATIVE_DRAFT_KEY);
-    localStorage.removeItem("sm_setup_creatives_backup_v1");
-    sessionStorage.removeItem("draft_form_creatives");
-    sessionStorage.removeItem("draft_form_creatives_v2");
+    lsRemove(CREATIVE_DRAFT_KEY);
+    lsRemove("sm_setup_creatives_backup_v1");
+    ssRemove("draft_form_creatives");
+    ssRemove("draft_form_creatives_v2");
+    // also clear a couple legacy direct keys (safe)
+    try {
+      sessionStorage.removeItem("draft_form_creatives");
+      sessionStorage.removeItem("draft_form_creatives_v2");
+    } catch {}
   } catch {}
 }
 
@@ -150,8 +230,10 @@ function purgeLegacyDraftKeys() {
       "sm_setup_creatives_backup_v1",
       "sm_active_ctx_v1",
     ].forEach((k) => {
-      localStorage.removeItem(k);
-      sessionStorage.removeItem(k);
+      try {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      } catch {}
     });
 
     // Remove namespaced keys like: u:$willkan:sm_form_draft_v2
@@ -176,7 +258,6 @@ function purgeLegacyDraftKeys() {
   } catch {}
 }
 
-
 // Creatives should stick around longer than the chat draft
 const CREATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -188,7 +269,7 @@ const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 9999;
 
 function loadGenQuota() {
   try {
-    const raw = localStorage.getItem(IMAGE_GEN_QUOTA_KEY);
+    const raw = lsGet(IMAGE_GEN_QUOTA_KEY);
     const now = Date.now();
     if (!raw) return { used: 0, resetAt: now + IMAGE_GEN_WINDOW_MS };
     const q = JSON.parse(raw);
@@ -201,7 +282,7 @@ function loadGenQuota() {
 }
 function saveGenQuota(q) {
   try {
-    localStorage.setItem(IMAGE_GEN_QUOTA_KEY, JSON.stringify(q));
+    lsSet(IMAGE_GEN_QUOTA_KEY, JSON.stringify(q));
   } catch {}
 }
 function canRunImageGen() {
@@ -217,8 +298,11 @@ function bumpImageGenCount() {
 function quotaMessage() {
   const q = loadGenQuota();
   const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
-  const mins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
-  return `Image generation limit reached for today. Remaining runs: ${remaining}. Try again in about ${mins} minutes.`;
+  const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+  return `Image generation limit reached for today. Remaining runs: ${remaining}. Try again in about ${resetStr}.`;
 }
 
 /* -------- Image copy edit store -------- */
@@ -233,17 +317,17 @@ const ALLOWED_CTAS = [
   "Get started",
 ];
 
-/* ===== image draft helpers ===== */
+/* ===== image draft helpers (NAMESPACED) ===== */
 function loadImageDrafts() {
   try {
-    return JSON.parse(localStorage.getItem(IMAGE_DRAFTS_KEY) || "{}");
+    return JSON.parse(lsGet(IMAGE_DRAFTS_KEY) || "{}");
   } catch {
     return {};
   }
 }
 function saveImageDrafts(map) {
   try {
-    localStorage.setItem(IMAGE_DRAFTS_KEY, JSON.stringify(map));
+    lsSet(IMAGE_DRAFTS_KEY, JSON.stringify(map));
   } catch {}
 }
 function getImageDraftById(id) {
@@ -265,7 +349,6 @@ function normalizeOverlayCTA(s = "") {
   const chosen = match || plain;
   return chosen.replace(/\b\w/g, (c) => c.toUpperCase());
 }
-
 function creativeIdFromUrl(url = "") {
   return `img:${url}`;
 }
@@ -306,17 +389,6 @@ function dotStyle(n) {
     color: TEAL,
     animationDelay: `${n * 0.13}s`,
   };
-}
-
-/* ===== robust URL normalizer ===== */
-function toAbsoluteMedia(u) {
-  if (!u) return "";
-  const s = String(u).trim();
-  if (/^https?:\/\//i.test(s)) return s;
-  if (s.startsWith("/")) return s;
-  if (s.startsWith("api/")) return "/" + s;
-  if (s.startsWith("media/")) return "/api/" + s;
-  return s;
 }
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -635,10 +707,9 @@ function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, 
       expiresAt: Date.now() + CREATIVE_TTL_MS, // ✅ persist for a while
     };
 
-    localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
-
-    localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(payload));
-    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+    lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+    lsSet("sm_setup_creatives_backup_v1", JSON.stringify(payload));
+    ssSet("draft_form_creatives", JSON.stringify(payload));
   } catch (e) {
     console.warn("syncCreativesToDraftKeys failed:", e);
   }
@@ -663,9 +734,9 @@ export default function FormPage() {
   const [generating, setGenerating] = useState(false);
   const [sideChatCount, setSideChatCount] = useState(0);
   const [hasGenerated, setHasGenerated] = useState(false);
-    const [imageDataUrls, setImageDataUrls] = useState([]); // 2 items max
-  const [imgFail, setImgFail] = useState({}); // {0:true,1:true}
 
+  const [imageDataUrls, setImageDataUrls] = useState([]); // 2 items max
+  const [imgFail, setImgFail] = useState({}); // {0:true,1:true}
 
   // Video removed: force image-only
   const [mediaType, setMediaType] = useState("image");
@@ -705,45 +776,66 @@ export default function FormPage() {
     warmBackend();
   }, []);
 
-  /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
+  /* Set per-user namespace (prevents shared-browser mixing) */
   useEffect(() => {
-    try {
-            purgeLegacyDraftKeys();
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/whoami`, {
+          method: "GET",
+          credentials: "include",
+        });
+        const j = await res.json().catch(() => ({}));
+        const u = j?.user?.username || j?.user?.email || "anon";
+        setUserNS(u);
+      } catch {
+        setUserNS("anon");
+      }
+    })();
+  }, []);
 
-      const existing = String(getActiveCtx() || "").trim();
-
-
-        useEffect(() => {
+  /* Load cached image previews for current ctx (24h) */
+  useEffect(() => {
     try {
       const ctx = getActiveCtx();
       const c = loadImageCache(ctx);
       if (c?.dataUrls?.length) setImageDataUrls(c.dataUrls.filter(Boolean).slice(0, 2));
     } catch {}
+    // eslint-disable-next-line
   }, []);
 
+  /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
+  useEffect(() => {
+    try {
+      purgeLegacyDraftKeys();
+
+      const existing = String(getActiveCtx() || "").trim();
+
       // Read raw drafts
-      const rawForm = localStorage.getItem(FORM_DRAFT_KEY);
+      const rawForm = lsGet(FORM_DRAFT_KEY);
       const rawCreative =
-        sessionStorage.getItem("draft_form_creatives") ||
-        localStorage.getItem(CREATIVE_DRAFT_KEY) ||
-        localStorage.getItem("sm_setup_creatives_backup_v1");
+        ssGet("draft_form_creatives") ||
+        lsGet(CREATIVE_DRAFT_KEY) ||
+        lsGet("sm_setup_creatives_backup_v1");
 
       // Parse form wrapper (if valid + not expired)
       let formWrap = null;
       if (rawForm) {
         try {
           const parsed = JSON.parse(rawForm || "{}");
+
           // ✅ If form draft has no ctxKey, it's legacy/unsafe: delete it and stop restore
-const parsedCtx = String(parsed?.ctxKey || "").trim();
-if (!parsedCtx) {
-  try { localStorage.removeItem(FORM_DRAFT_KEY); } catch {}
-  return;
-}
+          const parsedCtx = String(parsed?.ctxKey || "").trim();
+          if (!parsedCtx) {
+            try {
+              lsRemove(FORM_DRAFT_KEY);
+            } catch {}
+            return;
+          }
 
           const savedAt = Number(parsed?.savedAt || 0);
           const isExpired = savedAt && Date.now() - savedAt > DRAFT_TTL_MS;
           if (!isExpired) formWrap = parsed;
-          else localStorage.removeItem(FORM_DRAFT_KEY);
+          else lsRemove(FORM_DRAFT_KEY);
         } catch {}
       }
 
@@ -776,7 +868,7 @@ if (!parsedCtx) {
         // If draft has ctxKey and it doesn't match active, ignore it (stale)
         if (draftCtx && activeCtxNow && draftCtx !== activeCtxNow) {
           // remove ONLY the stale form draft; do NOT nuke creatives for current ctx
-          localStorage.removeItem(FORM_DRAFT_KEY);
+          lsRemove(FORM_DRAFT_KEY);
         } else {
           const data = formWrap.data || {};
 
@@ -897,14 +989,17 @@ if (!parsedCtx) {
   function hardResetChat() {
     if (!window.confirm("Reset the chat and clear saved progress for this form?")) return;
     try {
-      localStorage.removeItem(FORM_DRAFT_KEY);
-      localStorage.removeItem(CREATIVE_DRAFT_KEY);
-      sessionStorage.removeItem("draft_form_creatives");
-      localStorage.removeItem(IMAGE_DRAFTS_KEY);
-      localStorage.removeItem(IMAGE_GEN_QUOTA_KEY); // helpful during testing
-      // keep ACTIVE_CTX_KEY? no, reset run
-      sessionStorage.removeItem(ACTIVE_CTX_KEY);
-      localStorage.removeItem(ACTIVE_CTX_KEY);
+      lsRemove(FORM_DRAFT_KEY);
+      lsRemove(CREATIVE_DRAFT_KEY);
+      ssRemove("draft_form_creatives");
+
+      lsRemove(IMAGE_DRAFTS_KEY);
+      lsRemove(IMAGE_GEN_QUOTA_KEY); // helpful during testing
+      lsRemove(IMAGE_CACHE_KEY);
+
+      // reset run ctx
+      ssRemove(ACTIVE_CTX_KEY);
+      lsRemove(ACTIVE_CTX_KEY);
     } catch {}
     setAnswers({});
     setStep(0);
@@ -925,14 +1020,20 @@ if (!parsedCtx) {
     setEditBody("");
     setEditCTA("");
     setMediaType("image");
+    setImageDataUrls([]);
+    setImgFail({});
   }
 
   function clearPreviewStateForNewBusiness() {
     try {
-      localStorage.removeItem(CREATIVE_DRAFT_KEY);
-      localStorage.removeItem("sm_setup_creatives_backup_v1");
-      sessionStorage.removeItem("draft_form_creatives");
-      localStorage.removeItem("smartmark_last_image_url");
+      lsRemove(CREATIVE_DRAFT_KEY);
+      lsRemove("sm_setup_creatives_backup_v1");
+      ssRemove("draft_form_creatives");
+      // keep user namespace, just clear per-run preview
+      try {
+        localStorage.removeItem("smartmark_last_image_url");
+      } catch {}
+      lsRemove(IMAGE_CACHE_KEY);
     } catch {}
     setResult(null);
     setImageUrls([]);
@@ -940,6 +1041,8 @@ if (!parsedCtx) {
     setImageUrl("");
     setHasGenerated(false);
     setImageEditing(false);
+    setImageDataUrls([]);
+    setImgFail({});
   }
 
   /* Autosave */
@@ -964,7 +1067,7 @@ if (!parsedCtx) {
         hasGenerated,
       };
 
-      localStorage.setItem(
+      lsSet(
         FORM_DRAFT_KEY,
         JSON.stringify({
           savedAt: Date.now(),
@@ -991,9 +1094,9 @@ if (!parsedCtx) {
           expiresAt: Date.now() + CREATIVE_TTL_MS,
         };
 
-        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-        localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
-        sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+        lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+        lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+        ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
       }
     }, 150);
 
@@ -1043,9 +1146,9 @@ if (!parsedCtx) {
           expiresAt: Date.now() + CREATIVE_TTL_MS,
         };
 
-        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-        localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
-        sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+        lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+        lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+        ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
       } catch {}
     };
     window.addEventListener("beforeunload", handler);
@@ -1153,6 +1256,8 @@ if (!parsedCtx) {
         setImageUrl("");
         setHasGenerated(false);
         setImageEditing(false);
+        setImageDataUrls([]);
+        setImgFail({});
 
         setLoading(true);
         setGenerating(true);
@@ -1318,14 +1423,13 @@ if (!parsedCtx) {
     setActiveImage(0);
     setImageUrl(urls[0] || "");
 
-        // Cache previews for 24h (so they don't go blank after deploy/restart)
+    // Cache previews for 24h (so they don't go blank after deploy/restart)
     try {
       const ctx = getActiveCtx();
       const c = await cacheImagesFor24h(ctx, urls);
       const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
       if (cached.length) setImageDataUrls(cached);
     } catch {}
-
 
     setResult({
       headline: copyA.headline,
@@ -1735,65 +1839,70 @@ if (!parsedCtx) {
             position: "relative",
           }}
         >
-    <div
-  style={{
-    background: "#f5f6fa",
-    padding: "11px 20px",
-    borderBottom: "1px solid #e0e4eb",
-    fontWeight: 700,
-    color: "#495a68",
-    fontSize: 16,
-    letterSpacing: 0.08,
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 12,
-    }}
-  >
-    <span>
-      Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
-    </span>
+          <div
+            style={{
+              background: "#f5f6fa",
+              padding: "11px 20px",
+              borderBottom: "1px solid #e0e4eb",
+              fontWeight: 700,
+              color: "#495a68",
+              fontSize: 16,
+              letterSpacing: 0.08,
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <span>
+                Sponsored · <span style={{ color: "#12cbb8" }}>SmartMark</span>
+              </span>
 
-    <button
-      style={{
-        background: "#1ad6b7",
-        color: "#222",
-        border: "none",
-        borderRadius: 12,
-        fontWeight: 700,
-        fontSize: "1.01rem",
-        padding: "6px 20px",
-        cursor: imageLoading ? "not-allowed" : "pointer",
-        marginLeft: 8,
-        boxShadow: "0 2px 7px #19e5b733",
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-      }}
-      onClick={handleRegenerateImage}
-      disabled={imageLoading}
-      title="Regenerate Image Ad"
-    >
-      <FaSyncAlt style={{ fontSize: 16 }} />
-      {imageLoading || generating ? <Dotty /> : "Regenerate"}
-    </button>
-  </div>
+              <button
+                style={{
+                  background: "#1ad6b7",
+                  color: "#222",
+                  border: "none",
+                  borderRadius: 12,
+                  fontWeight: 700,
+                  fontSize: "1.01rem",
+                  padding: "6px 20px",
+                  cursor: imageLoading ? "not-allowed" : "pointer",
+                  marginLeft: 8,
+                  boxShadow: "0 2px 7px #19e5b733",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 7,
+                }}
+                onClick={handleRegenerateImage}
+                disabled={imageLoading}
+                title="Regenerate Image Ad"
+              >
+                <FaSyncAlt style={{ fontSize: 16 }} />
+                {imageLoading || generating ? <Dotty /> : "Regenerate"}
+              </button>
+            </div>
 
-  {/* ✅ put this OUTSIDE the button */}
-  <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
-    {(() => {
-      const q = loadGenQuota();
-      const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
-      const mins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
-      return `Generations left today: ${remaining}/${IMAGE_GEN_MAX_RUNS_PER_WINDOW} (resets in ~${mins} min)`;
-    })()}
-  </div>
-</div>
+            {/* ✅ put this OUTSIDE the button */}
+            <div style={{ fontSize: 12, color: "#6b7785", fontWeight: 700, marginTop: 6 }}>
+              {(() => {
+                const q = loadGenQuota();
+                const remaining = Math.max(0, IMAGE_GEN_MAX_RUNS_PER_WINDOW - (q.used || 0));
 
+                const totalMins = Math.max(1, Math.ceil((q.resetAt - Date.now()) / 60000));
+                const hrs = Math.floor(totalMins / 60);
+                const mins = totalMins % 60;
+
+                const resetStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+
+                return `Generations left today: ${remaining}/${IMAGE_GEN_MAX_RUNS_PER_WINDOW} (resets in ~${resetStr})`;
+              })()}
+            </div>
+          </div>
 
           <div
             style={{
@@ -1811,20 +1920,20 @@ if (!parsedCtx) {
               </div>
             ) : imageUrls.length > 0 ? (
               <>
-             <img
-  src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
-  alt="Ad Preview"
-  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
-  onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
-  onError={() => {
-    // If the hosted URL died (deploy/restart), try to use cached Data URL.
-    setImgFail((p) => ({ ...p, [activeImage]: true }));
-    const ctx = getActiveCtx();
-    const c = loadImageCache(ctx);
-    const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
-    if (cached.length) setImageDataUrls(cached);
-  }}
-/>
+                <img
+                  src={(imageDataUrls[activeImage] || toAbsoluteMedia(imageUrls[activeImage] || "")) || ""}
+                  alt="Ad Preview"
+                  style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 0, cursor: "pointer" }}
+                  onClick={() => handleImageClick(imageDataUrls[activeImage] || imageUrls[activeImage])}
+                  onError={() => {
+                    // If the hosted URL died (deploy/restart), try to use cached Data URL.
+                    setImgFail((p) => ({ ...p, [activeImage]: true }));
+                    const ctx = getActiveCtx();
+                    const c = loadImageCache(ctx);
+                    const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
+                    if (cached.length) setImageDataUrls(cached);
+                  }}
+                />
 
                 <Arrow
                   side="left"
@@ -1993,9 +2102,8 @@ if (!parsedCtx) {
               activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
             );
 
-           const cached = (imageDataUrls || []).filter(Boolean).slice(0, 2);
-const imgA = cached.length ? cached : imageUrls.map(abs).slice(0, 2);
-
+            const cached = (imageDataUrls || []).filter(Boolean).slice(0, 2);
+            const imgA = cached.length ? cached : imageUrls.map(abs).slice(0, 2);
 
             const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
             setActiveCtx(ctxKey);
@@ -2012,13 +2120,15 @@ const imgA = cached.length ? cached : imageUrls.map(abs).slice(0, 2);
               expiresAt: Date.now() + CREATIVE_TTL_MS,
             };
 
-            sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
-            localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-            localStorage.setItem("smartmark_media_selection", "image");
+            ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
+            lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
 
-            if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
-            localStorage.removeItem("smartmark_last_video_url");
-            localStorage.removeItem("smartmark_last_fb_video_id");
+            try {
+              localStorage.setItem("smartmark_media_selection", "image");
+              if (imgA[0]) localStorage.setItem("smartmark_last_image_url", imgA[0]);
+              localStorage.removeItem("smartmark_last_video_url");
+              localStorage.removeItem("smartmark_last_fb_video_id");
+            } catch {}
 
             navigate("/setup", {
               state: {
