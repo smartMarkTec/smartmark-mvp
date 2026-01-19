@@ -7,8 +7,9 @@ import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa"
 // Render origin ONLY for media files (images, fallback jpg)
 const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 
-// Same-origin auth routes (so cookies work)
-const AUTH_BASE = "/auth";
+// Auth backend MUST match the host used by FACEBOOK_REDIRECT_URI
+const AUTH_BASE = "https://smartmark-mvp.onrender.com/auth";
+
 
 /* ======================= Visual Theme (polish only) ======================= */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
