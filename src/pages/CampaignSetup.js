@@ -45,6 +45,14 @@ function getActiveCtx() {
   );
 }
 
+function setActiveCtx(ctxKey) {
+  const k = String(ctxKey || "").trim();
+  if (!k) return;
+  try { sessionStorage.setItem(ACTIVE_CTX_KEY, k); } catch {}
+  try { localStorage.setItem(ACTIVE_CTX_KEY, k); } catch {}
+}
+
+
 function isDraftForActiveCtx(draftObj) {
   const active = getActiveCtx();
   const dk = (draftObj && draftObj.ctxKey ? String(draftObj.ctxKey) : "").trim();
@@ -290,20 +298,20 @@ const calculateFees = (budget) => {
 function toAbsoluteMedia(u) {
   if (!u) return "";
   const s = String(u).trim();
+  if (!s) return "";
   if (/^https?:\/\//i.test(s)) return s;
 
-  // ✅ keep Vercel same-origin proxy paths
-  if (s.startsWith("/api/")) return s;
+  // If we have /api/media/* or /media/*, force backend absolute
+  if (s.startsWith("/api/media/")) return backendUrl + s.replace(/^\/api/, "");
+  if (s.startsWith("/media/")) return backendUrl + s;
+  if (s.startsWith("media/")) return backendUrl + "/" + s;
 
-  // ✅ normalize legacy /media/* into /api/media/*
-  if (s.startsWith("/media/")) return "/api" + s;
-  if (s.startsWith("media/")) return "/api/" + s;
-
-  // fallback
+  // keep any other absolute path as same-origin
   if (s.startsWith("/")) return s;
-  if (s.startsWith("api/")) return "/" + s;
+
   return s;
 }
+
 
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -562,6 +570,17 @@ const CampaignSetup = () => {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
+
+  useEffect(() => {
+  const qs = new URLSearchParams(location.search || "");
+  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+  const ctxFromState = (location.state && location.state.ctxKey ? String(location.state.ctxKey) : "").trim();
+  const existing = getActiveCtx();
+
+  const next = ctxFromState || ctxFromUrl || existing;
+  if (next) setActiveCtx(next);
+}, [location.search]); // run on OAuth return too
+
 
   const initialUser = useMemo(() => getUserFromStorage(), []);
   const resolvedUser = useMemo(() => initialUser, [initialUser]);
@@ -1533,13 +1552,17 @@ return (
             const finalImages =
               imagesToPersist.length ? imagesToPersist.slice(0, 2) : fallbackFromNav;
 
+              const finalImagesAbs = (finalImages || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+
+
             const endMillis =
               endDate && !isNaN(new Date(endDate).getTime())
                 ? new Date(endDate).getTime()
                 : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
             persistDraftCreativesNow(resolvedUser, {
-              images: finalImages,
+             images: finalImagesAbs,
+
               mediaSelection: "image",
               expiresAt: endMillis,
             });
@@ -1547,7 +1570,12 @@ return (
             try {
               localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
             } catch {}
-            const returnTo = window.location.origin + "/setup"; // stable landing page
+            const ctxKey = getActiveCtx();
+const returnTo =
+  window.location.origin +
+  "/setup" +
+  (ctxKey ? `?ctxKey=${encodeURIComponent(ctxKey)}` : "");
+
             window.location.assign(
               `${backendUrl}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`
             );

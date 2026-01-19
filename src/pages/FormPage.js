@@ -619,7 +619,8 @@ export default function FormPage() {
           localStorage.removeItem(FORM_DRAFT_KEY);
         } else if (data) {
           // ✅ ctx gating for FORM draft too (prevents old chat bleeding back after OAuth)
-          const draftCtx = String(data?.ctxKey || "").trim();
+         const draftCtx = String(parsed?.ctxKey || "").trim();
+
 
           // If draft has ctxKey and it doesn't match active, ignore it (stale)
           if (draftCtx && activeCtxNow && draftCtx !== activeCtxNow) {
@@ -841,7 +842,15 @@ const fallbackCopy = useMemo(() => {
         hasGenerated,
       };
 
-      localStorage.setItem(FORM_DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: payload }));
+      localStorage.setItem(
+  FORM_DRAFT_KEY,
+  JSON.stringify({
+    savedAt: Date.now(),
+    ctxKey: getActiveCtx(),
+    data: payload,
+  })
+);
+
 
  const imgs = imageUrls.slice(0, 2).map(abs);
 
