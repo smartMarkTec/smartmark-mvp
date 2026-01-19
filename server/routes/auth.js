@@ -14,14 +14,24 @@ const { nanoid } = require('nanoid');
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
 /* ------------------------------------------------------------------ */
-const DEFAULTS = {
-  adAccountId: null,
-  pageId: null,
-  adAccounts: [],
-  pages: [],
-};
+// Per-user defaults (prevents users overwriting each other)
+const DEFAULTS_BY_OWNER = new Map();
 
-async function refreshDefaults(userToken) {
+function defaultsFor(ownerKey) {
+  if (!DEFAULTS_BY_OWNER.has(ownerKey)) {
+    DEFAULTS_BY_OWNER.set(ownerKey, {
+      adAccountId: null,
+      pageId: null,
+      adAccounts: [],
+      pages: [],
+    });
+  }
+  return DEFAULTS_BY_OWNER.get(ownerKey);
+}
+
+async function refreshDefaults(userToken, ownerKey) {
+  const DEFAULTS = defaultsFor(ownerKey);
+
   try {
     const [acctRes, pagesRes] = await Promise.all([
       axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
@@ -64,6 +74,14 @@ const COOKIE_NAME = 'sm_sid';
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
 const RETURN_TO_COOKIE = 'sm_return_to';
 
+// --- per-user key for tokenStore (so users don't overwrite each other) ---
+function ownerKeyFromReq(req) {
+  const cookieSid = req.cookies?.sm_sid;
+  const headerSid = req.get('x-sm-sid');
+  const auth = req.headers.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+  return cookieSid || headerSid || bearer || `ip:${req.ip}`;
+}
 
 function computeCookieDomain() {
   if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN; // e.g. smartmark-mvp.onrender.com
@@ -88,7 +106,10 @@ function setSessionCookie(res, sid) {
 }
 
 /* ----------------------------- Sanity route ----------------------------- */
-router.get('/facebook/ping', (_req, res) => {
+router.get('/facebook/ping', (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  const DEFAULTS = defaultsFor(ownerKey);
+
   res.json({
     ok: true,
     env: {
@@ -123,8 +144,24 @@ const FB_SCOPES = [
 ];
 
 router.get('/facebook', (req, res) => {
-  const state = `sm_${Date.now()}`;
+  // ✅ ensure we have a stable sid before redirect
+  let sid = req.cookies?.[COOKIE_NAME];
+  if (!sid) {
+    sid = `sm_${nanoid(24)}`;
+    setSessionCookie(res, sid);
+  }
 
+  // ✅ state MUST be tied to this user/session
+  const state = sid;
+
+  // ✅ store expected state for callback validation
+  res.cookie('sm_oauth_state', state, {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 10 * 60 * 1000, // 10 min
+  });
 
   // where to send user back after OAuth
   const fallback = `${FRONTEND_URL}/setup`;
@@ -137,22 +174,21 @@ router.get('/facebook', (req, res) => {
     const u = new URL(returnTo);
     const host = u.hostname.toLowerCase();
     const allowed =
-  host === 'www.smartemark.com' ||
-  host === 'smartemark.com' ||
-  host === 'localhost';
+      host === 'www.smartemark.com' ||
+      host === 'smartemark.com' ||
+      host === 'localhost';
 
     if (allowed) safeReturnTo = u.toString();
   } catch {}
 
   // cookie is only read by backend in callback
   res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
-  httpOnly: true,
-  secure: isProd,
-  sameSite: 'lax',
-  path: '/',
-  maxAge: 10 * 60 * 1000, // 10 min
-});
-
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 10 * 60 * 1000, // 10 min
+  });
 
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
@@ -164,10 +200,21 @@ router.get('/facebook', (req, res) => {
   res.redirect(fbUrl);
 });
 
-
 router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('No code returned from Facebook.');
+
+  const state = String(req.query.state || '');
+  const expected = String(req.cookies?.sm_oauth_state || '');
+
+  if (!state || !expected || state !== expected) {
+    return res.status(400).send('Invalid OAuth state.');
+  }
+
+  res.clearCookie('sm_oauth_state', { path: '/' });
+
+  const ownerKey = state; // sid we set before redirect
+
   try {
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
       params: {
@@ -189,56 +236,59 @@ router.get('/facebook/callback', async (req, res) => {
         }
       });
       if (x.data?.access_token) {
-        await setFbUserToken(x.data.access_token);
-        await refreshDefaults(x.data.access_token);
+        await setFbUserToken(x.data.access_token, ownerKey);
+        await refreshDefaults(x.data.access_token, ownerKey);
         console.log('[auth] stored LONG-LIVED FB user token + refreshed defaults');
       } else {
-        await setFbUserToken(accessToken);
-        await refreshDefaults(accessToken);
+        await setFbUserToken(accessToken, ownerKey);
+        await refreshDefaults(accessToken, ownerKey);
         console.log('[auth] stored SHORT-LIVED FB user token + refreshed defaults');
       }
     } catch {
-      await setFbUserToken(accessToken);
-      await refreshDefaults(accessToken);
+      await setFbUserToken(accessToken, ownerKey);
+      await refreshDefaults(accessToken, ownerKey);
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
-const fallback = `${FRONTEND_URL}/setup`;
-let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
+    const fallback = `${FRONTEND_URL}/setup`;
+    let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
 
-res.clearCookie(RETURN_TO_COOKIE, { path: '/' }); // keep this simple; domain mismatch breaks clears
+    res.clearCookie(RETURN_TO_COOKIE, { path: '/' }); // keep this simple; domain mismatch breaks clears
 
-// Safety: only allow your own frontend origin
-try {
-  const u = new URL(returnTo || fallback);
-  const front = new URL(FRONTEND_URL);
+    // Safety: only allow your own frontend origin
+    try {
+      const u = new URL(returnTo || fallback);
+      const front = new URL(FRONTEND_URL);
 
-  if (u.origin !== front.origin) returnTo = fallback; // prevent open redirect
-  else returnTo = u.toString();
-} catch {
-  returnTo = fallback;
-}
+      if (u.origin !== front.origin) returnTo = fallback; // prevent open redirect
+      else returnTo = u.toString();
+    } catch {
+      returnTo = fallback;
+    }
 
-res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}facebook_connected=1`);
-
-
+    res.redirect(`${returnTo}${returnTo.includes('?') ? '&' : '?'}facebook_connected=1`);
   } catch (err) {
     console.error('FB OAuth error:', err.response?.data || err.message);
     res.status(500).send('Failed to authenticate with Facebook.');
   }
 });
 
-router.get('/debug/fbtoken', (_req, res) => {
-  res.json({ fbUserToken: getFbUserToken() ? 'present' : 'missing' });
+router.get('/debug/fbtoken', (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  res.json({ fbUserToken: getFbUserToken(ownerKey) ? 'present' : 'missing' });
 });
 
 /* =========================
    Defaults helper
    ========================= */
-router.get('/facebook/defaults', async (_req, res) => {
-  const userToken = getFbUserToken();
+router.get('/facebook/defaults', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  const DEFAULTS = defaultsFor(ownerKey);
+  const userToken = getFbUserToken(ownerKey);
+
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  await refreshDefaults(userToken);
+  await refreshDefaults(userToken, ownerKey);
+
   res.json({
     ok: true,
     adAccountId: DEFAULTS.adAccountId,
@@ -248,24 +298,35 @@ router.get('/facebook/defaults', async (_req, res) => {
   });
 });
 
-router.get('/facebook/adaccounts', async (_req, res) => {
-  const userToken = getFbUserToken();
+router.get('/facebook/adaccounts', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  const DEFAULTS = defaultsFor(ownerKey);
+  const userToken = getFbUserToken(ownerKey);
+
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  await refreshDefaults(userToken);
+  await refreshDefaults(userToken, ownerKey);
+
   return res.json({ data: DEFAULTS.adAccounts || [] });
 });
 
-router.get('/facebook/pages', async (_req, res) => {
-  const userToken = getFbUserToken();
+router.get('/facebook/pages', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  const DEFAULTS = defaultsFor(ownerKey);
+  const userToken = getFbUserToken(ownerKey);
+
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
-  await refreshDefaults(userToken);
+  await refreshDefaults(userToken, ownerKey);
+
   return res.json({ data: DEFAULTS.pages || [] });
 });
 
 router.post('/facebook/defaults/select', (req, res) => {
+  const DEFAULTS = defaultsFor(ownerKeyFromReq(req));
   const { adAccountId, pageId } = req.body || {};
+
   if (adAccountId) DEFAULTS.adAccountId = String(adAccountId).replace(/^act_/, '');
   if (pageId) DEFAULTS.pageId = String(pageId);
+
   return res.json({ ok: true, adAccountId: DEFAULTS.adAccountId, pageId: DEFAULTS.pageId });
 });
 
@@ -408,7 +469,9 @@ router.get('/whoami', async (req, res) => {
    LAUNCH CAMPAIGN (STATIC IMAGE ONLY)
    ========================= */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
-  const userToken = getFbUserToken();
+  const ownerKey = ownerKeyFromReq(req);
+  const userToken = getFbUserToken(ownerKey);
+
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
@@ -470,6 +533,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 
   async function resolvePageId(explicitPageId) {
+    const DEFAULTS = defaultsFor(ownerKeyFromReq(req));
+
     if (explicitPageId) return String(explicitPageId);
     if (DEFAULTS.pageId) return String(DEFAULTS.pageId);
     try {
@@ -629,7 +694,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           facebook_positions: ['feed', 'marketplace'],
           instagram_positions: ['stream', 'story', 'reels'],
           audience_network_positions: [],
-          messenger_positions: []
+          messenger_positions: [],
         }
       },
       { params: mkParams() }
@@ -686,6 +751,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const nowIso = new Date().toISOString();
 
     const record = {
+      ownerKey,
       campaignId,
       accountId: String(accountId || ''),
       pageId: String(pageIdFinal || ''),
@@ -731,7 +797,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
    TEST/UTILITY ROUTES (unchanged)
    ========================= */
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -746,7 +813,8 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
 });
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -761,7 +829,8 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
 });
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
@@ -783,12 +852,17 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
 });
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
     await db.read();
-    const rec = (db.data.campaign_creatives || []).find(r => r.campaignId === campaignId) || null;
+    const ownerKey = ownerKeyFromReq(req);
+    const rec = (db.data.campaign_creatives || []).find(
+      r => r.campaignId === campaignId && r.ownerKey === ownerKey
+    ) || null;
+
     if (!rec) return res.status(404).json({ error: 'No creatives stored for this campaign.' });
     res.json({
       campaignId: rec.campaignId,
@@ -809,7 +883,8 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
 });
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -825,7 +900,8 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
 });
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
@@ -841,7 +917,8 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
 });
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
-  const userToken = getFbUserToken();
+  const userToken = getFbUserToken(ownerKeyFromReq(req));
+
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
