@@ -561,17 +561,19 @@ const CampaignSetup = () => {
   const location = useLocation();
 
   // ✅ Bootstrap ctxKey early (on first render + on OAuth return)
-  useEffect(() => {
-   const qs = new URLSearchParams(location.search || "");
-const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
-const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-const active = (getActiveCtx() || "").trim();
+ useEffect(() => {
+  const qs = new URLSearchParams(location.search || "");
+  const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+  const active = (getActiveCtx() || "").trim();
 
-// ✅ NEVER blank
-const ctxKey = ctxFromState || ctxFromUrl || active || `${Date.now()}|||connect`;
-setActiveCtx(ctxKey);
+  // ✅ DO NOT rotate ctxKey on OAuth return.
+  // Only set ctxKey if we have one from state/url, or if none exists at all.
+  if (ctxFromState) return setActiveCtx(ctxFromState);
+  if (ctxFromUrl) return setActiveCtx(ctxFromUrl);
+  if (!active) setActiveCtx(`${Date.now()}|||setup`);
+}, [location.search]);
 
-  }, [location.search]);
 
   const initialUser = useMemo(() => getUserFromStorage(), []);
   const resolvedUser = useMemo(() => initialUser, [initialUser]);
@@ -806,11 +808,11 @@ setActiveCtx(ctxKey);
     }
 
     const applyDraft = (draftObj) => {
-      // ✅ reject drafts not tied to the active ctxKey
-      if (!isDraftForActiveCtx(draftObj)) {
-        purgeDraftStorages(resolvedUser);
-        return false;
-      }
+  // ✅ reject drafts not tied to the active ctxKey
+  // IMPORTANT: do NOT purge here (OAuth return can temporarily mismatch)
+  if (!isDraftForActiveCtx(draftObj)) {
+    return false;
+  }
 
       const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
       const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
@@ -1567,12 +1569,13 @@ setActiveCtx(safeCtx);
                   ? new Date(endDate).getTime()
                   : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
-             persistDraftCreativesNow(resolvedUser, {
-  ctxKey,
+persistDraftCreativesNow(resolvedUser, {
+  ctxKey: safeCtx,
   images: finalImagesAbs,
   mediaSelection: "image",
   expiresAt: endMillis,
 });
+
 
 
               try {

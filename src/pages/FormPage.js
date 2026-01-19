@@ -566,7 +566,8 @@ function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, 
       expiresAt: Date.now() + CREATIVE_TTL_MS, // ✅ persist for a while
     };
 
-    localStorage.setItem("draft_form_creatives_v2", JSON.stringify(payload));
+    localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+
     localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(payload));
     sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
   } catch (e) {
