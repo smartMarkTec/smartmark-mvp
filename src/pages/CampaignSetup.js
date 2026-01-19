@@ -562,14 +562,15 @@ const CampaignSetup = () => {
 
   // ✅ Bootstrap ctxKey early (on first render + on OAuth return)
   useEffect(() => {
-    const qs = new URLSearchParams(location.search || "");
-    const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-    const ctxFromState =
-      (location.state && location.state.ctxKey ? String(location.state.ctxKey) : "").trim();
-    const existing = getActiveCtx();
+   const qs = new URLSearchParams(location.search || "");
+const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+const active = (getActiveCtx() || "").trim();
 
-    const next = ctxFromState || ctxFromUrl || existing;
-    if (next) setActiveCtx(next);
+// ✅ NEVER blank
+const ctxKey = ctxFromState || ctxFromUrl || active || `${Date.now()}|||connect`;
+setActiveCtx(ctxKey);
+
   }, [location.search]);
 
   const initialUser = useMemo(() => getUserFromStorage(), []);
@@ -927,6 +928,14 @@ const CampaignSetup = () => {
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("facebook_connected") === "1") {
+      // ✅ Restore ctxKey from inflight so draft doesn't get rejected after OAuth
+try {
+  const raw = localStorage.getItem(FB_CONNECT_INFLIGHT_KEY);
+  const inflight = raw ? JSON.parse(raw) : null;
+  const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
+  if (k) setActiveCtx(k);
+} catch {}
+
       setFbConnected(true);
       setCameFromFbConnect(true);
 
@@ -1567,7 +1576,8 @@ setActiveCtx(safeCtx);
 
 
               try {
-                localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now() }));
+                localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, JSON.stringify({ t: Date.now(), ctxKey }));
+
               } catch {}
 
           
