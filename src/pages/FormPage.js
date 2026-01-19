@@ -34,6 +34,41 @@ const WARMUP_URL = `${API_BASE}/test`;
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
 const FORM_DRAFT_KEY = "sm_form_draft_v2";
 const CREATIVE_DRAFT_KEY = "draft_form_creatives_v2";
+
+// ✅ Active run context (prevents old industry/copy bleeding across back/forward/OAuth)
+const ACTIVE_CTX_KEY = "sm_active_ctx_v1";
+
+function getActiveCtx() {
+  return (
+    sessionStorage.getItem(ACTIVE_CTX_KEY) ||
+    localStorage.getItem(ACTIVE_CTX_KEY) ||
+    ""
+  );
+}
+function setActiveCtx(ctxKey) {
+  try {
+    sessionStorage.setItem(ACTIVE_CTX_KEY, ctxKey);
+    localStorage.setItem(ACTIVE_CTX_KEY, ctxKey); // survives OAuth reload
+  } catch {}
+}
+function buildCtxKey(a = {}) {
+  const bn = String(a.businessName || "").trim().toLowerCase();
+  const ind = String(a.industry || "").trim().toLowerCase();
+  const url = String(a.url || "").trim().toLowerCase();
+  return `${Date.now()}|${bn}|${ind}|${url}`;
+}
+
+// ✅ If saved creatives don't match activeCtx, purge them
+function purgeCreativeDraftKeys() {
+  try {
+    localStorage.removeItem(CREATIVE_DRAFT_KEY);
+    localStorage.removeItem("sm_setup_creatives_backup_v1");
+    sessionStorage.removeItem("draft_form_creatives");
+    sessionStorage.removeItem("draft_form_creatives_v2");
+  } catch {}
+}
+
+
 // Creatives should stick around longer than the chat draft
 const CREATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -478,7 +513,8 @@ function toAbsoluteMedia(u) {
   return s;
 }
 
-function syncCreativesToDraftKeys({ imageUrls, headline, body, overlay, answers, mediaSelection }) {
+function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, answers, mediaSelection }) {
+
   try {
     const imgs = (imageUrls || [])
       .filter(Boolean)
@@ -486,6 +522,7 @@ function syncCreativesToDraftKeys({ imageUrls, headline, body, overlay, answers,
       .map(toAbsoluteMedia);
 
  const payload = {
+  ctxKey: ctxKey || getActiveCtx(),
   images: imgs,
   headline: (headline || "").toString().trim().slice(0, 55),
   body: (body || "").toString().trim(),
@@ -566,72 +603,123 @@ export default function FormPage() {
   /* ✅ Restore draft: FORM first, then CREATIVE draft fallback (survives OAuth reloads) */
   useEffect(() => {
     try {
+      // ✅ Ensure we always have an active ctx (survives OAuth reload)
+      const existingActive = getActiveCtx();
+      if (!existingActive) setActiveCtx(buildCtxKey({}));
+
+      const activeCtxNow = getActiveCtx();
+
       const raw = localStorage.getItem(FORM_DRAFT_KEY);
       if (raw) {
-        const { savedAt, data } = JSON.parse(raw);
+        const parsed = JSON.parse(raw || "{}");
+        const { savedAt, data } = parsed || {};
+
+        // TTL
         if (savedAt && Date.now() - savedAt > DRAFT_TTL_MS) {
           localStorage.removeItem(FORM_DRAFT_KEY);
         } else if (data) {
+          // ✅ ctx gating for FORM draft too (prevents old chat bleeding back after OAuth)
+          const draftCtx = String(data?.ctxKey || "").trim();
+
+          // If draft has ctxKey and it doesn't match active, ignore it (stale)
+          if (draftCtx && activeCtxNow && draftCtx !== activeCtxNow) {
+            localStorage.removeItem(FORM_DRAFT_KEY);
+            purgeCreativeDraftKeys();
+            return;
+          }
+
+          // If active is missing but draft has one, adopt it
+          if (!activeCtxNow && draftCtx) setActiveCtx(draftCtx);
+
+          // If neither has ctxKey, mint one from draft answers
+          if (!getActiveCtx()) setActiveCtx(buildCtxKey(data.answers || {}));
+
           setAnswers(data.answers || {});
           setStep(data.step ?? 0);
-          setChatHistory(Array.isArray(data.chatHistory) && data.chatHistory.length ? data.chatHistory : chatHistory);
+          setChatHistory(
+            Array.isArray(data.chatHistory) && data.chatHistory.length
+              ? data.chatHistory
+              : chatHistory
+          );
           setMediaType("image");
-         const restoredImgs = Array.isArray(data.imageUrls) ? data.imageUrls.filter(Boolean) : [];
 
-setImageUrls(restoredImgs);
-setActiveImage(data.activeImage || 0);
-setAwaitingReady(data.awaitingReady ?? true);
-setInput(data.input || "");
-setSideChatCount(data.sideChatCount || 0);
+          const restoredImgs = Array.isArray(data.imageUrls)
+            ? data.imageUrls.filter(Boolean)
+            : [];
 
-// ✅ Only restore result/copy if we actually have creatives.
-// If no images, we force neutral defaults (prevents "makeup" stale copy).
-if (restoredImgs.length) {
-  setResult(data.result || null);
-  setHasGenerated(true);
-} else {
-  setResult(null);
-  setHasGenerated(false);
-}
-return;
+          setImageUrls(restoredImgs);
+          setActiveImage(data.activeImage || 0);
+          setAwaitingReady(data.awaitingReady ?? true);
+          setInput(data.input || "");
+          setSideChatCount(data.sideChatCount || 0);
 
+          // ✅ Only restore result/copy if we actually have creatives.
+          // If no images, force neutral defaults (prevents stale copy)
+          if (restoredImgs.length) {
+            setResult(data.result || null);
+            setHasGenerated(true);
+          } else {
+            setResult(null);
+            setHasGenerated(false);
+          }
+          return;
         }
       }
 
+      // ✅ Creative draft fallback — must be ctx-gated
       const rawC =
         localStorage.getItem(CREATIVE_DRAFT_KEY) ||
+        localStorage.getItem("sm_setup_creatives_backup_v1") ||
         sessionStorage.getItem("draft_form_creatives");
 
-    if (rawC) {
-  const c = JSON.parse(rawC);
+      if (rawC) {
+        const c = JSON.parse(rawC || "{}");
 
-  // ✅ expire creatives cleanly
-  if (c?.expiresAt && Date.now() > Number(c.expiresAt)) {
-    localStorage.removeItem(CREATIVE_DRAFT_KEY);
-    localStorage.removeItem("sm_setup_creatives_backup_v1");
-    sessionStorage.removeItem("draft_form_creatives");
-  } else {
-    const imgs = Array.isArray(c?.images) ? c.images.filter(Boolean).slice(0, 2) : [];
-    if (imgs.length) {
-      setImageUrls(imgs);
-      setActiveImage(0);
-      setImageUrl(imgs[0] || "");
-      setResult((prev) => ({
-        ...(prev || {}),
-        headline: String(c?.headline || prev?.headline || "").slice(0, 55),
-        body: String(c?.body || prev?.body || "").trim(),
-        image_overlay_text: String(c?.imageOverlayCTA || prev?.image_overlay_text || "").trim(),
-      }));
-      if (c?.answers && typeof c.answers === "object") setAnswers(c.answers);
-      setHasGenerated(true);
-      setAwaitingReady(false);
-    }
-  }
-}
+        // expire creatives cleanly
+        if (c?.expiresAt && Date.now() > Number(c.expiresAt)) {
+          purgeCreativeDraftKeys();
+          return;
+        }
 
+        // ✅ ctx gating
+        const activeCtx = getActiveCtx();
+        const draftCtx = String(c?.ctxKey || "").trim();
+
+        // If no ctxKey on draft (legacy) OR it doesn't match active ctx => purge + ignore
+        if (!draftCtx || (activeCtx && draftCtx !== activeCtx)) {
+          purgeCreativeDraftKeys();
+          return;
+        }
+
+        const imgs = Array.isArray(c?.images)
+          ? c.images.filter(Boolean).slice(0, 2)
+          : [];
+
+        if (imgs.length) {
+          setImageUrls(imgs);
+          setActiveImage(0);
+          setImageUrl(imgs[0] || "");
+          setResult((prev) => ({
+            ...(prev || {}),
+            headline: String(c?.headline || prev?.headline || "").slice(0, 55),
+            body: String(c?.body || prev?.body || "").trim(),
+            image_overlay_text: String(
+              c?.imageOverlayCTA || prev?.image_overlay_text || ""
+            ).trim(),
+          }));
+          if (c?.answers && typeof c.answers === "object") setAnswers(c.answers);
+          setHasGenerated(true);
+          setAwaitingReady(false);
+        } else {
+          // no images => neutral
+          setResult(null);
+          setHasGenerated(false);
+        }
+      }
     } catch {}
     // eslint-disable-next-line
   }, []);
+
 
   useEffect(() => {
     const draft = currentImageId ? getImageDraftById(currentImageId) : null;
@@ -739,6 +827,7 @@ const fallbackCopy = useMemo(() => {
       const mergedBody = activeDraft?.body || result?.body || "";
 
       const payload = {
+        ctxKey: getActiveCtx(),
         answers,
         step,
         chatHistory,
@@ -751,13 +840,15 @@ const fallbackCopy = useMemo(() => {
         sideChatCount,
         hasGenerated,
       };
+
       localStorage.setItem(FORM_DRAFT_KEY, JSON.stringify({ savedAt: Date.now(), data: payload }));
 
  const imgs = imageUrls.slice(0, 2).map(abs);
 
 // ✅ DON'T overwrite creatives with empty images
 if (imgs.length) {
-  const draftForSetup = {
+    const draftForSetup = {
+    ctxKey: getActiveCtx(),
     images: imgs,
     headline: mergedHeadline,
     body: mergedBody,
@@ -765,7 +856,9 @@ if (imgs.length) {
     answers,
     mediaSelection: "image",
     savedAt: Date.now(),
+    expiresAt: Date.now() + CREATIVE_TTL_MS,
   };
+
 
   localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
   localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
@@ -801,20 +894,29 @@ if (imgs.length) {
         const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
         const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
         const mergedBody = activeDraft?.body || result?.body || "";
-        const imgs = imageUrls.slice(0, 2).map(abs);
+              const imgs = imageUrls.slice(0, 2).map(abs);
+
+        // ✅ DON'T overwrite creatives with empty images
+        if (!imgs.length) return;
 
         const draftForSetup = {
+          ctxKey: getActiveCtx(),
           images: imgs,
           headline: mergedHeadline,
           body: mergedBody,
-          imageOverlayCTA: normalizeOverlayCTA(activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""),
+          imageOverlayCTA: normalizeOverlayCTA(
+            activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+          ),
           answers,
           mediaSelection: "image",
           savedAt: Date.now(),
+          expiresAt: Date.now() + CREATIVE_TTL_MS,
         };
 
         localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+        localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
         sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
+
       } catch {}
     };
     window.addEventListener("beforeunload", handler);
@@ -902,6 +1004,20 @@ if (imgs.length) {
         }
 
         bumpImageGenCount();
+
+                // ✅ NEW RUN: mint ctxKey + purge any old creative drafts immediately
+        const nextCtx = buildCtxKey(answers || {});
+        setActiveCtx(nextCtx);
+        purgeCreativeDraftKeys();
+
+        // ✅ Reset preview state so nothing stale can show
+        setResult(null);
+        setImageUrls([]);
+        setActiveImage(0);
+        setImageUrl("");
+        setHasGenerated(false);
+        setImageEditing(false);
+
 
         setLoading(true);
         setGenerating(true);
@@ -1071,7 +1187,10 @@ if (imgs.length) {
       image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
     });
 
-    syncCreativesToDraftKeys({
+  const ctxKey = getActiveCtx();
+
+syncCreativesToDraftKeys({
+  ctxKey,
   imageUrls: urls,
   headline: copyA.headline,
   body: copyA.subline,
@@ -1079,6 +1198,7 @@ if (imgs.length) {
   answers,
   mediaSelection: "image",
 });
+
 
 
     return urls;
@@ -1696,7 +1816,11 @@ if (imgs.length) {
 
             const imgA = imageUrls.map(abs).slice(0, 2);
 
+                      const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
+            setActiveCtx(ctxKey);
+
             const draftForSetup = {
+              ctxKey,
               images: imgA,
               headline: mergedHeadline,
               body: mergedBody,
@@ -1704,7 +1828,9 @@ if (imgs.length) {
               answers,
               mediaSelection: "image",
               savedAt: Date.now(),
+              expiresAt: Date.now() + CREATIVE_TTL_MS,
             };
+
 
             sessionStorage.setItem("draft_form_creatives", JSON.stringify(draftForSetup));
             localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
@@ -1716,6 +1842,7 @@ if (imgs.length) {
 
             navigate("/setup", {
               state: {
+                ctxKey,
                 imageUrls: imgA,
                 headline: mergedHeadline,
                 body: mergedBody,
