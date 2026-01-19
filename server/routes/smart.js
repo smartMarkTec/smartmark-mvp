@@ -458,7 +458,8 @@ async function runSmartOnceInternal(reqBody) {
     championPct: championPctRaw = 0.7,
 
     // IMPORTANT: default dryRun is true for safety
-    dryRun: dryRunRaw = true,
+    dryRun: dryRunRaw = false,
+
 
     debug: debugRaw = false
   } = reqBody;
