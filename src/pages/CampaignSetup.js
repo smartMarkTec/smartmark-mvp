@@ -776,11 +776,12 @@ const CampaignSetup = () => {
 
 
   // IMPORTANT: normalize stored account ID to "act_..."
-  const [selectedAccount, setSelectedAccount] = useState(() => {
+    const [selectedAccount, setSelectedAccount] = useState(() => {
     const v = (lsGet(resolvedUser, "smartmark_last_selected_account") || "").trim();
     if (!v) return "";
-    return v.startsWith("act_") ? v : `act_${v}`;
+    return String(v).replace(/^act_/, ""); // store digits only
   });
+
 
   const [selectedPageId, setSelectedPageId] = useState(
     () => lsGet(resolvedUser, "smartmark_last_selected_pageId") || ""
@@ -1218,10 +1219,11 @@ useEffect(() => {
       touchFbConn();
 
       // ✅ auto pick first account if none selected
-      if (!selectedAccount && list.length) {
+          if (!selectedAccount && list.length) {
         const first = String(list[0].id || "").trim();
-        setSelectedAccount(first.startsWith("act_") ? first : `act_${first}`);
+        setSelectedAccount(first.replace(/^act_/, "")); // digits only
       }
+
     })
     .catch(() => {});
   // eslint-disable-next-line
@@ -1250,7 +1252,8 @@ useEffect(() => {
 
   useEffect(() => {
     if (!selectedAccount) return;
-    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const acctId = String(selectedAccount).trim();
+
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
@@ -1267,7 +1270,8 @@ useEffect(() => {
 
   useEffect(() => {
     if (!fbConnected || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const acctId = String(selectedAccount).trim();
+
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" })
       .then((res) => res.json())
       .then((data) => {
@@ -1303,7 +1307,8 @@ useEffect(() => {
 
     if (!targetCampaignId) return;
 
-    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const acctId = String(selectedAccount).trim();
+
     const endMillis =
       endDate && !isNaN(new Date(endDate).getTime())
         ? new Date(endDate).getTime()
@@ -1336,7 +1341,8 @@ useEffect(() => {
 
   useEffect(() => {
     if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
-    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const acctId = String(selectedAccount).trim();
+
     fetch(`${backendUrl}/auth/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`, {
       credentials: "include",
     })
@@ -1374,10 +1380,11 @@ useEffect(() => {
 
 
 
-  useEffect(() => {
-    const v = selectedAccount ? (selectedAccount.startsWith("act_") ? selectedAccount : `act_${selectedAccount}`) : "";
+   useEffect(() => {
+    const v = selectedAccount ? String(selectedAccount).replace(/^act_/, "") : "";
     lsSet(resolvedUser, "smartmark_last_selected_account", v);
   }, [selectedAccount]);
+
 
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId);
@@ -1385,7 +1392,8 @@ useEffect(() => {
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const acctId = String(selectedAccount).trim();
+
     setLoading(true);
     try {
       if (isPaused) {
@@ -1413,7 +1421,8 @@ useEffect(() => {
 
   const handleDelete = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = String(selectedAccount).replace(/^act_/, "");
+    const acctId = String(selectedAccount).trim();
+
     setLoading(true);
     try {
       const r = await fetch(
@@ -1488,7 +1497,8 @@ useEffect(() => {
   const handleLaunch = async () => {
     setLoading(true);
     try {
-      const acctId = String(selectedAccount).replace(/^act_/, "");
+      const acctId = String(selectedAccount).trim();
+
       const safeBudget = Math.max(3, Number(budget) || 0);
 
       const { startISO, endISO } = capTwoWeeksISO(
