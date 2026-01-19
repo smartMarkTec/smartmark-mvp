@@ -153,7 +153,85 @@ function clean(s) {
   return String(s || "").replace(/\s+/g, " ").trim();
 }
 
-function buildAdPromptFromAnswers(a = {}, variationToken = "") {
+function hashSeed(str = "") {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+function mulberry32(a) {
+  return function () {
+    let t = (a += 0x6D2B79F5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function pick(rng, arr) {
+  return arr[Math.floor(rng() * arr.length)];
+}
+
+function buildVariantProfile(variationToken = "", variantTag = "A") {
+  const rng = mulberry32(hashSeed(`${variationToken}|${variantTag}`));
+
+  const settings = [
+    "bright studio backdrop",
+    "modern storefront exterior",
+    "cozy home interior",
+    "clean office/workspace",
+    "outdoor lifestyle scene",
+    "urban street scene",
+    "minimal product-on-table scene",
+    "soft gradient abstract backdrop"
+  ];
+
+  const palettes = [
+    "cool neutrals + teal accents",
+    "warm neutrals + gold accents",
+    "bold high-contrast colors",
+    "pastel modern palette",
+    "monochrome with one accent color",
+    "earth tones with natural textures"
+  ];
+
+  const compositions = [
+    "tight close-up with typography overlay",
+    "mid-shot with clear subject focus",
+    "wide shot with strong negative space for text",
+    "rule-of-thirds composition with CTA anchored"
+  ];
+
+  const lighting = [
+    "soft natural light",
+    "bright commercial lighting",
+    "cinematic rim lighting",
+    "even studio lighting"
+  ];
+
+  // People: sometimes none, often 1, sometimes 2, rarely 3–5
+  const peopleMode = pick(rng, [
+    "no people (product/service focused)",
+    "one person",
+    "one person",
+    "two people",
+    "two people",
+    "small group (3–5) if it fits the industry"
+  ]);
+
+  return {
+    variantTag,
+    setting: pick(rng, settings),
+    palette: pick(rng, palettes),
+    composition: pick(rng, compositions),
+    lighting: pick(rng, lighting),
+    peopleMode
+  };
+}
+
+
+function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
   const industry = clean(a.industry || "Business");
   const website = clean(a.website || a.url || "");
@@ -165,16 +243,27 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "") {
       (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
   );
 
-  // Strong variation guidance to avoid “same looking” ads across runs
+  const p = profile || buildVariantProfile(variationToken, "A");
+
   const variationBlock = [
     `Variation token: "${variationToken || Date.now()}"`,
-    `Make this creative clearly different from previous runs:`,
-    `- Change setting (indoor/outdoor), color palette, composition, and typography.`,
-    `- Change camera angle (close-up, mid-shot, wide).`,
-    `- Change layout (text placement + CTA style).`,
-    `- Use different props/background elements appropriate to the industry.`,
-    `- If people appear, vary gender + ethnicity across variants when appropriate.`,
-    `- Avoid repeating the same model/pose/outfit/setting across variants.`,
+    `Variant: ${p.variantTag}`,
+    ``,
+    `Make this creative clearly different from other variants in the same run:`,
+    `- Setting: ${p.setting}`,
+    `- Color palette: ${p.palette}`,
+    `- Composition: ${p.composition}`,
+    `- Lighting: ${p.lighting}`,
+    `- People: ${p.peopleMode}`,
+    ``,
+    `People casting rules (only if people appear):`,
+    `- Use realistic, ad-ready casting appropriate to the industry.`,
+    `- Do NOT force "one of each" ethnicity; it can be mixed OR the same ethnicity depending on what looks natural.`,
+    `- Across multiple variants, avoid repeating the exact same-looking model/pose/outfit.`,
+    ``,
+    `Avoid repetition:`,
+    `- Do not reuse the same background, framing, or typography layout across variants.`,
+    `- Change props/background elements to match the industry.`,
   ].join("\n");
 
   return [
@@ -211,6 +300,7 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "") {
   ].join("\n");
 }
 
+
 /* ------------------------ /generate-static-ad ------------------------ */
 
 router.post("/generate-static-ad", async (req, res) => {
@@ -226,18 +316,48 @@ router.post("/generate-static-ad", async (req, res) => {
     // Use regenerateToken/variant to force variation across runs
     const variationToken = String(body.regenerateToken || body.variant || `${Date.now()}-${Math.random()}`);
 
-    const prompt = buildAdPromptFromAnswers(a, variationToken);
+  const requestedCount = Number(body.count || body.n || 2);
+const count = Math.max(1, Math.min(2, requestedCount || 2));
 
-    const requestedCount = Number(body.count || body.n || 2);
-    const count = Math.max(1, Math.min(2, requestedCount || 2));
+// Generate each image with its OWN prompt/profile (more variation than n=2 on one prompt)
+const profiles = [
+  buildVariantProfile(variationToken, "A"),
+  buildVariantProfile(variationToken, "B"),
+];
 
-    const bufs = await generateOpenAIAdImageBuffers({
-      prompt,
-      size: "1024x1024",
-      output_format: "png",
-      quality: "auto",
-      n: count,
-    });
+const prompts = [
+  buildAdPromptFromAnswers(a, variationToken, profiles[0]),
+  buildAdPromptFromAnswers(a, variationToken, profiles[1]),
+];
+
+let bufs = [];
+
+if (count === 1) {
+  bufs = await generateOpenAIAdImageBuffers({
+    prompt: prompts[0],
+    size: "1024x1024",
+    output_format: "png",
+    quality: "auto",
+    n: 1,
+  });
+} else {
+  const b1 = await generateOpenAIAdImageBuffers({
+    prompt: prompts[0],
+    size: "1024x1024",
+    output_format: "png",
+    quality: "auto",
+    n: 1,
+  });
+  const b2 = await generateOpenAIAdImageBuffers({
+    prompt: prompts[1],
+    size: "1024x1024",
+    output_format: "png",
+    quality: "auto",
+    n: 1,
+  });
+  bufs = [b1[0], b2[0]].filter(Boolean);
+}
+
 
     const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
