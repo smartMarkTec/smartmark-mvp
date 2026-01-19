@@ -147,7 +147,7 @@ router.post("/gpt-chat", limitChat, async (req, res) => {
   }
 });
 
-// ---------- coherent 7–9 word subline generator ----------
+// ---------- coherent multi-sentence subline generator (28–60 words) ----------
 router.post("/coherent-subline", limitSubline, async (req, res) => {
   const { answers = {}, category = "generic" } = req.body || {};
 
@@ -164,11 +164,49 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
   }
   if (productHead === "quality") productHead = "products";
 
+  const stripQuotes = (s = "") => String(s || "").replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "").trim();
+
+  const normalizeSpaces = (s = "") => String(s || "").replace(/\s+/g, " ").trim();
+
+  const wordCount = (s = "") => normalizeSpaces(s).split(/\s+/).filter(Boolean).length;
+
+  const enforceSublineLen = (s = "") => {
+    s = stripWeOur(stripQuotes(s));
+    s = s.replace(/[“”"']/g, "").trim();
+    s = normalizeSpaces(s);
+
+    // Trim to max 60 words
+    let words = s.split(/\s+/).filter(Boolean);
+    if (words.length > 60) words = words.slice(0, 60);
+
+    let out = words.join(" ").trim();
+
+    // Ensure it ends cleanly
+    if (out && !/[.!?]$/.test(out)) out += ".";
+
+    // If too short, append a neutral, non-invented sentence
+    if (wordCount(out) < 28) {
+      out = `${out} See what fits your needs and take the next step today.`;
+    }
+
+    // Re-trim if appending pushed it too long
+    words = normalizeSpaces(out).split(/\s+/).filter(Boolean);
+    if (words.length > 60) out = words.slice(0, 60).join(" ").trim();
+
+    // Guarantee punctuation at end
+    if (out && !/[.!?]$/.test(out)) out += ".";
+
+    return out;
+  };
+
   const system = [
-    "You are SmartMark's subline composer.",
-    "Write ONE short ad subline of 7–9 words, sentence case.",
-    "No buzzwords, no unverifiable claims, no website/domain.",
-    "Do NOT end on a preposition (to, for, with, of, in, on, at, by)."
+    "You are SmartMark's ad description writer for static social ads.",
+    "Write a subline of 2–4 sentences.",
+    "Total length MUST be 28–60 words.",
+    "No emojis. No hashtags. No URLs.",
+    "No unverifiable claims (best, #1, guaranteed, cheapest, fastest, premium, luxury).",
+    "Do not invent offers, discounts, shipping/returns/warranties, or inventory claims.",
+    "Keep it benefit-first, skimmable, and neutral."
   ].join(" ");
 
   const user = [
@@ -178,7 +216,7 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
     audienceTerms.length ? `Audience: ${audienceTerms.join(" ")}.` : "",
     locationTerm ? `Location: ${locationTerm}.` : "",
     "",
-    "Return ONLY the line, nothing else."
+    "Return ONLY the subline text, nothing else."
   ].join(" ");
 
   let line = "";
@@ -186,8 +224,8 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
     const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
     const resp = await client.chat.completions.create({
       model,
-      temperature: 0.2,
-      max_tokens: 24,
+      temperature: 0.35,
+      max_tokens: 140,
       messages: [
         { role: "system", content: system },
         { role: "user", content: user }
@@ -199,12 +237,13 @@ router.post("/coherent-subline", limitSubline, async (req, res) => {
     console.warn("coherent-subline API error:", e?.message);
   }
 
-  if (!line) line = "Modern fashion built for everyday wear";
-  line = line.replace(/^["'“”‘’\s]+|["'“”‘’\s]+$/g, "");
-  line = ensure7to9Words(line);
+  if (!line) line = "Built to match your needs with a clear, simple experience. Get the details up front and choose the option that makes sense. Learn more and take the next step today.";
+
+  line = enforceSublineLen(line);
 
   return res.json({ subline: line });
 });
+
 
 // ---------- summarize-ad-copy (JSON) ----------
 router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, async (req, res) => {
@@ -252,55 +291,61 @@ router.post(["/summarize-ad-copy", "/gpt/summarize-ad-copy"], limitSummarize, as
       return s[0].toUpperCase() + s.slice(1);
     };
 
-    const safeSubline = (s = "") => {
-      s = stripWeOur(s);
-      s = s.replace(/[“”"']/g, "").replace(/[.]+$/g, "").trim();
-      s = String(s || "").replace(/\s+/g, " ").trim();
-      const words = s.split(/\s+/).filter(Boolean);
-      if (words.length > 14) return words.slice(0, 14).join(" ");
-      return s;
-    };
+const safeSubline = (s = "") => {
+  s = stripWeOur(s);
+  s = s.replace(/[“”"']/g, "").trim();
+  s = String(s || "").replace(/\s+/g, " ").trim();
 
-    const buildFallbackHeadline = () => {
-      const industry = String(a.industry || "").trim();
-      const benefit = String(a.mainBenefit || a.details || "").trim();
-      const offer = String(a.offer || a.saveAmount || "").trim();
+  // Enforce 28–60 words
+  let words = s.split(/\s+/).filter(Boolean);
+  if (words.length > 60) words = words.slice(0, 60);
+  let out = words.join(" ").trim();
 
-      const benefitTerms = takeTerms(benefit, 3).join(" ");
-      const indTerms = takeTerms(industry, 2).join(" ");
+  if (out && !/[.!?]$/.test(out)) out += ".";
 
-      if (offer) return safeHeadline(`Limited-time ${offer}`);
-      if (benefitTerms) return safeHeadline(`${benefitTerms} made simple`);
-      if (indTerms) return safeHeadline(`Better ${indTerms} for busy days`);
-      return "Made for everyday use";
-    };
+  if (out.split(/\s+/).filter(Boolean).length < 28) {
+    out = `${out} See what’s included, compare your options, and take the next step today.`;
+    words = out.split(/\s+/).filter(Boolean);
+    if (words.length > 60) out = words.slice(0, 60).join(" ").trim();
+    if (out && !/[.!?]$/.test(out)) out += ".";
+  }
 
-    const buildFallbackSubline = (headline) => {
-      const industry = String(a.industry || "").trim();
-      const audience = String(a.idealCustomer || "").trim();
-      const benefit = String(a.mainBenefit || a.details || "").trim();
-      const offer = String(a.offer || a.saveAmount || "").trim();
+  return out;
+};
 
-      const chunks = [];
-      if (benefit) chunks.push(benefit);
-      else if (industry) chunks.push(`Clean, modern ${industry} that fits your needs`);
-      else chunks.push("Clean, modern design that fits your needs");
+const buildFallbackSubline = (headline) => {
+  const industry = String(a.industry || "").trim();
+  const audience = String(a.idealCustomer || "").trim();
+  const benefit = String(a.mainBenefit || a.details || "").trim();
+  const offer = String(a.offer || a.saveAmount || "").trim();
 
-      if (audience) chunks.push(`Built for ${audience}.`);
-      if (offer) chunks.push(`Offer: ${offer}.`);
+  const s1 = benefit
+    ? `Get ${benefit.toLowerCase()} without extra hassle.`
+    : industry
+      ? `Modern ${industry.toLowerCase()} designed to match your needs.`
+      : "A clean, modern option designed to match your needs.";
 
-      let out = chunks.join(" ").replace(/\s+/g, " ").trim();
-      if (headline && norm(out).startsWith(norm(headline))) out = out.slice(headline.length).trim();
-      return safeSubline(out);
-    };
+  const s2 = audience
+    ? `Made for ${audience.toLowerCase()} who want a simple, reliable experience.`
+    : "Built for people who want a simple, reliable experience.";
 
-    const system =
-      "You are a professional direct-response copywriter. " +
-      "Return strict JSON with keys: headline (<=8 words), subline (7–14 words), offer (short, optional), " +
-      "bullets (array up to 3), disclaimers (short, optional), cta (2–3 words). " +
-      "Hard rules: NO URLs. NO 'our/we' language. NO brand-superlatives (best, #1, premium, luxury). " +
-      "Do NOT copy phrases verbatim from inputs; paraphrase and summarize. " +
-      "Headline and subline must not repeat each other.";
+  const s3 = offer
+    ? `If it fits, take advantage of the offer and get started.`
+    : "See what’s included and take the next step today.";
+
+  let out = `${s1} ${s2} ${s3}`.replace(/\s+/g, " ").trim();
+  if (headline && norm(out).startsWith(norm(headline))) out = out.slice(headline.length).trim();
+  return safeSubline(out);
+};
+
+const system =
+  "You are a professional direct-response copywriter. " +
+  "Return strict JSON with keys: headline (<=8 words), subline (2–4 sentences, 28–60 words), offer (short, optional), " +
+  "bullets (array up to 3), disclaimers (short, optional), cta (2–3 words). " +
+  "Hard rules: NO URLs. NO 'our/we' language. NO brand-superlatives (best, #1, premium, luxury). " +
+  "Do NOT copy phrases verbatim from inputs; paraphrase and summarize. " +
+  "Headline and subline must not repeat each other.";
+
 
     const user = [
       `Industry: ${a.industry || ""}`,
