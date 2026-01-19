@@ -34,7 +34,10 @@ const CREATIVE_DRAFT_KEY = "draft_form_creatives_v3";
 
 
 // ✅ Active run context (prevents old creatives bleeding across back/forward/OAuth)
-const ACTIVE_CTX_KEY = "sm_active_ctx_v2";
+const ACTIVE_CTX_KEY_LEGACY = "sm_active_ctx_v1";
+const CREATIVE_DRAFT_KEY_LEGACY = "draft_form_creatives_v2";
+
+
 
 
 const SM_DEBUG_KEY = "sm_debug_log_v1";
@@ -98,12 +101,22 @@ function smDumpDraftSnapshot({ FORM_DRAFT_KEY, CREATIVE_DRAFT_KEY, FB_CONNECT_IN
 
 
 function getActiveCtx() {
-  return (
-    sessionStorage.getItem(ACTIVE_CTX_KEY) ||
-    localStorage.getItem(ACTIVE_CTX_KEY) ||
-    ""
-  );
+  // primary (v2)
+  const v2 =
+    (sessionStorage.getItem(ACTIVE_CTX_KEY) || localStorage.getItem(ACTIVE_CTX_KEY) || "").trim();
+  if (v2) return v2;
+
+  // legacy migrate (v1 -> v2)
+  const v1 =
+    (sessionStorage.getItem(ACTIVE_CTX_KEY_LEGACY) || localStorage.getItem(ACTIVE_CTX_KEY_LEGACY) || "").trim();
+  if (v1) {
+    setActiveCtx(v1); // writes into v2 keys
+    return v1;
+  }
+
+  return "";
 }
+
 
 function setActiveCtx(ctxKey) {
   const k = String(ctxKey || "").trim();
@@ -310,6 +323,8 @@ function persistDraftCreativesNow(user, draftCreatives) {
     sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
     if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
     localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+    try { localStorage.setItem(CREATIVE_DRAFT_KEY_LEGACY, JSON.stringify(payload)); } catch {}
+
     saveSetupCreativeBackup(user, payload);
   } catch {}
 }
@@ -948,9 +963,15 @@ const CampaignSetup = () => {
       }
 
       // 2) local draft
-      const raw = lsGet(resolvedUser, CREATIVE_DRAFT_KEY);
-      if (raw) {
-        const draft = JSON.parse(raw);
+      // 2) local draft (v3 first, then legacy v2)
+const raw =
+  lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+  lsGet(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY) ||
+  localStorage.getItem(CREATIVE_DRAFT_KEY_LEGACY);
+
+if (raw) {
+  const draft = JSON.parse(raw);
+
         const now = Date.now();
         const expiresAt = Number(draft.expiresAt);
         const ageOk =
