@@ -154,14 +154,17 @@ router.get('/facebook', (req, res) => {
   // ✅ state MUST be tied to this user/session
   const state = sid;
 
-  // ✅ store expected state for callback validation
+   // ✅ store expected state for callback validation
+  const dom = computeCookieDomain();
   res.cookie('sm_oauth_state', state, {
     httpOnly: true,
     secure: isProd,
-    sameSite: 'lax',
+    sameSite: isProd ? 'none' : 'lax',
     path: '/',
     maxAge: 10 * 60 * 1000, // 10 min
+    ...(dom ? { domain: dom } : {})
   });
+
 
   // where to send user back after OAuth
   const fallback = `${FRONTEND_URL}/setup`;
@@ -182,13 +185,16 @@ router.get('/facebook', (req, res) => {
   } catch {}
 
   // cookie is only read by backend in callback
+  const dom2 = computeCookieDomain();
   res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
     httpOnly: true,
     secure: isProd,
-    sameSite: 'lax',
+    sameSite: isProd ? 'none' : 'lax',
     path: '/',
     maxAge: 10 * 60 * 1000, // 10 min
+    ...(dom2 ? { domain: dom2 } : {})
   });
+
 
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
@@ -211,7 +217,9 @@ router.get('/facebook/callback', async (req, res) => {
     return res.status(400).send('Invalid OAuth state.');
   }
 
-  res.clearCookie('sm_oauth_state', { path: '/' });
+    res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
+
+
 
   const ownerKey = state; // sid we set before redirect
 
