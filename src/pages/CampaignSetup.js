@@ -176,7 +176,7 @@ function getUserNSQuick() {
   }
 }
 
-function isDraftDisabled() {
+function isDraftDisabledLegacy() {
   try {
     const u = getUserNSQuick();
     for (const k of DRAFT_DISABLED_KEYS) {
@@ -192,6 +192,7 @@ function isDraftDisabled() {
   } catch {}
   return false;
 }
+
 
 function purgeDraftArtifactsEverywhere() {
   try {
@@ -1169,9 +1170,10 @@ const CampaignSetup = () => {
     if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
   }, [location.search]);
 
-  // ✅ If a campaign was launched successfully, never show leftover "Untitled / IN PROGRESS"
+// ✅ If a campaign was launched successfully, never show leftover "Untitled / IN PROGRESS"
 useEffect(() => {
-  if (!isDraftDisabled()) return;
+  if (!isDraftDisabledLegacy()) return;
+
 
   // wipe any remaining draft artifacts so they can't rehydrate
   purgeDraftArtifactsEverywhere();
