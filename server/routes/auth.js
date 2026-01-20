@@ -11,6 +11,7 @@ const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
 
+
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
 /* ------------------------------------------------------------------ */
@@ -126,15 +127,22 @@ router.get('/facebook/ping', (req, res) => {
   });
 });
 
-// Helper: absolute public URL for generated assets
 function absolutePublicUrl(relativePath) {
   const base =
     process.env.PUBLIC_BASE_URL ||
     process.env.RENDER_EXTERNAL_URL ||
     'https://smartmark-mvp.onrender.com';
+
   if (!relativePath) return '';
-  return /^https?:\/\//i.test(relativePath) ? relativePath : `${base}${relativePath}`;
+
+  // keep absolute urls
+  if (/^https?:\/\//i.test(relativePath)) return relativePath;
+
+  // ✅ ensure leading slash
+  const rel = String(relativePath).startsWith('/') ? String(relativePath) : `/${relativePath}`;
+  return `${base}${rel}`;
 }
+
 
 /* ------------------------------ Facebook OAuth ------------------------------ */
 const FB_SCOPES = [
@@ -533,78 +541,106 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
-   async function fetchImageAsBase64(url) {
-    if (!url) throw new Error('No image URL');
+async function fetchImageAsBase64(url) {
+  if (!url) throw new Error('No image URL');
 
-    // Accept Data URLs directly (best-case: no fetching needed)
-    const m = /^data:image\/\w+;base64,(.+)$/i.exec(String(url).trim());
-    if (m) return m[1];
+  // Accept Data URLs directly
+  const m = /^data:image\/\w+;base64,(.+)$/i.exec(String(url).trim());
+  if (m) return m[1];
 
-    const raw = String(url).trim();
+  const raw = String(url).trim();
 
-    // We prefer fetching from the backend public base (Render), because it definitely has /api/media + /generated.
-    const backendBase =
-      process.env.PUBLIC_BASE_URL ||
-      process.env.RENDER_EXTERNAL_URL ||
-      'https://smartmark-mvp.onrender.com';
+  const backendBase =
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://smartmark-mvp.onrender.com';
 
-    // Build a list of candidate URLs to try.
-    const candidates = [];
-    try {
-      // If it's already absolute, try it as-is first.
-      if (/^https?:\/\//i.test(raw)) {
-        candidates.push(raw);
+  const candidates = [];
 
-        // If it points to Vercel (smartemark.com) but path is /api/media or /generated, rewrite to backendBase.
-        const u = new URL(raw);
-        if (u.pathname.startsWith('/api/media') || u.pathname.startsWith('/generated') || u.pathname.startsWith('/media')) {
-          candidates.push(`${backendBase}${u.pathname}${u.search || ''}`);
-        }
-      } else {
-        // If it's relative, force it to backendBase
-        const rel = raw.startsWith('/') ? raw : `/${raw}`;
-        candidates.push(`${backendBase}${rel}`);
+  const pushCandidate = (u) => {
+    if (!u) return;
+    candidates.push(String(u));
+  };
+
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      pushCandidate(raw);
+
+      const u = new URL(raw);
+
+      // Always try same path on backendBase too (covers smartemark.com → backend host)
+      pushCandidate(`${backendBase}${u.pathname}${u.search || ''}`);
+
+      // If it's a generated/media path, try a couple common rewrites
+      if (u.pathname.startsWith('/generated/')) {
+        pushCandidate(`${backendBase}${u.pathname}`); // same
+        pushCandidate(`${backendBase}/api/media${u.pathname}`); // /api/media/generated/...
       }
-    } catch {
-      // If URL parsing fails, just force backendBase
+      if (u.pathname.startsWith('/api/media/')) {
+        pushCandidate(`${backendBase}${u.pathname}${u.search || ''}`);
+      }
+      if (u.pathname.startsWith('/media/')) {
+        pushCandidate(`${backendBase}${u.pathname}${u.search || ''}`);
+      }
+    } else {
+      // relative → force backend
       const rel = raw.startsWith('/') ? raw : `/${raw}`;
-      candidates.push(`${backendBase}${rel}`);
-    }
+      pushCandidate(`${backendBase}${rel}`);
 
-    // Also try your existing absolutePublicUrl behavior as a fallback
-    try {
-      candidates.push(absolutePublicUrl(raw));
-    } catch {}
-
-    // De-dupe
-    const uniq = Array.from(new Set(candidates.filter(Boolean)));
-
-    const tries = [0, 400, 900];
-    let lastErr;
-
-    for (const attemptDelay of tries) {
-      for (const abs of uniq) {
-        try {
-          if (attemptDelay) await sleep(attemptDelay);
-
-          const imgRes = await axios.get(abs, {
-            responseType: 'arraybuffer',
-            timeout: 20000,
-            headers: { Accept: 'image/*' }
-          });
-
-          const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
-          if (!ct.includes('image')) throw new Error(`Non-image content-type: ${ct || 'unknown'} from ${abs}`);
-
-          return Buffer.from(imgRes.data).toString('base64');
-        } catch (e) {
-          lastErr = e;
-        }
+      // common rewrites
+      if (rel.startsWith('/generated/')) {
+        pushCandidate(`${backendBase}/api/media${rel}`);
       }
     }
-
-    throw lastErr || new Error('Image download failed');
+  } catch {
+    const rel = raw.startsWith('/') ? raw : `/${raw}`;
+    pushCandidate(`${backendBase}${rel}`);
+    if (rel.startsWith('/generated/')) pushCandidate(`${backendBase}/api/media${rel}`);
   }
+
+  // Also try absolutePublicUrl fallback (now fixed)
+  try { pushCandidate(absolutePublicUrl(raw)); } catch {}
+
+  // de-dupe
+  const uniq = Array.from(new Set(candidates.filter(Boolean)));
+
+  let lastErr = null;
+  let lastTried = '';
+
+  for (const abs of uniq) {
+    lastTried = abs;
+    try {
+      const imgRes = await axios.get(abs, {
+        responseType: 'arraybuffer',
+        timeout: 20000,
+        headers: { Accept: 'image/*' }
+      });
+
+      const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+      if (!ct.includes('image')) {
+        throw new Error(`Non-image content-type: ${ct || 'unknown'} from ${abs}`);
+      }
+
+      return Buffer.from(imgRes.data).toString('base64');
+    } catch (e) {
+      lastErr = e;
+
+      // helpful debug
+      const status = e?.response?.status;
+      const data = e?.response?.data;
+
+      console.error('[fetchImageAsBase64] failed', {
+        url: abs,
+        status,
+        // if server returns JSON {error:"Not found"}, you'll see it here
+        data: Buffer.isBuffer(data) ? '(buffer)' : data
+      });
+    }
+  }
+
+  const status = lastErr?.response?.status ? `HTTP ${lastErr.response.status}` : '';
+  throw new Error(`Image download failed. Last tried: ${lastTried} ${status}`.trim());
+}
 
 
   async function uploadImage(imageUrl) {
