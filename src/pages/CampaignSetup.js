@@ -660,7 +660,15 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       <img
         src={broken ? `${MEDIA_ORIGIN}/__fallback/1200.jpg` : normalized[idx]}
         alt="Ad"
-        style={{ width: "100%", maxHeight: height, height, objectFit: "cover", display: "block" }}
+       style={{
+  width: "100%",
+  maxHeight: height,
+  height,
+  objectFit: "contain",
+  display: "block",
+  background: "#0f1418",
+}}
+
         onClick={() =>
           onFullscreen &&
           onFullscreen(broken ? `${MEDIA_ORIGIN}/__fallback/1200.jpg` : normalized[idx])
@@ -2113,7 +2121,10 @@ try {
               padding: "14px 22px",
               borderRadius: "14px",
               border: "none",
-              background: fbConnected ? ACCENT_ALT : "#1877F2",
+             background: fbConnected
+  ? `linear-gradient(90deg, ${BTN_BASE}, ${ACCENT_2})`
+  : "#1877F2",
+
               color: WHITE,
               fontWeight: 900,
               fontSize: "1.08rem",
@@ -2643,42 +2654,7 @@ boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
                             border: `1px solid ${INPUT_BORDER}`,
                           }}
                         >
-                          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
-                            Preview
-                          </div>
-
-                          {/* ✅ Copy / headline / link preview (FormPage-style simple) */}
-                          <div
-                            style={{
-                              background: "#0f1418",
-                              border: `1px solid ${INPUT_BORDER}`,
-                              borderRadius: 12,
-                              padding: "12px 12px",
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 8,
-                            }}
-                          >
-                            <div style={{ color: "#bdfdf0", fontWeight: 900, fontSize: 16, lineHeight: 1.2 }}>
-                              {creatives?.meta?.headline || "—"}
-                            </div>
-
-                            <div style={{ color: "#d7efe7", fontWeight: 800, fontSize: 13, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>
-                              {creatives?.meta?.body || "—"}
-                            </div>
-
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
-                              <div style={{ color: "#9ddfcd", fontWeight: 900, fontSize: 12 }}>Link:</div>
-                              <a
-                                href={creatives?.meta?.link || "https://your-smartmark-site.com"}
-                                target="_blank"
-                                rel="noreferrer"
-                                style={{ color: ACCENT, fontWeight: 900, fontSize: 12, textDecoration: "none" }}
-                              >
-                                {(creatives?.meta?.link || "https://your-smartmark-site.com").replace(/^https?:\/\//i, "")}
-                              </a>
-                            </div>
-                          </div>
+                     
 
                      <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
   Creatives
