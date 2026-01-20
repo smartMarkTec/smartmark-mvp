@@ -1055,62 +1055,70 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
   useEffect(() => {
     if (isDraftDisabled(resolvedUser)) return;
 
-    const hasDraftImages = draftCreatives?.images?.length > 0;
-    if (hasDraftImages) return;
+    // if already hydrated, do nothing
+    if (draftCreatives?.images?.length) return;
 
+    const setDraftFromImages = (imgs, ctxKeyFromDraft = "") => {
+      const norm = (imgs || []).slice(0, 2).map(toAbsoluteMedia).filter(Boolean);
+      if (!norm.length) return false;
+
+      // ensure ctxKey stays consistent
+      const active = (getActiveCtx(resolvedUser) || "").trim();
+      if (!active && ctxKeyFromDraft) setActiveCtx(ctxKeyFromDraft, resolvedUser);
+
+      const payload = {
+        ctxKey: ctxKeyFromDraft || active || "",
+        images: norm,
+        mediaSelection: "image",
+        savedAt: Date.now(),
+      };
+
+      setDraftCreatives({ images: norm, mediaSelection: "image" });
+      setSelectedCampaignId("__DRAFT__");
+      setExpandedId("__DRAFT__");
+
+      // persist for reliability across redirects/refresh
+      try {
+        sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payload));
+        if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
+        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+        saveSetupCreativeBackup(resolvedUser, payload);
+      } catch {}
+
+      return true;
+    };
+
+    // 1) Try load the actual draft object (session/user/anon/backup)
     let baseDraft = null;
     try {
-           const raw =
-        // 1) new per-user session key
+      const raw =
         sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
-        // 2) legacy session key used by older FormPage builds
         sessionStorage.getItem("draft_form_creatives") ||
-        // 3) user-scoped localStorage (with anon fallback via lsGet)
         lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-        // 4) backup (may also be under anon; lsGet handles it if you use it elsewhere)
         localStorage.getItem("sm_setup_creatives_backup_v1");
 
-      if (raw) {
-        baseDraft = JSON.parse(raw);
+      if (raw) baseDraft = JSON.parse(raw || "null");
+    } catch {
+      baseDraft = null;
+    }
 
-        // ✅ MIGRATE: if we loaded anon/global draft, copy it into this user namespace
-        try {
-          const imgs = Array.isArray(baseDraft?.images) ? baseDraft.images.map(toAbsoluteMedia).filter(Boolean) : [];
-          if (imgs.length) {
-            const migrated = { ...(baseDraft || {}), images: imgs, savedAt: Date.now() };
-
-            // write to current user keys so it persists consistently
-            sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(migrated));
-            if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(migrated));
-            localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(migrated));
-            saveSetupCreativeBackup(resolvedUser, migrated);
-          }
-        } catch {}
+    if (baseDraft) {
+      const ctx = String(baseDraft?.ctxKey || "").trim();
+      if (isDraftForActiveCtx(baseDraft, resolvedUser)) {
+        const imgs = Array.isArray(baseDraft?.images) ? baseDraft.images : [];
+        // ✅ CRITICAL: use the draft’s images FIRST (this is what was broken)
+        if (setDraftFromImages(imgs, ctx)) return;
       }
+    }
 
-    } catch {}
-
-    if (!baseDraft || !isDraftForActiveCtx(baseDraft, resolvedUser)) return;
-
+    // 2) Fallback: last 2 from imageDrafts (only if draft object didn’t hydrate)
     const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
-    if (!fallbackUrls.length) return;
+    if (fallbackUrls && fallbackUrls.length) {
+      const ctx = (baseDraft && String(baseDraft?.ctxKey || "").trim()) || (getActiveCtx(resolvedUser) || "").trim();
+      setDraftFromImages(fallbackUrls, ctx);
+    }
+  }, [resolvedUser, draftCreatives?.images?.length]);
 
-    const patched = {
-      ...draftCreatives,
-      images: fallbackUrls.map(toAbsoluteMedia).filter(Boolean),
-      savedAt: Date.now(),
-    };
-    setDraftCreatives(patched);
-
-    try {
-      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(patched));
-      localStorage.setItem("sm_setup_creatives_backup_v1", JSON.stringify(patched));
-      sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
-    } catch {}
-
-    setSelectedCampaignId("__DRAFT__");
-    setExpandedId("__DRAFT__");
-  }, [draftCreatives, resolvedUser]);
 
   /* ===================== CAMPAIGN DURATION (simple date range) ===================== */
 
