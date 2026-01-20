@@ -1520,20 +1520,29 @@ const CampaignSetup = () => {
 
       const filteredImages = (draftCreatives.images || []).slice(0, 2).map(toAbsoluteMedia).filter(Boolean);
 
-      const payload = {
-        form: { ...form },
-        budget: safeBudget,
-        campaignType: form?.campaignType || "Website Traffic",
-        pageId: selectedPageId,
-        aiAudience: form?.aiAudience || answers?.aiAudience || "",
-        adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-        answers: answers || {},
-        mediaSelection: "image",
-        imageVariants: filteredImages,
-        flightStart: startISO,
-        flightEnd: endISO,
-        overrideCountPerType: { images: Math.min(2, filteredImages.length) },
-      };
+    const websiteUrl =
+  (form?.websiteUrl || form?.website || answers?.websiteUrl || answers?.website || answers?.url || answers?.link || "")
+    .toString()
+    .trim();
+
+const payload = {
+  // ✅ ensure backend always sees the link (it currently uses form.url)
+  form: { ...form, url: websiteUrl, websiteUrl },
+  budget: safeBudget,
+  campaignType: form?.campaignType || "Website Traffic",
+  pageId: selectedPageId,
+  websiteUrl, // keep top-level too
+  aiAudience: form?.aiAudience || answers?.aiAudience || "",
+  adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
+  answers: answers || {},
+  mediaSelection: "image",
+  imageVariants: filteredImages,
+  flightStart: startISO,
+  flightEnd: endISO,
+  overrideCountPerType: { images: Math.min(2, filteredImages.length) },
+};
+
+
 
       const res = await fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
@@ -1574,11 +1583,52 @@ const CampaignSetup = () => {
       } catch {}
       setDraftCreatives({ images: [], mediaSelection: "image" });
 
-      setLaunched(true);
-      setLaunchResult(json);
-      setSelectedCampaignId(json.campaignId || selectedCampaignId);
-      setExpandedId(json.campaignId || selectedCampaignId);
-      setTimeout(() => setLaunched(false), 1500);
+     setLaunched(true);
+setLaunchResult(json);
+
+const launchedId = json.campaignId || selectedCampaignId;
+setSelectedCampaignId(launchedId);
+setExpandedId(launchedId);
+
+// ✅ reset campaign inputs (do NOT touch loginUser/loginPass)
+try {
+  // clear saved drafts/fields/budget for this user
+  if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_budget"));
+  if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, "smartmark_last_campaign_fields"));
+  localStorage.removeItem("smartmark_last_budget");
+  localStorage.removeItem("smartmark_last_campaign_fields");
+} catch {}
+
+setBudget("");
+setForm((prev) => ({ ...prev, campaignName: "" }));
+
+// reset dates to default (start ~10 min from now, end +3 days)
+try {
+  const d0 = new Date(Date.now() + 10 * 60 * 1000);
+  d0.setSeconds(0, 0);
+  const sISO = d0.toISOString().slice(0, 16);
+
+  const d1 = new Date(d0.getTime() + 3 * 24 * 60 * 60 * 1000);
+  d1.setSeconds(0, 0);
+  const eISO = d1.toISOString().slice(0, 16);
+
+  setStartDate(sISO);
+  setEndDate(eISO);
+
+  const sd2 = new Date(sISO);
+  const ed2 = new Date(eISO);
+
+  setSMonth(sd2.getMonth() + 1);
+  setSDay(sd2.getDate());
+  setSYear(sd2.getFullYear() % 100);
+
+  setEMonth(ed2.getMonth() + 1);
+  setEDay(ed2.getDate());
+  setEYear(ed2.getFullYear() % 100);
+} catch {}
+
+setTimeout(() => setLaunched(false), 1500);
+
     } catch (err) {
       alert("Failed to launch campaign: " + (err.message || ""));
       console.error(err);

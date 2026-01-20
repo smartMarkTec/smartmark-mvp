@@ -627,6 +627,29 @@ function extractFirstUrl(s = "") {
   const m = (s || "").match(URL_REGEX);
   return m ? m[0] : null;
 }
+
+function normalizeUrlForCopy(u) {
+  let s = String(u || "").trim();
+  if (!s) return "";
+  if (/^www\./i.test(s)) s = `https://${s}`;
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  return s;
+}
+
+function appendUrlToCopy(body, url) {
+  const u = normalizeUrlForCopy(url);
+  const b = String(body || "").trim();
+  if (!u) return b;
+  if (!b) return `Learn more: ${u}`;
+
+  const bLow = b.toLowerCase();
+  const uLow = u.toLowerCase();
+  const rawLow = String(url || "").trim().toLowerCase();
+
+  if (bLow.includes(uLow) || (rawLow && bLow.includes(rawLow))) return b;
+  return `${b}\n\nLearn more: ${u}`;
+}
+
 function isLikelyQuestion(s) {
   const t = (s || "").trim().toLowerCase();
   if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
@@ -984,7 +1007,11 @@ export default function FormPage() {
     .trim()
     .slice(0, 55);
 
-  const displayBody = (editBody || result?.body || fallbackCopy.body || "").toString().trim();
+const displayBody = appendUrlToCopy(
+  (editBody || result?.body || fallbackCopy.body || "").toString().trim(),
+  answers?.url
+);
+
 
   const displayCTA = normalizeOverlayCTA(
     editCTA || result?.image_overlay_text || answers?.cta || "Learn more"
@@ -1085,18 +1112,19 @@ export default function FormPage() {
       // ✅ DON'T overwrite creatives with empty images
       if (imgs.length) {
         const draftForSetup = {
-          ctxKey: getActiveCtx(),
-          images: imgs,
-          headline: mergedHeadline,
-          body: mergedBody,
-          imageOverlayCTA: normalizeOverlayCTA(
-            activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-          ),
-          answers,
-          mediaSelection: "image",
-          savedAt: Date.now(),
-          expiresAt: Date.now() + CREATIVE_TTL_MS,
-        };
+  ctxKey: getActiveCtx(),
+  images: imgs,
+  headline: mergedHeadline,
+  body: appendUrlToCopy(mergedBody, answers?.url),
+  imageOverlayCTA: normalizeOverlayCTA(
+    activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+  ),
+  answers,
+  mediaSelection: "image",
+  savedAt: Date.now(),
+  expiresAt: Date.now() + CREATIVE_TTL_MS,
+};
+
 
         lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
         lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
@@ -1136,19 +1164,20 @@ export default function FormPage() {
         // ✅ DON'T overwrite creatives with empty images
         if (!imgs.length) return;
 
-        const draftForSetup = {
-          ctxKey: getActiveCtx(),
-          images: imgs,
-          headline: mergedHeadline,
-          body: mergedBody,
-          imageOverlayCTA: normalizeOverlayCTA(
-            activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-          ),
-          answers,
-          mediaSelection: "image",
-          savedAt: Date.now(),
-          expiresAt: Date.now() + CREATIVE_TTL_MS,
-        };
+      const draftForSetup = {
+  ctxKey: getActiveCtx(),
+  images: imgs,
+  headline: mergedHeadline,
+  body: appendUrlToCopy(mergedBody, answers?.url),
+  imageOverlayCTA: normalizeOverlayCTA(
+    activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+  ),
+  answers,
+  mediaSelection: "image",
+  savedAt: Date.now(),
+  expiresAt: Date.now() + CREATIVE_TTL_MS,
+};
+
 
         lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
         lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
@@ -2113,16 +2142,17 @@ export default function FormPage() {
             setActiveCtx(ctxKey);
 
             const draftForSetup = {
-              ctxKey,
-              images: imgA,
-              headline: mergedHeadline,
-              body: mergedBody,
-              imageOverlayCTA: mergedCTA,
-              answers,
-              mediaSelection: "image",
-              savedAt: Date.now(),
-              expiresAt: Date.now() + CREATIVE_TTL_MS,
-            };
+  ctxKey,
+  images: imgA,
+  headline: mergedHeadline,
+  body: appendUrlToCopy(mergedBody, answers?.url),
+  imageOverlayCTA: mergedCTA,
+  answers,
+  mediaSelection: "image",
+  savedAt: Date.now(),
+  expiresAt: Date.now() + CREATIVE_TTL_MS,
+};
+
 
             ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
             lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));

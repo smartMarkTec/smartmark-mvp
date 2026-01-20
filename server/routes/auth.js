@@ -154,7 +154,7 @@ router.get('/facebook', (req, res) => {
   // ✅ state MUST be tied to this user/session
   const state = sid;
 
-   // ✅ store expected state for callback validation
+  // ✅ store expected state for callback validation
   const dom = computeCookieDomain();
   res.cookie('sm_oauth_state', state, {
     httpOnly: true,
@@ -164,7 +164,6 @@ router.get('/facebook', (req, res) => {
     maxAge: 10 * 60 * 1000, // 10 min
     ...(dom ? { domain: dom } : {})
   });
-
 
   // where to send user back after OAuth
   const fallback = `${FRONTEND_URL}/setup`;
@@ -184,7 +183,6 @@ router.get('/facebook', (req, res) => {
     if (allowed) safeReturnTo = u.toString();
   } catch {}
 
-  // cookie is only read by backend in callback
   const dom2 = computeCookieDomain();
   res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
     httpOnly: true,
@@ -194,7 +192,6 @@ router.get('/facebook', (req, res) => {
     maxAge: 10 * 60 * 1000, // 10 min
     ...(dom2 ? { domain: dom2 } : {})
   });
-
 
   const fbUrl =
     `https://www.facebook.com/v18.0/dialog/oauth` +
@@ -217,9 +214,7 @@ router.get('/facebook/callback', async (req, res) => {
     return res.status(400).send('Invalid OAuth state.');
   }
 
-    res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
-
-
+  res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
 
   const ownerKey = state; // sid we set before redirect
 
@@ -261,14 +256,14 @@ router.get('/facebook/callback', async (req, res) => {
     const fallback = `${FRONTEND_URL}/setup`;
     let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
 
-    res.clearCookie(RETURN_TO_COOKIE, { path: '/' }); // keep this simple; domain mismatch breaks clears
+    res.clearCookie(RETURN_TO_COOKIE, { path: '/' });
 
     // Safety: only allow your own frontend origin
     try {
       const u = new URL(returnTo || fallback);
       const front = new URL(FRONTEND_URL);
 
-      if (u.origin !== front.origin) returnTo = fallback; // prevent open redirect
+      if (u.origin !== front.origin) returnTo = fallback;
       else returnTo = u.toString();
     } catch {
       returnTo = fallback;
@@ -483,7 +478,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   const { accountId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  const NO_SPEND = process.env.NO_SPEND === '1' || req.query.no_spend === '1' || !!req.body.noSpend;
+  // ✅ IMPORTANT: do NOT let an env var accidentally put real users into PAUSED.
+  // Only allow "no spend" in dev, or if you explicitly enable it.
+  const allowNoSpend = process.env.ALLOW_NO_SPEND === '1' || !isProd;
+  const NO_SPEND =
+    allowNoSpend &&
+    (req.query.no_spend === '1' || !!req.body.noSpend || process.env.NO_SPEND === '1');
+
   const VALIDATE_ONLY = req.query.validate_only === '1' || !!req.body.validateOnly;
 
   const mkParams = () => {
@@ -494,12 +495,53 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
+  function normalizeLink(raw) {
+    let s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.startsWith('//')) s = 'https:' + s;
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    return s;
+  }
+
+  // If your frontend ever stores /generated URLs on smartemark.com,
+  // the backend should still fetch from the backend public base.
+  function normalizeImageUrl(u) {
+    const s = String(u || '').trim();
+    if (!s) return s;
+
+    // blob: cannot be fetched server-side
+    if (/^blob:/i.test(s)) return '';
+
+    // if it's already a data url, keep it
+    if (/^data:image\//i.test(s)) return s;
+
+    // if it's a relative path, force it onto backend base
+    if (!/^https?:\/\//i.test(s)) return absolutePublicUrl(s);
+
+    // if it's absolute but on your frontend domain, remap to backend base
+    try {
+      const parsed = new URL(s);
+      const host = parsed.hostname.toLowerCase();
+      if (host === 'smartemark.com' || host === 'www.smartemark.com') {
+        const backendBase =
+          process.env.PUBLIC_BASE_URL ||
+          process.env.RENDER_EXTERNAL_URL ||
+          'https://smartmark-mvp.onrender.com';
+        return new URL(parsed.pathname + parsed.search, backendBase).toString();
+      }
+    } catch {}
+    return s;
+  }
+
   async function fetchImageAsBase64(url) {
     if (!url) throw new Error('No image URL');
+
     const m = /^data:image\/\w+;base64,(.+)$/i.exec(url);
     if (m) return m[1];
 
-    const abs = absolutePublicUrl(url);
+    const abs = normalizeImageUrl(url);
+    if (!abs) throw new Error('Invalid image URL');
+
     const tries = [0, 400, 900];
     let lastErr;
     for (const d of tries) {
@@ -507,8 +549,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         if (d) await sleep(d);
         const imgRes = await axios.get(abs, {
           responseType: 'arraybuffer',
-          timeout: 15000,
-          headers: { 'Accept': 'image/*' }
+          timeout: 20000,
+          headers: { 'Accept': 'image/*' },
+          // Some hosts block unknown UA; set a simple UA
+          headers: { 'Accept': 'image/*', 'User-Agent': 'SmartMark/1.0' }
         });
         const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
         if (!ct.includes('image')) throw new Error(`Non-image content-type: ${ct || 'unknown'}`);
@@ -519,25 +563,20 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 
   async function uploadImage(imageUrl) {
-    try {
-      let base64;
-      try { base64 = await fetchImageAsBase64(imageUrl); }
-      catch { base64 = await fetchImageAsBase64('/__fallback/1200.jpg'); }
+    // ✅ Do NOT silently upload the green fallback in production.
+    // If the image can’t be fetched, fail fast so you never launch a broken creative.
+    const base64 = await fetchImageAsBase64(imageUrl);
 
-      const fbImageRes = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
-        new URLSearchParams({ bytes: base64 }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: mkParams() }
-      );
-      const imgData = fbImageRes.data?.images || {};
-      const hash = Object.values(imgData)[0]?.hash || null;
-      if (hash) return hash;
-      if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
-      throw new Error('Image upload failed');
-    } catch (e) {
-      if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
-      throw e;
-    }
+    const fbImageRes = await axios.post(
+      `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
+      new URLSearchParams({ bytes: base64 }),
+      { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: mkParams() }
+    );
+    const imgData = fbImageRes.data?.images || {};
+    const hash = Object.values(imgData)[0]?.hash || null;
+    if (hash) return hash;
+    if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
+    throw new Error('Image upload failed');
   }
 
   async function resolvePageId(explicitPageId) {
@@ -580,6 +619,18 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     }
 
     const campaignName = form.campaignName || form.businessName || 'SmartMark Campaign';
+
+    // ✅ Always use the real business website link (typeform), not a placeholder.
+    const destinationUrl =
+      normalizeLink(
+        form.websiteUrl ||
+        form.website ||
+        form.businessWebsite ||
+        form.businessUrl ||
+        form.url ||
+        req.body.websiteUrl ||
+        req.body.url
+      ) || 'https://smartemark.com';
 
     let aiAudience = null;
     try {
@@ -724,7 +775,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
             page_id: pageIdFinal,
             link_data: {
               message: form.adCopy || adCopy || '',
-              link: form.url || 'https://your-smartmark-site.com',
+              link: destinationUrl,
               image_hash: hash,
               description: form.description || ''
             }
@@ -797,6 +848,15 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       try { detail = detail.toString('utf8'); } catch {}
     }
     console.error('FB Campaign Launch Error:', detail);
+
+    // If the image URL can't be fetched, return a clean message (prevents green fallback launches)
+    if (String(err?.message || '').toLowerCase().includes('image')) {
+      return res.status(400).json({
+        error: 'One of your ad images could not be fetched by the server. Please regenerate the image and try again.',
+        detail
+      });
+    }
+
     res.status(500).json({ error: errorMsg, detail });
   }
 });
