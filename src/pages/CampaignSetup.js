@@ -952,6 +952,10 @@ const CampaignSetup = () => {
   const [isPaused, setIsPaused] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
 
+  const [showImageModal, setShowImageModal] = useState(false);
+const [modalImg, setModalImg] = useState("");
+
+
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
     mediaSelection: "image",
