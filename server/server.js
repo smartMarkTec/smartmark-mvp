@@ -213,11 +213,9 @@ app.post("/api/craft-ad-copy", (req, res) => {
 const authRoutes = require("./routes/auth");
 app.use("/auth", authRoutes);
 
-const authRoutes = require("./routes/auth");
-app.use("/auth", authRoutes);
-
 // ✅ Backward-compat alias (some clients still hit /api/whoami)
 app.get("/api/whoami", (req, res) => res.redirect(307, "/auth/whoami"));
+
 
 
 /* IMPORTANT: staticAds is your ONLY generation path now */
