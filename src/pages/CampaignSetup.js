@@ -1757,15 +1757,33 @@ const payload = {
 
 
 
-      const res = await fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/launch-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(payload),
-      });
+     const res = await fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/launch-campaign`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  credentials: "include",
+  body: JSON.stringify(payload),
+});
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Server error");
+// read raw body FIRST (works even if server returns HTML or plain text)
+const rawText = await res.text().catch(() => "");
+let json = null;
+try {
+  json = rawText ? JSON.parse(rawText) : null;
+} catch {
+  json = null;
+}
+
+if (!res.ok) {
+  const msg =
+    (json && (json.error || json.detail || json.message)) ||
+    rawText?.slice(0, 400) ||
+    `HTTP ${res.status}`;
+  throw new Error(`FB Launch Error (${res.status}): ${msg}`);
+}
+
+// keep your existing "json" variable working
+json = json || {};
+
 
        const map = readCreativeMap(resolvedUser, acctId);
       if (json.campaignId) {
