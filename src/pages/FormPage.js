@@ -650,6 +650,31 @@ function appendUrlToCopy(body, url) {
   return `${b}\n\nLearn more: ${u}`;
 }
 
+function stripTrailingLearnMore(body = "") {
+  return String(body || "")
+    .replace(/\n*\s*learn more:\s*(https?:\/\/\S+)\s*$/i, "")
+    .trim();
+}
+
+function extractTrailingLearnMoreUrl(body = "") {
+  const m = String(body || "").match(/\n*\s*learn more:\s*(https?:\/\/\S+)\s*$/i);
+  return m ? m[1] : "";
+}
+
+function prettyLink(u = "") {
+  try {
+    const x = new URL(normalizeUrlForCopy(u));
+    const host = x.hostname.replace(/^www\./i, "");
+    const path = (x.pathname || "/").replace(/\/$/, "");
+    const shown = (host + (path && path !== "/" ? path : "")).slice(0, 48);
+    return shown + ((host + path).length > 48 ? "…" : "");
+  } catch {
+    const s = String(u || "").trim();
+    return s.length > 48 ? s.slice(0, 48) + "…" : s;
+  }
+}
+
+
 function isLikelyQuestion(s) {
   const t = (s || "").trim().toLowerCase();
   if (extractFirstUrl(t) && t === extractFirstUrl(t)?.toLowerCase()) return false;
@@ -786,6 +811,8 @@ export default function FormPage() {
   const [editHeadline, setEditHeadline] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editCTA, setEditCTA] = useState("");
+  const [editLink, setEditLink] = useState("");
+
 
   const abs = toAbsoluteMedia;
 
@@ -963,12 +990,20 @@ export default function FormPage() {
     // eslint-disable-next-line
   }, []);
 
-  useEffect(() => {
-    const draft = currentImageId ? getImageDraftById(currentImageId) : null;
-    setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
-    setEditBody(draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? "");
-    setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
-  }, [currentImageId, result, answers]);
+useEffect(() => {
+  const draft = currentImageId ? getImageDraftById(currentImageId) : null;
+
+  const bodyRaw = (draft?.body ?? result?.body ?? answers?.details ?? answers?.adCopy ?? "").toString();
+  const urlFromBody = extractTrailingLearnMoreUrl(bodyRaw);
+
+  setEditHeadline((draft?.headline ?? result?.headline ?? "").slice(0, 55));
+  setEditBody(stripTrailingLearnMore(bodyRaw));
+  setEditCTA(normalizeOverlayCTA(draft?.overlay ?? result?.image_overlay_text ?? answers?.cta ?? ""));
+
+  const u = (answers?.url || urlFromBody || "").toString().trim();
+  setEditLink(u);
+}, [currentImageId, result, answers]);
+
 
   /* Debounced autosave of image edits */
   useEffect(() => {
@@ -1007,10 +1042,13 @@ export default function FormPage() {
     .trim()
     .slice(0, 55);
 
-const displayBody = appendUrlToCopy(
-  (editBody || result?.body || fallbackCopy.body || "").toString().trim(),
-  answers?.url
+const rawBody = (editBody || result?.body || fallbackCopy.body || "").toString().trim();
+const displayBody = stripTrailingLearnMore(rawBody);
+
+const displayLink = normalizeUrlForCopy(
+  (answers?.url || "").toString().trim() || extractTrailingLearnMoreUrl(rawBody)
 );
+
 
 
   const displayCTA = normalizeOverlayCTA(
@@ -2003,9 +2041,34 @@ const displayBody = appendUrlToCopy(
             <div style={{ color: "#191c1e", fontWeight: 800, fontSize: 17, marginBottom: 5, fontFamily: AD_FONT }}>
               {displayHeadline}
             </div>
-            <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 3, minHeight: 18 }}>
-              {displayBody}
-            </div>
+            <div style={{ color: "#3a4149", fontSize: 15, fontWeight: 600, marginBottom: 6, minHeight: 18, whiteSpace: "pre-wrap" }}>
+  {displayBody}
+</div>
+
+{displayLink ? (
+  <div
+    style={{
+      marginTop: 6,
+      fontSize: 13,
+      fontWeight: 800,
+      color: "#1b6fff",
+      wordBreak: "break-word",
+      lineHeight: 1.25,
+    }}
+  >
+    Learn more:{" "}
+    <a
+      href={displayLink}
+      target="_blank"
+      rel="noreferrer"
+      style={{ color: "#1b6fff", textDecoration: "none" }}
+      title={displayLink}
+    >
+      {prettyLink(displayLink)}
+    </a>
+  </div>
+) : null}
+
           </div>
 
           <div style={{ padding: "8px 18px", marginTop: 2 }}>
@@ -2075,6 +2138,32 @@ const displayBody = appendUrlToCopy(
                   style={{ width: "100%", borderRadius: 10, border: "1px solid #e4e7ec", padding: "10px 12px", fontWeight: 600 }}
                 />
               </label>
+
+              <label style={{ display: "block" }}>
+  <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>Link URL</div>
+  <input
+    value={editLink}
+    onChange={(e) => {
+      const v = e.target.value;
+      setEditLink(v);
+      setAnswers((prev) => ({ ...(prev || {}), url: v })); // ✅ keeps launch link correct
+    }}
+    onBlur={() => {
+      const v = (editLink || "").trim();
+      setEditLink(v);
+      setAnswers((prev) => ({ ...(prev || {}), url: v }));
+    }}
+    placeholder="https://yourbusiness.com"
+    style={{
+      width: "100%",
+      borderRadius: 10,
+      border: "1px solid #e4e7ec",
+      padding: "10px 12px",
+      fontWeight: 700,
+    }}
+  />
+</label>
+
 
               <label style={{ display: "block" }}>
                 <div style={{ fontSize: 12, color: "#6b7785", marginBottom: 4 }}>CTA (e.g., Shop now, Learn more)</div>
