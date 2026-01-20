@@ -200,6 +200,65 @@ function displayLink(u) {
   return s.length > 48 ? s.slice(0, 47) + "…" : s;
 }
 
+/* ======================= NEW: backup FETCHABLE image URLs for OAuth ======================= */
+const SETUP_FETCHABLE_IMAGES_KEY = "sm_setup_fetchable_images_v1";
+const LS_FETCHABLE_KEY = (u) => (u ? withUser(u, SETUP_FETCHABLE_IMAGES_KEY) : SETUP_FETCHABLE_IMAGES_KEY);
+
+function saveFetchableImagesBackup(user, urls) {
+  try {
+    const clean = (Array.isArray(urls) ? urls : []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+    const payload = { urls: clean, savedAt: Date.now() };
+    localStorage.setItem(LS_FETCHABLE_KEY(user), JSON.stringify(payload));
+    localStorage.setItem(SETUP_FETCHABLE_IMAGES_KEY, JSON.stringify(payload)); // legacy safety
+  } catch {}
+}
+
+function loadFetchableImagesBackup(user) {
+  try {
+    const raw =
+      localStorage.getItem(LS_FETCHABLE_KEY(user)) ||
+      localStorage.getItem(SETUP_FETCHABLE_IMAGES_KEY);
+
+    if (!raw) return [];
+    const p = JSON.parse(raw);
+    const ageOk = !p.savedAt || Date.now() - p.savedAt <= DRAFT_TTL_MS;
+    if (!ageOk) return [];
+    return (Array.isArray(p.urls) ? p.urls : []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+  } catch {
+    return [];
+  }
+}
+
+// pulls the last known FETCHABLE urls your generator cached (used as fallback)
+function getCachedFetchableImages() {
+  try {
+    const raw = localStorage.getItem("u:anon:sm_image_cache_v1") || localStorage.getItem("sm_image_cache_v1");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const urls = Array.isArray(parsed?.urls) ? parsed.urls : [];
+    return urls.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+  } catch {
+    return [];
+  }
+}
+
+// ✅ converts draft/nav images into FETCHABLE urls (replaces data:image with cached fetchable)
+function resolveFetchableDraftImages({ draftImages, navImages }) {
+  const candidate = (Array.isArray(draftImages) && draftImages.length ? draftImages : (navImages || [])).slice(0, 2);
+  const cached = getCachedFetchableImages();
+
+  return candidate
+    .map((img, i) => {
+      const s = String(img || "").trim();
+      if (!s) return "";
+      if (/^data:image\//i.test(s)) return cached[i] || "";   // ✅ key fix
+      return toAbsoluteMedia(s);
+    })
+    .filter(Boolean)
+    .slice(0, 2);
+}
+
+
 /* ---------- Preview card (copy lives UNDER the image, contained) ---------- */
 function PreviewCard({ headline, body, link }) {
   const h = clampText(headline, 90);
@@ -1583,6 +1642,30 @@ useEffect(() => {
   window.history.replaceState({}, document.title, "/setup");
 }, [location.search, resolvedUser]);
 
+setExpandedId("__DRAFT__");
+setSelectedCampaignId("__DRAFT__");
+
+// ✅ CRITICAL: restore FETCHABLE image URLs immediately after OAuth
+try {
+  const fetchable = loadFetchableImagesBackup(resolvedUser);
+  const fallback = fetchable.length ? fetchable : getCachedFetchableImages();
+  const imgs = (fallback || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+
+  if (imgs.length) {
+    const payload = {
+      ctxKey: getActiveCtx(resolvedUser) || "",
+      images: imgs,
+      mediaSelection: "image",
+      savedAt: Date.now(),
+    };
+
+    setDraftCreatives({ images: imgs, mediaSelection: "image" });
+    sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payload));
+    saveSetupCreativeBackup(resolvedUser, payload);
+  }
+} catch {}
+
+
 
   useEffect(() => {
     if (fbConnected) {
@@ -2260,43 +2343,50 @@ const filteredImages = draftImgs
                 localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), JSON.stringify({ t: Date.now(), ctxKey: safeCtx }));
               } catch {}
 
-              let finalImagesAbs = [];
+         // ✅ ALWAYS persist FETCHABLE urls before leaving for OAuth
+const navFallback = Array.isArray(navImageUrls) ? navImageUrls : [];
+const draftImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
 
-              try {
-                const imagesToPersist = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
-                const fallbackFromNav = Array.isArray(navImageUrls) ? navImageUrls : [];
+let finalImagesAbs = resolveFetchableDraftImages({
+  draftImages: draftImgs,
+  navImages: navFallback,
+});
 
-                const candidate = (imagesToPersist.length ? imagesToPersist : fallbackFromNav).slice(0, 2);
+// If still empty, try storage backup (last resort)
+if (!finalImagesAbs.length) {
+  try {
+    const raw =
+      sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
+      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+      localStorage.getItem("sm_setup_creatives_backup_v1");
 
-                finalImagesAbs = (candidate || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
-              } catch {}
+    if (raw) {
+      const d = JSON.parse(raw || "{}");
+      finalImagesAbs = resolveFetchableDraftImages({
+        draftImages: Array.isArray(d?.images) ? d.images : [],
+        navImages: navFallback,
+      });
+    }
+  } catch {}
+}
 
-              if (!finalImagesAbs.length) {
-                try {
-                  const raw =
-                    sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
-                    lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-                    localStorage.getItem("sm_setup_creatives_backup_v1");
+// ✅ store a dedicated fetchable backup for OAuth return (this is the persistence fix)
+saveFetchableImagesBackup(resolvedUser, finalImagesAbs);
 
-                  if (raw) {
-                    const d = JSON.parse(raw || "{}");
-                    const savedImgs = Array.isArray(d?.images) ? d.images : [];
-                    finalImagesAbs = savedImgs.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
-                  }
-                } catch {}
-              }
+if (finalImagesAbs.length) {
+  const endMillis =
+    endDate && !isNaN(new Date(endDate).getTime())
+      ? new Date(endDate).getTime()
+      : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
-              if (finalImagesAbs.length) {
-                const endMillis =
-                  endDate && !isNaN(new Date(endDate).getTime()) ? new Date(endDate).getTime() : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+  persistDraftCreativesNow(resolvedUser, {
+    ctxKey: safeCtx,
+    images: finalImagesAbs,
+    mediaSelection: "image",
+    expiresAt: endMillis,
+  });
+}
 
-                persistDraftCreativesNow(resolvedUser, {
-                  ctxKey: safeCtx,
-                  images: finalImagesAbs,
-                  mediaSelection: "image",
-                  expiresAt: endMillis,
-                });
-              }
 
               const returnTo = window.location.origin + "/setup" + `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
