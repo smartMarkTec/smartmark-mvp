@@ -157,6 +157,73 @@ function smDumpDraftSnapshot({ FORM_DRAFT_KEY, CREATIVE_DRAFT_KEY, FB_CONNECT_IN
   return snap;
 }
 
+// ✅ Draft disable flag (set after successful launch) — prevents resurrecting "Untitled / IN PROGRESS"
+const DRAFT_DISABLED_KEYS = [
+  "sm_setup_draft_disabled_v1",
+  "sm_draft_disabled_v1",
+  "sm_setup_draft_disabled",
+];
+
+function getUserNSQuick() {
+  try {
+    return (
+      sessionStorage.getItem("sm_user_ns_v1") ||
+      localStorage.getItem("sm_user_ns_v1") ||
+      "anon"
+    );
+  } catch {
+    return "anon";
+  }
+}
+
+function isDraftDisabled() {
+  try {
+    const u = getUserNSQuick();
+    for (const k of DRAFT_DISABLED_KEYS) {
+      const v =
+        localStorage.getItem(`u:${u}:${k}`) ||
+        sessionStorage.getItem(`u:${u}:${k}`) ||
+        localStorage.getItem(k) ||
+        sessionStorage.getItem(k) ||
+        "";
+      const s = String(v).trim().toLowerCase();
+      if (s === "1" || s === "true" || s === "yes") return true;
+    }
+  } catch {}
+  return false;
+}
+
+function purgeDraftArtifactsEverywhere() {
+  try {
+    const u = getUserNSQuick();
+    const keys = [
+      // form + creative draft keys
+      "sm_form_draft_v3",
+      "draft_form_creatives_v3",
+      "sm_setup_creatives_backup_v1",
+      "draft_form_creatives",
+      // image cache/drafts used for preview restore
+      "sm_image_cache_v1",
+      "smartmark.imageDrafts.v1",
+      // active ctx
+      "sm_active_ctx_v2",
+    ];
+
+    for (const k of keys) {
+      try {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      } catch {}
+
+      try {
+        localStorage.removeItem(`u:${u}:${k}`);
+        sessionStorage.removeItem(`u:${u}:${k}`);
+      } catch {}
+    }
+  } catch {}
+}
+
+
 /* ======================= hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
 
@@ -1102,6 +1169,28 @@ const CampaignSetup = () => {
     if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
   }, [location.search]);
 
+  // ✅ If a campaign was launched successfully, never show leftover "Untitled / IN PROGRESS"
+useEffect(() => {
+  if (!isDraftDisabled()) return;
+
+  // wipe any remaining draft artifacts so they can't rehydrate
+  purgeDraftArtifactsEverywhere();
+
+  // also remove any local-only/in-progress campaign from UI state (whatever your state var is)
+  // Replace `setCampaigns` / `campaigns` with YOUR actual state names if different.
+  setCampaigns((prev) =>
+    (prev || []).filter((c) => {
+      const status = String(c?.status || c?.state || "").toLowerCase();
+      const id = String(c?.id || "");
+      // remove draft-like entries
+      if (id === "draft" || id === "in_progress" || c?.localOnly) return false;
+      if (status.includes("progress")) return false;
+      return true;
+    })
+  );
+}, []);
+
+
  // ✅ use username if available, otherwise fall back to sid so storage keys stay consistent
 const stableSid = useMemo(() => ensureStoredSid(), []);
 const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid]);
@@ -1457,92 +1546,102 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
     // eslint-disable-next-line
   }, [startDate]);
 
-  /* ===================== DRAFT RE-HYDRATION ===================== */
-  useEffect(() => {
-    const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
-    if (lastFields) {
-      const f = JSON.parse(lastFields);
-      setForm(f);
-      const sd = String(f.startDate || "").slice(0, 10);
-      const ed = String(f.endDate || "").slice(0, 10);
+/* ===================== DRAFT RE-HYDRATION ===================== */
+useEffect(() => {
+  // ✅ BLOCK 2 FIX:
+  // If draft is disabled (meaning user successfully launched),
+  // NEVER rehydrate draftCreatives from any storage/backup.
+  if (isDraftDisabled(resolvedUser)) {
+    try {
+      purgeDraftStorages(resolvedUser);
+    } catch {}
+    try {
+      purgeDraftArtifactsEverywhere();
+    } catch {}
 
-      if (sd) setStartDate(sd);
-      if (ed) setEndDate(clampEndForStart(sd || startDate, ed));
+    setDraftCreatives({ images: [], mediaSelection: "image" });
+
+    // if UI was still pointing at draft, detach it
+    setExpandedId((prev) => (prev === "__DRAFT__" ? null : prev));
+    setSelectedCampaignId((prev) => (prev === "__DRAFT__" ? "" : prev));
+    return;
+  }
+
+  const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
+  if (lastFields) {
+    const f = JSON.parse(lastFields);
+    setForm(f);
+    const sd = String(f.startDate || "").slice(0, 10);
+    const ed = String(f.endDate || "").slice(0, 10);
+
+    if (sd) setStartDate(sd);
+    if (ed) setEndDate(clampEndForStart(sd || startDate, ed));
+  }
+
+  const applyDraft = (draftObj) => {
+    if (!isDraftForActiveCtx(draftObj, resolvedUser)) return false;
+
+    const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
+    const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
+    if (!norm.length) return false;
+
+    setDraftCreatives({
+      images: norm,
+      mediaSelection: "image",
+    });
+
+    setSelectedCampaignId("__DRAFT__");
+    setExpandedId("__DRAFT__");
+
+    return true;
+  };
+
+  const inflight = (() => {
+    try {
+      const v = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
+      if (!v) return false;
+      const parsed = JSON.parse(v);
+      return parsed?.t && Date.now() - Number(parsed.t) < 10 * 60 * 1000;
+    } catch {
+      return false;
+    }
+  })();
+
+  try {
+    const sess = sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser));
+    if (sess) {
+      const sObj = JSON.parse(sess);
+      const ok = applyDraft(sObj);
+      if (ok) {
+        saveSetupCreativeBackup(resolvedUser, sObj);
+        return;
+      }
     }
 
-    const applyDraft = (draftObj) => {
-      if (!isDraftForActiveCtx(draftObj, resolvedUser)) return false;
+    const raw =
+      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+      lsGet(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY) ||
+      localStorage.getItem(CREATIVE_DRAFT_KEY_LEGACY);
 
-      const imgs = Array.isArray(draftObj.images) ? draftObj.images.slice(0, 2) : [];
-      const norm = imgs.map(toAbsoluteMedia).filter(Boolean);
+    if (raw) {
+      const draft = JSON.parse(raw);
 
-      setDraftCreatives({
-        images: norm,
-        mediaSelection: "image",
-      });
+      const now = Date.now();
+      const expiresAt = Number(draft.expiresAt);
+      const ageOk =
+        (Number.isFinite(expiresAt) && now <= expiresAt) ||
+        (!draft.savedAt || now - draft.savedAt <= DEFAULT_CAMPAIGN_TTL_MS);
 
-      setSelectedCampaignId("__DRAFT__");
-      setExpandedId("__DRAFT__");
-
-      return true;
-    };
-
-    const inflight = (() => {
-      try {
-        const v = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
-        if (!v) return false;
-        const parsed = JSON.parse(v);
-        return parsed?.t && Date.now() - Number(parsed.t) < 10 * 60 * 1000;
-      } catch {
-        return false;
-      }
-    })();
-
-    try {
-      const sess = sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser));
-      if (sess) {
-        const sObj = JSON.parse(sess);
-        const ok = applyDraft(sObj);
+      if (ageOk) {
+        const ok = applyDraft(draft);
         if (ok) {
-          saveSetupCreativeBackup(resolvedUser, sObj);
+          saveSetupCreativeBackup(resolvedUser, draft);
           return;
         }
       }
+    }
 
-      const raw =
-        lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-        lsGet(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY) ||
-        localStorage.getItem(CREATIVE_DRAFT_KEY_LEGACY);
-
-      if (raw) {
-        const draft = JSON.parse(raw);
-
-        const now = Date.now();
-        const expiresAt = Number(draft.expiresAt);
-        const ageOk =
-          (Number.isFinite(expiresAt) && now <= expiresAt) ||
-          (!draft.savedAt || now - draft.savedAt <= DEFAULT_CAMPAIGN_TTL_MS);
-
-        if (ageOk) {
-          const ok = applyDraft(draft);
-          if (ok) {
-            saveSetupCreativeBackup(resolvedUser, draft);
-            return;
-          }
-        }
-      }
-
-      if (inflight) {
-        const backup = loadSetupCreativeBackup(resolvedUser);
-        if (backup) {
-          const ok = applyDraft(backup);
-          if (ok) {
-            sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(backup));
-            return;
-          }
-        }
-      }
-
+    if (inflight) {
       const backup = loadSetupCreativeBackup(resolvedUser);
       if (backup) {
         const ok = applyDraft(backup);
@@ -1551,8 +1650,19 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
           return;
         }
       }
-    } catch {}
-  }, []);
+    }
+
+    const backup = loadSetupCreativeBackup(resolvedUser);
+    if (backup) {
+      const ok = applyDraft(backup);
+      if (ok) {
+        sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(backup));
+        return;
+      }
+    }
+  } catch {}
+}, []);
+
 
   useEffect(() => {
     const hasDraft = draftCreatives.images && draftCreatives.images.length;
