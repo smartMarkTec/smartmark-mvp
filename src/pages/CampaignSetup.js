@@ -1070,8 +1070,10 @@ useEffect(() => {
 
 /* ===================== CAMPAIGN DURATION (simple date range) ===================== */
 
-// store as YYYY-MM-DD (clean, small UI)
-const todayISO = useMemo(() => {
+const isYMD = (s) => /^\d{4}-\d{2}-\d{2}$/.test(String(s || "").trim());
+const ymd = (val) => String(val || "").trim().slice(0, 10);
+
+const todayYMD = useMemo(() => {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -1079,40 +1081,44 @@ const todayISO = useMemo(() => {
   return `${y}-${m}-${da}`;
 }, []);
 
-const plusDaysISO = (baseYYYYMMDD, days) => {
+const plusDaysYMD = (baseYMD, days) => {
   try {
-    const d = new Date(`${baseYYYYMMDD}T00:00:00`);
-    d.setDate(d.getDate() + days);
+    const b = isYMD(baseYMD) ? baseYMD : todayYMD;
+    const d = new Date(`${b}T00:00:00`);
+    d.setDate(d.getDate() + Number(days || 0));
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const da = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${da}`;
   } catch {
-    return baseYYYYMMDD;
+    return todayYMD;
   }
 };
 
 const [startDate, setStartDate] = useState(() => {
-  const existing = (form?.startDate || "").slice(0, 10);
-  return existing || todayISO;
+  const existing = ymd(form?.startDate);
+  return isYMD(existing) ? existing : todayYMD;
 });
 
 const [endDate, setEndDate] = useState(() => {
-  const existing = (form?.endDate || "").slice(0, 10);
-  // default end = start + 3 days
-  return existing || plusDaysISO(existing ? existing : (form?.startDate || todayISO).slice(0, 10) || todayISO, 3);
+  const existing = ymd(form?.endDate);
+  if (isYMD(existing)) return existing;
+  const base = isYMD(ymd(form?.startDate)) ? ymd(form?.startDate) : todayYMD;
+  return plusDaysYMD(base, 3);
 });
 
 // Clamp end so: end > start, and end <= start + 14 days
-const clampEndForStart = (startYYYYMMDD, endYYYYMMDD) => {
+const clampEndForStart = (startYMD, endYMD) => {
   try {
-    const start = new Date(`${startYYYYMMDD}T00:00:00`);
-    let end = endYYYYMMDD ? new Date(`${endYYYYMMDD}T00:00:00`) : null;
+    const s = isYMD(startYMD) ? startYMD : todayYMD;
+    const start = new Date(`${s}T00:00:00`);
 
+    let end = isYMD(endYMD) ? new Date(`${endYMD}T00:00:00`) : null;
     const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-    if (!end || end <= start) {
-      end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    if (!end || isNaN(end.getTime()) || end <= start) {
+     end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
     }
     if (end > maxEnd) end = maxEnd;
 
@@ -1121,7 +1127,7 @@ const clampEndForStart = (startYYYYMMDD, endYYYYMMDD) => {
     const da = String(end.getDate()).padStart(2, "0");
     return `${y}-${m}-${da}`;
   } catch {
-    return endYYYYMMDD;
+    return plusDaysYMD(todayYMD, 3);
   }
 };
 
@@ -1132,17 +1138,18 @@ useEffect(() => {
 }, [startDate]);
 
 
-
-
-
   /* ===================== DRAFT RE-HYDRATION ===================== */
   useEffect(() => {
     const lastFields = lsGet(resolvedUser, "smartmark_last_campaign_fields");
     if (lastFields) {
       const f = JSON.parse(lastFields);
       setForm(f);
-      if (f.startDate) setStartDate(f.startDate);
-      if (f.endDate) setEndDate(clampEndForStart(f.startDate || startDate, f.endDate));
+ const sd = String(f.startDate || "").slice(0, 10);
+const ed = String(f.endDate || "").slice(0, 10);
+
+if (sd) setStartDate(sd);
+if (ed) setEndDate(clampEndForStart(sd || startDate, ed));
+
     }
 
     const applyDraft = (draftObj) => {
@@ -1717,22 +1724,36 @@ useEffect(() => {
     .toString()
     .trim();
 
+if (!filteredImages.length) {
+  throw new Error("No images found to launch. Please generate creatives again.");
+}
+
 const payload = {
-  // ✅ ensure backend always sees the link (it currently uses form.url)
+  // ✅ ensure backend always sees the link (many backends use form.url)
   form: { ...form, url: websiteUrl, websiteUrl },
+
   budget: safeBudget,
   campaignType: form?.campaignType || "Website Traffic",
   pageId: selectedPageId,
-  websiteUrl, // keep top-level too
+  websiteUrl,
+
   aiAudience: form?.aiAudience || answers?.aiAudience || "",
   adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
   answers: answers || {},
+
   mediaSelection: "image",
+
+  // ✅ send creatives in multiple common keys to guarantee backend sees them
   imageVariants: filteredImages,
+  imageUrls: filteredImages,
+  images: filteredImages,
+
   flightStart: startISO,
   flightEnd: endISO,
+
   overrideCountPerType: { images: Math.min(2, filteredImages.length) },
 };
+
 
 
 
@@ -1797,7 +1818,8 @@ const payload = {
      setLaunched(true);
 setLaunchResult(json);
 
-const launchedId = json.campaignId || selectedCampaignId;
+const launchedId = json.campaignId || "";
+
 setSelectedCampaignId(launchedId);
 setExpandedId(launchedId);
 
