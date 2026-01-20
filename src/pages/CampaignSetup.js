@@ -11,21 +11,38 @@ const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 const AUTH_BASE = "https://smartmark-mvp.onrender.com/auth";
 
 
-/* ======================= Visual Theme (polish only) ======================= */
-const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
-const DARK_BG = "#11161c";
-const GLOW_TEAL = "rgba(20,231,185,0.22)";
-const CARD_BG = "rgba(27, 32, 37, 0.92)";
-const EDGE_BG = "rgba(35, 39, 42, 0.85)";
-const PANEL_BG = "#1c2126";
-const INPUT_BG = "#1b1f23";
-const INPUT_BORDER = "rgba(255,255,255,0.06)";
-const TEXT_MAIN = "#ecfff6";
-const TEXT_DIM = "#bdfdf0";
-const TEXT_MUTED = "#9ddfcd";
-const ACCENT = "#14e7b9";
-const ACCENT_ALT = "#1ec885";
+/* ======================= Visual Theme (Landing-style tech palette) ======================= */
+const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
+
+const DARK_BG = "#0b0f14";                    // landing BG
+const ACCENT = "#31e1ff";                     // electric cyan
+const ACCENT_2 = "#7c4dff";                   // violet
+const BTN_BASE = "#0f6fff";                   // brand blue
+const BTN_BASE_HOVER = "#2e82ff";
+
+const GLOW_A = "rgba(49,225,255,0.22)";
+const GLOW_B = "rgba(124,77,255,0.18)";
+
+const CARD_BG = "rgba(20, 24, 31, 0.78)";
+const EDGE_BG = "rgba(255,255,255,0.06)";
+const PANEL_BG = "rgba(18, 22, 28, 0.72)";
+
+const INPUT_BG = "rgba(255,255,255,0.04)";
+const INPUT_BORDER = "rgba(255,255,255,0.08)";
+
+const TEXT_MAIN = "#ffffff";
+const TEXT_DIM = "#eaf5ff";
+const TEXT_MUTED = "rgba(255,255,255,0.72)";
 const WHITE = "#ffffff";
+
+/* “glass” helper like landing */
+const GLASS = {
+  background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
+  border: `1px solid ${INPUT_BORDER}`,
+  boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+  backdropFilter: "blur(8px)",
+};
+
 
 const CREATIVE_HEIGHT = 150;
 
@@ -103,6 +120,96 @@ function smDumpDraftSnapshot({ FORM_DRAFT_KEY, CREATIVE_DRAFT_KEY, FB_CONNECT_IN
 
 /* ======================= hard backup so creatives survive FB redirect ======================= */
 const SETUP_CREATIVE_BACKUP_KEY = "sm_setup_creatives_backup_v1";
+
+/* ======================= NEW: backup preview copy so it survives FB redirect ======================= */
+const SETUP_PREVIEW_BACKUP_KEY = "sm_setup_preview_backup_v1";
+const LS_PREVIEW_KEY = (u) => (u ? withUser(u, SETUP_PREVIEW_BACKUP_KEY) : SETUP_PREVIEW_BACKUP_KEY);
+
+function saveSetupPreviewBackup(user, previewObj) {
+  try {
+    const payload = { ...(previewObj || {}), savedAt: Date.now() };
+    localStorage.setItem(LS_PREVIEW_KEY(user), JSON.stringify(payload));
+    localStorage.setItem(SETUP_PREVIEW_BACKUP_KEY, JSON.stringify(payload)); // legacy safety
+  } catch {}
+}
+
+function loadSetupPreviewBackup(user) {
+  try {
+    const raw = localStorage.getItem(LS_PREVIEW_KEY(user)) || localStorage.getItem(SETUP_PREVIEW_BACKUP_KEY);
+    if (!raw) return null;
+
+    const p = JSON.parse(raw);
+    const ageOk = !p.savedAt || Date.now() - p.savedAt <= DRAFT_TTL_MS;
+    if (!ageOk) return null;
+
+    return p;
+  } catch {
+    return null;
+  }
+}
+
+function clampText(s, max = 220) {
+  const str = String(s || "").trim();
+  if (!str) return "";
+  return str.length > max ? str.slice(0, max - 1) + "…" : str;
+}
+
+function displayLink(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  // keep it short in UI; still clickable if you ever make it clickable later
+  return s.length > 48 ? s.slice(0, 47) + "…" : s;
+}
+
+/* ---------- Preview card (copy lives UNDER the image, contained) ---------- */
+function PreviewCard({ headline, body, link }) {
+  const h = clampText(headline, 90);
+  const b = clampText(body, 190);
+  const l = displayLink(link);
+
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        borderRadius: 14,
+        padding: "12px 12px",
+        ...GLASS,
+      }}
+    >
+      <div style={{ fontWeight: 900, color: TEXT_MAIN, fontSize: 15, marginBottom: 6 }}>
+        Preview
+      </div>
+
+      <div style={{ color: ACCENT, fontWeight: 900, fontSize: 16, lineHeight: 1.25 }}>
+        {h || "—"}
+      </div>
+
+      <div style={{ marginTop: 6, color: TEXT_DIM, fontWeight: 600, lineHeight: 1.45, fontSize: 13 }}>
+        {b || "—"}
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ color: TEXT_MUTED, fontWeight: 900, fontSize: 12 }}>Link:</div>
+        <div
+          title={String(link || "")}
+          style={{
+            flex: 1,
+            color: ACCENT,
+            fontWeight: 800,
+            fontSize: 12,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            maxWidth: "100%",
+          }}
+        >
+          {l || "—"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 /* flag to detect FB redirect flow and force re-hydration */
 const FB_CONNECT_INFLIGHT_KEY = "sm_fb_connect_inflight_v1";
@@ -628,50 +735,6 @@ function MetricsRow({ metrics }) {
   );
 }
 
-/* ---- date dropdown helpers ---- */
-function Sep() {
-  return (
-    <span
-      style={{
-        width: 1,
-        height: 22,
-        background: "rgba(255,255,255,0.08)",
-        display: "inline-block",
-        borderRadius: 2,
-      }}
-    />
-  );
-}
-
-function Picker({ value, options = [], onChange }) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
-      style={{
-        appearance: "none",
-        WebkitAppearance: "none",
-        MozAppearance: "none",
-        background: "#141a1f",
-        color: "#bdfdf0",
-        border: "1px solid rgba(255,255,255,0.06)",
-        borderRadius: 10,
-        padding: "8px 10px",
-        fontWeight: 900,
-        fontSize: 14,
-        outline: "none",
-        cursor: "pointer",
-        minWidth: 74,
-      }}
-    >
-      {options.map((o) => (
-        <option key={String(o)} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 /* ======================================================================= */
 /* ============================== MAIN =================================== */
@@ -902,8 +965,51 @@ const CampaignSetup = () => {
           : [];
 
   const headline = state.headline || "";
-  const body = state.body || "";
-  const answers = state.answers || {};
+const body = state.body || "";
+const answers = state.answers || {};
+
+const inferredLink =
+  (state.websiteUrl ||
+    form?.websiteUrl ||
+    form?.website ||
+    answers?.websiteUrl ||
+    answers?.website ||
+    answers?.url ||
+    answers?.link ||
+    "").toString().trim();
+
+const [previewCopy, setPreviewCopy] = useState(() => {
+  // 1) state (pre-connect)
+  const fromState = {
+    headline: headline || "",
+    body: body || "",
+    link: inferredLink || "",
+  };
+  if (fromState.headline || fromState.body || fromState.link) return fromState;
+
+  // 2) backup (post-connect / refresh)
+  const b = loadSetupPreviewBackup(resolvedUser);
+  return b ? { headline: b.headline || "", body: b.body || "", link: b.link || "" } : { headline: "", body: "", link: "" };
+});
+
+// save preview whenever we have it
+useEffect(() => {
+  const has = !!(previewCopy?.headline || previewCopy?.body || previewCopy?.link);
+  if (!has) return;
+  saveSetupPreviewBackup(resolvedUser, previewCopy);
+  // eslint-disable-next-line
+}, [previewCopy?.headline, previewCopy?.body, previewCopy?.link, resolvedUser]);
+
+// on oauth return, restore preview backup (fix “it removed after connected”)
+useEffect(() => {
+  const params = new URLSearchParams(location.search);
+  if (params.get("facebook_connected") === "1") {
+    const b = loadSetupPreviewBackup(resolvedUser);
+    if (b) setPreviewCopy({ headline: b.headline || "", body: b.body || "", link: b.link || "" });
+  }
+  // eslint-disable-next-line
+}, [location.search, resolvedUser]);
+
 
    useEffect(() => {
     // ✅ If we launched already, never resurrect the draft
@@ -945,61 +1051,72 @@ const CampaignSetup = () => {
   }, [draftCreatives, resolvedUser]);
 
 
-  const [startDate, setStartDate] = useState(() => {
-    const existing = form.startDate || "";
-    return existing || new Date(defaultStart).toISOString().slice(0, 16);
-  });
+/* ===================== CAMPAIGN DURATION (simple date range) ===================== */
 
-  const [endDate, setEndDate] = useState(() => {
-    const s = startDate ? new Date(startDate) : defaultStart;
-    const e = new Date(s.getTime() + 3 * 24 * 60 * 60 * 1000);
-    e.setSeconds(0, 0);
-    return (form.endDate || "").length ? form.endDate : e.toISOString().slice(0, 16);
-  });
+// store as YYYY-MM-DD (clean, small UI)
+const todayISO = useMemo(() => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${da}`;
+}, []);
 
-  const sd = new Date(startDate || defaultStart);
-  const ed = new Date(endDate || new Date(sd.getTime() + 3 * 24 * 60 * 60 * 1000));
-  const [sMonth, setSMonth] = useState(sd.getMonth() + 1);
-  const [sDay, setSDay] = useState(sd.getDate());
-  const [sYear, setSYear] = useState(sd.getFullYear() % 100);
-  const [eMonth, setEMonth] = useState(ed.getMonth() + 1);
-  const [eDay, setEDay] = useState(ed.getDate());
-  const [eYear, setEYear] = useState(ed.getFullYear() % 100);
+const plusDaysISO = (baseYYYYMMDD, days) => {
+  try {
+    const d = new Date(`${baseYYYYMMDD}T00:00:00`);
+    d.setDate(d.getDate() + days);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
+  } catch {
+    return baseYYYYMMDD;
+  }
+};
 
-  const [showImageModal, setShowImageModal] = useState(false);
-  const [modalImg, setModalImg] = useState("");
+const [startDate, setStartDate] = useState(() => {
+  const existing = (form?.startDate || "").slice(0, 10);
+  return existing || todayISO;
+});
 
-  const clampEndForStart = (startStr, endStr) => {
-    try {
-      const start = new Date(startStr);
-      let end = endStr ? new Date(endStr) : null;
-      const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
-      if (!end || end <= start) end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-      if (end > maxEnd) end = maxEnd;
-      end.setSeconds(0, 0);
-      return end.toISOString().slice(0, 16);
-    } catch {
-      return endStr;
+const [endDate, setEndDate] = useState(() => {
+  const existing = (form?.endDate || "").slice(0, 10);
+  // default end = start + 3 days
+  return existing || plusDaysISO(existing ? existing : (form?.startDate || todayISO).slice(0, 10) || todayISO, 3);
+});
+
+// Clamp end so: end > start, and end <= start + 14 days
+const clampEndForStart = (startYYYYMMDD, endYYYYMMDD) => {
+  try {
+    const start = new Date(`${startYYYYMMDD}T00:00:00`);
+    let end = endYYYYMMDD ? new Date(`${endYYYYMMDD}T00:00:00`) : null;
+
+    const maxEnd = new Date(start.getTime() + 14 * 24 * 60 * 60 * 1000);
+
+    if (!end || end <= start) {
+      end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
     }
-  };
+    if (end > maxEnd) end = maxEnd;
 
-  useEffect(() => {
-    const clampDay = (m, y2) => {
-      const y = 2000 + y2;
-      return new Date(y, m, 0).getDate();
-    };
-    const sdMaxDay = clampDay(sMonth, sYear);
-    const sD = Math.min(sDay, sdMaxDay);
-    const sISO = new Date(2000 + sYear, sMonth - 1, sD, 9, 0, 0).toISOString().slice(0, 16);
-    setStartDate(sISO);
+    const y = end.getFullYear();
+    const m = String(end.getMonth() + 1).padStart(2, "0");
+    const da = String(end.getDate()).padStart(2, "0");
+    return `${y}-${m}-${da}`;
+  } catch {
+    return endYYYYMMDD;
+  }
+};
 
-    const edMaxDay = clampDay(eMonth, eYear);
-    const eD = Math.min(eDay, edMaxDay);
-    let eISO = new Date(2000 + eYear, eMonth - 1, eD, 18, 0, 0).toISOString().slice(0, 16);
+// keep end clamped whenever start changes
+useEffect(() => {
+  setEndDate((prev) => clampEndForStart(startDate, prev));
+  // eslint-disable-next-line
+}, [startDate]);
 
-    eISO = clampEndForStart(sISO, eISO);
-    setEndDate(eISO);
-  }, [sMonth, sDay, sYear, eMonth, eDay, eYear]);
+
+
+
 
   /* ===================== DRAFT RE-HYDRATION ===================== */
   useEffect(() => {
@@ -1351,8 +1468,9 @@ const CampaignSetup = () => {
     const acctId = String(selectedAccount).trim();
 
     const endMillis =
-      endDate && !isNaN(new Date(endDate).getTime())
-        ? new Date(endDate).getTime()
+      endDate && !isNaN(new Date(`${endDate}T18:00:00`).getTime())
+  ? new Date(`${endDate}T18:00:00`).getTime()
+
         : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
 
     attachDraftToCampaignIfEmpty({
@@ -1569,10 +1687,11 @@ const CampaignSetup = () => {
 
       const safeBudget = Math.max(3, Number(budget) || 0);
 
-      const { startISO, endISO } = capTwoWeeksISO(
-        startDate ? new Date(startDate).toISOString() : null,
-        endDate ? new Date(endDate).toISOString() : null
-      );
+     const { startISO, endISO } = capTwoWeeksISO(
+  startDate ? new Date(`${startDate}T09:00:00`).toISOString() : null,
+  endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
+);
+
 
       const filteredImages = (draftCreatives.images || []).slice(0, 2).map(toAbsoluteMedia).filter(Boolean);
 
@@ -1975,6 +2094,18 @@ setTimeout(() => setLaunched(false), 1500);
                 "/setup" +
                 `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
+                // ✅ also persist preview copy so it survives the redirect
+try {
+  const p = {
+    headline: headline || previewCopy?.headline || "",
+    body: body || previewCopy?.body || "",
+    link: inferredLink || previewCopy?.link || "",
+    ctxKey: safeCtx,
+  };
+  saveSetupPreviewBackup(resolvedUser, p);
+} catch {}
+
+
               window.location.assign(
                 `${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`
               );
@@ -2050,57 +2181,65 @@ setTimeout(() => setLaunched(false), 1500);
             </div>
           </div>
 
-          <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ color: WHITE, fontWeight: 900, fontSize: "1.02rem" }}>Campaign Duration</div>
+    <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
+  <div style={{ color: WHITE, fontWeight: 900, fontSize: "1.02rem" }}>Campaign Duration</div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>Start</label>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "center",
-                    padding: "8px 10px",
-                    borderRadius: 12,
-                    background: INPUT_BG,
-                    border: `1px solid ${INPUT_BORDER}`,
-                  }}
-                >
-                  <Picker value={sMonth} options={months} onChange={setSMonth} />
-                  <Sep />
-                  <Picker value={sDay} options={daysFor(sMonth, sYear)} onChange={setSDay} />
-                  <Sep />
-                  <Picker value={sYear} options={years} onChange={setSYear} />
-                </div>
-              </div>
+  <div
+    style={{
+      ...GLASS,
+      borderRadius: 14,
+      padding: "12px 12px",
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 10,
+    }}
+  >
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.9rem" }}>From</label>
+      <input
+        type="date"
+        value={startDate}
+        onChange={(e) => setStartDate(e.target.value)}
+        style={{
+          background: INPUT_BG,
+          borderRadius: 12,
+          padding: "10px 12px",
+          border: `1px solid ${INPUT_BORDER}`,
+          width: "100%",
+          color: TEXT_DIM,
+          fontSize: "0.98rem",
+          fontWeight: 800,
+          outline: "none",
+        }}
+      />
+    </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.92rem" }}>End</label>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "center",
-                    padding: "8px 10px",
-                    borderRadius: 12,
-                    background: INPUT_BG,
-                    border: `1px solid ${INPUT_BORDER}`,
-                  }}
-                >
-                  <Picker value={eMonth} options={months} onChange={setEMonth} />
-                  <Sep />
-                  <Picker value={eDay} options={daysFor(eMonth, eYear)} onChange={setEDay} />
-                  <Sep />
-                  <Picker value={eYear} options={years} onChange={setEYear} />
-                </div>
-              </div>
-            </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.9rem" }}>To</label>
+      <input
+        type="date"
+        value={endDate}
+        onChange={(e) => setEndDate(clampEndForStart(startDate, e.target.value))}
+        style={{
+          background: INPUT_BG,
+          borderRadius: 12,
+          padding: "10px 12px",
+          border: `1px solid ${INPUT_BORDER}`,
+          width: "100%",
+          color: TEXT_DIM,
+          fontSize: "0.98rem",
+          fontWeight: 800,
+          outline: "none",
+        }}
+      />
+    </div>
+  </div>
 
-            <div style={{ color: "#9fe9c8", fontWeight: 700, fontSize: "0.9rem" }}>
-              Max duration is 14 days. End will auto-adjust if needed.
-            </div>
-          </div>
+  <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: "0.9rem" }}>
+    Max duration is 14 days. End will auto-adjust if needed.
+  </div>
+</div>
+
 
           {/* ==================== BUDGET + SMARTMARK FEE (ONLY ONE BLOCK) ==================== */}
           <div style={{ width: "100%", maxWidth: 420, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -2145,20 +2284,19 @@ setTimeout(() => setLaunched(false), 1500);
               if (!show) return null;
 
               return (
-                <div
-                  style={{
-                    marginTop: 4,
-                    background: "#12201b",
-                    border: "1px solid rgba(20,231,185,0.18)",
-                    borderRadius: 14,
-                    padding: "12px 12px",
-                    boxShadow: "0 2px 14px rgba(20,231,185,0.10)",
-                    color: WHITE,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
+               <div
+  style={{
+    marginTop: 6,
+    borderRadius: 16,
+    padding: "14px 14px",
+    ...GLASS,
+    color: WHITE,
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  }}
+>
+
                   <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>
                     Pay SmartMark Fee to Launch
                   </div>
@@ -2169,7 +2307,8 @@ setTimeout(() => setLaunched(false), 1500);
                       type="text"
                       value={loginUser}
                       onChange={(e) => setLoginUser(e.target.value)}
-                      placeholder="Email / Username"
+                      placeholder="CashTag (e.g., $willkw)"
+
                       style={{
                         background: INPUT_BG,
                         borderRadius: 12,
@@ -2187,7 +2326,8 @@ setTimeout(() => setLaunched(false), 1500);
                       type="password"
                       value={loginPass}
                       onChange={(e) => setLoginPass(e.target.value)}
-                      placeholder="Password"
+                     placeholder="Email"
+
                       style={{
                         background: INPUT_BG,
                         borderRadius: 12,
@@ -2214,8 +2354,10 @@ setTimeout(() => setLaunched(false), 1500);
                       type="button"
                       onClick={handlePayFee}
                       style={{
-                        background: feePaid ? "#2f7a5d" : ACCENT,
-                        color: feePaid ? WHITE : "#0f1418",
+                        background: feePaid ? `linear-gradient(90deg, ${ACCENT}, ${ACCENT_2})` : BTN_BASE,
+color: WHITE,
+boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
+
                         border: "none",
                         borderRadius: 12,
                         fontWeight: 900,
@@ -2539,49 +2681,58 @@ setTimeout(() => setLaunched(false), 1500);
                             </div>
                           </div>
 
-                          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
-                            Creatives
-                          </div>
+                     <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
+  Creatives
+</div>
 
-                          <div
-                            style={{
-                              background: "#ffffff",
-                              borderRadius: 12,
-                              border: "1.2px solid #eaeaea",
-                              overflow: "hidden",
-                              boxShadow: "0 2px 16px rgba(0,0,0,0.12)",
-                            }}
-                          >
-                            <div
-                              style={{
-                                background: "#f5f6fa",
-                                padding: "8px 12px",
-                                borderBottom: "1px solid #e0e4eb",
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                color: "#495a68",
-                                fontWeight: 800,
-                                fontSize: "0.95rem",
-                              }}
-                            >
-                              <span>Images</span>
-                            </div>
-                            <ImageCarousel
-                              items={creatives.images}
-                              height={CREATIVE_HEIGHT}
-                              onFullscreen={(url) => {
-                                setModalImg(url);
-                                setShowImageModal(true);
-                              }}
-                            />
-                          </div>
+<div
+  style={{
+    borderRadius: 16,
+    overflow: "hidden",
+    ...GLASS,
+  }}
+>
+  <div
+    style={{
+      padding: "10px 12px",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      color: TEXT_DIM,
+      fontWeight: 900,
+      fontSize: "0.95rem",
+      borderBottom: `1px solid ${INPUT_BORDER}`,
+      background: "rgba(255,255,255,0.03)",
+    }}
+  >
+    <span>Images</span>
+  </div>
 
-                          {(!creatives.images || creatives.images.length === 0) && (
-                            <div style={{ color: "#c9d7d2", fontWeight: 800, padding: "8px 4px" }}>
-                              No creatives saved for this campaign yet.
-                            </div>
-                          )}
+  <div style={{ padding: 10 }}>
+    <ImageCarousel
+      items={creatives.images}
+      height={CREATIVE_HEIGHT}
+      onFullscreen={(url) => {
+        setModalImg(url);
+        setShowImageModal(true);
+      }}
+    />
+
+    {/* ✅ Copy goes UNDER the image and never leaks */}
+    <PreviewCard
+      headline={previewCopy?.headline}
+      body={previewCopy?.body}
+      link={previewCopy?.link}
+    />
+  </div>
+</div>
+
+{(!creatives.images || creatives.images.length === 0) && (
+  <div style={{ color: TEXT_MUTED, fontWeight: 800, padding: "8px 4px" }}>
+    No creatives saved for this campaign yet.
+  </div>
+)}
+
                         </div>
 
                       </div>
