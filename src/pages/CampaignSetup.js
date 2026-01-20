@@ -359,20 +359,32 @@ const SS_ACTIVE_CTX_KEY = (u) => (u ? `u:${u}:${ACTIVE_CTX_KEY}` : ACTIVE_CTX_KE
 
 // ✅ Prevent draft from re-hydrating after a successful launch
 const SS_DRAFT_DISABLED_KEY = (u) => (u ? `u:${u}:sm_draft_disabled_v1` : "sm_draft_disabled_v1");
+// ✅ GLOBAL flag so draft stays disabled even if resolvedUser changes after login
+const SS_DRAFT_DISABLED_GLOBAL_KEY = "sm_draft_disabled_global_v1";
 
 function isDraftDisabled(user) {
   try {
+    // if globally disabled, never rehydrate a draft
+    if (sessionStorage.getItem(SS_DRAFT_DISABLED_GLOBAL_KEY) === "1") return true;
+
     return sessionStorage.getItem(SS_DRAFT_DISABLED_KEY(user)) === "1";
   } catch {
     return false;
   }
 }
+
 function setDraftDisabled(user, on) {
   try {
-    if (on) sessionStorage.setItem(SS_DRAFT_DISABLED_KEY(user), "1");
-    else sessionStorage.removeItem(SS_DRAFT_DISABLED_KEY(user));
+    if (on) {
+      sessionStorage.setItem(SS_DRAFT_DISABLED_KEY(user), "1");
+      sessionStorage.setItem(SS_DRAFT_DISABLED_GLOBAL_KEY, "1"); // ✅ global persist
+    } else {
+      sessionStorage.removeItem(SS_DRAFT_DISABLED_KEY(user));
+      sessionStorage.removeItem(SS_DRAFT_DISABLED_GLOBAL_KEY); // ✅ allow draft again (only when you explicitly want)
+    }
   } catch {}
 }
+
 
 // Local keys that should also be per-user
 const LS_INFLIGHT_KEY = (u) => (u ? withUser(u, FB_CONNECT_INFLIGHT_KEY) : FB_CONNECT_INFLIGHT_KEY);
@@ -1900,14 +1912,15 @@ useEffect(() => {
     setFeePaid(false);
   }, [budget, resolvedUser]);
 
-  useEffect(() => {
-    const v = selectedAccount ? String(selectedAccount).replace(/^act_/, "") : "";
-    lsSet(resolvedUser, "smartmark_last_selected_account", v);
-  }, [selectedAccount]);
+useEffect(() => {
+  const v = selectedAccount ? String(selectedAccount).replace(/^act_/, "") : "";
+  lsSet(resolvedUser, "smartmark_last_selected_account", v, true); // ✅ alsoLegacy
+}, [selectedAccount, resolvedUser]);
 
-  useEffect(() => {
-    lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId);
-  }, [selectedPageId]);
+useEffect(() => {
+  lsSet(resolvedUser, "smartmark_last_selected_pageId", selectedPageId, true); // ✅ alsoLegacy
+}, [selectedPageId, resolvedUser]);
+
 
   const handlePauseUnpause = async () => {
     if (!selectedCampaignId || !selectedAccount) return;
