@@ -699,12 +699,13 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [broken, setBroken] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // ✅ NEW: retry state (fixes “connect → one transient fail → stuck forever”)
+  const [retryCount, setRetryCount] = useState(0);
+  const [retryNonce, setRetryNonce] = useState(0);
+
   // Normalize + dedupe
   const normalized = useMemo(() => {
-    const arr = (items || [])
-      .map(toAbsoluteMedia)
-      .filter(Boolean);
-    // cheap dedupe while preserving order
+    const arr = (items || []).map(toAbsoluteMedia).filter(Boolean);
     const seen = new Set();
     return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
   }, [items]);
@@ -714,12 +715,16 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     if (idx >= normalized.length) setIdx(0);
     setBroken(false);
     setLoaded(false);
+    setRetryCount(0);
+    setRetryNonce(0);
   }, [normalized]); // eslint-disable-line
 
   // If idx changes, we’re loading a new image
   useEffect(() => {
     setBroken(false);
     setLoaded(false);
+    setRetryCount(0);
+    setRetryNonce(0);
   }, [idx]);
 
   if (!normalized.length) {
@@ -744,9 +749,33 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     );
   }
 
-  const current = normalized[idx];
+  const base = normalized[idx];
+
+  // ✅ cache-bust for retries (forces browser to re-request)
+  const current = useMemo(() => {
+    if (!base) return "";
+    if (!retryNonce) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}smcb=${retryNonce}`;
+  }, [base, retryNonce]);
 
   const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
+
+  // ✅ auto-retry a few times if we hit a transient failure (Render cold start etc.)
+  useEffect(() => {
+    if (!broken) return;
+    if (retryCount >= 3) return;
+
+    const delay = 350 + retryCount * 450; // small backoff
+    const t = setTimeout(() => {
+      setBroken(false);
+      setLoaded(false);
+      setRetryCount((c) => c + 1);
+      setRetryNonce(Date.now());
+    }, delay);
+
+    return () => clearTimeout(t);
+  }, [broken, retryCount]);
 
   return (
     <div
@@ -778,13 +807,15 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
         </div>
       )}
 
-      {/* Error state (NO fallback fetch that can also fail) */}
-      {broken && (
+      {/* Error state (after retries exhausted) */}
+      {broken && retryCount >= 3 && (
         <div
           style={{
             height,
             width: "100%",
             display: "flex",
+            flexDirection: "column",
+            gap: 10,
             alignItems: "center",
             justifyContent: "center",
             color: "rgba(255,255,255,0.62)",
@@ -793,13 +824,34 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             background: "linear-gradient(180deg, rgba(255,60,60,0.08), rgba(255,255,255,0.02))",
           }}
         >
-          Image failed to load
+          <div>Image failed to load</div>
+          <button
+            type="button"
+            onClick={() => {
+              setBroken(false);
+              setLoaded(false);
+              setRetryCount(0);
+              setRetryNonce(Date.now());
+            }}
+            style={{
+              background: "#1b242a",
+              color: "#fff",
+              border: "1px solid rgba(255,255,255,0.08)",
+              borderRadius: 10,
+              padding: "8px 14px",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            Retry
+          </button>
         </div>
       )}
 
+      {/* Image */}
       {!broken && (
         <img
-          key={current} // force reload when URL changes
+          key={current} // force reload when URL/nonce changes
           src={current}
           alt="Ad"
           style={{
@@ -810,7 +862,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             display: "block",
             background: "#0f1418",
           }}
-          onClick={() => onFullscreen && onFullscreen(current)}
+          onClick={() => onFullscreen && onFullscreen(base)}
           onLoad={() => setLoaded(true)}
           onError={() => setBroken(true)}
           draggable={false}
@@ -833,6 +885,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     </div>
   );
 }
+
 
 
 /* ---------- Minimal metrics row ---------- */
