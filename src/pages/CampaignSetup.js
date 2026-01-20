@@ -1429,82 +1429,107 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
     if (expandedId === "__DRAFT__") setExpandedId(null);
   };
 
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    if (params.get("facebook_connected") === "1") {
-      smLog(
-        "oauth.return.before",
-        smDumpDraftSnapshot({
-          FORM_DRAFT_KEY,
-          CREATIVE_DRAFT_KEY,
-          FB_CONNECT_INFLIGHT_KEY,
-          ACTIVE_CTX_KEY,
-        })
-      );
+useEffect(() => {
+  const params = new URLSearchParams(location.search);
+  if (params.get("facebook_connected") !== "1") return;
 
-      try {
-        const sid = (params.get("sm_sid") || params.get("sid") || "").trim();
-        if (sid) setStoredSid(sid);
-      } catch {}
+  smLog(
+    "oauth.return.before",
+    smDumpDraftSnapshot({
+      FORM_DRAFT_KEY,
+      CREATIVE_DRAFT_KEY,
+      FB_CONNECT_INFLIGHT_KEY,
+      ACTIVE_CTX_KEY,
+    })
+  );
 
-      try {
-        const raw = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
-        const inflight = raw ? JSON.parse(raw) : null;
-        const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
-        if (k) setActiveCtx(k, resolvedUser);
-      } catch {}
+  // ✅ keep sid stable if backend sends one
+  try {
+    const sid = (params.get("sm_sid") || params.get("sid") || "").trim();
+    if (sid) setStoredSid(sid);
+  } catch {}
 
-      setFbConnected(true);
-      setCameFromFbConnect(true);
+  // ✅ restore ctxKey from inflight so we stay in the same run namespace
+  try {
+    const raw = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
+    const inflight = raw ? JSON.parse(raw) : null;
+    const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
+    if (k) setActiveCtx(k, resolvedUser);
+  } catch {}
 
-      setExpandedId("__DRAFT__");
-      setSelectedCampaignId("__DRAFT__");
+  // ✅ allow draft to re-hydrate after redirect (critical)
+  setDraftDisabled(resolvedUser, false);
 
-      try {
-        localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
-      } catch {}
+  setFbConnected(true);
+  setCameFromFbConnect(true);
 
-      try {
-        const sess = sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser));
-        if (!sess) {
-          const backup = loadSetupCreativeBackup(resolvedUser);
-          if (backup && isDraftForActiveCtx(backup, resolvedUser)) {
-            const imgs = (Array.isArray(backup.images) ? backup.images : [])
-              .slice(0, 2)
-              .map(toAbsoluteMedia)
-              .filter(Boolean);
+  // ✅ FORCE re-hydration from ANY source (session, global, user, backup)
+  let best = null;
+  try {
+    const raw =
+      sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
+      sessionStorage.getItem("draft_form_creatives") ||
+      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+      localStorage.getItem(CREATIVE_DRAFT_KEY) ||
+      null;
 
-            const patched = { ...backup, images: imgs };
+    if (raw) best = JSON.parse(raw || "null");
+  } catch {
+    best = null;
+  }
 
-            sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
-            setDraftCreatives({
-              images: imgs,
-              mediaSelection: "image",
-            });
+  if (!best) {
+    best = loadSetupCreativeBackup(resolvedUser);
+  }
 
-            setExpandedId("__DRAFT__");
-            setSelectedCampaignId("__DRAFT__");
-          }
-        }
-      } catch {}
+  const imgs = (Array.isArray(best?.images) ? best.images : [])
+    .slice(0, 2)
+    .map(toAbsoluteMedia)
+    .filter(Boolean);
 
-      try {
-        localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
-      } catch {}
+  if (imgs.length) {
+    const patched = {
+      ...(best || {}),
+      images: imgs,
+      mediaSelection: "image",
+      savedAt: Date.now(),
+      ctxKey: String(best?.ctxKey || getActiveCtx(resolvedUser) || "").trim(),
+    };
 
-      smLog(
-        "oauth.return.after",
-        smDumpDraftSnapshot({
-          FORM_DRAFT_KEY,
-          CREATIVE_DRAFT_KEY,
-          FB_CONNECT_INFLIGHT_KEY,
-          ACTIVE_CTX_KEY,
-        })
-      );
+    try {
+      sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
+      saveSetupCreativeBackup(resolvedUser, patched);
+    } catch {}
 
-      window.history.replaceState({}, document.title, "/setup");
-    }
-  }, [location.search, resolvedUser]);
+    setDraftCreatives({ images: imgs, mediaSelection: "image" });
+    setExpandedId("__DRAFT__");
+    setSelectedCampaignId("__DRAFT__");
+  }
+
+  // keep connected flag fresh
+  try {
+    localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
+  } catch {}
+
+  // cleanup inflight marker
+  try {
+    localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
+  } catch {}
+
+  smLog(
+    "oauth.return.after",
+    smDumpDraftSnapshot({
+      FORM_DRAFT_KEY,
+      CREATIVE_DRAFT_KEY,
+      FB_CONNECT_INFLIGHT_KEY,
+      ACTIVE_CTX_KEY,
+    })
+  );
+
+  // strip query params after restore
+  window.history.replaceState({}, document.title, "/setup");
+}, [location.search, resolvedUser]);
+
 
   useEffect(() => {
     if (fbConnected) {
