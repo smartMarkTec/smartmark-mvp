@@ -566,15 +566,14 @@ function toAbsoluteMedia(u) {
   const s = String(u).trim();
   if (!s) return "";
 
-  // ✅ allow data:image previews (optional, but harmless)
+  // ✅ allow data:image previews (they may exist in cache)
   if (/^data:image\//i.test(s)) return s;
 
-  // ✅ reject frontend-only / non-fetchable URLs
+  // reject unusable schemes
   if (/^(blob:|file:|about:)/i.test(s)) return "";
 
-  // ✅ If it's already absolute:
-  //   - If it points to /api/media, ALWAYS normalize to MEDIA_ORIGIN (Render),
-  //     because smartemark.com does NOT serve /api/media (that caused your 404).
+  // ✅ absolute URL:
+  // if it’s a /api/media URL, ALWAYS force Render origin (smartemark.com does NOT serve /api/media)
   if (/^https?:\/\//i.test(s)) {
     try {
       const url = new URL(s);
@@ -588,21 +587,19 @@ function toAbsoluteMedia(u) {
   }
 
   // ✅ bare filenames like "static-....png" must be served from /api/media on Render
-  if (/\.(png|jpg|jpeg|webp)$/i.test(s) && !s.startsWith("/")) {
+  if (!s.startsWith("/") && /\.(png|jpg|jpeg|webp)$/i.test(s)) {
     return `${MEDIA_ORIGIN}/api/media/${s}`;
   }
 
-  // ✅ relative /api/media must go to Render too (NOT APP_ORIGIN)
+  // ✅ relative media paths must go to Render too
   if (s.startsWith("/api/media/")) return MEDIA_ORIGIN + s;
   if (s.startsWith("api/media/")) return `${MEDIA_ORIGIN}/${s}`;
 
-  // other relative paths
+  // other relative paths -> Render
   if (s.startsWith("/")) return MEDIA_ORIGIN + s;
 
   return MEDIA_ORIGIN + "/" + s;
 }
-
-
 
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -2629,7 +2626,18 @@ const filteredImages = draftImgs
                 const id = c.id;
                 const isOpen = expandedId === id;
                 const name = isDraft ? form.campaignName || "Untitled" : c.name || "Campaign";
-                const websiteUrlPreview = (form?.websiteUrl || form?.website || answers?.websiteUrl || answers?.website || answers?.url || answers?.link || "").toString().trim();
+               const websiteUrlPreview = (
+  form?.websiteUrl ||
+  form?.website ||
+  answers?.websiteUrl ||
+  answers?.website ||
+  answers?.url ||
+  answers?.link ||
+  inferredLink ||
+  previewCopy?.link ||
+  ""
+).toString().trim();
+
 
                 const creatives = isDraft
                   ? {
