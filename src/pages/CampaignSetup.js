@@ -23,6 +23,11 @@ const BTN_BASE_HOVER = "#2e82ff";
 const GLOW_A = "rgba(49,225,255,0.22)";
 const GLOW_B = "rgba(124,77,255,0.18)";
 
+// aliases used in UI sections
+const GLOW_TEAL = GLOW_A;
+const ACCENT_ALT = ACCENT; // keep legacy refs working
+
+
 const CARD_BG = "rgba(20, 24, 31, 0.78)";
 const EDGE_BG = "rgba(255,255,255,0.06)";
 const PANEL_BG = "rgba(18, 22, 28, 0.72)";
@@ -1796,30 +1801,20 @@ try {
 setBudget("");
 setForm((prev) => ({ ...prev, campaignName: "" }));
 
-// reset dates to default (start ~10 min from now, end +3 days)
+// reset dates to default (today -> today+3) for the new <input type="date" />
 try {
-  const d0 = new Date(Date.now() + 10 * 60 * 1000);
-  d0.setSeconds(0, 0);
-  const sISO = d0.toISOString().slice(0, 16);
+  const d0 = new Date();
+  const y = d0.getFullYear();
+  const m = String(d0.getMonth() + 1).padStart(2, "0");
+  const da = String(d0.getDate()).padStart(2, "0");
+  const startYYYYMMDD = `${y}-${m}-${da}`;
 
-  const d1 = new Date(d0.getTime() + 3 * 24 * 60 * 60 * 1000);
-  d1.setSeconds(0, 0);
-  const eISO = d1.toISOString().slice(0, 16);
+  const endYYYYMMDD = plusDaysISO(startYYYYMMDD, 3);
 
-  setStartDate(sISO);
-  setEndDate(eISO);
-
-  const sd2 = new Date(sISO);
-  const ed2 = new Date(eISO);
-
-  setSMonth(sd2.getMonth() + 1);
-  setSDay(sd2.getDate());
-  setSYear(sd2.getFullYear() % 100);
-
-  setEMonth(ed2.getMonth() + 1);
-  setEDay(ed2.getDate());
-  setEYear(ed2.getFullYear() % 100);
+  setStartDate(startYYYYMMDD);
+  setEndDate(endYYYYMMDD);
 } catch {}
+
 
 setTimeout(() => setLaunched(false), 1500);
 
@@ -2718,12 +2713,12 @@ boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
       }}
     />
 
-    {/* ✅ Copy goes UNDER the image and never leaks */}
-    <PreviewCard
-      headline={previewCopy?.headline}
-      body={previewCopy?.body}
-      link={previewCopy?.link}
-    />
+   <PreviewCard
+  headline={creatives?.meta?.headline || previewCopy?.headline}
+  body={creatives?.meta?.body || previewCopy?.body}
+  link={creatives?.meta?.link || previewCopy?.link}
+/>
+
   </div>
 </div>
 
