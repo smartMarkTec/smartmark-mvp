@@ -2169,14 +2169,78 @@ const payload = {
         writeCreativeMap(resolvedUser, acctId, map);
       }
 
-      // ✅ After successful launch: prevent "in progress" from coming back
+         // ✅ After successful launch: prevent "in progress" from coming back
       setDraftDisabled(resolvedUser, true);
+
       try {
+        // 1) remove ALL draft storages used by Setup/Form
         purgeDraftStorages(resolvedUser);
+
+        // also clear legacy creative draft keys (extra safety)
+        try {
+          if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY_LEGACY));
+        } catch {}
+        try {
+          localStorage.removeItem(CREATIVE_DRAFT_KEY_LEGACY);
+        } catch {}
+
+        // remove setup backups + inflight marker
         localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
         localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY);
         localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
+
+        // 2) IMPORTANT: remove the caches that re-create a draft after launch
+        //    - imageDrafts fallback
+        //    - fetchable image cache fallback
+        const launched = (filteredImages || []).map((u) => String(u || "").trim()).filter(Boolean);
+
+        // prune smartmark.imageDrafts.v1 (remove entries that match launched images)
+        try {
+          const raw = localStorage.getItem("smartmark.imageDrafts.v1");
+          if (raw) {
+            const obj = JSON.parse(raw || "{}") || {};
+            const keys = Object.keys(obj || {});
+            const launchedFileNames = launched
+              .map((u) => {
+                try {
+                  const url = new URL(u);
+                  return (url.pathname.split("/").pop() || "").trim();
+                } catch {
+                  return (String(u).split("/").pop() || "").trim();
+                }
+              })
+              .filter(Boolean);
+
+            let changed = false;
+
+            for (const k of keys) {
+              if (!k.startsWith("img:")) continue;
+              const imgKey = k.slice(4); // after "img:"
+              const hit =
+                launched.includes(imgKey) ||
+                launched.some((u) => imgKey.includes(u)) ||
+                launchedFileNames.some((fn) => imgKey.includes(fn));
+              if (hit) {
+                delete obj[k];
+                changed = true;
+              }
+            }
+
+            if (changed) {
+              const left = Object.keys(obj || {}).length;
+              if (!left) localStorage.removeItem("smartmark.imageDrafts.v1");
+              else localStorage.setItem("smartmark.imageDrafts.v1", JSON.stringify(obj));
+            }
+          }
+        } catch {}
+
+        // clear fetchable cache so data:image -> cached url can't resurrect an old draft
+        try {
+          localStorage.removeItem("sm_image_cache_v1");
+          localStorage.removeItem("u:anon:sm_image_cache_v1");
+        } catch {}
       } catch {}
+
 
       setDraftCreatives({ images: [], mediaSelection: "image" });
       if (expandedId === "__DRAFT__") setExpandedId(null);
