@@ -557,50 +557,26 @@ function toAbsoluteMedia(u) {
   const s = String(u).trim();
   if (!s) return "";
 
-  // ✅ reject frontend-only / non-fetchable URLs
-  if (/^(blob:|data:|file:|about:)/i.test(s)) return "";
+  // ✅ Allow Data URLs for PREVIEW rendering (FormPage may pass cached data:image)
+  if (/^data:image\//i.test(s)) return s;
 
-  // If it's an /api/media path, prefer same-origin first (prevents cross-origin blocking).
-  // Example:
-  //   https://smartmark-mvp.onrender.com/api/media/x.png  ->  https://smartemark.com/api/media/x.png
-  //   /api/media/x.png                                   ->  https://smartemark.com/api/media/x.png
-  const looksLikeMediaPath =
-    s.startsWith("/api/media/") ||
-    s.includes("/api/media/");
+  // Reject truly unusable schemes
+  if (/^(blob:|file:|about:)/i.test(s)) return "";
 
-  if (looksLikeMediaPath) {
-    try {
-      // If it's an absolute URL, strip to pathname+search, then rebuild on APP_ORIGIN
-      if (/^https?:\/\//i.test(s)) {
-        const url = new URL(s);
-        if (url.pathname.startsWith("/api/media/")) {
-          return APP_ORIGIN + url.pathname + (url.search || "");
-        }
-        // if it contains /api/media deeper, try best-effort
-        const idx = url.pathname.indexOf("/api/media/");
-        if (idx >= 0) {
-          const path = url.pathname.slice(idx);
-          return APP_ORIGIN + path + (url.search || "");
-        }
-        return s;
-      }
-
-      // If it's relative, force same-origin absolute
-      if (s.startsWith("/api/media/")) return APP_ORIGIN + s;
-
-      // If it's "api/media/..." without leading slash
-      if (s.startsWith("api/media/")) return APP_ORIGIN + "/" + s;
-    } catch {}
-  }
-
-  // Absolute non-media URLs: keep as-is
+  // ✅ If it's already absolute (Render or anything), DO NOT rewrite to APP_ORIGIN
+  // This fixes the "redirecting to Vercel instead of actual website" issue.
   if (/^https?:\/\//i.test(s)) return s;
 
-  // For other relative paths, use Render as fallback origin (your existing behavior)
+  // ✅ If relative /api/media, use same-origin (smartemark.com) ONLY when it's actually relative
+  if (s.startsWith("/api/media/")) return APP_ORIGIN + s;
+  if (s.startsWith("api/media/")) return APP_ORIGIN + "/" + s;
+
+  // Other relative paths fall back to Render
   if (s.startsWith("/")) return MEDIA_ORIGIN + s;
 
   return MEDIA_ORIGIN + "/" + s;
 }
+
 
 function ImageModal({ open, imageUrl, onClose }) {
   if (!open) return null;
@@ -1840,11 +1816,32 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
         endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
       );
 
-      // ✅ normalize + filter to ONLY fetchable URLs
-      const filteredImages = (draftCreatives.images || [])
-        .slice(0, 2)
-        .map(toAbsoluteMedia)
-        .filter(Boolean);
+    // ✅ For LAUNCH: must send real fetchable URLs (never data:image)
+function getFetchableUrlsFromCache() {
+  try {
+    const raw = localStorage.getItem("u:anon:sm_image_cache_v1") || localStorage.getItem("sm_image_cache_v1");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const urls = Array.isArray(parsed?.urls) ? parsed.urls : [];
+    return urls.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+  } catch {
+    return [];
+  }
+}
+
+const cachedFetchable = getFetchableUrlsFromCache();
+const draftImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images.slice(0, 2) : [];
+
+const filteredImages = draftImgs
+  .map((img, i) => {
+    const s = String(img || "").trim();
+    if (!s) return "";
+    if (/^data:image\//i.test(s)) return cachedFetchable[i] || "";
+    return toAbsoluteMedia(s);
+  })
+  .filter(Boolean)
+  .slice(0, 2);
+
 
       const websiteUrl = (form?.websiteUrl || form?.website || answers?.websiteUrl || answers?.website || answers?.url || answers?.link || "").toString().trim();
 
