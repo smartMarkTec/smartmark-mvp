@@ -964,19 +964,53 @@ useEffect(() => {
 
 
 
-  /* Load cached image previews for current ctx (24h) */
-  useEffect(() => {
-    try {
-      const ctx = getActiveCtx();
-      const c = loadImageCache(ctx);
-      if (c?.dataUrls?.length) setImageDataUrls(c.dataUrls.filter(Boolean).slice(0, 2));
-      if (c?.urls?.length && (!imageUrls || imageUrls.length === 0)) {
-  setImageUrls(c.urls.slice(0, 2));
-}
+/* Load cached image previews for current ctx (24h)
+   ✅ BUT: if campaign was launched (drafts disabled), NEVER restore previews.
+   ✅ Also: clear any cached previews so FormPage doesn't show "blank ad" remnants.
+*/
+useEffect(() => {
+  try {
+    // If CampaignSetup marked drafts disabled after successful launch,
+    // FormPage must be totally clean (no "in progress" remnants).
+    if (isDraftDisabled()) {
+      // wipe caches + drafts that can rehydrate a ghost preview
+      purgeCreativeDraftKeys();
+      try {
+        lsRemove(IMAGE_CACHE_KEY);
+        lsRemove(IMAGE_DRAFTS_KEY);
+        lsRemove(FORM_DRAFT_KEY);
+        ssRemove(ACTIVE_CTX_KEY);
+        lsRemove(ACTIVE_CTX_KEY);
+      } catch {}
 
-    } catch {}
-    // eslint-disable-next-line
-  }, []);
+      // reset UI preview state
+      setImageDataUrls([]);
+      setImageUrls([]);
+      setActiveImage(0);
+      setImageUrl("");
+      setResult(null);
+      setHasGenerated(false);
+      setAwaitingReady(true);
+      setImgFail({});
+      setImageEditing(false);
+      return;
+    }
+
+    // Normal behavior: restore cached previews for current ctx
+    const ctx = getActiveCtx();
+    const c = loadImageCache(ctx);
+
+    if (c?.dataUrls?.length) {
+      setImageDataUrls(c.dataUrls.filter(Boolean).slice(0, 2));
+    }
+
+    if (c?.urls?.length && (!imageUrls || imageUrls.length === 0)) {
+      setImageUrls(c.urls.slice(0, 2));
+    }
+  } catch {}
+  // eslint-disable-next-line
+}, []);
+
 
   /* ✅ Restore draft: choose ctx FIRST from existing OR saved drafts (fixes OAuth/back bugs) */
   useEffect(() => {
