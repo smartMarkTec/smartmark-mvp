@@ -284,6 +284,24 @@ function isDraftDisabled() {
   return false;
 }
 
+// ✅ IMPORTANT: when starting a NEW run, re-enable draft saving (otherwise nothing persists)
+function clearDraftDisabled() {
+  try {
+    const user = getUserNS();
+    for (const k of DRAFT_DISABLED_KEYS) {
+      try {
+        localStorage.removeItem(`u:${user}:${k}`);
+        sessionStorage.removeItem(`u:${user}:${k}`);
+      } catch {}
+      try {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      } catch {}
+    }
+  } catch {}
+}
+
+
 
 /* -------- Image generation spend guard -------- */
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
@@ -1350,84 +1368,106 @@ const displayLink = normalizeUrlForCopy(
     setImgFail({});
   }
 
-  /* Autosave */
-  useEffect(() => {
-    const t = setTimeout(() => {
-      const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
-      const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
-      const mergedBody = activeDraft?.body || result?.body || "";
+/* Autosave */
+useEffect(() => {
+  const t = setTimeout(() => {
+    // ✅ If campaign was launched, FormPage must NOT keep writing drafts (this causes ghost previews)
+    if (isDraftDisabled()) {
+      try {
+        // remove anything that can rehydrate previews
+        lsRemove(FORM_DRAFT_KEY);
+        purgeCreativeDraftKeys();
+        lsRemove(IMAGE_CACHE_KEY);
+        lsRemove(IMAGE_DRAFTS_KEY);
+      } catch {}
 
-      const payload = {
+      // clear UI state once (only if something is currently showing)
+      if ((imageUrls && imageUrls.length) || result || hasGenerated) {
+        setImageDataUrls([]);
+        setImageUrls([]);
+        setActiveImage(0);
+        setImageUrl("");
+        setResult(null);
+        setHasGenerated(false);
+        setAwaitingReady(true);
+        setImgFail({});
+        setImageEditing(false);
+      }
+      return;
+    }
+
+    const activeDraft = currentImageId ? getImageDraftById(currentImageId) : null;
+    const mergedHeadline = (activeDraft?.headline || result?.headline || "").slice(0, 55);
+    const mergedBody = activeDraft?.body || result?.body || "";
+
+    const payload = {
+      ctxKey: getActiveCtx(),
+      answers,
+      step,
+      chatHistory,
+      mediaType: "image",
+      result: { ...(result || {}), headline: mergedHeadline, body: mergedBody },
+      imageUrls,
+      activeImage,
+      awaitingReady,
+      input,
+      sideChatCount,
+      hasGenerated,
+    };
+
+    lsSet(
+      FORM_DRAFT_KEY,
+      JSON.stringify({
+        savedAt: Date.now(),
         ctxKey: getActiveCtx(),
+        data: payload,
+      })
+    );
+
+    const imgs = imageUrls.slice(0, 2).map(abs);
+
+    // ✅ DON'T overwrite creatives with empty images
+    if (imgs.length) {
+      const draftForSetup = {
+        ctxKey: getActiveCtx(),
+        images: imgs,
+        headline: mergedHeadline,
+        body: appendUrlToCopy(mergedBody, answers?.url),
+        imageOverlayCTA: normalizeOverlayCTA(
+          activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+        ),
         answers,
-        step,
-        chatHistory,
-        mediaType: "image",
-        result: { ...(result || {}), headline: mergedHeadline, body: mergedBody },
-        imageUrls,
-        activeImage,
-        awaitingReady,
-        input,
-        sideChatCount,
-        hasGenerated,
+        mediaSelection: "image",
+        savedAt: Date.now(),
+        expiresAt: Date.now() + CREATIVE_TTL_MS,
       };
 
-      lsSet(
-        FORM_DRAFT_KEY,
-        JSON.stringify({
-          savedAt: Date.now(),
-          ctxKey: getActiveCtx(),
-          data: payload,
-        })
-      );
+      lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+      lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+      ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
+    }
+  }, 150);
 
-      const imgs = imageUrls.slice(0, 2).map(abs);
+  return () => clearTimeout(t);
+}, [
+  answers,
+  step,
+  chatHistory,
+  mediaType,
+  result,
+  imageUrls,
+  activeImage,
+  awaitingReady,
+  input,
+  sideChatCount,
+  hasGenerated,
+  currentImageId,
+  editHeadline,
+  editBody,
+  editCTA,
+  abs,
+]);
 
-      // ✅ After launch, do NOT persist creatives (prevents "in progress" from reappearing)
-      if (!isDraftDisabled()) {
-        // ✅ DON'T overwrite creatives with empty images
-        if (imgs.length) {
-          const draftForSetup = {
-            ctxKey: getActiveCtx(),
-            images: imgs,
-            headline: mergedHeadline,
-            body: appendUrlToCopy(mergedBody, answers?.url),
-            imageOverlayCTA: normalizeOverlayCTA(
-              activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-            ),
-            answers,
-            mediaSelection: "image",
-            savedAt: Date.now(),
-            expiresAt: Date.now() + CREATIVE_TTL_MS,
-          };
-
-          lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-          lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
-          ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
-        }
-      }
-
-    }, 150);
-
-    return () => clearTimeout(t);
-  }, [
-    answers,
-    step,
-    chatHistory,
-    mediaType,
-    result,
-    imageUrls,
-    activeImage,
-    awaitingReady,
-    input,
-    sideChatCount,
-    hasGenerated,
-    currentImageId,
-    editHeadline,
-    editBody,
-    editCTA,
-    abs,
-  ]);
 
   /* Write latest draft before unload/navigation */
   useEffect(() => {
@@ -1557,10 +1597,19 @@ const displayLink = normalizeUrlForCopy(
 
         bumpImageGenCount();
 
-        // ✅ NEW RUN: mint ctxKey + purge any old creative drafts immediately
-        const nextCtx = buildCtxKey(answers || {});
-        setActiveCtx(nextCtx);
-        purgeCreativeDraftKeys();
+      // ✅ NEW RUN: re-enable drafts + mint ctxKey + purge old creative drafts immediately
+clearDraftDisabled();
+
+const nextCtx = buildCtxKey(answers || {});
+setActiveCtx(nextCtx);
+purgeCreativeDraftKeys();
+
+// also clear image cache for the new run so nothing “ghosts” in
+try {
+  lsRemove(IMAGE_CACHE_KEY);
+  lsRemove(IMAGE_DRAFTS_KEY);
+} catch {}
+
 
         // ✅ Reset preview state so nothing stale can show
         setResult(null);
