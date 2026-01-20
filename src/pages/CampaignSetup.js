@@ -132,6 +132,20 @@ const withUser = (u, key) => `u:${u}:${key}`;
 const SS_DRAFT_KEY = (u) => (u ? `u:${u}:draft_form_creatives` : "draft_form_creatives");
 const SS_ACTIVE_CTX_KEY = (u) => (u ? `u:${u}:${ACTIVE_CTX_KEY}` : ACTIVE_CTX_KEY);
 
+// ✅ Prevent draft from re-hydrating after a successful launch
+const SS_DRAFT_DISABLED_KEY = (u) => (u ? `u:${u}:sm_draft_disabled_v1` : "sm_draft_disabled_v1");
+
+function isDraftDisabled(user) {
+  try { return sessionStorage.getItem(SS_DRAFT_DISABLED_KEY(user)) === "1"; } catch { return false; }
+}
+function setDraftDisabled(user, on) {
+  try {
+    if (on) sessionStorage.setItem(SS_DRAFT_DISABLED_KEY(user), "1");
+    else sessionStorage.removeItem(SS_DRAFT_DISABLED_KEY(user));
+  } catch {}
+}
+
+
 // Local keys that should also be per-user
 const LS_INFLIGHT_KEY = (u) => (u ? withUser(u, FB_CONNECT_INFLIGHT_KEY) : FB_CONNECT_INFLIGHT_KEY);
 const LS_BACKUP_KEY = (u) => (u ? withUser(u, SETUP_CREATIVE_BACKUP_KEY) : SETUP_CREATIVE_BACKUP_KEY);
@@ -891,7 +905,10 @@ const CampaignSetup = () => {
   const body = state.body || "";
   const answers = state.answers || {};
 
-  useEffect(() => {
+   useEffect(() => {
+    // ✅ If we launched already, never resurrect the draft
+    if (isDraftDisabled(resolvedUser)) return;
+
     const hasDraftImages = draftCreatives?.images?.length > 0;
     if (hasDraftImages) return;
 
@@ -910,7 +927,11 @@ const CampaignSetup = () => {
     const fallbackUrls = getLatestDraftImageUrlsFromImageDrafts();
     if (!fallbackUrls.length) return;
 
-    const patched = { ...draftCreatives, images: fallbackUrls.map(toAbsoluteMedia).filter(Boolean), savedAt: Date.now() };
+    const patched = {
+      ...draftCreatives,
+      images: fallbackUrls.map(toAbsoluteMedia).filter(Boolean),
+      savedAt: Date.now()
+    };
     setDraftCreatives(patched);
 
     try {
@@ -919,10 +940,10 @@ const CampaignSetup = () => {
       sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
     } catch {}
 
-    // keep the draft visible
     setSelectedCampaignId("__DRAFT__");
     setExpandedId("__DRAFT__");
   }, [draftCreatives, resolvedUser]);
+
 
   const [startDate, setStartDate] = useState(() => {
     const existing = form.startDate || "";
@@ -1208,7 +1229,9 @@ const CampaignSetup = () => {
 
     if (!imgs.length) return;
 
-    // keep draft visible
+    // ✅ New campaign run — allow drafts again
+    setDraftDisabled(resolvedUser, false);
+
     setDraftCreatives({ images: imgs, mediaSelection: "image" });
     setSelectedCampaignId("__DRAFT__");
     setExpandedId("__DRAFT__");
@@ -1227,6 +1250,7 @@ const CampaignSetup = () => {
       localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
     } catch {}
   }, [navImageUrls, resolvedUser]);
+
 
   useEffect(() => {
     if (!fbConnected) return;
@@ -1434,39 +1458,71 @@ const CampaignSetup = () => {
   };
 
   const handleDelete = async () => {
-    if (!selectedCampaignId || !selectedAccount) return;
+    if (!selectedAccount) return;
+
     const acctId = String(selectedAccount).trim();
+    const idToDelete = String(selectedCampaignId || "").trim();
+
+    // ✅ If the draft is selected, "delete" means discard draft only.
+    if (!idToDelete || idToDelete === "__DRAFT__") {
+      handleClearDraft();
+      alert("Draft discarded.");
+      return;
+    }
+
+    // Optional: confirm
+    if (!window.confirm("Delete this campaign? (It will be archived in Facebook)")) return;
 
     setLoading(true);
     try {
       const r = await fetch(
-        `${AUTH_BASE}/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/cancel`,
+        `${AUTH_BASE}/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`,
         { method: "POST", credentials: "include" }
       );
-      if (!r.ok) throw new Error("Archive failed");
-      setCampaignStatus("ARCHIVED");
-      setLaunched(false);
-      setLaunchResult(null);
-      setSelectedCampaignId("");
-      setMetricsMap((m) => {
-        const { [selectedCampaignId]: _, ...rest } = m;
-        return rest;
-      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error || "Archive failed");
 
+      // ✅ remove creatives for THAT campaign id (never rely on state that might change)
       try {
         const map = readCreativeMap(resolvedUser, acctId);
-        if (map[selectedCampaignId]) {
-          delete map[selectedCampaignId];
+        if (map && map[idToDelete]) {
+          delete map[idToDelete];
           writeCreativeMap(resolvedUser, acctId, map);
         }
       } catch {}
 
+      // ✅ remove from UI list immediately
+      setCampaigns((prev) => (Array.isArray(prev) ? prev.filter((c) => c?.id !== idToDelete) : prev));
+
+      // ✅ clear selection + expanded so user doesn't keep seeing stale "in progress"
+      setSelectedCampaignId("");
+      setExpandedId(null);
+
+      // ✅ clear metrics for that id
+      setMetricsMap((m) => {
+        const { [idToDelete]: _, ...rest } = m || {};
+        return rest;
+      });
+
+      setCampaignStatus("ARCHIVED");
+      setLaunched(false);
+      setLaunchResult(null);
+
+      // ✅ hard refresh campaigns from backend so the right pane is correct
+      try {
+        const rr = await fetch(`${AUTH_BASE}/facebook/adaccount/${acctId}/campaigns`, { credentials: "include" });
+        const data = await rr.json().catch(() => ({}));
+        const list = data && data.data ? data.data.slice(0, 2) : [];
+        setCampaigns(list);
+      } catch {}
+
       alert("Campaign deleted.");
-    } catch {
-      alert("Could not delete campaign.");
+    } catch (e) {
+      alert("Could not delete campaign: " + (e?.message || ""));
     }
     setLoading(false);
   };
+
 
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
@@ -1554,12 +1610,17 @@ const payload = {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Server error");
 
-      const map = readCreativeMap(resolvedUser, acctId);
+       const map = readCreativeMap(resolvedUser, acctId);
       if (json.campaignId) {
         const expiresAt =
           endISO && !isNaN(new Date(endISO).getTime())
             ? new Date(endISO).getTime()
             : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+
+        const websiteUrl =
+          (form?.websiteUrl || form?.website || answers?.websiteUrl || answers?.website || answers?.url || answers?.link || "")
+            .toString()
+            .trim();
 
         map[json.campaignId] = {
           images: filteredImages,
@@ -1567,21 +1628,35 @@ const payload = {
           time: Date.now(),
           expiresAt,
           name: form.campaignName || "Untitled",
+
+          // ✅ store preview meta so Setup page can display the same “FormPage preview”
+          meta: {
+            headline: String(headline || "").trim(),
+            body: String(body || "").trim(),
+            link: websiteUrl || "https://your-smartmark-site.com",
+          },
         };
         writeCreativeMap(resolvedUser, acctId, map);
       }
 
-      sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser));
-      try { sessionStorage.removeItem("draft_form_creatives"); } catch {}
+
+          // ✅ After a successful launch, kill the draft permanently (no resurrection)
+      setDraftDisabled(resolvedUser, true);
+
       try {
-        if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
-        localStorage.removeItem(CREATIVE_DRAFT_KEY);
+        // clear draft storages
+        purgeDraftStorages(resolvedUser);
+
+        // clear backups + inflight markers too (these are what kept bringing "IN PROGRESS" back)
+        localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
+        localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY); // legacy safety
+        localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
       } catch {}
-      try {
-        if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, FORM_DRAFT_KEY));
-        localStorage.removeItem(FORM_DRAFT_KEY);
-      } catch {}
+
       setDraftCreatives({ images: [], mediaSelection: "image" });
+      if (expandedId === "__DRAFT__") setExpandedId(null);
+      if (selectedCampaignId === "__DRAFT__") setSelectedCampaignId("");
+
 
      setLaunched(true);
 setLaunchResult(json);
@@ -1666,7 +1741,7 @@ setTimeout(() => setLaunched(false), 1500);
   const { fee } = calculateFees(budget);
 
   const getSavedCreatives = (campaignId) => {
-    if (!selectedAccount) return { images: [], mediaSelection: "image" };
+    if (!selectedAccount) return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
     const acctKey = String(selectedAccount || "").replace(/^act_/, "");
     const map = readCreativeMap(resolvedUser, acctKey);
 
@@ -1674,10 +1749,19 @@ setTimeout(() => setLaunched(false), 1500);
     if (didPurge) writeCreativeMap(resolvedUser, acctKey, map);
 
     const saved = map[campaignId] || null;
-    if (!saved) return { images: [], mediaSelection: "image" };
+    if (!saved) return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
 
-    return { images: (saved.images || []).map(toAbsoluteMedia).filter(Boolean), mediaSelection: "image" };
+    return {
+      images: (saved.images || []).map(toAbsoluteMedia).filter(Boolean),
+      mediaSelection: "image",
+      meta: {
+        headline: String(saved?.meta?.headline || "").trim(),
+        body: String(saved?.meta?.body || "").trim(),
+        link: String(saved?.meta?.link || "").trim(),
+      },
+    };
   };
+
 
   /* ---------- Render helpers ---------- */
   const yearNow = new Date().getFullYear() % 100;
@@ -2296,7 +2380,22 @@ setTimeout(() => setLaunched(false), 1500);
                 const id = c.id;
                 const isOpen = expandedId === id;
                 const name = isDraft ? form.campaignName || "Untitled" : c.name || "Campaign";
-                const creatives = isDraft ? draftCreatives : getSavedCreatives(id);
+                               const websiteUrlPreview =
+                  (form?.websiteUrl || form?.website || answers?.websiteUrl || answers?.website || answers?.url || answers?.link || "")
+                    .toString()
+                    .trim();
+
+                const creatives = isDraft
+                  ? {
+                      ...draftCreatives,
+                      meta: {
+                        headline: String(headline || "").trim(),
+                        body: String(body || "").trim(),
+                        link: websiteUrlPreview || "https://your-smartmark-site.com",
+                      },
+                    }
+                  : getSavedCreatives(id);
+
 
                 return (
                   <div
@@ -2404,6 +2503,43 @@ setTimeout(() => setLaunched(false), 1500);
                           }}
                         >
                           <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
+                            Preview
+                          </div>
+
+                          {/* ✅ Copy / headline / link preview (FormPage-style simple) */}
+                          <div
+                            style={{
+                              background: "#0f1418",
+                              border: `1px solid ${INPUT_BORDER}`,
+                              borderRadius: 12,
+                              padding: "12px 12px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 8,
+                            }}
+                          >
+                            <div style={{ color: "#bdfdf0", fontWeight: 900, fontSize: 16, lineHeight: 1.2 }}>
+                              {creatives?.meta?.headline || "—"}
+                            </div>
+
+                            <div style={{ color: "#d7efe7", fontWeight: 800, fontSize: 13, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>
+                              {creatives?.meta?.body || "—"}
+                            </div>
+
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
+                              <div style={{ color: "#9ddfcd", fontWeight: 900, fontSize: 12 }}>Link:</div>
+                              <a
+                                href={creatives?.meta?.link || "https://your-smartmark-site.com"}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{ color: ACCENT, fontWeight: 900, fontSize: 12, textDecoration: "none" }}
+                              >
+                                {(creatives?.meta?.link || "https://your-smartmark-site.com").replace(/^https?:\/\//i, "")}
+                              </a>
+                            </div>
+                          </div>
+
+                          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>
                             Creatives
                           </div>
 
@@ -2447,6 +2583,7 @@ setTimeout(() => setLaunched(false), 1500);
                             </div>
                           )}
                         </div>
+
                       </div>
                     )}
                   </div>

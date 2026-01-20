@@ -533,34 +533,79 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
-  async function fetchImageAsBase64(url) {
+   async function fetchImageAsBase64(url) {
     if (!url) throw new Error('No image URL');
 
-    const m = /^data:image\/\w+;base64,(.+)$/i.exec(url);
+    // Accept Data URLs directly (best-case: no fetching needed)
+    const m = /^data:image\/\w+;base64,(.+)$/i.exec(String(url).trim());
     if (m) return m[1];
 
-    const abs = normalizeImageUrl(url);
-    if (!abs) throw new Error('Invalid image URL');
+    const raw = String(url).trim();
+
+    // We prefer fetching from the backend public base (Render), because it definitely has /api/media + /generated.
+    const backendBase =
+      process.env.PUBLIC_BASE_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      'https://smartmark-mvp.onrender.com';
+
+    // Build a list of candidate URLs to try.
+    const candidates = [];
+    try {
+      // If it's already absolute, try it as-is first.
+      if (/^https?:\/\//i.test(raw)) {
+        candidates.push(raw);
+
+        // If it points to Vercel (smartemark.com) but path is /api/media or /generated, rewrite to backendBase.
+        const u = new URL(raw);
+        if (u.pathname.startsWith('/api/media') || u.pathname.startsWith('/generated') || u.pathname.startsWith('/media')) {
+          candidates.push(`${backendBase}${u.pathname}${u.search || ''}`);
+        }
+      } else {
+        // If it's relative, force it to backendBase
+        const rel = raw.startsWith('/') ? raw : `/${raw}`;
+        candidates.push(`${backendBase}${rel}`);
+      }
+    } catch {
+      // If URL parsing fails, just force backendBase
+      const rel = raw.startsWith('/') ? raw : `/${raw}`;
+      candidates.push(`${backendBase}${rel}`);
+    }
+
+    // Also try your existing absolutePublicUrl behavior as a fallback
+    try {
+      candidates.push(absolutePublicUrl(raw));
+    } catch {}
+
+    // De-dupe
+    const uniq = Array.from(new Set(candidates.filter(Boolean)));
 
     const tries = [0, 400, 900];
     let lastErr;
-    for (const d of tries) {
-      try {
-        if (d) await sleep(d);
-        const imgRes = await axios.get(abs, {
-          responseType: 'arraybuffer',
-          timeout: 20000,
-          headers: { 'Accept': 'image/*' },
-          // Some hosts block unknown UA; set a simple UA
-          headers: { 'Accept': 'image/*', 'User-Agent': 'SmartMark/1.0' }
-        });
-        const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
-        if (!ct.includes('image')) throw new Error(`Non-image content-type: ${ct || 'unknown'}`);
-        return Buffer.from(imgRes.data).toString('base64');
-      } catch (e) { lastErr = e; }
+
+    for (const attemptDelay of tries) {
+      for (const abs of uniq) {
+        try {
+          if (attemptDelay) await sleep(attemptDelay);
+
+          const imgRes = await axios.get(abs, {
+            responseType: 'arraybuffer',
+            timeout: 20000,
+            headers: { Accept: 'image/*' }
+          });
+
+          const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+          if (!ct.includes('image')) throw new Error(`Non-image content-type: ${ct || 'unknown'} from ${abs}`);
+
+          return Buffer.from(imgRes.data).toString('base64');
+        } catch (e) {
+          lastErr = e;
+        }
+      }
     }
+
     throw lastErr || new Error('Image download failed');
   }
+
 
   async function uploadImage(imageUrl) {
     // ✅ Do NOT silently upload the green fallback in production.
