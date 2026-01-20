@@ -808,41 +808,46 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const adIds = [];
     const usedImages = [];
 
-    for (let i = 0; i < needImg; i++) {
-      const srcUrl = imageVariants[i];
-      const hash = await uploadImage(srcUrl);
+ for (let i = 0; i < needImg; i++) {
+  const srcUrlRaw = imageVariants[i];
+  const srcUrl = normalizeImageUrl(srcUrlRaw);   // ✅ USE IT
 
-      const cr = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-        {
-          name: `${campaignName} (Image v${i + 1})`,
-          object_story_spec: {
-            page_id: pageIdFinal,
-            link_data: {
-              message: form.adCopy || adCopy || '',
-              link: destinationUrl,
-              image_hash: hash,
-              description: form.description || ''
-            }
-          }
-        },
-        { params: mkParams() }
-      );
+  if (!srcUrl) throw new Error("Invalid image URL");
 
-      const ad = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-        {
-          name: `${campaignName} (Image v${i + 1})`,
-          adset_id: imageAdSetId,
-          creative: { creative_id: cr.data.id },
-          status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
-        },
-        { params: mkParams() }
-      );
+  const hash = await uploadImage(srcUrl);
 
-      adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
-      if (srcUrl) usedImages.push(absolutePublicUrl(srcUrl));
-    }
+  const cr = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+    {
+      name: `${campaignName} (Image v${i + 1})`,
+      object_story_spec: {
+        page_id: pageIdFinal,
+        link_data: {
+          message: form.adCopy || adCopy || '',
+          link: destinationUrl,
+          image_hash: hash,
+          description: form.description || ''
+        }
+      }
+    },
+    { params: mkParams() }
+  );
+
+  const ad = await axios.post(
+    `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+    {
+      name: `${campaignName} (Image v${i + 1})`,
+      adset_id: imageAdSetId,
+      creative: { creative_id: cr.data.id },
+      status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
+    },
+    { params: mkParams() }
+  );
+
+  adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
+  usedImages.push(srcUrl); // ✅ store the resolved URL, not absolutePublicUrl() of a full URL
+}
+
 
     const campaignStatus = NO_SPEND ? 'PAUSED' : 'ACTIVE';
 
