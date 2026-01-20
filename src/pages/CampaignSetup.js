@@ -297,15 +297,23 @@ function getUserFromStorage() {
 
 function lsGet(user, key) {
   try {
+    // 1) user-scoped
     if (user) {
       const v = localStorage.getItem(withUser(user, key));
       if (v !== null && v !== undefined) return v;
     }
+
+    // 2) anon fallback (critical for creative transfer when user not set on FormPage)
+    const anon = localStorage.getItem(withUser("anon", key));
+    if (anon !== null && anon !== undefined) return anon;
+
+    // 3) legacy/global
     return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
+
 
 function lsSet(user, key, value, alsoLegacy = false) {
   try {
@@ -1052,11 +1060,34 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
 
     let baseDraft = null;
     try {
-      const raw =
+           const raw =
+        // 1) new per-user session key
         sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
+        // 2) legacy session key used by older FormPage builds
+        sessionStorage.getItem("draft_form_creatives") ||
+        // 3) user-scoped localStorage (with anon fallback via lsGet)
         lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+        // 4) backup (may also be under anon; lsGet handles it if you use it elsewhere)
         localStorage.getItem("sm_setup_creatives_backup_v1");
-      if (raw) baseDraft = JSON.parse(raw);
+
+      if (raw) {
+        baseDraft = JSON.parse(raw);
+
+        // ✅ MIGRATE: if we loaded anon/global draft, copy it into this user namespace
+        try {
+          const imgs = Array.isArray(baseDraft?.images) ? baseDraft.images.map(toAbsoluteMedia).filter(Boolean) : [];
+          if (imgs.length) {
+            const migrated = { ...(baseDraft || {}), images: imgs, savedAt: Date.now() };
+
+            // write to current user keys so it persists consistently
+            sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(migrated));
+            if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(migrated));
+            localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(migrated));
+            saveSetupCreativeBackup(resolvedUser, migrated);
+          }
+        } catch {}
+      }
+
     } catch {}
 
     if (!baseDraft || !isDraftForActiveCtx(baseDraft, resolvedUser)) return;
