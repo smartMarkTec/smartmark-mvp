@@ -261,6 +261,30 @@ function purgeLegacyDraftKeys() {
 // Creatives should stick around longer than the chat draft
 const CREATIVE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
+// ✅ After a successful launch, CampaignSetup disables drafts so FormPage must stop restoring/persisting them.
+// We check a few possible keys (covers legacy + namespaced).
+const DRAFT_DISABLED_KEYS = [
+  "sm_setup_draft_disabled_v1",
+  "sm_draft_disabled_v1",
+  "sm_setup_draft_disabled",
+];
+
+function isDraftDisabled() {
+  try {
+    const user = getUserNS();
+    for (const k of DRAFT_DISABLED_KEYS) {
+      const v1 = localStorage.getItem(`u:${user}:${k}`);
+      const v2 = localStorage.getItem(k);
+      const v3 = sessionStorage.getItem(`u:${user}:${k}`);
+      const v4 = sessionStorage.getItem(k);
+      const v = (v1 ?? v2 ?? v3 ?? v4 ?? "").toString().trim().toLowerCase();
+      if (v === "1" || v === "true" || v === "yes") return true;
+    }
+  } catch {}
+  return false;
+}
+
+
 /* -------- Image generation spend guard -------- */
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
 const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -826,7 +850,9 @@ export default function FormPage() {
     warmBackend();
   }, []);
 
- /* Set per-user namespace (prevents shared-browser mixing) */
+/* Set per-user namespace (prevents shared-browser mixing)
+   ✅ MUST be same-origin via /api so cookies persist (Vercel rewrite -> Render)
+*/
 useEffect(() => {
   (async () => {
     try {
@@ -840,7 +866,7 @@ useEffect(() => {
           return s;
         })();
 
-      const res = await fetch(`https://smartmark-mvp.onrender.com/auth/whoami`, {
+      const res = await fetch(`${API_BASE}/auth/whoami`, {
         method: "GET",
         credentials: "include",
         headers: { "x-sm-sid": sid },
@@ -852,10 +878,21 @@ useEffect(() => {
       const u = j?.user?.username || j?.user?.email || "anon";
       setUserNS(u);
     } catch {
+      // If not logged in, force anon AND clear any visible persisted creatives for anon
       setUserNS("anon");
+      try {
+        // wipe anon-only UI persistence so logged-out users don't see old creatives
+        localStorage.removeItem("u:anon:sm_form_draft_v3");
+        localStorage.removeItem("u:anon:draft_form_creatives_v3");
+        localStorage.removeItem("u:anon:sm_setup_creatives_backup_v1");
+        localStorage.removeItem("u:anon:sm_image_cache_v1");
+        localStorage.removeItem("u:anon:smartmark.imageDrafts.v1");
+        sessionStorage.removeItem("u:anon:draft_form_creatives");
+      } catch {}
     }
   })();
 }, []);
+
 
 
   /* Load cached image previews for current ctx (24h) */
@@ -970,6 +1007,20 @@ useEffect(() => {
 
       // ================= CREATIVE fallback restore (ctx-gated) =================
       if (creativeObj) {
+        // ✅ If a campaign was successfully launched, do NOT restore old creatives into a new "in progress" draft
+        if (isDraftDisabled()) {
+          purgeCreativeDraftKeys();
+          try {
+            lsRemove(IMAGE_CACHE_KEY);
+            lsRemove(IMAGE_DRAFTS_KEY);
+          } catch {}
+          setResult(null);
+          setImageUrls([]);
+          setHasGenerated(false);
+          setAwaitingReady(true);
+          return;
+        }
+
         const draftCtx = String(creativeObj?.ctxKey || "").trim();
         if (!draftCtx || (activeCtxNow && draftCtx !== activeCtxNow)) {
           // wrong ctx or legacy missing ctx => purge creatives only
@@ -1001,6 +1052,7 @@ useEffect(() => {
           setHasGenerated(false);
         }
       }
+
     } catch {}
     // eslint-disable-next-line
   }, []);
@@ -1162,27 +1214,30 @@ const displayLink = normalizeUrlForCopy(
 
       const imgs = imageUrls.slice(0, 2).map(abs);
 
-      // ✅ DON'T overwrite creatives with empty images
-      if (imgs.length) {
-        const draftForSetup = {
-  ctxKey: getActiveCtx(),
-  images: imgs,
-  headline: mergedHeadline,
-  body: appendUrlToCopy(mergedBody, answers?.url),
-  imageOverlayCTA: normalizeOverlayCTA(
-    activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-  ),
-  answers,
-  mediaSelection: "image",
-  savedAt: Date.now(),
-  expiresAt: Date.now() + CREATIVE_TTL_MS,
-};
+      // ✅ After launch, do NOT persist creatives (prevents "in progress" from reappearing)
+      if (!isDraftDisabled()) {
+        // ✅ DON'T overwrite creatives with empty images
+        if (imgs.length) {
+          const draftForSetup = {
+            ctxKey: getActiveCtx(),
+            images: imgs,
+            headline: mergedHeadline,
+            body: appendUrlToCopy(mergedBody, answers?.url),
+            imageOverlayCTA: normalizeOverlayCTA(
+              activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+            ),
+            answers,
+            mediaSelection: "image",
+            savedAt: Date.now(),
+            expiresAt: Date.now() + CREATIVE_TTL_MS,
+          };
 
-
-        lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
-        lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
-        ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
+          lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
+          lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
+          ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
+        }
       }
+
     }, 150);
 
     return () => clearTimeout(t);
@@ -1214,27 +1269,30 @@ const displayLink = normalizeUrlForCopy(
         const mergedBody = activeDraft?.body || result?.body || "";
         const imgs = imageUrls.slice(0, 2).map(abs);
 
+        // ✅ After launch, do NOT persist creatives (prevents "in progress" from reappearing)
+        if (isDraftDisabled()) return;
+
         // ✅ DON'T overwrite creatives with empty images
         if (!imgs.length) return;
 
-      const draftForSetup = {
-  ctxKey: getActiveCtx(),
-  images: imgs,
-  headline: mergedHeadline,
-  body: appendUrlToCopy(mergedBody, answers?.url),
-  imageOverlayCTA: normalizeOverlayCTA(
-    activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
-  ),
-  answers,
-  mediaSelection: "image",
-  savedAt: Date.now(),
-  expiresAt: Date.now() + CREATIVE_TTL_MS,
-};
-
+        const draftForSetup = {
+          ctxKey: getActiveCtx(),
+          images: imgs,
+          headline: mergedHeadline,
+          body: appendUrlToCopy(mergedBody, answers?.url),
+          imageOverlayCTA: normalizeOverlayCTA(
+            activeDraft?.overlay || result?.image_overlay_text || answers?.cta || ""
+          ),
+          answers,
+          mediaSelection: "image",
+          savedAt: Date.now(),
+          expiresAt: Date.now() + CREATIVE_TTL_MS,
+        };
 
         lsSet(CREATIVE_DRAFT_KEY, JSON.stringify(draftForSetup));
         lsSet("sm_setup_creatives_backup_v1", JSON.stringify(draftForSetup));
         ssSet("draft_form_creatives", JSON.stringify(draftForSetup));
+
       } catch {}
     };
     window.addEventListener("beforeunload", handler);
