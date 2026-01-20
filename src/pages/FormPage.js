@@ -872,6 +872,75 @@ useEffect(() => {
         headers: { "x-sm-sid": sid },
       });
 
+      // ✅ If a campaign was launched, FormPage must NEVER show old previews again.
+// This fixes bfcache/back-button cases where React doesn't remount the page.
+useEffect(() => {
+  const clearLaunchedRemnants = () => {
+    if (!isDraftDisabled()) return;
+
+    // storage purge (prevents "in progress" resurrecting)
+    try {
+      purgeCreativeDraftKeys();
+      lsRemove(CREATIVE_DRAFT_KEY);
+      lsRemove("sm_setup_creatives_backup_v1");
+      ssRemove("draft_form_creatives");
+
+      // also clear preview caches so images don't try to load dead URLs
+      lsRemove(IMAGE_CACHE_KEY);
+      lsRemove(IMAGE_DRAFTS_KEY);
+
+      // OPTIONAL: keep FORM_DRAFT_KEY if you want chat to persist; but remove if you want it totally clean:
+      // lsRemove(FORM_DRAFT_KEY);
+
+      // clear last-media helpers
+      localStorage.removeItem("smartmark_last_image_url");
+    } catch {}
+
+    // ✅ in-memory UI reset (this is the main fix)
+    setResult(null);
+    setImageUrls([]);
+    setImageDataUrls([]);
+    setImgFail({});
+    setHasGenerated(false);
+    setGenerating(false);
+    setImageLoading(false);
+
+    setActiveImage(0);
+    setImageUrl("");
+
+    setImageEditing(false);
+    setEditHeadline("");
+    setEditBody("");
+    setEditCTA("");
+    setEditLink("");
+
+    // reset to "ready" flow (prevents “stuck preview”)
+    setAwaitingReady(true);
+  };
+
+  // run now
+  clearLaunchedRemnants();
+
+  // run on BFCache restore (back button)
+  const onPageShow = (e) => {
+    if (e?.persisted) clearLaunchedRemnants();
+  };
+
+  // run when tab becomes visible again
+  const onVis = () => {
+    if (document.visibilityState === "visible") clearLaunchedRemnants();
+  };
+
+  window.addEventListener("pageshow", onPageShow);
+  document.addEventListener("visibilitychange", onVis);
+
+  return () => {
+    window.removeEventListener("pageshow", onPageShow);
+    document.removeEventListener("visibilitychange", onVis);
+  };
+}, []);
+
+
       if (!res.ok) throw new Error(`whoami ${res.status}`);
 
       const j = await res.json().catch(() => ({}));
