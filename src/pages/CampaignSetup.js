@@ -476,12 +476,21 @@ function getLatestDraftImageUrlsFromImageDrafts() {
       .slice(-2)
       .map(([k]) => k.replace(/^img:/, ""))
       .map((u) => {
-        const s = String(u || "").trim();
-        if (!s) return "";
-        if (/^https?:\/\//i.test(s)) return s;
-        if (s.startsWith("/")) return MEDIA_ORIGIN + s;
-        return MEDIA_ORIGIN + "/" + s;
-      })
+  const s = String(u || "").trim();
+  if (!s) return "";
+  if (/^https?:\/\//i.test(s)) return s;
+
+  // ✅ FIX: bare filenames should be treated as /api/media/*
+  if (!s.startsWith("/") && /\.(png|jpg|jpeg|webp)$/i.test(s)) {
+    return `${MEDIA_ORIGIN}/api/media/${s}`;
+  }
+
+  if (s.startsWith("/api/media/")) return APP_ORIGIN + s;
+  if (s.startsWith("/")) return MEDIA_ORIGIN + s;
+
+  return MEDIA_ORIGIN + "/" + s;
+})
+
       .filter(Boolean);
 
     return urls;
@@ -557,25 +566,35 @@ function toAbsoluteMedia(u) {
   const s = String(u).trim();
   if (!s) return "";
 
-  // ✅ Allow Data URLs for PREVIEW rendering (FormPage may pass cached data:image)
+  // Preview can render data urls
   if (/^data:image\//i.test(s)) return s;
 
-  // Reject truly unusable schemes
+  // Reject unusable schemes
   if (/^(blob:|file:|about:)/i.test(s)) return "";
 
-  // ✅ If it's already absolute (Render or anything), DO NOT rewrite to APP_ORIGIN
-  // This fixes the "redirecting to Vercel instead of actual website" issue.
+  // Absolute URLs: keep as-is
   if (/^https?:\/\//i.test(s)) return s;
 
-  // ✅ If relative /api/media, use same-origin (smartemark.com) ONLY when it's actually relative
+  // ✅ FIX: bare static filenames must go through /api/media/
+  const isBareStaticFile =
+    /^static-\d+[-\w]+(?:\.\w+)?\.(png|jpg|jpeg|webp)$/i.test(s) ||
+    /^static-\d+[-\w]+\.(png|jpg|jpeg|webp)$/i.test(s);
+
+  if (isBareStaticFile) return `${MEDIA_ORIGIN}/api/media/${s}`;
+
+  // /api/media relative -> same origin
   if (s.startsWith("/api/media/")) return APP_ORIGIN + s;
   if (s.startsWith("api/media/")) return APP_ORIGIN + "/" + s;
 
-  // Other relative paths fall back to Render
+  // Other relative paths -> Render fallback
   if (s.startsWith("/")) return MEDIA_ORIGIN + s;
+
+  // If it's a generic bare filename, assume it's also a media file
+  if (/\.(png|jpg|jpeg|webp)$/i.test(s)) return `${MEDIA_ORIGIN}/api/media/${s}`;
 
   return MEDIA_ORIGIN + "/" + s;
 }
+
 
 
 function ImageModal({ open, imageUrl, onClose }) {
