@@ -826,22 +826,37 @@ export default function FormPage() {
     warmBackend();
   }, []);
 
-  /* Set per-user namespace (prevents shared-browser mixing) */
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch(`${API_BASE}/whoami`, {
-          method: "GET",
-          credentials: "include",
-        });
-        const j = await res.json().catch(() => ({}));
-        const u = j?.user?.username || j?.user?.email || "anon";
-        setUserNS(u);
-      } catch {
-        setUserNS("anon");
-      }
-    })();
-  }, []);
+ /* Set per-user namespace (prevents shared-browser mixing) */
+useEffect(() => {
+  (async () => {
+    try {
+      const sid =
+        (localStorage.getItem("sm_sid_v1") || "").trim() ||
+        (() => {
+          const s = `sm_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+          try {
+            localStorage.setItem("sm_sid_v1", s);
+          } catch {}
+          return s;
+        })();
+
+      const res = await fetch(`https://smartmark-mvp.onrender.com/auth/whoami`, {
+        method: "GET",
+        credentials: "include",
+        headers: { "x-sm-sid": sid },
+      });
+
+      if (!res.ok) throw new Error(`whoami ${res.status}`);
+
+      const j = await res.json().catch(() => ({}));
+      const u = j?.user?.username || j?.user?.email || "anon";
+      setUserNS(u);
+    } catch {
+      setUserNS("anon");
+    }
+  })();
+}, []);
+
 
   /* Load cached image previews for current ctx (24h) */
   useEffect(() => {

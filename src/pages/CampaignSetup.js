@@ -622,43 +622,51 @@ const calculateFees = (budget) => {
 
 function toAbsoluteMedia(u) {
   if (!u) return "";
-  const s = String(u).trim();
-  if (!s) return "";
+  const s0 = String(u).trim();
+  if (!s0) return "";
 
   // ✅ allow data:image previews (they may exist in cache)
-  if (/^data:image\//i.test(s)) return s;
+  if (/^data:image\//i.test(s0)) return s0;
 
   // reject unusable schemes
-  if (/^(blob:|file:|about:)/i.test(s)) return "";
+  if (/^(blob:|file:|about:)/i.test(s0)) return "";
+
+  // Split off query/hash so filename detection works even after cache-busting
+  const [basePart, suffixPart = ""] = s0.split(/(?=[?#])/); // keeps ?/# in suffix
+  const base = basePart.trim();
+  const suffix = suffixPart || "";
 
   // ✅ absolute URL:
   // if it’s a /api/media URL, ALWAYS force Render origin (smartemark.com does NOT serve /api/media)
-  if (/^https?:\/\//i.test(s)) {
+  if (/^https?:\/\//i.test(base)) {
     try {
-      const url = new URL(s);
+      const url = new URL(base + suffix);
       const idx = url.pathname.indexOf("/api/media/");
       if (idx >= 0) {
         const path = url.pathname.slice(idx);
         return MEDIA_ORIGIN + path + (url.search || "");
       }
-    } catch {}
-    return s;
+      return url.toString();
+    } catch {
+      return base + suffix;
+    }
   }
 
-  // ✅ bare filenames like "static-....png" must be served from /api/media on Render
-  if (!s.startsWith("/") && /\.(png|jpg|jpeg|webp)$/i.test(s)) {
-    return `${MEDIA_ORIGIN}/api/media/${s}`;
+  // ✅ bare filenames like "static-....png" (WITH or WITHOUT ?smcb=) must be served from /api/media on Render
+  if (!base.startsWith("/") && /\.(png|jpg|jpeg|webp)$/i.test(base)) {
+    return `${MEDIA_ORIGIN}/api/media/${base}${suffix}`;
   }
 
   // ✅ relative media paths must go to Render too
-  if (s.startsWith("/api/media/")) return MEDIA_ORIGIN + s;
-  if (s.startsWith("api/media/")) return `${MEDIA_ORIGIN}/${s}`;
+  if (base.startsWith("/api/media/")) return MEDIA_ORIGIN + base + suffix;
+  if (base.startsWith("api/media/")) return `${MEDIA_ORIGIN}/${base}${suffix}`;
 
   // other relative paths -> Render
-  if (s.startsWith("/")) return MEDIA_ORIGIN + s;
+  if (base.startsWith("/")) return MEDIA_ORIGIN + base + suffix;
 
-  return MEDIA_ORIGIN + "/" + s;
+  return MEDIA_ORIGIN + "/" + base + suffix;
 }
+
 
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -1561,9 +1569,13 @@ useEffect(() => {
     if (sid) setStoredSid(sid);
   } catch {}
 
-  // ✅ restore ctxKey from inflight so we stay in the same run namespace
+  // ✅ restore ctxKey from inflight (try user + anon + legacy)
   try {
-    const raw = localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser));
+    const raw =
+      localStorage.getItem(LS_INFLIGHT_KEY(resolvedUser)) ||
+      localStorage.getItem(LS_INFLIGHT_KEY("anon")) ||
+      localStorage.getItem(FB_CONNECT_INFLIGHT_KEY);
+
     const inflight = raw ? JSON.parse(raw) : null;
     const k = (inflight?.ctxKey ? String(inflight.ctxKey) : "").trim();
     if (k) setActiveCtx(k, resolvedUser);
@@ -1575,42 +1587,59 @@ useEffect(() => {
   setFbConnected(true);
   setCameFromFbConnect(true);
 
-  // ✅ FORCE re-hydration from ANY source (session, global, user, backup)
-  let best = null;
+  // ✅ restore preview copy (prevents link/headline/body flipping to placeholder)
   try {
-    const raw =
-      sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
-      sessionStorage.getItem("draft_form_creatives") ||
-      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-      localStorage.getItem(CREATIVE_DRAFT_KEY) ||
-      null;
+    const b = loadSetupPreviewBackup(resolvedUser);
+    if (b) setPreviewCopy({ headline: b.headline || "", body: b.body || "", link: b.link || "" });
+  } catch {}
 
-    if (raw) best = JSON.parse(raw || "null");
-  } catch {
-    best = null;
+  // ✅ FORCE restore images from the FETCHABLE backup first (this is what fixes the post-connect 404)
+  let imgs = [];
+  try {
+    const fetchable = loadFetchableImagesBackup(resolvedUser); // already absolute + safe
+    if (Array.isArray(fetchable) && fetchable.length) {
+      imgs = fetchable.slice(0, 2).map(toAbsoluteMedia).filter(Boolean);
+    }
+  } catch {}
+
+  // fallback to existing draft sources if fetchable backup missing
+  if (!imgs.length) {
+    let best = null;
+    try {
+      const raw =
+        sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
+        sessionStorage.getItem("draft_form_creatives") ||
+        lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+        localStorage.getItem(CREATIVE_DRAFT_KEY) ||
+        null;
+
+      if (raw) best = JSON.parse(raw || "null");
+    } catch {
+      best = null;
+    }
+
+    if (!best) best = loadSetupCreativeBackup(resolvedUser);
+
+    imgs = (Array.isArray(best?.images) ? best.images : [])
+      .slice(0, 2)
+      .map(toAbsoluteMedia)
+      .filter(Boolean);
   }
-
-  if (!best) {
-    best = loadSetupCreativeBackup(resolvedUser);
-  }
-
-  const imgs = (Array.isArray(best?.images) ? best.images : [])
-    .slice(0, 2)
-    .map(toAbsoluteMedia)
-    .filter(Boolean);
 
   if (imgs.length) {
     const patched = {
-      ...(best || {}),
+      ctxKey: String(getActiveCtx(resolvedUser) || "").trim(),
       images: imgs,
       mediaSelection: "image",
       savedAt: Date.now(),
-      ctxKey: String(best?.ctxKey || getActiveCtx(resolvedUser) || "").trim(),
     };
 
     try {
       sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(patched));
+      localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(patched));
+      if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(patched));
       saveSetupCreativeBackup(resolvedUser, patched);
+      saveFetchableImagesBackup(resolvedUser, imgs); // keep it fresh
     } catch {}
 
     setDraftCreatives({ images: imgs, mediaSelection: "image" });
@@ -1623,9 +1652,11 @@ useEffect(() => {
     localStorage.setItem(FB_CONN_KEY, JSON.stringify({ connected: 1, time: Date.now() }));
   } catch {}
 
-  // cleanup inflight marker
+  // cleanup inflight marker (user + anon + legacy)
   try {
     localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
+    localStorage.removeItem(LS_INFLIGHT_KEY("anon"));
+    localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
   } catch {}
 
   smLog(
@@ -1642,28 +1673,6 @@ useEffect(() => {
   window.history.replaceState({}, document.title, "/setup");
 }, [location.search, resolvedUser]);
 
-setExpandedId("__DRAFT__");
-setSelectedCampaignId("__DRAFT__");
-
-// ✅ CRITICAL: restore FETCHABLE image URLs immediately after OAuth
-try {
-  const fetchable = loadFetchableImagesBackup(resolvedUser);
-  const fallback = fetchable.length ? fetchable : getCachedFetchableImages();
-  const imgs = (fallback || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
-
-  if (imgs.length) {
-    const payload = {
-      ctxKey: getActiveCtx(resolvedUser) || "",
-      images: imgs,
-      mediaSelection: "image",
-      savedAt: Date.now(),
-    };
-
-    setDraftCreatives({ images: imgs, mediaSelection: "image" });
-    sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payload));
-    saveSetupCreativeBackup(resolvedUser, payload);
-  }
-} catch {}
 
 
 
