@@ -27,11 +27,21 @@ function setStoredSid(sid) {
   } catch {}
 }
 
-// ✅ one wrapper for ALL auth calls
+// ✅ ALWAYS ensure we have a stable sid (so drafts/creatives use same namespace)
+function ensureStoredSid() {
+  let sid = getStoredSid();
+  if (sid) return sid;
+
+  sid = `sm_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  setStoredSid(sid);
+  return sid;
+}
+
+// ✅ one wrapper for ALL auth calls (ALWAYS sends sid)
 async function authFetch(path, opts = {}) {
-  const sid = getStoredSid();
+  const sid = ensureStoredSid();
   const headers = { ...(opts.headers || {}) };
-  if (sid) headers["x-sm-sid"] = sid;
+  headers["x-sm-sid"] = sid;
 
   return fetch(`${AUTH_BASE}${path}`, {
     ...opts,
@@ -813,8 +823,10 @@ const CampaignSetup = () => {
     if (!active) setActiveCtx(`${Date.now()}|||setup`, user);
   }, [location.search]);
 
-  const initialUser = useMemo(() => getUserFromStorage(), []);
-  const resolvedUser = useMemo(() => initialUser, [initialUser]);
+ // ✅ use username if available, otherwise fall back to sid so storage keys stay consistent
+const stableSid = useMemo(() => ensureStoredSid(), []);
+const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid]);
+
 
   const [form, setForm] = useState(() => {
     try {
