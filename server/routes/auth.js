@@ -11,7 +11,6 @@ const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
 
-
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
 /* ------------------------------------------------------------------ */
@@ -75,14 +74,8 @@ const COOKIE_NAME = 'sm_sid';
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
 const RETURN_TO_COOKIE = 'sm_return_to';
 
-// --- per-user key for tokenStore (so users don't overwrite each other) ---
-function ownerKeyFromReq(req) {
-  const cookieSid = req.cookies?.sm_sid;
-  const headerSid = req.get('x-sm-sid');
-  const auth = req.headers.authorization || '';
-  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
-  return cookieSid || headerSid || bearer || `ip:${req.ip}`;
-}
+// If cookies are blocked, frontend can send this header as a fallback
+const SID_HEADER = 'x-sm-sid';
 
 function computeCookieDomain() {
   if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN; // e.g. smartmark-mvp.onrender.com
@@ -104,6 +97,86 @@ function setSessionCookie(res, sid) {
   const dom = computeCookieDomain();
   if (dom) opts.domain = dom;
   res.cookie(COOKIE_NAME, sid, opts);
+}
+
+function isSidLike(x) {
+  const s = String(x || '').trim();
+  return !!s && /^sm_[A-Za-z0-9_-]{10,}$/.test(s);
+}
+
+// Always keep a stable sid for FB token ownership.
+function getSidFromReq(req) {
+  const cookieSid = req.cookies?.[COOKIE_NAME];
+  const headerSid = req.get(SID_HEADER);
+  const auth = req.headers.authorization || '';
+  const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : null;
+  return (cookieSid || headerSid || bearer || '').trim();
+}
+
+function ensureSid(req, res) {
+  let sid = getSidFromReq(req);
+  if (!sid) {
+    sid = `sm_${nanoid(24)}`;
+    setSessionCookie(res, sid);
+  }
+  req.smSid = sid;
+  return sid;
+}
+
+// --- per-user key for tokenStore (so users don't overwrite each other) ---
+function ownerKeyFromReq(req) {
+  const sid = (req.smSid || getSidFromReq(req) || '').trim();
+  return sid || `ip:${req.ip}`;
+}
+
+// ✅ Ensure sid exists on all facebook/auth flows (including launch)
+router.use((req, res, next) => {
+  if (
+    req.path.startsWith('/facebook') ||
+    req.path.startsWith('/debug/fbtoken') ||
+    req.path.includes('/launch-campaign')
+  ) {
+    ensureSid(req, res);
+  }
+  next();
+});
+
+/**
+ * SID stitch:
+ * If frontend sends x-sm-sid (or Bearer sm_...) but cookies are missing,
+ * set cookie so downstream routes (including OAuth + launch) use same ownerKey.
+ */
+router.use((req, res, next) => {
+  try {
+    const cookieSid = req.cookies?.[COOKIE_NAME];
+    if (isSidLike(cookieSid)) return next();
+
+    const headerSid = req.get(SID_HEADER);
+    const auth = req.headers.authorization || '';
+    const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const candidate = isSidLike(headerSid) ? headerSid : (isSidLike(bearer) ? bearer : '');
+
+    if (candidate) {
+      setSessionCookie(res, candidate);
+      req.cookies = req.cookies || {};
+      req.cookies[COOKIE_NAME] = candidate;
+      req.smSid = candidate;
+    }
+  } catch {}
+  next();
+});
+
+// Helper: safely append sid to return_to so frontend can store it even if cookies are blocked
+function appendSidToReturnTo(urlStr, sid) {
+  try {
+    if (!urlStr) return urlStr;
+    const u = new URL(urlStr);
+    if (!u.searchParams.get('sm_sid')) u.searchParams.set('sm_sid', sid);
+    if (!u.searchParams.get('sid')) u.searchParams.set('sid', sid);
+    return u.toString();
+  } catch {
+    return urlStr;
+  }
 }
 
 /* ----------------------------- Sanity route ----------------------------- */
@@ -138,11 +211,9 @@ function absolutePublicUrl(relativePath) {
   // keep absolute urls
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
 
-  // ✅ ensure leading slash
   const rel = String(relativePath).startsWith('/') ? String(relativePath) : `/${relativePath}`;
   return `${base}${rel}`;
 }
-
 
 /* ------------------------------ Facebook OAuth ------------------------------ */
 const FB_SCOPES = [
@@ -159,10 +230,9 @@ router.get('/facebook', (req, res) => {
     setSessionCookie(res, sid);
   }
 
-  // ✅ state MUST be tied to this user/session
   const state = sid;
 
-  // ✅ store expected state for callback validation
+  // store expected state for callback validation
   const dom = computeCookieDomain();
   res.cookie('sm_oauth_state', state, {
     httpOnly: true,
@@ -187,9 +257,11 @@ router.get('/facebook', (req, res) => {
       host === 'www.smartemark.com' ||
       host === 'smartemark.com' ||
       host === 'localhost';
-
     if (allowed) safeReturnTo = u.toString();
   } catch {}
+
+  // ✅ put sid into return_to so frontend can persist it (cookie fallback)
+  safeReturnTo = appendSidToReturnTo(safeReturnTo, sid);
 
   const dom2 = computeCookieDomain();
   res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
@@ -197,7 +269,7 @@ router.get('/facebook', (req, res) => {
     secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
     path: '/',
-    maxAge: 10 * 60 * 1000, // 10 min
+    maxAge: 10 * 60 * 1000,
     ...(dom2 ? { domain: dom2 } : {})
   });
 
@@ -264,13 +336,12 @@ router.get('/facebook/callback', async (req, res) => {
     const fallback = `${FRONTEND_URL}/setup`;
     let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
 
-    res.clearCookie(RETURN_TO_COOKIE, { path: '/' });
+    res.clearCookie(RETURN_TO_COOKIE, { path: '/', domain: computeCookieDomain() });
 
     // Safety: only allow your own frontend origin
     try {
       const u = new URL(returnTo || fallback);
       const front = new URL(FRONTEND_URL);
-
       if (u.origin !== front.origin) returnTo = fallback;
       else returnTo = u.toString();
     } catch {
@@ -357,7 +428,7 @@ async function requireSession(req) {
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : null;
   const sid =
     req.cookies?.[COOKIE_NAME] ||
-    req.get('x-sm-sid') ||
+    req.get(SID_HEADER) ||
     bearer;
 
   if (!sid) return { ok: false, status: 401, error: 'Not logged in' };
@@ -481,13 +552,17 @@ router.get('/whoami', async (req, res) => {
    ========================= */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
-  const userToken = getFbUserToken(ownerKey);
-
   const { accountId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
-  // ✅ IMPORTANT: do NOT let an env var accidentally put real users into PAUSED.
-  // Only allow "no spend" in dev, or if you explicitly enable it.
+  const userToken = getFbUserToken(ownerKey);
+  if (!userToken) {
+    return res.status(401).json({
+      error: 'Not authenticated with Facebook',
+      hint: 'Session mismatch: your sid cookie/header must match the one used during OAuth.',
+      ownerKeyUsed: ownerKey
+    });
+  }
+
   const allowNoSpend = process.env.ALLOW_NO_SPEND === '1' || !isProd;
   const NO_SPEND =
     allowNoSpend &&
@@ -501,8 +576,6 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return p;
   };
 
-  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-
   function normalizeLink(raw) {
     let s = String(raw || '').trim();
     if (!s) return '';
@@ -511,22 +584,15 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
-  // If your frontend ever stores /generated URLs on smartemark.com,
-  // the backend should still fetch from the backend public base.
   function normalizeImageUrl(u) {
     const s = String(u || '').trim();
-    if (!s) return s;
+    if (!s) return '';
 
-    // blob: cannot be fetched server-side
     if (/^blob:/i.test(s)) return '';
-
-    // if it's already a data url, keep it
     if (/^data:image\//i.test(s)) return s;
 
-    // if it's a relative path, force it onto backend base
     if (!/^https?:\/\//i.test(s)) return absolutePublicUrl(s);
 
-    // if it's absolute but on your frontend domain, remap to backend base
     try {
       const parsed = new URL(s);
       const host = parsed.hostname.toLowerCase();
@@ -541,123 +607,140 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
-async function fetchImageAsBase64(url) {
-  if (!url) throw new Error('No image URL');
-
-  // Accept Data URLs directly
-  const m = /^data:image\/\w+;base64,(.+)$/i.exec(String(url).trim());
-  if (m) return m[1];
-
-  const raw = String(url).trim();
-
-  const backendBase =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    'https://smartmark-mvp.onrender.com';
-
-  const candidates = [];
-
-  const pushCandidate = (u) => {
-    if (!u) return;
-    candidates.push(String(u));
-  };
-
-  try {
-    if (/^https?:\/\//i.test(raw)) {
-      pushCandidate(raw);
-
-      const u = new URL(raw);
-
-      // Always try same path on backendBase too (covers smartemark.com → backend host)
-      pushCandidate(`${backendBase}${u.pathname}${u.search || ''}`);
-
-      // If it's a generated/media path, try a couple common rewrites
-      if (u.pathname.startsWith('/generated/')) {
-        pushCandidate(`${backendBase}${u.pathname}`); // same
-        pushCandidate(`${backendBase}/api/media${u.pathname}`); // /api/media/generated/...
-      }
-      if (u.pathname.startsWith('/api/media/')) {
-        pushCandidate(`${backendBase}${u.pathname}${u.search || ''}`);
-      }
-      if (u.pathname.startsWith('/media/')) {
-        pushCandidate(`${backendBase}${u.pathname}${u.search || ''}`);
-      }
-    } else {
-      // relative → force backend
-      const rel = raw.startsWith('/') ? raw : `/${raw}`;
-      pushCandidate(`${backendBase}${rel}`);
-
-      // common rewrites
-      if (rel.startsWith('/generated/')) {
-        pushCandidate(`${backendBase}/api/media${rel}`);
-      }
-    }
-  } catch {
-    const rel = raw.startsWith('/') ? raw : `/${raw}`;
-    pushCandidate(`${backendBase}${rel}`);
-    if (rel.startsWith('/generated/')) pushCandidate(`${backendBase}/api/media${rel}`);
+  function extractBase64FromDataUrl(s) {
+    const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(String(s || '').trim());
+    return m ? m[1] : null;
   }
 
-  // Also try absolutePublicUrl fallback (now fixed)
-  try { pushCandidate(absolutePublicUrl(raw)); } catch {}
+  function parseImageVariant(v) {
+    if (typeof v === 'string') return { url: v, bytes: null };
+    if (v && typeof v === 'object') {
+      return {
+        url: v.url || v.src || v.imageUrl || v.image || '',
+        bytes: v.bytes || v.base64 || v.b64 || null
+      };
+    }
+    return { url: '', bytes: null };
+  }
 
-  // de-dupe
-  const uniq = Array.from(new Set(candidates.filter(Boolean)));
+  async function fetchImageAsBase64(url, debugLabel = '') {
+    if (!url) throw new Error(`No image URL${debugLabel ? ` (${debugLabel})` : ''}`);
 
-  let lastErr = null;
-  let lastTried = '';
+    const inline = extractBase64FromDataUrl(url);
+    if (inline) return inline;
 
-  for (const abs of uniq) {
-    lastTried = abs;
+    const raw = String(url).trim();
+    const backendBase =
+      process.env.PUBLIC_BASE_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      'https://smartmark-mvp.onrender.com';
+
+    const candidates = [];
+    const push = (u) => { if (u) candidates.push(String(u)); };
+
     try {
-      const imgRes = await axios.get(abs, {
-        responseType: 'arraybuffer',
-        timeout: 20000,
-        headers: { Accept: 'image/*' }
-      });
+      if (/^https?:\/\//i.test(raw)) {
+        push(raw);
 
-      const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
-      if (!ct.includes('image')) {
-        throw new Error(`Non-image content-type: ${ct || 'unknown'} from ${abs}`);
+        const u = new URL(raw);
+        push(`${backendBase}${u.pathname}${u.search || ''}`);
+
+        if (u.pathname.startsWith('/generated/')) {
+          push(`${backendBase}${u.pathname}`);
+          push(`${backendBase}/api/media${u.pathname}`);
+        }
+        if (u.pathname.startsWith('/api/media/')) push(`${backendBase}${u.pathname}${u.search || ''}`);
+        if (u.pathname.startsWith('/media/')) push(`${backendBase}${u.pathname}${u.search || ''}`);
+      } else {
+        const rel = raw.startsWith('/') ? raw : `/${raw}`;
+        push(`${backendBase}${rel}`);
+        if (rel.startsWith('/generated/')) push(`${backendBase}/api/media${rel}`);
       }
-
-      return Buffer.from(imgRes.data).toString('base64');
-    } catch (e) {
-      lastErr = e;
-
-      // helpful debug
-      const status = e?.response?.status;
-      const data = e?.response?.data;
-
-      console.error('[fetchImageAsBase64] failed', {
-        url: abs,
-        status,
-        // if server returns JSON {error:"Not found"}, you'll see it here
-        data: Buffer.isBuffer(data) ? '(buffer)' : data
-      });
+    } catch {
+      const rel = raw.startsWith('/') ? raw : `/${raw}`;
+      push(`${backendBase}${rel}`);
+      if (rel.startsWith('/generated/')) push(`${backendBase}/api/media${rel}`);
     }
+
+    try { push(absolutePublicUrl(raw)); } catch {}
+
+    const uniq = Array.from(new Set(candidates.filter(Boolean)));
+
+    let lastErr = null;
+    let lastTried = '';
+
+    for (const abs of uniq) {
+      lastTried = abs;
+      try {
+        const imgRes = await axios.get(abs, {
+          responseType: 'arraybuffer',
+          timeout: 25000,
+          maxBodyLength: 25 * 1024 * 1024,
+          maxContentLength: 25 * 1024 * 1024,
+          validateStatus: (s) => s >= 200 && s < 400,
+          headers: {
+            Accept: 'image/*',
+            'User-Agent': 'SmartMark/1.0'
+          }
+        });
+
+        const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+        if (!ct.includes('image')) {
+          throw new Error(`Non-image content-type: ${ct || 'unknown'} from ${abs}`);
+        }
+
+        return Buffer.from(imgRes.data).toString('base64');
+      } catch (e) {
+        lastErr = e;
+        const status = e?.response?.status;
+        const data = e?.response?.data;
+        console.error('[fetchImageAsBase64] failed', {
+          label: debugLabel || '',
+          url: abs,
+          status,
+          data: Buffer.isBuffer(data) ? '(buffer)' : data
+        });
+      }
+    }
+
+    const status = lastErr?.response?.status ? `HTTP ${lastErr.response.status}` : '';
+    throw new Error(
+      `Image download failed${debugLabel ? ` (${debugLabel})` : ''}. Last tried: ${lastTried} ${status}`.trim()
+    );
   }
 
-  const status = lastErr?.response?.status ? `HTTP ${lastErr.response.status}` : '';
-  throw new Error(`Image download failed. Last tried: ${lastTried} ${status}`.trim());
-}
-
-
-  async function uploadImage(imageUrl) {
-    // ✅ Do NOT silently upload the green fallback in production.
-    // If the image can’t be fetched, fail fast so you never launch a broken creative.
-    const base64 = await fetchImageAsBase64(imageUrl);
+  async function uploadImageFromBase64(base64, debugLabel = '') {
+    if (!base64) throw new Error(`Missing base64 bytes${debugLabel ? ` (${debugLabel})` : ''}`);
 
     const fbImageRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adimages`,
       new URLSearchParams({ bytes: base64 }),
       { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, params: mkParams() }
     );
+
     const imgData = fbImageRes.data?.images || {};
     const hash = Object.values(imgData)[0]?.hash || null;
+
     if (hash) return hash;
     if (VALIDATE_ONLY) return 'VALIDATION_ONLY_HASH';
-    throw new Error('Image upload failed');
+    throw new Error(`Image upload failed${debugLabel ? ` (${debugLabel})` : ''}`);
+  }
+
+  async function uploadImage(variant, index) {
+    const label = `variant ${index + 1}`;
+
+    if (variant.bytes) {
+      const inline = extractBase64FromDataUrl(variant.bytes) || String(variant.bytes).trim();
+      return await uploadImageFromBase64(inline, label);
+    }
+
+    const normalized = normalizeImageUrl(variant.url);
+    if (!normalized) {
+      throw new Error(`Invalid image URL (${label}). Do NOT send blob: URLs.`);
+    }
+
+    const base64 = await fetchImageAsBase64(normalized, label);
+    return await uploadImageFromBase64(base64, label);
   }
 
   async function resolvePageId(explicitPageId) {
@@ -665,6 +748,7 @@ async function fetchImageAsBase64(url) {
 
     if (explicitPageId) return String(explicitPageId);
     if (DEFAULTS.pageId) return String(DEFAULTS.pageId);
+
     try {
       const pagesRes = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
         params: { access_token: userToken, fields: 'id,name' }
@@ -682,10 +766,7 @@ async function fetchImageAsBase64(url) {
       adCopy,
       pageId,
       aiAudience: aiAudienceRaw,
-
-      // ✅ static-only input
       imageVariants = [],
-
       flightStart = null,
       flightEnd = null,
       flightHours = null,
@@ -701,7 +782,6 @@ async function fetchImageAsBase64(url) {
 
     const campaignName = form.campaignName || form.businessName || 'SmartMark Campaign';
 
-    // ✅ Always use the real business website link (typeform), not a placeholder.
     const destinationUrl =
       normalizeLink(
         form.websiteUrl ||
@@ -719,37 +799,32 @@ async function fetchImageAsBase64(url) {
       else if (aiAudienceRaw && typeof aiAudienceRaw === 'object') aiAudience = aiAudienceRaw;
     } catch { aiAudience = null; }
 
-    // ✅ force images-only
-    const ms = 'image';
-
     let targeting = {
       geo_locations: { countries: ['US'] },
       age_min: 18,
       age_max: 65,
       targeting_automation: { advantage_audience: 0 }
     };
+
     if (aiAudience?.location) {
       const loc = String(aiAudience.location).trim();
-      if (/^[A-Za-z]{2}$/.test(loc)) {
-        targeting.geo_locations = { countries: [loc.toUpperCase()] };
-      } else if (/united states|usa/i.test(loc)) {
-        targeting.geo_locations = { countries: ['US'] };
-      } else {
-        targeting.geo_locations = { countries: [loc.toUpperCase()] };
-      }
+      if (/^[A-Za-z]{2}$/.test(loc)) targeting.geo_locations = { countries: [loc.toUpperCase()] };
+      else if (/united states|usa/i.test(loc)) targeting.geo_locations = { countries: ['US'] };
+      else targeting.geo_locations = { countries: [loc.toUpperCase()] };
     }
+
     if (aiAudience?.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
       const [min, max] = aiAudience.ageRange.split('-').map(Number);
       targeting.age_min = min; targeting.age_max = max;
     }
+
     if (aiAudience?.fbInterestIds?.length) {
       targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map(id => ({ id })) }];
       targeting.targeting_automation.advantage_audience = 0;
     } else {
-      targeting.targeting_automation.advantage_audience = 1; // let FB optimize
+      targeting.targeting_automation.advantage_audience = 1;
     }
 
-    // limit 2 active campaigns (kept)
     if (!VALIDATE_ONLY) {
       const existing = await axios.get(
         `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
@@ -770,7 +845,6 @@ async function fetchImageAsBase64(url) {
       return 0;
     })();
 
-    // ✅ images only
     const plan = policy.decideVariantPlan({
       assetTypes: 'image',
       dailyBudget,
@@ -779,10 +853,27 @@ async function fetchImageAsBase64(url) {
         ? { images: Number(overrideCountPerType.images || 0) }
         : overrideCountPerType
     });
+
     const needImg = plan.images || 0;
 
     if (needImg > 0 && imageVariants.length < needImg) {
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
+    }
+
+    // ✅ validate first N variants BEFORE creating FB campaign/adset
+    const parsedVariants = [];
+    for (let i = 0; i < needImg; i++) {
+      const v = parseImageVariant(imageVariants[i]);
+      const normalized = normalizeImageUrl(v.url);
+      const inline = v.bytes ? (extractBase64FromDataUrl(v.bytes) || String(v.bytes).trim()) : null;
+
+      if (!inline && !normalized) {
+        return res.status(400).json({
+          error: `Invalid image URL for variant ${i + 1}. Do NOT send blob: URLs.`,
+          badValue: imageVariants[i]
+        });
+      }
+      parsedVariants.push({ url: normalized || v.url, bytes: inline });
     }
 
     const now = new Date();
@@ -813,7 +904,6 @@ async function fetchImageAsBase64(url) {
     );
     const campaignId = campaignRes.data?.id || 'VALIDATION_ONLY';
 
-    // ✅ single adset for images
     const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100));
     const { data: adsetData } = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
@@ -844,50 +934,44 @@ async function fetchImageAsBase64(url) {
     const adIds = [];
     const usedImages = [];
 
- for (let i = 0; i < needImg; i++) {
-  const srcUrlRaw = imageVariants[i];
-  const srcUrl = normalizeImageUrl(srcUrlRaw);   // ✅ USE IT
+    for (let i = 0; i < needImg; i++) {
+      const variant = parsedVariants[i];
+      const hash = await uploadImage(variant, i);
 
-  if (!srcUrl) throw new Error("Invalid image URL");
+      const cr = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+        {
+          name: `${campaignName} (Image v${i + 1})`,
+          object_story_spec: {
+            page_id: pageIdFinal,
+            link_data: {
+              message: form.adCopy || adCopy || '',
+              link: destinationUrl,
+              image_hash: hash,
+              description: form.description || ''
+            }
+          }
+        },
+        { params: mkParams() }
+      );
 
-  const hash = await uploadImage(srcUrl);
+      const ad = await axios.post(
+        `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
+        {
+          name: `${campaignName} (Image v${i + 1})`,
+          adset_id: imageAdSetId,
+          creative: { creative_id: cr.data.id },
+          status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
+        },
+        { params: mkParams() }
+      );
 
-  const cr = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-    {
-      name: `${campaignName} (Image v${i + 1})`,
-      object_story_spec: {
-        page_id: pageIdFinal,
-        link_data: {
-          message: form.adCopy || adCopy || '',
-          link: destinationUrl,
-          image_hash: hash,
-          description: form.description || ''
-        }
-      }
-    },
-    { params: mkParams() }
-  );
-
-  const ad = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
-    {
-      name: `${campaignName} (Image v${i + 1})`,
-      adset_id: imageAdSetId,
-      creative: { creative_id: cr.data.id },
-      status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
-    },
-    { params: mkParams() }
-  );
-
-  adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
-  usedImages.push(srcUrl); // ✅ store the resolved URL, not absolutePublicUrl() of a full URL
-}
-
+      adIds.push(ad.data?.id || `VALIDATION_ONLY_IMG_${i + 1}`);
+      usedImages.push(variant.bytes ? '(inline_base64)' : String(variant.url || ''));
+    }
 
     const campaignStatus = NO_SPEND ? 'PAUSED' : 'ACTIVE';
 
-    // store creatives record (static-only)
     await ensureUsersAndSessions();
     await db.read();
     db.data.campaign_creatives = db.data.campaign_creatives || [];
@@ -935,11 +1019,11 @@ async function fetchImageAsBase64(url) {
     }
     console.error('FB Campaign Launch Error:', detail);
 
-    // If the image URL can't be fetched, return a clean message (prevents green fallback launches)
-    if (String(err?.message || '').toLowerCase().includes('image')) {
+    const msg = String(err?.message || '').toLowerCase();
+    if (msg.includes('image') || msg.includes('download') || msg.includes('blob')) {
       return res.status(400).json({
-        error: 'One of your ad images could not be fetched by the server. Please regenerate the image and try again.',
-        detail
+        error: 'One of your ad images could not be fetched by the server (or a blob: URL was sent). Regenerate the image and try again.',
+        detail: String(err?.message || detail)
       });
     }
 
@@ -1070,17 +1154,33 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   }
 });
 
+// ✅ Delete (one click): archive on FB + purge stored creatives so "in progress" doesn't stick
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
-  const userToken = getFbUserToken(ownerKeyFromReq(req));
+  const ownerKey = ownerKeyFromReq(req);
+  const userToken = getFbUserToken(ownerKey);
 
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
   try {
     await axios.post(
       `https://graph.facebook.com/v18.0/${campaignId}`,
       { status: 'ARCHIVED' },
       { params: { access_token: userToken } }
     );
+
+    try {
+      await ensureUsersAndSessions();
+      await db.read();
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+      db.data.campaign_creatives = db.data.campaign_creatives.filter(
+        (r) => !(String(r.campaignId) === String(campaignId) && String(r.ownerKey) === String(ownerKey))
+      );
+      await db.write();
+    } catch (e) {
+      console.warn('[auth] cancel: failed to purge campaign_creatives record', e?.message || e);
+    }
+
     res.json({ success: true, message: `Campaign ${campaignId} canceled.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
