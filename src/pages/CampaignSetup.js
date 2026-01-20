@@ -167,22 +167,50 @@ const LS_PREVIEW_KEY = (u) => (u ? withUser(u, SETUP_PREVIEW_BACKUP_KEY) : SETUP
 
 function saveSetupPreviewBackup(user, previewObj) {
   try {
-    const payload = { ...(previewObj || {}), savedAt: Date.now() };
-    localStorage.setItem(LS_PREVIEW_KEY(user), JSON.stringify(payload));
-    localStorage.setItem(SETUP_PREVIEW_BACKUP_KEY, JSON.stringify(payload)); // legacy safety
+    const keyUser = LS_PREVIEW_KEY(user);
+
+    // read existing (user key OR legacy)
+    let prev = null;
+    try {
+      const rawPrev = localStorage.getItem(keyUser) || localStorage.getItem(SETUP_PREVIEW_BACKUP_KEY);
+      prev = rawPrev ? JSON.parse(rawPrev) : null;
+    } catch {
+      prev = null;
+    }
+
+    // MERGE: never overwrite good values with blanks
+    const next = {
+      headline: String(previewObj?.headline ?? "").trim() || String(prev?.headline ?? "").trim() || "",
+      body: String(previewObj?.body ?? "").trim() || String(prev?.body ?? "").trim() || "",
+      link: String(previewObj?.link ?? "").trim() || String(prev?.link ?? "").trim() || "",
+      ctxKey: String(previewObj?.ctxKey ?? "").trim() || String(prev?.ctxKey ?? "").trim() || "",
+      savedAt: Date.now(),
+    };
+
+    localStorage.setItem(keyUser, JSON.stringify(next));
+    localStorage.setItem(SETUP_PREVIEW_BACKUP_KEY, JSON.stringify(next)); // legacy safety
   } catch {}
 }
 
 function loadSetupPreviewBackup(user) {
   try {
-    const raw = localStorage.getItem(LS_PREVIEW_KEY(user)) || localStorage.getItem(SETUP_PREVIEW_BACKUP_KEY);
+    const raw =
+      localStorage.getItem(LS_PREVIEW_KEY(user)) ||
+      localStorage.getItem(SETUP_PREVIEW_BACKUP_KEY);
+
     if (!raw) return null;
 
     const p = JSON.parse(raw);
     const ageOk = !p.savedAt || Date.now() - p.savedAt <= DRAFT_TTL_MS;
     if (!ageOk) return null;
 
-    return p;
+    return {
+      headline: String(p.headline || "").trim(),
+      body: String(p.body || "").trim(),
+      link: String(p.link || "").trim(),
+      ctxKey: String(p.ctxKey || "").trim(),
+      savedAt: p.savedAt,
+    };
   } catch {
     return null;
   }
@@ -2037,35 +2065,51 @@ const filteredImages = draftImgs
   .slice(0, 2);
 
 
-      const websiteUrl = (form?.websiteUrl || form?.website || answers?.websiteUrl || answers?.website || answers?.url || answers?.link || "").toString().trim();
+    // ✅ ALWAYS use previewCopy fallback (OAuth return loses location.state)
+const finalHeadline = String(headline || previewCopy?.headline || "").trim();
+const finalBody = String(body || previewCopy?.body || "").trim();
 
-      if (!filteredImages.length) {
-        throw new Error("No valid images found to launch. Please generate creatives again.");
-      }
+// use the most reliable link fallback order
+const websiteUrl = (
+  form?.websiteUrl ||
+  form?.website ||
+  answers?.websiteUrl ||
+  answers?.website ||
+  answers?.url ||
+  answers?.link ||
+  inferredLink ||
+  previewCopy?.link ||
+  ""
+).toString().trim();
 
-      const payload = {
-        form: { ...form, url: websiteUrl, websiteUrl },
+if (!filteredImages.length) {
+  throw new Error("No valid images found to launch. Please generate creatives again.");
+}
 
-        budget: safeBudget,
-        campaignType: form?.campaignType || "Website Traffic",
-        pageId: selectedPageId,
-        websiteUrl,
+const payload = {
+  form: { ...form, url: websiteUrl, websiteUrl },
 
-        aiAudience: form?.aiAudience || answers?.aiAudience || "",
-        adCopy: (headline || "") + (body ? `\n\n${body}` : ""),
-        answers: answers || {},
+  budget: safeBudget,
+  campaignType: form?.campaignType || "Website Traffic",
+  pageId: selectedPageId,
+  websiteUrl,
 
-        mediaSelection: "image",
+  aiAudience: form?.aiAudience || answers?.aiAudience || "",
+  adCopy: finalHeadline + (finalBody ? `\n\n${finalBody}` : ""),
+  answers: answers || {},
 
-        imageVariants: filteredImages,
-        imageUrls: filteredImages,
-        images: filteredImages,
+  mediaSelection: "image",
 
-        flightStart: startISO,
-        flightEnd: endISO,
+  imageVariants: filteredImages,
+  imageUrls: filteredImages,
+  images: filteredImages,
 
-        overrideCountPerType: { images: Math.min(2, filteredImages.length) },
-      };
+  flightStart: startISO,
+  flightEnd: endISO,
+
+  overrideCountPerType: { images: Math.min(2, filteredImages.length) },
+};
+
 
       const res = await authFetch(`/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
@@ -2099,11 +2143,15 @@ const filteredImages = draftImgs
           time: Date.now(),
           expiresAt,
           name: form.campaignName || "Untitled",
-          meta: {
-            headline: String(headline || "").trim(),
-            body: String(body || "").trim(),
-            link: websiteUrl || "https://your-smartmark-site.com",
-          },
+        meta: {
+  headline: String(finalHeadline || "").trim(),
+  body: String(finalBody || "").trim(),
+  link:
+    String(websiteUrl || "").trim() ||
+    String(previewCopy?.link || inferredLink || "").trim() ||
+    "https://your-smartmark-site.com",
+},
+
         };
         writeCreativeMap(resolvedUser, acctId, map);
       }
