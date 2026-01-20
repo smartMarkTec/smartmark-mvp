@@ -5,7 +5,11 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
 
 // Render origin ONLY for media files (images, fallback jpg)
+// Prefer same-origin for /api/media when possible (prevents cross-origin blocks/glitches),
+// but keep Render as hard fallback.
 const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
+const APP_ORIGIN = window.location.origin;
+
 
 // Auth backend MUST match the host used by FACEBOOK_REDIRECT_URI
 const AUTH_BASE = "https://smartmark-mvp.onrender.com/auth";
@@ -553,11 +557,46 @@ function toAbsoluteMedia(u) {
   const s = String(u).trim();
   if (!s) return "";
 
-  // ✅ CRITICAL: reject frontend-only / non-fetchable URLs (these cause FB uploads to fail)
+  // ✅ reject frontend-only / non-fetchable URLs
   if (/^(blob:|data:|file:|about:)/i.test(s)) return "";
 
+  // If it's an /api/media path, prefer same-origin first (prevents cross-origin blocking).
+  // Example:
+  //   https://smartmark-mvp.onrender.com/api/media/x.png  ->  https://smartemark.com/api/media/x.png
+  //   /api/media/x.png                                   ->  https://smartemark.com/api/media/x.png
+  const looksLikeMediaPath =
+    s.startsWith("/api/media/") ||
+    s.includes("/api/media/");
+
+  if (looksLikeMediaPath) {
+    try {
+      // If it's an absolute URL, strip to pathname+search, then rebuild on APP_ORIGIN
+      if (/^https?:\/\//i.test(s)) {
+        const url = new URL(s);
+        if (url.pathname.startsWith("/api/media/")) {
+          return APP_ORIGIN + url.pathname + (url.search || "");
+        }
+        // if it contains /api/media deeper, try best-effort
+        const idx = url.pathname.indexOf("/api/media/");
+        if (idx >= 0) {
+          const path = url.pathname.slice(idx);
+          return APP_ORIGIN + path + (url.search || "");
+        }
+        return s;
+      }
+
+      // If it's relative, force same-origin absolute
+      if (s.startsWith("/api/media/")) return APP_ORIGIN + s;
+
+      // If it's "api/media/..." without leading slash
+      if (s.startsWith("api/media/")) return APP_ORIGIN + "/" + s;
+    } catch {}
+  }
+
+  // Absolute non-media URLs: keep as-is
   if (/^https?:\/\//i.test(s)) return s;
 
+  // For other relative paths, use Render as fallback origin (your existing behavior)
   if (s.startsWith("/")) return MEDIA_ORIGIN + s;
 
   return MEDIA_ORIGIN + "/" + s;
@@ -658,12 +697,30 @@ const badge = {
 function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
   const [broken, setBroken] = useState(false);
-  const normalized = (items || []).map(toAbsoluteMedia).filter(Boolean);
+  const [loaded, setLoaded] = useState(false);
 
+  // Normalize + dedupe
+  const normalized = useMemo(() => {
+    const arr = (items || [])
+      .map(toAbsoluteMedia)
+      .filter(Boolean);
+    // cheap dedupe while preserving order
+    const seen = new Set();
+    return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
+  }, [items]);
+
+  // Reset state when list changes
   useEffect(() => {
     if (idx >= normalized.length) setIdx(0);
     setBroken(false);
-  }, [normalized, idx]);
+    setLoaded(false);
+  }, [normalized]); // eslint-disable-line
+
+  // If idx changes, we’re loading a new image
+  useEffect(() => {
+    setBroken(false);
+    setLoaded(false);
+  }, [idx]);
 
   if (!normalized.length) {
     return (
@@ -679,6 +736,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
           justifyContent: "center",
           fontSize: 16,
           borderRadius: 12,
+          border: "1px solid rgba(255,255,255,0.06)",
         }}
       >
         No Images
@@ -686,27 +744,79 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     );
   }
 
+  const current = normalized[idx];
+
   const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
 
   return (
-    <div style={{ position: "relative", background: "#0f1418" }}>
-      <img
-        src={broken ? `${MEDIA_ORIGIN}/__fallback/1200.jpg` : normalized[idx]}
-        alt="Ad"
-        style={{
-          width: "100%",
-          maxHeight: height,
-          height,
-          objectFit: "contain",
-          display: "block",
-          background: "#0f1418",
-        }}
-        onClick={() =>
-          onFullscreen &&
-          onFullscreen(broken ? `${MEDIA_ORIGIN}/__fallback/1200.jpg` : normalized[idx])
-        }
-        onError={() => setBroken(true)}
-      />
+    <div
+      style={{
+        position: "relative",
+        background: "#0f1418",
+        borderRadius: 12,
+        overflow: "hidden",
+        border: "1px solid rgba(255,255,255,0.06)",
+      }}
+    >
+      {/* Loading skeleton */}
+      {!broken && !loaded && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "rgba(255,255,255,0.55)",
+            fontWeight: 800,
+            fontSize: 13,
+            background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+            zIndex: 1,
+          }}
+        >
+          Loading image…
+        </div>
+      )}
+
+      {/* Error state (NO fallback fetch that can also fail) */}
+      {broken && (
+        <div
+          style={{
+            height,
+            width: "100%",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "rgba(255,255,255,0.62)",
+            fontWeight: 900,
+            fontSize: 13,
+            background: "linear-gradient(180deg, rgba(255,60,60,0.08), rgba(255,255,255,0.02))",
+          }}
+        >
+          Image failed to load
+        </div>
+      )}
+
+      {!broken && (
+        <img
+          key={current} // force reload when URL changes
+          src={current}
+          alt="Ad"
+          style={{
+            width: "100%",
+            maxHeight: height,
+            height,
+            objectFit: "contain",
+            display: "block",
+            background: "#0f1418",
+          }}
+          onClick={() => onFullscreen && onFullscreen(current)}
+          onLoad={() => setLoaded(true)}
+          onError={() => setBroken(true)}
+          draggable={false}
+        />
+      )}
+
       {normalized.length > 1 && (
         <>
           <button onClick={() => go(-1)} style={navBtn(-1)} aria-label="Prev">
@@ -723,6 +833,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     </div>
   );
 }
+
 
 /* ---------- Minimal metrics row ---------- */
 function MetricsRow({ metrics }) {
