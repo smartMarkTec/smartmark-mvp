@@ -566,34 +566,42 @@ function toAbsoluteMedia(u) {
   const s = String(u).trim();
   if (!s) return "";
 
-  // Preview can render data urls
+  // ✅ allow data:image previews (optional, but harmless)
   if (/^data:image\//i.test(s)) return s;
 
-  // Reject unusable schemes
+  // ✅ reject frontend-only / non-fetchable URLs
   if (/^(blob:|file:|about:)/i.test(s)) return "";
 
-  // Absolute URLs: keep as-is
-  if (/^https?:\/\//i.test(s)) return s;
+  // ✅ If it's already absolute:
+  //   - If it points to /api/media, ALWAYS normalize to MEDIA_ORIGIN (Render),
+  //     because smartemark.com does NOT serve /api/media (that caused your 404).
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const url = new URL(s);
+      const idx = url.pathname.indexOf("/api/media/");
+      if (idx >= 0) {
+        const path = url.pathname.slice(idx);
+        return MEDIA_ORIGIN + path + (url.search || "");
+      }
+    } catch {}
+    return s;
+  }
 
-  // ✅ FIX: bare static filenames must go through /api/media/
-  const isBareStaticFile =
-    /^static-\d+[-\w]+(?:\.\w+)?\.(png|jpg|jpeg|webp)$/i.test(s) ||
-    /^static-\d+[-\w]+\.(png|jpg|jpeg|webp)$/i.test(s);
+  // ✅ bare filenames like "static-....png" must be served from /api/media on Render
+  if (/\.(png|jpg|jpeg|webp)$/i.test(s) && !s.startsWith("/")) {
+    return `${MEDIA_ORIGIN}/api/media/${s}`;
+  }
 
-  if (isBareStaticFile) return `${MEDIA_ORIGIN}/api/media/${s}`;
+  // ✅ relative /api/media must go to Render too (NOT APP_ORIGIN)
+  if (s.startsWith("/api/media/")) return MEDIA_ORIGIN + s;
+  if (s.startsWith("api/media/")) return `${MEDIA_ORIGIN}/${s}`;
 
-  // /api/media relative -> same origin
-  if (s.startsWith("/api/media/")) return APP_ORIGIN + s;
-  if (s.startsWith("api/media/")) return APP_ORIGIN + "/" + s;
-
-  // Other relative paths -> Render fallback
+  // other relative paths
   if (s.startsWith("/")) return MEDIA_ORIGIN + s;
-
-  // If it's a generic bare filename, assume it's also a media file
-  if (/\.(png|jpg|jpeg|webp)$/i.test(s)) return `${MEDIA_ORIGIN}/api/media/${s}`;
 
   return MEDIA_ORIGIN + "/" + s;
 }
+
 
 
 
