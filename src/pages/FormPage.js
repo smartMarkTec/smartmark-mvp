@@ -845,10 +845,76 @@ export default function FormPage() {
     if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
   }, [chatHistory]);
 
-  /* Warm backend on mount */
-  useEffect(() => {
-    warmBackend();
-  }, []);
+/* Warm backend on mount + ✅ BFCache fix: always re-check drafts when page is shown */
+useEffect(() => {
+  warmBackend();
+
+  const clearFormPreview = () => {
+    try {
+      // hard clear anything that can rehydrate a ghost preview
+      purgeCreativeDraftKeys();
+      lsRemove(IMAGE_CACHE_KEY);
+      lsRemove(IMAGE_DRAFTS_KEY);
+      lsRemove(FORM_DRAFT_KEY);
+      ssRemove(ACTIVE_CTX_KEY);
+      lsRemove(ACTIVE_CTX_KEY);
+    } catch {}
+
+    // reset UI state
+    setImageDataUrls([]);
+    setImageUrls([]);
+    setActiveImage(0);
+    setImageUrl("");
+    setResult(null);
+    setHasGenerated(false);
+    setAwaitingReady(true);
+    setImgFail({});
+    setImageEditing(false);
+  };
+
+  const shouldClearBecauseNoDrafts = () => {
+    try {
+      const rawForm = lsGet(FORM_DRAFT_KEY);
+      const rawCreative =
+        ssGet("draft_form_creatives") ||
+        lsGet(CREATIVE_DRAFT_KEY) ||
+        lsGet("sm_setup_creatives_backup_v1");
+
+      // if nothing saved, FormPage must be clean
+      if (!rawForm && !rawCreative) return true;
+
+      // if drafts are disabled (campaign launched), FormPage must be clean
+      if (isDraftDisabled()) return true;
+
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
+  const recheck = () => {
+    if (shouldClearBecauseNoDrafts()) clearFormPreview();
+  };
+
+  // Runs on normal mount
+  recheck();
+
+  // ✅ Runs when browser restores page from memory (back/forward cache)
+  const onPageShow = () => recheck();
+  window.addEventListener("pageshow", onPageShow);
+
+  // ✅ Runs when tab becomes visible again
+  const onVis = () => {
+    if (document.visibilityState === "visible") recheck();
+  };
+  document.addEventListener("visibilitychange", onVis);
+
+  return () => {
+    window.removeEventListener("pageshow", onPageShow);
+    document.removeEventListener("visibilitychange", onVis);
+  };
+}, []);
+
 
 /* Set per-user namespace (prevents shared-browser mixing)
    ✅ MUST be same-origin via /api so cookies persist (Vercel rewrite -> Render)
