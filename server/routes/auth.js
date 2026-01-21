@@ -6,7 +6,15 @@ const router = express.Router();
 const axios = require('axios');
 const { Buffer } = require('buffer');
 const db = require('../db');
-const { getFbUserToken, setFbUserToken } = require('../tokenStore');
+const {
+  getFbUserToken,
+  setFbUserToken,
+  clearFbUserToken,
+  getFbUserTokenMeta,
+  setFbUserTokenMeta,
+  clearFbUserTokenMeta,
+} = require('../tokenStore');
+
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
@@ -123,11 +131,20 @@ function ensureSid(req, res) {
   return sid;
 }
 
-// --- per-user key for tokenStore (so users don't overwrite each other) ---
 function ownerKeyFromReq(req) {
   const sid = (req.smSid || getSidFromReq(req) || '').trim();
+
+  // ✅ If logged in, bind FB token to the USER (persists across new sid logins)
+  try {
+    const sess = db?.data?.sessions?.find(s => String(s.sid) === String(sid));
+    const username = sess?.username ? String(sess.username).trim() : '';
+    if (username) return `user:${username}`;
+  } catch {}
+
+  // fallback: still support sid-based ownership
   return sid || `ip:${req.ip}`;
 }
+
 
 // ✅ Ensure sid exists on all facebook/auth flows (including launch)
 router.use((req, res, next) => {
@@ -166,6 +183,22 @@ router.use((req, res, next) => {
   next();
 });
 
+// ✅ Ensure db sessions are loaded for routes that need sid->username mapping
+router.use(async (req, res, next) => {
+  try {
+    if (
+      req.path.startsWith('/facebook') ||
+      req.path.startsWith('/debug/fbtoken') ||
+      req.path.includes('/launch-campaign')
+    ) {
+      await ensureUsersAndSessions();
+      await db.read();
+    }
+  } catch {}
+  next();
+});
+
+
 // Helper: safely append sid to return_to so frontend can store it even if cookies are blocked
 function appendSidToReturnTo(urlStr, sid) {
   try {
@@ -199,6 +232,33 @@ router.get('/facebook/ping', (req, res) => {
     }
   });
 });
+
+// ✅ Returns whether FB is connected for the current logged-in user
+router.get('/facebook/status', async (req, res) => {
+  try {
+    const ownerKey = ownerKeyFromReq(req);
+    const token = getFbUserToken(ownerKey);
+    const meta = getFbUserTokenMeta(ownerKey);
+
+    if (!token) return res.json({ ok: true, connected: false });
+
+    const expiresAt = Number(meta?.expiresAt || 0);
+    if (expiresAt && Date.now() > expiresAt) {
+      await clearFbUserToken(ownerKey);
+      await clearFbUserTokenMeta(ownerKey);
+      return res.json({ ok: true, connected: false, expired: true });
+    }
+
+    const daysLeft = expiresAt
+      ? Math.max(0, Math.ceil((expiresAt - Date.now()) / (1000 * 60 * 60 * 24)))
+      : null;
+
+    return res.json({ ok: true, connected: true, expiresAt: expiresAt || null, daysLeft });
+  } catch {
+    return res.json({ ok: true, connected: false });
+  }
+});
+
 
 function absolutePublicUrl(relativePath) {
   const base =
@@ -296,7 +356,18 @@ router.get('/facebook/callback', async (req, res) => {
 
   res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
 
-  const ownerKey = state; // sid we set before redirect
+ // sid we set before redirect
+const sidOwner = state;
+
+// ✅ Prefer storing token under the logged-in USER (persists across logins)
+let userOwner = sidOwner;
+try {
+  await ensureUsersAndSessions();
+  await db.read();
+  const sess = (db.data.sessions || []).find(s => String(s.sid) === String(sidOwner));
+  if (sess?.username) userOwner = `user:${String(sess.username).trim()}`;
+} catch {}
+
 
   try {
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
@@ -318,18 +389,75 @@ router.get('/facebook/callback', async (req, res) => {
           fb_exchange_token: accessToken
         }
       });
-      if (x.data?.access_token) {
-        await setFbUserToken(x.data.access_token, ownerKey);
-        await refreshDefaults(x.data.access_token, ownerKey);
-        console.log('[auth] stored LONG-LIVED FB user token + refreshed defaults');
-      } else {
-        await setFbUserToken(accessToken, ownerKey);
-        await refreshDefaults(accessToken, ownerKey);
-        console.log('[auth] stored SHORT-LIVED FB user token + refreshed defaults');
-      }
+     if (x.data?.access_token) {
+  const tok = x.data.access_token;
+
+  // expires_in is usually provided for long-lived tokens
+  const expiresInSec = Number(x.data.expires_in || 0);
+  const fallback60Days = 60 * 24 * 60 * 60; // 60 days
+  const expSec = expiresInSec > 0 ? expiresInSec : fallback60Days;
+  const expiresAt = Date.now() + expSec * 1000;
+
+  // ✅ store under USER key for persistence
+  await setFbUserToken(tok, userOwner);
+  await setFbUserTokenMeta(
+    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
+    userOwner
+  );
+
+  // optional: also store under sid as fallback
+  await setFbUserToken(tok, sidOwner);
+  await setFbUserTokenMeta(
+    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
+    sidOwner
+  );
+
+  await refreshDefaults(tok, userOwner);
+  console.log('[auth] stored LONG-LIVED FB user token (user-bound) + refreshed defaults');
+}
+else {
+  const tok = accessToken;
+  // short-lived tokens can be ~1-2 hours; set a conservative TTL
+  const expSec = 2 * 60 * 60; // 2 hours
+  const expiresAt = Date.now() + expSec * 1000;
+
+  await setFbUserToken(tok, userOwner);
+  await setFbUserTokenMeta(
+    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+    userOwner
+  );
+
+  // optional sid fallback
+  await setFbUserToken(tok, sidOwner);
+  await setFbUserTokenMeta(
+    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+    sidOwner
+  );
+
+  await refreshDefaults(tok, userOwner);
+  console.log('[auth] stored SHORT-LIVED FB user token (user-bound) + refreshed defaults');
+}
+
     } catch {
-      await setFbUserToken(accessToken, ownerKey);
-      await refreshDefaults(accessToken, ownerKey);
+     const tok = accessToken;
+const expSec = 2 * 60 * 60; // 2 hours
+const expiresAt = Date.now() + expSec * 1000;
+
+await setFbUserToken(tok, userOwner);
+await setFbUserTokenMeta(
+  { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+  userOwner
+);
+
+// sid fallback
+await setFbUserToken(tok, sidOwner);
+await setFbUserTokenMeta(
+  { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+  sidOwner
+);
+
+await refreshDefaults(tok, userOwner);
+
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 

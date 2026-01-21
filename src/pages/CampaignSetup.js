@@ -429,6 +429,7 @@ const SS_ACTIVE_CTX_KEY = (u) => (u ? `u:${u}:${ACTIVE_CTX_KEY}` : ACTIVE_CTX_KE
 const SS_DRAFT_DISABLED_KEY = (u) => (u ? `u:${u}:sm_draft_disabled_v1` : "sm_draft_disabled_v1");
 // ✅ GLOBAL flag so draft stays disabled even if resolvedUser changes after login
 const SS_DRAFT_DISABLED_GLOBAL_KEY = "sm_draft_disabled_global_v1";
+const SS_FEE_PAID_GLOBAL_KEY = "sm_fee_paid_global_v1";
 
 function isDraftDisabled(user) {
   try {
@@ -1223,13 +1224,23 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
-  const [feePaid, setFeePaid] = useState(() => {
-    try {
-      return localStorage.getItem(withUser(resolvedUser, FEE_PAID_KEY)) === "1";
-    } catch {
-      return false;
-    }
-  });
+ const [feePaid, setFeePaid] = useState(() => {
+  try {
+    // 1) session-global (survives resolvedUser changes in same tab/session)
+    if (sessionStorage.getItem(SS_FEE_PAID_GLOBAL_KEY) === "1") return true;
+
+    // 2) user-scoped
+    if (localStorage.getItem(withUser(resolvedUser, FEE_PAID_KEY)) === "1") return true;
+
+    // 3) legacy/global safety (optional but helps on refresh)
+    if (localStorage.getItem(FEE_PAID_KEY) === "1") return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+});
+
 
   /* ===================== LOGIN (simple + works) ===================== */
   const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
@@ -2017,12 +2028,14 @@ useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_budget", budget);
   }, [budget]);
 
-  useEffect(() => {
-    try {
-      localStorage.removeItem(withUser(resolvedUser, FEE_PAID_KEY));
-    } catch {}
-    setFeePaid(false);
-  }, [budget, resolvedUser]);
+useEffect(() => {
+  if (feePaid) return; // ✅ don't wipe once it's paid
+  try {
+    localStorage.removeItem(withUser(resolvedUser, FEE_PAID_KEY));
+  } catch {}
+  // feePaid already false here, no need to set again
+}, [budget, resolvedUser, feePaid]);
+
 
 useEffect(() => {
   const v = selectedAccount ? String(selectedAccount).replace(/^act_/, "") : "";
@@ -2144,13 +2157,23 @@ useEffect(() => {
     }
   }
 
-  const handlePayFee = () => {
-    window.open(CASHAPP_URL, "_blank", "noopener,noreferrer");
-    try {
-      localStorage.setItem(withUser(resolvedUser, FEE_PAID_KEY), "1");
-    } catch {}
-    setFeePaid(true);
-  };
+ const handlePayFee = () => {
+  window.open(CASHAPP_URL, "_blank", "noopener,noreferrer");
+  try {
+    // ✅ per-user
+    localStorage.setItem(withUser(resolvedUser, FEE_PAID_KEY), "1");
+    // ✅ legacy/global (so refresh still sees it)
+    localStorage.setItem(FEE_PAID_KEY, "1");
+  } catch {}
+
+  try {
+    // ✅ session-global (so resolvedUser changes don't break the UI)
+    sessionStorage.setItem(SS_FEE_PAID_GLOBAL_KEY, "1");
+  } catch {}
+
+  setFeePaid(true);
+};
+
 
   const handleLaunch = async () => {
     setLoading(true);
