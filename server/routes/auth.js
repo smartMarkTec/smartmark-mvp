@@ -354,7 +354,11 @@ router.get('/facebook/callback', async (req, res) => {
     return res.status(400).send('Invalid OAuth state.');
   }
 
-  res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
+ // clear without domain (works when cookie was host-only)
+res.clearCookie('sm_oauth_state', { path: '/' });
+// clear with domain (works when cookie was domain cookie)
+res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
+
 
  // sid we set before redirect
 const sidOwner = state;
@@ -464,7 +468,11 @@ await refreshDefaults(tok, userOwner);
     const fallback = `${FRONTEND_URL}/setup`;
     let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
 
-    res.clearCookie(RETURN_TO_COOKIE, { path: '/', domain: computeCookieDomain() });
+  // clear without domain (works when cookie was host-only)
+res.clearCookie('sm_oauth_state', { path: '/' });
+// clear with domain (works when cookie was domain cookie)
+res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
+
 
     // Safety: only allow your own frontend origin
     try {
