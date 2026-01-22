@@ -13,9 +13,11 @@ const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 const APP_ORIGIN = window.location.origin;
 
 
-// Prefer /auth (works when /api/auth is 404 on the Vercel domain). Fallback to /api/auth if present.
-const AUTH_BASE_PRIMARY = "/auth";
-const AUTH_BASE_FALLBACK = "/api/auth";
+// ✅ Always start OAuth + auth calls on the actual auth server (Render)
+// Fixes "Invalid OAuth state" caused by starting OAuth on the wrong origin.
+const AUTH_BASE_PRIMARY = `${MEDIA_ORIGIN}/auth`;
+const AUTH_BASE_FALLBACK = `${MEDIA_ORIGIN}/api/auth`;
+
 
 
 
