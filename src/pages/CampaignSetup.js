@@ -2655,79 +2655,59 @@ const payload = {
           }}
         >
           <button
-            onClick={() => {
-              trackEvent("connect_facebook", { page: "setup" });
-              const qs = new URLSearchParams(location.search || "");
-              const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
-              const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-              const active = (getActiveCtx(resolvedUser) || "").trim();
+onClick={() => {
+  trackEvent("connect_facebook", { page: "setup" });
 
-              const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
-              setActiveCtx(safeCtx, resolvedUser);
+  const qs = new URLSearchParams(location.search || "");
+  const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+  const active = (getActiveCtx(resolvedUser) || "").trim();
+  const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
 
-              try {
-                localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), JSON.stringify({ t: Date.now(), ctxKey: safeCtx }));
-              } catch {}
+  setActiveCtx(safeCtx, resolvedUser);
 
-         // ✅ ALWAYS persist FETCHABLE urls before leaving for OAuth
-const navFallback = Array.isArray(navImageUrls) ? navImageUrls : [];
-const draftImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
-
-let finalImagesAbs = resolveFetchableDraftImages({
-  draftImages: draftImgs,
-  navImages: navFallback,
-});
-
-// If still empty, try storage backup (last resort)
-if (!finalImagesAbs.length) {
+  // mark inflight so we can restore after OAuth
   try {
-    const raw =
-      sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
-      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-      localStorage.getItem("sm_setup_creatives_backup_v1");
+    localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), JSON.stringify({ t: Date.now(), ctxKey: safeCtx }));
+  } catch {}
 
-    if (raw) {
-      const d = JSON.parse(raw || "{}");
-      finalImagesAbs = resolveFetchableDraftImages({
-        draftImages: Array.isArray(d?.images) ? d.images : [],
-        navImages: navFallback,
+  // save preview copy for after redirect
+  try {
+    saveSetupPreviewBackup(resolvedUser, {
+      headline: String(headline || previewCopy?.headline || "").trim(),
+      body: String(body || previewCopy?.body || "").trim(),
+      link: String(inferredLink || previewCopy?.link || "").trim(),
+      ctxKey: safeCtx,
+    });
+  } catch {}
+
+  // save FETCHABLE images for after redirect
+  try {
+    const imgs = resolveFetchableDraftImages({
+      draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
+      navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
+    });
+
+    saveFetchableImagesBackup(resolvedUser, imgs);
+
+    if (imgs.length) {
+      persistDraftCreativesNow(resolvedUser, {
+        ctxKey: safeCtx,
+        images: imgs,
+        mediaSelection: "image",
+        expiresAt: Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
       });
     }
   } catch {}
-}
 
-// ✅ store a dedicated fetchable backup for OAuth return (this is the persistence fix)
-saveFetchableImagesBackup(resolvedUser, finalImagesAbs);
+  const returnTo =
+    window.location.origin +
+    "/setup" +
+    `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
-if (finalImagesAbs.length) {
-  const endMillis =
-    endDate && !isNaN(new Date(endDate).getTime())
-      ? new Date(endDate).getTime()
-      : Date.now() + DEFAULT_CAMPAIGN_TTL_MS;
+  window.location.assign(`${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+}}
 
-  persistDraftCreativesNow(resolvedUser, {
-    ctxKey: safeCtx,
-    images: finalImagesAbs,
-    mediaSelection: "image",
-    expiresAt: endMillis,
-  });
-}
-
-
-              const returnTo = window.location.origin + "/setup" + `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
-
-              try {
-                const p = {
-                  headline: headline || previewCopy?.headline || "",
-                  body: body || previewCopy?.body || "",
-                  link: inferredLink || previewCopy?.link || "",
-                  ctxKey: safeCtx,
-                };
-                saveSetupPreviewBackup(resolvedUser, p);
-              } catch {}
-
-              window.location.assign(`${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`);
-            }}
             style={{
               padding: "14px 22px",
               borderRadius: "14px",
