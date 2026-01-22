@@ -34,6 +34,29 @@ function ensureStoredSid() {
   return sid;
 }
 
+// ✅ Email -> backend-username map (so changing username field never breaks login)
+const EMAIL_USER_MAP_KEY = "sm_email_user_map_v1";
+
+function emailKey(e) {
+  return String(e || "").trim().toLowerCase();
+}
+
+function readEmailUserMap() {
+  try {
+    const raw = localStorage.getItem(EMAIL_USER_MAP_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeEmailUserMap(map) {
+  try {
+    localStorage.setItem(EMAIL_USER_MAP_KEY, JSON.stringify(map || {}));
+  } catch {}
+}
+
+
 // strip leading $ only (do NOT force lowercase)
 function normalizeUsername(raw) {
   const s = String(raw || "").trim();
@@ -180,96 +203,100 @@ export default function Login() {
     setPasswordEmail(p);
   }, []);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+const handleLogin = async (e) => {
+  e.preventDefault();
+  setLoading(true);
+  setError("");
 
-    const typedRaw = String(username || "").trim();          // keep what they typed for autofill
-    const typedAuthU = normalizeUsername(typedRaw);          // canonical for backend
-    const email = String(passwordEmail || "").trim();        // used as password in MVP
-    const emailNorm = email.toLowerCase();
-    const mapK = emailKey(emailNorm);
+  const uRaw = String(username || "").trim();
+  const uTyped = normalizeUsername(uRaw); // typed username (no leading $)
+  const p = String(passwordEmail || "").trim(); // email used as password
 
-    if (!typedAuthU || !email) {
-      setError("Please enter both fields.");
-      setLoading(false);
-      return;
-    }
+  if (!uTyped || !p) {
+    setError("Please enter both fields.");
+    setLoading(false);
+    return;
+  }
 
-    // If this email has an established “real auth username”, use it as fallback
-    const mappedAuthU =
-      (localStorage.getItem(mapK) || "").trim() ||
-      (localStorage.getItem("sm_current_user") || "").trim();
+  const ek = emailKey(p);
+  const map = readEmailUserMap();
+  const mappedUser = String(map[ek] || "").trim(); // known-good backend username for this email (if any)
 
-    const tryLogin = async (uTry) =>
-      postJSONWithTimeout(`${AUTH_BASE}/login`, { username: uTry, password: email }, 15000);
+  // try a specific username
+  const tryLogin = async (uTry) =>
+    postJSONWithTimeout(`${AUTH_BASE}/login`, { username: uTry, password: p }, 15000);
 
-    const tryRegister = async (uTry) =>
-      postJSONWithTimeout(`${AUTH_BASE}/register`, { username: uTry, email, password: email }, 15000);
+  try {
+    let successUser = "";
+    let out = await tryLogin(uTyped);
 
-    try {
-      // 1) Try login with what they typed
-      let out = await tryLogin(typedAuthU);
+    // If login fails, try register (MVP)
+    if (!out.ok || !out.data?.success) {
+      const reg = await postJSONWithTimeout(
+        `${AUTH_BASE}/register`,
+        { username: uTyped, email: p, password: p },
+        15000
+      );
 
-      // 2) If login fails, try register with typed username (MVP)
-      if (!out.ok || !out.data?.success) {
-        const reg = await tryRegister(typedAuthU);
-
-        // If register succeeded -> treat as success
-        if (reg.ok && reg.data?.success) {
-          out = reg;
-        } else {
-          // 3) If register failed (common: email already exists), fallback to mapped username login
-          if (mappedAuthU && mappedAuthU !== typedAuthU) {
-            const alt = await tryLogin(mappedAuthU);
-            if (alt.ok && alt.data?.success) {
-              out = alt;
-            } else {
-              // last fallback: retry typed login once (some backends race-create)
-              out = await tryLogin(typedAuthU);
-            }
-          } else {
-            // last fallback: retry typed login once
-            out = await tryLogin(typedAuthU);
+      if (reg.ok && reg.data?.success) {
+        successUser = uTyped;
+        out = reg;
+      } else {
+        // If email already belongs to another username, try that mapped username
+        if (mappedUser && mappedUser !== uTyped) {
+          const out2 = await tryLogin(mappedUser);
+          if (out2.ok && out2.data?.success) {
+            successUser = mappedUser;
+            out = out2;
           }
         }
+
+        // last attempt: retry typed login once (covers race conditions)
+        if (!successUser) {
+          out = await tryLogin(uTyped);
+          if (out.ok && out.data?.success) successUser = uTyped;
+        }
       }
-
-      if (!out.ok || !out.data?.success) {
-        const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
-        throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
-      }
-
-      // Determine which username actually worked for auth
-      const authedAs = (out?.data?.username && String(out.data.username).trim()) || (mappedAuthU && mappedAuthU !== typedAuthU ? mappedAuthU : typedAuthU);
-
-      // ✅ Persist:
-      // - Always keep the *typed* username for autofill/UI
-      // - Keep the *actual* auth username for backend + namespace stability
-      try {
-        localStorage.setItem("smartmark_login_username", typedRaw); // ✅ what user typed (autofill)
-        localStorage.setItem("smartmark_login_password", email);    // ✅ last typed email/pass
-
-        localStorage.setItem("sm_current_user", authedAs);          // ✅ real backend username
-        localStorage.setItem(mapK, authedAs);                       // ✅ email -> real backend username
-
-        // optional: user-scoped storage under the REAL auth username (keeps your per-user keys consistent)
-        localStorage.setItem(withUser(authedAs, "smartmark_login_username"), typedRaw);
-        localStorage.setItem(withUser(authedAs, "smartmark_login_password"), email);
-      } catch {}
-
-      navigate("/setup");
-    } catch (err) {
-      const msg =
-        err?.name === "AbortError"
-          ? "Login timed out. Server didn’t respond."
-          : err?.message || "Server error. Please try again.";
-      setError(msg);
-    } finally {
-      setLoading(false);
+    } else {
+      successUser = uTyped;
     }
-  };
+
+    if (!out.ok || !out.data?.success || !successUser) {
+      const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
+      throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
+    }
+
+    // ✅ Persist "current user" + last-used creds
+    try {
+      localStorage.setItem("sm_current_user", successUser);
+      localStorage.setItem("smartmark_login_username", successUser); // canonical (no $)
+      localStorage.setItem("smartmark_login_password", p);
+
+      // also user-scoped (optional)
+      localStorage.setItem(withUser(successUser, "smartmark_login_username"), successUser);
+      localStorage.setItem(withUser(successUser, "smartmark_login_password"), p);
+    } catch {}
+
+    // ✅ Remember which backend-username works for this email forever
+    try {
+      map[ek] = successUser;
+      writeEmailUserMap(map);
+    } catch {}
+
+    migrateToUserNamespace(successUser);
+
+    navigate("/setup");
+  } catch (err) {
+    const msg =
+      err?.name === "AbortError"
+        ? "Login timed out. Server didn’t respond."
+        : err?.message || "Server error. Please try again.";
+    setError(msg);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <>

@@ -484,11 +484,14 @@ const LS_BACKUP_KEY = (u) => (u ? withUser(u, SETUP_CREATIVE_BACKUP_KEY) : SETUP
 
 function getUserFromStorage() {
   try {
-    return (localStorage.getItem("sm_current_user") || localStorage.getItem("smartmark_login_username") || "").trim();
+    // ✅ Only treat sm_current_user as "logged in user"
+    // DO NOT fall back to smartmark_login_username, because typing would swap namespaces.
+    return (localStorage.getItem("sm_current_user") || "").trim();
   } catch {
     return "";
   }
 }
+
 
 function lsGet(user, key) {
   try {
@@ -1258,6 +1261,29 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
   }
 });
 
+// ✅ Email -> backend-username map (so changing username field never breaks login)
+const EMAIL_USER_MAP_KEY = "sm_email_user_map_v1";
+
+function emailKey(e) {
+  return String(e || "").trim().toLowerCase();
+}
+
+function readEmailUserMap() {
+  try {
+    const raw = localStorage.getItem(EMAIL_USER_MAP_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeEmailUserMap(map) {
+  try {
+    localStorage.setItem(EMAIL_USER_MAP_KEY, JSON.stringify(map || {}));
+  } catch {}
+}
+
+
 
   /* ===================== LOGIN (simple + works) ===================== */
   const [loginUser, setLoginUser] = useState(() => lsGet(resolvedUser, "smartmark_login_username") || "");
@@ -1291,34 +1317,86 @@ function normalizeUsername(raw) {
 
 const handleLogin = async () => {
   const uRaw = String(loginUser || "").trim();
-  const uAuth = normalizeUsername(uRaw);
+  const uTyped = normalizeUsername(uRaw);
   const p = String(loginPass || "").trim();
 
-  if (!uAuth || !p) {
+  if (!uTyped || !p) {
     setAuthStatus({ ok: false, msg: "Enter CashTag + email." });
     return false;
   }
+
+  const ek = emailKey(p);
+  const map = readEmailUserMap();
+  const mappedUser = String(map[ek] || "").trim();
+
+  const tryLogin = async (uTry) => {
+    const r = await authFetch(`/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: uTry, password: p }),
+    });
+    const j = await r.json().catch(() => ({}));
+    return { r, j };
+  };
+
+  const tryRegister = async (uTry) => {
+    const r = await authFetch(`/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: uTry, email: p, password: p }),
+    });
+    const j = await r.json().catch(() => ({}));
+    return { r, j };
+  };
 
   setAuthLoading(true);
   setAuthStatus({ ok: false, msg: "Logging in..." });
 
   try {
-    const r = await authFetch(`/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: uAuth, password: p }),
-    });
+    let successUser = "";
 
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error || "Login failed");
+    // 1) login with typed username
+    let out = await tryLogin(uTyped);
+    if (out.r.ok && out.j?.success) {
+      successUser = uTyped;
+    } else {
+      // 2) try auto-register
+      const reg = await tryRegister(uTyped);
+      if (reg.r.ok && reg.j?.success) {
+        successUser = uTyped;
+      } else {
+        // 3) if email is already tied to another username, login with mapped username
+        if (mappedUser && mappedUser !== uTyped) {
+          const out2 = await tryLogin(mappedUser);
+          if (out2.r.ok && out2.j?.success) {
+            successUser = mappedUser;
+          }
+        }
 
-   try {
-  // ✅ always store canonical username (no $) everywhere used for namespaces
-  localStorage.setItem("sm_current_user", uAuth);
-  localStorage.setItem("smartmark_login_username", uAuth);
-  localStorage.setItem("smartmark_login_password", p);
-} catch {}
+        // 4) last retry typed login
+        if (!successUser) {
+          out = await tryLogin(uTyped);
+          if (out.r.ok && out.j?.success) successUser = uTyped;
+        }
+      }
+    }
 
+    if (!successUser) {
+      const msg = out?.j?.error || "Login failed";
+      throw new Error(msg);
+    }
+
+    try {
+      localStorage.setItem("sm_current_user", successUser);
+      localStorage.setItem("smartmark_login_username", successUser); // canonical (no $)
+      localStorage.setItem("smartmark_login_password", p);
+    } catch {}
+
+    // ✅ store mapping (email -> working backend username)
+    try {
+      map[ek] = successUser;
+      writeEmailUserMap(map);
+    } catch {}
 
     setAuthStatus({ ok: true, msg: "Logged in ✅" });
     return true;
@@ -1329,6 +1407,7 @@ const handleLogin = async () => {
     setAuthLoading(false);
   }
 };
+
 
 
   // IMPORTANT: normalize stored account ID to "act_..."
@@ -2929,7 +3008,17 @@ onClick={() => {
                     <input
                       type="text"
                       value={loginUser}
-                      onChange={(e) => setLoginUser(e.target.value)}
+                     onChange={(e) => {
+  const v = e.target.value;
+  setLoginUser(v);
+
+  // ✅ keep global last-typed username canonical (no $)
+  try {
+    const t = String(v || "").trim();
+    if (t) localStorage.setItem("smartmark_login_username", t.replace(/^\$/, ""));
+  } catch {}
+}}
+
                       placeholder="$CashTag"
                       style={{
                         background: INPUT_BG,
