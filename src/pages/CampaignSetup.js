@@ -2658,55 +2658,51 @@ const payload = {
 onClick={() => {
   trackEvent("connect_facebook", { page: "setup" });
 
+  // ✅ ctxKey (safe + stable)
   const qs = new URLSearchParams(location.search || "");
   const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
   const ctxFromUrl = (qs.get("ctxKey") || "").trim();
   const active = (getActiveCtx(resolvedUser) || "").trim();
   const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
 
-  setActiveCtx(safeCtx, resolvedUser);
-
-  // mark inflight so we can restore after OAuth
   try {
-    localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), JSON.stringify({ t: Date.now(), ctxKey: safeCtx }));
+    setActiveCtx(safeCtx, resolvedUser);
   } catch {}
 
-  // save preview copy for after redirect
+  // ✅ inflight marker (write in 3 places so restore ALWAYS works)
+  try {
+    const payload = JSON.stringify({ t: Date.now(), ctxKey: safeCtx });
+    localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), payload);
+    localStorage.setItem(LS_INFLIGHT_KEY("anon"), payload);
+    localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, payload);
+  } catch {}
+
+  // ✅ backup preview copy
   try {
     saveSetupPreviewBackup(resolvedUser, {
-      headline: String(headline || previewCopy?.headline || "").trim(),
-      body: String(body || previewCopy?.body || "").trim(),
-      link: String(inferredLink || previewCopy?.link || "").trim(),
+      headline: String(previewCopy?.headline || headline || "").trim(),
+      body: String(previewCopy?.body || body || "").trim(),
+      link: String(previewCopy?.link || inferredLink || "").trim(),
       ctxKey: safeCtx,
     });
   } catch {}
 
-  // save FETCHABLE images for after redirect
+  // ✅ backup fetchable images
   try {
     const imgs = resolveFetchableDraftImages({
       draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
       navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
     });
-
-    saveFetchableImagesBackup(resolvedUser, imgs);
-
-    if (imgs.length) {
-      persistDraftCreativesNow(resolvedUser, {
-        ctxKey: safeCtx,
-        images: imgs,
-        mediaSelection: "image",
-        expiresAt: Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
-      });
-    }
+    if (imgs.length) saveFetchableImagesBackup(resolvedUser, imgs);
   } catch {}
 
+  // ✅ IMPORTANT FIX: use /auth/facebook for redirect (authFetch has fallback, redirects don't)
   const returnTo =
-    window.location.origin +
-    "/setup" +
-    `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
+    window.location.origin + `/setup?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
-  window.location.assign(`${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+  window.location.assign(`/auth/facebook?return_to=${encodeURIComponent(returnTo)}`);
 }}
+
 
             style={{
               padding: "14px 22px",
