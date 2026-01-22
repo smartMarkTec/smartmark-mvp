@@ -184,8 +184,10 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
 function normalizeUsername(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
-  return s.replace(/^\$/, "").toLowerCase();
+  // strip leading $ only (do NOT force lowercase)
+  return s.replace(/^\$/, "");
 }
+
 
 
 export default function Login() {
@@ -198,17 +200,27 @@ export default function Login() {
   // Prefill:
   // 1) if sm_current_user exists, prefer that user’s scoped creds
   // 2) otherwise fallback to legacy global “last typed” creds (from CampaignSetup)
-  useEffect(() => {
-    const current = (localStorage.getItem("sm_current_user") || "").trim();
+useEffect(() => {
+  // ✅ ALWAYS prefer the last-typed global creds (CampaignSetup writes these)
+  const globalU = (localStorage.getItem("smartmark_login_username") || "").trim();
+  const globalP = (localStorage.getItem("smartmark_login_password") || "").trim();
 
-    const u =
-      readUserScoped(current, "smartmark_login_username", "smartmark_login_username") || "";
-    const p =
-      readUserScoped(current, "smartmark_login_password", "smartmark_login_password") || "";
+  if (globalU || globalP) {
+    setUsername(globalU);
+    setPasswordEmail(globalP);
+    return;
+  }
 
-    setUsername(u);
-    setPasswordEmail(p);
-  }, []);
+  // fallback to user-scoped if globals not present
+  const current = (localStorage.getItem("sm_current_user") || "").trim();
+
+  const u = readUserScoped(current, "smartmark_login_username", "smartmark_login_username") || "";
+  const p = readUserScoped(current, "smartmark_login_password", "smartmark_login_password") || "";
+
+  setUsername(u);
+  setPasswordEmail(p);
+}, []);
+
 
   // MVP behavior:
   // - Try /auth/login
@@ -219,7 +231,9 @@ export default function Login() {
     setLoading(true);
     setError("");
 
-   const u = normalizeUsername(username);
+   const uRaw = String(username || "").trim();
+const u = normalizeUsername(uRaw); // auth username
+
 
     const p = passwordEmail.trim();
 

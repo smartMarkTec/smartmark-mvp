@@ -1258,20 +1258,30 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
     lsSet(resolvedUser, "smartmark_login_password", loginPass, true);
   }, [loginPass, resolvedUser]);
 
- function normalizeUsername(raw) {
+function normalizeUsername(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
-  return s.replace(/^\$/, "").toLowerCase();
+  // strip leading $ only (do NOT force lowercase)
+  return s.replace(/^\$/, "");
 }
 
+
 const handleLogin = async () => {
-  const u = normalizeUsername(loginUser);
+  const uRaw = String(loginUser || "").trim();     // keep what user typed for UI/storage
+  const uAuth = normalizeUsername(uRaw);           // only for sending to backend
   const p = String(loginPass || "").trim();
 
-  if (!u || !p) {
+  // ✅ ALWAYS mirror what user typed into the GLOBAL keys Login.js reads
+  try {
+    localStorage.setItem("smartmark_login_username", uRaw);
+    localStorage.setItem("smartmark_login_password", p);
+  } catch {}
+
+  if (!uAuth || !p) {
     setAuthStatus({ ok: false, msg: "Enter CashTag + email." });
     return;
   }
+
 
 
     setAuthLoading(true);
@@ -1281,14 +1291,17 @@ const handleLogin = async () => {
       const r = await authFetch(`/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: u, password: p }),
+       body: JSON.stringify({ username: uAuth, password: p }),
+
       });
 
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error || "Login failed");
 
       try {
-        localStorage.setItem("sm_current_user", u);
+       // ✅ store the normalized username (without $) as the true user key
+localStorage.setItem("sm_current_user", uAuth);
+
       } catch {}
       setAuthStatus({ ok: true, msg: "Logged in ✅" });
     } catch (e) {
