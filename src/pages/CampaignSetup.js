@@ -1695,24 +1695,37 @@ useEffect(() => {
     } catch {}
   }, [draftCreatives, resolvedUser]);
 
-  const handleClearDraft = () => {
-    try {
-      sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser));
-    } catch {}
-    try {
-      sessionStorage.removeItem("draft_form_creatives");
-    } catch {}
-    try {
-      if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
-      localStorage.removeItem(CREATIVE_DRAFT_KEY);
-    } catch {}
-    try {
-      if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, FORM_DRAFT_KEY));
-      localStorage.removeItem(FORM_DRAFT_KEY);
-    } catch {}
-    setDraftCreatives({ images: [], mediaSelection: "image" });
-    if (expandedId === "__DRAFT__") setExpandedId(null);
-  };
+ const handleClearDraft = () => {
+  try {
+    sessionStorage.removeItem(SS_DRAFT_KEY(resolvedUser));
+  } catch {}
+  try {
+    sessionStorage.removeItem("draft_form_creatives");
+  } catch {}
+  try {
+    if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY));
+    localStorage.removeItem(CREATIVE_DRAFT_KEY);
+  } catch {}
+  try {
+    if (resolvedUser) localStorage.removeItem(withUser(resolvedUser, FORM_DRAFT_KEY));
+    localStorage.removeItem(FORM_DRAFT_KEY);
+  } catch {}
+
+  // ✅ clear backup + inflight so it can't resurrect
+  try {
+    localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
+    localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY);
+    localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
+  } catch {}
+
+  // ✅ kill UI immediately
+  setDraftCreatives({ images: [], mediaSelection: "image" });
+
+  // ✅ IMPORTANT: if UI was focused on the draft, detach it
+  setExpandedId((prev) => (prev === "__DRAFT__" ? null : prev));
+  setSelectedCampaignId((prev) => (prev === "__DRAFT__" ? "" : prev));
+};
+
 
 useEffect(() => {
   const params = new URLSearchParams(location.search);
@@ -3149,10 +3162,11 @@ if (finalImagesAbs.length) {
 
                       {isDraft ? (
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleClearDraft();
-                          }}
+                         onClick={(e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  handleClearDraft();
+}}
                           title="Discard draft"
                           aria-label="Discard draft"
                           style={{
