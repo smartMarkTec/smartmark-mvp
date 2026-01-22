@@ -3,6 +3,8 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { FaSyncAlt, FaTimes, FaArrowUp, FaArrowLeft } from "react-icons/fa";
+import { trackEvent } from "../analytics/gaEvents";
+
 
 /* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
@@ -1595,14 +1597,21 @@ useEffect(() => {
           return;
         }
 
+             // ✅ Track the key action: generating creatives
+        trackEvent("generate_creatives", {
+          page: "form",
+          action: "initial",
+        });
+
         bumpImageGenCount();
 
-      // ✅ NEW RUN: re-enable drafts + mint ctxKey + purge old creative drafts immediately
-clearDraftDisabled();
+        // ✅ NEW RUN: re-enable drafts + mint ctxKey + purge old creative drafts immediately
+        clearDraftDisabled();
 
-const nextCtx = buildCtxKey(answers || {});
-setActiveCtx(nextCtx);
-purgeCreativeDraftKeys();
+        const nextCtx = buildCtxKey(answers || {});
+        setActiveCtx(nextCtx);
+        purgeCreativeDraftKeys();
+
 
 // also clear image cache for the new run so nothing “ghosts” in
 try {
@@ -1825,6 +1834,12 @@ try {
       return;
     }
 
+    // ✅ Track regenerate click
+    trackEvent("generate_creatives", {
+      page: "form",
+      action: "regenerate",
+    });
+
     setImageLoading(true);
     try {
       bumpImageGenCount();
@@ -1838,6 +1853,7 @@ try {
       setImageLoading(false);
     }
   }
+
 
   // --- Static Ad Generator (UPDATED: no weird fallback bullets) ---
   async function handleGenerateStaticAd(

@@ -1,6 +1,6 @@
 // src/App.js
-import React from "react";
-import { Routes, Route } from "react-router-dom";
+import React, { useEffect } from "react";
+import { Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
 import FormPage from "./pages/FormPage";
 import CampaignSetup from "./pages/CampaignSetup";
@@ -40,6 +40,18 @@ function NotFound() {
 }
 
 function App() {
+  const location = useLocation();
+
+  // ✅ GA4 SPA pageview tracking
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!window.gtag) return;
+
+    window.gtag("config", "G-XP146JNFE7", {
+      page_path: location.pathname + location.search,
+    });
+  }, [location]);
+
   return (
     <Routes>
       <Route path="/" element={<Landing />} />

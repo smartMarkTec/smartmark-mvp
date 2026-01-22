@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa";
+import { trackEvent } from "../analytics/gaEvents";
+
 
 // Render origin ONLY for media files (images, fallback jpg)
 // Prefer same-origin for /api/media when possible (prevents cross-origin blocks/glitches),
@@ -2600,6 +2602,7 @@ const payload = {
         >
           <button
             onClick={() => {
+              trackEvent("connect_facebook", { page: "setup" });
               const qs = new URLSearchParams(location.search || "");
               const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
               const ctxFromUrl = (qs.get("ctxKey") || "").trim();
@@ -2894,49 +2897,57 @@ if (finalImagesAbs.length) {
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "center" }}>
-                    <button
-                      type="button"
-                      onClick={handlePayFee}
-                      style={{
-                        background: feePaid ? `linear-gradient(90deg, ${ACCENT}, ${ACCENT_2})` : BTN_BASE,
-                        color: WHITE,
-                        boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
-                        border: "none",
-                        borderRadius: 12,
-                        fontWeight: 900,
-                        padding: "10px 18px",
-                        cursor: "pointer",
-                        minWidth: 170,
-                      }}
-                    >
-                      Setup Fee
-                    </button>
+                   <button
+  type="button"
+  onClick={() => {
+    trackEvent("setup_fee_click", { page: "setup" });
+    handlePayFee();
+  }}
+  style={{
+    background: feePaid ? `linear-gradient(90deg, ${ACCENT}, ${ACCENT_2})` : BTN_BASE,
+    color: WHITE,
+    boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
+    border: "none",
+    borderRadius: 12,
+    fontWeight: 900,
+    padding: "10px 18px",
+    cursor: "pointer",
+    minWidth: 170,
+  }}
+>
+  Setup Fee
+</button>
+
                   </div>
                 </div>
               );
             })()}
           </div>
 
-          <button
-            onClick={handleLaunch}
-            disabled={loading || campaignCount >= 2 || !canLaunch}
-            style={{
-              background: campaignCount >= 2 || !canLaunch ? "#8b8d90" : ACCENT,
-              color: "#0f1418",
-              border: "none",
-              borderRadius: 14,
-              fontWeight: 900,
-              fontSize: "1.02rem",
-              padding: "14px 36px",
-              marginTop: 6,
-              boxShadow: "0 2px 16px rgba(12,196,190,0.25)",
-              cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
-              opacity: loading || campaignCount >= 2 || !canLaunch ? 0.6 : 1,
-              transition: "transform 0.15s",
-            }}
-          >
-            {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
-          </button>
+         <button
+  onClick={() => {
+    trackEvent("launch_campaign", { page: "setup" });
+    handleLaunch();
+  }}
+  disabled={loading || campaignCount >= 2 || !canLaunch}
+  style={{
+    background: campaignCount >= 2 || !canLaunch ? "#8b8d90" : ACCENT,
+    color: "#0f1418",
+    border: "none",
+    borderRadius: 14,
+    fontWeight: 900,
+    fontSize: "1.02rem",
+    padding: "14px 36px",
+    marginTop: 6,
+    boxShadow: "0 2px 16px rgba(12,196,190,0.25)",
+    cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
+    opacity: loading || campaignCount >= 2 || !canLaunch ? 0.6 : 1,
+    transition: "transform 0.15s",
+  }}
+>
+  {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
+</button>
+
 
           {launched && launchResult && (
             <div

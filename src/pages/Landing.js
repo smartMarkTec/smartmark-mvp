@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
+import { trackEvent } from "../analytics/gaEvents";
 
 
 /** Tech palette */
@@ -48,23 +49,28 @@ const Landing = () => {
   const faqRef = useRef(null);
   const isMobile = useIsMobile();
 
-  // Keep drafts unless user intentionally starts a new campaign
   useEffect(() => {
-    // intentionally left empty: we DO NOT clear drafts on load
-  }, []);
+  // intentionally left empty: we DO NOT clear drafts on load
+  trackEvent("view_landing", { page: "landing" });
+}, []);
 
-  /* navigation */
-  const clearDraftsAndGoToForm = () => {
-    try {
-      // clear only the keys related to starting a brand-new campaign
-      localStorage.removeItem("sm_form_draft_v2");
-      localStorage.removeItem("draft_form_creatives");
-      localStorage.removeItem("draft_form_creatives_v2");
-      localStorage.removeItem("smartmark_media_selection");
-      // keep user login autofill and per-user state
-    } catch {}
-    navigate("/form");
-  };
+
+const clearDraftsAndGoToForm = () => {
+  // GA event first (before any navigation)
+  trackEvent("start_campaign", { page: "landing" });
+
+  try {
+    // clear only the keys related to starting a brand-new campaign
+    localStorage.removeItem("sm_form_draft_v2");
+    localStorage.removeItem("draft_form_creatives");
+    localStorage.removeItem("draft_form_creatives_v2");
+    localStorage.removeItem("smartmark_media_selection");
+    // keep user login autofill and per-user state
+  } catch {}
+
+  navigate("/form");
+};
+
 
   const goToLogin = () => navigate("/login");
 
