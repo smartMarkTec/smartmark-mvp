@@ -7,7 +7,6 @@ const API_BASE = "/api";
 // ✅ Match CampaignSetup.js (same-origin /api/auth -> Vercel rewrite -> Render /auth)
 const AUTH_BASE = "/api/auth";
 
-
 // ✅ sid fallback (matches CampaignSetup.js)
 const SM_SID_LS_KEY = "sm_sid_v1";
 
@@ -35,15 +34,13 @@ function ensureStoredSid() {
   return sid;
 }
 
-// Optional: normalize CashTag-style usernames
-function normalizeUser(u) {
-  const s = String(u || "").trim();
+// strip leading $ only (do NOT force lowercase)
+function normalizeUsername(raw) {
+  const s = String(raw || "").trim();
   if (!s) return "";
-  return s.startsWith("$") ? s : s; // keep as-is unless you want to force "$"
+  return s.replace(/^\$/, "");
 }
 
-
-/* ---------------- Theme ---------------- */
 const ACCENT = "#14e7b9";
 const CARD_BG = "#34373de6";
 const EDGE = "rgba(255,255,255,0.06)";
@@ -107,51 +104,9 @@ const styles = `
   }
 `;
 
-const USER_KEYS = [
-  "smartmark_last_campaign_fields",
-  "smartmark_last_budget",
-  "smartmark_last_selected_account",
-  "smartmark_last_selected_pageId",
-  "smartmark_media_selection",
-  "draft_form_creatives_v2",
-  "sm_form_draft_v2",
-  "draft_form_creatives" // sessionStorage key sometimes mirrored
-];
-
-const withUser = (u, key) => `u:${u}:${key}`;
-
-function migrateToUserNamespace(user) {
-  try {
-    // Migrate known “app state” keys into this user’s namespace if not already there
-    USER_KEYS.forEach((k) => {
-      const existing = localStorage.getItem(withUser(user, k));
-      if (existing !== null && existing !== undefined) return;
-
-      const legacy = localStorage.getItem(k);
-      if (legacy !== null && legacy !== undefined) {
-        localStorage.setItem(withUser(user, k), legacy);
-      }
-    });
-
-    // Migrate legacy creds into user scope (for autofill consistency)
-    const un = localStorage.getItem("smartmark_login_username");
-    const pw = localStorage.getItem("smartmark_login_password");
-    if (un) localStorage.setItem(withUser(user, "smartmark_login_username"), un);
-    if (pw) localStorage.setItem(withUser(user, "smartmark_login_password"), pw);
-  } catch {}
-}
-
-function readUserScoped(user, key, fallbackKey = key) {
-  try {
-    if (user) {
-      const v = localStorage.getItem(withUser(user, key));
-      if (v !== null && v !== undefined) return v;
-    }
-    return localStorage.getItem(fallbackKey);
-  } catch {
-    return null;
-  }
-}
+/* ---------- per-email auth mapping (so editing username never breaks login) ---------- */
+const AUTH_USER_BY_EMAIL_PREFIX = "sm_auth_user_by_email_v1:";
+const emailKey = (email) => `${AUTH_USER_BY_EMAIL_PREFIX}${String(email || "").trim().toLowerCase()}`;
 
 async function postJSONWithTimeout(url, body, ms = 15000) {
   const ctrl = new AbortController();
@@ -197,14 +152,7 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
   }
 }
 
-function normalizeUsername(raw) {
-  const s = String(raw || "").trim();
-  if (!s) return "";
-  // strip leading $ only (do NOT force lowercase)
-  return s.replace(/^\$/, "");
-}
-
-
+const withUser = (u, key) => `u:${u}:${key}`;
 
 export default function Login() {
   const navigate = useNavigate();
@@ -213,110 +161,115 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Prefill:
-  // 1) if sm_current_user exists, prefer that user’s scoped creds
-  // 2) otherwise fallback to legacy global “last typed” creds (from CampaignSetup)
-useEffect(() => {
-  // ✅ ALWAYS prefer the last-typed global creds (CampaignSetup writes these)
-  const globalU = (localStorage.getItem("smartmark_login_username") || "").trim();
-  const globalP = (localStorage.getItem("smartmark_login_password") || "").trim();
+  // Prefill always from “last typed” globals first
+  useEffect(() => {
+    const globalU = (localStorage.getItem("smartmark_login_username") || "").trim();
+    const globalP = (localStorage.getItem("smartmark_login_password") || "").trim();
 
-  if (globalU || globalP) {
-    setUsername(globalU);
-    setPasswordEmail(globalP);
-    return;
-  }
-
-  // fallback to user-scoped if globals not present
-  const current = (localStorage.getItem("sm_current_user") || "").trim();
-
-  const u = readUserScoped(current, "smartmark_login_username", "smartmark_login_username") || "";
-  const p = readUserScoped(current, "smartmark_login_password", "smartmark_login_password") || "";
-
-  setUsername(u);
-  setPasswordEmail(p);
-}, []);
-
-
-  // MVP behavior:
-  // - Try /auth/login
-  // - If user doesn't exist yet, auto-create via /auth/register (no separate register button)
-  // - Then navigate to /setup
-const handleLogin = async (e) => {
-  e.preventDefault();
-  setLoading(true);
-  setError("");
-
-  const uRaw = String(username || "").trim();
-  const u = normalizeUsername(uRaw); // canonical (no leading $)
-  const p = String(passwordEmail || "").trim(); // MVP: email used as password
-
-  if (!u || !p) {
-    setError("Please enter both fields.");
-    setLoading(false);
-    return;
-  }
-
-  try {
-    // 1) Try login
-    let out = await postJSONWithTimeout(
-      `${AUTH_BASE}/login`,
-      { username: u, password: p },
-      15000
-    );
-
-    // 2) If login fails, try auto-register once (MVP)
-    if (!out.ok || !out.data?.success) {
-      const reg = await postJSONWithTimeout(
-        `${AUTH_BASE}/register`,
-        { username: u, email: p, password: p },
-        15000
-      );
-
-      // If register succeeded -> treat as success
-      if (reg.ok && reg.data?.success) {
-        out = reg;
-      } else {
-        // If register didn’t succeed, retry login once (common if user already exists)
-        out = await postJSONWithTimeout(
-          `${AUTH_BASE}/login`,
-          { username: u, password: p },
-          15000
-        );
-      }
+    if (globalU || globalP) {
+      setUsername(globalU);
+      setPasswordEmail(globalP);
+      return;
     }
 
-    if (!out.ok || !out.data?.success) {
-      const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
-      throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
+    // fallback (should rarely be used now)
+    const current = (localStorage.getItem("sm_current_user") || "").trim();
+    const u = (localStorage.getItem(withUser(current, "smartmark_login_username")) || localStorage.getItem("smartmark_login_username") || "").trim();
+    const p = (localStorage.getItem(withUser(current, "smartmark_login_password")) || localStorage.getItem("smartmark_login_password") || "").trim();
+    setUsername(u);
+    setPasswordEmail(p);
+  }, []);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+
+    const typedRaw = String(username || "").trim();          // keep what they typed for autofill
+    const typedAuthU = normalizeUsername(typedRaw);          // canonical for backend
+    const email = String(passwordEmail || "").trim();        // used as password in MVP
+    const emailNorm = email.toLowerCase();
+    const mapK = emailKey(emailNorm);
+
+    if (!typedAuthU || !email) {
+      setError("Please enter both fields.");
+      setLoading(false);
+      return;
     }
 
-    // ✅ Persist "current user" + last-used creds (global keys CampaignSetup reads)
+    // If this email has an established “real auth username”, use it as fallback
+    const mappedAuthU =
+      (localStorage.getItem(mapK) || "").trim() ||
+      (localStorage.getItem("sm_current_user") || "").trim();
+
+    const tryLogin = async (uTry) =>
+      postJSONWithTimeout(`${AUTH_BASE}/login`, { username: uTry, password: email }, 15000);
+
+    const tryRegister = async (uTry) =>
+      postJSONWithTimeout(`${AUTH_BASE}/register`, { username: uTry, email, password: email }, 15000);
+
     try {
-      localStorage.setItem("sm_current_user", u);
-      localStorage.setItem("smartmark_login_username", u);
-      localStorage.setItem("smartmark_login_password", p);
+      // 1) Try login with what they typed
+      let out = await tryLogin(typedAuthU);
 
-      // also user-scoped (optional but fine)
-      localStorage.setItem(withUser(u, "smartmark_login_username"), u);
-      localStorage.setItem(withUser(u, "smartmark_login_password"), p);
-    } catch {}
+      // 2) If login fails, try register with typed username (MVP)
+      if (!out.ok || !out.data?.success) {
+        const reg = await tryRegister(typedAuthU);
 
-    // migrate shared app state into user namespace (first login)
-    migrateToUserNamespace(u);
+        // If register succeeded -> treat as success
+        if (reg.ok && reg.data?.success) {
+          out = reg;
+        } else {
+          // 3) If register failed (common: email already exists), fallback to mapped username login
+          if (mappedAuthU && mappedAuthU !== typedAuthU) {
+            const alt = await tryLogin(mappedAuthU);
+            if (alt.ok && alt.data?.success) {
+              out = alt;
+            } else {
+              // last fallback: retry typed login once (some backends race-create)
+              out = await tryLogin(typedAuthU);
+            }
+          } else {
+            // last fallback: retry typed login once
+            out = await tryLogin(typedAuthU);
+          }
+        }
+      }
 
-    navigate("/setup");
-  } catch (err) {
-    const msg =
-      err?.name === "AbortError"
-        ? "Login timed out. Server didn’t respond."
-        : err?.message || "Server error. Please try again.";
-    setError(msg);
-  } finally {
-    setLoading(false);
-  }
-};
+      if (!out.ok || !out.data?.success) {
+        const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
+        throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
+      }
 
+      // Determine which username actually worked for auth
+      const authedAs = (out?.data?.username && String(out.data.username).trim()) || (mappedAuthU && mappedAuthU !== typedAuthU ? mappedAuthU : typedAuthU);
+
+      // ✅ Persist:
+      // - Always keep the *typed* username for autofill/UI
+      // - Keep the *actual* auth username for backend + namespace stability
+      try {
+        localStorage.setItem("smartmark_login_username", typedRaw); // ✅ what user typed (autofill)
+        localStorage.setItem("smartmark_login_password", email);    // ✅ last typed email/pass
+
+        localStorage.setItem("sm_current_user", authedAs);          // ✅ real backend username
+        localStorage.setItem(mapK, authedAs);                       // ✅ email -> real backend username
+
+        // optional: user-scoped storage under the REAL auth username (keeps your per-user keys consistent)
+        localStorage.setItem(withUser(authedAs, "smartmark_login_username"), typedRaw);
+        localStorage.setItem(withUser(authedAs, "smartmark_login_password"), email);
+      } catch {}
+
+      navigate("/setup");
+    } catch (err) {
+      const msg =
+        err?.name === "AbortError"
+          ? "Login timed out. Server didn’t respond."
+          : err?.message || "Server error. Please try again.";
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <>
@@ -341,17 +294,15 @@ const handleLogin = async (e) => {
               autoComplete="username"
               placeholder="Username"
               value={username}
-             onChange={(e) => {
-  const v = e.target.value;
-  setUsername(v);
-  setError("");
-
-  // ✅ keep global "last typed" in sync (CampaignSetup + Prefill reads these)
-  try {
-    localStorage.setItem("smartmark_login_username", String(v || "").trim());
-  } catch {}
-}}
-
+              onChange={(e) => {
+                const v = e.target.value;
+                setUsername(v);
+                setError("");
+                // ✅ always store last typed (autofill)
+                try {
+                  localStorage.setItem("smartmark_login_username", String(v || "").trim());
+                } catch {}
+              }}
               required
             />
           </div>
@@ -366,17 +317,15 @@ const handleLogin = async (e) => {
               autoComplete="email"
               placeholder="you@example.com"
               value={passwordEmail}
-             onChange={(e) => {
-  const v = e.target.value;
-  setPasswordEmail(v);
-  setError("");
-
-  // ✅ keep global "last typed" in sync (CampaignSetup + Prefill reads these)
-  try {
-    localStorage.setItem("smartmark_login_password", String(v || "").trim());
-  } catch {}
-}}
-
+              onChange={(e) => {
+                const v = e.target.value;
+                setPasswordEmail(v);
+                setError("");
+                // ✅ always store last typed (autofill)
+                try {
+                  localStorage.setItem("smartmark_login_password", String(v || "").trim());
+                } catch {}
+              }}
               required
             />
           </div>
