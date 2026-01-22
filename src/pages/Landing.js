@@ -436,7 +436,7 @@ const clearDraftsAndGoToForm = () => {
         }}
       >
         <div style={{ color: "#bfeeff", fontWeight: 700 }}>
-          Effortless. No experience needed.
+          Effortless. No marketing experience needed.
         </div>
         <button
           onClick={clearDraftsAndGoToForm}
