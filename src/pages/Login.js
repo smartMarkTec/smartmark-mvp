@@ -4,6 +4,41 @@ import { useNavigate } from "react-router-dom";
 
 const BACKEND_URL = "https://smartmark-mvp.onrender.com";
 
+// ✅ sid fallback (matches CampaignSetup.js)
+const SM_SID_LS_KEY = "sm_sid_v1";
+
+function getStoredSid() {
+  try {
+    return (localStorage.getItem(SM_SID_LS_KEY) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function setStoredSid(sid) {
+  try {
+    const s = String(sid || "").trim();
+    if (s) localStorage.setItem(SM_SID_LS_KEY, s);
+  } catch {}
+}
+
+function ensureStoredSid() {
+  let sid = getStoredSid();
+  if (sid) return sid;
+
+  sid = `sm_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  setStoredSid(sid);
+  return sid;
+}
+
+// Optional: normalize CashTag-style usernames
+function normalizeUser(u) {
+  const s = String(u || "").trim();
+  if (!s) return "";
+  return s.startsWith("$") ? s : s; // keep as-is unless you want to force "$"
+}
+
+
 /* ---------------- Theme ---------------- */
 const ACCENT = "#14e7b9";
 const CARD_BG = "#34373de6";
@@ -117,14 +152,22 @@ function readUserScoped(user, key, fallbackKey = key) {
 async function postJSONWithTimeout(url, body, ms = 15000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
+
+  // ✅ ALWAYS send sid header (matches CampaignSetup authFetch)
+  const sid = ensureStoredSid();
+
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "include", // CRITICAL: cross-site cookie (sm_sid)
+      headers: {
+        "Content-Type": "application/json",
+        "x-sm-sid": sid,
+      },
+      credentials: "include",
       body: JSON.stringify(body),
       signal: ctrl.signal,
     });
+
     let data;
     const txt = await res.text();
     try {
@@ -137,6 +180,7 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
     clearTimeout(t);
   }
 }
+
 
 export default function Login() {
   const navigate = useNavigate();
@@ -182,7 +226,8 @@ export default function Login() {
       // 1) Attempt login
       let { ok, status, data } = await postJSONWithTimeout(
         `${BACKEND_URL}/auth/login`,
-        { username: u, password: p },
+        { username: normalizeUser(u), password: p, email: p }
+,
         15000
       );
 
@@ -190,7 +235,8 @@ export default function Login() {
       if (!ok || !data?.success) {
         const registerAttempt = await postJSONWithTimeout(
           `${BACKEND_URL}/auth/register`,
-          { username: u, email: p, password: p },
+          { username: normalizeUser(u), email: p, password: p }
+,
           15000
         );
 
