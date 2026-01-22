@@ -2875,7 +2875,7 @@ if (finalImagesAbs.length) {
                       type="text"
                       value={loginUser}
                       onChange={(e) => setLoginUser(e.target.value)}
-                      placeholder="CashTag (e.g., $willkw)"
+                      placeholder="$CashTag"
                       style={{
                         background: INPUT_BG,
                         borderRadius: 12,
