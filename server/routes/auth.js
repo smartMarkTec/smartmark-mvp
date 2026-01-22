@@ -18,6 +18,7 @@ const {
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
+const crypto = require('crypto');
 
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
@@ -145,7 +146,6 @@ function ownerKeyFromReq(req) {
   return sid || `ip:${req.ip}`;
 }
 
-
 // ✅ Ensure sid exists on all facebook/auth flows (including launch)
 router.use((req, res, next) => {
   if (
@@ -197,7 +197,6 @@ router.use(async (req, res, next) => {
   } catch {}
   next();
 });
-
 
 // Helper: safely append sid to return_to so frontend can store it even if cookies are blocked
 function appendSidToReturnTo(urlStr, sid) {
@@ -259,7 +258,6 @@ router.get('/facebook/status', async (req, res) => {
   }
 });
 
-
 function absolutePublicUrl(relativePath) {
   const base =
     process.env.PUBLIC_BASE_URL ||
@@ -277,31 +275,69 @@ function absolutePublicUrl(relativePath) {
 
 /* ------------------------------ Facebook OAuth ------------------------------ */
 const FB_SCOPES = [
-  'pages_manage_engagement','pages_manage_metadata','pages_manage_posts',
-  'pages_read_engagement','pages_read_user_content','pages_show_list',
-  'public_profile','read_insights','business_management','ads_management','ads_read'
+  'pages_manage_engagement', 'pages_manage_metadata', 'pages_manage_posts',
+  'pages_read_engagement', 'pages_read_user_content', 'pages_show_list',
+  'public_profile', 'read_insights', 'business_management', 'ads_management', 'ads_read'
 ];
 
+/**
+ * ✅ Cookie-less OAuth state (fixes "Invalid OAuth state" across smartemark.com -> onrender.com)
+ * We embed sid + returnTo into a signed `state` so callback can verify without any cookies.
+ */
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function b64urlEncode(str) {
+  return Buffer.from(str, 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function b64urlDecode(b64) {
+  const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+  const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(s, 'base64').toString('utf8');
+}
+
+function signStateB64(b64) {
+  return crypto.createHmac('sha256', String(FACEBOOK_APP_SECRET || ''))
+    .update(b64)
+    .digest('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function makeOAuthState(payloadObj) {
+  const b64 = b64urlEncode(JSON.stringify(payloadObj));
+  const sig = signStateB64(b64);
+  return `${b64}.${sig}`;
+}
+
+function parseAndVerifyOAuthState(stateRaw) {
+  const parts = String(stateRaw || '').split('.');
+  if (parts.length !== 2) return { ok: false, error: 'bad_state_format' };
+
+  const [b64, sig] = parts;
+  const expected = signStateB64(b64);
+  if (!sig || sig !== expected) return { ok: false, error: 'bad_state_signature' };
+
+  let payload;
+  try { payload = JSON.parse(b64urlDecode(b64)); }
+  catch { return { ok: false, error: 'bad_state_payload' }; }
+
+  const iat = Number(payload?.iat || 0);
+  if (!iat || (Date.now() - iat) > OAUTH_STATE_TTL_MS) {
+    return { ok: false, error: 'state_expired' };
+  }
+
+  return { ok: true, payload };
+}
+
 router.get('/facebook', (req, res) => {
-  // ✅ ensure we have a stable sid before redirect
+  // Ensure stable sid (we embed it in state)
   let sid = req.cookies?.[COOKIE_NAME];
   if (!sid) {
     sid = `sm_${nanoid(24)}`;
     setSessionCookie(res, sid);
   }
-
-  const state = sid;
-
-  // store expected state for callback validation
-  const dom = computeCookieDomain();
-  res.cookie('sm_oauth_state', state, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    path: '/',
-    maxAge: 10 * 60 * 1000, // 10 min
-    ...(dom ? { domain: dom } : {})
-  });
 
   // where to send user back after OAuth
   const fallback = `${FRONTEND_URL}/setup`;
@@ -320,17 +356,15 @@ router.get('/facebook', (req, res) => {
     if (allowed) safeReturnTo = u.toString();
   } catch {}
 
-  // ✅ put sid into return_to so frontend can persist it (cookie fallback)
+  // put sid into return_to so frontend can persist it (cookie fallback)
   safeReturnTo = appendSidToReturnTo(safeReturnTo, sid);
 
-  const dom2 = computeCookieDomain();
-  res.cookie(RETURN_TO_COOKIE, safeReturnTo, {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    path: '/',
-    maxAge: 10 * 60 * 1000,
-    ...(dom2 ? { domain: dom2 } : {})
+  // ✅ Signed cookie-less state
+  const state = makeOAuthState({
+    sid,
+    returnTo: safeReturnTo,
+    iat: Date.now(),
+    n: nanoid(10),
   });
 
   const fbUrl =
@@ -338,7 +372,7 @@ router.get('/facebook', (req, res) => {
     `?client_id=${FACEBOOK_APP_ID}` +
     `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
     `&scope=${encodeURIComponent(FB_SCOPES.join(','))}` +
-    `&response_type=code&state=${state}`;
+    `&response_type=code&state=${encodeURIComponent(state)}`;
 
   res.redirect(fbUrl);
 });
@@ -347,31 +381,28 @@ router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('No code returned from Facebook.');
 
-  const state = String(req.query.state || '');
-  const expected = String(req.cookies?.sm_oauth_state || '');
+  // ✅ Verify signed state (no cookies required)
+  const verified = parseAndVerifyOAuthState(String(req.query.state || ''));
+  if (!verified.ok) return res.status(400).send('Invalid OAuth state.');
 
-  if (!state || !expected || state !== expected) {
-    return res.status(400).send('Invalid OAuth state.');
-  }
+  const sidOwner = String(verified.payload?.sid || '').trim();
+  if (!sidOwner) return res.status(400).send('Invalid OAuth state.');
 
- // clear without domain (works when cookie was host-only)
-res.clearCookie('sm_oauth_state', { path: '/' });
-// clear with domain (works when cookie was domain cookie)
-res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
+  // re-stitch sid cookie on callback domain (helps Render-side)
+  setSessionCookie(res, sidOwner);
 
+  // returnTo embedded in state
+  const fallback = `${FRONTEND_URL}/setup`;
+  let returnTo = String(verified.payload?.returnTo || fallback).trim();
 
- // sid we set before redirect
-const sidOwner = state;
-
-// ✅ Prefer storing token under the logged-in USER (persists across logins)
-let userOwner = sidOwner;
-try {
-  await ensureUsersAndSessions();
-  await db.read();
-  const sess = (db.data.sessions || []).find(s => String(s.sid) === String(sidOwner));
-  if (sess?.username) userOwner = `user:${String(sess.username).trim()}`;
-} catch {}
-
+  // ✅ Prefer storing token under the logged-in USER (persists across logins)
+  let userOwner = sidOwner;
+  try {
+    await ensureUsersAndSessions();
+    await db.read();
+    const sess = (db.data.sessions || []).find(s => String(s.sid) === String(sidOwner));
+    if (sess?.username) userOwner = `user:${String(sess.username).trim()}`;
+  } catch { }
 
   try {
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
@@ -393,86 +424,76 @@ try {
           fb_exchange_token: accessToken
         }
       });
-     if (x.data?.access_token) {
-  const tok = x.data.access_token;
 
-  // expires_in is usually provided for long-lived tokens
-  const expiresInSec = Number(x.data.expires_in || 0);
-  const fallback60Days = 60 * 24 * 60 * 60; // 60 days
-  const expSec = expiresInSec > 0 ? expiresInSec : fallback60Days;
-  const expiresAt = Date.now() + expSec * 1000;
+      if (x.data?.access_token) {
+        const tok = x.data.access_token;
 
-  // ✅ store under USER key for persistence
-  await setFbUserToken(tok, userOwner);
-  await setFbUserTokenMeta(
-    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
-    userOwner
-  );
+        // expires_in is usually provided for long-lived tokens
+        const expiresInSec = Number(x.data.expires_in || 0);
+        const fallback60Days = 60 * 24 * 60 * 60; // 60 days
+        const expSec = expiresInSec > 0 ? expiresInSec : fallback60Days;
+        const expiresAt = Date.now() + expSec * 1000;
 
-  // optional: also store under sid as fallback
-  await setFbUserToken(tok, sidOwner);
-  await setFbUserTokenMeta(
-    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
-    sidOwner
-  );
+        // ✅ store under USER key for persistence
+        await setFbUserToken(tok, userOwner);
+        await setFbUserTokenMeta(
+          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
+          userOwner
+        );
 
-  await refreshDefaults(tok, userOwner);
-  console.log('[auth] stored LONG-LIVED FB user token (user-bound) + refreshed defaults');
-}
-else {
-  const tok = accessToken;
-  // short-lived tokens can be ~1-2 hours; set a conservative TTL
-  const expSec = 2 * 60 * 60; // 2 hours
-  const expiresAt = Date.now() + expSec * 1000;
+        // optional: also store under sid as fallback
+        await setFbUserToken(tok, sidOwner);
+        await setFbUserTokenMeta(
+          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
+          sidOwner
+        );
 
-  await setFbUserToken(tok, userOwner);
-  await setFbUserTokenMeta(
-    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-    userOwner
-  );
+        await refreshDefaults(tok, userOwner);
+        console.log('[auth] stored LONG-LIVED FB user token (user-bound) + refreshed defaults');
+      } else {
+        const tok = accessToken;
+        // short-lived tokens can be ~1-2 hours; set a conservative TTL
+        const expSec = 2 * 60 * 60; // 2 hours
+        const expiresAt = Date.now() + expSec * 1000;
 
-  // optional sid fallback
-  await setFbUserToken(tok, sidOwner);
-  await setFbUserTokenMeta(
-    { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-    sidOwner
-  );
+        await setFbUserToken(tok, userOwner);
+        await setFbUserTokenMeta(
+          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+          userOwner
+        );
 
-  await refreshDefaults(tok, userOwner);
-  console.log('[auth] stored SHORT-LIVED FB user token (user-bound) + refreshed defaults');
-}
+        // optional sid fallback
+        await setFbUserToken(tok, sidOwner);
+        await setFbUserTokenMeta(
+          { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+          sidOwner
+        );
 
+        await refreshDefaults(tok, userOwner);
+        console.log('[auth] stored SHORT-LIVED FB user token (user-bound) + refreshed defaults');
+      }
     } catch {
-     const tok = accessToken;
-const expSec = 2 * 60 * 60; // 2 hours
-const expiresAt = Date.now() + expSec * 1000;
+      const tok = accessToken;
+      const expSec = 2 * 60 * 60; // 2 hours
+      const expiresAt = Date.now() + expSec * 1000;
 
-await setFbUserToken(tok, userOwner);
-await setFbUserTokenMeta(
-  { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-  userOwner
-);
+      await setFbUserToken(tok, userOwner);
+      await setFbUserTokenMeta(
+        { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+        userOwner
+      );
 
-// sid fallback
-await setFbUserToken(tok, sidOwner);
-await setFbUserTokenMeta(
-  { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
-  sidOwner
-);
+      // sid fallback
+      await setFbUserToken(tok, sidOwner);
+      await setFbUserTokenMeta(
+        { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
+        sidOwner
+      );
 
-await refreshDefaults(tok, userOwner);
+      await refreshDefaults(tok, userOwner);
 
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
-
-    const fallback = `${FRONTEND_URL}/setup`;
-    let returnTo = String(req.cookies?.[RETURN_TO_COOKIE] || '').trim();
-
-  // clear without domain (works when cookie was host-only)
-res.clearCookie('sm_oauth_state', { path: '/' });
-// clear with domain (works when cookie was domain cookie)
-res.clearCookie('sm_oauth_state', { path: '/', domain: computeCookieDomain() });
-
 
     // Safety: only allow your own frontend origin
     try {
@@ -739,7 +760,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           'https://smartmark-mvp.onrender.com';
         return new URL(parsed.pathname + parsed.search, backendBase).toString();
       }
-    } catch {}
+    } catch { }
     return s;
   }
 
@@ -798,7 +819,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       if (rel.startsWith('/generated/')) push(`${backendBase}/api/media${rel}`);
     }
 
-    try { push(absolutePublicUrl(raw)); } catch {}
+    try { push(absolutePublicUrl(raw)); } catch { }
 
     const uniq = Array.from(new Set(candidates.filter(Boolean)));
 
@@ -891,7 +912,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       });
       const first = pagesRes.data?.data?.[0]?.id || null;
       if (first) { DEFAULTS.pageId = String(first); return String(first); }
-    } catch {}
+    } catch { }
     return null;
   }
 
@@ -1016,8 +1037,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     let startISO = flightStart
       ? new Date(flightStart).toISOString()
       : (NO_SPEND
-          ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-          : new Date(now.getTime() + 60 * 1000).toISOString());
+        ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+        : new Date(now.getTime() + 60 * 1000).toISOString());
 
     let endISO = flightEnd ? new Date(flightEnd).toISOString() : null;
     if (endISO) {
@@ -1151,7 +1172,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     let detail = err.response?.data || err.message;
     if (Buffer.isBuffer(detail)) {
-      try { detail = detail.toString('utf8'); } catch {}
+      try { detail = detail.toString('utf8'); } catch { }
     }
     console.error('FB Campaign Launch Error:', detail);
 
