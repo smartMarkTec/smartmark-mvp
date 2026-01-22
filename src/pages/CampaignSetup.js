@@ -13,9 +13,10 @@ const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 const APP_ORIGIN = window.location.origin;
 
 
-// ✅ Always hit same-origin /api/auth (Vercel rewrite -> Render /auth)
-// This keeps cookies/sessions consistent and prevents cross-origin blocks.
-const AUTH_BASE = "/api/auth";
+// Prefer /auth (works when /api/auth is 404 on the Vercel domain). Fallback to /api/auth if present.
+const AUTH_BASE_PRIMARY = "/auth";
+const AUTH_BASE_FALLBACK = "/api/auth";
+
 
 
 // ✅ sid fallback for when cookies are blocked / flaky
@@ -51,21 +52,21 @@ async function authFetch(path, opts = {}) {
   headers["x-sm-sid"] = sid;
 
   const p = String(path || "");
-  const url = `${AUTH_BASE}${p.startsWith("/") ? p : `/${p}`}`;
+  const rel = `${p.startsWith("/") ? p : `/${p}`}`;
 
-  const doFetch = (u) =>
-    fetch(u, {
+  const doFetch = (base) =>
+    fetch(`${base}${rel}`, {
       ...opts,
       headers,
       credentials: "include",
     });
 
-  // 1) Preferred: /api/auth/*
-  let res = await doFetch(url);
+  // ✅ Preferred: /auth/*
+  let res = await doFetch(AUTH_BASE_PRIMARY);
 
-  // 2) Fallback: if /api/* not available (404), try /auth/*
-  if (res.status === 404 && url.startsWith("/api/auth/")) {
-    res = await doFetch(url.replace(/^\/api/, ""));
+  // ✅ Fallback: /api/auth/* (only if /auth is missing)
+  if (res.status === 404) {
+    res = await doFetch(AUTH_BASE_FALLBACK);
   }
 
   return res;
@@ -2739,7 +2740,8 @@ onClick={() => {
 
   // ✅ Start OAuth on SAME-ORIGIN so session cookies land on your app domain
   // Vercel rewrite: /api/auth/* -> Render /auth/*
-  window.location.assign(`${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+ window.location.assign(`${AUTH_BASE_PRIMARY}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+
 }}
 
 
