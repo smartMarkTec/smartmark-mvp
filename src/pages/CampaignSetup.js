@@ -1266,20 +1266,26 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
   const [authLoading, setAuthLoading] = useState(false);
   const [authStatus, setAuthStatus] = useState({ ok: false, msg: "" });
 
-  useEffect(() => {
-    lsSet(resolvedUser, "smartmark_login_username", loginUser, true);
-  }, [loginUser, resolvedUser]);
+useEffect(() => {
+  const v = String(loginUser || "").trim();
+  if (!v) return; // ✅ don't overwrite with blank
+  lsSet(resolvedUser, "smartmark_login_username", v, true);
+}, [loginUser, resolvedUser]);
 
-  useEffect(() => {
-    lsSet(resolvedUser, "smartmark_login_password", loginPass, true);
-  }, [loginPass, resolvedUser]);
+useEffect(() => {
+  const v = String(loginPass || "").trim();
+  if (!v) return; // ✅ don't overwrite with blank
+  lsSet(resolvedUser, "smartmark_login_password", v, true);
+}, [loginPass, resolvedUser]);
+
 
 function normalizeUsername(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
-  // ✅ match Login.js: strip leading $ only, do NOT force lowercase
+  // ✅ strip leading $ only, do NOT force lowercase
   return s.replace(/^\$/, "");
 }
+
 
 
 
@@ -2917,10 +2923,19 @@ if (finalImagesAbs.length) {
                       }}
                     />
 
-                   <input
+                  <input
   type="email"
   value={loginPass}
-  onChange={(e) => setLoginPass(e.target.value)}
+  onChange={(e) => {
+    const v = e.target.value;
+    setLoginPass(v);
+
+    // ✅ ALSO write to the global keys that Login.js reads
+    try {
+      const t = String(v || "").trim();
+      if (t) localStorage.setItem("smartmark_login_password", t);
+    } catch {}
+  }}
   placeholder="Email"
   autoComplete="email"
   style={{
@@ -2947,17 +2962,11 @@ if (finalImagesAbs.length) {
                   <div style={{ display: "flex", justifyContent: "center" }}>
          <button
   type="button"
-onClick={async () => {
+onClick={() => {
   trackEvent("setup_fee_click", { page: "setup" });
-
-  const ok = await handleLogin();
-  if (!ok) {
-    alert("Login failed — please enter your CashTag and email, then try again.");
-    return;
-  }
-
   handlePayFee();
 }}
+
 
 
   style={{
