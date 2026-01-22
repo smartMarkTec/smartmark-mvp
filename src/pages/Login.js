@@ -2,7 +2,9 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-const BACKEND_URL = "https://smartmark-mvp.onrender.com";
+// ✅ Always hit same-origin /api (Vercel rewrite -> Render). Avoids cookie/CORS issues.
+const API_BASE = "/api";
+
 
 // ✅ sid fallback (matches CampaignSetup.js)
 const SM_SID_LS_KEY = "sm_sid_v1";
@@ -156,8 +158,8 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
   // ✅ ALWAYS send sid header (matches CampaignSetup authFetch)
   const sid = ensureStoredSid();
 
-  try {
-    const res = await fetch(url, {
+  const doFetch = async (u) => {
+    const res = await fetch(u, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -168,14 +170,26 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
       signal: ctrl.signal,
     });
 
-    let data;
     const txt = await res.text();
+    let data;
     try {
       data = JSON.parse(txt);
     } catch {
       data = { raw: txt };
     }
     return { ok: res.ok, status: res.status, data };
+  };
+
+  try {
+    // 1) Try the provided URL (usually /api/...)
+    let out = await doFetch(url);
+
+    // 2) If /api/* is missing (Render-direct / local without rewrites), fallback to non-/api
+    if (out.status === 404 && typeof url === "string" && url.startsWith("/api/")) {
+      out = await doFetch(url.replace(/^\/api/, ""));
+    }
+
+    return out;
   } finally {
     clearTimeout(t);
   }
@@ -244,40 +258,41 @@ const u = normalizeUsername(uRaw); // auth username
     }
 
     try {
-      // 1) Attempt login
-      let { ok, status, data } = await postJSONWithTimeout(
-        `${BACKEND_URL}/auth/login`,
-        { username: normalizeUser(u), password: p, email: p }
-,
-        15000
-      );
+  const uRaw = String(username || "").trim();
+const u = normalizeUsername(uRaw); // ✅ canonical username (strips leading $ once)
+const p = passwordEmail.trim();
 
-      // 2) If login failed, attempt auto-register once (MVP simplicity)
-      if (!ok || !data?.success) {
-        const registerAttempt = await postJSONWithTimeout(
-          `${BACKEND_URL}/auth/register`,
-          { username: normalizeUser(u), email: p, password: p }
-,
-          15000
-        );
+let { ok, status, data } = await postJSONWithTimeout(
+  `${API_BASE}/auth/login`,
+  { username: u, password: p },
+  15000
+);
 
-        if (registerAttempt.ok && registerAttempt.data?.success) {
-          // Auto-register created a session cookie already (register route sets cookie)
-          ok = true;
-          status = 200;
-          data = registerAttempt.data;
-        } else {
-          // If register failed because user exists, re-try login once (covers race / stale cookies)
-          const retry = await postJSONWithTimeout(
-            `${BACKEND_URL}/auth/login`,
-            { username: u, password: p },
-            15000
-          );
-          ok = retry.ok;
-          status = retry.status;
-          data = retry.data;
-        }
-      }
+// 2) If login failed, attempt auto-register once (MVP simplicity)
+if (!ok || !data?.success) {
+  const registerAttempt = await postJSONWithTimeout(
+    `${API_BASE}/auth/register`,
+    { username: u, email: p, password: p },
+    15000
+  );
+
+  if (registerAttempt.ok && registerAttempt.data?.success) {
+    ok = true;
+    status = 200;
+    data = registerAttempt.data;
+  } else {
+    // If register failed because user exists, retry login once
+    const retry = await postJSONWithTimeout(
+      `${API_BASE}/auth/login`,
+      { username: u, password: p },
+      15000
+    );
+    ok = retry.ok;
+    status = retry.status;
+    data = retry.data;
+  }
+}
+
 
       if (!ok || !data?.success) {
         const snippet = (data?.error || data?.raw || "").toString().slice(0, 220);
@@ -285,10 +300,9 @@ const u = normalizeUsername(uRaw); // auth username
       }
 
       // Persist "current user" + last-used creds
-      localStorage.setItem("sm_current_user", u);
+     localStorage.setItem("sm_current_user", u);
+localStorage.setItem("smartmark_login_username", u);
 
-      // keep global last-used for simple prefill when user returns
-      localStorage.setItem("smartmark_login_username", u);
       localStorage.setItem("smartmark_login_password", p);
 
       // ensure user-scoped creds exist too

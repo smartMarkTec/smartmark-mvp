@@ -13,8 +13,10 @@ const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 const APP_ORIGIN = window.location.origin;
 
 
-// Auth backend MUST match the host used by FACEBOOK_REDIRECT_URI
-const AUTH_BASE = "https://smartmark-mvp.onrender.com/auth";
+// ✅ Always hit same-origin /api/auth (Vercel rewrite -> Render /auth)
+// This keeps cookies/sessions consistent and prevents cross-origin blocks.
+const AUTH_BASE = "/api/auth";
+
 
 // ✅ sid fallback for when cookies are blocked / flaky
 const SM_SID_LS_KEY = "sm_sid_v1";
@@ -43,18 +45,32 @@ function ensureStoredSid() {
   return sid;
 }
 
-// ✅ one wrapper for ALL auth calls (ALWAYS sends sid)
 async function authFetch(path, opts = {}) {
   const sid = ensureStoredSid();
   const headers = { ...(opts.headers || {}) };
   headers["x-sm-sid"] = sid;
 
-  return fetch(`${AUTH_BASE}${path}`, {
-    ...opts,
-    headers,
-    credentials: "include",
-  });
+  const p = String(path || "");
+  const url = `${AUTH_BASE}${p.startsWith("/") ? p : `/${p}`}`;
+
+  const doFetch = (u) =>
+    fetch(u, {
+      ...opts,
+      headers,
+      credentials: "include",
+    });
+
+  // 1) Preferred: /api/auth/*
+  let res = await doFetch(url);
+
+  // 2) Fallback: if /api/* not available (404), try /auth/*
+  if (res.status === 404 && url.startsWith("/api/auth/")) {
+    res = await doFetch(url.replace(/^\/api/, ""));
+  }
+
+  return res;
 }
+
 
 /* ======================= Visual Theme (Landing-style tech palette) ======================= */
 const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
@@ -1261,55 +1277,54 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
 function normalizeUsername(raw) {
   const s = String(raw || "").trim();
   if (!s) return "";
-  // strip leading $ only (do NOT force lowercase)
+  // ✅ match Login.js: strip leading $ only, do NOT force lowercase
   return s.replace(/^\$/, "");
 }
 
 
-const handleLogin = async () => {
-  const uRaw = String(loginUser || "").trim();     // keep what user typed for UI/storage
-  const uAuth = normalizeUsername(uRaw);           // only for sending to backend
-  const p = String(loginPass || "").trim();
 
-  // ✅ ALWAYS mirror what user typed into the GLOBAL keys Login.js reads
-  try {
-    localStorage.setItem("smartmark_login_username", uRaw);
-    localStorage.setItem("smartmark_login_password", p);
-  } catch {}
+
+const handleLogin = async () => {
+  const uRaw = String(loginUser || "").trim();
+  const uAuth = normalizeUsername(uRaw);
+  const p = String(loginPass || "").trim();
 
   if (!uAuth || !p) {
     setAuthStatus({ ok: false, msg: "Enter CashTag + email." });
-    return;
+    return false;
   }
 
+  setAuthLoading(true);
+  setAuthStatus({ ok: false, msg: "Logging in..." });
+
+  try {
+    const r = await authFetch(`/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: uAuth, password: p }),
+    });
+
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "Login failed");
+
+   try {
+  // ✅ always store canonical username (no $) everywhere used for namespaces
+  localStorage.setItem("sm_current_user", uAuth);
+  localStorage.setItem("smartmark_login_username", uAuth);
+  localStorage.setItem("smartmark_login_password", p);
+} catch {}
 
 
-    setAuthLoading(true);
-    setAuthStatus({ ok: false, msg: "Logging in..." });
-
-    try {
-      const r = await authFetch(`/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-       body: JSON.stringify({ username: uAuth, password: p }),
-
-      });
-
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "Login failed");
-
-      try {
-       // ✅ store the normalized username (without $) as the true user key
-localStorage.setItem("sm_current_user", uAuth);
-
-      } catch {}
-      setAuthStatus({ ok: true, msg: "Logged in ✅" });
-    } catch (e) {
-      setAuthStatus({ ok: false, msg: e?.message || "Login failed" });
-    }
-
+    setAuthStatus({ ok: true, msg: "Logged in ✅" });
+    return true;
+  } catch (e) {
+    setAuthStatus({ ok: false, msg: e?.message || "Login failed" });
+    return false;
+  } finally {
     setAuthLoading(false);
-  };
+  }
+};
+
 
   // IMPORTANT: normalize stored account ID to "act_..."
   const [selectedAccount, setSelectedAccount] = useState(() => {
@@ -2930,12 +2945,21 @@ if (finalImagesAbs.length) {
                   </div>
 
                   <div style={{ display: "flex", justifyContent: "center" }}>
-                   <button
+         <button
   type="button"
-  onClick={() => {
-    trackEvent("setup_fee_click", { page: "setup" });
-    handlePayFee();
-  }}
+onClick={async () => {
+  trackEvent("setup_fee_click", { page: "setup" });
+
+  const ok = await handleLogin();
+  if (!ok) {
+    alert("Login failed — please enter your CashTag and email, then try again.");
+    return;
+  }
+
+  handlePayFee();
+}}
+
+
   style={{
     background: feePaid ? `linear-gradient(90deg, ${ACCENT}, ${ACCENT_2})` : BTN_BASE,
     color: WHITE,

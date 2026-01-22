@@ -937,7 +937,9 @@ useEffect(() => {
 
 
 /* Set per-user namespace (prevents shared-browser mixing)
-   ✅ MUST be same-origin via /api so cookies persist (Vercel rewrite -> Render)
+   ✅ Works on BOTH:
+   - Vercel frontend with rewrites: /api/* -> Render
+   - Render direct (no rewrite): /auth/*
 */
 useEffect(() => {
   (async () => {
@@ -952,37 +954,60 @@ useEffect(() => {
           return s;
         })();
 
-      const res = await fetch(`${API_BASE}/auth/whoami`, {
+      // 1) Try Vercel rewrite path first
+      let res = await fetch(`/api/auth/whoami`, {
         method: "GET",
         credentials: "include",
         headers: { "x-sm-sid": sid },
+        cache: "no-store",
       });
 
-      // ✅ If a campaign was launched, FormPage must NEVER show old previews again.
-// This fixes bfcache/back-button cases where React doesn't remount the page.
+      // 2) If running without rewrites (Render direct), fallback to /auth/whoami
+      if (res.status === 404) {
+        res = await fetch(`/auth/whoami`, {
+          method: "GET",
+          credentials: "include",
+          headers: { "x-sm-sid": sid },
+          cache: "no-store",
+        });
+      }
+
+      if (!res.ok) throw new Error(`whoami ${res.status}`);
+
+      const j = await res.json().catch(() => ({}));
+      const u = j?.user?.username || j?.user?.email || "anon";
+      setUserNS(u);
+    } catch {
+      // If not logged in, force anon AND clear any visible persisted creatives for anon
+      setUserNS("anon");
+      try {
+        localStorage.removeItem("u:anon:sm_form_draft_v3");
+        localStorage.removeItem("u:anon:draft_form_creatives_v3");
+        localStorage.removeItem("u:anon:sm_setup_creatives_backup_v1");
+        localStorage.removeItem("u:anon:sm_image_cache_v1");
+        localStorage.removeItem("u:anon:smartmark.imageDrafts.v1");
+        sessionStorage.removeItem("u:anon:draft_form_creatives");
+      } catch {}
+    }
+  })();
+}, []);
+
+/* ✅ If a campaign was launched, FormPage must NEVER show old previews again.
+   Run this as its own hook (NOT nested) */
 useEffect(() => {
   const clearLaunchedRemnants = () => {
     if (!isDraftDisabled()) return;
 
-    // storage purge (prevents "in progress" resurrecting)
     try {
       purgeCreativeDraftKeys();
       lsRemove(CREATIVE_DRAFT_KEY);
       lsRemove("sm_setup_creatives_backup_v1");
       ssRemove("draft_form_creatives");
-
-      // also clear preview caches so images don't try to load dead URLs
       lsRemove(IMAGE_CACHE_KEY);
       lsRemove(IMAGE_DRAFTS_KEY);
-
-      // OPTIONAL: keep FORM_DRAFT_KEY if you want chat to persist; but remove if you want it totally clean:
-      // lsRemove(FORM_DRAFT_KEY);
-
-      // clear last-media helpers
       localStorage.removeItem("smartmark_last_image_url");
     } catch {}
 
-    // ✅ in-memory UI reset (this is the main fix)
     setResult(null);
     setImageUrls([]);
     setImageDataUrls([]);
@@ -990,29 +1015,21 @@ useEffect(() => {
     setHasGenerated(false);
     setGenerating(false);
     setImageLoading(false);
-
     setActiveImage(0);
     setImageUrl("");
-
     setImageEditing(false);
     setEditHeadline("");
     setEditBody("");
     setEditCTA("");
     setEditLink("");
-
-    // reset to "ready" flow (prevents “stuck preview”)
     setAwaitingReady(true);
   };
 
-  // run now
   clearLaunchedRemnants();
 
-  // run on BFCache restore (back button)
   const onPageShow = (e) => {
     if (e?.persisted) clearLaunchedRemnants();
   };
-
-  // run when tab becomes visible again
   const onVis = () => {
     if (document.visibilityState === "visible") clearLaunchedRemnants();
   };
@@ -1026,27 +1043,6 @@ useEffect(() => {
   };
 }, []);
 
-
-      if (!res.ok) throw new Error(`whoami ${res.status}`);
-
-      const j = await res.json().catch(() => ({}));
-      const u = j?.user?.username || j?.user?.email || "anon";
-      setUserNS(u);
-    } catch {
-      // If not logged in, force anon AND clear any visible persisted creatives for anon
-      setUserNS("anon");
-      try {
-        // wipe anon-only UI persistence so logged-out users don't see old creatives
-        localStorage.removeItem("u:anon:sm_form_draft_v3");
-        localStorage.removeItem("u:anon:draft_form_creatives_v3");
-        localStorage.removeItem("u:anon:sm_setup_creatives_backup_v1");
-        localStorage.removeItem("u:anon:sm_image_cache_v1");
-        localStorage.removeItem("u:anon:smartmark.imageDrafts.v1");
-        sessionStorage.removeItem("u:anon:draft_form_creatives");
-      } catch {}
-    }
-  })();
-}, []);
 
 
 
