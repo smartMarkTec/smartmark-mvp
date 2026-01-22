@@ -437,7 +437,9 @@ const useIsMobile = () => {
 
 /* FB connection flag */
 const FB_CONN_KEY = "smartmark_fb_connected";
-const FB_CONN_MAX_AGE = 3 * 24 * 60 * 60 * 1000;
+// keep the “connected” UI flag around ~60 days (token validity can be ~60 days / sometimes “Never” depending on token type)
+const FB_CONN_MAX_AGE = 60 * 24 * 60 * 60 * 1000;
+
 
 /* ---- per-user session keys (prevents same-browser multi-user bleed) ---- */
 const SS_DRAFT_KEY = (u) => (u ? `u:${u}:draft_form_creatives` : "draft_form_creatives");
@@ -1806,6 +1808,34 @@ useEffect(() => {
   setFbConnected(true);
   setCameFromFbConnect(true);
 
+  // ✅ FORCE refresh accounts/pages after OAuth so dropdowns auto-fill even if fbConnected was already true
+  (async () => {
+    try {
+      const r = await authFetch(`/facebook/adaccounts`);
+      if (r.ok) {
+        const json = await r.json().catch(() => ({}));
+        const list = json.data || [];
+        setAdAccounts(list);
+        touchFbConn();
+        const first = list?.[0]?.id ? String(list[0].id).replace(/^act_/, "") : "";
+        setSelectedAccount((prev) => (prev ? prev : first));
+      }
+    } catch {}
+
+    try {
+      const r = await authFetch(`/facebook/pages`);
+      if (r.ok) {
+        const json = await r.json().catch(() => ({}));
+        const list = json.data || [];
+        setPages(list);
+        touchFbConn();
+        const first = list?.[0]?.id ? String(list[0].id) : "";
+        setSelectedPageId((prev) => (prev ? prev : first));
+      }
+    } catch {}
+  })();
+
+
   // ✅ restore preview copy (prevents link/headline/body flipping to placeholder)
   try {
     const b = loadSetupPreviewBackup(resolvedUser);
@@ -2713,9 +2743,11 @@ onClick={() => {
     "/setup" +
     `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
-  // ✅ IMPORTANT: start OAuth on Render origin to avoid Invalid OAuth state
-  window.location.assign(`${MEDIA_ORIGIN}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`);
+  // ✅ Start OAuth on SAME-ORIGIN so session cookies land on your app domain
+  // Vercel rewrite: /api/auth/* -> Render /auth/*
+  window.location.assign(`${AUTH_BASE}/facebook?return_to=${encodeURIComponent(returnTo)}`);
 }}
+
 
 
 
