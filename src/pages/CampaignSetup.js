@@ -1195,23 +1195,17 @@ const CampaignSetup = () => {
 useEffect(() => {
   if (!isDraftDisabledLegacy()) return;
 
-
   // wipe any remaining draft artifacts so they can't rehydrate
   purgeDraftArtifactsEverywhere();
 
-  // also remove any local-only/in-progress campaign from UI state (whatever your state var is)
-  // Replace `setCampaigns` / `campaigns` with YOUR actual state names if different.
-  setCampaigns((prev) =>
-    (prev || []).filter((c) => {
-      const status = String(c?.status || c?.state || "").toLowerCase();
-      const id = String(c?.id || "");
-      // remove draft-like entries
-      if (id === "draft" || id === "in_progress" || c?.localOnly) return false;
-      if (status.includes("progress")) return false;
-      return true;
-    })
-  );
+  // hard-reset the draft UI immediately (no dependency on setCampaigns existing)
+  setDraftCreatives({ images: [], mediaSelection: "image" });
+
+  // if UI was still pointing at draft, detach it
+  setExpandedId((prev) => (prev === "__DRAFT__" ? null : prev));
+  setSelectedCampaignId((prev) => (prev === "__DRAFT__" ? "" : prev));
 }, []);
+
 
 
  // ✅ use username if available, otherwise fall back to sid so storage keys stay consistent
