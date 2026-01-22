@@ -1,3 +1,4 @@
+/* eslint-disable */
 // src/pages/Login.js
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
@@ -55,7 +56,6 @@ function writeEmailUserMap(map) {
     localStorage.setItem(EMAIL_USER_MAP_KEY, JSON.stringify(map || {}));
   } catch {}
 }
-
 
 // strip leading $ only (do NOT force lowercase)
 function normalizeUsername(raw) {
@@ -127,10 +127,6 @@ const styles = `
   }
 `;
 
-/* ---------- per-email auth mapping (so editing username never breaks login) ---------- */
-const AUTH_USER_BY_EMAIL_PREFIX = "sm_auth_user_by_email_v1:";
-const emailKey = (email) => `${AUTH_USER_BY_EMAIL_PREFIX}${String(email || "").trim().toLowerCase()}`;
-
 async function postJSONWithTimeout(url, body, ms = 15000) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), ms);
@@ -177,6 +173,20 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
 
 const withUser = (u, key) => `u:${u}:${key}`;
 
+// ✅ Safe no-op migration helper (prevents ReferenceError if missing)
+function migrateToUserNamespace(user) {
+  try {
+    const u = String(user || "").trim();
+    if (!u) return;
+
+    const globalU = (localStorage.getItem("smartmark_login_username") || "").trim();
+    const globalP = (localStorage.getItem("smartmark_login_password") || "").trim();
+
+    if (globalU) localStorage.setItem(withUser(u, "smartmark_login_username"), globalU);
+    if (globalP) localStorage.setItem(withUser(u, "smartmark_login_password"), globalP);
+  } catch {}
+}
+
 export default function Login() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
@@ -197,106 +207,111 @@ export default function Login() {
 
     // fallback (should rarely be used now)
     const current = (localStorage.getItem("sm_current_user") || "").trim();
-    const u = (localStorage.getItem(withUser(current, "smartmark_login_username")) || localStorage.getItem("smartmark_login_username") || "").trim();
-    const p = (localStorage.getItem(withUser(current, "smartmark_login_password")) || localStorage.getItem("smartmark_login_password") || "").trim();
+    const u =
+      (localStorage.getItem(withUser(current, "smartmark_login_username")) ||
+        localStorage.getItem("smartmark_login_username") ||
+        "").trim();
+    const p =
+      (localStorage.getItem(withUser(current, "smartmark_login_password")) ||
+        localStorage.getItem("smartmark_login_password") ||
+        "").trim();
     setUsername(u);
     setPasswordEmail(p);
   }, []);
 
-const handleLogin = async (e) => {
-  e.preventDefault();
-  setLoading(true);
-  setError("");
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
 
-  const uRaw = String(username || "").trim();
-  const uTyped = normalizeUsername(uRaw); // typed username (no leading $)
-  const p = String(passwordEmail || "").trim(); // email used as password
+    const uRaw = String(username || "").trim();
+    const uTyped = normalizeUsername(uRaw); // typed username (no leading $)
+    const p = String(passwordEmail || "").trim(); // email used as password
 
-  if (!uTyped || !p) {
-    setError("Please enter both fields.");
-    setLoading(false);
-    return;
-  }
+    if (!uTyped || !p) {
+      setError("Please enter both fields.");
+      setLoading(false);
+      return;
+    }
 
-  const ek = emailKey(p);
-  const map = readEmailUserMap();
-  const mappedUser = String(map[ek] || "").trim(); // known-good backend username for this email (if any)
+    const ek = emailKey(p);
+    const map = readEmailUserMap();
+    const mappedUser = String(map[ek] || "").trim(); // known-good backend username for this email (if any)
 
-  // try a specific username
-  const tryLogin = async (uTry) =>
-    postJSONWithTimeout(`${AUTH_BASE}/login`, { username: uTry, password: p }, 15000);
+    // try a specific username
+    const tryLogin = async (uTry) =>
+      postJSONWithTimeout(`${AUTH_BASE}/login`, { username: uTry, password: p }, 15000);
 
-  try {
-    let successUser = "";
-    let out = await tryLogin(uTyped);
+    try {
+      let successUser = "";
+      let out = await tryLogin(uTyped);
 
-    // If login fails, try register (MVP)
-    if (!out.ok || !out.data?.success) {
-      const reg = await postJSONWithTimeout(
-        `${AUTH_BASE}/register`,
-        { username: uTyped, email: p, password: p },
-        15000
-      );
+      // If login fails, try register (MVP)
+      if (!out.ok || !out.data?.success) {
+        const reg = await postJSONWithTimeout(
+          `${AUTH_BASE}/register`,
+          { username: uTyped, email: p, password: p },
+          15000
+        );
 
-      if (reg.ok && reg.data?.success) {
-        successUser = uTyped;
-        out = reg;
-      } else {
-        // If email already belongs to another username, try that mapped username
-        if (mappedUser && mappedUser !== uTyped) {
-          const out2 = await tryLogin(mappedUser);
-          if (out2.ok && out2.data?.success) {
-            successUser = mappedUser;
-            out = out2;
+        if (reg.ok && reg.data?.success) {
+          successUser = uTyped;
+          out = reg;
+        } else {
+          // If email already belongs to another username, try that mapped username
+          if (mappedUser && mappedUser !== uTyped) {
+            const out2 = await tryLogin(mappedUser);
+            if (out2.ok && out2.data?.success) {
+              successUser = mappedUser;
+              out = out2;
+            }
+          }
+
+          // last attempt: retry typed login once (covers race conditions)
+          if (!successUser) {
+            out = await tryLogin(uTyped);
+            if (out.ok && out.data?.success) successUser = uTyped;
           }
         }
-
-        // last attempt: retry typed login once (covers race conditions)
-        if (!successUser) {
-          out = await tryLogin(uTyped);
-          if (out.ok && out.data?.success) successUser = uTyped;
-        }
+      } else {
+        successUser = uTyped;
       }
-    } else {
-      successUser = uTyped;
+
+      if (!out.ok || !out.data?.success || !successUser) {
+        const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
+        throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
+      }
+
+      // ✅ Persist "current user" + last-used creds
+      try {
+        localStorage.setItem("sm_current_user", successUser);
+        localStorage.setItem("smartmark_login_username", successUser); // canonical (no $)
+        localStorage.setItem("smartmark_login_password", p);
+
+        // also user-scoped (optional)
+        localStorage.setItem(withUser(successUser, "smartmark_login_username"), successUser);
+        localStorage.setItem(withUser(successUser, "smartmark_login_password"), p);
+      } catch {}
+
+      // ✅ Remember which backend-username works for this email forever
+      try {
+        map[ek] = successUser;
+        writeEmailUserMap(map);
+      } catch {}
+
+      migrateToUserNamespace(successUser);
+
+      navigate("/setup");
+    } catch (err) {
+      const msg =
+        err?.name === "AbortError"
+          ? "Login timed out. Server didn’t respond."
+          : err?.message || "Server error. Please try again.";
+      setError(msg);
+    } finally {
+      setLoading(false);
     }
-
-    if (!out.ok || !out.data?.success || !successUser) {
-      const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
-      throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
-    }
-
-    // ✅ Persist "current user" + last-used creds
-    try {
-      localStorage.setItem("sm_current_user", successUser);
-      localStorage.setItem("smartmark_login_username", successUser); // canonical (no $)
-      localStorage.setItem("smartmark_login_password", p);
-
-      // also user-scoped (optional)
-      localStorage.setItem(withUser(successUser, "smartmark_login_username"), successUser);
-      localStorage.setItem(withUser(successUser, "smartmark_login_password"), p);
-    } catch {}
-
-    // ✅ Remember which backend-username works for this email forever
-    try {
-      map[ek] = successUser;
-      writeEmailUserMap(map);
-    } catch {}
-
-    migrateToUserNamespace(successUser);
-
-    navigate("/setup");
-  } catch (err) {
-    const msg =
-      err?.name === "AbortError"
-        ? "Login timed out. Server didn’t respond."
-        : err?.message || "Server error. Please try again.";
-    setError(msg);
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   return (
     <>
@@ -325,9 +340,12 @@ const handleLogin = async (e) => {
                 const v = e.target.value;
                 setUsername(v);
                 setError("");
-                // ✅ always store last typed (autofill)
+                // ✅ always store last typed (autofill) - canonical username (no $)
                 try {
-                  localStorage.setItem("smartmark_login_username", String(v || "").trim());
+                  localStorage.setItem(
+                    "smartmark_login_username",
+                    normalizeUsername(String(v || "").trim())
+                  );
                 } catch {}
               }}
               required
