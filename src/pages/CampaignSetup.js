@@ -2658,50 +2658,65 @@ const payload = {
 onClick={() => {
   trackEvent("connect_facebook", { page: "setup" });
 
-  // ✅ ctxKey (safe + stable)
+  // ✅ always persist creds before redirect (so login always works)
+  try {
+    const u = String(loginUser || "").trim();
+    const p = String(loginPass || "").trim();
+    if (u) localStorage.setItem("smartmark_login_username", u.replace(/^\$/, "")); // canonical username
+    if (p) localStorage.setItem("smartmark_login_password", p);
+  } catch {}
+
   const qs = new URLSearchParams(location.search || "");
   const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
   const ctxFromUrl = (qs.get("ctxKey") || "").trim();
   const active = (getActiveCtx(resolvedUser) || "").trim();
   const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
 
+  setActiveCtx(safeCtx, resolvedUser);
+
+  // mark inflight so we can restore after OAuth
   try {
-    setActiveCtx(safeCtx, resolvedUser);
+    localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), JSON.stringify({ t: Date.now(), ctxKey: safeCtx }));
   } catch {}
 
-  // ✅ inflight marker (write in 3 places so restore ALWAYS works)
-  try {
-    const payload = JSON.stringify({ t: Date.now(), ctxKey: safeCtx });
-    localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), payload);
-    localStorage.setItem(LS_INFLIGHT_KEY("anon"), payload);
-    localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, payload);
-  } catch {}
-
-  // ✅ backup preview copy
+  // save preview copy for after redirect
   try {
     saveSetupPreviewBackup(resolvedUser, {
-      headline: String(previewCopy?.headline || headline || "").trim(),
-      body: String(previewCopy?.body || body || "").trim(),
-      link: String(previewCopy?.link || inferredLink || "").trim(),
+      headline: String(headline || previewCopy?.headline || "").trim(),
+      body: String(body || previewCopy?.body || "").trim(),
+      link: String(inferredLink || previewCopy?.link || "").trim(),
       ctxKey: safeCtx,
     });
   } catch {}
 
-  // ✅ backup fetchable images
+  // save FETCHABLE images for after redirect
   try {
     const imgs = resolveFetchableDraftImages({
       draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
       navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
     });
-    if (imgs.length) saveFetchableImagesBackup(resolvedUser, imgs);
+
+    saveFetchableImagesBackup(resolvedUser, imgs);
+
+    if (imgs.length) {
+      persistDraftCreativesNow(resolvedUser, {
+        ctxKey: safeCtx,
+        images: imgs,
+        mediaSelection: "image",
+        expiresAt: Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
+      });
+    }
   } catch {}
 
-  // ✅ IMPORTANT FIX: use /auth/facebook for redirect (authFetch has fallback, redirects don't)
   const returnTo =
-    window.location.origin + `/setup?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
+    window.location.origin +
+    "/setup" +
+    `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
-  window.location.assign(`/auth/facebook?return_to=${encodeURIComponent(returnTo)}`);
+  // ✅ IMPORTANT: start OAuth on Render origin to avoid Invalid OAuth state
+  window.location.assign(`${MEDIA_ORIGIN}/auth/facebook?return_to=${encodeURIComponent(returnTo)}`);
 }}
+
 
 
             style={{
