@@ -181,6 +181,12 @@ async function postJSONWithTimeout(url, body, ms = 15000) {
   }
 }
 
+function normalizeUsername(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s.replace(/^\$/, "").toLowerCase();
+}
+
 
 export default function Login() {
   const navigate = useNavigate();
@@ -213,7 +219,8 @@ export default function Login() {
     setLoading(true);
     setError("");
 
-    const u = username.trim();
+   const u = normalizeUsername(username);
+
     const p = passwordEmail.trim();
 
     if (!u || !p) {

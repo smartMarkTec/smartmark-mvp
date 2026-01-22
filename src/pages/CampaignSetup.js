@@ -1258,14 +1258,21 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
     lsSet(resolvedUser, "smartmark_login_password", loginPass, true);
   }, [loginPass, resolvedUser]);
 
-  const handleLogin = async () => {
-    const u = String(loginUser || "").trim();
-    const p = String(loginPass || "").trim();
-    if (!u || !p) {
-      setAuthStatus({ ok: false, msg: "Enter CashTag + email." });
+ function normalizeUsername(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  return s.replace(/^\$/, "").toLowerCase();
+}
 
-      return;
-    }
+const handleLogin = async () => {
+  const u = normalizeUsername(loginUser);
+  const p = String(loginPass || "").trim();
+
+  if (!u || !p) {
+    setAuthStatus({ ok: false, msg: "Enter CashTag + email." });
+    return;
+  }
+
 
     setAuthLoading(true);
     setAuthStatus({ ok: false, msg: "Logging in..." });
