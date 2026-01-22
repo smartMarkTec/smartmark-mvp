@@ -2,8 +2,10 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
-// ✅ Always hit same-origin /api (Vercel rewrite -> Render). Avoids cookie/CORS issues.
 const API_BASE = "/api";
+
+// ✅ Match CampaignSetup.js (same-origin /api/auth -> Vercel rewrite -> Render /auth)
+const AUTH_BASE = "/api/auth";
 
 
 // ✅ sid fallback (matches CampaignSetup.js)
@@ -240,91 +242,81 @@ useEffect(() => {
   // - Try /auth/login
   // - If user doesn't exist yet, auto-create via /auth/register (no separate register button)
   // - Then navigate to /setup
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
+const handleLogin = async (e) => {
+  e.preventDefault();
+  setLoading(true);
+  setError("");
 
-   const uRaw = String(username || "").trim();
-const u = normalizeUsername(uRaw); // auth username
-
-
-    const p = passwordEmail.trim();
-
-    if (!u || !p) {
-      setError("Please enter both fields.");
-      setLoading(false);
-      return;
-    }
-
-    try {
   const uRaw = String(username || "").trim();
-const u = normalizeUsername(uRaw); // ✅ canonical username (strips leading $ once)
-const p = passwordEmail.trim();
+  const u = normalizeUsername(uRaw); // canonical (no leading $)
+  const p = String(passwordEmail || "").trim(); // MVP: email used as password
 
-let { ok, status, data } = await postJSONWithTimeout(
-  `${API_BASE}/auth/login`,
-  { username: u, password: p },
-  15000
-);
+  if (!u || !p) {
+    setError("Please enter both fields.");
+    setLoading(false);
+    return;
+  }
 
-// 2) If login failed, attempt auto-register once (MVP simplicity)
-if (!ok || !data?.success) {
-  const registerAttempt = await postJSONWithTimeout(
-    `${API_BASE}/auth/register`,
-    { username: u, email: p, password: p },
-    15000
-  );
-
-  if (registerAttempt.ok && registerAttempt.data?.success) {
-    ok = true;
-    status = 200;
-    data = registerAttempt.data;
-  } else {
-    // If register failed because user exists, retry login once
-    const retry = await postJSONWithTimeout(
-      `${API_BASE}/auth/login`,
+  try {
+    // 1) Try login
+    let out = await postJSONWithTimeout(
+      `${AUTH_BASE}/login`,
       { username: u, password: p },
       15000
     );
-    ok = retry.ok;
-    status = retry.status;
-    data = retry.data;
-  }
-}
 
+    // 2) If login fails, try auto-register once (MVP)
+    if (!out.ok || !out.data?.success) {
+      const reg = await postJSONWithTimeout(
+        `${AUTH_BASE}/register`,
+        { username: u, email: p, password: p },
+        15000
+      );
 
-      if (!ok || !data?.success) {
-        const snippet = (data?.error || data?.raw || "").toString().slice(0, 220);
-        throw new Error(snippet || `Login failed (HTTP ${status}).`);
+      // If register succeeded -> treat as success
+      if (reg.ok && reg.data?.success) {
+        out = reg;
+      } else {
+        // If register didn’t succeed, retry login once (common if user already exists)
+        out = await postJSONWithTimeout(
+          `${AUTH_BASE}/login`,
+          { username: u, password: p },
+          15000
+        );
       }
+    }
 
-      // Persist "current user" + last-used creds
-     localStorage.setItem("sm_current_user", u);
-localStorage.setItem("smartmark_login_username", u);
+    if (!out.ok || !out.data?.success) {
+      const snippet = (out.data?.error || out.data?.raw || "").toString().slice(0, 220);
+      throw new Error(snippet || `Login failed (HTTP ${out.status}).`);
+    }
 
+    // ✅ Persist "current user" + last-used creds (global keys CampaignSetup reads)
+    try {
+      localStorage.setItem("sm_current_user", u);
+      localStorage.setItem("smartmark_login_username", u);
       localStorage.setItem("smartmark_login_password", p);
 
-      // ensure user-scoped creds exist too
-      try {
-        localStorage.setItem(withUser(u, "smartmark_login_username"), u);
-        localStorage.setItem(withUser(u, "smartmark_login_password"), p);
-      } catch {}
+      // also user-scoped (optional but fine)
+      localStorage.setItem(withUser(u, "smartmark_login_username"), u);
+      localStorage.setItem(withUser(u, "smartmark_login_password"), p);
+    } catch {}
 
-      // migrate shared app state into user namespace (first login)
-      migrateToUserNamespace(u);
+    // migrate shared app state into user namespace (first login)
+    migrateToUserNamespace(u);
 
-      navigate("/setup");
-    } catch (err) {
-      const msg =
-        err?.name === "AbortError"
-          ? "Login timed out. Server didn’t respond."
-          : err?.message || "Server error. Please try again.";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
+    navigate("/setup");
+  } catch (err) {
+    const msg =
+      err?.name === "AbortError"
+        ? "Login timed out. Server didn’t respond."
+        : err?.message || "Server error. Please try again.";
+    setError(msg);
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <>
@@ -349,10 +341,17 @@ localStorage.setItem("smartmark_login_username", u);
               autoComplete="username"
               placeholder="Username"
               value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setError("");
-              }}
+             onChange={(e) => {
+  const v = e.target.value;
+  setUsername(v);
+  setError("");
+
+  // ✅ keep global "last typed" in sync (CampaignSetup + Prefill reads these)
+  try {
+    localStorage.setItem("smartmark_login_username", String(v || "").trim());
+  } catch {}
+}}
+
               required
             />
           </div>
@@ -367,10 +366,17 @@ localStorage.setItem("smartmark_login_username", u);
               autoComplete="email"
               placeholder="you@example.com"
               value={passwordEmail}
-              onChange={(e) => {
-                setPasswordEmail(e.target.value);
-                setError("");
-              }}
+             onChange={(e) => {
+  const v = e.target.value;
+  setPasswordEmail(v);
+  setError("");
+
+  // ✅ keep global "last typed" in sync (CampaignSetup + Prefill reads these)
+  try {
+    localStorage.setItem("smartmark_login_password", String(v || "").trim());
+  } catch {}
+}}
+
               required
             />
           </div>
