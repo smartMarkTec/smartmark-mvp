@@ -2414,59 +2414,131 @@ const finalBody = (
 ).toString().trim();
 
 
-// ✅ For LAUNCH: must send real fetchable URLs (never data:image)
-// ✅ LAUNCH images: use EXACTLY what the UI is showing (draft if draft, saved if campaign),
-// but ensure they're FETCHABLE URLs (no data:image).
-let candidateImgs = [];
+// ✅ LAUNCH images: ALWAYS resolve to FETCHABLE urls (never data:image)
+const resolveLaunchImages = () => {
+  const dedupe = (arr) => {
+    const seen = new Set();
+    return (arr || []).filter((u) => (u && !seen.has(u) ? (seen.add(u), true) : false));
+  };
 
-// If user expanded/selected a real campaign, use its saved creatives
-if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
-  try {
-    const saved = getSavedCreatives(selectedCampaignId);
-    candidateImgs = Array.isArray(saved?.images) ? saved.images.slice(0, 2) : [];
-  } catch {
-    candidateImgs = [];
+  // 0) Gather candidates from ALL possible sources
+  let candidateImgs = [];
+
+  // A) If user selected a real campaign, use saved creatives first
+  if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
+    try {
+      const saved = getSavedCreatives(selectedCampaignId);
+      if (Array.isArray(saved?.images)) candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
+    } catch {}
   }
-}
 
-// Otherwise use the draft creatives (what user just generated)
-if (!candidateImgs.length) {
-  candidateImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images.slice(0, 2) : [];
-}
+  // B) Draft creatives (what user just generated)
+  if (Array.isArray(draftCreatives?.images) && draftCreatives.images.length) {
+    candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
+  }
 
-// Last fallback: nav images from FormPage state
-if (!candidateImgs.length) {
-  candidateImgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
-}
+  // C) Nav state from FormPage
+  if (Array.isArray(navImageUrls) && navImageUrls.length) {
+    candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+  }
 
-// Normalize to absolute FETCHABLE URLs (Render /api/media/*), drop data:image
-let filteredImages = candidateImgs
-  .map((u) => String(u || "").trim())
-  .filter(Boolean)
-  .map(toAbsoluteMedia)
-  .filter((u) => u && !/^data:image\//i.test(u))
-  .slice(0, 2);
+  // D) “Fetchable” backups/caches (OAuth safe)
+  try {
+    candidateImgs = candidateImgs
+      .concat(loadFetchableImagesBackup(resolvedUser) || [])
+      .concat(getCachedFetchableImages() || []);
+  } catch {}
 
-// If still empty, pull from your fetchable backups/caches (OAuth safe)
+  // E) Absolute last-resort: pull latest from imageDrafts registry
+  try {
+    candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
+  } catch {}
+
+  // 1) Normalize to absolute media URLs
+  let normalized = dedupe(
+    candidateImgs
+      .map((u) => String(u || "").trim())
+      .filter(Boolean)
+      .map(toAbsoluteMedia)
+      .filter(Boolean)
+  );
+
+  // 2) If we still have data:image entries, map them to cached fetchable by index
+  //    (this is the #1 reason launches randomly fail even though UI shows images)
+  if (normalized.some((u) => /^data:image\//i.test(u))) {
+    const cached = dedupe(
+      []
+        .concat(getCachedFetchableImages() || [])
+        .concat(loadFetchableImagesBackup(resolvedUser) || [])
+        .concat(getLatestDraftImageUrlsFromImageDrafts() || [])
+        .map(toAbsoluteMedia)
+        .filter((u) => u && !/^data:image\//i.test(u))
+    );
+
+    const fixed = [];
+    for (const u of normalized) {
+      if (!u) continue;
+      if (/^data:image\//i.test(u)) {
+        // replace data url with next cached fetchable url
+        const repl = cached.shift();
+        if (repl) fixed.push(repl);
+      } else {
+        fixed.push(u);
+      }
+      if (fixed.length >= 2) break;
+    }
+    normalized = dedupe(fixed);
+  }
+
+  // 3) Drop any remaining data urls (Meta launch must be fetchable)
+  normalized = normalized.filter((u) => u && !/^data:image\//i.test(u)).slice(0, 2);
+
+  return normalized;
+};
+
+let filteredImages = resolveLaunchImages();
+
+// ✅ If still empty, forcibly rehydrate draft + backups ON THE SPOT so user doesn’t get blocked
 if (!filteredImages.length) {
-  const backups = []
-    .concat(loadFetchableImagesBackup(resolvedUser) || [])
-    .concat(getCachedFetchableImages() || [])
-    .map(toAbsoluteMedia)
-    .filter((u) => u && !/^data:image\//i.test(u));
+  try {
+    const latest = (getLatestDraftImageUrlsFromImageDrafts() || [])
+      .map(toAbsoluteMedia)
+      .filter((u) => u && !/^data:image\//i.test(u))
+      .slice(0, 2);
 
-  filteredImages = backups.slice(0, 2);
+    if (latest.length) {
+      filteredImages = latest;
+
+      // persist so next click always works
+      const payloadDraft = {
+        ctxKey: String(getActiveCtx(resolvedUser) || "").trim(),
+        images: filteredImages,
+        mediaSelection: "image",
+        savedAt: Date.now(),
+      };
+
+      try {
+        setDraftCreatives({ images: filteredImages, mediaSelection: "image" });
+        sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payloadDraft));
+        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payloadDraft));
+        if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payloadDraft));
+        saveSetupCreativeBackup(resolvedUser, payloadDraft);
+        saveFetchableImagesBackup(resolvedUser, filteredImages);
+      } catch {}
+    }
+  } catch {}
 }
 
-// Still nothing? then it's truly missing
+// ✅ LAST guard: ONLY now throw (this should basically never happen now)
 if (!filteredImages.length) {
   throw new Error("No valid images found to launch. Please generate creatives again.");
 }
 
-// ✅ Keep backup fresh (so FB connect / refresh still launches)
+// ✅ Keep fetchable backup fresh so OAuth/refresh never breaks launch
 try {
   saveFetchableImagesBackup(resolvedUser, filteredImages);
 } catch {}
+
 
 
 
