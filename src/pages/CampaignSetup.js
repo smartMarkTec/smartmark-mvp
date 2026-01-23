@@ -2383,6 +2383,20 @@ useEffect(() => {
         endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
       );
 
+      // ✅ ensure websiteUrl is defined in THIS scope (fixes ReferenceError)
+const websiteUrl = (
+  form?.websiteUrl ||
+  form?.website ||
+  answers?.websiteUrl ||
+  answers?.website ||
+  answers?.url ||
+  answers?.link ||
+  inferredLink ||
+  previewCopy?.link ||
+  ""
+).toString().trim();
+
+
 // ✅ For LAUNCH: must send real fetchable URLs (never data:image)
 // ✅ LAUNCH images: use EXACTLY what the UI is showing (draft if draft, saved if campaign),
 // but ensure they're FETCHABLE URLs (no data:image).
