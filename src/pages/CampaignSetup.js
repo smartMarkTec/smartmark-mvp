@@ -2093,7 +2093,10 @@ useEffect(() => {
   } catch {}
 
   // ✅ allow draft to re-hydrate after redirect (critical)
+  if (!(isDraftDisabled(resolvedUser) || isDraftDisabledLegacy())) {
   setDraftDisabled(resolvedUser, false);
+}
+
 
   setFbConnected(true);
   setCameFromFbConnect(true);
@@ -2232,7 +2235,10 @@ useEffect(() => {
 
     if (!imgs.length) return;
 
-    setDraftDisabled(resolvedUser, false);
+   if (!(isDraftDisabled(resolvedUser) || isDraftDisabledLegacy())) {
+  setDraftDisabled(resolvedUser, false);
+}
+
 
     setDraftCreatives({ images: imgs, mediaSelection: "image" });
     setSelectedCampaignId("__DRAFT__");
