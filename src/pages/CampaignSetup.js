@@ -21,6 +21,9 @@ const AUTH_BASE_FALLBACK = `${MEDIA_ORIGIN}/api/auth`;
 
 
 
+
+
+
 // ✅ sid fallback for when cookies are blocked / flaky
 const SM_SID_LS_KEY = "sm_sid_v1";
 
@@ -72,6 +75,8 @@ async function authFetch(path, opts = {}) {
   }
 
   return res;
+
+
 }
 
 
@@ -323,34 +328,61 @@ const LS_FETCHABLE_KEY = (u) => (u ? withUser(u, SETUP_FETCHABLE_IMAGES_KEY) : S
 
 function saveFetchableImagesBackup(user, urls) {
   try {
-    const clean = (Array.isArray(urls) ? urls : []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+    const clean = (Array.isArray(urls) ? urls : [])
+      .map(toAbsoluteMedia)
+      .filter((u) => u && !/^data:image\//i.test(u))
+      .slice(0, 2);
+
     const payload = { urls: clean, savedAt: Date.now() };
+
+    // ✅ save under current user namespace
     localStorage.setItem(LS_FETCHABLE_KEY(user), JSON.stringify(payload));
-    localStorage.setItem(SETUP_FETCHABLE_IMAGES_KEY, JSON.stringify(payload)); // legacy safety
+
+    // ✅ ALSO save under sid namespace so login/namespace switches never break launch
+    const sid = getStoredSid();
+    if (sid && sid !== user) {
+      localStorage.setItem(LS_FETCHABLE_KEY(sid), JSON.stringify(payload));
+    }
+
+    // ✅ legacy safety
+    localStorage.setItem(SETUP_FETCHABLE_IMAGES_KEY, JSON.stringify(payload));
   } catch {}
 }
 
 function loadFetchableImagesBackup(user) {
   try {
+    const sid = getStoredSid();
+
+    // ✅ IMPORTANT: check user → sid → legacy
     const raw =
       localStorage.getItem(LS_FETCHABLE_KEY(user)) ||
+      (sid ? localStorage.getItem(LS_FETCHABLE_KEY(sid)) : null) ||
       localStorage.getItem(SETUP_FETCHABLE_IMAGES_KEY);
 
     if (!raw) return [];
+
     const p = JSON.parse(raw);
     const ageOk = !p.savedAt || Date.now() - p.savedAt <= DRAFT_TTL_MS;
     if (!ageOk) return [];
-    return (Array.isArray(p.urls) ? p.urls : []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+
+    return (Array.isArray(p.urls) ? p.urls : [])
+      .map(toAbsoluteMedia)
+      .filter((u) => u && !/^data:image\//i.test(u))
+      .slice(0, 2);
   } catch {
     return [];
   }
 }
 
+
 function getCachedFetchableImages(user) {
   try {
-    // ✅ check user-scoped cache FIRST, then anon, then legacy
+    const sid = getStoredSid();
+
+    // ✅ IMPORTANT: check user → sid → anon → legacy
     const raw =
       (user ? localStorage.getItem(withUser(user, "sm_image_cache_v1")) : null) ||
+      (sid ? localStorage.getItem(withUser(sid, "sm_image_cache_v1")) : null) ||
       localStorage.getItem("u:anon:sm_image_cache_v1") ||
       localStorage.getItem("sm_image_cache_v1");
 
@@ -367,6 +399,7 @@ function getCachedFetchableImages(user) {
     return [];
   }
 }
+
 
 
 function resolveFetchableDraftImages({ user, draftImages, navImages }) {
@@ -1180,6 +1213,8 @@ useEffect(() => {
 
         return origFetch(fixed, { ...(init || {}), credentials: "include" });
       }
+
+
     } catch {}
 
     return origFetch(input, init);
@@ -2982,7 +3017,9 @@ onClick={() => {
 
   // ✅ Start OAuth on SAME-ORIGIN so session cookies land on your app domain
   // Vercel rewrite: /api/auth/* -> Render /auth/*
- window.location.assign(`${AUTH_BASE_PRIMARY}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+window.location.assign(`${AUTH_BASE_PRIMARY}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+
+
 
 }}
 
