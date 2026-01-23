@@ -1190,6 +1190,119 @@ function MetricsRow({ metrics }) {
 /* ======================================================================= */
 /* ============================== MAIN =================================== */
 /* ======================================================================= */
+
+// ===================== URL FETCHER (data:image -> /api/media URL) =====================
+const isDataImage = (u) => /^data:image\//i.test(String(u || "").trim());
+
+function dataUrlToBlob(dataUrl) {
+  const s = String(dataUrl || "");
+  const match = s.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)$/);
+  if (!match) return null;
+  const mime = match[1];
+  const b64 = match[2];
+  const bin = atob(b64);
+  const len = bin.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+async function uploadImageToMedia(dataUrl, idx = 0) {
+  const blob = dataUrlToBlob(dataUrl);
+  if (!blob) return "";
+
+  const ext = blob.type.includes("png") ? "png" : blob.type.includes("webp") ? "webp" : "jpg";
+  const filename = `launch-${Date.now()}-${idx}.${ext}`;
+
+  const fd = new FormData();
+  // Most multer setups expect "file"
+  fd.append("file", blob, filename);
+
+  const endpoints = [
+    `${MEDIA_ORIGIN}/api/media/upload`,
+    `${MEDIA_ORIGIN}/api/media`,
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const r = await fetch(url, { method: "POST", body: fd });
+      const text = await r.text().catch(() => "");
+      if (!r.ok) continue;
+
+      // Try JSON first
+      let j = null;
+      try { j = text ? JSON.parse(text) : null; } catch { j = null; }
+
+      // Common response shapes
+      const candidate =
+        (j && (j.url || j.path || j.location || j.fileUrl)) ||
+        (j && j.data && (j.data.url || j.data.path)) ||
+        "";
+
+      // If backend returns "/api/media/xxx.png" in plain text
+      const fromText =
+        String(text || "").match(/\/api\/media\/[^\s"'<>]+/i)?.[0] || "";
+
+      const finalPath = candidate || fromText;
+      if (!finalPath) continue;
+
+      return toAbsoluteMedia(finalPath);
+    } catch {
+      // try next endpoint
+    }
+  }
+
+  return "";
+}
+
+async function ensureFetchableUrls(candidates, max = 2) {
+  const dedupe = (arr) => {
+    const seen = new Set();
+    const out = [];
+    for (const u of arr || []) {
+      const s = String(u || "").trim();
+      if (!s) continue;
+      if (seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+    }
+    return out;
+  };
+
+  // Normalize candidates
+  let arr = dedupe(candidates)
+    .map((u) => String(u || "").trim())
+    .filter(Boolean);
+
+  // First normalize non-data urls
+  const norm = [];
+  const data = [];
+  for (const u of arr) {
+    if (isDataImage(u)) data.push(u);
+    else norm.push(toAbsoluteMedia(u));
+  }
+
+  // Keep only real fetchable urls
+  let fetchable = norm.filter((u) => u && !isDataImage(u));
+
+  // Upload data:image entries if we still need more
+  if (fetchable.length < max && data.length) {
+    for (let i = 0; i < data.length && fetchable.length < max; i++) {
+      const uploaded = await uploadImageToMedia(data[i], i);
+      if (uploaded) fetchable.push(uploaded);
+    }
+  }
+
+  // Final clean
+  fetchable = dedupe(fetchable)
+    .map(toAbsoluteMedia)
+    .filter((u) => u && !isDataImage(u))
+    .slice(0, max);
+
+  return fetchable;
+}
+
+
 const CampaignSetup = () => {
 
   // ✅ HOTFIX: If ANY code (here or other components) accidentally calls /api/auth/* on the app domain,
@@ -2461,12 +2574,8 @@ const finalBody = (
 
 
 // ✅ LAUNCH images: ALWAYS resolve to FETCHABLE urls (never data:image)
-const resolveLaunchImages = () => {
-  const dedupe = (arr) => {
-    const seen = new Set();
-    return (arr || []).filter((u) => (u && !seen.has(u) ? (seen.add(u), true) : false));
-  };
-
+// ✅ LAUNCH images: ALWAYS resolve to FETCHABLE urls (never data:image)
+const resolveLaunchImages = async () => {
   // 0) Gather candidates from ALL possible sources
   let candidateImgs = [];
 
@@ -2488,63 +2597,44 @@ const resolveLaunchImages = () => {
     candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
   }
 
-  // D) “Fetchable” backups/caches (OAuth safe)
+  // D) Cached/backup fetchable urls (OAuth safe)
   try {
     candidateImgs = candidateImgs
-  .concat(loadFetchableImagesBackup(resolvedUser) || [])
-  .concat(getCachedFetchableImages(resolvedUser) || []);
-
+      .concat(loadFetchableImagesBackup(resolvedUser) || [])
+      .concat(getCachedFetchableImages(resolvedUser) || []);
   } catch {}
 
-  // E) Absolute last-resort: pull latest from imageDrafts registry
+  // E) Last resort: imageDrafts registry
   try {
     candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
   } catch {}
 
-  // 1) Normalize to absolute media URLs
-  let normalized = dedupe(
-    candidateImgs
-      .map((u) => String(u || "").trim())
-      .filter(Boolean)
-      .map(toAbsoluteMedia)
-      .filter(Boolean)
-  );
+  // ✅ HERE IS THE FIX: force-convert any data:image -> real /api/media URL by uploading
+  const fetchable = await ensureFetchableUrls(candidateImgs, 2);
 
-  // 2) If we still have data:image entries, map them to cached fetchable by index
-  //    (this is the #1 reason launches randomly fail even though UI shows images)
-  if (normalized.some((u) => /^data:image\//i.test(u))) {
- const cached = dedupe(
-  []
-    .concat(getCachedFetchableImages(resolvedUser) || [])
-    .concat(loadFetchableImagesBackup(resolvedUser) || [])
-    .concat(getLatestDraftImageUrlsFromImageDrafts() || [])
-    .map(toAbsoluteMedia)
-    .filter((u) => u && !/^data:image\//i.test(u))
-);
-
-
-    const fixed = [];
-    for (const u of normalized) {
-      if (!u) continue;
-      if (/^data:image\//i.test(u)) {
-        // replace data url with next cached fetchable url
-        const repl = cached.shift();
-        if (repl) fixed.push(repl);
-      } else {
-        fixed.push(u);
-      }
-      if (fixed.length >= 2) break;
-    }
-    normalized = dedupe(fixed);
-  }
-
-  // 3) Drop any remaining data urls (Meta launch must be fetchable)
-  normalized = normalized.filter((u) => u && !/^data:image\//i.test(u)).slice(0, 2);
-
-  return normalized;
+  return fetchable;
 };
 
-let filteredImages = resolveLaunchImages();
+let filteredImages = await resolveLaunchImages();
+
+// ✅ If still empty, force last-resort upload from whatever is in draftCreatives
+if (!filteredImages.length) {
+  try {
+    const fallback = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
+    filteredImages = await ensureFetchableUrls(fallback, 2);
+  } catch {}
+}
+
+// ✅ LAST guard
+if (!filteredImages.length) {
+  throw new Error("No valid images found to launch. Please generate creatives again.");
+}
+
+// ✅ Keep fetchable backup fresh so OAuth/refresh never breaks launch
+try {
+  saveFetchableImagesBackup(resolvedUser, filteredImages);
+} catch {}
+
 
 // ✅ If still empty, forcibly rehydrate draft + backups ON THE SPOT so user doesn’t get blocked
 if (!filteredImages.length) {
