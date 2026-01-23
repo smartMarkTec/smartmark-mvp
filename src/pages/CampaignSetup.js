@@ -754,12 +754,21 @@ function persistDraftCreativesNow(user, draftCreatives) {
       savedAt: Date.now(),
     };
 
+    // ✅ primary (user / sid scoped)
     sessionStorage.setItem(SS_DRAFT_KEY(user), JSON.stringify(payload));
+
+    // ✅ CRITICAL: legacy/global bridge so hydrate still works after user/ns changes
+    // (your hydration code checks this key, but you weren’t writing it)
+    sessionStorage.setItem("draft_form_creatives", JSON.stringify(payload));
+
+    // ✅ local persistence
     if (user) localStorage.setItem(withUser(user, CREATIVE_DRAFT_KEY), JSON.stringify(payload));
     localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payload));
+
     saveSetupCreativeBackup(user, payload);
   } catch {}
 }
+
 
 /* ======================= NEW: attach draft creatives into active campaign slot after FB connect ======================= */
 function attachDraftToCampaignIfEmpty({ user, acctId, campaignId, draftImages, expiresAt, name }) {
@@ -3071,9 +3080,18 @@ onClick={() => {
   setActiveCtx(safeCtx, resolvedUser);
 
   // mark inflight so we can restore after OAuth
-  try {
-    localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), JSON.stringify({ t: Date.now(), ctxKey: safeCtx }));
-  } catch {}
+// mark inflight so we can restore after OAuth
+try {
+  const payload = JSON.stringify({ t: Date.now(), ctxKey: safeCtx });
+
+  // ✅ primary
+  localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), payload);
+
+  // ✅ fallback namespaces so OAuth return can still find it
+  localStorage.setItem(LS_INFLIGHT_KEY("anon"), payload);
+  localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, payload);
+} catch {}
+
 
   // save preview copy for after redirect
   try {
