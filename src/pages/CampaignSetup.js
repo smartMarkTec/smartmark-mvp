@@ -2348,7 +2348,8 @@ useEffect(() => {
         endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
       );
 
-    // ✅ For LAUNCH: must send real fetchable URLs (never data:image)
+// ✅ For LAUNCH: must send real fetchable URLs (never data:image)
+// ✅ FIX: If draft images are missing or are data:image without cache, fall back to backups / saved creatives / draft stores.
 function getFetchableUrlsFromCache() {
   try {
     const raw = localStorage.getItem("u:anon:sm_image_cache_v1") || localStorage.getItem("sm_image_cache_v1");
@@ -2361,40 +2362,100 @@ function getFetchableUrlsFromCache() {
   }
 }
 
+function pickFirstValidImages(candidates) {
+  for (const arr of candidates) {
+    const norm = (Array.isArray(arr) ? arr : [])
+      .map((u) => String(u || "").trim())
+      .filter(Boolean)
+      .slice(0, 2);
+
+    if (!norm.length) continue;
+
+    const out = norm
+      .map((img, i) => {
+        if (!img) return "";
+
+        // never send data:image to backend — replace with fetchable backups if possible
+        if (/^data:image\//i.test(img)) {
+          return cachedFetchable[i] || fetchableBackup[i] || "";
+        }
+
+        return toAbsoluteMedia(img);
+      })
+      .filter(Boolean)
+      .slice(0, 2);
+
+    if (out.length) return out;
+  }
+  return [];
+}
+
 const cachedFetchable = getFetchableUrlsFromCache();
+const fetchableBackup = (() => {
+  try {
+    return loadFetchableImagesBackup(resolvedUser).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+  } catch {
+    return [];
+  }
+})();
+
+// 1) Draft in memory (most common)
 const draftImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images.slice(0, 2) : [];
 
-const filteredImages = draftImgs
-  .map((img, i) => {
-    const s = String(img || "").trim();
-    if (!s) return "";
-    if (/^data:image\//i.test(s)) return cachedFetchable[i] || "";
-    return toAbsoluteMedia(s);
-  })
-  .filter(Boolean)
-  .slice(0, 2);
+// 2) Draft stored (session/local/backup)
+const storedDraftImgs = (() => {
+  try {
+    const raw =
+      sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
+      sessionStorage.getItem("draft_form_creatives") ||
+      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
+      localStorage.getItem(CREATIVE_DRAFT_KEY) ||
+      localStorage.getItem("sm_setup_creatives_backup_v1");
 
+    const obj = raw ? JSON.parse(raw) : null;
+    return Array.isArray(obj?.images) ? obj.images.slice(0, 2) : [];
+  } catch {
+    return [];
+  }
+})();
 
-    // ✅ ALWAYS use previewCopy fallback (OAuth return loses location.state)
-const finalHeadline = String(headline || previewCopy?.headline || "").trim();
-const finalBody = String(body || previewCopy?.body || "").trim();
+// 3) Nav images (when arriving from /form)
+const navImgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
 
-// use the most reliable link fallback order
-const websiteUrl = (
-  form?.websiteUrl ||
-  form?.website ||
-  answers?.websiteUrl ||
-  answers?.website ||
-  answers?.url ||
-  answers?.link ||
-  inferredLink ||
-  previewCopy?.link ||
-  ""
-).toString().trim();
+// 4) Saved creatives for a real campaign (if user expanded/selected one)
+const savedCampaignImgs = (() => {
+  try {
+    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") return [];
+    const saved = getSavedCreatives(selectedCampaignId);
+    return Array.isArray(saved?.images) ? saved.images.slice(0, 2) : [];
+  } catch {
+    return [];
+  }
+})();
+
+// 5) Last-resort draft images list
+const imageDraftsFallback = (() => {
+  try {
+    return getLatestDraftImageUrlsFromImageDrafts().slice(0, 2);
+  } catch {
+    return [];
+  }
+})();
+
+// Prefer draft → stored draft → fetchable backup → nav → saved campaign → imageDrafts fallback
+const filteredImages = pickFirstValidImages([
+  draftImgs,
+  storedDraftImgs,
+  fetchableBackup,
+  navImgs,
+  savedCampaignImgs,
+  imageDraftsFallback,
+]);
 
 if (!filteredImages.length) {
   throw new Error("No valid images found to launch. Please generate creatives again.");
 }
+
 
 const payload = {
   form: { ...form, url: websiteUrl, websiteUrl },
