@@ -3323,34 +3323,79 @@ onClick={() => {
                         )}
                       </div>
 
-                      {isDraft ? (
-                        <button
-                         onClick={(e) => {
-  e.preventDefault();
-  e.stopPropagation();
-  handleClearDraft();
-}}
-                          title="Discard draft"
-                          aria-label="Discard draft"
-                          style={{
-                            background: "#5b2d2d",
-                            color: "#ffecec",
-                            border: "none",
-                            borderRadius: 10,
-                            fontWeight: 900,
-                            width: 28,
-                            height: 28,
-                            lineHeight: "28px",
-                            textAlign: "center",
-                            cursor: "pointer",
-                            boxShadow: "0 1px 6px rgba(0,0,0,0.25)",
-                          }}
-                        >
-                          ×
-                        </button>
-                      ) : (
-                        <div style={{ color: "#89f0cc", fontSize: 12, fontWeight: 900 }}>{c.status || c.effective_status || "ACTIVE"}</div>
-                      )}
+                     {isDraft ? (
+  <button
+    type="button"
+    onClick={(e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // ✅ hard-disable + hard-purge so draft can’t resurrect from any storage path
+      try {
+        setDraftDisabled(resolvedUser, true);
+      } catch {}
+
+      try {
+        purgeDraftStorages(resolvedUser);
+      } catch {}
+      try {
+        purgeDraftArtifactsEverywhere();
+      } catch {}
+
+      try {
+        // kill OAuth inflight + backups (common resurrection paths)
+        localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
+        localStorage.removeItem(LS_INFLIGHT_KEY("anon"));
+        localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
+
+        localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
+        localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY);
+
+        localStorage.removeItem(LS_FETCHABLE_KEY(resolvedUser));
+        localStorage.removeItem(SETUP_FETCHABLE_IMAGES_KEY);
+
+        localStorage.removeItem(LS_PREVIEW_KEY(resolvedUser));
+        localStorage.removeItem(SETUP_PREVIEW_BACKUP_KEY);
+
+        localStorage.removeItem("sm_image_cache_v1");
+        localStorage.removeItem("u:anon:sm_image_cache_v1");
+        localStorage.removeItem("smartmark.imageDrafts.v1");
+      } catch {}
+
+      // keep your existing clear function too
+      try {
+        handleClearDraft();
+      } catch {}
+
+      // ✅ force UI to detach immediately
+      setDraftCreatives({ images: [], mediaSelection: "image" });
+      setExpandedId(null);
+      setSelectedCampaignId("");
+    }}
+    title="Discard draft"
+    aria-label="Discard draft"
+    style={{
+      background: "#5b2d2d",
+      color: "#ffecec",
+      border: "none",
+      borderRadius: 10,
+      fontWeight: 900,
+      width: 28,
+      height: 28,
+      lineHeight: "28px",
+      textAlign: "center",
+      cursor: "pointer",
+      boxShadow: "0 1px 6px rgba(0,0,0,0.25)",
+    }}
+  >
+    ×
+  </button>
+) : (
+  <div style={{ color: "#89f0cc", fontSize: 12, fontWeight: 900 }}>
+    {c.status || c.effective_status || "ACTIVE"}
+  </div>
+)}
+
                     </div>
 
                     {isOpen && (
