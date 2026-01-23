@@ -346,29 +346,40 @@ function loadFetchableImagesBackup(user) {
   }
 }
 
-// pulls the last known FETCHABLE urls your generator cached (used as fallback)
-function getCachedFetchableImages() {
+function getCachedFetchableImages(user) {
   try {
-    const raw = localStorage.getItem("u:anon:sm_image_cache_v1") || localStorage.getItem("sm_image_cache_v1");
+    // ✅ check user-scoped cache FIRST, then anon, then legacy
+    const raw =
+      (user ? localStorage.getItem(withUser(user, "sm_image_cache_v1")) : null) ||
+      localStorage.getItem("u:anon:sm_image_cache_v1") ||
+      localStorage.getItem("sm_image_cache_v1");
+
     if (!raw) return [];
+
     const parsed = JSON.parse(raw);
     const urls = Array.isArray(parsed?.urls) ? parsed.urls : [];
-    return urls.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+
+    return urls
+      .map(toAbsoluteMedia)
+      .filter((u) => u && !/^data:image\//i.test(u))
+      .slice(0, 2);
   } catch {
     return [];
   }
 }
 
-// ✅ converts draft/nav images into FETCHABLE urls (replaces data:image with cached fetchable)
-function resolveFetchableDraftImages({ draftImages, navImages }) {
+
+function resolveFetchableDraftImages({ user, draftImages, navImages }) {
   const candidate = (Array.isArray(draftImages) && draftImages.length ? draftImages : (navImages || [])).slice(0, 2);
-  const cached = getCachedFetchableImages();
+
+  // ✅ MUST use user-scoped cache (your Fix 1 created per-user storage)
+  const cached = getCachedFetchableImages(user);
 
   return candidate
     .map((img, i) => {
       const s = String(img || "").trim();
       if (!s) return "";
-      if (/^data:image\//i.test(s)) return cached[i] || "";   // ✅ key fix
+      if (/^data:image\//i.test(s)) return cached[i] || ""; // ✅ replace data URL with fetchable URL
       return toAbsoluteMedia(s);
     })
     .filter(Boolean)
@@ -2445,8 +2456,9 @@ const resolveLaunchImages = () => {
   // D) “Fetchable” backups/caches (OAuth safe)
   try {
     candidateImgs = candidateImgs
-      .concat(loadFetchableImagesBackup(resolvedUser) || [])
-      .concat(getCachedFetchableImages() || []);
+  .concat(loadFetchableImagesBackup(resolvedUser) || [])
+  .concat(getCachedFetchableImages(resolvedUser) || []);
+
   } catch {}
 
   // E) Absolute last-resort: pull latest from imageDrafts registry
@@ -2466,14 +2478,15 @@ const resolveLaunchImages = () => {
   // 2) If we still have data:image entries, map them to cached fetchable by index
   //    (this is the #1 reason launches randomly fail even though UI shows images)
   if (normalized.some((u) => /^data:image\//i.test(u))) {
-    const cached = dedupe(
-      []
-        .concat(getCachedFetchableImages() || [])
-        .concat(loadFetchableImagesBackup(resolvedUser) || [])
-        .concat(getLatestDraftImageUrlsFromImageDrafts() || [])
-        .map(toAbsoluteMedia)
-        .filter((u) => u && !/^data:image\//i.test(u))
-    );
+ const cached = dedupe(
+  []
+    .concat(getCachedFetchableImages(resolvedUser) || [])
+    .concat(loadFetchableImagesBackup(resolvedUser) || [])
+    .concat(getLatestDraftImageUrlsFromImageDrafts() || [])
+    .map(toAbsoluteMedia)
+    .filter((u) => u && !/^data:image\//i.test(u))
+);
+
 
     const fixed = [];
     for (const u of normalized) {
@@ -2943,10 +2956,12 @@ onClick={() => {
 
   // save FETCHABLE images for after redirect
   try {
-    const imgs = resolveFetchableDraftImages({
-      draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
-      navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
-    });
+  const imgs = resolveFetchableDraftImages({
+  user: resolvedUser,
+  draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
+  navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
+});
+
 
     saveFetchableImagesBackup(resolvedUser, imgs);
 
