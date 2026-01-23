@@ -3059,107 +3059,105 @@ const payload = {
             minHeight: "600px",
           }}
         >
-          <button
-onClick={() => {
-  trackEvent("connect_facebook", { page: "setup" });
+<button
+  onClick={async () => {
+    trackEvent("connect_facebook", { page: "setup" });
 
-  // ✅ always persist creds before redirect (so login always works)
-  try {
-    const u = String(loginUser || "").trim();
-    const p = String(loginPass || "").trim();
-    if (u) localStorage.setItem("smartmark_login_username", u.replace(/^\$/, "")); // canonical username
-    if (p) localStorage.setItem("smartmark_login_password", p);
-  } catch {}
+    // ✅ always persist creds before redirect (so login always works)
+    try {
+      const u = String(loginUser || "").trim();
+      const p = String(loginPass || "").trim();
+      if (u) localStorage.setItem("smartmark_login_username", u.replace(/^\$/, "")); // canonical username
+      if (p) localStorage.setItem("smartmark_login_password", p);
+    } catch {}
 
-  const qs = new URLSearchParams(location.search || "");
-  const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
-  const ctxFromUrl = (qs.get("ctxKey") || "").trim();
-  const active = (getActiveCtx(resolvedUser) || "").trim();
-  const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
+    const qs = new URLSearchParams(location.search || "");
+    const ctxFromState = (location.state?.ctxKey ? String(location.state.ctxKey) : "").trim();
+    const ctxFromUrl = (qs.get("ctxKey") || "").trim();
+    const active = (getActiveCtx(resolvedUser) || "").trim();
+    const safeCtx = ctxFromState || ctxFromUrl || active || `${Date.now()}|||setup`;
 
-  setActiveCtx(safeCtx, resolvedUser);
+    setActiveCtx(safeCtx, resolvedUser);
 
-  // mark inflight so we can restore after OAuth
-// mark inflight so we can restore after OAuth
-try {
-  const payload = JSON.stringify({ t: Date.now(), ctxKey: safeCtx });
+    // ✅ mark inflight so we can restore after OAuth
+    try {
+      const payload = JSON.stringify({ t: Date.now(), ctxKey: safeCtx });
 
-  // ✅ primary
-  localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), payload);
+      // ✅ primary
+      localStorage.setItem(LS_INFLIGHT_KEY(resolvedUser), payload);
 
-  // ✅ fallback namespaces so OAuth return can still find it
-  localStorage.setItem(LS_INFLIGHT_KEY("anon"), payload);
-  localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, payload);
-} catch {}
+      // ✅ fallback namespaces so OAuth return can still find it
+      localStorage.setItem(LS_INFLIGHT_KEY("anon"), payload);
+      localStorage.setItem(FB_CONNECT_INFLIGHT_KEY, payload);
+    } catch {}
 
-
-  // save preview copy for after redirect
-  try {
-    saveSetupPreviewBackup(resolvedUser, {
-      headline: String(headline || previewCopy?.headline || "").trim(),
-      body: String(body || previewCopy?.body || "").trim(),
-      link: String(inferredLink || previewCopy?.link || "").trim(),
-      ctxKey: safeCtx,
-    });
-  } catch {}
-
-  // save FETCHABLE images for after redirect
-  try {
-  const imgs = resolveFetchableDraftImages({
-  user: resolvedUser,
-  draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
-  navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
-});
-
-
-    saveFetchableImagesBackup(resolvedUser, imgs);
-
-    if (imgs.length) {
-      persistDraftCreativesNow(resolvedUser, {
+    // ✅ save preview copy for after redirect
+    try {
+      saveSetupPreviewBackup(resolvedUser, {
+        headline: String(headline || previewCopy?.headline || "").trim(),
+        body: String(body || previewCopy?.body || "").trim(),
+        link: String(inferredLink || previewCopy?.link || "").trim(),
         ctxKey: safeCtx,
-        images: imgs,
-        mediaSelection: "image",
-        expiresAt: Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
       });
-    }
-  } catch {}
+    } catch {}
 
-  const returnTo =
-    window.location.origin +
-    "/setup" +
-    `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
+    // ✅ save FETCHABLE images for after redirect
+    try {
+      const imgs = resolveFetchableDraftImages({
+        user: resolvedUser,
+        draftImages: Array.isArray(draftCreatives?.images) ? draftCreatives.images : [],
+        navImages: Array.isArray(navImageUrls) ? navImageUrls : [],
+      });
 
-  // ✅ Start OAuth on SAME-ORIGIN so session cookies land on your app domain
-  // Vercel rewrite: /api/auth/* -> Render /auth/*
-window.location.assign(`${AUTH_BASE_PRIMARY}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+      // ✅ If any are data:image, upload them to Render so we have real /api/media URLs
+      let fetchables = [];
+      try {
+        fetchables = await ensureFetchableUrls(imgs, 2); // uploads data:image -> /api/media
+      } catch {
+        fetchables = imgs || [];
+      }
 
+      saveFetchableImagesBackup(resolvedUser, fetchables);
 
+      if (fetchables.length) {
+        persistDraftCreativesNow(resolvedUser, {
+          ctxKey: safeCtx,
+          images: fetchables,
+          mediaSelection: "image",
+          expiresAt: Date.now() + DEFAULT_CAMPAIGN_TTL_MS,
+        });
+      }
+    } catch {}
 
-}}
+    const returnTo =
+      window.location.origin +
+      "/setup" +
+      `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
+    // ✅ Start OAuth on SAME-ORIGIN so session cookies land on your app domain
+    window.location.assign(`${AUTH_BASE_PRIMARY}/facebook?return_to=${encodeURIComponent(returnTo)}`);
+  }}
+  style={{
+    padding: "14px 22px",
+    borderRadius: "14px",
+    border: "none",
+    background: fbConnected ? `linear-gradient(90deg, ${BTN_BASE}, ${ACCENT_2})` : "#1877F2",
+    color: WHITE,
+    fontWeight: 900,
+    fontSize: "1.08rem",
+    boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
+    letterSpacing: "0.4px",
+    cursor: "pointer",
+    width: "100%",
+    maxWidth: 420,
+    transition: "transform 0.15s",
+  }}
+  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+>
+  {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
+</button>
 
-
-
-            style={{
-              padding: "14px 22px",
-              borderRadius: "14px",
-              border: "none",
-              background: fbConnected ? `linear-gradient(90deg, ${BTN_BASE}, ${ACCENT_2})` : "#1877F2",
-              color: WHITE,
-              fontWeight: 900,
-              fontSize: "1.08rem",
-              boxShadow: "0 2px 12px rgba(24,119,242,0.35)",
-              letterSpacing: "0.4px",
-              cursor: "pointer",
-              width: "100%",
-              maxWidth: 420,
-              transition: "transform 0.15s",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-          >
-            {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
-          </button>
 
           <button
             onClick={openFbPaymentPopup}
