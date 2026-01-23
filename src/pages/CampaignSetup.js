@@ -1294,30 +1294,44 @@ async function ensureFetchableUrls(candidates, max = 2) {
     return out;
   };
 
-  const arr = dedupe(candidates).map((u) => String(u || "").trim()).filter(Boolean);
+  const arr = dedupe(candidates)
+    .map((u) => String(u || "").trim())
+    .filter(Boolean);
 
   const fetchable0 = [];
   const dataUrls = [];
 
   for (const u of arr) {
-    if (isDataImage(u)) dataUrls.push(u);
-    else {
+    if (isDataImage(u)) {
+      dataUrls.push(u);
+    } else {
       const abs = toAbsoluteMedia(u);
       if (abs && !isDataImage(abs)) fetchable0.push(abs);
     }
   }
 
-  let fetchable = dedupe(fetchable0).slice(0, max);
-  if (fetchable.length >= max) return fetchable;
+  // ✅ CRITICAL CHANGE:
+  // If we have data:image creatives, ALWAYS upload them first and prefer them.
+  // This prevents stale cached fetchable URLs from "winning" and causing 404s.
+  let fetchable = [];
 
   if (dataUrls.length) {
-    const uploaded = await uploadDataUrlsToMedia(dataUrls.slice(0, max - fetchable.length));
-    fetchable = dedupe(fetchable.concat(uploaded)).slice(0, max);
+    try {
+      const uploaded = await uploadDataUrlsToMedia(dataUrls.slice(0, max));
+      fetchable = dedupe(fetchable.concat(uploaded));
+    } catch {
+      // if upload fails, we'll fall back to any existing fetchables below
+    }
   }
 
-  return dedupe(fetchable)
+  // Fill remaining slots with existing fetchable URLs (if needed)
+  if (fetchable.length < max) {
+    fetchable = dedupe(fetchable.concat(fetchable0)).slice(0, max);
+  }
+
+  return fetchable
     .map(toAbsoluteMedia)
-    .filter((u) => u && !isDataImage(u))
+    .filter((u) => u && !isDataImage(u) && !/^blob:/i.test(u))
     .slice(0, max);
 }
 
