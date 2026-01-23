@@ -1147,6 +1147,41 @@ function MetricsRow({ metrics }) {
 /* ============================== MAIN =================================== */
 /* ======================================================================= */
 const CampaignSetup = () => {
+
+  // ✅ HOTFIX: If ANY code (here or other components) accidentally calls /api/auth/* on the app domain,
+// rewrite it to the real Render auth server so it doesn't 404.
+useEffect(() => {
+  const origFetch = window.fetch;
+
+  window.fetch = (input, init) => {
+    try {
+      const url = typeof input === "string" ? input : (input?.url || "");
+      const isRelative = url && !/^https?:\/\//i.test(url);
+
+      // Rewrite ONLY auth endpoints
+      if (isRelative && (/^\/?api\/auth\//i.test(url) || /^\/?auth\//i.test(url))) {
+        const rel = url.startsWith("/") ? url : `/${url}`;
+
+        // Map /api/auth/* -> Render /auth/*
+        const fixed = /^\/api\/auth\//i.test(rel)
+          ? `${AUTH_BASE_PRIMARY}${rel.replace(/^\/api\/auth/i, "")}`
+          : `${AUTH_BASE_PRIMARY}${rel.replace(/^\/auth/i, "")}`;
+
+        return origFetch(fixed, { ...(init || {}), credentials: "include" });
+      }
+    } catch {}
+
+    return origFetch(input, init);
+  };
+
+  return () => {
+    window.fetch = origFetch;
+  };
+  // eslint-disable-next-line
+}, []);
+
+
+
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const location = useLocation();
@@ -2349,112 +2384,59 @@ useEffect(() => {
       );
 
 // ✅ For LAUNCH: must send real fetchable URLs (never data:image)
-// ✅ FIX: If draft images are missing or are data:image without cache, fall back to backups / saved creatives / draft stores.
-function getFetchableUrlsFromCache() {
+// ✅ LAUNCH images: use EXACTLY what the UI is showing (draft if draft, saved if campaign),
+// but ensure they're FETCHABLE URLs (no data:image).
+let candidateImgs = [];
+
+// If user expanded/selected a real campaign, use its saved creatives
+if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
   try {
-    const raw = localStorage.getItem("u:anon:sm_image_cache_v1") || localStorage.getItem("sm_image_cache_v1");
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    const urls = Array.isArray(parsed?.urls) ? parsed.urls : [];
-    return urls.map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
-  } catch {
-    return [];
-  }
-}
-
-function pickFirstValidImages(candidates) {
-  for (const arr of candidates) {
-    const norm = (Array.isArray(arr) ? arr : [])
-      .map((u) => String(u || "").trim())
-      .filter(Boolean)
-      .slice(0, 2);
-
-    if (!norm.length) continue;
-
-    const out = norm
-      .map((img, i) => {
-        if (!img) return "";
-
-        // never send data:image to backend — replace with fetchable backups if possible
-        if (/^data:image\//i.test(img)) {
-          return cachedFetchable[i] || fetchableBackup[i] || "";
-        }
-
-        return toAbsoluteMedia(img);
-      })
-      .filter(Boolean)
-      .slice(0, 2);
-
-    if (out.length) return out;
-  }
-  return [];
-}
-
-const cachedFetchable = getFetchableUrlsFromCache();
-const fetchableBackup = (() => {
-  try {
-    return loadFetchableImagesBackup(resolvedUser).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
-  } catch {
-    return [];
-  }
-})();
-
-// 1) Draft in memory (most common)
-const draftImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images.slice(0, 2) : [];
-
-// 2) Draft stored (session/local/backup)
-const storedDraftImgs = (() => {
-  try {
-    const raw =
-      sessionStorage.getItem(SS_DRAFT_KEY(resolvedUser)) ||
-      sessionStorage.getItem("draft_form_creatives") ||
-      lsGet(resolvedUser, CREATIVE_DRAFT_KEY) ||
-      localStorage.getItem(CREATIVE_DRAFT_KEY) ||
-      localStorage.getItem("sm_setup_creatives_backup_v1");
-
-    const obj = raw ? JSON.parse(raw) : null;
-    return Array.isArray(obj?.images) ? obj.images.slice(0, 2) : [];
-  } catch {
-    return [];
-  }
-})();
-
-// 3) Nav images (when arriving from /form)
-const navImgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
-
-// 4) Saved creatives for a real campaign (if user expanded/selected one)
-const savedCampaignImgs = (() => {
-  try {
-    if (!selectedCampaignId || selectedCampaignId === "__DRAFT__") return [];
     const saved = getSavedCreatives(selectedCampaignId);
-    return Array.isArray(saved?.images) ? saved.images.slice(0, 2) : [];
+    candidateImgs = Array.isArray(saved?.images) ? saved.images.slice(0, 2) : [];
   } catch {
-    return [];
+    candidateImgs = [];
   }
-})();
+}
 
-// 5) Last-resort draft images list
-const imageDraftsFallback = (() => {
-  try {
-    return getLatestDraftImageUrlsFromImageDrafts().slice(0, 2);
-  } catch {
-    return [];
-  }
-})();
+// Otherwise use the draft creatives (what user just generated)
+if (!candidateImgs.length) {
+  candidateImgs = Array.isArray(draftCreatives?.images) ? draftCreatives.images.slice(0, 2) : [];
+}
 
-// Prefer draft → stored draft → fetchable backup → nav → saved campaign → imageDrafts fallback
-const filteredImages = pickFirstValidImages([
-  draftImgs,
-  storedDraftImgs,
-  fetchableBackup,
-  navImgs,
-  savedCampaignImgs,
-  imageDraftsFallback,
-]);
+// Last fallback: nav images from FormPage state
+if (!candidateImgs.length) {
+  candidateImgs = Array.isArray(navImageUrls) ? navImageUrls.slice(0, 2) : [];
+}
 
+// Normalize to absolute FETCHABLE URLs (Render /api/media/*), drop data:image
+let filteredImages = candidateImgs
+  .map((u) => String(u || "").trim())
+  .filter(Boolean)
+  .map(toAbsoluteMedia)
+  .filter((u) => u && !/^data:image\//i.test(u))
+  .slice(0, 2);
+
+// If still empty, pull from your fetchable backups/caches (OAuth safe)
+if (!filteredImages.length) {
+  const backups = []
+    .concat(loadFetchableImagesBackup(resolvedUser) || [])
+    .concat(getCachedFetchableImages() || [])
+    .map(toAbsoluteMedia)
+    .filter((u) => u && !/^data:image\//i.test(u));
+
+  filteredImages = backups.slice(0, 2);
+}
+
+// Still nothing? then it's truly missing
 if (!filteredImages.length) {
   throw new Error("No valid images found to launch. Please generate creatives again.");
 }
+
+// ✅ Keep backup fresh (so FB connect / refresh still launches)
+try {
+  saveFetchableImagesBackup(resolvedUser, filteredImages);
+} catch {}
+
 
 
 const payload = {
