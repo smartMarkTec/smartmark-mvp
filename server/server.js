@@ -20,6 +20,9 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const sharp = require("sharp");
+const crypto = require("crypto");
+
+
 
 // Optional deps
 let compression = null;
@@ -101,6 +104,73 @@ const staticOpts = {
     res.setHeader("Access-Control-Expose-Headers", "Content-Length");
   },
 };
+
+/* ----------------------- MEDIA UPLOAD (dataURL -> /api/media/<file>) ----------------------- */
+
+// NOTE: must come BEFORE app.use("/api/media", express.static(...))
+// so /api/media/upload is handled as a route, not treated like a file path.
+
+function parseDataUrl(dataUrl) {
+  const s = String(dataUrl || "").trim();
+  const m = s.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!m) return null;
+
+  const mime = m[1];
+  const b64 = m[2];
+
+  let ext = "png";
+  if (mime.includes("jpeg")) ext = "jpg";
+  else if (mime.includes("webp")) ext = "webp";
+  else if (mime.includes("png")) ext = "png";
+
+  const buffer = Buffer.from(b64, "base64");
+  return { mime, buffer, ext };
+}
+
+app.post("/api/media/upload", express.json({ limit: "25mb" }), (req, res) => {
+  try {
+    const { dataUrl, dataUrls } = req.body || {};
+    const list = [];
+
+    if (dataUrl) list.push(dataUrl);
+    if (Array.isArray(dataUrls)) list.push(...dataUrls);
+
+    const clean = list
+      .map((x) => String(x || "").trim())
+      .filter(Boolean)
+      .slice(0, 6); // safety cap
+
+    if (!clean.length) {
+      return res.status(400).json({ ok: false, error: "No dataUrl(s) provided" });
+    }
+
+    const urls = [];
+
+    for (const du of clean) {
+      const parsed = parseDataUrl(du);
+      if (!parsed) continue;
+
+      const id = crypto.randomBytes(8).toString("hex");
+      const filename = `static-${Date.now()}-${id}.${parsed.ext}`;
+      const outPath = path.join(generatedPath, filename);
+
+      fs.writeFileSync(outPath, parsed.buffer);
+
+      // Serveable via existing static mount:
+      urls.push(`/api/media/${filename}`);
+    }
+
+    if (!urls.length) {
+      return res.status(400).json({ ok: false, error: "No valid image dataUrl(s)" });
+    }
+
+    return res.json({ ok: true, urls });
+  } catch (e) {
+    console.error("[media/upload] error:", e);
+    return res.status(500).json({ ok: false, error: e?.message || "Upload failed" });
+  }
+});
+
 
 app.use("/generated", express.static(generatedPath, staticOpts));
 app.use("/api/media", express.static(generatedPath, staticOpts));

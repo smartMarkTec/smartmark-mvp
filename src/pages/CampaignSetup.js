@@ -6,17 +6,16 @@ import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown } from "react-icons/fa"
 import { trackEvent } from "../analytics/gaEvents";
 
 
-// Render origin ONLY for media files (images, fallback jpg)
-// Prefer same-origin for /api/media when possible (prevents cross-origin blocks/glitches),
-// but keep Render as hard fallback.
+/* ===================== AUTH ORIGIN (UPDATED) ===================== */
+// ✅ Start OAuth + auth calls on YOUR APP ORIGIN so state/cookies stay consistent.
+// Your Vercel rewrites should proxy /auth/* (and /api/*) to Render.
 const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 const APP_ORIGIN = window.location.origin;
 
+// ✅ Use relative paths for auth so the browser stays on the same origin (fixes Invalid OAuth state)
+const AUTH_BASE_PRIMARY = "/auth";
+const AUTH_BASE_FALLBACK = "/api/auth";
 
-// ✅ Always start OAuth + auth calls on the actual auth server (Render)
-// Fixes "Invalid OAuth state" caused by starting OAuth on the wrong origin.
-const AUTH_BASE_PRIMARY = `${MEDIA_ORIGIN}/auth`;
-const AUTH_BASE_FALLBACK = `${MEDIA_ORIGIN}/api/auth`;
 
 
 
@@ -846,6 +845,33 @@ function toAbsoluteMedia(u) {
   return MEDIA_ORIGIN + "/" + base + suffix;
 }
 
+function isDataImage(u) {
+  return /^data:image\//i.test(String(u || "").trim());
+}
+
+async function uploadDataUrlsToMedia(dataUrls = []) {
+  const clean = (Array.isArray(dataUrls) ? dataUrls : [])
+    .map((x) => String(x || "").trim())
+    .filter(isDataImage)
+    .slice(0, 2);
+
+  if (!clean.length) return [];
+
+  const r = await fetch(`${MEDIA_ORIGIN}/api/media/upload`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataUrls: clean }),
+  });
+
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j?.urls) {
+    throw new Error(j?.error || `Upload failed (HTTP ${r.status})`);
+  }
+
+  return (j.urls || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2);
+}
+
+
 
 
 function ImageModal({ open, imageUrl, onClose }) {
@@ -1191,8 +1217,7 @@ function MetricsRow({ metrics }) {
 /* ============================== MAIN =================================== */
 /* ======================================================================= */
 
-// ===================== URL FETCHER (data:image -> /api/media URL) =====================
-const isDataImage = (u) => /^data:image\//i.test(String(u || "").trim());
+
 
 function dataUrlToBlob(dataUrl) {
   const s = String(dataUrl || "");
@@ -1269,38 +1294,33 @@ async function ensureFetchableUrls(candidates, max = 2) {
     return out;
   };
 
-  // Normalize candidates
-  let arr = dedupe(candidates)
-    .map((u) => String(u || "").trim())
-    .filter(Boolean);
+  const arr = dedupe(candidates).map((u) => String(u || "").trim()).filter(Boolean);
 
-  // First normalize non-data urls
-  const norm = [];
-  const data = [];
+  const fetchable0 = [];
+  const dataUrls = [];
+
   for (const u of arr) {
-    if (isDataImage(u)) data.push(u);
-    else norm.push(toAbsoluteMedia(u));
-  }
-
-  // Keep only real fetchable urls
-  let fetchable = norm.filter((u) => u && !isDataImage(u));
-
-  // Upload data:image entries if we still need more
-  if (fetchable.length < max && data.length) {
-    for (let i = 0; i < data.length && fetchable.length < max; i++) {
-      const uploaded = await uploadImageToMedia(data[i], i);
-      if (uploaded) fetchable.push(uploaded);
+    if (isDataImage(u)) dataUrls.push(u);
+    else {
+      const abs = toAbsoluteMedia(u);
+      if (abs && !isDataImage(abs)) fetchable0.push(abs);
     }
   }
 
-  // Final clean
-  fetchable = dedupe(fetchable)
+  let fetchable = dedupe(fetchable0).slice(0, max);
+  if (fetchable.length >= max) return fetchable;
+
+  if (dataUrls.length) {
+    const uploaded = await uploadDataUrlsToMedia(dataUrls.slice(0, max - fetchable.length));
+    fetchable = dedupe(fetchable.concat(uploaded)).slice(0, max);
+  }
+
+  return dedupe(fetchable)
     .map(toAbsoluteMedia)
     .filter((u) => u && !isDataImage(u))
     .slice(0, max);
-
-  return fetchable;
 }
+
 
 
 const CampaignSetup = () => {
