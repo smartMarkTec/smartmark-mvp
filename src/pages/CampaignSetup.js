@@ -1325,29 +1325,30 @@ async function ensureFetchableUrls(candidates, max = 2) {
 
 const CampaignSetup = () => {
 
-  // ✅ HOTFIX: If ANY code (here or other components) accidentally calls /api/auth/* on the app domain,
-// rewrite it to the real Render auth server so it doesn't 404.
+// ✅ HOTFIX: rewrite ANY /api/auth/* or /auth/* calls to SAME-ORIGIN /auth/*
+// (covers string URLs, Request objects, and absolute URLs)
 useEffect(() => {
   const origFetch = window.fetch;
 
   window.fetch = (input, init) => {
     try {
-      const url = typeof input === "string" ? input : (input?.url || "");
-      const isRelative = url && !/^https?:\/\//i.test(url);
+      const rawUrl = typeof input === "string" ? input : (input?.url || "");
+      if (rawUrl) {
+        const u = new URL(rawUrl, window.location.origin);
 
-      // Rewrite ONLY auth endpoints
-      if (isRelative && (/^\/?api\/auth\//i.test(url) || /^\/?auth\//i.test(url))) {
-        const rel = url.startsWith("/") ? url : `/${url}`;
+        const isAppOrigin = u.origin === window.location.origin;
+        const isAuthPath =
+          /^\/api\/auth\//i.test(u.pathname) || /^\/auth\//i.test(u.pathname);
 
-        // Map /api/auth/* -> Render /auth/*
-        const fixed = /^\/api\/auth\//i.test(rel)
-          ? `${AUTH_BASE_PRIMARY}${rel.replace(/^\/api\/auth/i, "")}`
-          : `${AUTH_BASE_PRIMARY}${rel.replace(/^\/auth/i, "")}`;
+        if (isAppOrigin && isAuthPath) {
+          const rel =
+            /^\/api\/auth\//i.test(u.pathname)
+              ? `/auth${u.pathname.replace(/^\/api\/auth/i, "")}${u.search || ""}`
+              : `/auth${u.pathname.replace(/^\/auth/i, "")}${u.search || ""}`;
 
-        return origFetch(fixed, { ...(init || {}), credentials: "include" });
+          return origFetch(rel, { ...(init || {}), credentials: "include" });
+        }
       }
-
-
     } catch {}
 
     return origFetch(input, init);
@@ -1358,6 +1359,7 @@ useEffect(() => {
   };
   // eslint-disable-next-line
 }, []);
+
 
 
 
@@ -2599,103 +2601,67 @@ const finalBody = (
 ).toString().trim();
 
 
-// ✅ LAUNCH images: ALWAYS resolve to FETCHABLE urls (never data:image)
-// ✅ LAUNCH images: ALWAYS resolve to FETCHABLE urls (never data:image)
-const resolveLaunchImages = async () => {
-  // 0) Gather candidates from ALL possible sources
-  let candidateImgs = [];
-
-  // A) If user selected a real campaign, use saved creatives first
-  if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
-    try {
-      const saved = getSavedCreatives(selectedCampaignId);
-      if (Array.isArray(saved?.images)) candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
-    } catch {}
-  }
-
-  // B) Draft creatives (what user just generated)
-  if (Array.isArray(draftCreatives?.images) && draftCreatives.images.length) {
-    candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
-  }
-
-  // C) Nav state from FormPage
-  if (Array.isArray(navImageUrls) && navImageUrls.length) {
-    candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
-  }
-
-  // D) Cached/backup fetchable urls (OAuth safe)
-  try {
-    candidateImgs = candidateImgs
-      .concat(loadFetchableImagesBackup(resolvedUser) || [])
-      .concat(getCachedFetchableImages(resolvedUser) || []);
-  } catch {}
-
-  // E) Last resort: imageDrafts registry
-  try {
-    candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
-  } catch {}
-
-  // ✅ HERE IS THE FIX: force-convert any data:image -> real /api/media URL by uploading
-  const fetchable = await ensureFetchableUrls(candidateImgs, 2);
-
-  return fetchable;
+// ✅ LAUNCH IMAGES MUST be REAL, PUBLIC Render /api/media URLs (Meta must fetch them)
+const isRenderMediaUrl = (u) => {
+  const s = String(u || "").trim();
+  return s.startsWith(`${MEDIA_ORIGIN}/api/media/`);
 };
 
-let filteredImages = await resolveLaunchImages();
+const forceHostOnRenderMedia = async (candidates) => {
+  // 1) normalize everything
+  const norm = (candidates || []).map(toAbsoluteMedia).filter(Boolean);
 
-// ✅ If still empty, force last-resort upload from whatever is in draftCreatives
-if (!filteredImages.length) {
+  // 2) if any are data:image, upload them to Render media
+  const uploaded = await ensureFetchableUrls(norm, 2); // uploads data:image -> /api/media
+  const final = (uploaded || []).map(toAbsoluteMedia).filter(Boolean);
+
+  // 3) HARD REQUIRE: only Render /api/media URLs may go to FB
+  return final.filter(isRenderMediaUrl).slice(0, 2);
+};
+
+let candidateImgs = [];
+
+// A) If user selected a real campaign, use saved creatives first
+if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
   try {
-    const fallback = Array.isArray(draftCreatives?.images) ? draftCreatives.images : [];
-    filteredImages = await ensureFetchableUrls(fallback, 2);
+    const saved = getSavedCreatives(selectedCampaignId);
+    if (Array.isArray(saved?.images)) candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
   } catch {}
 }
 
-// ✅ LAST guard
-if (!filteredImages.length) {
-  throw new Error("No valid images found to launch. Please generate creatives again.");
+// B) Draft creatives (what user just generated)
+if (Array.isArray(draftCreatives?.images) && draftCreatives.images.length) {
+  candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
 }
 
-// ✅ Keep fetchable backup fresh so OAuth/refresh never breaks launch
+// C) Nav state from FormPage
+if (Array.isArray(navImageUrls) && navImageUrls.length) {
+  candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
+}
+
+// D) Cached/backup fetchable urls (OAuth safe)
 try {
-  saveFetchableImagesBackup(resolvedUser, filteredImages);
+  candidateImgs = candidateImgs
+    .concat(loadFetchableImagesBackup(resolvedUser) || [])
+    .concat(getCachedFetchableImages(resolvedUser) || []);
 } catch {}
 
+// E) Last resort: imageDrafts registry
+try {
+  candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
+} catch {}
 
-// ✅ If still empty, forcibly rehydrate draft + backups ON THE SPOT so user doesn’t get blocked
+let filteredImages = await forceHostOnRenderMedia(candidateImgs);
+
+// ✅ last-ditch retry
 if (!filteredImages.length) {
   try {
-    const latest = (getLatestDraftImageUrlsFromImageDrafts() || [])
-      .map(toAbsoluteMedia)
-      .filter((u) => u && !/^data:image\//i.test(u))
-      .slice(0, 2);
-
-    if (latest.length) {
-      filteredImages = latest;
-
-      // persist so next click always works
-      const payloadDraft = {
-        ctxKey: String(getActiveCtx(resolvedUser) || "").trim(),
-        images: filteredImages,
-        mediaSelection: "image",
-        savedAt: Date.now(),
-      };
-
-      try {
-        setDraftCreatives({ images: filteredImages, mediaSelection: "image" });
-        sessionStorage.setItem(SS_DRAFT_KEY(resolvedUser), JSON.stringify(payloadDraft));
-        localStorage.setItem(CREATIVE_DRAFT_KEY, JSON.stringify(payloadDraft));
-        if (resolvedUser) localStorage.setItem(withUser(resolvedUser, CREATIVE_DRAFT_KEY), JSON.stringify(payloadDraft));
-        saveSetupCreativeBackup(resolvedUser, payloadDraft);
-        saveFetchableImagesBackup(resolvedUser, filteredImages);
-      } catch {}
-    }
+    filteredImages = await forceHostOnRenderMedia(draftCreatives?.images || []);
   } catch {}
 }
 
-// ✅ LAST guard: ONLY now throw (this should basically never happen now)
 if (!filteredImages.length) {
-  throw new Error("No valid images found to launch. Please generate creatives again.");
+  throw new Error("No launchable images. Please regenerate creatives (images must be hosted on Render /api/media).");
 }
 
 // ✅ Keep fetchable backup fresh so OAuth/refresh never breaks launch
