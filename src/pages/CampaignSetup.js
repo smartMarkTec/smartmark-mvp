@@ -2396,6 +2396,23 @@ const websiteUrl = (
   ""
 ).toString().trim();
 
+// ✅ ensure finalHeadline/finalBody exist in THIS scope (fixes ReferenceError)
+const finalHeadline = (
+  form?.headline ||
+  form?.adHeadline ||
+  previewCopy?.headline ||
+  headline ||               // from location.state
+  ""
+).toString().trim();
+
+const finalBody = (
+  form?.primaryText ||
+  form?.body ||
+  previewCopy?.body ||
+  body ||                   // from location.state
+  ""
+).toString().trim();
+
 
 // ✅ For LAUNCH: must send real fetchable URLs (never data:image)
 // ✅ LAUNCH images: use EXACTLY what the UI is showing (draft if draft, saved if campaign),
