@@ -173,8 +173,9 @@ function pick(rng, arr) {
   return arr[Math.floor(rng() * arr.length)];
 }
 
-function buildVariantProfile(variationToken = "", variantTag = "A") {
+function buildVariantProfile(variationToken = "", variantTag = "A", industryHint = "") {
   const rng = mulberry32(hashSeed(`${variationToken}|${variantTag}`));
+  const ind = String(industryHint || "").toLowerCase();
 
   const settings = [
     "bright studio backdrop",
@@ -184,7 +185,9 @@ function buildVariantProfile(variationToken = "", variantTag = "A") {
     "outdoor lifestyle scene",
     "urban street scene",
     "minimal product-on-table scene",
-    "soft gradient abstract backdrop"
+    "soft gradient abstract backdrop",
+    "sleek tech abstract scene",
+    "modern desk flatlay with devices"
   ];
 
   const palettes = [
@@ -210,15 +213,47 @@ function buildVariantProfile(variationToken = "", variantTag = "A") {
     "even studio lighting"
   ];
 
-  // People: sometimes none, often 1, sometimes 2, rarely 3–5
-  const peopleMode = pick(rng, [
+  const isTechy =
+    /(marketing|agency|advertis|branding|seo|saas|software|tech|ai|analytics|data|startup|consult)/i.test(ind);
+
+  // Subject focus: allow more non-people variety (dashboards/charts/graphics) especially for marketing/tech
+  const subjectModesTech = [
+    "no-people concept: clean analytics dashboard/charts/graphs visual",
+    "no-people concept: abstract technology/AI/network graphics",
+    "no-people concept: laptop/phone UI mockup showing growth metrics",
+    "one person using a laptop/phone with subtle dashboard overlay",
+    "product/service hero visual with bold typography (no people)"
+  ];
+
+  const subjectModesGeneral = [
+    "product or service hero visual (no people)",
+    "one person enjoying/using the service",
+    "one person portrait-style lifestyle ad shot",
+    "environment/scene-led creative with strong negative space (no people)",
+    "object/flatlay-led creative with premium textures (no people)"
+  ];
+
+  const subjectMode = isTechy ? pick(rng, subjectModesTech) : pick(rng, subjectModesGeneral);
+
+  // People: more often none or 1 person; 2 people sometimes; groups rare
+  const peoplePoolTech = [
+    "no people (use tech/graphics/charts/dashboards instead)",
+    "no people (use tech/graphics/charts/dashboards instead)",
+    "one person",
+    "one person",
+    "two people (only if it naturally fits)"
+  ];
+
+  const peoplePoolGeneral = [
     "no people (product/service focused)",
     "one person",
     "one person",
-    "two people",
-    "two people",
-    "small group (3–5) if it fits the industry"
-  ]);
+    "one person",
+    "two people (only if it naturally fits)",
+    "small group (3–5) ONLY if it truly fits the scenario"
+  ];
+
+  const peopleMode = pick(rng, isTechy ? peoplePoolTech : peoplePoolGeneral);
 
   return {
     variantTag,
@@ -226,10 +261,10 @@ function buildVariantProfile(variationToken = "", variantTag = "A") {
     palette: pick(rng, palettes),
     composition: pick(rng, compositions),
     lighting: pick(rng, lighting),
+    subjectMode,
     peopleMode
   };
 }
-
 
 function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
   const businessName = clean(a.businessName || a.brand || "Your Brand");
@@ -243,7 +278,7 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
       (industry.toLowerCase().includes("fashion") ? "Shop Now" : "Learn More")
   );
 
-  const p = profile || buildVariantProfile(variationToken, "A");
+  const p = profile || buildVariantProfile(variationToken, "A", industry);
 
   const variationBlock = [
     `Variation token: "${variationToken || Date.now()}"`,
@@ -254,11 +289,13 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
     `- Color palette: ${p.palette}`,
     `- Composition: ${p.composition}`,
     `- Lighting: ${p.lighting}`,
+    `- Subject focus: ${p.subjectMode}`,
     `- People: ${p.peopleMode}`,
     ``,
-    `People casting rules (only if people appear):`,
-    `- Use realistic, ad-ready casting appropriate to the industry.`,
-    `- Do NOT force "one of each" ethnicity; it can be mixed OR the same ethnicity depending on what looks natural.`,
+    `People rules:`,
+    `- Prefer NO people or ONE person most of the time.`,
+    `- Avoid 2–3 people unless it truly fits; groups are rare.`,
+    `- If people appear, keep casting naturally diverse across variants (age/skin tone/gender presentation) without forcing a "one-of-each" look.`,
     `- Across multiple variants, avoid repeating the exact same-looking model/pose/outfit.`,
     ``,
     `Avoid repetition:`,
@@ -279,14 +316,14 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
     benefit
       ? `Core promise/benefit: "${benefit}"`
       : `Include a clear believable benefit appropriate to this industry.`,
-   offer
-  ? `Promo/offer to feature prominently: "${offer}"`
-  : [
-      `No promo/discount was provided.`,
-      `DO NOT use promo language like "Featured Collection", "New Arrivals", "Limited Drop", "Sale", "Special Offer", "Deal", "Limited Time".`,
-      `Keep the small pill/label area in the design, but fill it with a neutral descriptor that is NOT a promotion.`,
-      `Neutral descriptor examples (choose ONE, fit to industry/benefit): "Made With Care", "Fresh Daily", "Everyday Essential", "Trusted Service", "Local Favorite", "Crafted By Experts", "Quality You Can Feel", "Simple & Reliable", "Book Today", "Shop The Look" (only if fashion).`
-    ].join(" "),
+    offer
+      ? `Promo/offer to feature prominently: "${offer}"`
+      : [
+          `No promo/discount was provided.`,
+          `DO NOT use promo language like "Featured Collection", "New Arrivals", "Limited Drop", "Sale", "Special Offer", "Deal", "Limited Time".`,
+          `Keep the small pill/label area in the design, but fill it with a neutral descriptor that is NOT a promotion.`,
+          `Neutral descriptor examples (choose ONE, fit to industry/benefit): "Made With Care", "Fresh Daily", "Everyday Essential", "Trusted Service", "Local Favorite", "Crafted By Experts", "Quality You Can Feel", "Simple & Reliable", "Book Today", "Shop The Look" (only if fashion).`
+        ].join(" "),
     ``,
     `Layout & typography requirements:`,
     `- Use modern, premium, clean design with strong visual hierarchy.`,
@@ -306,7 +343,6 @@ function buildAdPromptFromAnswers(a = {}, variationToken = "", profile = null) {
   ].join("\n");
 }
 
-
 /* ------------------------ /generate-static-ad ------------------------ */
 
 router.post("/generate-static-ad", async (req, res) => {
@@ -322,48 +358,47 @@ router.post("/generate-static-ad", async (req, res) => {
     // Use regenerateToken/variant to force variation across runs
     const variationToken = String(body.regenerateToken || body.variant || `${Date.now()}-${Math.random()}`);
 
-  const requestedCount = Number(body.count || body.n || 2);
-const count = Math.max(1, Math.min(2, requestedCount || 2));
+    const requestedCount = Number(body.count || body.n || 2);
+    const count = Math.max(1, Math.min(2, requestedCount || 2));
 
-// Generate each image with its OWN prompt/profile (more variation than n=2 on one prompt)
-const profiles = [
-  buildVariantProfile(variationToken, "A"),
-  buildVariantProfile(variationToken, "B"),
-];
+    // Generate each image with its OWN prompt/profile (more variation than n=2 on one prompt)
+    const profiles = [
+      buildVariantProfile(variationToken, "A", a.industry || ""),
+      buildVariantProfile(variationToken, "B", a.industry || ""),
+    ];
 
-const prompts = [
-  buildAdPromptFromAnswers(a, variationToken, profiles[0]),
-  buildAdPromptFromAnswers(a, variationToken, profiles[1]),
-];
+    const prompts = [
+      buildAdPromptFromAnswers(a, variationToken, profiles[0]),
+      buildAdPromptFromAnswers(a, variationToken, profiles[1]),
+    ];
 
-let bufs = [];
+    let bufs = [];
 
-if (count === 1) {
-  bufs = await generateOpenAIAdImageBuffers({
-    prompt: prompts[0],
-    size: "1024x1024",
-    output_format: "png",
-    quality: "auto",
-    n: 1,
-  });
-} else {
-  const b1 = await generateOpenAIAdImageBuffers({
-    prompt: prompts[0],
-    size: "1024x1024",
-    output_format: "png",
-    quality: "auto",
-    n: 1,
-  });
-  const b2 = await generateOpenAIAdImageBuffers({
-    prompt: prompts[1],
-    size: "1024x1024",
-    output_format: "png",
-    quality: "auto",
-    n: 1,
-  });
-  bufs = [b1[0], b2[0]].filter(Boolean);
-}
-
+    if (count === 1) {
+      bufs = await generateOpenAIAdImageBuffers({
+        prompt: prompts[0],
+        size: "1024x1024",
+        output_format: "png",
+        quality: "auto",
+        n: 1,
+      });
+    } else {
+      const b1 = await generateOpenAIAdImageBuffers({
+        prompt: prompts[0],
+        size: "1024x1024",
+        output_format: "png",
+        quality: "auto",
+        n: 1,
+      });
+      const b2 = await generateOpenAIAdImageBuffers({
+        prompt: prompts[1],
+        size: "1024x1024",
+        output_format: "png",
+        quality: "auto",
+        n: 1,
+      });
+      bufs = [b1[0], b2[0]].filter(Boolean);
+    }
 
     const base = `static-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
