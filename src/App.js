@@ -6,6 +6,7 @@ import FormPage from "./pages/FormPage";
 import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
 import Confirmation from "./pages/Confirmation";
+import PrivacyPolicy from "./pages/PrivacyPolicy";
 
 /**
  * NOTE:
@@ -59,6 +60,7 @@ function App() {
       <Route path="/setup" element={<CampaignSetup />} /> {/* no auth guard */}
       <Route path="/login" element={<Login />} />
       <Route path="/confirmation" element={<Confirmation />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
