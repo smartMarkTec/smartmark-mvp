@@ -1678,27 +1678,77 @@ const handleLogin = async () => {
     } catch {}
   };
 
-  useEffect(() => {
-    const saved = localStorage.getItem(FB_CONN_KEY);
-    if (!saved) return;
-    const { connected, time } = JSON.parse(saved);
-    if (!connected) return;
-    if (Date.now() - time > FB_CONN_MAX_AGE) {
+ useEffect(() => {
+  let cancelled = false;
+
+  const safeParse = (raw) => {
+    try {
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const isExpired = (time) => !time || (Date.now() - Number(time) > FB_CONN_MAX_AGE);
+
+  const retryDelays = [600, 1400, 2600]; // handles Render cold starts / transient errors
+
+  const validate = async (attempt = 0) => {
+    const savedRaw = localStorage.getItem(FB_CONN_KEY);
+    const saved = safeParse(savedRaw);
+
+    if (!saved?.connected) return;
+
+    if (isExpired(saved.time)) {
       localStorage.removeItem(FB_CONN_KEY);
-      setFbConnected(false);
+      if (!cancelled) setFbConnected(false);
       return;
     }
-    authFetch(`/facebook/adaccounts`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(() => {
-        setFbConnected(true);
-        touchFbConn();
-      })
-      .catch(() => {
+
+    // ✅ optimistic: keep UI connected while validating
+    if (!cancelled) setFbConnected(true);
+
+    try {
+      const r = await authFetch(`/facebook/adaccounts`);
+
+      if (r.ok) {
+        if (!cancelled) {
+          setFbConnected(true);
+          touchFbConn(); // refresh timestamp
+        }
+        return;
+      }
+
+      // ✅ ONLY clear saved connection on real auth failure
+      if (r.status === 401 || r.status === 403) {
         localStorage.removeItem(FB_CONN_KEY);
-        setFbConnected(false);
-      });
-  }, []);
+        if (!cancelled) setFbConnected(false);
+        return;
+      }
+
+      // transient non-auth failure — retry, do NOT wipe connection
+      if (attempt < retryDelays.length) {
+        setTimeout(() => validate(attempt + 1), retryDelays[attempt]);
+      } else {
+        if (!cancelled) setFbConnected(true);
+      }
+    } catch {
+      // network/cold start — retry, do NOT wipe connection
+      if (attempt < retryDelays.length) {
+        setTimeout(() => validate(attempt + 1), retryDelays[attempt]);
+      } else {
+        if (!cancelled) setFbConnected(true);
+      }
+    }
+  };
+
+  validate(0);
+
+  return () => {
+    cancelled = true;
+  };
+}, []);
+
 
   const [adAccounts, setAdAccounts] = useState([]);
 
