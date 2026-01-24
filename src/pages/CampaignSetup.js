@@ -1003,6 +1003,18 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
   }, [items]);
 
+  useEffect(() => {
+  // ✅ prefetch all carousel images so switching/first paint is faster
+  try {
+    (normalized || []).forEach((u) => {
+      const img = new Image();
+      img.decoding = "async";
+      img.src = u;
+    });
+  } catch {}
+}, [normalized]);
+
+
   // Reset state when list changes
   useEffect(() => {
     if (idx >= normalized.length) setIdx(0);
@@ -1142,25 +1154,29 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       )}
 
       {/* Image */}
-      {!broken && (
-        <img
-          key={current} // force reload when URL/nonce changes
-          src={current}
-          alt="Ad"
-          style={{
-            width: "100%",
-            maxHeight: height,
-            height,
-            objectFit: "contain",
-            display: "block",
-            background: "#0f1418",
-          }}
-          onClick={() => onFullscreen && onFullscreen(base)}
-          onLoad={() => setLoaded(true)}
-          onError={() => setBroken(true)}
-          draggable={false}
-        />
-      )}
+     {!broken && (
+  <img
+    key={current} // force reload when URL/nonce changes
+    src={current}
+    alt="Ad"
+    loading="eager"
+    decoding="async"
+    fetchPriority="high"
+    style={{
+      width: "100%",
+      maxHeight: height,
+      height,
+      objectFit: "contain",
+      display: "block",
+      background: "#0f1418",
+    }}
+    onClick={() => onFullscreen && onFullscreen(base)}
+    onLoad={() => setLoaded(true)}
+    onError={() => setBroken(true)}
+    draggable={false}
+  />
+)}
+
 
       {normalized.length > 1 && (
         <>
@@ -1177,7 +1193,10 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       )}
     </div>
   );
+
 }
+
+
 
 
 
@@ -3433,7 +3452,7 @@ onClick={() => {
             })()}
           </div>
 
-         <button
+<button
   onClick={() => {
     trackEvent("launch_campaign", { page: "setup" });
     handleLaunch();
@@ -3452,10 +3471,41 @@ onClick={() => {
     cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
     opacity: loading || campaignCount >= 2 || !canLaunch ? 0.6 : 1,
     transition: "transform 0.15s",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
   }}
 >
-  {campaignCount >= 2 ? "Limit Reached" : "Launch Campaign"}
+  {campaignCount >= 2 ? (
+    "Limit Reached"
+  ) : loading ? (
+    <>
+      <span
+        aria-hidden
+        style={{
+          width: 18,
+          height: 18,
+          borderRadius: "50%",
+          border: "3px solid rgba(15,20,24,0.25)",
+          borderTopColor: "#0f1418",
+          animation: "smSpin 0.9s linear infinite",
+        }}
+      />
+      Launching…
+    </>
+  ) : launched ? (
+    "Campaign launched ✅"
+  ) : (
+    "Launch Campaign"
+  )}
 </button>
+
+{/* tiny local keyframes (no global CSS needed) */}
+<style>
+  {`@keyframes smSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}
+</style>
+
 
 
           {launched && launchResult && (
