@@ -9,12 +9,23 @@ import { trackEvent } from "../analytics/gaEvents";
 /* ===================== AUTH ORIGIN (UPDATED) ===================== */
 // ✅ Start OAuth + auth calls on YOUR APP ORIGIN so state/cookies stay consistent.
 // Your Vercel rewrites should proxy /auth/* (and /api/*) to Render.
-const MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
+// ===================== ORIGINS (CORS-SAFE) =====================
+//
+// ✅ Browser/UI should always use SAME-ORIGIN /api/media/* so Vercel rewrites proxy to Render.
+// This avoids CORS when loading images + uploading data URLs.
+//
+// ✅ Meta (Facebook) must receive ABSOLUTE Render URLs so FB can fetch the images.
+//
+const RENDER_MEDIA_ORIGIN = "https://smartmark-mvp.onrender.com";
 const APP_ORIGIN = window.location.origin;
 
-// ✅ Use relative paths for auth so the browser stays on the same origin (fixes Invalid OAuth state)
+// Browser/UI media base (SAME ORIGIN via proxy)
+const MEDIA_ORIGIN = APP_ORIGIN;
+
+// Auth bases (unchanged)
 const AUTH_BASE_PRIMARY = "/auth";
 const AUTH_BASE_FALLBACK = "/api/auth";
+
 
 
 
@@ -1678,7 +1689,7 @@ const handleLogin = async () => {
     } catch {}
   };
 
- useEffect(() => {
+useEffect(() => {
   let cancelled = false;
 
   const safeParse = (raw) => {
@@ -1689,65 +1700,26 @@ const handleLogin = async () => {
     }
   };
 
-  const isExpired = (time) => !time || (Date.now() - Number(time) > FB_CONN_MAX_AGE);
+  const saved = safeParse(localStorage.getItem(FB_CONN_KEY));
 
-  const retryDelays = [600, 1400, 2600]; // handles Render cold starts / transient errors
+  if (!saved?.connected) return;
 
-  const validate = async (attempt = 0) => {
-    const savedRaw = localStorage.getItem(FB_CONN_KEY);
-    const saved = safeParse(savedRaw);
+  const expired = !saved.time || (Date.now() - Number(saved.time) > FB_CONN_MAX_AGE);
 
-    if (!saved?.connected) return;
+  if (expired) {
+    localStorage.removeItem(FB_CONN_KEY);
+    if (!cancelled) setFbConnected(false);
+    return;
+  }
 
-    if (isExpired(saved.time)) {
-      localStorage.removeItem(FB_CONN_KEY);
-      if (!cancelled) setFbConnected(false);
-      return;
-    }
-
-    // ✅ optimistic: keep UI connected while validating
-    if (!cancelled) setFbConnected(true);
-
-    try {
-      const r = await authFetch(`/facebook/adaccounts`);
-
-      if (r.ok) {
-        if (!cancelled) {
-          setFbConnected(true);
-          touchFbConn(); // refresh timestamp
-        }
-        return;
-      }
-
-      // ✅ ONLY clear saved connection on real auth failure
-      if (r.status === 401 || r.status === 403) {
-        localStorage.removeItem(FB_CONN_KEY);
-        if (!cancelled) setFbConnected(false);
-        return;
-      }
-
-      // transient non-auth failure — retry, do NOT wipe connection
-      if (attempt < retryDelays.length) {
-        setTimeout(() => validate(attempt + 1), retryDelays[attempt]);
-      } else {
-        if (!cancelled) setFbConnected(true);
-      }
-    } catch {
-      // network/cold start — retry, do NOT wipe connection
-      if (attempt < retryDelays.length) {
-        setTimeout(() => validate(attempt + 1), retryDelays[attempt]);
-      } else {
-        if (!cancelled) setFbConnected(true);
-      }
-    }
-  };
-
-  validate(0);
+  // ✅ ONLY set connected based on stored flag (no early fetch = no draft race)
+  if (!cancelled) setFbConnected(true);
 
   return () => {
     cancelled = true;
   };
 }, []);
+
 
 
   const [adAccounts, setAdAccounts] = useState([]);
