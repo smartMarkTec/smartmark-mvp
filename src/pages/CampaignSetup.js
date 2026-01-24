@@ -411,7 +411,8 @@ function resolveFetchableDraftImages({ user, draftImages, navImages }) {
     .map((img, i) => {
       const s = String(img || "").trim();
       if (!s) return "";
-      if (/^data:image\//i.test(s)) return cached[i] || ""; // ✅ replace data URL with fetchable URL
+if (/^data:image\//i.test(s)) return cached[i] || s; // keep data URL if no cached fetchable
+
       return toAbsoluteMedia(s);
     })
     .filter(Boolean)

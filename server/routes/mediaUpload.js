@@ -54,7 +54,10 @@ router.post('/upload', express.json({ limit: '20mb' }), async (req, res) => {
     const urls = [];
 
     for (const du of clean) {
-      const parsed = parseDataUrl(du);
+     if (!parsed) {
+  return res.status(400).json({ error: "Invalid dataUrl(s)" });
+}
+
       if (!parsed) continue;
 
       const id = crypto.randomBytes(8).toString('hex');
