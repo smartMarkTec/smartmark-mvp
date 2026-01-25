@@ -12,6 +12,9 @@ const BTN_BASE = "#0f6fff"; // brand blue
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
+// Formspree endpoint (sends submissions to the email configured in your Formspree form)
+const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/mqeqaozw";
+
 /* content */
 const processSteps = [
   { icon: "🎯", title: "Answer a few questions" },
@@ -58,12 +61,14 @@ const Landing = () => {
   const [eaName, setEaName] = React.useState("");
   const [eaEmail, setEaEmail] = React.useState("");
   const [eaSubmitted, setEaSubmitted] = React.useState(false);
+  const [eaServerOk, setEaServerOk] = React.useState(false);
 
   const openEarlyAccess = (source = "cta") => {
     try {
       trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
     } catch {}
     setEaSubmitted(false);
+    setEaServerOk(false);
     setEaOpen(true);
   };
 
@@ -80,26 +85,40 @@ const Landing = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [eaOpen]);
 
-  const buildMailto = () =>
-    `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
-      "SmartMark Early Access"
-    )}&body=${encodeURIComponent(
-      `Name: ${eaName.trim()}\nEmail: ${eaEmail.trim()}\n\nRequested Early Access from Landing page.`
-    )}`;
+  const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
+    "SmartMark Early Access"
+  )}&body=${encodeURIComponent(
+    `Name: ${eaName.trim()}\nEmail: ${eaEmail.trim()}\n\nRequested Early Access from Landing page.`
+  )}`;
 
-  const submitEarlyAccess = (e) => {
+  const submitEarlyAccess = async (e) => {
     e.preventDefault();
     if (!eaName.trim() || !eaEmail.trim()) return;
 
-    // Show thank-you immediately (no setup required)
+    let ok = false;
+
+    // Send to Formspree (most reliable format: FormData)
+    try {
+      const fd = new FormData();
+      fd.append("name", eaName.trim());
+      fd.append("email", eaEmail.trim());
+      fd.append("source", "smartmark-landing");
+
+      const res = await fetch(EARLY_ACCESS_ENDPOINT, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: fd,
+      });
+
+      ok = !!res.ok;
+    } catch {}
+
+    setEaServerOk(ok);
     setEaSubmitted(true);
 
     try {
-      trackEvent("early_access_submit", { page: "landing", ok: true, method: "mailto" });
+      trackEvent("early_access_submit", { page: "landing", ok });
     } catch {}
-
-    // Open user's email client with prefilled message to you
-    window.location.href = buildMailto();
   };
 
   const clearDraftsAndGoToForm = () => {
@@ -415,8 +434,12 @@ const Landing = () => {
                     textAlign: "center",
                     transition: "transform .15s ease",
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-                  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.transform = "translateY(-2px)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.transform = "translateY(0)")
+                  }
                 >
                   <span
                     aria-hidden
@@ -549,8 +572,12 @@ const Landing = () => {
                 transition: "transform .15s ease, box-shadow .2s ease",
                 ...glass,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
-              onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.transform = "translateY(-1px)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.transform = "translateY(0)")
+              }
             >
               <div
                 style={{
@@ -755,7 +782,25 @@ const Landing = () => {
                   Thank you — we’ll reach out soon.
                 </div>
                 <div style={{ marginTop: 8, color: "rgba(255,255,255,0.88)", fontWeight: 600 }}>
-                  Your email app should open now to send the request.
+                  {eaServerOk ? (
+                    <>Your request was received.</>
+                  ) : (
+                    <>
+                      If you want to ensure we get it, tap{" "}
+                      <a
+                        href={mailtoHref}
+                        style={{
+                          color: ACCENT,
+                          fontWeight: 900,
+                          textDecoration: "none",
+                          borderBottom: `1px solid ${ACCENT}66`,
+                        }}
+                      >
+                        send via email
+                      </a>
+                      .
+                    </>
+                  )}
                 </div>
 
                 <button
