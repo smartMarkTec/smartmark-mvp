@@ -3,13 +3,12 @@ import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
-
 /** Tech palette */
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG_DARK = "#0b0f14";            // deep navy
-const ACCENT = "#31e1ff";             // electric cyan
-const ACCENT_2 = "#7c4dff";           // violet
-const BTN_BASE = "#0f6fff";           // brand blue
+const BG_DARK = "#0b0f14"; // deep navy
+const ACCENT = "#31e1ff"; // electric cyan
+const ACCENT_2 = "#7c4dff"; // violet
+const BTN_BASE = "#0f6fff"; // brand blue
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
@@ -50,27 +49,89 @@ const Landing = () => {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-  // intentionally left empty: we DO NOT clear drafts on load
-  trackEvent("view_landing", { page: "landing" });
-}, []);
+    // intentionally left empty: we DO NOT clear drafts on load
+    trackEvent("view_landing", { page: "landing" });
+  }, []);
 
+  // Early Access modal (simple)
+  const [eaOpen, setEaOpen] = React.useState(false);
+  const [eaName, setEaName] = React.useState("");
+  const [eaEmail, setEaEmail] = React.useState("");
+  const [eaSubmitted, setEaSubmitted] = React.useState(false);
+  const [eaServerOk, setEaServerOk] = React.useState(false);
 
-const clearDraftsAndGoToForm = () => {
-  // GA event first (before any navigation)
-  trackEvent("start_campaign", { page: "landing" });
+  const openEarlyAccess = (source = "cta") => {
+    try {
+      // keep analytics simple / consistent
+      trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
+    } catch {}
+    setEaSubmitted(false);
+    setEaServerOk(false);
+    setEaOpen(true);
+  };
 
-  try {
-    // clear only the keys related to starting a brand-new campaign
-    localStorage.removeItem("sm_form_draft_v2");
-    localStorage.removeItem("draft_form_creatives");
-    localStorage.removeItem("draft_form_creatives_v2");
-    localStorage.removeItem("smartmark_media_selection");
-    // keep user login autofill and per-user state
-  } catch {}
+  const closeEarlyAccess = () => {
+    setEaOpen(false);
+  };
 
-  navigate("/form");
-};
+  React.useEffect(() => {
+    if (!eaOpen) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") closeEarlyAccess();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [eaOpen]);
 
+  const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
+    "SmartMark Early Access"
+  )}&body=${encodeURIComponent(
+    `Name: ${eaName.trim()}\nEmail: ${eaEmail.trim()}\n\nRequested Early Access from Landing page.`
+  )}`;
+
+  const submitEarlyAccess = async (e) => {
+    e.preventDefault();
+    if (!eaName.trim() || !eaEmail.trim()) return;
+
+    let ok = false;
+
+    // Best-effort: if you later add a backend endpoint, this will work automatically
+    try {
+      const res = await fetch("/api/early-access", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: eaName.trim(),
+          email: eaEmail.trim(),
+          page: "landing",
+        }),
+      });
+      ok = !!res.ok;
+    } catch {}
+
+    setEaServerOk(ok);
+    setEaSubmitted(true);
+
+    try {
+      trackEvent("early_access_submit", { page: "landing", ok });
+    } catch {}
+  };
+
+  const clearDraftsAndGoToForm = () => {
+    // GA event first (before any navigation)
+    trackEvent("start_campaign", { page: "landing" });
+
+    try {
+      // clear only the keys related to starting a brand-new campaign
+      localStorage.removeItem("sm_form_draft_v2");
+      localStorage.removeItem("draft_form_creatives");
+      localStorage.removeItem("draft_form_creatives_v2");
+      localStorage.removeItem("smartmark_media_selection");
+      // keep user login autofill and per-user state
+    } catch {}
+
+    navigate("/form");
+  };
 
   const goToLogin = () => navigate("/login");
 
@@ -93,7 +154,8 @@ const clearDraftsAndGoToForm = () => {
   const faqTitle = isMobile ? "1.4rem" : "2.1rem";
 
   const glass = {
-    background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
     border: `1px solid ${GLASS_BORDER}`,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
     backdropFilter: "blur(8px)",
@@ -149,64 +211,61 @@ const clearDraftsAndGoToForm = () => {
         }}
       />
 
-  {/* Header */}
-<div
-  style={{
-    width: "100%",
-    display: "flex",
-    flexDirection: isMobile ? "column" : "row",
-    justifyContent: isMobile ? "center" : "space-between",
-    alignItems: "center",
-    padding: `18px ${headerPadding} 0`,
-    gap: isMobile ? "0.9rem" : 0,
-    position: "relative",
-    zIndex: 2,
-  }}
->
-  {/* Left: small logo + FAQ */}
-  <div
-    style={{
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 10,
-      width: isMobile ? "100%" : "auto",
-    }}
-  >
-    <img
-      src={smartmarkLogo}
-      alt="SmarteMark"
-      style={{
-        height: 26,
-        width: 26,
-        borderRadius: 10,
-        opacity: 0.92,
-        flex: "0 0 auto",
-      }}
-    />
+      {/* Header */}
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          flexDirection: isMobile ? "column" : "row",
+          justifyContent: isMobile ? "center" : "space-between",
+          alignItems: "center",
+          padding: `18px ${headerPadding} 0`,
+          gap: isMobile ? "0.9rem" : 0,
+          position: "relative",
+          zIndex: 2,
+        }}
+      >
+        {/* Left: small logo + FAQ */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+            width: isMobile ? "100%" : "auto",
+          }}
+        >
+          <img
+            src={smartmarkLogo}
+            alt="SmarteMark"
+            style={{
+              height: 26,
+              width: 26,
+              borderRadius: 10,
+              opacity: 0.92,
+              flex: "0 0 auto",
+            }}
+          />
 
-    <button
-      onClick={scrollToFaq}
-      style={{
-        fontWeight: 700,
-        fontSize: isMobile ? "0.98rem" : "1rem",
-        color: "#e6faff",
-        borderRadius: 999,
-        padding: "0.55rem 1.1rem",
-        cursor: "pointer",
-        transition: "transform .15s ease",
-        ...glass,
-        width: isMobile ? "86vw" : "auto",
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-      onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-    >
-      FAQ
-    </button>
-  </div>
-
-  {/* Right side stays exactly as you already have it below this */}
-  {/* KEEP YOUR EXISTING RIGHT-SIDE BUTTONS / CONTENT HERE */}
+          <button
+            onClick={scrollToFaq}
+            style={{
+              fontWeight: 700,
+              fontSize: isMobile ? "0.98rem" : "1rem",
+              color: "#e6faff",
+              borderRadius: 999,
+              padding: "0.55rem 1.1rem",
+              cursor: "pointer",
+              transition: "transform .15s ease",
+              ...glass,
+              width: isMobile ? "86vw" : "auto",
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+          >
+            FAQ
+          </button>
+        </div>
 
         <div style={{ display: "flex", gap: "10px" }}>
           <button
@@ -228,8 +287,9 @@ const clearDraftsAndGoToForm = () => {
           >
             Login
           </button>
+
           <button
-            onClick={clearDraftsAndGoToForm}
+            onClick={() => openEarlyAccess("header_start_campaign")}
             style={{
               padding: isMobile ? "0.7rem 1.6rem" : "0.95rem 2.2rem",
               fontSize: isMobile ? "1.02rem" : "1.08rem",
@@ -303,7 +363,7 @@ const clearDraftsAndGoToForm = () => {
         </h2>
 
         <button
-          onClick={clearDraftsAndGoToForm}
+          onClick={() => openEarlyAccess("hero_launch_campaign")}
           style={{
             marginTop: isMobile ? "1.2rem" : "2rem",
             padding: ctaPad,
@@ -439,7 +499,7 @@ const clearDraftsAndGoToForm = () => {
           Effortless. No marketing experience needed.
         </div>
         <button
-          onClick={clearDraftsAndGoToForm}
+          onClick={() => openEarlyAccess("subcta_get_started")}
           style={{
             padding: isMobile ? "0.75rem 1.8rem" : "1rem 2.4rem",
             fontSize: isMobile ? "1rem" : "1.1rem",
@@ -557,41 +617,208 @@ const clearDraftsAndGoToForm = () => {
       </div>
 
       {/* Contact (barely visible, bottom-center) */}
-<div
-  style={{
-    width: "100%",
-    display: "flex",
-    justifyContent: "center",
-    padding: "6px 0 10px",
-    opacity: 0.22, // barely visible
-    fontSize: 12,
-    fontWeight: 700,
-    color: "rgba(255,255,255,0.75)",
-    letterSpacing: 0.2,
-    userSelect: "none",
-    position: "relative",
-    zIndex: 1,
-  }}
->
-  <span>
-    Contact:{" "}
-    <a
-      href="mailto:knowwilltech@gmail.com"
-      style={{
-        color: "rgba(255,255,255,0.75)",
-        textDecoration: "none",
-        borderBottom: "1px solid rgba(255,255,255,0.12)",
-        paddingBottom: 1,
-      }}
-    >
-      knowwilltech@gmail.com
-    </a>
-  </span>
-</div>
+      <div
+        style={{
+          width: "100%",
+          display: "flex",
+          justifyContent: "center",
+          padding: "6px 0 10px",
+          opacity: 0.22, // barely visible
+          fontSize: 12,
+          fontWeight: 700,
+          color: "rgba(255,255,255,0.75)",
+          letterSpacing: 0.2,
+          userSelect: "none",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        <span>
+          Contact:{" "}
+          <a
+            href="mailto:knowwilltech@gmail.com"
+            style={{
+              color: "rgba(255,255,255,0.75)",
+              textDecoration: "none",
+              borderBottom: "1px solid rgba(255,255,255,0.12)",
+              paddingBottom: 1,
+            }}
+          >
+            knowwilltech@gmail.com
+          </a>
+        </span>
+      </div>
 
-{/* tiny spacer so the bottom gradient never reveals page background */}
-<div style={{ height: 24 }} />
+      {/* tiny spacer so the bottom gradient never reveals page background */}
+      <div style={{ height: 24 }} />
 
+      {/* Early Access Modal */}
+      {eaOpen && (
+        <div
+          onClick={closeEarlyAccess}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.62)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 9999,
+            padding: "18px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: isMobile ? "92vw" : 520,
+              borderRadius: 16,
+              padding: isMobile ? "1rem" : "1.15rem",
+              position: "relative",
+              ...glass,
+            }}
+          >
+            <button
+              onClick={closeEarlyAccess}
+              aria-label="Close"
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                border: `1px solid ${GLASS_BORDER}`,
+                background: "rgba(255,255,255,0.06)",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: 900,
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+
+            <div style={{ fontWeight: 900, fontSize: isMobile ? 18 : 20, marginBottom: 8 }}>
+              Early Access
+            </div>
+
+            <div style={{ color: "rgba(255,255,255,0.9)", lineHeight: 1.55, fontWeight: 600 }}>
+              SmartMark is onboarding a limited number of users. Campaign launching is enabled after
+              final platform approvals.
+            </div>
+
+            <div style={{ height: 10 }} />
+
+            {!eaSubmitted ? (
+              <form onSubmit={submitEarlyAccess} style={{ marginTop: 6 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <input
+                    value={eaName}
+                    onChange={(e) => setEaName(e.target.value)}
+                    placeholder="Name"
+                    style={{
+                      width: "100%",
+                      padding: "0.75rem 0.9rem",
+                      borderRadius: 12,
+                      border: `1px solid ${GLASS_BORDER}`,
+                      background: "rgba(255,255,255,0.04)",
+                      color: "#fff",
+                      outline: "none",
+                      fontWeight: 700,
+                    }}
+                  />
+                  <input
+                    value={eaEmail}
+                    onChange={(e) => setEaEmail(e.target.value)}
+                    placeholder="Email"
+                    type="email"
+                    style={{
+                      width: "100%",
+                      padding: "0.75rem 0.9rem",
+                      borderRadius: 12,
+                      border: `1px solid ${GLASS_BORDER}`,
+                      background: "rgba(255,255,255,0.04)",
+                      color: "#fff",
+                      outline: "none",
+                      fontWeight: 700,
+                    }}
+                  />
+
+                  <button
+                    type="submit"
+                    style={{
+                      marginTop: 4,
+                      padding: isMobile ? "0.75rem 1.2rem" : "0.85rem 1.4rem",
+                      fontSize: isMobile ? "1rem" : "1.05rem",
+                      background: BTN_BASE,
+                      color: "#fff",
+                      border: "none",
+                      borderRadius: 999,
+                      fontWeight: 900,
+                      boxShadow: "0 10px 26px rgba(15,111,255,0.35)",
+                      cursor: "pointer",
+                      transition: "transform .15s ease, background .2s ease",
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                      e.currentTarget.style.background = BTN_BASE_HOVER;
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.transform = "translateY(0)";
+                      e.currentTarget.style.background = BTN_BASE;
+                    }}
+                  >
+                    Submit
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontWeight: 900, fontSize: 18, color: "#eaf5ff" }}>
+                  Thank you — we’ll reach out soon.
+                </div>
+                <div style={{ marginTop: 8, color: "rgba(255,255,255,0.88)", fontWeight: 600 }}>
+                  {eaServerOk ? (
+                    <>Your request was received.</>
+                  ) : (
+                    <>
+                      If you want to ensure we get it, tap{" "}
+                      <a
+                        href={mailtoHref}
+                        style={{
+                          color: ACCENT,
+                          fontWeight: 900,
+                          textDecoration: "none",
+                          borderBottom: `1px solid ${ACCENT}66`,
+                        }}
+                      >
+                        send via email
+                      </a>
+                      .
+                    </>
+                  )}
+                </div>
+
+                <button
+                  onClick={closeEarlyAccess}
+                  style={{
+                    marginTop: 12,
+                    padding: "0.7rem 1.2rem",
+                    fontSize: "0.98rem",
+                    color: "#fff",
+                    background: "transparent",
+                    borderRadius: 999,
+                    cursor: "pointer",
+                    ...glass,
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* tiny spacer so the bottom gradient never reveals page background */}
       <div style={{ height: 24 }} />
