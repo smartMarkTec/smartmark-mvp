@@ -12,11 +12,6 @@ const BTN_BASE = "#0f6fff"; // brand blue
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
-// OPTION A (Form endpoint)
-// Create a Formspree form and paste your endpoint here (it will email you submissions).
-// Example: https://formspree.io/f/abcdwxyz
-const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/REPLACE_ME";
-
 /* content */
 const processSteps = [
   { icon: "🎯", title: "Answer a few questions" },
@@ -63,14 +58,12 @@ const Landing = () => {
   const [eaName, setEaName] = React.useState("");
   const [eaEmail, setEaEmail] = React.useState("");
   const [eaSubmitted, setEaSubmitted] = React.useState(false);
-  const [eaServerOk, setEaServerOk] = React.useState(false);
 
   const openEarlyAccess = (source = "cta") => {
     try {
       trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
     } catch {}
     setEaSubmitted(false);
-    setEaServerOk(false);
     setEaOpen(true);
   };
 
@@ -87,43 +80,26 @@ const Landing = () => {
     return () => window.removeEventListener("keydown", onKey);
   }, [eaOpen]);
 
-  const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
-    "SmartMark Early Access"
-  )}&body=${encodeURIComponent(
-    `Name: ${eaName.trim()}\nEmail: ${eaEmail.trim()}\n\nRequested Early Access from Landing page.`
-  )}`;
+  const buildMailto = () =>
+    `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
+      "SmartMark Early Access"
+    )}&body=${encodeURIComponent(
+      `Name: ${eaName.trim()}\nEmail: ${eaEmail.trim()}\n\nRequested Early Access from Landing page.`
+    )}`;
 
-  const submitEarlyAccess = async (e) => {
+  const submitEarlyAccess = (e) => {
     e.preventDefault();
     if (!eaName.trim() || !eaEmail.trim()) return;
 
-    let ok = false;
-
-    // Sends directly to Formspree (or any similar form endpoint)
-    try {
-      if (EARLY_ACCESS_ENDPOINT && !EARLY_ACCESS_ENDPOINT.includes("REPLACE_ME")) {
-        const res = await fetch(EARLY_ACCESS_ENDPOINT, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({
-            name: eaName.trim(),
-            email: eaEmail.trim(),
-            source: "smartmark-landing",
-          }),
-        });
-        ok = !!res.ok;
-      }
-    } catch {}
-
-    setEaServerOk(ok);
+    // Show thank-you immediately (no setup required)
     setEaSubmitted(true);
 
     try {
-      trackEvent("early_access_submit", { page: "landing", ok });
+      trackEvent("early_access_submit", { page: "landing", ok: true, method: "mailto" });
     } catch {}
+
+    // Open user's email client with prefilled message to you
+    window.location.href = buildMailto();
   };
 
   const clearDraftsAndGoToForm = () => {
@@ -439,12 +415,8 @@ const Landing = () => {
                     textAlign: "center",
                     transition: "transform .15s ease",
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.transform = "translateY(-2px)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.transform = "translateY(0)")
-                  }
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
                 >
                   <span
                     aria-hidden
@@ -577,12 +549,8 @@ const Landing = () => {
                 transition: "transform .15s ease, box-shadow .2s ease",
                 ...glass,
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.transform = "translateY(-1px)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.transform = "translateY(0)")
-              }
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
             >
               <div
                 style={{
@@ -787,25 +755,7 @@ const Landing = () => {
                   Thank you — we’ll reach out soon.
                 </div>
                 <div style={{ marginTop: 8, color: "rgba(255,255,255,0.88)", fontWeight: 600 }}>
-                  {eaServerOk ? (
-                    <>Your request was received.</>
-                  ) : (
-                    <>
-                      If you want to ensure we get it, tap{" "}
-                      <a
-                        href={mailtoHref}
-                        style={{
-                          color: ACCENT,
-                          fontWeight: 900,
-                          textDecoration: "none",
-                          borderBottom: `1px solid ${ACCENT}66`,
-                        }}
-                      >
-                        send via email
-                      </a>
-                      .
-                    </>
-                  )}
+                  Your email app should open now to send the request.
                 </div>
 
                 <button
