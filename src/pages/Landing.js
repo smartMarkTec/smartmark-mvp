@@ -12,6 +12,11 @@ const BTN_BASE = "#0f6fff"; // brand blue
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
+// OPTION A (Form endpoint)
+// Create a Formspree form and paste your endpoint here (it will email you submissions).
+// Example: https://formspree.io/f/abcdwxyz
+const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/REPLACE_ME";
+
 /* content */
 const processSteps = [
   { icon: "🎯", title: "Answer a few questions" },
@@ -62,7 +67,6 @@ const Landing = () => {
 
   const openEarlyAccess = (source = "cta") => {
     try {
-      // keep analytics simple / consistent
       trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
     } catch {}
     setEaSubmitted(false);
@@ -95,18 +99,23 @@ const Landing = () => {
 
     let ok = false;
 
-    // Best-effort: if you later add a backend endpoint, this will work automatically
+    // Sends directly to Formspree (or any similar form endpoint)
     try {
-      const res = await fetch("/api/early-access", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: eaName.trim(),
-          email: eaEmail.trim(),
-          page: "landing",
-        }),
-      });
-      ok = !!res.ok;
+      if (EARLY_ACCESS_ENDPOINT && !EARLY_ACCESS_ENDPOINT.includes("REPLACE_ME")) {
+        const res = await fetch(EARLY_ACCESS_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({
+            name: eaName.trim(),
+            email: eaEmail.trim(),
+            source: "smartmark-landing",
+          }),
+        });
+        ok = !!res.ok;
+      }
     } catch {}
 
     setEaServerOk(ok);
