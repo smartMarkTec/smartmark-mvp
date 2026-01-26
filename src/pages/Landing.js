@@ -3,8 +3,6 @@ import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
-
-
 // ✅ Put your uploaded mp4 into: src/assets/
 // Example filename: smartmark-walkthrough.mp4
 import walkthroughVideo from "../assets/smartmark-walkthrough.mp4";
@@ -17,6 +15,9 @@ const ACCENT_2 = "#7c4dff"; // violet
 const BTN_BASE = "#0f6fff"; // brand blue
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
+
+// ✅ Put a crisp thumbnail here (NO IMPORTS, no bundler issues)
+const WALKTHROUGH_THUMB = "/smartmark-walkthrough-thumb.png";
 
 // Formspree endpoint (sends submissions to the email configured in your Formspree form)
 const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/mqeqaozw";
@@ -68,9 +69,6 @@ const Landing = () => {
   const [eaSubmitted, setEaSubmitted] = React.useState(false);
   const [eaServerOk, setEaServerOk] = React.useState(false);
 
-  // Walkthrough video modal
-  const [videoOpen, setVideoOpen] = React.useState(false);
-
   const openEarlyAccess = (source = "cta") => {
     try {
       trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
@@ -82,26 +80,26 @@ const Landing = () => {
 
   const closeEarlyAccess = () => setEaOpen(false);
 
-  const openVideo = (source = "video_card") => {
+  // ✅ Open the video in a new window/tab (native player, less blur)
+  const openVideoNewWindow = (source = "video_card") => {
     try {
-      trackEvent("open_walkthrough_video", { page: "landing", source });
+      trackEvent("open_walkthrough_video_new_window", { page: "landing", source });
     } catch {}
-    setVideoOpen(true);
+
+    // Open the bundled mp4 in a new tab
+    const w = window.open(walkthroughVideo, "_blank", "noopener,noreferrer");
+    // If popup blocked, fallback: same tab
+    if (!w) window.location.href = walkthroughVideo;
   };
 
-  const closeVideo = () => setVideoOpen(false);
-
   React.useEffect(() => {
-    if (!eaOpen && !videoOpen) return;
+    if (!eaOpen) return;
     const onKey = (e) => {
-      if (e.key === "Escape") {
-        if (videoOpen) closeVideo();
-        if (eaOpen) closeEarlyAccess();
-      }
+      if (e.key === "Escape") closeEarlyAccess();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [eaOpen, videoOpen]);
+  }, [eaOpen]);
 
   const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
     "SmartMark Early Access"
@@ -223,7 +221,6 @@ const Landing = () => {
           justifyContent: isMobile ? "center" : "space-between",
           alignItems: "center",
           padding: `${isMobile ? 22 : 28}px ${headerPadding} 0`,
-
           gap: isMobile ? "0.9rem" : 0,
           position: "relative",
           zIndex: 2,
@@ -323,22 +320,20 @@ const Landing = () => {
 
       {/* Hero */}
       <div
-  style={{
-    minHeight: isMobile ? "48vh" : "78vh",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "flex-start",
-    textAlign: "center",
-    gap: isMobile ? "1rem" : "1.6rem",
-    padding: "0 18px",
-    position: "relative",
-    zIndex: 1,
-  }}
->
-
-  <div style={{ height: isMobile ? 120 : 160 }} />
-
+        style={{
+          minHeight: isMobile ? "48vh" : "78vh",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          textAlign: "center",
+          gap: isMobile ? "1rem" : "1.6rem",
+          padding: "0 18px",
+          position: "relative",
+          zIndex: 1,
+        }}
+      >
+        <div style={{ height: isMobile ? 120 : 160 }} />
 
         <h1
           style={{
@@ -356,6 +351,7 @@ const Landing = () => {
         >
           SmarteMark
         </h1>
+
         <h2
           style={{
             fontFamily: FONT,
@@ -399,13 +395,13 @@ const Landing = () => {
           Launch Campaign
         </button>
 
-        {/* ✅ Small clickable walkthrough video card (between button and graphic) */}
+        {/* ✅ Video stays on page, but "Play" opens a new window */}
         <div
-          onClick={() => openVideo("hero_between_cta_and_graphic")}
+          onClick={() => openVideoNewWindow("hero_between_cta_and_graphic")}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") openVideo("hero_between_cta_and_graphic");
+            if (e.key === "Enter" || e.key === " ") openVideoNewWindow("hero_between_cta_and_graphic");
           }}
           style={{
             marginTop: isMobile ? "0.9rem" : "1.05rem",
@@ -418,18 +414,21 @@ const Landing = () => {
           }}
         >
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
-<img
-  src="/smartmark-walkthrough-thumb.png"
-  alt="SmartMark walkthrough thumbnail"
-  style={{
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-    display: "block",
-    opacity: 0.98,
-  }}
-/>
-
+            {/* keep the video element (so it’s “on the page”), but use a crisp poster */}
+            <video
+              src={walkthroughVideo}
+              poster={WALKTHROUGH_THUMB}
+              preload="metadata"
+              muted
+              playsInline
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+                opacity: 0.98,
+              }}
+            />
 
             {/* play overlay */}
             <div
@@ -486,7 +485,7 @@ const Landing = () => {
                 Watch the 10-min walkthrough
               </div>
               <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.85 }}>
-                Click to open video
+                Opens in a new tab
               </div>
             </div>
             <div
@@ -919,78 +918,6 @@ const Landing = () => {
                 </button>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Walkthrough Video Modal */}
-      {videoOpen && (
-        <div
-          onClick={closeVideo}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10000,
-            padding: "18px",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-            width: isMobile ? "94vw" : 760,
-
-              borderRadius: 16,
-              overflow: "hidden",
-              position: "relative",
-              ...glass,
-            }}
-          >
-            <button
-              onClick={closeVideo}
-              aria-label="Close video"
-              style={{
-                position: "absolute",
-                top: 10,
-                right: 10,
-                width: 34,
-                height: 34,
-                borderRadius: 999,
-                border: `1px solid ${GLASS_BORDER}`,
-                background: "rgba(0,0,0,0.35)",
-                color: "#fff",
-                cursor: "pointer",
-                fontWeight: 900,
-                lineHeight: 1,
-                zIndex: 2,
-              }}
-            >
-              ×
-            </button>
-
-            <div style={{ width: "100%", background: "rgba(0,0,0,0.25)" }}>
-              <video
-                src={walkthroughVideo}
-                controls
-                autoPlay
-               style={{
-  width: "100%",
-  height: "auto",
-  display: "block",
-  maxHeight: isMobile ? "70vh" : "75vh",
-  maxWidth: 760, // prevents upscaling softness
-}}
-
-              />
-            </div>
-
-            <div style={{ padding: "0.75rem 0.9rem", display: "flex", justifyContent: "space-between" }}>
-              <div style={{ fontWeight: 900, color: "#eaf5ff" }}>SmartMark Walkthrough</div>
-              <div style={{ fontWeight: 700, opacity: 0.85 }}>Press Esc to close</div>
-            </div>
           </div>
         </div>
       )}
