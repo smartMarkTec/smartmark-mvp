@@ -2,6 +2,8 @@ import React, { useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
+import walkthroughThumb from "../assets/smartmark-walkthrough-thumb.png";
+
 
 // ✅ Put your uploaded mp4 into: src/assets/
 // Example filename: smartmark-walkthrough.mp4
@@ -416,19 +418,18 @@ const Landing = () => {
           }}
         >
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
-            <video
-              src={walkthroughVideo}
-              muted
-              playsInline
-              preload="metadata"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                display: "block",
-                opacity: 0.92,
-              }}
-            />
+        <img
+  src={walkthroughThumb}
+  alt="SmartMark walkthrough thumbnail"
+  style={{
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+    opacity: 0.98,
+  }}
+/>
+
             {/* play overlay */}
             <div
               aria-hidden
