@@ -940,7 +940,8 @@ const Landing = () => {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              width: isMobile ? "94vw" : 920,
+            width: isMobile ? "94vw" : 760,
+
               borderRadius: 16,
               overflow: "hidden",
               position: "relative",
@@ -974,12 +975,14 @@ const Landing = () => {
                 src={walkthroughVideo}
                 controls
                 autoPlay
-                style={{
-                  width: "100%",
-                  height: "auto",
-                  display: "block",
-                  maxHeight: isMobile ? "70vh" : "75vh",
-                }}
+               style={{
+  width: "100%",
+  height: "auto",
+  display: "block",
+  maxHeight: isMobile ? "70vh" : "75vh",
+  maxWidth: 760, // prevents upscaling softness
+}}
+
               />
             </div>
 
