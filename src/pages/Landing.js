@@ -4,10 +4,10 @@ import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
-// ✅ MP4 stays in src/assets so it can be imported
+// ✅ MP4 in src/assets so it can be imported
 import walkthroughVideo from "../assets/smartmark-walkthrough.mp4";
 
-// ✅ PNG is in /public, so reference by URL (NOT import)
+// ✅ Thumbnail in /public (optional). If you don't have it, the video poster can be blank.
 const WALKTHROUGH_THUMB = "/smartmark-walkthrough-thumb.png";
 
 /** Tech palette */
@@ -19,6 +19,7 @@ const BTN_BASE = "#0f6fff";
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
+// Formspree endpoint
 const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/mqeqaozw";
 
 /* content */
@@ -53,76 +54,14 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-const buildVideoWindowHtml = ({ title, videoUrl }) => {
-  const safeTitle = String(title || "SmartMark Walkthrough")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  const safeVideoUrl = String(videoUrl || "").replace(/"/g, "%22");
-
-  return `<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${safeTitle}</title>
-  <style>
-    :root {
-      --bg: #0b0f14;
-      --border: rgba(255,255,255,0.10);
-      --text: rgba(255,255,255,0.92);
-      --muted: rgba(255,255,255,0.70);
-      --accent: #31e1ff;
-    }
-    html, body { height: 100%; margin: 0; background: var(--bg); font-family: Inter, system-ui, -apple-system, Segoe UI, Arial, sans-serif; }
-    .wrap { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
-    .card {
-      width: min(1200px, 96vw);
-      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
-      border: 1px solid var(--border);
-      border-radius: 18px;
-      box-shadow: 0 18px 70px rgba(0,0,0,0.55);
-      overflow: hidden;
-    }
-    .header {
-      display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
-      padding: 14px 16px; color: var(--text);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
-    }
-    .title { font-weight: 900; letter-spacing: 0.2px; }
-    .hint { font-weight: 700; color: var(--muted); font-size: 13px; }
-    .hint b { color: var(--accent); }
-    .player { width: 100%; background: rgba(0,0,0,0.35); display: flex; justify-content: center; align-items: center; }
-    video { width: 100%; height: auto; max-height: 85vh; display: block; object-fit: contain; background: rgba(0,0,0,0.35); }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="card">
-      <div class="header">
-        <div class="title">${safeTitle}</div>
-        <div class="hint">Tip: watch here (fullscreen <b>disabled</b>)</div>
-      </div>
-      <div class="player">
-        <video
-          src="${safeVideoUrl}"
-          controls
-          autoplay
-          playsinline
-          controlsList="nofullscreen nodownload noremoteplayback"
-          disablepictureinpicture
-        ></video>
-      </div>
-    </div>
-  </div>
-</body>
-</html>`;
-};
-
 const Landing = () => {
   const navigate = useNavigate();
   const faqRef = useRef(null);
   const isMobile = useIsMobile();
+
+  // 🔥 inline video refs/state
+  const videoRef = useRef(null);
+  const [isVidPlaying, setIsVidPlaying] = useState(false);
 
   useEffect(() => {
     trackEvent("view_landing", { page: "landing" });
@@ -201,26 +140,32 @@ const Landing = () => {
 
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
 
-  const openVideoInNewWindow = (source = "video_card") => {
+  // ✅ play inline in card (no modal, no fullscreen, no new window)
+  const playInlineVideo = async (source = "video_card") => {
     try {
-      trackEvent("open_walkthrough_video_new_window", { page: "landing", source });
+      trackEvent("play_walkthrough_inline", { page: "landing", source });
     } catch {}
 
-    // ✅ Absolute URL so the new window always finds the video
-    const videoAbsUrl = new URL(walkthroughVideo, window.location.origin).toString();
+    const v = videoRef.current;
+    if (!v) return;
 
-    const html = buildVideoWindowHtml({
-      title: "SmartMark Walkthrough",
-      videoUrl: videoAbsUrl,
-    });
+    try {
+      // ensure it starts from beginning if you want:
+      // v.currentTime = 0;
 
-    const blob = new Blob([html], { type: "text/html" });
-    const blobUrl = URL.createObjectURL(blob);
+      await v.play();
+      setIsVidPlaying(true);
+    } catch {
+      // autoplay restrictions shouldn't apply since it's user click,
+      // but if something blocks it, do nothing.
+    }
+  };
 
-    const w = window.open(blobUrl, "_blank");
-    if (!w) return;
-
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  const pauseInlineVideo = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.pause();
+    setIsVidPlaying(false);
   };
 
   /* sizing */
@@ -239,6 +184,10 @@ const Landing = () => {
     backdropFilter: "blur(8px)",
   };
 
+  // ✅ bigger video frame
+  const videoCardWidth = isMobile ? "90vw" : 520; // increased from ~420
+  const videoCardRadius = 18;
+
   return (
     <div
       style={{
@@ -256,6 +205,8 @@ const Landing = () => {
         html, body { scroll-behavior: smooth; }
         @keyframes floatA { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
         @keyframes floatB { 0%,100% { transform: translateY(0) } 50% { transform: translateY(12px) } }
+        /* remove the iOS blue tap highlight on the video card */
+        .noTap { -webkit-tap-highlight-color: transparent; }
       `}</style>
 
       {/* subtle tech gradients */}
@@ -471,85 +422,92 @@ const Landing = () => {
           Launch Campaign
         </button>
 
-        {/* ✅ Thumbnail from /public, opens NEW window */}
+        {/* ✅ Inline playable video card (no fullscreen + no new window) */}
         <div
-          onClick={() => openVideoInNewWindow("hero_between_cta_and_graphic")}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ")
-              openVideoInNewWindow("hero_between_cta_and_graphic");
-          }}
+          className="noTap"
           style={{
             marginTop: isMobile ? "0.9rem" : "1.05rem",
-            width: isMobile ? "86vw" : 420,
-            borderRadius: 16,
+            width: videoCardWidth,
+            borderRadius: videoCardRadius,
             overflow: "hidden",
-            cursor: "pointer",
             position: "relative",
             ...glass,
           }}
         >
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
-            <img
-              src={WALKTHROUGH_THUMB}
-              alt="SmartMark walkthrough thumbnail"
+            <video
+              ref={videoRef}
+              src={walkthroughVideo}
+              poster={WALKTHROUGH_THUMB}
+              preload="metadata"
+              playsInline
+              controls={isVidPlaying} // show controls only while playing (clean look)
+              controlsList="nofullscreen nodownload noremoteplayback"
+              disablePictureInPicture
+              onPlay={() => setIsVidPlaying(true)}
+              onPause={() => setIsVidPlaying(false)}
+              onEnded={() => setIsVidPlaying(false)}
               style={{
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
                 display: "block",
-                opacity: 0.98,
-              }}
-              onError={(e) => {
-                // fallback if path is wrong
-                e.currentTarget.style.opacity = "0.35";
+                background: "rgba(0,0,0,0.35)",
               }}
             />
 
-            <div
-              aria-hidden
-              style={{
-                position: "absolute",
-                inset: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.35))",
-              }}
-            >
+            {/* Overlay: only show when NOT playing */}
+            {!isVidPlaying && (
               <div
+                onClick={() => playInlineVideo("hero_inline_card")}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") playInlineVideo("hero_inline_card");
+                }}
                 style={{
-                  width: 64,
-                  height: 64,
-                  borderRadius: 999,
-                  border: `1px solid ${GLASS_BORDER}`,
-                  background: "rgba(255,255,255,0.10)",
+                  position: "absolute",
+                  inset: 0,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-                  backdropFilter: "blur(8px)",
+                  cursor: "pointer",
+                  background: "linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.35))",
                 }}
               >
                 <div
                   style={{
-                    width: 0,
-                    height: 0,
-                    borderTop: "10px solid transparent",
-                    borderBottom: "10px solid transparent",
-                    borderLeft: `16px solid ${ACCENT}`,
-                    marginLeft: 4,
-                    filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))",
+                    width: 72,
+                    height: 72,
+                    borderRadius: 999,
+                    border: `1px solid ${GLASS_BORDER}`,
+                    background: "rgba(255,255,255,0.10)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+                    backdropFilter: "blur(8px)",
                   }}
-                />
+                >
+                  <div
+                    style={{
+                      width: 0,
+                      height: 0,
+                      borderTop: "11px solid transparent",
+                      borderBottom: "11px solid transparent",
+                      borderLeft: `18px solid ${ACCENT}`,
+                      marginLeft: 4,
+                      filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))",
+                    }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           <div
             style={{
-              padding: "0.65rem 0.85rem",
+              padding: "0.75rem 0.95rem",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -561,21 +519,51 @@ const Landing = () => {
                 Watch the 10-min walkthrough
               </div>
               <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.85 }}>
-                Opens in a new window (fullscreen disabled)
+                Plays inline (fullscreen disabled)
               </div>
             </div>
-            <div
-              style={{
-                fontWeight: 900,
-                fontSize: 12,
-                color: ACCENT,
-                borderBottom: `1px solid ${ACCENT}55`,
-                paddingBottom: 1,
-                userSelect: "none",
-              }}
-            >
-              Play
-            </div>
+
+            {!isVidPlaying ? (
+              <div
+                onClick={() => playInlineVideo("hero_inline_play_text")}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") playInlineVideo("hero_inline_play_text");
+                }}
+                style={{
+                  fontWeight: 900,
+                  fontSize: 12,
+                  color: ACCENT,
+                  borderBottom: `1px solid ${ACCENT}55`,
+                  paddingBottom: 1,
+                  userSelect: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Play
+              </div>
+            ) : (
+              <div
+                onClick={pauseInlineVideo}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") pauseInlineVideo();
+                }}
+                style={{
+                  fontWeight: 900,
+                  fontSize: 12,
+                  color: "rgba(255,255,255,0.9)",
+                  borderBottom: `1px solid rgba(255,255,255,0.25)`,
+                  paddingBottom: 1,
+                  userSelect: "none",
+                  cursor: "pointer",
+                }}
+              >
+                Pause
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -923,8 +911,6 @@ const Landing = () => {
           </div>
         </div>
       )}
-
-      <div style={{ height: 24 }} />
     </div>
   );
 };
