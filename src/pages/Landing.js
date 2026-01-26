@@ -321,20 +321,23 @@ const Landing = () => {
 
       {/* Hero */}
       <div
-        style={{
-          minHeight: isMobile ? "48vh" : "78vh",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-          gap: isMobile ? "1rem" : "1.6rem",
-          padding: "0 18px",
-          paddingTop: isMobile ? 12 : 18,
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
+  style={{
+    minHeight: isMobile ? "48vh" : "78vh",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    textAlign: "center",
+    gap: isMobile ? "1rem" : "1.6rem",
+    padding: "0 18px",
+    position: "relative",
+    zIndex: 1,
+  }}
+>
+
+  <div style={{ height: isMobile ? 120 : 160 }} />
+
+
         <h1
           style={{
             fontFamily: FONT,
