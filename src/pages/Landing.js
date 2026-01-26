@@ -1,10 +1,14 @@
-import React, { useRef, useEffect } from "react";
+// src/pages/Landing.js
+import React, { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
-// ✅ Put your uploaded mp4 into: src/assets/
+// ✅ Make sure these two files exist in src/assets/
+// - smartmark-walkthrough.mp4
+// - smartmark-walkthrough-thumb.png
 import walkthroughVideo from "../assets/smartmark-walkthrough.mp4";
+import walkthroughThumb from "../assets/smartmark-walkthrough-thumb.png";
 
 /** Tech palette */
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
@@ -40,8 +44,8 @@ const faqList = [
 
 /* responsive helper */
 const useIsMobile = () => {
-  const [isMobile, setIsMobile] = React.useState(window.innerWidth <= 750);
-  React.useEffect(() => {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
+  useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 750);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -49,12 +53,11 @@ const useIsMobile = () => {
   return isMobile;
 };
 
-// ✅ Lightweight “Video Player” page HTML (opened in a new tab/window).
-// - Big player area
-// - NO fullscreen control in Chromium browsers via controlsList="nofullscreen"
-// - playsInline to reduce forced fullscreen on some mobile scenarios
 const buildVideoWindowHtml = ({ title, videoUrl }) => {
-  const safeTitle = String(title || "SmartMark Walkthrough").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeTitle = String(title || "SmartMark Walkthrough")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
   const safeVideoUrl = String(videoUrl || "").replace(/"/g, "%22");
 
   return `<!doctype html>
@@ -66,22 +69,15 @@ const buildVideoWindowHtml = ({ title, videoUrl }) => {
   <style>
     :root {
       --bg: #0b0f14;
-      --card: rgba(255,255,255,0.06);
       --border: rgba(255,255,255,0.10);
       --text: rgba(255,255,255,0.92);
       --muted: rgba(255,255,255,0.70);
+      --accent: #31e1ff;
     }
     html, body { height: 100%; margin: 0; background: var(--bg); font-family: Inter, system-ui, -apple-system, Segoe UI, Arial, sans-serif; }
-    .wrap {
-      min-height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      box-sizing: border-box;
-    }
+    .wrap { min-height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; box-sizing: border-box; }
     .card {
-      width: min(1100px, 96vw);
+      width: min(1200px, 96vw);
       background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
       border: 1px solid var(--border);
       border-radius: 18px;
@@ -89,38 +85,15 @@ const buildVideoWindowHtml = ({ title, videoUrl }) => {
       overflow: hidden;
     }
     .header {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 12px;
-      padding: 14px 16px;
-      color: var(--text);
+      display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+      padding: 14px 16px; color: var(--text);
       border-bottom: 1px solid rgba(255,255,255,0.08);
     }
-    .title {
-      font-weight: 900;
-      letter-spacing: 0.2px;
-    }
-    .hint {
-      font-weight: 700;
-      color: var(--muted);
-      font-size: 13px;
-    }
-    .player {
-      width: 100%;
-      background: rgba(0,0,0,0.35);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-    }
-    video {
-      width: 100%;
-      height: auto;
-      max-height: 85vh;
-      display: block;
-      object-fit: contain;
-      background: rgba(0,0,0,0.35);
-    }
+    .title { font-weight: 900; letter-spacing: 0.2px; }
+    .hint { font-weight: 700; color: var(--muted); font-size: 13px; }
+    .hint b { color: var(--accent); }
+    .player { width: 100%; background: rgba(0,0,0,0.35); display: flex; justify-content: center; align-items: center; }
+    video { width: 100%; height: auto; max-height: 85vh; display: block; object-fit: contain; background: rgba(0,0,0,0.35); }
   </style>
 </head>
 <body>
@@ -128,7 +101,7 @@ const buildVideoWindowHtml = ({ title, videoUrl }) => {
     <div class="card">
       <div class="header">
         <div class="title">${safeTitle}</div>
-        <div class="hint">Tip: keep it in this window (fullscreen disabled)</div>
+        <div class="hint">Tip: watch here (fullscreen <b>disabled</b>)</div>
       </div>
       <div class="player">
         <video
@@ -156,11 +129,11 @@ const Landing = () => {
   }, []);
 
   // Early Access modal
-  const [eaOpen, setEaOpen] = React.useState(false);
-  const [eaName, setEaName] = React.useState("");
-  const [eaEmail, setEaEmail] = React.useState("");
-  const [eaSubmitted, setEaSubmitted] = React.useState(false);
-  const [eaServerOk, setEaServerOk] = React.useState(false);
+  const [eaOpen, setEaOpen] = useState(false);
+  const [eaName, setEaName] = useState("");
+  const [eaEmail, setEaEmail] = useState("");
+  const [eaSubmitted, setEaSubmitted] = useState(false);
+  const [eaServerOk, setEaServerOk] = useState(false);
 
   const openEarlyAccess = (source = "cta") => {
     try {
@@ -173,30 +146,7 @@ const Landing = () => {
 
   const closeEarlyAccess = () => setEaOpen(false);
 
-  // ✅ Open walkthrough in a NEW WINDOW (bigger player, no fullscreen button)
-  const openVideoInNewWindow = (source = "video_card") => {
-    try {
-      trackEvent("open_walkthrough_video_new_window", { page: "landing", source });
-    } catch {}
-
-    // Open an empty window first (avoids popup blockers when triggered by click)
-    const w = window.open("", "_blank", "noopener,noreferrer");
-    if (!w) return;
-
-    const html = buildVideoWindowHtml({
-      title: "SmartMark Walkthrough",
-      videoUrl: walkthroughVideo,
-    });
-
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
-    try {
-      w.focus();
-    } catch {}
-  };
-
-  React.useEffect(() => {
+  useEffect(() => {
     if (!eaOpen) return;
     const onKey = (e) => {
       if (e.key === "Escape") closeEarlyAccess();
@@ -250,6 +200,31 @@ const Landing = () => {
     window.scrollTo({ top, behavior: "smooth" });
   };
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
+
+  // ✅ Opens the video in a NEW window that won’t fullscreen (and won’t be blank)
+  const openVideoInNewWindow = (source = "video_card") => {
+    try {
+      trackEvent("open_walkthrough_video_new_window", { page: "landing", source });
+    } catch {}
+
+    // Make URL absolute so it loads correctly in a new page
+    const videoAbsUrl = new URL(walkthroughVideo, window.location.origin).toString();
+
+    const html = buildVideoWindowHtml({
+      title: "SmartMark Walkthrough",
+      videoUrl: videoAbsUrl,
+    });
+
+    // Use Blob URL to avoid about:blank relative-path issues
+    const blob = new Blob([html], { type: "text/html" });
+    const blobUrl = URL.createObjectURL(blob);
+
+    const w = window.open(blobUrl, "_blank");
+    if (!w) return;
+
+    // cleanup
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+  };
 
   /* sizing */
   const headerPadding = isMobile ? "16px" : "32px";
@@ -384,7 +359,8 @@ const Landing = () => {
               transition: "transform .15s ease, background .2s ease",
               ...glass,
               border: `1px solid ${GLASS_BORDER}`,
-              background: "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
             onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
@@ -437,6 +413,7 @@ const Landing = () => {
           zIndex: 1,
         }}
       >
+        {/* push hero down a bit so it looks balanced with the video card */}
         <div style={{ height: isMobile ? 120 : 160 }} />
 
         <h1
@@ -499,7 +476,7 @@ const Landing = () => {
           Launch Campaign
         </button>
 
-        {/* ✅ Video card stays on page, but opens a new window for actual playback */}
+        {/* ✅ Walkthrough card stays on page; click opens a NEW window player (fullscreen disabled) */}
         <div
           onClick={() => openVideoInNewWindow("hero_between_cta_and_graphic")}
           role="button"
@@ -510,7 +487,7 @@ const Landing = () => {
           }}
           style={{
             marginTop: isMobile ? "0.9rem" : "1.05rem",
-            width: isMobile ? "86vw" : 380,
+            width: isMobile ? "86vw" : 420,
             borderRadius: 16,
             overflow: "hidden",
             cursor: "pointer",
@@ -518,21 +495,20 @@ const Landing = () => {
             ...glass,
           }}
         >
-          {/* preview */}
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
-            <video
-              src={walkthroughVideo}
-              muted
-              playsInline
-              preload="metadata"
+            <img
+              src={walkthroughThumb}
+              alt="SmartMark walkthrough thumbnail"
               style={{
                 width: "100%",
                 height: "100%",
                 objectFit: "cover",
                 display: "block",
-                opacity: 0.92,
+                opacity: 0.98,
               }}
             />
+
+            {/* play overlay */}
             <div
               aria-hidden
               style={{
@@ -575,7 +551,7 @@ const Landing = () => {
 
           <div
             style={{
-              padding: "0.7rem 0.9rem",
+              padding: "0.65rem 0.85rem",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -587,7 +563,7 @@ const Landing = () => {
                 Watch the 10-min walkthrough
               </div>
               <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.85 }}>
-                Opens in a new window (better quality)
+                Opens in a new window (fullscreen disabled)
               </div>
             </div>
             <div
@@ -821,7 +797,7 @@ const Landing = () => {
         </button>
       </div>
 
-      {/* Contact */}
+      {/* Contact (barely visible, bottom-center) */}
       <div
         style={{
           width: "100%",
