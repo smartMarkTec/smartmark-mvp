@@ -220,7 +220,8 @@ const Landing = () => {
           flexDirection: isMobile ? "column" : "row",
           justifyContent: isMobile ? "center" : "space-between",
           alignItems: "center",
-          padding: `18px ${headerPadding} 0`,
+          padding: `${isMobile ? 22 : 28}px ${headerPadding} 0`,
+
           gap: isMobile ? "0.9rem" : 0,
           position: "relative",
           zIndex: 2,
@@ -329,6 +330,7 @@ const Landing = () => {
           textAlign: "center",
           gap: isMobile ? "1rem" : "1.6rem",
           padding: "0 18px",
+          paddingTop: isMobile ? 12 : 18,
           position: "relative",
           zIndex: 1,
         }}
