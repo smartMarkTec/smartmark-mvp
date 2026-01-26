@@ -4,22 +4,21 @@ import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
-// ✅ Make sure these two files exist in src/assets/
-// - smartmark-walkthrough.mp4
-// - smartmark-walkthrough-thumb.png
+// ✅ MP4 stays in src/assets so it can be imported
 import walkthroughVideo from "../assets/smartmark-walkthrough.mp4";
-import walkthroughThumb from "../assets/smartmark-walkthrough-thumb.png";
+
+// ✅ PNG is in /public, so reference by URL (NOT import)
+const WALKTHROUGH_THUMB = "/smartmark-walkthrough-thumb.png";
 
 /** Tech palette */
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG_DARK = "#0b0f14"; // deep navy
-const ACCENT = "#31e1ff"; // electric cyan
-const ACCENT_2 = "#7c4dff"; // violet
-const BTN_BASE = "#0f6fff"; // brand blue
+const BG_DARK = "#0b0f14";
+const ACCENT = "#31e1ff";
+const ACCENT_2 = "#7c4dff";
+const BTN_BASE = "#0f6fff";
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
-// Formspree endpoint (sends submissions to the email configured in your Formspree form)
 const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/mqeqaozw";
 
 /* content */
@@ -29,6 +28,7 @@ const processSteps = [
   { icon: "✅", title: "Review and approve" },
   { icon: "🚀", title: "Launch" },
 ];
+
 const faqList = [
   {
     question: "How much does each campaign cost?",
@@ -192,22 +192,21 @@ const Landing = () => {
 
   const goToLogin = () => navigate("/login");
 
-  /* smooth scroll */
   const scrollToFaq = () => {
     const el = faqRef.current;
     if (!el) return;
     const top = window.scrollY + el.getBoundingClientRect().top - 12;
     window.scrollTo({ top, behavior: "smooth" });
   };
+
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: "smooth" });
 
-  // ✅ Opens the video in a NEW window that won’t fullscreen (and won’t be blank)
   const openVideoInNewWindow = (source = "video_card") => {
     try {
       trackEvent("open_walkthrough_video_new_window", { page: "landing", source });
     } catch {}
 
-    // Make URL absolute so it loads correctly in a new page
+    // ✅ Absolute URL so the new window always finds the video
     const videoAbsUrl = new URL(walkthroughVideo, window.location.origin).toString();
 
     const html = buildVideoWindowHtml({
@@ -215,14 +214,12 @@ const Landing = () => {
       videoUrl: videoAbsUrl,
     });
 
-    // Use Blob URL to avoid about:blank relative-path issues
     const blob = new Blob([html], { type: "text/html" });
     const blobUrl = URL.createObjectURL(blob);
 
     const w = window.open(blobUrl, "_blank");
     if (!w) return;
 
-    // cleanup
     setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
   };
 
@@ -305,7 +302,6 @@ const Landing = () => {
           zIndex: 2,
         }}
       >
-        {/* Left: small logo + FAQ */}
         <div
           style={{
             display: "flex",
@@ -413,7 +409,6 @@ const Landing = () => {
           zIndex: 1,
         }}
       >
-        {/* push hero down a bit so it looks balanced with the video card */}
         <div style={{ height: isMobile ? 120 : 160 }} />
 
         <h1
@@ -476,7 +471,7 @@ const Landing = () => {
           Launch Campaign
         </button>
 
-        {/* ✅ Walkthrough card stays on page; click opens a NEW window player (fullscreen disabled) */}
+        {/* ✅ Thumbnail from /public, opens NEW window */}
         <div
           onClick={() => openVideoInNewWindow("hero_between_cta_and_graphic")}
           role="button"
@@ -497,7 +492,7 @@ const Landing = () => {
         >
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
             <img
-              src={walkthroughThumb}
+              src={WALKTHROUGH_THUMB}
               alt="SmartMark walkthrough thumbnail"
               style={{
                 width: "100%",
@@ -506,9 +501,12 @@ const Landing = () => {
                 display: "block",
                 opacity: 0.98,
               }}
+              onError={(e) => {
+                // fallback if path is wrong
+                e.currentTarget.style.opacity = "0.35";
+              }}
             />
 
-            {/* play overlay */}
             <div
               aria-hidden
               style={{
@@ -669,47 +667,6 @@ const Landing = () => {
         </div>
       </div>
 
-      {/* Sub-CTA */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "0.8rem",
-          paddingBottom: "1.4rem",
-        }}
-      >
-        <div style={{ color: "#bfeeff", fontWeight: 700 }}>
-          Effortless. No marketing experience needed.
-        </div>
-        <button
-          onClick={() => openEarlyAccess("subcta_get_started")}
-          style={{
-            padding: isMobile ? "0.75rem 1.8rem" : "1rem 2.4rem",
-            fontSize: isMobile ? "1rem" : "1.1rem",
-            background: BTN_BASE,
-            color: "#fff",
-            border: "none",
-            borderRadius: 999,
-            fontWeight: 800,
-            boxShadow: "0 10px 26px rgba(15,111,255,0.35)",
-            cursor: "pointer",
-            transition: "transform .15s ease, background .2s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.background = BTN_BASE_HOVER;
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.background = BTN_BASE;
-          }}
-        >
-          Get Started
-        </button>
-      </div>
-
       {/* FAQ */}
       <div
         ref={faqRef}
@@ -795,39 +752,6 @@ const Landing = () => {
         >
           ↑ Back to top
         </button>
-      </div>
-
-      {/* Contact (barely visible, bottom-center) */}
-      <div
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "center",
-          padding: "6px 0 10px",
-          opacity: 0.22,
-          fontSize: 12,
-          fontWeight: 700,
-          color: "rgba(255,255,255,0.75)",
-          letterSpacing: 0.2,
-          userSelect: "none",
-          position: "relative",
-          zIndex: 1,
-        }}
-      >
-        <span>
-          Contact:{" "}
-          <a
-            href="mailto:knowwilltech@gmail.com"
-            style={{
-              color: "rgba(255,255,255,0.75)",
-              textDecoration: "none",
-              borderBottom: "1px solid rgba(255,255,255,0.12)",
-              paddingBottom: 1,
-            }}
-          >
-            knowwilltech@gmail.com
-          </a>
-        </span>
       </div>
 
       <div style={{ height: 24 }} />
