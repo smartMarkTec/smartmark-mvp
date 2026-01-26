@@ -519,7 +519,7 @@ const Landing = () => {
                 Watch the 10-min walkthrough
               </div>
               <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.85 }}>
-                Plays inline (fullscreen disabled)
+            
               </div>
             </div>
 
@@ -671,7 +671,7 @@ const Landing = () => {
          {/* PUT THE CONTACT BLOCK RIGHT HERE */}
 
       <div style={{ height: 24 }} />
-      
+
         <h2
           style={{
             fontWeight: 900,
