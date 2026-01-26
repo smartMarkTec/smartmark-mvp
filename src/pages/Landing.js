@@ -3,6 +3,10 @@ import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
+// ✅ Put your uploaded mp4 into: src/assets/
+// Example filename: smartmark-walkthrough.mp4
+import walkthroughVideo from "../assets/smartmark-walkthrough.mp4";
+
 /** Tech palette */
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const BG_DARK = "#0b0f14"; // deep navy
@@ -52,16 +56,18 @@ const Landing = () => {
   const isMobile = useIsMobile();
 
   useEffect(() => {
-    // intentionally left empty: we DO NOT clear drafts on load
     trackEvent("view_landing", { page: "landing" });
   }, []);
 
-  // Early Access modal (simple)
+  // Early Access modal
   const [eaOpen, setEaOpen] = React.useState(false);
   const [eaName, setEaName] = React.useState("");
   const [eaEmail, setEaEmail] = React.useState("");
   const [eaSubmitted, setEaSubmitted] = React.useState(false);
   const [eaServerOk, setEaServerOk] = React.useState(false);
+
+  // Walkthrough video modal
+  const [videoOpen, setVideoOpen] = React.useState(false);
 
   const openEarlyAccess = (source = "cta") => {
     try {
@@ -72,18 +78,28 @@ const Landing = () => {
     setEaOpen(true);
   };
 
-  const closeEarlyAccess = () => {
-    setEaOpen(false);
+  const closeEarlyAccess = () => setEaOpen(false);
+
+  const openVideo = (source = "video_card") => {
+    try {
+      trackEvent("open_walkthrough_video", { page: "landing", source });
+    } catch {}
+    setVideoOpen(true);
   };
 
+  const closeVideo = () => setVideoOpen(false);
+
   React.useEffect(() => {
-    if (!eaOpen) return;
+    if (!eaOpen && !videoOpen) return;
     const onKey = (e) => {
-      if (e.key === "Escape") closeEarlyAccess();
+      if (e.key === "Escape") {
+        if (videoOpen) closeVideo();
+        if (eaOpen) closeEarlyAccess();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [eaOpen]);
+  }, [eaOpen, videoOpen]);
 
   const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
     "SmartMark Early Access"
@@ -97,7 +113,6 @@ const Landing = () => {
 
     let ok = false;
 
-    // Send to Formspree (most reliable format: FormData)
     try {
       const fd = new FormData();
       fd.append("name", eaName.trim());
@@ -121,25 +136,9 @@ const Landing = () => {
     } catch {}
   };
 
-  const clearDraftsAndGoToForm = () => {
-    // GA event first (before any navigation)
-    trackEvent("start_campaign", { page: "landing" });
-
-    try {
-      // clear only the keys related to starting a brand-new campaign
-      localStorage.removeItem("sm_form_draft_v2");
-      localStorage.removeItem("draft_form_creatives");
-      localStorage.removeItem("draft_form_creatives_v2");
-      localStorage.removeItem("smartmark_media_selection");
-      // keep user login autofill and per-user state
-    } catch {}
-
-    navigate("/form");
-  };
-
   const goToLogin = () => navigate("/login");
 
-  /* smooth scroll both ways; avoids scrollIntoView quirks */
+  /* smooth scroll */
   const scrollToFaq = () => {
     const el = faqRef.current;
     if (!el) return;
@@ -158,8 +157,7 @@ const Landing = () => {
   const faqTitle = isMobile ? "1.4rem" : "2.1rem";
 
   const glass = {
-    background:
-      "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
+    background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
     border: `1px solid ${GLASS_BORDER}`,
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
     backdropFilter: "blur(8px)",
@@ -177,7 +175,6 @@ const Landing = () => {
         color: "#fff",
       }}
     >
-      {/* Site-wide tweaks (renamed to avoid ESLint 'global' directive parsing) */}
       <style>{`
         html, body, #root { height: 100%; background: ${BG_DARK}; margin: 0; }
         html, body { scroll-behavior: smooth; }
@@ -283,8 +280,7 @@ const Landing = () => {
               transition: "transform .15s ease, background .2s ease",
               ...glass,
               border: `1px solid ${GLASS_BORDER}`,
-              background:
-                "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
             onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
@@ -395,9 +391,114 @@ const Landing = () => {
         >
           Launch Campaign
         </button>
+
+        {/* ✅ Small clickable walkthrough video card (between button and graphic) */}
+        <div
+          onClick={() => openVideo("hero_between_cta_and_graphic")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") openVideo("hero_between_cta_and_graphic");
+          }}
+          style={{
+            marginTop: isMobile ? "0.9rem" : "1.05rem",
+            width: isMobile ? "86vw" : 360,
+            borderRadius: 16,
+            overflow: "hidden",
+            cursor: "pointer",
+            position: "relative",
+            ...glass,
+          }}
+        >
+          <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
+            <video
+              src={walkthroughVideo}
+              muted
+              playsInline
+              preload="metadata"
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
+                opacity: 0.92,
+              }}
+            />
+            {/* play overlay */}
+            <div
+              aria-hidden
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                background: "linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.35))",
+              }}
+            >
+              <div
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 999,
+                  border: `1px solid ${GLASS_BORDER}`,
+                  background: "rgba(255,255,255,0.10)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+                  backdropFilter: "blur(8px)",
+                }}
+              >
+                <div
+                  style={{
+                    width: 0,
+                    height: 0,
+                    borderTop: "10px solid transparent",
+                    borderBottom: "10px solid transparent",
+                    borderLeft: `16px solid ${ACCENT}`,
+                    marginLeft: 4,
+                    filter: "drop-shadow(0 6px 14px rgba(0,0,0,0.35))",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: "0.65rem 0.85rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <div style={{ textAlign: "left" }}>
+              <div style={{ fontWeight: 900, fontSize: 14, color: "#eaf5ff" }}>
+                Watch the 10-min walkthrough
+              </div>
+              <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.85 }}>
+                Click to open video
+              </div>
+            </div>
+            <div
+              style={{
+                fontWeight: 900,
+                fontSize: 12,
+                color: ACCENT,
+                borderBottom: `1px solid ${ACCENT}55`,
+                paddingBottom: 1,
+                userSelect: "none",
+              }}
+            >
+              Play
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Process — grid keeps emojis centered above labels; arrows aligned */}
+      {/* Process — graphic */}
       <div
         style={{
           width: "100%",
@@ -434,12 +535,8 @@ const Landing = () => {
                     textAlign: "center",
                     transition: "transform .15s ease",
                   }}
-                  onMouseEnter={(e) =>
-                    (e.currentTarget.style.transform = "translateY(-2px)")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.currentTarget.style.transform = "translateY(0)")
-                  }
+                  onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+                  onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
                 >
                   <span
                     aria-hidden
@@ -572,12 +669,8 @@ const Landing = () => {
                 transition: "transform .15s ease, box-shadow .2s ease",
                 ...glass,
               }}
-              onMouseEnter={(e) =>
-                (e.currentTarget.style.transform = "translateY(-1px)")
-              }
-              onMouseLeave={(e) =>
-                (e.currentTarget.style.transform = "translateY(0)")
-              }
+              onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-1px)")}
+              onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
             >
               <div
                 style={{
@@ -627,7 +720,7 @@ const Landing = () => {
           display: "flex",
           justifyContent: "center",
           padding: "6px 0 10px",
-          opacity: 0.22, // barely visible
+          opacity: 0.22,
           fontSize: 12,
           fontWeight: 700,
           color: "rgba(255,255,255,0.75)",
@@ -653,7 +746,6 @@ const Landing = () => {
         </span>
       </div>
 
-      {/* tiny spacer so the bottom gradient never reveals page background */}
       <div style={{ height: 24 }} />
 
       {/* Early Access Modal */}
@@ -824,7 +916,75 @@ const Landing = () => {
         </div>
       )}
 
-      {/* tiny spacer so the bottom gradient never reveals page background */}
+      {/* Walkthrough Video Modal */}
+      {videoOpen && (
+        <div
+          onClick={closeVideo}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 10000,
+            padding: "18px",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: isMobile ? "94vw" : 920,
+              borderRadius: 16,
+              overflow: "hidden",
+              position: "relative",
+              ...glass,
+            }}
+          >
+            <button
+              onClick={closeVideo}
+              aria-label="Close video"
+              style={{
+                position: "absolute",
+                top: 10,
+                right: 10,
+                width: 34,
+                height: 34,
+                borderRadius: 999,
+                border: `1px solid ${GLASS_BORDER}`,
+                background: "rgba(0,0,0,0.35)",
+                color: "#fff",
+                cursor: "pointer",
+                fontWeight: 900,
+                lineHeight: 1,
+                zIndex: 2,
+              }}
+            >
+              ×
+            </button>
+
+            <div style={{ width: "100%", background: "rgba(0,0,0,0.25)" }}>
+              <video
+                src={walkthroughVideo}
+                controls
+                autoPlay
+                style={{
+                  width: "100%",
+                  height: "auto",
+                  display: "block",
+                  maxHeight: isMobile ? "70vh" : "75vh",
+                }}
+              />
+            </div>
+
+            <div style={{ padding: "0.75rem 0.9rem", display: "flex", justifyContent: "space-between" }}>
+              <div style={{ fontWeight: 900, color: "#eaf5ff" }}>SmartMark Walkthrough</div>
+              <div style={{ fontWeight: 700, opacity: 0.85 }}>Press Esc to close</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={{ height: 24 }} />
     </div>
   );
