@@ -4,7 +4,6 @@ import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
 // ✅ Put your uploaded mp4 into: src/assets/
-// Example filename: smartmark-walkthrough.mp4
 import walkthroughVideo from "../assets/smartmark-walkthrough.mp4";
 
 /** Tech palette */
@@ -50,6 +49,103 @@ const useIsMobile = () => {
   return isMobile;
 };
 
+// ✅ Lightweight “Video Player” page HTML (opened in a new tab/window).
+// - Big player area
+// - NO fullscreen control in Chromium browsers via controlsList="nofullscreen"
+// - playsInline to reduce forced fullscreen on some mobile scenarios
+const buildVideoWindowHtml = ({ title, videoUrl }) => {
+  const safeTitle = String(title || "SmartMark Walkthrough").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const safeVideoUrl = String(videoUrl || "").replace(/"/g, "%22");
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${safeTitle}</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --card: rgba(255,255,255,0.06);
+      --border: rgba(255,255,255,0.10);
+      --text: rgba(255,255,255,0.92);
+      --muted: rgba(255,255,255,0.70);
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); font-family: Inter, system-ui, -apple-system, Segoe UI, Arial, sans-serif; }
+    .wrap {
+      min-height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .card {
+      width: min(1100px, 96vw);
+      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03));
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 18px 70px rgba(0,0,0,0.55);
+      overflow: hidden;
+    }
+    .header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      color: var(--text);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .title {
+      font-weight: 900;
+      letter-spacing: 0.2px;
+    }
+    .hint {
+      font-weight: 700;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .player {
+      width: 100%;
+      background: rgba(0,0,0,0.35);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    video {
+      width: 100%;
+      height: auto;
+      max-height: 85vh;
+      display: block;
+      object-fit: contain;
+      background: rgba(0,0,0,0.35);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <div class="title">${safeTitle}</div>
+        <div class="hint">Tip: keep it in this window (fullscreen disabled)</div>
+      </div>
+      <div class="player">
+        <video
+          src="${safeVideoUrl}"
+          controls
+          autoplay
+          playsinline
+          controlsList="nofullscreen nodownload noremoteplayback"
+          disablepictureinpicture
+        ></video>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
 const Landing = () => {
   const navigate = useNavigate();
   const faqRef = useRef(null);
@@ -66,9 +162,6 @@ const Landing = () => {
   const [eaSubmitted, setEaSubmitted] = React.useState(false);
   const [eaServerOk, setEaServerOk] = React.useState(false);
 
-  // Walkthrough video modal
-  const [videoOpen, setVideoOpen] = React.useState(false);
-
   const openEarlyAccess = (source = "cta") => {
     try {
       trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
@@ -80,26 +173,37 @@ const Landing = () => {
 
   const closeEarlyAccess = () => setEaOpen(false);
 
-  const openVideo = (source = "video_card") => {
+  // ✅ Open walkthrough in a NEW WINDOW (bigger player, no fullscreen button)
+  const openVideoInNewWindow = (source = "video_card") => {
     try {
-      trackEvent("open_walkthrough_video", { page: "landing", source });
+      trackEvent("open_walkthrough_video_new_window", { page: "landing", source });
     } catch {}
-    setVideoOpen(true);
+
+    // Open an empty window first (avoids popup blockers when triggered by click)
+    const w = window.open("", "_blank", "noopener,noreferrer");
+    if (!w) return;
+
+    const html = buildVideoWindowHtml({
+      title: "SmartMark Walkthrough",
+      videoUrl: walkthroughVideo,
+    });
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    try {
+      w.focus();
+    } catch {}
   };
 
-  const closeVideo = () => setVideoOpen(false);
-
   React.useEffect(() => {
-    if (!eaOpen && !videoOpen) return;
+    if (!eaOpen) return;
     const onKey = (e) => {
-      if (e.key === "Escape") {
-        if (videoOpen) closeVideo();
-        if (eaOpen) closeEarlyAccess();
-      }
+      if (e.key === "Escape") closeEarlyAccess();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [eaOpen, videoOpen]);
+  }, [eaOpen]);
 
   const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
     "SmartMark Early Access"
@@ -162,10 +266,6 @@ const Landing = () => {
     boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
     backdropFilter: "blur(8px)",
   };
-
-  // ✅ Bigger modal sizes
-  const modalMaxW = isMobile ? "96vw" : "980px";
-  const modalMaxH = isMobile ? "78vh" : "88vh";
 
   return (
     <div
@@ -284,8 +384,7 @@ const Landing = () => {
               transition: "transform .15s ease, background .2s ease",
               ...glass,
               border: `1px solid ${GLASS_BORDER}`,
-              background:
-                "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
+              background: "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))",
             }}
             onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
             onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
@@ -400,17 +499,18 @@ const Landing = () => {
           Launch Campaign
         </button>
 
-        {/* ✅ Small clickable walkthrough video card */}
+        {/* ✅ Video card stays on page, but opens a new window for actual playback */}
         <div
-          onClick={() => openVideo("hero_between_cta_and_graphic")}
+          onClick={() => openVideoInNewWindow("hero_between_cta_and_graphic")}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") openVideo("hero_between_cta_and_graphic");
+            if (e.key === "Enter" || e.key === " ")
+              openVideoInNewWindow("hero_between_cta_and_graphic");
           }}
           style={{
             marginTop: isMobile ? "0.9rem" : "1.05rem",
-            width: isMobile ? "86vw" : 360,
+            width: isMobile ? "86vw" : 380,
             borderRadius: 16,
             overflow: "hidden",
             cursor: "pointer",
@@ -418,6 +518,7 @@ const Landing = () => {
             ...glass,
           }}
         >
+          {/* preview */}
           <div style={{ position: "relative", width: "100%", aspectRatio: "16 / 9" }}>
             <video
               src={walkthroughVideo}
@@ -474,7 +575,7 @@ const Landing = () => {
 
           <div
             style={{
-              padding: "0.65rem 0.85rem",
+              padding: "0.7rem 0.9rem",
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
@@ -486,7 +587,7 @@ const Landing = () => {
                 Watch the 10-min walkthrough
               </div>
               <div style={{ fontWeight: 700, fontSize: 12, opacity: 0.85 }}>
-                Click to open video
+                Opens in a new window (better quality)
               </div>
             </div>
             <div
@@ -919,102 +1020,6 @@ const Landing = () => {
                 </button>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* ✅ Bigger Walkthrough Video Modal (and no-fullscreen) */}
-      {videoOpen && (
-        <div
-          onClick={closeVideo}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 10000,
-            padding: "18px",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: modalMaxW,
-              maxWidth: "92vw",
-              maxHeight: modalMaxH,
-              borderRadius: 18,
-              overflow: "hidden",
-              position: "relative",
-              ...glass,
-            }}
-          >
-            <button
-              onClick={closeVideo}
-              aria-label="Close video"
-              style={{
-                position: "absolute",
-                top: 10,
-                right: 10,
-                width: 36,
-                height: 36,
-                borderRadius: 999,
-                border: `1px solid ${GLASS_BORDER}`,
-                background: "rgba(0,0,0,0.35)",
-                color: "#fff",
-                cursor: "pointer",
-                fontWeight: 900,
-                lineHeight: 1,
-                zIndex: 2,
-              }}
-            >
-              ×
-            </button>
-
-            <div
-              style={{
-                width: "100%",
-                background: "rgba(0,0,0,0.25)",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "center",
-              }}
-            >
-              <video
-                src={walkthroughVideo}
-                controls
-                autoPlay
-                playsInline
-                // Try to remove fullscreen option (works best on Chrome/Edge)
-                controlsList="nofullscreen nodownload noremoteplayback"
-                disablePictureInPicture
-                style={{
-                  width: "100%",
-                  height: "auto",
-                  display: "block",
-                  // ✅ Keep it from going beyond the modal height
-                  maxHeight: `calc(${modalMaxH} - 58px)`,
-                  // ✅ Avoid upscaling too wide (softness)
-                  maxWidth: isMobile ? "96vw" : "980px",
-                  objectFit: "contain",
-                  background: "rgba(0,0,0,0.35)",
-                }}
-              />
-            </div>
-
-            <div
-              style={{
-                padding: "0.8rem 0.95rem",
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                alignItems: "center",
-              }}
-            >
-              <div style={{ fontWeight: 900, color: "#eaf5ff" }}>SmartMark Walkthrough</div>
-              <div style={{ fontWeight: 700, opacity: 0.85 }}>Press Esc to close</div>
-            </div>
           </div>
         </div>
       )}
