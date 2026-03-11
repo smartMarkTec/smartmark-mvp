@@ -151,36 +151,49 @@ function defaultsFor(ownerKey) {
 async function refreshDefaults(userToken, ownerKey) {
   const DEFAULTS = defaultsFor(ownerKey);
 
-  try {
-    const [acctRes, pagesRes] = await Promise.all([
-      axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
-        params: { access_token: userToken, fields: 'id,name,account_status' },
-      }),
-      axios.get('https://graph.facebook.com/v18.0/me/accounts', {
-        params: { access_token: userToken, fields: 'id,name,access_token' },
-      }),
-    ]);
+  const [acctRes, pagesRes] = await Promise.allSettled([
+    axios.get('https://graph.facebook.com/v18.0/me/adaccounts', {
+      params: { access_token: userToken, fields: 'id,name,account_status' },
+    }),
+    axios.get('https://graph.facebook.com/v18.0/me/accounts', {
+      params: { access_token: userToken, fields: 'id,name,access_token' },
+    }),
+  ]);
 
-    const accts = Array.isArray(acctRes.data?.data) ? acctRes.data.data : [];
-    const pages = Array.isArray(pagesRes.data?.data) ? pagesRes.data.data : [];
-
-    DEFAULTS.adAccounts = accts.map(a => ({
-      id: String(a.id).replace(/^act_/, ''),
-      name: a.name,
-      account_status: a.account_status
-    }));
-    DEFAULTS.pages = pages.map(p => ({ id: p.id, name: p.name }));
-
-    const firstAcct = DEFAULTS.adAccounts[0]?.id || null;
-    const firstPage = DEFAULTS.pages[0]?.id || null;
-
-    if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find(a => a.id === DEFAULTS.adAccountId)) {
-      DEFAULTS.adAccountId = firstAcct;
+  // ad accounts: only overwrite if fetch actually succeeded
+  if (acctRes.status === 'fulfilled') {
+    const accts = Array.isArray(acctRes.value?.data?.data) ? acctRes.value.data.data : [];
+    if (accts.length > 0) {
+      DEFAULTS.adAccounts = accts.map(a => ({
+        id: String(a.id).replace(/^act_/, ''),
+        name: a.name,
+        account_status: a.account_status
+      }));
     }
-    if (!DEFAULTS.pageId || !DEFAULTS.pages.find(p => p.id === DEFAULTS.pageId)) {
-      DEFAULTS.pageId = firstPage;
+  } else {
+    console.warn('[refreshDefaults] me/adaccounts failed:', acctRes.reason?.response?.data || acctRes.reason?.message);
+  }
+
+  // pages: only overwrite if fetch actually succeeded
+  if (pagesRes.status === 'fulfilled') {
+    const pages = Array.isArray(pagesRes.value?.data?.data) ? pagesRes.value.data.data : [];
+    if (pages.length > 0) {
+      DEFAULTS.pages = pages.map(p => ({ id: p.id, name: p.name }));
     }
-  } catch { /* ignore */ }
+  } else {
+    console.warn('[refreshDefaults] me/accounts failed:', pagesRes.reason?.response?.data || pagesRes.reason?.message);
+  }
+
+  // preserve existing selections if possible
+  const firstAcct = DEFAULTS.adAccounts[0]?.id || null;
+  const firstPage = DEFAULTS.pages[0]?.id || null;
+
+  if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find(a => a.id === DEFAULTS.adAccountId)) {
+    DEFAULTS.adAccountId = firstAcct;
+  }
+  if (!DEFAULTS.pageId || !DEFAULTS.pages.find(p => p.id === DEFAULTS.pageId)) {
+    DEFAULTS.pageId = firstPage;
+  }
 }
 
 /* ------------------------------- ENV ------------------------------- */
@@ -1330,23 +1343,33 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
 
     const list = Array.isArray(response.data?.data) ? response.data.data : [];
 
-    // keep only top 2 like your UI expects
     return res.json({
       data: list.slice(0, 2),
       source: 'facebook',
     });
   } catch (err) {
-    // fallback to locally stored launched campaigns
     try {
       await ensureUsersAndSessions();
       await db.read();
 
+      const sid = getSidFromReq(req);
+      const ownerCandidates = new Set([
+        String(ownerKey || ''),
+        String(sid || ''),
+      ]);
+
+      // also include user:<username> if session resolves
+      try {
+        const sess = (db.data.sessions || []).find(s => String(s.sid) === String(sid));
+        if (sess?.username) ownerCandidates.add(`user:${String(sess.username).trim()}`);
+      } catch {}
+
       const cached = (db.data?.campaign_creatives || [])
-        .filter(
-          (r) =>
-            String(r.ownerKey) === String(ownerKey) &&
-            String(r.accountId).replace(/^act_/, '') === normalizedAccountId
-        )
+        .filter((r) => {
+          const recAccount = String(r.accountId || '').replace(/^act_/, '');
+          const recOwner = String(r.ownerKey || '');
+          return recAccount === normalizedAccountId && ownerCandidates.has(recOwner);
+        })
         .map((r) => ({
           id: r.campaignId,
           name: r.name || 'Campaign',
@@ -1359,6 +1382,7 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
       if (cached.length > 0) {
         console.warn('[campaigns] Facebook fetch failed, serving cached campaigns instead:', {
           ownerKey,
+          sid,
           accountId: normalizedAccountId,
           fbError: err.response?.data || err.message,
           cachedCount: cached.length,
