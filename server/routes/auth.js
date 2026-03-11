@@ -21,6 +21,116 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 
 /* ------------------------------------------------------------------ */
+/*                  META API CALL LOGGING / DEBUG COUNTER             */
+/* ------------------------------------------------------------------ */
+const META_CALL_STATS = {
+  startedAt: new Date().toISOString(),
+  total: 0,
+  success: 0,
+  fail: 0,
+  byLabel: {},
+  recent: [],
+};
+
+function getMetaLabel(method, url) {
+  const m = String(method || 'GET').toUpperCase();
+  const u = String(url || '');
+
+  if (u.includes('/me/adaccounts')) return `${m} me/adaccounts`;
+  if (u.includes('/me/accounts')) return `${m} me/accounts`;
+  if (u.includes('/insights')) return `${m} insights`;
+  if (u.includes('/adimages')) return `${m} adimages`;
+  if (u.includes('/adcreatives')) return `${m} adcreatives`;
+  if (u.includes('/adsets')) return `${m} adsets`;
+  if (u.includes('/ads')) return `${m} ads`;
+
+  if (/\/act_[^/]+\/campaigns/.test(u)) {
+    return m === 'POST' ? 'POST campaigns_create' : 'GET campaigns_list';
+  }
+
+  if (/graph\.facebook\.com\/v18\.0\/[^/?]+$/.test(u)) {
+    return `${m} campaign_object_update_or_read`;
+  }
+
+  return `${m} other`;
+}
+
+function recordMetaCall({ method, url, status, ok }) {
+  const label = getMetaLabel(method, url);
+
+  META_CALL_STATS.total += 1;
+  if (ok) META_CALL_STATS.success += 1;
+  else META_CALL_STATS.fail += 1;
+
+  if (!META_CALL_STATS.byLabel[label]) {
+    META_CALL_STATS.byLabel[label] = { total: 0, success: 0, fail: 0 };
+  }
+
+  META_CALL_STATS.byLabel[label].total += 1;
+  if (ok) META_CALL_STATS.byLabel[label].success += 1;
+  else META_CALL_STATS.byLabel[label].fail += 1;
+
+  const row = {
+    t: new Date().toISOString(),
+    label,
+    method: String(method || '').toUpperCase(),
+    url: String(url || ''),
+    status: Number(status || 0),
+    ok: !!ok,
+  };
+
+  META_CALL_STATS.recent.push(row);
+  if (META_CALL_STATS.recent.length > 200) META_CALL_STATS.recent.shift();
+
+  console.log(
+    `[META_API] ${row.t} | ${row.label} | ${row.method} ${row.url} | status=${row.status} | ok=${row.ok ? 1 : 0}`
+  );
+}
+
+// prevent duplicate interceptors on hot reload / restarts
+if (!global.__SMARTMARK_META_AXIOS_LOGGER__) {
+  axios.interceptors.request.use((config) => {
+    try {
+      config.__smMetaStart = Date.now();
+    } catch {}
+    return config;
+  });
+
+  axios.interceptors.response.use(
+    (response) => {
+      try {
+        const url = String(response?.config?.url || '');
+        if (url.includes('graph.facebook.com')) {
+          recordMetaCall({
+            method: response?.config?.method || 'GET',
+            url,
+            status: response?.status || 200,
+            ok: true,
+          });
+        }
+      } catch {}
+      return response;
+    },
+    (error) => {
+      try {
+        const url = String(error?.config?.url || '');
+        if (url.includes('graph.facebook.com')) {
+          recordMetaCall({
+            method: error?.config?.method || 'GET',
+            url,
+            status: error?.response?.status || 500,
+            ok: false,
+          });
+        }
+      } catch {}
+      return Promise.reject(error);
+    }
+  );
+
+  global.__SMARTMARK_META_AXIOS_LOGGER__ = true;
+}
+
+/* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
 /* ------------------------------------------------------------------ */
 // Per-user defaults (prevents users overwriting each other)
@@ -1347,6 +1457,13 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to cancel campaign.' });
   }
+});
+
+router.get('/facebook/debug/meta-call-stats', (req, res) => {
+  res.json({
+    ok: true,
+    stats: META_CALL_STATS,
+  });
 });
 
 module.exports = router;
