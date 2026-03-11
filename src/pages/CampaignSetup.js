@@ -1202,19 +1202,42 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
 
 /* ---------- Minimal metrics row ---------- */
 function MetricsRow({ metrics }) {
-  const cards = useMemo(() => {
+  const safeNum = (v, fallback = 0) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  const normalized = useMemo(() => {
     const m = metrics || {};
-    const impressions = m.impressions ?? "--";
-    const clicks = m.clicks ?? "--";
-    const ctr = m.ctr ?? "--";
-    const cpc = m.spend && m.clicks ? `$${(Number(m.spend) / Number(m.clicks)).toFixed(2)}` : "--";
-    return [
-      { key: "impressions", label: "Impressions", value: impressions },
-      { key: "clicks", label: "Clicks", value: clicks },
-      { key: "ctr", label: "CTR", value: ctr },
-      { key: "cpc", label: "CPC", value: cpc },
-    ];
+
+    const impressions = safeNum(m.impressions, 0);
+    const clicks = safeNum(m.clicks, 0);
+    const spend = safeNum(m.spend, 0);
+    const ctrNum =
+      m.ctr !== undefined && m.ctr !== null && m.ctr !== ""
+        ? safeNum(m.ctr, 0)
+        : impressions > 0
+        ? (clicks / impressions) * 100
+        : 0;
+
+    const cpcNum = clicks > 0 ? spend / clicks : 0;
+    const hasDelivery = impressions > 0 || clicks > 0 || spend > 0;
+
+    return {
+      impressions: impressions.toLocaleString(),
+      clicks: clicks.toLocaleString(),
+      ctr: `${ctrNum.toFixed(2)}%`,
+      cpc: `$${cpcNum.toFixed(2)}`,
+      hasDelivery,
+    };
   }, [metrics]);
+
+  const cards = [
+    { key: "impressions", label: "Impressions", value: normalized.impressions },
+    { key: "clicks", label: "Clicks", value: normalized.clicks },
+    { key: "ctr", label: "CTR", value: normalized.ctr },
+    { key: "cpc", label: "CPC", value: normalized.cpc },
+  ];
 
   const cardStyle = {
     minWidth: 160,
@@ -1234,6 +1257,18 @@ function MetricsRow({ metrics }) {
     <div style={{ position: "relative", width: "100%" }}>
       <div
         style={{
+          marginBottom: 8,
+          color: normalized.hasDelivery ? "#89f0cc" : "rgba(255,255,255,0.72)",
+          fontWeight: 800,
+          fontSize: 12,
+          letterSpacing: 0.2,
+        }}
+      >
+        {normalized.hasDelivery ? "Delivery data received" : "No delivery data yet"}
+      </div>
+
+      <div
+        style={{
           display: "flex",
           gap: 12,
           overflowX: "auto",
@@ -1244,7 +1279,9 @@ function MetricsRow({ metrics }) {
       >
         {cards.map((c) => (
           <div key={c.key} style={{ ...cardStyle, scrollSnapAlign: "start" }}>
-            <div style={{ fontSize: 12, color: TEXT_MUTED, fontWeight: 900, letterSpacing: 0.3 }}>{c.label}</div>
+            <div style={{ fontSize: 12, color: TEXT_MUTED, fontWeight: 900, letterSpacing: 0.3 }}>
+              {c.label}
+            </div>
             <div style={{ fontSize: 20, fontWeight: 900 }}>{c.value}</div>
           </div>
         ))}
@@ -2450,24 +2487,45 @@ useEffect(() => {
     resolvedUser,
   ]);
 
-  useEffect(() => {
-    if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
-    const acctId = String(selectedAccount).trim();
+ useEffect(() => {
+  if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
+  const acctId = String(selectedAccount).trim();
 
-    authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        const row = Array.isArray(data?.data) && data.data[0] ? data.data[0] : {};
-        const normalized = {
-          impressions: row.impressions ? String(row.impressions) : "--",
-          clicks: row.clicks ? String(row.clicks) : "--",
-          ctr: row.ctr ? String(row.ctr) : "--",
-          spend: row.spend ? Number(row.spend) : undefined,
-        };
-        setMetricsMap((m) => ({ ...m, [expandedId]: normalized }));
-      })
-      .catch(() => setMetricsMap((m) => ({ ...m, [expandedId]: { impressions: "--", clicks: "--", ctr: "--" } })));
-  }, [expandedId, selectedAccount]);
+  authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`)
+    .then((res) => (res.ok ? res.json() : Promise.reject()))
+    .then((data) => {
+      const row = Array.isArray(data?.data) && data.data[0] ? data.data[0] : {};
+
+      const impressions = Number(row?.impressions);
+      const clicks = Number(row?.clicks);
+      const spend = Number(row?.spend);
+      const ctr = Number(row?.ctr);
+
+      const normalized = {
+        impressions: Number.isFinite(impressions) ? impressions : 0,
+        clicks: Number.isFinite(clicks) ? clicks : 0,
+        ctr: Number.isFinite(ctr)
+          ? ctr
+          : Number.isFinite(impressions) && impressions > 0 && Number.isFinite(clicks)
+          ? (clicks / impressions) * 100
+          : 0,
+        spend: Number.isFinite(spend) ? spend : 0,
+      };
+
+      setMetricsMap((m) => ({ ...m, [expandedId]: normalized }));
+    })
+    .catch(() =>
+      setMetricsMap((m) => ({
+        ...m,
+        [expandedId]: {
+          impressions: 0,
+          clicks: 0,
+          ctr: 0,
+          spend: 0,
+        },
+      }))
+    );
+}, [expandedId, selectedAccount]);
 
   // Persist
   useEffect(() => {
