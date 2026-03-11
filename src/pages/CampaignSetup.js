@@ -2554,93 +2554,101 @@ useEffect(() => {
 }, [selectedPageId, resolvedUser]);
 
 
-  const handlePauseUnpause = async () => {
-    if (!selectedCampaignId || !selectedAccount) return;
-    const acctId = String(selectedAccount).trim();
+const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
+  if (!campaignId || !selectedAccount || campaignId === "__DRAFT__") return;
 
-    setLoading(true);
+  const acctId = String(selectedAccount).trim();
+  const action = currentlyPaused ? "unpause" : "pause";
+
+  setLoading(true);
+  try {
+    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/${action}`, {
+      method: "POST",
+    });
+
+    if (!r.ok) throw new Error(`${action} failed`);
+
+    const nextStatus = currentlyPaused ? "ACTIVE" : "PAUSED";
+
+    setCampaigns((prev) =>
+      Array.isArray(prev)
+        ? prev.map((c) =>
+            c?.id === campaignId
+              ? { ...c, status: nextStatus, effective_status: nextStatus }
+              : c
+          )
+        : prev
+    );
+
+    if (selectedCampaignId === campaignId) {
+      setCampaignStatus(nextStatus);
+      setIsPaused(!currentlyPaused);
+    }
+  } catch {
+    alert("Could not update campaign status.");
+  }
+  setLoading(false);
+};
+
+const handleDeleteCampaign = async (campaignId) => {
+  if (!selectedAccount) return;
+
+  const acctId = String(selectedAccount).trim();
+  const idToDelete = String(campaignId || "").trim();
+
+  if (!idToDelete || idToDelete === "__DRAFT__") {
+    handleClearDraft();
+    alert("Draft discarded.");
+    return;
+  }
+
+  if (!window.confirm("Delete this campaign? (It will be archived in Facebook)")) return;
+
+  setLoading(true);
+  try {
+    const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
+      method: "POST",
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || "Archive failed");
+
     try {
-      if (isPaused) {
-        const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/unpause`, {
-          method: "POST",
-        });
-        if (!r.ok) throw new Error("Unpause failed");
-        setCampaignStatus("ACTIVE");
-        setIsPaused(false);
-      } else {
-        const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${selectedCampaignId}/pause`, {
-          method: "POST",
-        });
-        if (!r.ok) throw new Error("Pause failed");
-        setCampaignStatus("PAUSED");
-        setIsPaused(true);
+      const map = readCreativeMap(resolvedUser, acctId);
+      if (map && map[idToDelete]) {
+        delete map[idToDelete];
+        writeCreativeMap(resolvedUser, acctId, map);
       }
-    } catch {
-      alert("Could not update campaign status.");
-    }
-    setLoading(false);
-  };
+    } catch {}
 
-  const handleDelete = async () => {
-    if (!selectedAccount) return;
+    setCampaigns((prev) =>
+      Array.isArray(prev) ? prev.filter((c) => c?.id !== idToDelete) : prev
+    );
 
-    const acctId = String(selectedAccount).trim();
-    const idToDelete = String(selectedCampaignId || "").trim();
+    setMetricsMap((m) => {
+      const { [idToDelete]: _, ...rest } = m || {};
+      return rest;
+    });
 
-    if (!idToDelete || idToDelete === "__DRAFT__") {
-      handleClearDraft();
-      alert("Draft discarded.");
-      return;
-    }
+    if (selectedCampaignId === idToDelete) setSelectedCampaignId("");
+    if (expandedId === idToDelete) setExpandedId(null);
 
-    if (!window.confirm("Delete this campaign? (It will be archived in Facebook)")) return;
+    setCampaignStatus("ARCHIVED");
+    setLaunched(false);
+    setLaunchResult(null);
 
-    setLoading(true);
     try {
-      const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, { method: "POST" });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "Archive failed");
+      const rr = await authFetch(`/facebook/adaccount/${acctId}/campaigns`);
+      const data = await rr.json().catch(() => ({}));
+      const list = data && data.data ? data.data.slice(0, 2) : [];
+      setCampaigns(list);
+    } catch {}
 
-      // ✅ remove creatives map entry immediately
-      try {
-        const map = readCreativeMap(resolvedUser, acctId);
-        if (map && map[idToDelete]) {
-          delete map[idToDelete];
-          writeCreativeMap(resolvedUser, acctId, map);
-        }
-      } catch {}
-
-      // ✅ remove from UI list immediately
-      setCampaigns((prev) => (Array.isArray(prev) ? prev.filter((c) => c?.id !== idToDelete) : prev));
-
-      // ✅ clear selection/expanded so no stale "in progress" hangs around
-      setSelectedCampaignId("");
-      setExpandedId(null);
-
-      // ✅ clear metrics for that id
-      setMetricsMap((m) => {
-        const { [idToDelete]: _, ...rest } = m || {};
-        return rest;
-      });
-
-      setCampaignStatus("ARCHIVED");
-      setLaunched(false);
-      setLaunchResult(null);
-
-      // ✅ refresh campaigns from backend
-      try {
-        const rr = await authFetch(`/facebook/adaccount/${acctId}/campaigns`);
-        const data = await rr.json().catch(() => ({}));
-        const list = data && data.data ? data.data.slice(0, 2) : [];
-        setCampaigns(list);
-      } catch {}
-
-      alert("Campaign deleted.");
-    } catch (e) {
-      alert("Could not delete campaign: " + (e?.message || ""));
-    }
-    setLoading(false);
-  };
+    alert("Campaign deleted.");
+  } catch (e) {
+    alert("Could not delete campaign: " + (e?.message || ""));
+  }
+  setLoading(false);
+};
 
   const handleNewCampaign = () => {
     if (campaigns.length >= 2) return;
@@ -3613,76 +3621,31 @@ onClick={() => {
           >
             <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ fontSize: "1.08rem", fontWeight: 900, color: WHITE, letterSpacing: 0.3 }}>Active Campaigns</div>
-              <div style={{ display: "flex", gap: "0.6rem" }}>
-                <button onClick={() => {}} disabled={true} style={{ display: "none" }} />
-                <button
-                  onClick={handlePauseUnpause}
-                  disabled={loading || !selectedCampaignId}
-                  style={{
-                    background: isPaused ? "#22dd7f" : "#ffd966",
-                    color: "#0f1418",
-                    border: "none",
-                    borderRadius: 10,
-                    fontWeight: 900,
-                    fontSize: 20,
-                    width: 36,
-                    height: 36,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-                  }}
-                  title={isPaused ? "Play" : "Pause"}
-                >
-                  {isPaused ? <FaPlay /> : <FaPause />}
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={loading || !selectedCampaignId}
-                  style={{
-                    background: "#f44336",
-                    color: WHITE,
-                    border: "none",
-                    borderRadius: 10,
-                    fontWeight: 900,
-                    fontSize: 18,
-                    width: 36,
-                    height: 36,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-                  }}
-                  title="Delete"
-                >
-                  <FaTrash />
-                </button>
-                {campaigns.length < 2 && (
-                  <button
-                    onClick={handleNewCampaign}
-                    style={{
-                      background: ACCENT_ALT,
-                      color: WHITE,
-                      border: "none",
-                      borderRadius: 10,
-                      fontWeight: 900,
-                      fontSize: 20,
-                      width: 36,
-                      height: 36,
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-                    }}
-                    title="New Campaign"
-                  >
-                    <FaPlus />
-                  </button>
-                )}
-              </div>
+     <div style={{ display: "flex", gap: "0.6rem" }}>
+  {campaigns.length < 2 && (
+    <button
+      onClick={handleNewCampaign}
+      style={{
+        background: ACCENT_ALT,
+        color: WHITE,
+        border: "none",
+        borderRadius: 10,
+        fontWeight: 900,
+        fontSize: 20,
+        width: 36,
+        height: 36,
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+      }}
+      title="New Campaign"
+    >
+      <FaPlus />
+    </button>
+  )}
+</div>
             </div>
 
             <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -3764,14 +3727,13 @@ onClick={() => {
                         )}
                       </div>
 
-                     {isDraft ? (
+{isDraft ? (
   <button
     type="button"
     onClick={(e) => {
       e.preventDefault();
       e.stopPropagation();
 
-      // ✅ hard-disable + hard-purge so draft can’t resurrect from any storage path
       try {
         setDraftDisabled(resolvedUser, true);
       } catch {}
@@ -3784,7 +3746,6 @@ onClick={() => {
       } catch {}
 
       try {
-        // kill OAuth inflight + backups (common resurrection paths)
         localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
         localStorage.removeItem(LS_INFLIGHT_KEY("anon"));
         localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
@@ -3803,12 +3764,10 @@ onClick={() => {
         localStorage.removeItem("smartmark.imageDrafts.v1");
       } catch {}
 
-      // keep your existing clear function too
       try {
         handleClearDraft();
       } catch {}
 
-      // ✅ force UI to detach immediately
       setDraftCreatives({ images: [], mediaSelection: "image" });
       setExpandedId(null);
       setSelectedCampaignId("");
@@ -3832,8 +3791,73 @@ onClick={() => {
     ×
   </button>
 ) : (
-  <div style={{ color: "#89f0cc", fontSize: 12, fontWeight: 900 }}>
-    {c.status || c.effective_status || "ACTIVE"}
+  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ color: "#89f0cc", fontSize: 12, fontWeight: 900 }}>
+      {c.status || c.effective_status || "ACTIVE"}
+    </div>
+
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const currentStatus = String(c.status || c.effective_status || "ACTIVE").toUpperCase();
+        const currentlyPaused = currentStatus === "PAUSED";
+        handlePauseUnpauseCampaign(id, currentlyPaused);
+      }}
+      disabled={loading}
+      title={String(c.status || c.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? "Unpause" : "Pause"}
+      style={{
+        background:
+          String(c.status || c.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
+            ? "#22dd7f"
+            : "#ffd966",
+        color: "#0f1418",
+        border: "none",
+        borderRadius: 10,
+        fontWeight: 900,
+        fontSize: 16,
+        width: 32,
+        height: 32,
+        cursor: loading ? "not-allowed" : "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        opacity: loading ? 0.6 : 1,
+      }}
+    >
+      {String(c.status || c.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? <FaPlay /> : <FaPause />}
+    </button>
+
+    <button
+      type="button"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        handleDeleteCampaign(id);
+      }}
+      disabled={loading}
+      title="Delete"
+      style={{
+        background: "#f44336",
+        color: WHITE,
+        border: "none",
+        borderRadius: 10,
+        fontWeight: 900,
+        fontSize: 15,
+        width: 32,
+        height: 32,
+        cursor: loading ? "not-allowed" : "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
+        opacity: loading ? 0.6 : 1,
+      }}
+    >
+      <FaTrash />
+    </button>
   </div>
 )}
 
