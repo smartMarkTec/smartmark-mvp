@@ -1307,18 +1307,79 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
    TEST/UTILITY ROUTES (unchanged)
    ========================= */
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
-  const userToken = getFbUserToken(ownerKeyFromReq(req));
-
+  const ownerKey = ownerKeyFromReq(req);
+  const userToken = getFbUserToken(ownerKey);
   const { accountId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '');
+
+  if (!userToken) {
+    return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  }
+
   try {
     const response = await axios.get(
-      `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-      { params: { access_token: userToken, fields: 'id,name,status,start_time' } }
+      `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+      {
+        params: {
+          access_token: userToken,
+          fields: 'id,name,status,effective_status,start_time',
+          limit: 50,
+        },
+      }
     );
-    res.json(response.data);
+
+    const list = Array.isArray(response.data?.data) ? response.data.data : [];
+
+    // keep only top 2 like your UI expects
+    return res.json({
+      data: list.slice(0, 2),
+      source: 'facebook',
+    });
   } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaigns.' });
+    // fallback to locally stored launched campaigns
+    try {
+      await ensureUsersAndSessions();
+      await db.read();
+
+      const cached = (db.data?.campaign_creatives || [])
+        .filter(
+          (r) =>
+            String(r.ownerKey) === String(ownerKey) &&
+            String(r.accountId).replace(/^act_/, '') === normalizedAccountId
+        )
+        .map((r) => ({
+          id: r.campaignId,
+          name: r.name || 'Campaign',
+          status: r.status || 'ACTIVE',
+          effective_status: r.status || 'ACTIVE',
+          start_time: r.createdAt || r.updatedAt || null,
+        }))
+        .slice(0, 2);
+
+      if (cached.length > 0) {
+        console.warn('[campaigns] Facebook fetch failed, serving cached campaigns instead:', {
+          ownerKey,
+          accountId: normalizedAccountId,
+          fbError: err.response?.data || err.message,
+          cachedCount: cached.length,
+        });
+
+        return res.json({
+          data: cached,
+          source: 'cache',
+          fbError: err.response?.data?.error?.message || err.message || 'Facebook campaigns fetch failed',
+        });
+      }
+    } catch (cacheErr) {
+      console.error('[campaigns] cache fallback failed:', cacheErr?.message || cacheErr);
+    }
+
+    console.error('[campaigns] Facebook fetch failed with no cache fallback:', err.response?.data || err.message);
+
+    return res.status(500).json({
+      error: err.response?.data?.error?.message || 'Failed to fetch campaigns.',
+      detail: err.response?.data || err.message,
+    });
   }
 });
 
