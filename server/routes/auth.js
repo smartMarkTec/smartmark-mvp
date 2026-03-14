@@ -854,28 +854,71 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
-  function normalizeImageUrl(u) {
-    const s = String(u || '').trim();
-    if (!s) return '';
+ function normalizeImageUrl(u) {
+  const s = String(u || '').trim();
+  if (!s) return '';
 
-    if (/^blob:/i.test(s)) return '';
-    if (/^data:image\//i.test(s)) return s;
+  // hard reject browser-only blob URLs
+  if (/^blob:/i.test(s)) return '';
 
-    if (!/^https?:\/\//i.test(s)) return absolutePublicUrl(s);
+  // allow inline data URLs
+  if (/^data:image\//i.test(s)) return s;
 
-    try {
-      const parsed = new URL(s);
-      const host = parsed.hostname.toLowerCase();
-      if (host === 'smartemark.com' || host === 'www.smartemark.com') {
-        const backendBase =
-          process.env.PUBLIC_BASE_URL ||
-          process.env.RENDER_EXTERNAL_URL ||
-          'https://smartmark-mvp.onrender.com';
-        return new URL(parsed.pathname + parsed.search, backendBase).toString();
-      }
-    } catch {}
-    return s;
+  const backendBase =
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://smartmark-mvp.onrender.com';
+
+  const frontendBase =
+    process.env.FRONTEND_URL ||
+    'https://smartmark-mvp.vercel.app';
+
+  // relative path -> force to backend
+  if (!/^https?:\/\//i.test(s)) {
+    const rel = s.startsWith('/') ? s : `/${s}`;
+    return `${backendBase}${rel}`;
   }
+
+  try {
+    const parsed = new URL(s);
+    const host = parsed.hostname.toLowerCase();
+
+    const frontendHost = (() => {
+      try {
+        return new URL(frontendBase).hostname.toLowerCase();
+      } catch {
+        return '';
+      }
+    })();
+
+    const backendHost = (() => {
+      try {
+        return new URL(backendBase).hostname.toLowerCase();
+      } catch {
+        return '';
+      }
+    })();
+
+    const shouldRewriteToBackend =
+      host === 'smartemark.com' ||
+      host === 'www.smartemark.com' ||
+      host === 'smartmark-mvp.vercel.app' ||
+      host === 'www.smartmark-mvp.vercel.app' ||
+      (frontendHost && host === frontendHost);
+
+    // if frontend-origin/generated/media url, rewrite to backend static host
+    if (shouldRewriteToBackend) {
+      return new URL(parsed.pathname + parsed.search, backendBase).toString();
+    }
+
+    // already backend-hosted -> keep it
+    if (backendHost && host === backendHost) {
+      return s;
+    }
+  } catch {}
+
+  return s;
+}
 
   function extractBase64FromDataUrl(s) {
     const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(String(s || '').trim());
