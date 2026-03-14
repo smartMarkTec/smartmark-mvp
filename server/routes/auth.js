@@ -1301,13 +1301,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state', async (req, res) => {
   try {
-    const ownerKey = ownerKeyFromReq(req);
-    const userToken = getFbUserToken(ownerKey);
-    const { campaignId } = req.params;
-
-    if (!userToken) {
-      return res.status(401).json({ error: 'Not authenticated with Facebook' });
+    const session = await requireSession(req);
+    if (!session.ok) {
+      return res.status(session.status).json({ ok: false, error: session.error });
     }
+
+    const currentOwnerKey = `user:${String(session.user.username).trim()}`;
+    const { campaignId, accountId } = req.params;
 
     const state = await findOptimizerCampaignStateByCampaignId(campaignId);
     if (!state) {
@@ -1317,10 +1317,17 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
       });
     }
 
-    if (String(state.ownerKey || '') !== String(ownerKey || '')) {
+    if (String(state.ownerKey || '') !== currentOwnerKey) {
       return res.status(403).json({
         ok: false,
         error: 'You do not have access to this optimizer campaign state.',
+      });
+    }
+
+    if (String(state.accountId || '').replace(/^act_/, '') !== String(accountId || '').replace(/^act_/, '')) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Account ID does not match this optimizer campaign state.',
       });
     }
 
