@@ -14,6 +14,10 @@ const {
   setFbUserTokenMeta,
   clearFbUserTokenMeta,
 } = require('../tokenStore');
+const {
+  upsertOptimizerCampaignState,
+  findOptimizerCampaignStateByCampaignId,
+} = require('../optimizerCampaignState');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -160,38 +164,41 @@ async function refreshDefaults(userToken, ownerKey) {
     }),
   ]);
 
-  // ad accounts: only overwrite if fetch actually succeeded
   if (acctRes.status === 'fulfilled') {
     const accts = Array.isArray(acctRes.value?.data?.data) ? acctRes.value.data.data : [];
     if (accts.length > 0) {
-      DEFAULTS.adAccounts = accts.map(a => ({
+      DEFAULTS.adAccounts = accts.map((a) => ({
         id: String(a.id).replace(/^act_/, ''),
         name: a.name,
-        account_status: a.account_status
+        account_status: a.account_status,
       }));
     }
   } else {
-    console.warn('[refreshDefaults] me/adaccounts failed:', acctRes.reason?.response?.data || acctRes.reason?.message);
+    console.warn(
+      '[refreshDefaults] me/adaccounts failed:',
+      acctRes.reason?.response?.data || acctRes.reason?.message
+    );
   }
 
-  // pages: only overwrite if fetch actually succeeded
   if (pagesRes.status === 'fulfilled') {
     const pages = Array.isArray(pagesRes.value?.data?.data) ? pagesRes.value.data.data : [];
     if (pages.length > 0) {
-      DEFAULTS.pages = pages.map(p => ({ id: p.id, name: p.name }));
+      DEFAULTS.pages = pages.map((p) => ({ id: p.id, name: p.name }));
     }
   } else {
-    console.warn('[refreshDefaults] me/accounts failed:', pagesRes.reason?.response?.data || pagesRes.reason?.message);
+    console.warn(
+      '[refreshDefaults] me/accounts failed:',
+      pagesRes.reason?.response?.data || pagesRes.reason?.message
+    );
   }
 
-  // preserve existing selections if possible
   const firstAcct = DEFAULTS.adAccounts[0]?.id || null;
   const firstPage = DEFAULTS.pages[0]?.id || null;
 
-  if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find(a => a.id === DEFAULTS.adAccountId)) {
+  if (!DEFAULTS.adAccountId || !DEFAULTS.adAccounts.find((a) => a.id === DEFAULTS.adAccountId)) {
     DEFAULTS.adAccountId = firstAcct;
   }
-  if (!DEFAULTS.pageId || !DEFAULTS.pages.find(p => p.id === DEFAULTS.pageId)) {
+  if (!DEFAULTS.pageId || !DEFAULTS.pages.find((p) => p.id === DEFAULTS.pageId)) {
     DEFAULTS.pageId = firstPage;
   }
 }
@@ -204,27 +211,25 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const COOKIE_NAME = 'sm_sid';
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
-const RETURN_TO_COOKIE = 'sm_return_to';
-
-// If cookies are blocked, frontend can send this header as a fallback
 const SID_HEADER = 'x-sm-sid';
 
 function computeCookieDomain() {
-  if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN; // e.g. smartmark-mvp.onrender.com
+  if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN;
   if (process.env.RENDER_EXTERNAL_URL) {
-    try { return new URL(process.env.RENDER_EXTERNAL_URL).hostname; } catch {}
+    try {
+      return new URL(process.env.RENDER_EXTERNAL_URL).hostname;
+    } catch {}
   }
   return undefined;
 }
 
-/* Consistent cookie setter */
 function setSessionCookie(res, sid) {
   const opts = {
     httpOnly: true,
-    secure: isProd,                   // required when SameSite=None
+    secure: isProd,
     sameSite: isProd ? 'none' : 'lax',
     path: '/',
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    maxAge: 7 * 24 * 60 * 60 * 1000,
   };
   const dom = computeCookieDomain();
   if (dom) opts.domain = dom;
@@ -236,7 +241,6 @@ function isSidLike(x) {
   return !!s && /^sm_[A-Za-z0-9_-]{10,}$/.test(s);
 }
 
-// Always keep a stable sid for FB token ownership.
 function getSidFromReq(req) {
   const cookieSid = req.cookies?.[COOKIE_NAME];
   const headerSid = req.get(SID_HEADER);
@@ -258,18 +262,15 @@ function ensureSid(req, res) {
 function ownerKeyFromReq(req) {
   const sid = (req.smSid || getSidFromReq(req) || '').trim();
 
-  // ✅ If logged in, bind FB token to the USER (persists across new sid logins)
   try {
-    const sess = db?.data?.sessions?.find(s => String(s.sid) === String(sid));
+    const sess = db?.data?.sessions?.find((s) => String(s.sid) === String(sid));
     const username = sess?.username ? String(sess.username).trim() : '';
     if (username) return `user:${username}`;
   } catch {}
 
-  // fallback: still support sid-based ownership
   return sid || `ip:${req.ip}`;
 }
 
-// ✅ Ensure sid exists on all facebook/auth flows (including launch)
 router.use((req, res, next) => {
   if (
     req.path.startsWith('/facebook') ||
@@ -281,11 +282,6 @@ router.use((req, res, next) => {
   next();
 });
 
-/**
- * SID stitch:
- * If frontend sends x-sm-sid (or Bearer sm_...) but cookies are missing,
- * set cookie so downstream routes (including OAuth + launch) use same ownerKey.
- */
 router.use((req, res, next) => {
   try {
     const cookieSid = req.cookies?.[COOKIE_NAME];
@@ -294,7 +290,7 @@ router.use((req, res, next) => {
     const headerSid = req.get(SID_HEADER);
     const auth = req.headers.authorization || '';
     const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-    const candidate = isSidLike(headerSid) ? headerSid : (isSidLike(bearer) ? bearer : '');
+    const candidate = isSidLike(headerSid) ? headerSid : isSidLike(bearer) ? bearer : '';
 
     if (candidate) {
       setSessionCookie(res, candidate);
@@ -306,7 +302,6 @@ router.use((req, res, next) => {
   next();
 });
 
-// ✅ Ensure db sessions are loaded for routes that need sid->username mapping
 router.use(async (req, res, next) => {
   try {
     if (
@@ -321,7 +316,6 @@ router.use(async (req, res, next) => {
   next();
 });
 
-// Helper: safely append sid to return_to so frontend can store it even if cookies are blocked
 function appendSidToReturnTo(urlStr, sid) {
   try {
     if (!urlStr) return urlStr;
@@ -334,7 +328,6 @@ function appendSidToReturnTo(urlStr, sid) {
   }
 }
 
-/* ----------------------------- Sanity route ----------------------------- */
 router.get('/facebook/ping', (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const DEFAULTS = defaultsFor(ownerKey);
@@ -344,18 +337,17 @@ router.get('/facebook/ping', (req, res) => {
     env: {
       FACEBOOK_APP_ID: !!FACEBOOK_APP_ID,
       FACEBOOK_APP_SECRET: !!FACEBOOK_APP_SECRET,
-      FACEBOOK_REDIRECT_URI
+      FACEBOOK_REDIRECT_URI,
     },
     defaults: {
       adAccountId: DEFAULTS.adAccountId,
       pageId: DEFAULTS.pageId,
       adAccounts: DEFAULTS.adAccounts,
       pages: DEFAULTS.pages,
-    }
+    },
   });
 });
 
-// ✅ Returns whether FB is connected for the current logged-in user
 router.get('/facebook/status', async (req, res) => {
   try {
     const ownerKey = ownerKeyFromReq(req);
@@ -388,15 +380,12 @@ function absolutePublicUrl(relativePath) {
     'https://smartmark-mvp.onrender.com';
 
   if (!relativePath) return '';
-
-  // keep absolute urls
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
 
   const rel = String(relativePath).startsWith('/') ? String(relativePath) : `/${relativePath}`;
   return `${base}${rel}`;
 }
 
-/* ------------------------------ Facebook OAuth ------------------------------ */
 const FB_SCOPES = [
   'public_profile',
   'email',
@@ -404,20 +393,17 @@ const FB_SCOPES = [
   'pages_read_engagement',
   'business_management',
   'ads_management',
-  'ads_read'
+  'ads_read',
 ];
 
-
-/**
- * ✅ Cookie-less OAuth state (fixes "Invalid OAuth state" across smartemark.com -> onrender.com)
- * We embed sid + returnTo into a signed `state` so callback can verify without any cookies.
- */
-const OAUTH_STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 
 function b64urlEncode(str) {
   return Buffer.from(str, 'utf8')
     .toString('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function b64urlDecode(b64) {
@@ -427,10 +413,13 @@ function b64urlDecode(b64) {
 }
 
 function signStateB64(b64) {
-  return crypto.createHmac('sha256', String(FACEBOOK_APP_SECRET || ''))
+  return crypto
+    .createHmac('sha256', String(FACEBOOK_APP_SECRET || ''))
     .update(b64)
     .digest('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
 }
 
 function makeOAuthState(payloadObj) {
@@ -448,11 +437,14 @@ function parseAndVerifyOAuthState(stateRaw) {
   if (!sig || sig !== expected) return { ok: false, error: 'bad_state_signature' };
 
   let payload;
-  try { payload = JSON.parse(b64urlDecode(b64)); }
-  catch { return { ok: false, error: 'bad_state_payload' }; }
+  try {
+    payload = JSON.parse(b64urlDecode(b64));
+  } catch {
+    return { ok: false, error: 'bad_state_payload' };
+  }
 
   const iat = Number(payload?.iat || 0);
-  if (!iat || (Date.now() - iat) > OAUTH_STATE_TTL_MS) {
+  if (!iat || Date.now() - iat > OAUTH_STATE_TTL_MS) {
     return { ok: false, error: 'state_expired' };
   }
 
@@ -460,34 +452,26 @@ function parseAndVerifyOAuthState(stateRaw) {
 }
 
 router.get('/facebook', (req, res) => {
-  // Ensure stable sid (we embed it in state)
   let sid = req.cookies?.[COOKIE_NAME];
   if (!sid) {
     sid = `sm_${nanoid(24)}`;
     setSessionCookie(res, sid);
   }
 
-  // where to send user back after OAuth
   const fallback = `${FRONTEND_URL}/setup`;
   const rawReturnTo = String(req.query.return_to || '').trim();
   const returnTo = rawReturnTo || fallback;
 
-  // basic open-redirect safety: only allow your own frontends
   let safeReturnTo = fallback;
   try {
     const u = new URL(returnTo);
     const host = u.hostname.toLowerCase();
-    const allowed =
-      host === 'www.smartemark.com' ||
-      host === 'smartemark.com' ||
-      host === 'localhost';
+    const allowed = host === 'www.smartemark.com' || host === 'smartemark.com' || host === 'localhost';
     if (allowed) safeReturnTo = u.toString();
   } catch {}
 
-  // put sid into return_to so frontend can persist it (cookie fallback)
   safeReturnTo = appendSidToReturnTo(safeReturnTo, sid);
 
-  // ✅ Signed cookie-less state
   const state = makeOAuthState({
     sid,
     returnTo: safeReturnTo,
@@ -509,28 +493,24 @@ router.get('/facebook/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('No code returned from Facebook.');
 
-  // ✅ Verify signed state (no cookies required)
   const verified = parseAndVerifyOAuthState(String(req.query.state || ''));
   if (!verified.ok) return res.status(400).send('Invalid OAuth state.');
 
   const sidOwner = String(verified.payload?.sid || '').trim();
   if (!sidOwner) return res.status(400).send('Invalid OAuth state.');
 
-  // re-stitch sid cookie on callback domain (helps Render-side)
   setSessionCookie(res, sidOwner);
 
-  // returnTo embedded in state
   const fallback = `${FRONTEND_URL}/setup`;
   let returnTo = String(verified.payload?.returnTo || fallback).trim();
 
-  // ✅ Prefer storing token under the logged-in USER (persists across logins)
   let userOwner = sidOwner;
   try {
     await ensureUsersAndSessions();
     await db.read();
-    const sess = (db.data.sessions || []).find(s => String(s.sid) === String(sidOwner));
+    const sess = (db.data.sessions || []).find((s) => String(s.sid) === String(sidOwner));
     if (sess?.username) userOwner = `user:${String(sess.username).trim()}`;
-  } catch { }
+  } catch {}
 
   try {
     const tokenRes = await axios.get('https://graph.facebook.com/v18.0/oauth/access_token', {
@@ -538,8 +518,8 @@ router.get('/facebook/callback', async (req, res) => {
         client_id: FACEBOOK_APP_ID,
         client_secret: FACEBOOK_APP_SECRET,
         redirect_uri: FACEBOOK_REDIRECT_URI,
-        code
-      }
+        code,
+      },
     });
     const accessToken = tokenRes.data.access_token;
 
@@ -549,27 +529,23 @@ router.get('/facebook/callback', async (req, res) => {
           grant_type: 'fb_exchange_token',
           client_id: FACEBOOK_APP_ID,
           client_secret: FACEBOOK_APP_SECRET,
-          fb_exchange_token: accessToken
-        }
+          fb_exchange_token: accessToken,
+        },
       });
 
       if (x.data?.access_token) {
         const tok = x.data.access_token;
-
-        // expires_in is usually provided for long-lived tokens
         const expiresInSec = Number(x.data.expires_in || 0);
-        const fallback60Days = 60 * 24 * 60 * 60; // 60 days
+        const fallback60Days = 60 * 24 * 60 * 60;
         const expSec = expiresInSec > 0 ? expiresInSec : fallback60Days;
         const expiresAt = Date.now() + expSec * 1000;
 
-        // ✅ store under USER key for persistence
         await setFbUserToken(tok, userOwner);
         await setFbUserTokenMeta(
           { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
           userOwner
         );
 
-        // optional: also store under sid as fallback
         await setFbUserToken(tok, sidOwner);
         await setFbUserTokenMeta(
           { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'long_lived' },
@@ -580,8 +556,7 @@ router.get('/facebook/callback', async (req, res) => {
         console.log('[auth] stored LONG-LIVED FB user token (user-bound) + refreshed defaults');
       } else {
         const tok = accessToken;
-        // short-lived tokens can be ~1-2 hours; set a conservative TTL
-        const expSec = 2 * 60 * 60; // 2 hours
+        const expSec = 2 * 60 * 60;
         const expiresAt = Date.now() + expSec * 1000;
 
         await setFbUserToken(tok, userOwner);
@@ -590,7 +565,6 @@ router.get('/facebook/callback', async (req, res) => {
           userOwner
         );
 
-        // optional sid fallback
         await setFbUserToken(tok, sidOwner);
         await setFbUserTokenMeta(
           { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
@@ -602,7 +576,7 @@ router.get('/facebook/callback', async (req, res) => {
       }
     } catch {
       const tok = accessToken;
-      const expSec = 2 * 60 * 60; // 2 hours
+      const expSec = 2 * 60 * 60;
       const expiresAt = Date.now() + expSec * 1000;
 
       await setFbUserToken(tok, userOwner);
@@ -611,7 +585,6 @@ router.get('/facebook/callback', async (req, res) => {
         userOwner
       );
 
-      // sid fallback
       await setFbUserToken(tok, sidOwner);
       await setFbUserTokenMeta(
         { expiresAt, expiresInSec: expSec, provider: 'facebook', kind: 'short_lived' },
@@ -619,11 +592,9 @@ router.get('/facebook/callback', async (req, res) => {
       );
 
       await refreshDefaults(tok, userOwner);
-
       console.warn('[auth] long-lived exchange failed, stored short-lived token; defaults refreshed');
     }
 
-    // Safety: only allow your own frontend origin
     try {
       const u = new URL(returnTo || fallback);
       const front = new URL(FRONTEND_URL);
@@ -645,9 +616,6 @@ router.get('/debug/fbtoken', (req, res) => {
   res.json({ fbUserToken: getFbUserToken(ownerKey) ? 'present' : 'missing' });
 });
 
-/* =========================
-   Defaults helper
-   ========================= */
 router.get('/facebook/defaults', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const DEFAULTS = defaultsFor(ownerKey);
@@ -697,7 +665,6 @@ router.post('/facebook/defaults/select', (req, res) => {
   return res.json({ ok: true, adAccountId: DEFAULTS.adAccountId, pageId: DEFAULTS.pageId });
 });
 
-/* ---------------------------- LowDB init helpers ---------------------------- */
 async function ensureUsersAndSessions() {
   await db.read();
   db.data = db.data || {};
@@ -706,29 +673,22 @@ async function ensureUsersAndSessions() {
   await db.write();
 }
 
-/* ---------------------------- Session helper ---------------------------- */
 async function requireSession(req) {
   await ensureUsersAndSessions();
   const auth = req.headers.authorization || '';
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : null;
-  const sid =
-    req.cookies?.[COOKIE_NAME] ||
-    req.get(SID_HEADER) ||
-    bearer;
+  const sid = req.cookies?.[COOKIE_NAME] || req.get(SID_HEADER) || bearer;
 
   if (!sid) return { ok: false, status: 401, error: 'Not logged in' };
-  const sess = db.data.sessions.find(s => s.sid === sid);
+  const sess = db.data.sessions.find((s) => s.sid === sid);
   if (!sess) return { ok: false, status: 401, error: 'Session not found' };
 
-  const user = db.data.users.find(u => u.username === sess.username);
+  const user = db.data.users.find((u) => u.username === sess.username);
   if (!user) return { ok: false, status: 401, error: 'User not found for session' };
 
   return { ok: true, sid, sess, user };
 }
 
-/* =========================
-   REAL AUTH (LowDB + bcrypt)
-   ========================= */
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password } = req.body || {};
@@ -737,7 +697,7 @@ router.post('/register', async (req, res) => {
     }
 
     await ensureUsersAndSessions();
-    if (db.data.users.find(u => u.username === username || u.email === email)) {
+    if (db.data.users.find((u) => u.username === username || u.email === email)) {
       return res.status(400).json({ error: 'Username or email already exists' });
     }
 
@@ -769,10 +729,7 @@ router.post('/login', async (req, res) => {
 
     await ensureUsersAndSessions();
 
-    // Allow login by username OR email
-    const user =
-      db.data.users.find(x => x.username === u) ||
-      db.data.users.find(x => x.email === u);
+    const user = db.data.users.find((x) => x.username === u) || db.data.users.find((x) => x.email === u);
 
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
@@ -795,14 +752,14 @@ router.post('/logout', async (req, res) => {
     await ensureUsersAndSessions();
     const sid = req.cookies?.[COOKIE_NAME];
     if (sid) {
-      db.data.sessions = db.data.sessions.filter(s => s.sid !== sid);
+      db.data.sessions = db.data.sessions.filter((s) => s.sid !== sid);
       await db.write();
     }
     res.clearCookie(COOKIE_NAME, {
       path: '/',
       secure: isProd,
       sameSite: isProd ? 'none' : 'lax',
-      domain: computeCookieDomain()
+      domain: computeCookieDomain(),
     });
     res.json({ success: true });
   } catch (err) {
@@ -810,17 +767,13 @@ router.post('/logout', async (req, res) => {
   }
 });
 
-/* ---------------------------- Debug cookies ---------------------------- */
 router.get('/debug/cookies', (req, res) => {
   res.json({
     headerCookie: req.headers.cookie || null,
-    parsed: req.cookies || null
+    parsed: req.cookies || null,
   });
 });
 
-/* =========================
-   WHOAMI (cookie + header fallback)
-   ========================= */
 router.get('/whoami', async (req, res) => {
   try {
     const s = await requireSession(req);
@@ -832,9 +785,6 @@ router.get('/whoami', async (req, res) => {
   }
 });
 
-/* =========================
-   LAUNCH CAMPAIGN (STATIC IMAGE ONLY)
-   ========================= */
 router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const { accountId } = req.params;
@@ -844,7 +794,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return res.status(401).json({
       error: 'Not authenticated with Facebook',
       hint: 'Session mismatch: your sid cookie/header must match the one used during OAuth.',
-      ownerKeyUsed: ownerKey
+      ownerKeyUsed: ownerKey,
     });
   }
 
@@ -888,7 +838,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           'https://smartmark-mvp.onrender.com';
         return new URL(parsed.pathname + parsed.search, backendBase).toString();
       }
-    } catch { }
+    } catch {}
     return s;
   }
 
@@ -902,7 +852,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     if (v && typeof v === 'object') {
       return {
         url: v.url || v.src || v.imageUrl || v.image || '',
-        bytes: v.bytes || v.base64 || v.b64 || null
+        bytes: v.bytes || v.base64 || v.b64 || null,
       };
     }
     return { url: '', bytes: null };
@@ -921,7 +871,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       'https://smartmark-mvp.onrender.com';
 
     const candidates = [];
-    const push = (u) => { if (u) candidates.push(String(u)); };
+    const push = (u) => {
+      if (u) candidates.push(String(u));
+    };
 
     try {
       if (/^https?:\/\//i.test(raw)) {
@@ -947,7 +899,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       if (rel.startsWith('/generated/')) push(`${backendBase}/api/media${rel}`);
     }
 
-    try { push(absolutePublicUrl(raw)); } catch { }
+    try {
+      push(absolutePublicUrl(raw));
+    } catch {}
 
     const uniq = Array.from(new Set(candidates.filter(Boolean)));
 
@@ -965,8 +919,8 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           validateStatus: (s) => s >= 200 && s < 400,
           headers: {
             Accept: 'image/*',
-            'User-Agent': 'SmartMark/1.0'
-          }
+            'User-Agent': 'SmartMark/1.0',
+          },
         });
 
         const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
@@ -983,7 +937,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           label: debugLabel || '',
           url: abs,
           status,
-          data: Buffer.isBuffer(data) ? '(buffer)' : data
+          data: Buffer.isBuffer(data) ? '(buffer)' : data,
         });
       }
     }
@@ -1036,11 +990,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     try {
       const pagesRes = await axios.get('https://graph.facebook.com/v18.0/me/accounts', {
-        params: { access_token: userToken, fields: 'id,name' }
+        params: { access_token: userToken, fields: 'id,name' },
       });
       const first = pagesRes.data?.data?.[0]?.id || null;
-      if (first) { DEFAULTS.pageId = String(first); return String(first); }
-    } catch { }
+      if (first) {
+        DEFAULTS.pageId = String(first);
+        return String(first);
+      }
+    } catch {}
     return null;
   }
 
@@ -1055,13 +1012,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       flightStart = null,
       flightEnd = null,
       flightHours = null,
-      overrideCountPerType = null
+      overrideCountPerType = null,
     } = req.body;
 
     const pageIdFinal = await resolvePageId(pageId);
     if (!pageIdFinal) {
       return res.status(400).json({
-        error: 'No Facebook Page available on this account. Connect a Page and try again.'
+        error: 'No Facebook Page available on this account. Connect a Page and try again.',
       });
     }
 
@@ -1070,25 +1027,27 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const destinationUrl =
       normalizeLink(
         form.websiteUrl ||
-        form.website ||
-        form.businessWebsite ||
-        form.businessUrl ||
-        form.url ||
-        req.body.websiteUrl ||
-        req.body.url
+          form.website ||
+          form.businessWebsite ||
+          form.businessUrl ||
+          form.url ||
+          req.body.websiteUrl ||
+          req.body.url
       ) || 'https://smartemark.com';
 
     let aiAudience = null;
     try {
       if (typeof aiAudienceRaw === 'string') aiAudience = JSON.parse(aiAudienceRaw);
       else if (aiAudienceRaw && typeof aiAudienceRaw === 'object') aiAudience = aiAudienceRaw;
-    } catch { aiAudience = null; }
+    } catch {
+      aiAudience = null;
+    }
 
     let targeting = {
       geo_locations: { countries: ['US'] },
       age_min: 18,
       age_max: 65,
-      targeting_automation: { advantage_audience: 0 }
+      targeting_automation: { advantage_audience: 0 },
     };
 
     if (aiAudience?.location) {
@@ -1100,23 +1059,23 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     if (aiAudience?.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
       const [min, max] = aiAudience.ageRange.split('-').map(Number);
-      targeting.age_min = min; targeting.age_max = max;
+      targeting.age_min = min;
+      targeting.age_max = max;
     }
 
     if (aiAudience?.fbInterestIds?.length) {
-      targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map(id => ({ id })) }];
+      targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map((id) => ({ id })) }];
       targeting.targeting_automation.advantage_audience = 0;
     } else {
       targeting.targeting_automation.advantage_audience = 1;
     }
 
     if (!VALIDATE_ONLY) {
-      const existing = await axios.get(
-        `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-        { params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 } }
-      );
+      const existing = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
+        params: { access_token: userToken, fields: 'id,name,effective_status', limit: 50 },
+      });
       const activeCount = (existing.data?.data || []).filter(
-        c => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
+        (c) => !['ARCHIVED', 'DELETED'].includes((c.effective_status || '').toUpperCase())
       ).length;
       if (activeCount >= 2) {
         return res.status(400).json({ error: 'Limit reached: maximum of 2 active campaigns per user.' });
@@ -1134,9 +1093,10 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       assetTypes: 'image',
       dailyBudget,
       flightHours: hours,
-      overrideCountPerType: overrideCountPerType && typeof overrideCountPerType === 'object'
-        ? { images: Number(overrideCountPerType.images || 0) }
-        : overrideCountPerType
+      overrideCountPerType:
+        overrideCountPerType && typeof overrideCountPerType === 'object'
+          ? { images: Number(overrideCountPerType.images || 0) }
+          : overrideCountPerType,
     });
 
     const needImg = plan.images || 0;
@@ -1145,17 +1105,16 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       return res.status(400).json({ error: `Need ${needImg} image(s) but received ${imageVariants.length}.` });
     }
 
-    // ✅ validate first N variants BEFORE creating FB campaign/adset
     const parsedVariants = [];
     for (let i = 0; i < needImg; i++) {
       const v = parseImageVariant(imageVariants[i]);
       const normalized = normalizeImageUrl(v.url);
-      const inline = v.bytes ? (extractBase64FromDataUrl(v.bytes) || String(v.bytes).trim()) : null;
+      const inline = v.bytes ? extractBase64FromDataUrl(v.bytes) || String(v.bytes).trim() : null;
 
       if (!inline && !normalized) {
         return res.status(400).json({
           error: `Invalid image URL for variant ${i + 1}. Do NOT send blob: URLs.`,
-          badValue: imageVariants[i]
+          badValue: imageVariants[i],
         });
       }
       parsedVariants.push({ url: normalized || v.url, bytes: inline });
@@ -1164,9 +1123,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const now = new Date();
     let startISO = flightStart
       ? new Date(flightStart).toISOString()
-      : (NO_SPEND
-        ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
-        : new Date(now.getTime() + 60 * 1000).toISOString());
+      : NO_SPEND
+      ? new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      : new Date(now.getTime() + 60 * 1000).toISOString();
 
     let endISO = flightEnd ? new Date(flightEnd).toISOString() : null;
     if (endISO) {
@@ -1183,7 +1142,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         name: campaignName,
         objective: 'OUTCOME_TRAFFIC',
         status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-        special_ad_categories: []
+        special_ad_categories: [],
       },
       { params: mkParams() }
     );
@@ -1210,7 +1169,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           instagram_positions: ['stream', 'story', 'reels'],
           audience_network_positions: [],
           messenger_positions: [],
-        }
+        },
       },
       { params: mkParams() }
     );
@@ -1233,9 +1192,9 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
               message: form.adCopy || adCopy || '',
               link: destinationUrl,
               image_hash: hash,
-              description: form.description || ''
-            }
-          }
+              description: form.description || '',
+            },
+          },
         },
         { params: mkParams() }
       );
@@ -1246,7 +1205,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           name: `${campaignName} (Image v${i + 1})`,
           adset_id: imageAdSetId,
           creative: { creative_id: cr.data.id },
-          status: NO_SPEND ? 'PAUSED' : 'ACTIVE'
+          status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
         },
         { params: mkParams() }
       );
@@ -1261,7 +1220,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     await db.read();
     db.data.campaign_creatives = db.data.campaign_creatives || [];
     const list = db.data.campaign_creatives;
-    const idx = list.findIndex(c => c.campaignId === campaignId);
+    const idx = list.findIndex((c) => c.campaignId === campaignId);
     const nowIso = new Date().toISOString();
 
     const record = {
@@ -1276,13 +1235,34 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       videos: [],
       fbVideoIds: [],
       updatedAt: nowIso,
-      ...(idx === -1 ? { createdAt: nowIso } : {})
+      ...(idx === -1 ? { createdAt: nowIso } : {}),
     };
 
     if (idx === -1) list.push(record);
     else list[idx] = { ...list[idx], ...record };
 
     await db.write();
+
+    try {
+      await upsertOptimizerCampaignState({
+        campaignId,
+        metaCampaignId: campaignId,
+        accountId: String(accountId || ''),
+        ownerKey,
+        pageId: String(pageIdFinal || ''),
+        campaignName,
+        niche: String(form.businessType || form.industry || form.niche || form.cuisineType || '').trim(),
+        currentStatus: campaignStatus,
+        optimizationEnabled: !VALIDATE_ONLY,
+        metricsSnapshot: {},
+        latestAction: null,
+        latestMonitoringDecision: null,
+        currentWinner: null,
+        activeTestType: '',
+      });
+    } catch (stateErr) {
+      console.error('[optimizer state] failed to upsert on campaign launch:', stateErr?.message || stateErr);
+    }
 
     res.json({
       success: true,
@@ -1292,7 +1272,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       variantPlan: plan,
       campaignStatus,
       validateOnly: VALIDATE_ONLY,
-      resolvedPageId: pageIdFinal
+      resolvedPageId: pageIdFinal,
     });
   } catch (err) {
     let errorMsg = 'Failed to launch campaign.';
@@ -1300,15 +1280,18 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     let detail = err.response?.data || err.message;
     if (Buffer.isBuffer(detail)) {
-      try { detail = detail.toString('utf8'); } catch { }
+      try {
+        detail = detail.toString('utf8');
+      } catch {}
     }
     console.error('FB Campaign Launch Error:', detail);
 
     const msg = String(err?.message || '').toLowerCase();
     if (msg.includes('image') || msg.includes('download') || msg.includes('blob')) {
       return res.status(400).json({
-        error: 'One of your ad images could not be fetched by the server (or a blob: URL was sent). Regenerate the image and try again.',
-        detail: String(err?.message || detail)
+        error:
+          'One of your ad images could not be fetched by the server (or a blob: URL was sent). Regenerate the image and try again.',
+        detail: String(err?.message || detail),
       });
     }
 
@@ -1316,9 +1299,43 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   }
 });
 
-/* =========================
-   TEST/UTILITY ROUTES (unchanged)
-   ========================= */
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state', async (req, res) => {
+  try {
+    const ownerKey = ownerKeyFromReq(req);
+    const userToken = getFbUserToken(ownerKey);
+    const { campaignId } = req.params;
+
+    if (!userToken) {
+      return res.status(401).json({ error: 'Not authenticated with Facebook' });
+    }
+
+    const state = await findOptimizerCampaignStateByCampaignId(campaignId);
+    if (!state) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No optimizer campaign state found for this campaign.',
+      });
+    }
+
+    if (String(state.ownerKey || '') !== String(ownerKey || '')) {
+      return res.status(403).json({
+        ok: false,
+        error: 'You do not have access to this optimizer campaign state.',
+      });
+    }
+
+    return res.json({
+      ok: true,
+      optimizerState: state,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to load optimizer campaign state.',
+    });
+  }
+});
+
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const userToken = getFbUserToken(ownerKey);
@@ -1330,16 +1347,13 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
   }
 
   try {
-    const response = await axios.get(
-      `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
-      {
-        params: {
-          access_token: userToken,
-          fields: 'id,name,status,effective_status,start_time',
-          limit: 50,
-        },
-      }
-    );
+    const response = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`, {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,status,effective_status,start_time',
+        limit: 50,
+      },
+    });
 
     const list = Array.isArray(response.data?.data) ? response.data.data : [];
 
@@ -1353,14 +1367,10 @@ router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
       await db.read();
 
       const sid = getSidFromReq(req);
-      const ownerCandidates = new Set([
-        String(ownerKey || ''),
-        String(sid || ''),
-      ]);
+      const ownerCandidates = new Set([String(ownerKey || ''), String(sid || '')]);
 
-      // also include user:<username> if session resolves
       try {
-        const sess = (db.data.sessions || []).find(s => String(s.sid) === String(sid));
+        const sess = (db.data.sessions || []).find((s) => String(s.sid) === String(sid));
         if (sess?.username) ownerCandidates.add(`user:${String(sess.username).trim()}`);
       } catch {}
 
@@ -1413,10 +1423,9 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
-    const response = await axios.get(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
-      { params: { access_token: userToken, fields: 'id,name,status,start_time,objective,effective_status' } }
-    );
+    const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+      params: { access_token: userToken, fields: 'id,name,status,start_time,objective,effective_status' },
+    });
     res.json(response.data);
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaign details.' });
@@ -1430,16 +1439,13 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
 
   try {
-    const response = await axios.get(
-      `https://graph.facebook.com/v18.0/${campaignId}/insights`,
-      {
-        params: {
-          access_token: userToken,
-          fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
-          date_preset: 'maximum'
-        }
-      }
-    );
+    const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+      params: {
+        access_token: userToken,
+        fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
+        date_preset: 'maximum',
+      },
+    });
     res.json(response.data);
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaign metrics.' });
@@ -1454,9 +1460,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
   try {
     await db.read();
     const ownerKey = ownerKeyFromReq(req);
-    const rec = (db.data.campaign_creatives || []).find(
-      r => r.campaignId === campaignId && r.ownerKey === ownerKey
-    ) || null;
+    const rec =
+      (db.data.campaign_creatives || []).find(
+        (r) => r.campaignId === campaignId && r.ownerKey === ownerKey
+      ) || null;
 
     if (!rec) return res.status(404).json({ error: 'No creatives stored for this campaign.' });
     res.json({
@@ -1470,7 +1477,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       videos: [],
       fbVideoIds: [],
       updatedAt: rec.updatedAt,
-      createdAt: rec.createdAt
+      createdAt: rec.createdAt,
     });
   } catch (e) {
     res.status(500).json({ error: e.message || 'Failed to load creatives.' });
@@ -1511,7 +1518,6 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
   }
 });
 
-// ✅ Delete (one click): archive on FB + purge stored creatives so "in progress" doesn't stick
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const userToken = getFbUserToken(ownerKey);

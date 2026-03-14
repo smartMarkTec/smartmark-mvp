@@ -7,10 +7,13 @@ const { Low } = require('lowdb');
 const { JSONFile } = require('lowdb/node');
 
 // Prefer a mounted disk if available (Render: /var/data)
-const DATA_DIR = process.env.DATA_DIR ||
+const DATA_DIR =
+  process.env.DATA_DIR ||
   (fs.existsSync('/var/data') ? '/var/data/smartmark' : path.join(__dirname, 'data'));
 
-try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch {}
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch {}
 
 const DB_FILE = process.env.DB_FILE || path.join(DATA_DIR, 'db.json');
 
@@ -22,6 +25,7 @@ const db = new Low(adapter, {
   smart_configs: [],
   smart_runs: [],
   creative_history: [],
+  optimizer_campaign_state: [],
   tokens: {} // <= where we keep the FB token
 });
 
