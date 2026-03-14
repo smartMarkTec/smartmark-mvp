@@ -207,7 +207,6 @@ const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
-// accept either spelling just in case env was added slightly differently
 const SMARTEMARK_DEBUG_KEY = String(
   process.env.SMARTEMARK_DEBUG_KEY ||
   process.env.SMARTMARK_DEBUG_KEY ||
@@ -280,29 +279,16 @@ function ownerKeyFromReq(req) {
 function hasValidDebugKey(req) {
   const supplied = String(
     req.query?.debug_key ||
-    req.query?.key ||
-    req.get(DEBUG_KEY_HEADER) ||
-    ''
+      req.query?.key ||
+      req.get(DEBUG_KEY_HEADER) ||
+      ''
   ).trim();
 
   if (!SMARTEMARK_DEBUG_KEY || !supplied) {
-    console.log('[optimizer debug] missing debug key', {
-      hasEnv: !!SMARTEMARK_DEBUG_KEY,
-      hasSupplied: !!supplied,
-    });
     return false;
   }
 
-  const ok = supplied === SMARTEMARK_DEBUG_KEY;
-
-  console.log('[optimizer debug] debug key check', {
-    hasEnv: !!SMARTEMARK_DEBUG_KEY,
-    suppliedLength: supplied.length,
-    envLength: SMARTEMARK_DEBUG_KEY.length,
-    ok,
-  });
-
-  return ok;
+  return supplied === SMARTEMARK_DEBUG_KEY;
 }
 
 router.use((req, res, next) => {
@@ -415,6 +401,7 @@ function absolutePublicUrl(relativePath) {
     'https://smartmark-mvp.onrender.com';
 
   if (!relativePath) return '';
+
   if (/^https?:\/\//i.test(relativePath)) return relativePath;
 
   const rel = String(relativePath).startsWith('/') ? String(relativePath) : `/${relativePath}`;
@@ -501,7 +488,11 @@ router.get('/facebook', (req, res) => {
   try {
     const u = new URL(returnTo);
     const host = u.hostname.toLowerCase();
-    const allowed = host === 'www.smartemark.com' || host === 'smartemark.com' || host === 'localhost';
+    const allowed =
+      host === 'www.smartemark.com' ||
+      host === 'smartemark.com' ||
+      host === 'localhost' ||
+      host === 'smartmark-mvp.vercel.app';
     if (allowed) safeReturnTo = u.toString();
   } catch {}
 
@@ -764,7 +755,9 @@ router.post('/login', async (req, res) => {
 
     await ensureUsersAndSessions();
 
-    const user = db.data.users.find((x) => x.username === u) || db.data.users.find((x) => x.email === u);
+    const user =
+      db.data.users.find((x) => x.username === u) ||
+      db.data.users.find((x) => x.email === u);
 
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
@@ -854,71 +847,65 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     return s;
   }
 
- function normalizeImageUrl(u) {
-  const s = String(u || '').trim();
-  if (!s) return '';
+  function normalizeImageUrl(u) {
+    const s = String(u || '').trim();
+    if (!s) return '';
 
-  // hard reject browser-only blob URLs
-  if (/^blob:/i.test(s)) return '';
+    if (/^blob:/i.test(s)) return '';
+    if (/^data:image\//i.test(s)) return s;
 
-  // allow inline data URLs
-  if (/^data:image\//i.test(s)) return s;
+    const backendBase =
+      process.env.PUBLIC_BASE_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      'https://smartmark-mvp.onrender.com';
 
-  const backendBase =
-    process.env.PUBLIC_BASE_URL ||
-    process.env.RENDER_EXTERNAL_URL ||
-    'https://smartmark-mvp.onrender.com';
+    const frontendBase =
+      process.env.FRONTEND_URL ||
+      'https://smartmark-mvp.vercel.app';
 
-  const frontendBase =
-    process.env.FRONTEND_URL ||
-    'https://smartmark-mvp.vercel.app';
+    if (!/^https?:\/\//i.test(s)) {
+      const rel = s.startsWith('/') ? s : `/${s}`;
+      return `${backendBase}${rel}`;
+    }
 
-  // relative path -> force to backend
-  if (!/^https?:\/\//i.test(s)) {
-    const rel = s.startsWith('/') ? s : `/${s}`;
-    return `${backendBase}${rel}`;
+    try {
+      const parsed = new URL(s);
+      const host = parsed.hostname.toLowerCase();
+
+      const frontendHost = (() => {
+        try {
+          return new URL(frontendBase).hostname.toLowerCase();
+        } catch {
+          return '';
+        }
+      })();
+
+      const backendHost = (() => {
+        try {
+          return new URL(backendBase).hostname.toLowerCase();
+        } catch {
+          return '';
+        }
+      })();
+
+      const shouldRewriteToBackend =
+        host === 'smartemark.com' ||
+        host === 'www.smartemark.com' ||
+        host === 'smartmark-mvp.vercel.app' ||
+        host === 'www.smartmark-mvp.vercel.app' ||
+        (frontendHost && host === frontendHost);
+
+      if (shouldRewriteToBackend) {
+        return new URL(parsed.pathname + parsed.search, backendBase).toString();
+      }
+
+      if (backendHost && host === backendHost) {
+        return s;
+      }
+    } catch {}
+
+    return s;
   }
-
-  try {
-    const parsed = new URL(s);
-    const host = parsed.hostname.toLowerCase();
-
-    const frontendHost = (() => {
-      try {
-        return new URL(frontendBase).hostname.toLowerCase();
-      } catch {
-        return '';
-      }
-    })();
-
-    const backendHost = (() => {
-      try {
-        return new URL(backendBase).hostname.toLowerCase();
-      } catch {
-        return '';
-      }
-    })();
-
-    const shouldRewriteToBackend =
-      host === 'smartemark.com' ||
-      host === 'www.smartemark.com' ||
-      host === 'smartmark-mvp.vercel.app' ||
-      host === 'www.smartmark-mvp.vercel.app' ||
-      (frontendHost && host === frontendHost);
-
-    // if frontend-origin/generated/media url, rewrite to backend static host
-    if (shouldRewriteToBackend) {
-      return new URL(parsed.pathname + parsed.search, backendBase).toString();
-    }
-
-    // already backend-hosted -> keep it
-    if (backendHost && host === backendHost) {
-      return s;
-    }
-  } catch {}
-
-  return s;
-}
 
   function extractBase64FromDataUrl(s) {
     const m = /^data:image\/[a-z0-9.+-]+;base64,(.+)$/i.exec(String(s || '').trim());
@@ -943,6 +930,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     if (inline) return inline;
 
     const raw = String(url).trim();
+
     const backendBase =
       process.env.PUBLIC_BASE_URL ||
       process.env.RENDER_EXTERNAL_URL ||
@@ -958,18 +946,39 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         push(raw);
 
         const u = new URL(raw);
-        push(`${backendBase}${u.pathname}${u.search || ''}`);
+        const pathWithSearch = `${u.pathname}${u.search || ''}`;
+
+        push(`${backendBase}${pathWithSearch}`);
 
         if (u.pathname.startsWith('/generated/')) {
           push(`${backendBase}${u.pathname}`);
           push(`${backendBase}/api/media${u.pathname}`);
         }
-        if (u.pathname.startsWith('/api/media/')) push(`${backendBase}${u.pathname}${u.search || ''}`);
-        if (u.pathname.startsWith('/media/')) push(`${backendBase}${u.pathname}${u.search || ''}`);
+
+        if (u.pathname.startsWith('/api/media/')) {
+          push(`${backendBase}${pathWithSearch}`);
+          const stripped = u.pathname.replace(/^\/api\/media/, '');
+          if (stripped) push(`${backendBase}/media${stripped}${u.search || ''}`);
+        }
+
+        if (u.pathname.startsWith('/media/')) {
+          push(`${backendBase}${pathWithSearch}`);
+          const stripped = u.pathname.replace(/^\/media/, '');
+          if (stripped) push(`${backendBase}/api/media${stripped}${u.search || ''}`);
+        }
       } else {
         const rel = raw.startsWith('/') ? raw : `/${raw}`;
         push(`${backendBase}${rel}`);
+
         if (rel.startsWith('/generated/')) push(`${backendBase}/api/media${rel}`);
+        if (rel.startsWith('/api/media/')) {
+          const stripped = rel.replace(/^\/api\/media/, '');
+          if (stripped) push(`${backendBase}/media${stripped}`);
+        }
+        if (rel.startsWith('/media/')) {
+          const stripped = rel.replace(/^\/media/, '');
+          if (stripped) push(`${backendBase}/api/media${stripped}`);
+        }
       }
     } catch {
       const rel = raw.startsWith('/') ? raw : `/${raw}`;
@@ -996,13 +1005,13 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
           maxContentLength: 25 * 1024 * 1024,
           validateStatus: (s) => s >= 200 && s < 400,
           headers: {
-            Accept: 'image/*',
+            Accept: 'image/*,*/*',
             'User-Agent': 'SmartMark/1.0',
           },
         });
 
         const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
-        if (!ct.includes('image')) {
+        if (ct && !ct.includes('image') && !ct.includes('octet-stream')) {
           throw new Error(`Non-image content-type: ${ct || 'unknown'} from ${abs}`);
         }
 
@@ -1321,47 +1330,47 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     await db.write();
 
- try {
-  const optimizerPayload = {
-    campaignId: String(campaignId || '').trim(),
-    metaCampaignId: String(campaignId || '').trim(),
-    accountId: String(accountId || '').trim(),
-    ownerKey: String(ownerKey || '').trim(),
-    pageId: String(pageIdFinal || '').trim(),
-    campaignName: String(campaignName || '').trim(),
-    niche: String(
-      form.businessType ||
-      form.industry ||
-      form.niche ||
-      form.cuisineType ||
-      ''
-    ).trim(),
-    currentStatus: String(campaignStatus || '').trim(),
-    optimizationEnabled: !VALIDATE_ONLY,
-    metricsSnapshot: {},
-    latestAction: null,
-    latestMonitoringDecision: null,
-    currentWinner: null,
-    activeTestType: '',
-  };
+    try {
+      const optimizerPayload = {
+        campaignId: String(campaignId || '').trim(),
+        metaCampaignId: String(campaignId || '').trim(),
+        accountId: String(accountId || '').trim(),
+        ownerKey: String(ownerKey || '').trim(),
+        pageId: String(pageIdFinal || '').trim(),
+        campaignName: String(campaignName || '').trim(),
+        niche: String(
+          form.businessType ||
+            form.industry ||
+            form.niche ||
+            form.cuisineType ||
+            ''
+        ).trim(),
+        currentStatus: String(campaignStatus || '').trim(),
+        optimizationEnabled: !VALIDATE_ONLY,
+        metricsSnapshot: {},
+        latestAction: null,
+        latestMonitoringDecision: null,
+        currentWinner: null,
+        activeTestType: '',
+      };
 
-  console.log('[optimizer state] launch upsert payload:', optimizerPayload);
+      console.log('[optimizer state] launch upsert payload:', optimizerPayload);
 
-  const savedOptimizerState = await upsertOptimizerCampaignState(optimizerPayload);
+      const savedOptimizerState = await upsertOptimizerCampaignState(optimizerPayload);
 
-  console.log('[optimizer state] launch upsert success:', savedOptimizerState);
-} catch (stateErr) {
-  console.error('[optimizer state] failed to upsert on campaign launch:', {
-    message: stateErr?.message || 'unknown error',
-    stack: stateErr?.stack || null,
-    campaignId,
-    accountId,
-    ownerKey,
-    pageIdFinal,
-    campaignName,
-    campaignStatus,
-  });
-}
+      console.log('[optimizer state] launch upsert success:', savedOptimizerState);
+    } catch (stateErr) {
+      console.error('[optimizer state] failed to upsert on campaign launch:', {
+        message: stateErr?.message || 'unknown error',
+        stack: stateErr?.stack || null,
+        campaignId,
+        accountId,
+        ownerKey,
+        pageIdFinal,
+        campaignName,
+        campaignStatus,
+      });
+    }
 
     res.json({
       success: true,
@@ -1418,7 +1427,6 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
       });
     }
 
-    // if debug key is valid, bypass session entirely
     if (usingDebugKey) {
       return res.json({
         ok: true,
