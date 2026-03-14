@@ -206,7 +206,13 @@ const FACEBOOK_APP_ID = process.env.FACEBOOK_APP_ID;
 const FACEBOOK_APP_SECRET = process.env.FACEBOOK_APP_SECRET;
 const FACEBOOK_REDIRECT_URI = process.env.FACEBOOK_REDIRECT_URI;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
-const SMARTEMARK_DEBUG_KEY = String(process.env.SMARTEMARK_DEBUG_KEY || '').trim();
+
+// accept either spelling just in case env was added slightly differently
+const SMARTEMARK_DEBUG_KEY = String(
+  process.env.SMARTEMARK_DEBUG_KEY ||
+  process.env.SMARTMARK_DEBUG_KEY ||
+  ''
+).trim();
 
 const COOKIE_NAME = 'sm_sid';
 const isProd = process.env.NODE_ENV === 'production' || !!process.env.RENDER;
@@ -272,17 +278,31 @@ function ownerKeyFromReq(req) {
 }
 
 function hasValidDebugKey(req) {
-  const supplied = String(req.query?.debug_key || req.get(DEBUG_KEY_HEADER) || '').trim();
-  if (!SMARTEMARK_DEBUG_KEY || !supplied) return false;
+  const supplied = String(
+    req.query?.debug_key ||
+    req.query?.key ||
+    req.get(DEBUG_KEY_HEADER) ||
+    ''
+  ).trim();
 
-  try {
-    const a = Buffer.from(supplied);
-    const b = Buffer.from(SMARTEMARK_DEBUG_KEY);
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
-  } catch {
+  if (!SMARTEMARK_DEBUG_KEY || !supplied) {
+    console.log('[optimizer debug] missing debug key', {
+      hasEnv: !!SMARTEMARK_DEBUG_KEY,
+      hasSupplied: !!supplied,
+    });
     return false;
   }
+
+  const ok = supplied === SMARTEMARK_DEBUG_KEY;
+
+  console.log('[optimizer debug] debug key check', {
+    hasEnv: !!SMARTEMARK_DEBUG_KEY,
+    suppliedLength: supplied.length,
+    envLength: SMARTEMARK_DEBUG_KEY.length,
+    ok,
+  });
+
+  return ok;
 }
 
 router.use((req, res, next) => {
@@ -1319,28 +1339,11 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
     const { campaignId, accountId } = req.params;
     const usingDebugKey = hasValidDebugKey(req);
 
-    let currentOwnerKey = null;
-
-    if (!usingDebugKey) {
-      const session = await requireSession(req);
-      if (!session.ok) {
-        return res.status(session.status).json({ ok: false, error: session.error });
-      }
-      currentOwnerKey = `user:${String(session.user.username).trim()}`;
-    }
-
     const state = await findOptimizerCampaignStateByCampaignId(campaignId);
     if (!state) {
       return res.status(404).json({
         ok: false,
         error: 'No optimizer campaign state found for this campaign.',
-      });
-    }
-
-    if (!usingDebugKey && String(state.ownerKey || '') !== currentOwnerKey) {
-      return res.status(403).json({
-        ok: false,
-        error: 'You do not have access to this optimizer campaign state.',
       });
     }
 
@@ -1351,9 +1354,32 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
       });
     }
 
+    // if debug key is valid, bypass session entirely
+    if (usingDebugKey) {
+      return res.json({
+        ok: true,
+        accessMode: 'debug_key',
+        optimizerState: state,
+      });
+    }
+
+    const session = await requireSession(req);
+    if (!session.ok) {
+      return res.status(session.status).json({ ok: false, error: session.error });
+    }
+
+    const currentOwnerKey = `user:${String(session.user.username).trim()}`;
+
+    if (String(state.ownerKey || '') !== currentOwnerKey) {
+      return res.status(403).json({
+        ok: false,
+        error: 'You do not have access to this optimizer campaign state.',
+      });
+    }
+
     return res.json({
       ok: true,
-      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      accessMode: 'session',
       optimizerState: state,
     });
   } catch (err) {
