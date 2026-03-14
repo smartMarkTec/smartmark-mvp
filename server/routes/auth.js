@@ -1278,26 +1278,47 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
 
     await db.write();
 
-    try {
-      await upsertOptimizerCampaignState({
-        campaignId,
-        metaCampaignId: campaignId,
-        accountId: String(accountId || ''),
-        ownerKey,
-        pageId: String(pageIdFinal || ''),
-        campaignName,
-        niche: String(form.businessType || form.industry || form.niche || form.cuisineType || '').trim(),
-        currentStatus: campaignStatus,
-        optimizationEnabled: !VALIDATE_ONLY,
-        metricsSnapshot: {},
-        latestAction: null,
-        latestMonitoringDecision: null,
-        currentWinner: null,
-        activeTestType: '',
-      });
-    } catch (stateErr) {
-      console.error('[optimizer state] failed to upsert on campaign launch:', stateErr?.message || stateErr);
-    }
+ try {
+  const optimizerPayload = {
+    campaignId: String(campaignId || '').trim(),
+    metaCampaignId: String(campaignId || '').trim(),
+    accountId: String(accountId || '').trim(),
+    ownerKey: String(ownerKey || '').trim(),
+    pageId: String(pageIdFinal || '').trim(),
+    campaignName: String(campaignName || '').trim(),
+    niche: String(
+      form.businessType ||
+      form.industry ||
+      form.niche ||
+      form.cuisineType ||
+      ''
+    ).trim(),
+    currentStatus: String(campaignStatus || '').trim(),
+    optimizationEnabled: !VALIDATE_ONLY,
+    metricsSnapshot: {},
+    latestAction: null,
+    latestMonitoringDecision: null,
+    currentWinner: null,
+    activeTestType: '',
+  };
+
+  console.log('[optimizer state] launch upsert payload:', optimizerPayload);
+
+  const savedOptimizerState = await upsertOptimizerCampaignState(optimizerPayload);
+
+  console.log('[optimizer state] launch upsert success:', savedOptimizerState);
+} catch (stateErr) {
+  console.error('[optimizer state] failed to upsert on campaign launch:', {
+    message: stateErr?.message || 'unknown error',
+    stack: stateErr?.stack || null,
+    campaignId,
+    accountId,
+    ownerKey,
+    pageIdFinal,
+    campaignName,
+    campaignStatus,
+  });
+}
 
     res.json({
       success: true,
