@@ -1414,41 +1414,28 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
 
     let state = await findOptimizerCampaignStateByCampaignId(campaignId);
 
-    // Backfill from campaign_creatives if optimizer state is missing
+    // If missing, create a minimal state directly from route params
     if (!state) {
-      await db.read();
-      db.data = db.data || {};
-      db.data.campaign_creatives = db.data.campaign_creatives || [];
+      const minimalPayload = {
+        campaignId: String(campaignId || '').trim(),
+        metaCampaignId: String(campaignId || '').trim(),
+        accountId: String(accountId || '').replace(/^act_/, '').trim(),
+        ownerKey: '',
+        pageId: '',
+        campaignName: '',
+        niche: '',
+        currentStatus: 'ACTIVE',
+        optimizationEnabled: true,
+        metricsSnapshot: {},
+        latestAction: null,
+        latestMonitoringDecision: null,
+        currentWinner: null,
+        activeTestType: '',
+      };
 
-      const creativeRecord =
-        db.data.campaign_creatives.find(
-          (r) =>
-            String(r.campaignId || '') === String(campaignId || '') &&
-            String(r.accountId || '').replace(/^act_/, '') === String(accountId || '').replace(/^act_/, '')
-        ) || null;
+      console.log('[optimizer state] creating minimal fallback state from route params:', minimalPayload);
 
-      if (creativeRecord) {
-        const backfillPayload = {
-          campaignId: String(creativeRecord.campaignId || '').trim(),
-          metaCampaignId: String(creativeRecord.campaignId || '').trim(),
-          accountId: String(creativeRecord.accountId || '').replace(/^act_/, '').trim(),
-          ownerKey: String(creativeRecord.ownerKey || '').trim(),
-          pageId: String(creativeRecord.pageId || '').trim(),
-          campaignName: String(creativeRecord.name || '').trim(),
-          niche: '',
-          currentStatus: String(creativeRecord.status || 'ACTIVE').trim(),
-          optimizationEnabled: true,
-          metricsSnapshot: {},
-          latestAction: null,
-          latestMonitoringDecision: null,
-          currentWinner: null,
-          activeTestType: '',
-        };
-
-        console.log('[optimizer state] backfilling from campaign_creatives:', backfillPayload);
-
-        state = await upsertOptimizerCampaignState(backfillPayload);
-      }
+      state = await upsertOptimizerCampaignState(minimalPayload);
     }
 
     if (!state) {
@@ -1480,10 +1467,18 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
 
     const currentOwnerKey = `user:${String(session.user.username).trim()}`;
 
-    if (String(state.ownerKey || '') !== currentOwnerKey) {
+    if (state.ownerKey && String(state.ownerKey) !== currentOwnerKey) {
       return res.status(403).json({
         ok: false,
         error: 'You do not have access to this optimizer campaign state.',
+      });
+    }
+
+    // If ownerKey was blank in fallback creation, attach it now
+    if (!state.ownerKey) {
+      state = await upsertOptimizerCampaignState({
+        ...state,
+        ownerKey: currentOwnerKey,
       });
     }
 
