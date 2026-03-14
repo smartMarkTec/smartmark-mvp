@@ -1412,7 +1412,45 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
     const { campaignId, accountId } = req.params;
     const usingDebugKey = hasValidDebugKey(req);
 
-    const state = await findOptimizerCampaignStateByCampaignId(campaignId);
+    let state = await findOptimizerCampaignStateByCampaignId(campaignId);
+
+    // Backfill from campaign_creatives if optimizer state is missing
+    if (!state) {
+      await db.read();
+      db.data = db.data || {};
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+      const creativeRecord =
+        db.data.campaign_creatives.find(
+          (r) =>
+            String(r.campaignId || '') === String(campaignId || '') &&
+            String(r.accountId || '').replace(/^act_/, '') === String(accountId || '').replace(/^act_/, '')
+        ) || null;
+
+      if (creativeRecord) {
+        const backfillPayload = {
+          campaignId: String(creativeRecord.campaignId || '').trim(),
+          metaCampaignId: String(creativeRecord.campaignId || '').trim(),
+          accountId: String(creativeRecord.accountId || '').replace(/^act_/, '').trim(),
+          ownerKey: String(creativeRecord.ownerKey || '').trim(),
+          pageId: String(creativeRecord.pageId || '').trim(),
+          campaignName: String(creativeRecord.name || '').trim(),
+          niche: '',
+          currentStatus: String(creativeRecord.status || 'ACTIVE').trim(),
+          optimizationEnabled: true,
+          metricsSnapshot: {},
+          latestAction: null,
+          latestMonitoringDecision: null,
+          currentWinner: null,
+          activeTestType: '',
+        };
+
+        console.log('[optimizer state] backfilling from campaign_creatives:', backfillPayload);
+
+        state = await upsertOptimizerCampaignState(backfillPayload);
+      }
+    }
+
     if (!state) {
       return res.status(404).json({
         ok: false,
