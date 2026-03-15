@@ -17,6 +17,7 @@ const {
 const {
   upsertOptimizerCampaignState,
   findOptimizerCampaignStateByCampaignId,
+  updateOptimizerCampaignState,
 } = require('../optimizerCampaignState');
 
 const {
@@ -1502,19 +1503,62 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', async (req, res) => {
   try {
     const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
     let ownerKey = '';
     let userToken = null;
 
     if (usingDebugKey) {
-      ownerKey = ownerKeyFromReq(req);
-      userToken = getFbUserToken(ownerKey);
+      // First try current request/session-derived owner key
+      const reqOwnerKey = ownerKeyFromReq(req);
+      userToken = getFbUserToken(reqOwnerKey);
+
+      if (userToken) {
+        ownerKey = reqOwnerKey;
+      } else {
+        // Then try optimizer state ownerKey
+        const existingState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+
+        if (existingState?.ownerKey) {
+          ownerKey = String(existingState.ownerKey).trim();
+          userToken = getFbUserToken(ownerKey);
+        }
+
+        // Then try campaign_creatives backfill
+        if (!userToken) {
+          await ensureUsersAndSessions();
+          await db.read();
+          db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+          const creativeRecord = db.data.campaign_creatives.find((row) => {
+            return (
+              String(row?.campaignId || '').trim() === normalizedCampaignId &&
+              String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId &&
+              String(row?.ownerKey || '').trim()
+            );
+          });
+
+          if (creativeRecord?.ownerKey) {
+            ownerKey = String(creativeRecord.ownerKey).trim();
+            userToken = getFbUserToken(ownerKey);
+
+            // Backfill optimizer state ownerKey so future calls work cleanly
+            if (userToken) {
+              await updateOptimizerCampaignState(normalizedCampaignId, {
+                ownerKey,
+              });
+            }
+          }
+        }
+      }
 
       if (!userToken) {
         return res.status(401).json({
           ok: false,
           error: 'No Facebook token available for debug-key metrics sync.',
+          hint: 'This campaign is not yet linked to a stored ownerKey with a Facebook token.',
         });
       }
     } else {
@@ -1536,8 +1580,8 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', 
 
     const result = await syncCampaignMetricsToOptimizerState({
       userToken,
-      campaignId: String(campaignId || '').trim(),
-      accountId: String(accountId || '').replace(/^act_/, '').trim(),
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
       ownerKey,
     });
 
@@ -1545,6 +1589,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', 
       ok: true,
       accessMode: usingDebugKey ? 'debug_key' : 'session',
       created: !!result.created,
+      resolvedOwnerKey: ownerKey,
       metricsSnapshot: result.snapshot,
       optimizerState: result.optimizerState,
     });
