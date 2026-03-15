@@ -1,170 +1,167 @@
+// server/optimizerCampaignState.js
 'use strict';
 
-const axios = require('axios');
-const {
-  findOptimizerCampaignStateByCampaignId,
-  upsertOptimizerCampaignState,
-  updateOptimizerCampaignState,
-} = require('./optimizerCampaignState');
+const db = require('./db');
 
-function toNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
+async function ensureOptimizerCampaignStateShape() {
+  await db.read();
+  db.data = db.data || {};
+  db.data.optimizer_campaign_state = db.data.optimizer_campaign_state || [];
+  await db.write();
+  return db.data.optimizer_campaign_state;
 }
 
-function safeDivide(a, b, fallback = null) {
-  const x = Number(a);
-  const y = Number(b);
-  if (!Number.isFinite(x) || !Number.isFinite(y) || y === 0) return fallback;
-  return x / y;
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function extractActionValue(actions = [], actionTypes = []) {
-  if (!Array.isArray(actions) || !Array.isArray(actionTypes) || actionTypes.length === 0) {
-    return 0;
+function normalizeId(value) {
+  return String(value || '').trim();
+}
+
+async function getAllOptimizerCampaignStates() {
+  await ensureOptimizerCampaignStateShape();
+  return db.data.optimizer_campaign_state;
+}
+
+async function findOptimizerCampaignStateByCampaignId(campaignId) {
+  await ensureOptimizerCampaignStateShape();
+  const id = normalizeId(campaignId);
+  if (!id) return null;
+
+  return (
+    db.data.optimizer_campaign_state.find(
+      (row) => normalizeId(row?.campaignId) === id
+    ) || null
+  );
+}
+
+async function findOptimizerCampaignStateByMetaCampaignId(metaCampaignId) {
+  await ensureOptimizerCampaignStateShape();
+  const id = normalizeId(metaCampaignId);
+  if (!id) return null;
+
+  return (
+    db.data.optimizer_campaign_state.find(
+      (row) => normalizeId(row?.metaCampaignId) === id
+    ) || null
+  );
+}
+
+async function upsertOptimizerCampaignState(input = {}) {
+  await ensureOptimizerCampaignStateShape();
+
+  const campaignId = normalizeId(input.campaignId || input.metaCampaignId);
+  const metaCampaignId = normalizeId(input.metaCampaignId || input.campaignId);
+
+  if (!campaignId && !metaCampaignId) {
+    throw new Error('campaignId or metaCampaignId is required');
   }
 
-  const wanted = new Set(actionTypes.map((x) => String(x).trim().toLowerCase()));
+  const list = db.data.optimizer_campaign_state;
+  const existingIndex = list.findIndex((row) => {
+    const rowCampaignId = normalizeId(row?.campaignId);
+    const rowMetaCampaignId = normalizeId(row?.metaCampaignId);
 
-  return actions.reduce((sum, row) => {
-    const type = String(row?.action_type || '').trim().toLowerCase();
-    if (!wanted.has(type)) return sum;
-    return sum + toNumber(row?.value, 0);
-  }, 0);
-}
-
-function normalizeInsightsRow(row = {}, campaignId) {
-  const impressions = toNumber(row.impressions, 0);
-  const reach = toNumber(row.reach, 0);
-  const clicks = toNumber(row.clicks, 0);
-  const uniqueClicks = toNumber(row.unique_clicks, 0);
-  const spend = toNumber(row.spend, 0);
-  const ctr = toNumber(row.ctr, safeDivide(clicks * 100, impressions, 0));
-  const cpm = toNumber(row.cpm, safeDivide(spend * 1000, impressions, 0));
-  const cpp = toNumber(row.cpp, safeDivide(spend * 1000, reach, 0));
-
-  const actions = Array.isArray(row.actions) ? row.actions : [];
-  const linkClicks = extractActionValue(actions, [
-    'link_click',
-    'landing_page_view',
-    'outbound_click',
-  ]);
-
-  const conversions = extractActionValue(actions, [
-    'lead',
-    'onsite_conversion.lead_grouped',
-    'offsite_conversion.fb_pixel_lead',
-    'omni_lead',
-    'purchase',
-    'offsite_conversion.fb_pixel_purchase',
-  ]);
-
-  const cpc =
-    linkClicks > 0
-      ? safeDivide(spend, linkClicks, null)
-      : clicks > 0
-      ? safeDivide(spend, clicks, null)
-      : null;
-
-  const frequency = reach > 0 ? safeDivide(impressions, reach, null) : null;
-  const conversionRate = linkClicks > 0 ? safeDivide(conversions * 100, linkClicks, null) : null;
-  const costPerConversion = conversions > 0 ? safeDivide(spend, conversions, null) : null;
-
-  return {
-    campaignId: String(campaignId || '').trim(),
-    spend,
-    impressions,
-    reach,
-    clicks,
-    uniqueClicks,
-    linkClicks,
-    ctr,
-    cpm,
-    cpp,
-    cpc,
-    frequency,
-    conversions,
-    conversionRate,
-    costPerConversion,
-    rawActions: actions,
-    source: 'meta_insights',
-    datePreset: 'maximum',
-    dateStart: String(row.date_start || '').trim(),
-    dateStop: String(row.date_stop || '').trim(),
-    lastSyncedAt: new Date().toISOString(),
-  };
-}
-
-async function fetchCampaignInsightsSnapshot({ userToken, campaignId }) {
-  if (!userToken) throw new Error('userToken is required');
-  if (!campaignId) throw new Error('campaignId is required');
-
-  const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
-    params: {
-      access_token: userToken,
-      fields:
-        'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks,date_start,date_stop',
-      date_preset: 'maximum',
-    },
+    return (
+      (campaignId && rowCampaignId === campaignId) ||
+      (metaCampaignId && rowMetaCampaignId === metaCampaignId)
+    );
   });
 
-  const row = Array.isArray(response.data?.data) ? response.data.data[0] || {} : {};
-  return normalizeInsightsRow(row, campaignId);
+  const timestamp = nowIso();
+
+  const baseRecord = {
+    campaignId: campaignId || metaCampaignId,
+    metaCampaignId: metaCampaignId || campaignId,
+    accountId: normalizeId(input.accountId),
+    ownerKey: normalizeId(input.ownerKey),
+    pageId: normalizeId(input.pageId),
+    campaignName: String(input.campaignName || '').trim(),
+    niche: String(input.niche || '').trim(),
+    currentStatus: String(input.currentStatus || 'ACTIVE').trim(),
+    optimizationEnabled:
+      typeof input.optimizationEnabled === 'boolean'
+        ? input.optimizationEnabled
+        : true,
+    metricsSnapshot:
+      input.metricsSnapshot && typeof input.metricsSnapshot === 'object'
+        ? input.metricsSnapshot
+        : {},
+    latestAction:
+      input.latestAction && typeof input.latestAction === 'object'
+        ? input.latestAction
+        : null,
+    latestMonitoringDecision:
+      input.latestMonitoringDecision && typeof input.latestMonitoringDecision === 'object'
+        ? input.latestMonitoringDecision
+        : null,
+    currentWinner:
+      input.currentWinner && typeof input.currentWinner === 'object'
+        ? input.currentWinner
+        : null,
+    activeTestType: String(input.activeTestType || '').trim(),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
+  if (existingIndex === -1) {
+    list.push(baseRecord);
+    await db.write();
+    return baseRecord;
+  }
+
+  const existing = list[existingIndex];
+
+  const merged = {
+    ...existing,
+    ...Object.fromEntries(
+      Object.entries(baseRecord).filter(([, value]) => value !== undefined)
+    ),
+    createdAt: existing.createdAt || timestamp,
+    updatedAt: timestamp,
+  };
+
+  list[existingIndex] = merged;
+  await db.write();
+  return merged;
 }
 
-async function syncCampaignMetricsToOptimizerState({
-  userToken,
-  campaignId,
-  accountId = '',
-  ownerKey = '',
-}) {
-  if (!campaignId) throw new Error('campaignId is required');
+async function updateOptimizerCampaignState(campaignId, patch = {}) {
+  await ensureOptimizerCampaignStateShape();
 
-  const snapshot = await fetchCampaignInsightsSnapshot({ userToken, campaignId });
+  const id = normalizeId(campaignId);
+  if (!id) throw new Error('campaignId is required');
 
-  let existing = await findOptimizerCampaignStateByCampaignId(campaignId);
+  const list = db.data.optimizer_campaign_state;
+  const index = list.findIndex(
+    (row) =>
+      normalizeId(row?.campaignId) === id ||
+      normalizeId(row?.metaCampaignId) === id
+  );
 
-  if (!existing) {
-    existing = await upsertOptimizerCampaignState({
-      campaignId: String(campaignId).trim(),
-      metaCampaignId: String(campaignId).trim(),
-      accountId: String(accountId || '').replace(/^act_/, '').trim(),
-      ownerKey: String(ownerKey || '').trim(),
-      currentStatus: 'ACTIVE',
-      optimizationEnabled: true,
-      metricsSnapshot: snapshot,
-    });
+  if (index === -1) return null;
 
-    return {
-      snapshot,
-      optimizerState: existing,
-      created: true,
-    };
-  }
+  const existing = list[index];
+  const timestamp = nowIso();
 
-  const patch = {
-    metricsSnapshot: snapshot,
+  const merged = {
+    ...existing,
+    ...patch,
+    updatedAt: timestamp,
+    createdAt: existing.createdAt || timestamp,
   };
 
-  if (!existing.accountId && accountId) {
-    patch.accountId = String(accountId).replace(/^act_/, '').trim();
-  }
-
-  if (!existing.ownerKey && ownerKey) {
-    patch.ownerKey = String(ownerKey).trim();
-  }
-
-  const updated = await updateOptimizerCampaignState(campaignId, patch);
-
-  return {
-    snapshot,
-    optimizerState: updated,
-    created: false,
-  };
+  list[index] = merged;
+  await db.write();
+  return merged;
 }
 
 module.exports = {
-  fetchCampaignInsightsSnapshot,
-  syncCampaignMetricsToOptimizerState,
-  normalizeInsightsRow,
+  ensureOptimizerCampaignStateShape,
+  getAllOptimizerCampaignStates,
+  findOptimizerCampaignStateByCampaignId,
+  findOptimizerCampaignStateByMetaCampaignId,
+  upsertOptimizerCampaignState,
+  updateOptimizerCampaignState,
 };
