@@ -2342,47 +2342,94 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
   try {
     const usingDebugKey = hasValidDebugKey(req);
 
-    if (!usingDebugKey) {
+    let ownerKey = '';
+    let userToken = null;
+
+    if (usingDebugKey) {
+      ownerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+
+      if (!ownerKey) {
+        return res.status(400).json({
+          ok: false,
+          error: 'owner_key is required for debug scheduled pass.',
+        });
+      }
+
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'No Facebook token available for scheduled pass.',
+          ownerKey,
+        });
+      }
+    } else {
       const session = await requireSession(req);
       if (!session.ok) {
         return res.status(session.status).json({ ok: false, error: session.error });
       }
+
+      ownerKey = `user:${String(session.user.username).trim()}`;
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'Not authenticated with Facebook for this session.',
+        });
+      }
     }
 
-    const minHoursBetweenRuns = Number(req.body?.minHoursBetweenRuns || req.query?.minHoursBetweenRuns || 1);
-    const limit = Number(req.body?.limit || req.query?.limit || 10);
+    const minHoursBetweenRuns = Number(req.body?.minHoursBetweenRuns ?? req.query?.minHoursBetweenRuns ?? 1);
+    const limit = Number(req.body?.limit ?? req.query?.limit ?? 10);
+    const accountId = String(req.body?.accountId || req.query?.accountId || '').replace(/^act_/, '').trim();
 
     let existingStates = await getAllOptimizerCampaignStates();
 
-if (!existingStates.length) {
-  await ensureUsersAndSessions();
-  await db.read();
-  db.data.campaign_creatives = db.data.campaign_creatives || [];
+    // Bootstrap from live Meta campaigns if local state is empty
+    if (!existingStates.length && accountId) {
+      const campaignsRes = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
+        params: {
+          access_token: userToken,
+          fields: 'id,name,status,effective_status,configured_status,objective,start_time',
+          limit: 50,
+        },
+      });
 
-  for (const rec of db.data.campaign_creatives) {
-    const campaignId = String(rec?.campaignId || '').trim();
-    const accountId = String(rec?.accountId || '').replace(/^act_/, '').trim();
+      const liveCampaigns = Array.isArray(campaignsRes.data?.data) ? campaignsRes.data.data : [];
 
-    if (!campaignId || !accountId) continue;
+      for (const campaign of liveCampaigns) {
+        const campaignId = String(campaign?.id || '').trim();
+        if (!campaignId) continue;
 
-    await upsertOptimizerCampaignState({
-      campaignId,
-      metaCampaignId: campaignId,
-      accountId,
-      ownerKey: String(rec?.ownerKey || '').trim(),
-      pageId: String(rec?.pageId || '').trim(),
-      campaignName: String(rec?.name || '').trim(),
-      niche: '',
-      currentStatus: String(rec?.status || 'ACTIVE').trim(),
-      optimizationEnabled: true,
-    });
-  }
+        await upsertOptimizerCampaignState({
+          campaignId,
+          metaCampaignId: campaignId,
+          accountId,
+          ownerKey,
+          pageId: '',
+          campaignName: String(campaign?.name || '').trim(),
+          niche: '',
+          currentStatus: String(
+            campaign?.effective_status ||
+            campaign?.status ||
+            'ACTIVE'
+          ).trim(),
+          optimizationEnabled: true,
+        });
+      }
 
-  existingStates = await getAllOptimizerCampaignStates();
-}
+      existingStates = await getAllOptimizerCampaignStates();
+    }
 
     const result = await runScheduledOptimizerPass({
-      getUserTokenForOwnerKey: (ownerKey) => getFbUserToken(ownerKey),
+      getUserTokenForOwnerKey: (ownerKeyArg) => getFbUserToken(ownerKeyArg),
       loadCreativesRecord: async (campaignIdArg, accountIdArg) => {
         await ensureUsersAndSessions();
         await db.read();
@@ -2422,7 +2469,11 @@ if (!existingStates.length) {
       limit,
     });
 
-    console.log('[optimizer scheduler] scheduled pass completed:', result);
+    console.log('[optimizer scheduler] scheduled pass completed:', {
+      ownerKey,
+      accountId,
+      result,
+    });
 
     return res.json({
       ok: true,
@@ -2432,7 +2483,8 @@ if (!existingStates.length) {
   } catch (err) {
     return res.status(500).json({
       ok: false,
-      error: err?.message || 'Failed to run scheduled optimizer pass.',
+      error: err?.response?.data?.error?.message || err?.message || 'Failed to run scheduled optimizer pass.',
+      detail: err?.response?.data || null,
     });
   }
 });
