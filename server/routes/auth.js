@@ -26,6 +26,7 @@ const {
 const { buildDiagnosis } = require('../optimizerDiagnosis');
 const { buildDecision } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
+const { buildMonitoring } = require('../optimizerMonitoring');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -2036,6 +2037,80 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
       ok: false,
       error: err?.response?.data?.error?.message || err?.message || 'Failed to run campaign action.',
       detail: err?.response?.data || null,
+    });
+  }
+});
+
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-monitoring', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+
+    if (!state) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No optimizer campaign state found for this campaign.',
+      });
+    }
+
+    if (String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Account ID does not match this optimizer campaign state.',
+      });
+    }
+
+    if (!usingDebugKey) {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+
+      const currentOwnerKey = `user:${String(session.user.username).trim()}`;
+
+      if (state.ownerKey && String(state.ownerKey).trim() !== currentOwnerKey) {
+        return res.status(403).json({
+          ok: false,
+          error: 'You do not have access to this optimizer campaign state.',
+        });
+      }
+    }
+
+    console.log('[optimizer monitoring] input summary:', {
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: state?.ownerKey || '',
+      latestDiagnosis: state?.latestDiagnosis || null,
+      latestDecision: state?.latestDecision || null,
+      latestAction: state?.latestAction || null,
+    });
+
+    const monitoring = buildMonitoring({
+      optimizerState: state,
+    });
+
+    console.log('[optimizer monitoring] result:', monitoring);
+
+    state = await updateOptimizerCampaignState(normalizedCampaignId, {
+      latestMonitoringDecision: monitoring,
+    });
+
+    console.log('[optimizer monitoring] persisted for campaign:', normalizedCampaignId);
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      monitoring,
+      optimizerState: state,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to run campaign monitoring.',
     });
   }
 });
