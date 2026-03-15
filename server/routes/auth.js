@@ -23,6 +23,7 @@ const {
 const {
   syncCampaignMetricsToOptimizerState,
 } = require('../optimizerMetricsSync');
+const { buildDiagnosis } = require('../optimizerDiagnosis');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -1732,6 +1733,80 @@ if (usingDebugKey) {
     return res.status(500).json({
       ok: false,
       error: err?.message || 'Failed to sync campaign metrics into optimizer state.',
+    });
+  }
+});
+
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-diagnosis', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+
+    if (!state) {
+      return res.status(404).json({
+        ok: false,
+        error: 'No optimizer campaign state found for this campaign.',
+      });
+    }
+
+    if (String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId) {
+      return res.status(403).json({
+        ok: false,
+        error: 'Account ID does not match this optimizer campaign state.',
+      });
+    }
+
+    if (!usingDebugKey) {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+
+      const currentOwnerKey = `user:${String(session.user.username).trim()}`;
+
+      if (state.ownerKey && String(state.ownerKey).trim() !== currentOwnerKey) {
+        return res.status(403).json({
+          ok: false,
+          error: 'You do not have access to this optimizer campaign state.',
+        });
+      }
+    }
+
+    await ensureUsersAndSessions();
+    await db.read();
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+    const creativesRecord =
+      db.data.campaign_creatives.find((row) => {
+        return (
+          String(row?.campaignId || '').trim() === normalizedCampaignId &&
+          String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+        );
+      }) || null;
+
+    const diagnosis = buildDiagnosis({
+      optimizerState: state,
+      creativesRecord,
+    });
+
+    state = await updateOptimizerCampaignState(normalizedCampaignId, {
+      latestDiagnosis: diagnosis,
+    });
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      diagnosis,
+      optimizerState: state,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to run campaign diagnosis.',
     });
   }
 });
