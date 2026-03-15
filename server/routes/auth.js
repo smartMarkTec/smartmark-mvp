@@ -32,6 +32,7 @@ const { executeAction } = require('../optimizerAction');
 const { buildMonitoring } = require('../optimizerMonitoring');
 const { runFullOptimizerCycle } = require('../optimizerOrchestrator');
 const { runScheduledOptimizerPass } = require('../optimizerScheduler');
+const { startOptimizerAutoRunner } = require('../optimizerAutoRunner');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -812,6 +813,55 @@ async function ensureUsersAndSessions() {
   db.data.users = db.data.users || [];
   db.data.sessions = db.data.sessions || [];
   await db.write();
+}
+
+async function runInternalScheduledPass({ minHoursBetweenRuns = 1, limit = 10 }) {
+  return await runScheduledOptimizerPass({
+    getUserTokenForOwnerKey: (ownerKeyArg) => getFbUserToken(ownerKeyArg),
+    loadCreativesRecord: async (campaignIdArg, accountIdArg) => {
+      await ensureUsersAndSessions();
+      await db.read();
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+      return (
+        db.data.campaign_creatives.find((row) => {
+          return (
+            String(row?.campaignId || '').trim() === String(campaignIdArg).trim() &&
+            String(row?.accountId || '').replace(/^act_/, '').trim() ===
+              String(accountIdArg).replace(/^act_/, '').trim()
+          );
+        }) || null
+      );
+    },
+    persistDiagnosis: async (campaignIdArg, diagnosis) => {
+      return await updateOptimizerCampaignState(campaignIdArg, {
+        latestDiagnosis: diagnosis,
+      });
+    },
+    persistDecision: async (campaignIdArg, decision) => {
+      return await updateOptimizerCampaignState(campaignIdArg, {
+        latestDecision: decision,
+      });
+    },
+    persistAction: async (campaignIdArg, action) => {
+      const nextStatus =
+        action?.actionResult?.campaign?.effectiveStatus ||
+        action?.actionResult?.campaign?.status ||
+        null;
+
+      return await updateOptimizerCampaignState(campaignIdArg, {
+        latestAction: action,
+        ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
+      });
+    },
+    persistMonitoring: async (campaignIdArg, monitoring) => {
+      return await updateOptimizerCampaignState(campaignIdArg, {
+        latestMonitoringDecision: monitoring,
+      });
+    },
+    minHoursBetweenRuns,
+    limit,
+  });
 }
 
 async function requireSession(req) {
@@ -2428,52 +2478,10 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
       existingStates = await getAllOptimizerCampaignStates();
     }
 
-    const result = await runScheduledOptimizerPass({
-      getUserTokenForOwnerKey: (ownerKeyArg) => getFbUserToken(ownerKeyArg),
-      loadCreativesRecord: async (campaignIdArg, accountIdArg) => {
-        await ensureUsersAndSessions();
-        await db.read();
-        db.data.campaign_creatives = db.data.campaign_creatives || [];
-
-        return (
-          db.data.campaign_creatives.find((row) => {
-            return (
-              String(row?.campaignId || '').trim() === String(campaignIdArg).trim() &&
-              String(row?.accountId || '').replace(/^act_/, '').trim() ===
-                String(accountIdArg).replace(/^act_/, '').trim()
-            );
-          }) || null
-        );
-      },
-      persistDiagnosis: async (campaignIdArg, diagnosis) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestDiagnosis: diagnosis,
-        });
-      },
-      persistDecision: async (campaignIdArg, decision) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestDecision: decision,
-        });
-      },
-     persistAction: async (campaignIdArg, action) => {
-  const nextStatus =
-    action?.actionResult?.campaign?.effectiveStatus ||
-    action?.actionResult?.campaign?.status ||
-    null;
-
-  return await updateOptimizerCampaignState(campaignIdArg, {
-    latestAction: action,
-    ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
-  });
-},
-      persistMonitoring: async (campaignIdArg, monitoring) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestMonitoringDecision: monitoring,
-        });
-      },
-      minHoursBetweenRuns,
-      limit,
-    });
+const result = await runInternalScheduledPass({
+  minHoursBetweenRuns,
+  limit,
+});
 
     console.log('[optimizer scheduler] scheduled pass completed:', {
       ownerKey,
@@ -2789,5 +2797,25 @@ router.get('/facebook/debug/meta-call-stats', (req, res) => {
     stats: META_CALL_STATS,
   });
 });
+
+if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
+  try {
+    startOptimizerAutoRunner({
+      runScheduledPass: async ({ minHoursBetweenRuns, limit }) => {
+        return await runInternalScheduledPass({
+          minHoursBetweenRuns,
+          limit,
+        });
+      },
+    });
+
+    global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__ = true;
+  } catch (err) {
+    console.error('[optimizer autorun] failed to start', {
+      message: err?.message || 'unknown error',
+      stack: err?.stack || null,
+    });
+  }
+}
 
 module.exports = router;
