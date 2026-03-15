@@ -27,6 +27,7 @@ const { buildDiagnosis } = require('../optimizerDiagnosis');
 const { buildDecision } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
 const { buildMonitoring } = require('../optimizerMonitoring');
+const { runFullOptimizerCycle } = require('../optimizerOrchestrator');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -2111,6 +2112,122 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-monitoring'
     return res.status(500).json({
       ok: false,
       error: err?.message || 'Failed to run campaign monitoring.',
+    });
+  }
+});
+
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-full-cycle', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let ownerKey = '';
+    let userToken = null;
+
+    if (usingDebugKey) {
+      const state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+
+      ownerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        state?.ownerKey ||
+        ''
+      ).trim();
+
+      if (!ownerKey) {
+        return res.status(401).json({
+          ok: false,
+          error: 'No ownerKey available for full cycle.',
+        });
+      }
+
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'No Facebook token available for full cycle.',
+          ownerKey,
+        });
+      }
+    } else {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+
+      ownerKey = `user:${String(session.user.username).trim()}`;
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'Not authenticated with Facebook for this session.',
+        });
+      }
+    }
+
+    const result = await runFullOptimizerCycle({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey,
+      userToken,
+      loadCreativesRecord: async (campaignIdArg, accountIdArg) => {
+        await ensureUsersAndSessions();
+        await db.read();
+        db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+        return (
+          db.data.campaign_creatives.find((row) => {
+            return (
+              String(row?.campaignId || '').trim() === String(campaignIdArg).trim() &&
+              String(row?.accountId || '').replace(/^act_/, '').trim() ===
+                String(accountIdArg).replace(/^act_/, '').trim()
+            );
+          }) || null
+        );
+      },
+      persistDiagnosis: async (campaignIdArg, diagnosis) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestDiagnosis: diagnosis,
+        });
+      },
+      persistDecision: async (campaignIdArg, decision) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestDecision: decision,
+        });
+      },
+      persistAction: async (campaignIdArg, action) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestAction: action,
+        });
+      },
+      persistMonitoring: async (campaignIdArg, monitoring) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestMonitoringDecision: monitoring,
+        });
+      },
+    });
+
+    console.log('[optimizer full cycle] completed:', {
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey,
+      cycle: result.cycle,
+    });
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      cycle: result.cycle,
+      optimizerState: result.optimizerState,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.response?.data?.error?.message || err?.message || 'Failed to run full optimizer cycle.',
+      detail: err?.response?.data || null,
     });
   }
 });
