@@ -40,6 +40,7 @@ async function runFullOptimizerCycle({
     action: null,
     monitoring: null,
     decisionAfterMonitoring: null,
+    secondAction: null,
     finishedAt: null,
   };
 
@@ -92,11 +93,42 @@ async function runFullOptimizerCycle({
   state = await persistDecision(cycle.campaignId, decisionAfterMonitoring);
   cycle.decisionAfterMonitoring = decisionAfterMonitoring;
 
+  const firstActionType = String(action?.actionType || '').trim();
+  const secondActionType = String(decisionAfterMonitoring?.actionType || '').trim();
+
+  const shouldRunSecondAction =
+    secondActionType &&
+    secondActionType !== firstActionType &&
+    ![
+      'continue_monitoring',
+      'run_diagnosis_first',
+      'run_decision_first',
+      'none',
+    ].includes(secondActionType);
+
+  if (shouldRunSecondAction) {
+    const stateBeforeSecondAction = await findOptimizerCampaignStateByCampaignId(cycle.campaignId);
+    if (!stateBeforeSecondAction) {
+      throw new Error('Optimizer state missing before second action');
+    }
+
+    const secondAction = await executeAction({
+      optimizerState: stateBeforeSecondAction,
+      userToken,
+    });
+
+    state = await persistAction(cycle.campaignId, secondAction);
+    cycle.secondAction = secondAction;
+  }
+
   cycle.finishedAt = new Date().toISOString();
+
+  const finalState = await findOptimizerCampaignStateByCampaignId(cycle.campaignId);
+  if (!finalState) throw new Error('Final optimizer state missing after full cycle');
 
   return {
     cycle,
-    optimizerState: state,
+    optimizerState: finalState,
   };
 }
 
