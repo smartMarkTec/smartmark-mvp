@@ -15,8 +15,11 @@ const {
   clearFbUserTokenMeta,
 } = require('../tokenStore');
 const {
+  ensureOptimizerCampaignStateShape,
+  getAllOptimizerCampaignStates,
   upsertOptimizerCampaignState,
   findOptimizerCampaignStateByCampaignId,
+  findOptimizerCampaignStatesByAccountId,
   updateOptimizerCampaignState,
 } = require('../optimizerCampaignState');
 
@@ -2247,6 +2250,35 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
     const minHoursBetweenRuns = Number(req.body?.minHoursBetweenRuns || req.query?.minHoursBetweenRuns || 1);
     const limit = Number(req.body?.limit || req.query?.limit || 10);
 
+    let existingStates = await getAllOptimizerCampaignStates();
+
+if (!existingStates.length) {
+  await ensureUsersAndSessions();
+  await db.read();
+  db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+  for (const rec of db.data.campaign_creatives) {
+    const campaignId = String(rec?.campaignId || '').trim();
+    const accountId = String(rec?.accountId || '').replace(/^act_/, '').trim();
+
+    if (!campaignId || !accountId) continue;
+
+    await upsertOptimizerCampaignState({
+      campaignId,
+      metaCampaignId: campaignId,
+      accountId,
+      ownerKey: String(rec?.ownerKey || '').trim(),
+      pageId: String(rec?.pageId || '').trim(),
+      campaignName: String(rec?.name || '').trim(),
+      niche: '',
+      currentStatus: String(rec?.status || 'ACTIVE').trim(),
+      optimizationEnabled: true,
+    });
+  }
+
+  existingStates = await getAllOptimizerCampaignStates();
+}
+
     const result = await runScheduledOptimizerPass({
       getUserTokenForOwnerKey: (ownerKey) => getFbUserToken(ownerKey),
       loadCreativesRecord: async (campaignIdArg, accountIdArg) => {
@@ -2299,6 +2331,80 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: err?.message || 'Failed to run scheduled optimizer pass.',
+    });
+  }
+});
+
+router.post('/facebook/optimizer/backfill-states', async (req, res) => {
+  try {
+    const usingDebugKey = hasValidDebugKey(req);
+
+    if (!usingDebugKey) {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+    }
+
+    await ensureUsersAndSessions();
+    await db.read();
+
+    db.data = db.data || {};
+    db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+    const sourceRecords = db.data.campaign_creatives;
+    const results = [];
+
+    for (const rec of sourceRecords) {
+      const campaignId = String(rec?.campaignId || '').trim();
+      const accountId = String(rec?.accountId || '').replace(/^act_/, '').trim();
+
+      if (!campaignId || !accountId) {
+        results.push({
+          ok: false,
+          skipped: true,
+          reason: 'Missing campaignId or accountId on campaign_creatives record.',
+          campaignId,
+          accountId,
+        });
+        continue;
+      }
+
+      const payload = {
+        campaignId,
+        metaCampaignId: campaignId,
+        accountId,
+        ownerKey: String(rec?.ownerKey || '').trim(),
+        pageId: String(rec?.pageId || '').trim(),
+        campaignName: String(rec?.name || '').trim(),
+        niche: '',
+        currentStatus: String(rec?.status || 'ACTIVE').trim(),
+        optimizationEnabled: true,
+      };
+
+      const saved = await upsertOptimizerCampaignState(payload);
+
+      results.push({
+        ok: true,
+        campaignId,
+        accountId,
+        ownerKey: saved?.ownerKey || '',
+        campaignName: saved?.campaignName || '',
+        currentStatus: saved?.currentStatus || '',
+      });
+    }
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      scanned: sourceRecords.length,
+      backfilled: results.filter((x) => x.ok).length,
+      results,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to backfill optimizer states.',
     });
   }
 });

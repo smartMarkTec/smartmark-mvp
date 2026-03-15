@@ -157,11 +157,22 @@ async function updateOptimizerCampaignState(campaignId, patch = {}) {
   return merged;
 }
 
+async function findOptimizerCampaignStatesByAccountId(accountId) {
+  await ensureOptimizerCampaignStateShape();
+  const normalized = normalizeId(accountId).replace(/^act_/, '');
+  if (!normalized) return [];
+
+  return db.data.optimizer_campaign_state.filter(
+    (row) => normalizeId(row?.accountId).replace(/^act_/, '') === normalized
+  );
+}
+
 module.exports = {
   ensureOptimizerCampaignStateShape,
   getAllOptimizerCampaignStates,
   findOptimizerCampaignStateByCampaignId,
   findOptimizerCampaignStateByMetaCampaignId,
+  findOptimizerCampaignStatesByAccountId,
   upsertOptimizerCampaignState,
   updateOptimizerCampaignState,
 };
