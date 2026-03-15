@@ -655,6 +655,60 @@ router.get('/debug/fbtoken', (req, res) => {
   res.json({ fbUserToken: getFbUserToken(ownerKey) ? 'present' : 'missing' });
 });
 
+router.get('/debug/fbtoken-owners', async (req, res) => {
+  try {
+    await ensureUsersAndSessions();
+    await db.read();
+
+    db.data = db.data || {};
+    db.data.sessions = db.data.sessions || [];
+    db.data.users = db.data.users || [];
+
+    const candidateOwnerKeys = new Set();
+
+    // user:* keys
+    for (const user of db.data.users) {
+      const username = String(user?.username || '').trim();
+      if (username) candidateOwnerKeys.add(`user:${username}`);
+    }
+
+    // session sid keys
+    for (const sess of db.data.sessions) {
+      const sid = String(sess?.sid || '').trim();
+      if (sid) candidateOwnerKeys.add(sid);
+    }
+
+    const rows = Array.from(candidateOwnerKeys).map((ownerKey) => {
+      const token = getFbUserToken(ownerKey);
+      const meta = getFbUserTokenMeta(ownerKey);
+
+      return {
+        ownerKey,
+        hasToken: !!token,
+        tokenKind: meta?.kind || null,
+        expiresAt: meta?.expiresAt || null,
+        username:
+          ownerKey.startsWith('user:')
+            ? ownerKey.slice(5)
+            : (
+                db.data.sessions.find((s) => String(s.sid) === ownerKey)?.username || null
+              ),
+      };
+    });
+
+    return res.json({
+      ok: true,
+      owners: rows.filter((r) => r.hasToken),
+      allCheckedCount: rows.length,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to inspect Facebook token owners.',
+    });
+  }
+});
+
 router.get('/facebook/defaults', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const DEFAULTS = defaultsFor(ownerKey);
