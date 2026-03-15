@@ -1744,14 +1744,40 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-diagnosis',
     const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
-    let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+   let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
 
-    if (!state) {
-      return res.status(404).json({
-        ok: false,
-        error: 'No optimizer campaign state found for this campaign.',
-      });
-    }
+if (!state) {
+  await ensureUsersAndSessions();
+  await db.read();
+  db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+  const creativeRecordForBackfill =
+    db.data.campaign_creatives.find((row) => {
+      return (
+        String(row?.campaignId || '').trim() === normalizedCampaignId &&
+        String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+      );
+    }) || null;
+
+  const fallbackPayload = {
+    campaignId: normalizedCampaignId,
+    metaCampaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    ownerKey: String(creativeRecordForBackfill?.ownerKey || '').trim(),
+    pageId: String(creativeRecordForBackfill?.pageId || '').trim(),
+    campaignName: String(creativeRecordForBackfill?.name || '').trim(),
+    niche: '',
+    currentStatus: String(creativeRecordForBackfill?.status || 'ACTIVE').trim(),
+    optimizationEnabled: true,
+    metricsSnapshot: {},
+    latestAction: null,
+    latestMonitoringDecision: null,
+    currentWinner: null,
+    activeTestType: '',
+  };
+
+  state = await upsertOptimizerCampaignState(fallbackPayload);
+}
 
     if (String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId) {
       return res.status(403).json({
@@ -1780,13 +1806,22 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-diagnosis',
     await db.read();
     db.data.campaign_creatives = db.data.campaign_creatives || [];
 
-    const creativesRecord =
-      db.data.campaign_creatives.find((row) => {
-        return (
-          String(row?.campaignId || '').trim() === normalizedCampaignId &&
-          String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
-        );
-      }) || null;
+  const creativesRecord =
+  db.data.campaign_creatives.find((row) => {
+    return (
+      String(row?.campaignId || '').trim() === normalizedCampaignId &&
+      String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+    );
+  }) || null;
+
+// If metricsSnapshot is still empty but creatives exist, refresh state from DB before diagnosis
+if (
+  state &&
+  (!state.metricsSnapshot || Object.keys(state.metricsSnapshot).length === 0)
+) {
+  const refreshed = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+  if (refreshed) state = refreshed;
+}
 
     const diagnosis = buildDiagnosis({
       optimizerState: state,
