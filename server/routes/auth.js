@@ -1518,62 +1518,88 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', 
     let ownerKey = '';
     let userToken = null;
 
-    if (usingDebugKey) {
-      const debugOwnerKey = getDebugOwnerKeyOverride(req);
+if (usingDebugKey) {
+  const candidateOwnerKeys = [];
+  const seen = new Set();
 
-      if (debugOwnerKey) {
-        ownerKey = debugOwnerKey;
-        userToken = getFbUserToken(ownerKey);
+  const addCandidate = (value) => {
+    const v = String(value || '').trim();
+    if (!v || seen.has(v)) return;
+    seen.add(v);
+    candidateOwnerKeys.push(v);
+  };
+
+  const debugOwnerKey = getDebugOwnerKeyOverride(req);
+  addCandidate(debugOwnerKey);
+
+  const reqOwnerKey = ownerKeyFromReq(req);
+  addCandidate(reqOwnerKey);
+
+  const existingState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+  addCandidate(existingState?.ownerKey);
+
+  await ensureUsersAndSessions();
+  await db.read();
+  db.data.campaign_creatives = db.data.campaign_creatives || [];
+  db.data.sessions = db.data.sessions || [];
+
+  const creativeRecord = db.data.campaign_creatives.find((row) => {
+    return (
+      String(row?.campaignId || '').trim() === normalizedCampaignId &&
+      String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+    );
+  });
+
+  addCandidate(creativeRecord?.ownerKey);
+
+  if (debugOwnerKey.startsWith('user:')) {
+    const username = debugOwnerKey.slice(5).trim();
+
+    for (const sess of db.data.sessions) {
+      if (String(sess?.username || '').trim() === username) {
+        addCandidate(sess.sid);
       }
+    }
+  }
 
-      if (!userToken) {
-        const reqOwnerKey = ownerKeyFromReq(req);
-        const reqToken = getFbUserToken(reqOwnerKey);
-        if (reqToken) {
-          ownerKey = reqOwnerKey;
-          userToken = reqToken;
-        }
+  const creativeOwnerKey = String(creativeRecord?.ownerKey || '').trim();
+  if (creativeOwnerKey.startsWith('user:')) {
+    const username = creativeOwnerKey.slice(5).trim();
+
+    for (const sess of db.data.sessions) {
+      if (String(sess?.username || '').trim() === username) {
+        addCandidate(sess.sid);
       }
+    }
+  }
 
-      if (!userToken) {
-        const existingState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
-        if (existingState?.ownerKey) {
-          ownerKey = String(existingState.ownerKey).trim();
-          userToken = getFbUserToken(ownerKey);
-        }
-      }
+  for (const candidate of candidateOwnerKeys) {
+    const tok = getFbUserToken(candidate);
+    if (tok) {
+      ownerKey = candidate;
+      userToken = tok;
+      break;
+    }
+  }
 
-      if (!userToken) {
-        await ensureUsersAndSessions();
-        await db.read();
-        db.data.campaign_creatives = db.data.campaign_creatives || [];
+  if (!userToken) {
+    return res.status(401).json({
+      ok: false,
+      error: 'No Facebook token available for debug-key metrics sync.',
+      triedOwnerKeys: candidateOwnerKeys,
+    });
+  }
 
-        const creativeRecord = db.data.campaign_creatives.find((row) => {
-          return (
-            String(row?.campaignId || '').trim() === normalizedCampaignId &&
-            String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId &&
-            String(row?.ownerKey || '').trim()
-          );
-        });
-
-        if (creativeRecord?.ownerKey) {
-          ownerKey = String(creativeRecord.ownerKey).trim();
-          userToken = getFbUserToken(ownerKey);
-
-          if (userToken) {
-            await updateOptimizerCampaignState(normalizedCampaignId, { ownerKey });
-          }
-        }
-      }
-
-      if (!userToken) {
-        return res.status(401).json({
-          ok: false,
-          error: 'No Facebook token available for debug-key metrics sync.',
-          hint: 'Pass owner_key=user:YOUR_USERNAME if you know which Smartemark user owns the FB token.',
-        });
-      }
-    } else {
+  if (ownerKey.startsWith('sm_') && debugOwnerKey.startsWith('user:')) {
+    await updateOptimizerCampaignState(normalizedCampaignId, {
+      ownerKey: debugOwnerKey,
+    });
+  } else if (ownerKey) {
+    await updateOptimizerCampaignState(normalizedCampaignId, {
+      ownerKey,
+    });
+  }
+} else {
       const session = await requireSession(req);
       if (!session.ok) {
         return res.status(session.status).json({ ok: false, error: session.error });
