@@ -1610,6 +1610,108 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
   }
 });
 
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/seed-optimizer-state', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let ownerKey = '';
+    let userToken = null;
+
+    if (usingDebugKey) {
+      ownerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+
+      if (!ownerKey) {
+        return res.status(400).json({
+          ok: false,
+          error: 'owner_key is required for debug seed route.',
+        });
+      }
+
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'No Facebook token found for supplied owner_key.',
+          ownerKey,
+        });
+      }
+    } else {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+
+      ownerKey = `user:${String(session.user.username).trim()}`;
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'Not authenticated with Facebook for this session.',
+        });
+      }
+    }
+
+    const campaignRes = await axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}`, {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,status,effective_status,configured_status,objective,start_time',
+      },
+    });
+
+    const campaign = campaignRes.data || {};
+
+    const payload = {
+      campaignId: normalizedCampaignId,
+      metaCampaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey,
+      pageId: '',
+      campaignName: String(campaign.name || '').trim(),
+      niche: '',
+      currentStatus: String(
+        campaign.effective_status ||
+        campaign.status ||
+        'ACTIVE'
+      ).trim(),
+      optimizationEnabled: true,
+    };
+
+    const saved = await upsertOptimizerCampaignState(payload);
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      seeded: true,
+      optimizerState: saved,
+      campaign: {
+        id: String(campaign.id || '').trim(),
+        name: String(campaign.name || '').trim(),
+        status: String(campaign.status || '').trim(),
+        effectiveStatus: String(campaign.effective_status || '').trim(),
+        configuredStatus: String(campaign.configured_status || '').trim(),
+        objective: String(campaign.objective || '').trim(),
+        startTime: String(campaign.start_time || '').trim(),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.response?.data?.error?.message || err?.message || 'Failed to seed optimizer state.',
+      detail: err?.response?.data || null,
+    });
+  }
+});
+
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', async (req, res) => {
   try {
     const { campaignId, accountId } = req.params;
