@@ -295,6 +295,14 @@ function hasValidDebugKey(req) {
 
   return supplied === SMARTEMARK_DEBUG_KEY;
 }
+function getDebugOwnerKeyOverride(req) {
+  return String(
+    req.query?.owner_key ||
+      req.query?.ownerKey ||
+      req.get('x-smartemark-owner-key') ||
+      ''
+  ).trim();
+}
 
 router.use((req, res, next) => {
   if (
@@ -1511,45 +1519,49 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', 
     let userToken = null;
 
     if (usingDebugKey) {
-      // First try current request/session-derived owner key
-      const reqOwnerKey = ownerKeyFromReq(req);
-      userToken = getFbUserToken(reqOwnerKey);
+      const debugOwnerKey = getDebugOwnerKeyOverride(req);
 
-      if (userToken) {
-        ownerKey = reqOwnerKey;
-      } else {
-        // Then try optimizer state ownerKey
+      if (debugOwnerKey) {
+        ownerKey = debugOwnerKey;
+        userToken = getFbUserToken(ownerKey);
+      }
+
+      if (!userToken) {
+        const reqOwnerKey = ownerKeyFromReq(req);
+        const reqToken = getFbUserToken(reqOwnerKey);
+        if (reqToken) {
+          ownerKey = reqOwnerKey;
+          userToken = reqToken;
+        }
+      }
+
+      if (!userToken) {
         const existingState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
-
         if (existingState?.ownerKey) {
           ownerKey = String(existingState.ownerKey).trim();
           userToken = getFbUserToken(ownerKey);
         }
+      }
 
-        // Then try campaign_creatives backfill
-        if (!userToken) {
-          await ensureUsersAndSessions();
-          await db.read();
-          db.data.campaign_creatives = db.data.campaign_creatives || [];
+      if (!userToken) {
+        await ensureUsersAndSessions();
+        await db.read();
+        db.data.campaign_creatives = db.data.campaign_creatives || [];
 
-          const creativeRecord = db.data.campaign_creatives.find((row) => {
-            return (
-              String(row?.campaignId || '').trim() === normalizedCampaignId &&
-              String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId &&
-              String(row?.ownerKey || '').trim()
-            );
-          });
+        const creativeRecord = db.data.campaign_creatives.find((row) => {
+          return (
+            String(row?.campaignId || '').trim() === normalizedCampaignId &&
+            String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId &&
+            String(row?.ownerKey || '').trim()
+          );
+        });
 
-          if (creativeRecord?.ownerKey) {
-            ownerKey = String(creativeRecord.ownerKey).trim();
-            userToken = getFbUserToken(ownerKey);
+        if (creativeRecord?.ownerKey) {
+          ownerKey = String(creativeRecord.ownerKey).trim();
+          userToken = getFbUserToken(ownerKey);
 
-            // Backfill optimizer state ownerKey so future calls work cleanly
-            if (userToken) {
-              await updateOptimizerCampaignState(normalizedCampaignId, {
-                ownerKey,
-              });
-            }
+          if (userToken) {
+            await updateOptimizerCampaignState(normalizedCampaignId, { ownerKey });
           }
         }
       }
@@ -1558,7 +1570,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', 
         return res.status(401).json({
           ok: false,
           error: 'No Facebook token available for debug-key metrics sync.',
-          hint: 'This campaign is not yet linked to a stored ownerKey with a Facebook token.',
+          hint: 'Pass owner_key=user:YOUR_USERNAME if you know which Smartemark user owns the FB token.',
         });
       }
     } else {
@@ -1584,6 +1596,10 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', 
       accountId: normalizedAccountId,
       ownerKey,
     });
+
+    if (ownerKey) {
+      await updateOptimizerCampaignState(normalizedCampaignId, { ownerKey });
+    }
 
     return res.json({
       ok: true,
