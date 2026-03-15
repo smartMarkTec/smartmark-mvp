@@ -16,6 +16,7 @@ async function executeAction({
 
   const campaignId = String(optimizerState.campaignId || '').trim();
   const latestDecision = optimizerState.latestDecision || null;
+  const latestMonitoringDecision = optimizerState.latestMonitoringDecision || null;
 
   if (!campaignId) {
     throw new Error('campaignId is required on optimizerState');
@@ -64,6 +65,63 @@ async function executeAction({
       },
       reason:
         'Checked campaign delivery status from Meta before attempting optimization changes.',
+      generatedAt: new Date().toISOString(),
+      mode: 'rule_based_mvp',
+    };
+  }
+
+  if (actionType === 'unpause_campaign') {
+    const writeRes = await axios.post(
+      `https://graph.facebook.com/v18.0/${campaignId}`,
+      { status: 'ACTIVE' },
+      { params: { access_token: userToken } }
+    );
+
+    const verifyRes = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,status,effective_status,configured_status,objective,start_time',
+      },
+    });
+
+    const campaign = verifyRes.data || {};
+
+    return {
+      campaignId,
+      executed: true,
+      status: 'completed',
+      actionType,
+      actionResult: {
+        mutationType: 'campaign_unpause',
+        writeResponse: writeRes.data || null,
+        campaign: {
+          id: String(campaign.id || '').trim(),
+          name: String(campaign.name || '').trim(),
+          status: String(campaign.status || '').trim(),
+          effectiveStatus: String(campaign.effective_status || '').trim(),
+          configuredStatus: String(campaign.configured_status || '').trim(),
+          objective: String(campaign.objective || '').trim(),
+          startTime: String(campaign.start_time || '').trim(),
+        },
+      },
+      reason:
+        'Campaign was unpaused because monitoring identified delivery as blocked by paused status.',
+      generatedAt: new Date().toISOString(),
+      mode: 'rule_based_mvp',
+    };
+  }
+
+  if (
+    latestMonitoringDecision &&
+    String(latestMonitoringDecision.monitoringDecision || '').trim() === 'delivery_blocked'
+  ) {
+    return {
+      campaignId,
+      executed: false,
+      status: 'ready_for_followup_action',
+      actionType,
+      reason:
+        'Monitoring indicates delivery is blocked. The next recommended mutation is to set decision/actionType to "unpause_campaign".',
       generatedAt: new Date().toISOString(),
       mode: 'rule_based_mvp',
     };

@@ -7,7 +7,37 @@ function toNumber(value, fallback = 0) {
 
 function buildDecision({ optimizerState }) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
+  const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
   const metrics = optimizerState?.metricsSnapshot || {};
+
+  if (latestMonitoringDecision) {
+    const monitoringDecision = String(
+      latestMonitoringDecision.monitoringDecision || ''
+    ).trim();
+
+    if (monitoringDecision === 'delivery_blocked') {
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'restore_delivery',
+        actionType: 'unpause_campaign',
+        priority: 'high',
+        reason:
+          'Monitoring confirmed the campaign is paused, so the next best move is to unpause it before any creative or audience optimization.',
+        requiresHumanApproval: true,
+        confidence: 0.98,
+        supportingContext: {
+          monitoringDecision,
+          diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+          spend: toNumber(metrics.spend, 0),
+          impressions: toNumber(metrics.impressions, 0),
+          linkClicks: toNumber(metrics.linkClicks, 0),
+          conversions: toNumber(metrics.conversions, 0),
+        },
+        generatedAt: new Date().toISOString(),
+        mode: 'rule_based_mvp',
+      };
+    }
+  }
 
   if (!latestDiagnosis) {
     return {
