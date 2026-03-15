@@ -28,6 +28,7 @@ const { buildDecision } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
 const { buildMonitoring } = require('../optimizerMonitoring');
 const { runFullOptimizerCycle } = require('../optimizerOrchestrator');
+const { runScheduledOptimizerPass } = require('../optimizerScheduler');
 
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
@@ -2228,6 +2229,76 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-full-cycle'
       ok: false,
       error: err?.response?.data?.error?.message || err?.message || 'Failed to run full optimizer cycle.',
       detail: err?.response?.data || null,
+    });
+  }
+});
+
+router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
+  try {
+    const usingDebugKey = hasValidDebugKey(req);
+
+    if (!usingDebugKey) {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+    }
+
+    const minHoursBetweenRuns = Number(req.body?.minHoursBetweenRuns || req.query?.minHoursBetweenRuns || 1);
+    const limit = Number(req.body?.limit || req.query?.limit || 10);
+
+    const result = await runScheduledOptimizerPass({
+      getUserTokenForOwnerKey: (ownerKey) => getFbUserToken(ownerKey),
+      loadCreativesRecord: async (campaignIdArg, accountIdArg) => {
+        await ensureUsersAndSessions();
+        await db.read();
+        db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+        return (
+          db.data.campaign_creatives.find((row) => {
+            return (
+              String(row?.campaignId || '').trim() === String(campaignIdArg).trim() &&
+              String(row?.accountId || '').replace(/^act_/, '').trim() ===
+                String(accountIdArg).replace(/^act_/, '').trim()
+            );
+          }) || null
+        );
+      },
+      persistDiagnosis: async (campaignIdArg, diagnosis) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestDiagnosis: diagnosis,
+        });
+      },
+      persistDecision: async (campaignIdArg, decision) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestDecision: decision,
+        });
+      },
+      persistAction: async (campaignIdArg, action) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestAction: action,
+        });
+      },
+      persistMonitoring: async (campaignIdArg, monitoring) => {
+        return await updateOptimizerCampaignState(campaignIdArg, {
+          latestMonitoringDecision: monitoring,
+        });
+      },
+      minHoursBetweenRuns,
+      limit,
+    });
+
+    console.log('[optimizer scheduler] scheduled pass completed:', result);
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      scheduler: result,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to run scheduled optimizer pass.',
     });
   }
 });
