@@ -2802,6 +2802,62 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
   try {
     startOptimizerAutoRunner({
       runScheduledPass: async ({ minHoursBetweenRuns, limit }) => {
+        await ensureUsersAndSessions();
+        await db.read();
+
+        let existingStates = await getAllOptimizerCampaignStates();
+
+        // If no local optimizer states exist yet, bootstrap from known live account + owner env
+        if (!existingStates.length) {
+          const ownerKey = String(process.env.OPTIMIZER_AUTORUN_OWNER_KEY || '').trim();
+          const accountId = String(process.env.OPTIMIZER_AUTORUN_ACCOUNT_ID || '')
+            .replace(/^act_/, '')
+            .trim();
+
+          if (ownerKey && accountId) {
+            const userToken = getFbUserToken(ownerKey);
+
+            if (userToken) {
+              const campaignsRes = await axios.get(
+                `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
+                {
+                  params: {
+                    access_token: userToken,
+                    fields:
+                      'id,name,status,effective_status,configured_status,objective,start_time',
+                    limit: 50,
+                  },
+                }
+              );
+
+              const liveCampaigns = Array.isArray(campaignsRes.data?.data)
+                ? campaignsRes.data.data
+                : [];
+
+              for (const campaign of liveCampaigns) {
+                const campaignId = String(campaign?.id || '').trim();
+                if (!campaignId) continue;
+
+                await upsertOptimizerCampaignState({
+                  campaignId,
+                  metaCampaignId: campaignId,
+                  accountId,
+                  ownerKey,
+                  pageId: '',
+                  campaignName: String(campaign?.name || '').trim(),
+                  niche: '',
+                  currentStatus: String(
+                    campaign?.effective_status || campaign?.status || 'ACTIVE'
+                  ).trim(),
+                  optimizationEnabled: true,
+                });
+              }
+            }
+          }
+
+          existingStates = await getAllOptimizerCampaignStates();
+        }
+
         return await runInternalScheduledPass({
           minHoursBetweenRuns,
           limit,
