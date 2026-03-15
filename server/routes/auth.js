@@ -655,6 +655,45 @@ router.get('/debug/fbtoken', (req, res) => {
   res.json({ fbUserToken: getFbUserToken(ownerKey) ? 'present' : 'missing' });
 });
 
+router.get('/debug/fbtoken-current', async (req, res) => {
+  try {
+    await ensureUsersAndSessions();
+    await db.read();
+
+    const sid = getSidFromReq(req);
+    const ownerKey = ownerKeyFromReq(req);
+    const token = getFbUserToken(ownerKey);
+    const meta = getFbUserTokenMeta(ownerKey);
+
+    const sessionMatch =
+      sid
+        ? (db.data.sessions || []).find((s) => String(s.sid) === String(sid)) || null
+        : null;
+
+    return res.json({
+      ok: true,
+      sid: sid || null,
+      ownerKey,
+      hasToken: !!token,
+      tokenKind: meta?.kind || null,
+      expiresAt: meta?.expiresAt || null,
+      sessionMatch: sessionMatch
+        ? {
+            sid: sessionMatch.sid,
+            username: sessionMatch.username,
+          }
+        : null,
+      cookieSid: req.cookies?.[COOKIE_NAME] || null,
+      headerSid: req.get(SID_HEADER) || null,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to inspect current Facebook token context.',
+    });
+  }
+});
+
 router.get('/debug/fbtoken-owners', async (req, res) => {
   try {
     await ensureUsersAndSessions();
