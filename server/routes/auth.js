@@ -2455,11 +2455,17 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
           latestDecision: decision,
         });
       },
-      persistAction: async (campaignIdArg, action) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestAction: action,
-        });
-      },
+     persistAction: async (campaignIdArg, action) => {
+  const nextStatus =
+    action?.actionResult?.campaign?.effectiveStatus ||
+    action?.actionResult?.campaign?.status ||
+    null;
+
+  return await updateOptimizerCampaignState(campaignIdArg, {
+    latestAction: action,
+    ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
+  });
+},
       persistMonitoring: async (campaignIdArg, monitoring) => {
         return await updateOptimizerCampaignState(campaignIdArg, {
           latestMonitoringDecision: monitoring,
