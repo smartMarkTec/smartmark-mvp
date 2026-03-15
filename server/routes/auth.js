@@ -19,6 +19,10 @@ const {
   findOptimizerCampaignStateByCampaignId,
 } = require('../optimizerCampaignState');
 
+const {
+  syncCampaignMetricsToOptimizerState,
+} = require('../optimizerMetricsSync');
+
 const { policy } = require('../smartCampaignEngine');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
@@ -1491,6 +1495,63 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
     return res.status(500).json({
       ok: false,
       error: err?.message || 'Failed to load optimizer campaign state.',
+    });
+  }
+});
+
+router.post('/facebook/adaccount/:accountId/campaign/:campaignId/sync-metrics', async (req, res) => {
+  try {
+    const { campaignId, accountId } = req.params;
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let ownerKey = '';
+    let userToken = null;
+
+    if (usingDebugKey) {
+      ownerKey = ownerKeyFromReq(req);
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'No Facebook token available for debug-key metrics sync.',
+        });
+      }
+    } else {
+      const session = await requireSession(req);
+      if (!session.ok) {
+        return res.status(session.status).json({ ok: false, error: session.error });
+      }
+
+      ownerKey = `user:${String(session.user.username).trim()}`;
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          ok: false,
+          error: 'Not authenticated with Facebook for this session.',
+        });
+      }
+    }
+
+    const result = await syncCampaignMetricsToOptimizerState({
+      userToken,
+      campaignId: String(campaignId || '').trim(),
+      accountId: String(accountId || '').replace(/^act_/, '').trim(),
+      ownerKey,
+    });
+
+    return res.json({
+      ok: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      created: !!result.created,
+      metricsSnapshot: result.snapshot,
+      optimizerState: result.optimizerState,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to sync campaign metrics into optimizer state.',
     });
   }
 });
