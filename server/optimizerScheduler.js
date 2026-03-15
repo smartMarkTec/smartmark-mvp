@@ -28,7 +28,11 @@ function isEligibleForCycle(state, nowIso, minHoursBetweenRuns = 1) {
 
   if (!lastRunAt) return true;
 
-  return hoursBetween(lastRunAt, nowIso) >= Number(minHoursBetweenRuns || 1);
+  const minGap = Number.isFinite(Number(minHoursBetweenRuns))
+  ? Number(minHoursBetweenRuns)
+  : 1;
+
+return hoursBetween(lastRunAt, nowIso) >= minGap;
 }
 
 async function runScheduledOptimizerPass({
