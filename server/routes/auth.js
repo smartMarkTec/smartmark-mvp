@@ -2741,18 +2741,51 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
 });
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
-  const userToken = getFbUserToken(ownerKeyFromReq(req));
-
-  const { campaignId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
+    const { campaignId } = req.params;
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let ownerKey = '';
+    let userToken = null;
+
+    if (usingDebugKey) {
+      ownerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+
+      if (!ownerKey) {
+        return res.status(400).json({
+          error: 'owner_key is required for debug pause route.',
+        });
+      }
+
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          error: 'Not authenticated with Facebook',
+          ownerKey,
+        });
+      }
+    } else {
+      ownerKey = ownerKeyFromReq(req);
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({ error: 'Not authenticated with Facebook' });
+      }
+    }
+
     await axios.post(
       `https://graph.facebook.com/v18.0/${campaignId}`,
       { status: 'PAUSED' },
       { params: { access_token: userToken } }
     );
 
-        try {
+    try {
       await markManualOverride(campaignId, {
         manualOverride: true,
         manualOverrideType: 'paused_by_user',
@@ -2761,29 +2794,71 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
 
       await updateOptimizerCampaignState(campaignId, {
         currentStatus: 'PAUSED',
+        ownerKey: String(ownerKey || '').trim(),
       });
     } catch (e) {
       console.warn('[manual override] failed to mark pause override', e?.message || e);
     }
-    res.json({ success: true, message: `Campaign ${campaignId} paused.` });
+
+    res.json({
+      success: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      ownerKey,
+      message: `Campaign ${campaignId} paused.`,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to pause campaign.' });
+    res.status(500).json({
+      error: err.response?.data?.error?.message || 'Failed to pause campaign.',
+    });
   }
 });
 
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async (req, res) => {
-  const userToken = getFbUserToken(ownerKeyFromReq(req));
-
-  const { campaignId } = req.params;
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
   try {
+    const { campaignId } = req.params;
+    const usingDebugKey = hasValidDebugKey(req);
+
+    let ownerKey = '';
+    let userToken = null;
+
+    if (usingDebugKey) {
+      ownerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+
+      if (!ownerKey) {
+        return res.status(400).json({
+          error: 'owner_key is required for debug unpause route.',
+        });
+      }
+
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({
+          error: 'Not authenticated with Facebook',
+          ownerKey,
+        });
+      }
+    } else {
+      ownerKey = ownerKeyFromReq(req);
+      userToken = getFbUserToken(ownerKey);
+
+      if (!userToken) {
+        return res.status(401).json({ error: 'Not authenticated with Facebook' });
+      }
+    }
+
     await axios.post(
       `https://graph.facebook.com/v18.0/${campaignId}`,
       { status: 'ACTIVE' },
       { params: { access_token: userToken } }
     );
 
-        try {
+    try {
       await markManualOverride(campaignId, {
         manualOverride: false,
         manualOverrideType: '',
@@ -2792,13 +2867,22 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
 
       await updateOptimizerCampaignState(campaignId, {
         currentStatus: 'ACTIVE',
+        ownerKey: String(ownerKey || '').trim(),
       });
     } catch (e) {
       console.warn('[manual override] failed to clear override on unpause', e?.message || e);
     }
-    res.json({ success: true, message: `Campaign ${campaignId} unpaused.` });
+
+    res.json({
+      success: true,
+      accessMode: usingDebugKey ? 'debug_key' : 'session',
+      ownerKey,
+      message: `Campaign ${campaignId} unpaused.`,
+    });
   } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to unpause campaign.' });
+    res.status(500).json({
+      error: err.response?.data?.error?.message || 'Failed to unpause campaign.',
+    });
   }
 });
 
