@@ -30,6 +30,7 @@ const { buildDiagnosis } = require('../optimizerDiagnosis');
 const { buildDecision } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
 const { buildMonitoring } = require('../optimizerMonitoring');
+const { buildPublicSummary } = require('../optimizerPublicSummary');
 const { runFullOptimizerCycle } = require('../optimizerOrchestrator');
 const { runScheduledOptimizerPass } = require('../optimizerScheduler');
 const { startOptimizerAutoRunner } = require('../optimizerAutoRunner');
@@ -1537,7 +1538,7 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     await db.write();
 
     try {
-   const optimizerPayload = {
+const optimizerPayload = {
   campaignId: String(campaignId || '').trim(),
   metaCampaignId: String(campaignId || '').trim(),
   accountId: String(accountId || '').trim(),
@@ -1559,6 +1560,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
   latestMonitoringDecision: null,
   currentWinner: null,
   activeTestType: '',
+  publicSummary: {
+    headline: 'Monitoring campaign performance',
+    subtext: 'Smartemark is preparing to learn from campaign data and improve results over time.',
+    stage: 'monitoring',
+    tone: 'calm',
+    updatedAt: new Date().toISOString(),
+    mode: 'public_marketer_summary_v1',
+  },
 };
 
       console.log('[optimizer state] launch upsert payload:', optimizerPayload);
@@ -2043,9 +2052,17 @@ if (
 
 console.log('[optimizer diagnosis] result:', diagnosis);
 
-    state = await updateOptimizerCampaignState(normalizedCampaignId, {
-      latestDiagnosis: diagnosis,
-    });
+   const diagnosisPatchedState = {
+  ...state,
+  latestDiagnosis: diagnosis,
+};
+
+state = await updateOptimizerCampaignState(normalizedCampaignId, {
+  latestDiagnosis: diagnosis,
+  publicSummary: buildPublicSummary({
+    optimizerState: diagnosisPatchedState,
+  }),
+});
 
     console.log('[optimizer diagnosis] persisted for campaign:', normalizedCampaignId);
 
@@ -2116,9 +2133,17 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-decision', 
 
     console.log('[optimizer decision] result:', decision);
 
-    state = await updateOptimizerCampaignState(normalizedCampaignId, {
-      latestDecision: decision,
-    });
+   const decisionPatchedState = {
+  ...state,
+  latestDecision: decision,
+};
+
+state = await updateOptimizerCampaignState(normalizedCampaignId, {
+  latestDecision: decision,
+  publicSummary: buildPublicSummary({
+    optimizerState: decisionPatchedState,
+  }),
+});
 
     console.log('[optimizer decision] persisted for campaign:', normalizedCampaignId);
 
@@ -2222,9 +2247,17 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
 
     console.log('[optimizer action] result:', action);
 
-    state = await updateOptimizerCampaignState(normalizedCampaignId, {
-      latestAction: action,
-    });
+    const actionPatchedState = {
+  ...state,
+  latestAction: action,
+};
+
+state = await updateOptimizerCampaignState(normalizedCampaignId, {
+  latestAction: action,
+  publicSummary: buildPublicSummary({
+    optimizerState: actionPatchedState,
+  }),
+});
 
     console.log('[optimizer action] persisted for campaign:', normalizedCampaignId);
 
@@ -2297,9 +2330,17 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-monitoring'
 
     console.log('[optimizer monitoring] result:', monitoring);
 
-    state = await updateOptimizerCampaignState(normalizedCampaignId, {
-      latestMonitoringDecision: monitoring,
-    });
+   const monitoringPatchedState = {
+  ...state,
+  latestMonitoringDecision: monitoring,
+};
+
+state = await updateOptimizerCampaignState(normalizedCampaignId, {
+  latestMonitoringDecision: monitoring,
+  publicSummary: buildPublicSummary({
+    optimizerState: monitoringPatchedState,
+  }),
+});
 
     console.log('[optimizer monitoring] persisted for campaign:', normalizedCampaignId);
 
