@@ -82,14 +82,17 @@ function buildDecision({ optimizerState }) {
       'The campaign is getting delivery but not clicks, so the next best move is a messaging test rather than a structural change.';
     requiresHumanApproval = true;
     confidence = 0.84;
-  } else if (diagnosis === 'low_ctr') {
-    decision = 'launch_creative_test';
-    actionType = 'test_new_creative_or_primary_text';
+   } else if (
+    diagnosis === 'low_ctr' ||
+    String(latestDiagnosis.recommendedAction || '').trim() === 'update_primary_text'
+  ) {
+    decision = 'refresh_copy';
+    actionType = 'update_primary_text';
     priority = 'high';
     reason =
-      'CTR is weak despite enough impressions, so a new creative/message variant is the most appropriate next move.';
+      'CTR is weak after meaningful delivery, so the next best move is to refresh the ad’s primary text.';
     requiresHumanApproval = true;
-    confidence = 0.85;
+    confidence = 0.87;
   } else if (diagnosis === 'post_click_conversion_gap') {
     decision = 'adjust_angle';
     actionType = 'test_offer_or_audience_angle';

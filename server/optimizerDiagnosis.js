@@ -58,13 +58,13 @@ function buildDiagnosis({
     reason =
       'Campaign has delivery but no click response, which suggests weak hook, message, or creative relevance.';
     confidence = 0.8;
-  } else if (impressions >= 500 && ctr >= 0 && ctr < 0.8) {
+   } else if (impressions >= 100 && clicks >= 1 && ctr > 0 && ctr < 1) {
     diagnosis = 'low_ctr';
-    likelyProblem = 'Creative-message combination is underperforming on click-through rate.';
-    recommendedAction = 'test_new_creative_or_primary_text';
+    likelyProblem = 'Primary text hook is likely underperforming on click-through rate.';
+    recommendedAction = 'update_primary_text';
     reason =
-      'The campaign has enough impressions to judge early engagement, and CTR is weak for a traffic objective.';
-    confidence = 0.82;
+      'The campaign has started delivering and earning clicks, but CTR remains weak enough to justify a primary text refresh.';
+    confidence = 0.84;
   } else if (linkClicks >= 10 && conversions === 0) {
     diagnosis = 'post_click_conversion_gap';
     likelyProblem = 'Users are clicking but not converting.';
