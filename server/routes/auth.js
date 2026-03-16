@@ -887,6 +887,32 @@ async function markManualOverride(campaignId, patch = {}) {
   const manualOverride =
     typeof patch.manualOverride === 'boolean' ? patch.manualOverride : true;
 
+  let existing = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+
+  if (!existing) {
+    existing = await upsertOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      metaCampaignId: normalizedCampaignId,
+      accountId: String(patch.accountId || '').replace(/^act_/, '').trim(),
+      ownerKey: String(patch.ownerKey || '').trim(),
+      pageId: String(patch.pageId || '').trim(),
+      campaignName: String(patch.campaignName || '').trim(),
+      niche: '',
+      currentStatus: String(patch.currentStatus || '').trim() || 'ACTIVE',
+      optimizationEnabled: true,
+      metricsSnapshot: {},
+      latestAction: null,
+      latestMonitoringDecision: null,
+      currentWinner: null,
+      activeTestType: '',
+      manualOverride,
+      manualOverrideType: String(patch.manualOverrideType || '').trim(),
+      manualOverrideReason: String(patch.manualOverrideReason || '').trim(),
+      manualOverrideAt: manualOverride ? new Date().toISOString() : '',
+    });
+    return existing;
+  }
+
   return await updateOptimizerCampaignState(normalizedCampaignId, {
     manualOverride,
     manualOverrideType: String(patch.manualOverrideType || '').trim(),
@@ -2785,11 +2811,14 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
       { params: { access_token: userToken } }
     );
 
-    try {
+      try {
       await markManualOverride(campaignId, {
         manualOverride: true,
         manualOverrideType: 'paused_by_user',
         manualOverrideReason: 'User manually paused campaign.',
+        accountId: String(req.params.accountId || '').replace(/^act_/, '').trim(),
+        ownerKey: String(ownerKey || '').trim(),
+        currentStatus: 'PAUSED',
       });
 
       await updateOptimizerCampaignState(campaignId, {
@@ -2858,11 +2887,14 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
       { params: { access_token: userToken } }
     );
 
-    try {
+     try {
       await markManualOverride(campaignId, {
         manualOverride: false,
         manualOverrideType: '',
         manualOverrideReason: '',
+        accountId: String(req.params.accountId || '').replace(/^act_/, '').trim(),
+        ownerKey: String(ownerKey || '').trim(),
+        currentStatus: 'ACTIVE',
       });
 
       await updateOptimizerCampaignState(campaignId, {
