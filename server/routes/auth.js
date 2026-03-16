@@ -1537,28 +1537,29 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     await db.write();
 
     try {
-      const optimizerPayload = {
-        campaignId: String(campaignId || '').trim(),
-        metaCampaignId: String(campaignId || '').trim(),
-        accountId: String(accountId || '').trim(),
-        ownerKey: String(ownerKey || '').trim(),
-        pageId: String(pageIdFinal || '').trim(),
-        campaignName: String(campaignName || '').trim(),
-        niche: String(
-          form.businessType ||
-            form.industry ||
-            form.niche ||
-            form.cuisineType ||
-            ''
-        ).trim(),
-        currentStatus: String(campaignStatus || '').trim(),
-        optimizationEnabled: !VALIDATE_ONLY,
-        metricsSnapshot: {},
-        latestAction: null,
-        latestMonitoringDecision: null,
-        currentWinner: null,
-        activeTestType: '',
-      };
+   const optimizerPayload = {
+  campaignId: String(campaignId || '').trim(),
+  metaCampaignId: String(campaignId || '').trim(),
+  accountId: String(accountId || '').trim(),
+  ownerKey: String(ownerKey || '').trim(),
+  pageId: String(pageIdFinal || '').trim(),
+  campaignName: String(campaignName || '').trim(),
+  niche: String(
+    form.businessType ||
+      form.industry ||
+      form.niche ||
+      form.cuisineType ||
+      ''
+  ).trim(),
+  currentStatus: String(campaignStatus || '').trim(),
+  optimizationEnabled: !VALIDATE_ONLY,
+  billingBlocked: false,
+  metricsSnapshot: {},
+  latestAction: null,
+  latestMonitoringDecision: null,
+  currentWinner: null,
+  activeTestType: '',
+};
 
       console.log('[optimizer state] launch upsert payload:', optimizerPayload);
 
@@ -1622,22 +1623,23 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
 
     // If missing, create a minimal state directly from route params
     if (!state) {
-      const minimalPayload = {
-        campaignId: String(campaignId || '').trim(),
-        metaCampaignId: String(campaignId || '').trim(),
-        accountId: String(accountId || '').replace(/^act_/, '').trim(),
-        ownerKey: '',
-        pageId: '',
-        campaignName: '',
-        niche: '',
-        currentStatus: 'ACTIVE',
-        optimizationEnabled: true,
-        metricsSnapshot: {},
-        latestAction: null,
-        latestMonitoringDecision: null,
-        currentWinner: null,
-        activeTestType: '',
-      };
+    const minimalPayload = {
+  campaignId: String(campaignId || '').trim(),
+  metaCampaignId: String(campaignId || '').trim(),
+  accountId: String(accountId || '').replace(/^act_/, '').trim(),
+  ownerKey: '',
+  pageId: '',
+  campaignName: '',
+  niche: '',
+  currentStatus: 'ACTIVE',
+  optimizationEnabled: true,
+  billingBlocked: false,
+  metricsSnapshot: {},
+  latestAction: null,
+  latestMonitoringDecision: null,
+  currentWinner: null,
+  activeTestType: '',
+};
 
       console.log('[optimizer state] creating minimal fallback state from route params:', minimalPayload);
 
@@ -1761,21 +1763,22 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/seed-optimizer-
 
     const campaign = campaignRes.data || {};
 
-    const payload = {
-      campaignId: normalizedCampaignId,
-      metaCampaignId: normalizedCampaignId,
-      accountId: normalizedAccountId,
-      ownerKey,
-      pageId: '',
-      campaignName: String(campaign.name || '').trim(),
-      niche: '',
-      currentStatus: String(
-        campaign.effective_status ||
-        campaign.status ||
-        'ACTIVE'
-      ).trim(),
-      optimizationEnabled: true,
-    };
+   const payload = {
+  campaignId: normalizedCampaignId,
+  metaCampaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey,
+  pageId: '',
+  campaignName: String(campaign.name || '').trim(),
+  niche: '',
+  currentStatus: String(
+    campaign.effective_status ||
+    campaign.status ||
+    'ACTIVE'
+  ).trim(),
+  optimizationEnabled: true,
+  billingBlocked: false,
+};
 
     const saved = await upsertOptimizerCampaignState(payload);
 
@@ -1960,22 +1963,23 @@ if (!state) {
       );
     }) || null;
 
-  const fallbackPayload = {
-    campaignId: normalizedCampaignId,
-    metaCampaignId: normalizedCampaignId,
-    accountId: normalizedAccountId,
-    ownerKey: String(creativeRecordForBackfill?.ownerKey || '').trim(),
-    pageId: String(creativeRecordForBackfill?.pageId || '').trim(),
-    campaignName: String(creativeRecordForBackfill?.name || '').trim(),
-    niche: '',
-    currentStatus: String(creativeRecordForBackfill?.status || 'ACTIVE').trim(),
-    optimizationEnabled: true,
-    metricsSnapshot: {},
-    latestAction: null,
-    latestMonitoringDecision: null,
-    currentWinner: null,
-    activeTestType: '',
-  };
+const fallbackPayload = {
+  campaignId: normalizedCampaignId,
+  metaCampaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: String(creativeRecordForBackfill?.ownerKey || '').trim(),
+  pageId: String(creativeRecordForBackfill?.pageId || '').trim(),
+  campaignName: String(creativeRecordForBackfill?.name || '').trim(),
+  niche: '',
+  currentStatus: String(creativeRecordForBackfill?.status || 'ACTIVE').trim(),
+  optimizationEnabled: true,
+  billingBlocked: false,
+  metricsSnapshot: {},
+  latestAction: null,
+  latestMonitoringDecision: null,
+  currentWinner: null,
+  activeTestType: '',
+};
 
   state = await upsertOptimizerCampaignState(fallbackPayload);
 }
@@ -2499,21 +2503,22 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
         const campaignId = String(campaign?.id || '').trim();
         if (!campaignId) continue;
 
-        await upsertOptimizerCampaignState({
-          campaignId,
-          metaCampaignId: campaignId,
-          accountId,
-          ownerKey,
-          pageId: '',
-          campaignName: String(campaign?.name || '').trim(),
-          niche: '',
-          currentStatus: String(
-            campaign?.effective_status ||
-            campaign?.status ||
-            'ACTIVE'
-          ).trim(),
-          optimizationEnabled: true,
-        });
+       await upsertOptimizerCampaignState({
+  campaignId,
+  metaCampaignId: campaignId,
+  accountId,
+  ownerKey,
+  pageId: '',
+  campaignName: String(campaign?.name || '').trim(),
+  niche: '',
+  currentStatus: String(
+    campaign?.effective_status ||
+    campaign?.status ||
+    'ACTIVE'
+  ).trim(),
+  optimizationEnabled: true,
+  billingBlocked: false,
+});
       }
 
       existingStates = await getAllOptimizerCampaignStates();
@@ -2579,17 +2584,18 @@ router.post('/facebook/optimizer/backfill-states', async (req, res) => {
         continue;
       }
 
-      const payload = {
-        campaignId,
-        metaCampaignId: campaignId,
-        accountId,
-        ownerKey: String(rec?.ownerKey || '').trim(),
-        pageId: String(rec?.pageId || '').trim(),
-        campaignName: String(rec?.name || '').trim(),
-        niche: '',
-        currentStatus: String(rec?.status || 'ACTIVE').trim(),
-        optimizationEnabled: true,
-      };
+  const payload = {
+  campaignId,
+  metaCampaignId: campaignId,
+  accountId,
+  ownerKey: String(rec?.ownerKey || '').trim(),
+  pageId: String(rec?.pageId || '').trim(),
+  campaignName: String(rec?.name || '').trim(),
+  niche: '',
+  currentStatus: String(rec?.status || 'ACTIVE').trim(),
+  optimizationEnabled: true,
+  billingBlocked: false,
+};
 
       const saved = await upsertOptimizerCampaignState(payload);
 
@@ -2997,19 +3003,20 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
                 const campaignId = String(campaign?.id || '').trim();
                 if (!campaignId) continue;
 
-                await upsertOptimizerCampaignState({
-                  campaignId,
-                  metaCampaignId: campaignId,
-                  accountId,
-                  ownerKey,
-                  pageId: '',
-                  campaignName: String(campaign?.name || '').trim(),
-                  niche: '',
-                  currentStatus: String(
-                    campaign?.effective_status || campaign?.status || 'ACTIVE'
-                  ).trim(),
-                  optimizationEnabled: true,
-                });
+            await upsertOptimizerCampaignState({
+  campaignId,
+  metaCampaignId: campaignId,
+  accountId,
+  ownerKey,
+  pageId: '',
+  campaignName: String(campaign?.name || '').trim(),
+  niche: '',
+  currentStatus: String(
+    campaign?.effective_status || campaign?.status || 'ACTIVE'
+  ).trim(),
+  optimizationEnabled: true,
+  billingBlocked: false,
+});
               }
             }
           }

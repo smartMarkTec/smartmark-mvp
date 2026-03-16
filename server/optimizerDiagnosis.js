@@ -44,7 +44,40 @@ function buildDiagnosis({
     'There are no impressions, clicks, or spend signals strong enough yet to diagnose performance.';
   let confidence = 0.9;
 
-  if (impressions === 0 && spend === 0) {
+   const latestAction = optimizerState?.latestAction || null;
+  const inspectedCampaign = latestAction?.actionResult?.campaign || null;
+  const inspectedEffectiveStatus = String(inspectedCampaign?.effectiveStatus || inspectedCampaign?.status || '').trim();
+  const inspectedStartTime = String(inspectedCampaign?.startTime || '').trim();
+
+  const currentStatus = String(optimizerState?.currentStatus || '').trim();
+  const nowMs = Date.now();
+  const startMs = inspectedStartTime ? new Date(inspectedStartTime).getTime() : NaN;
+  const hasFutureStart = Number.isFinite(startMs) && startMs > nowMs;
+
+  if (
+    impressions === 0 &&
+    spend === 0 &&
+    hasFutureStart &&
+    ['ACTIVE', 'PAUSED'].includes(inspectedEffectiveStatus || currentStatus)
+  ) {
+    diagnosis = 'scheduled_not_started';
+    likelyProblem = 'Campaign is active but the scheduled start time has not arrived yet.';
+    recommendedAction = 'wait_for_start_time';
+    reason =
+      'The campaign has zero delivery so far, but Meta reports a future start time, so this is likely a schedule timing issue rather than a creative or delivery failure.';
+    confidence = 0.97;
+  } else if (
+    impressions === 0 &&
+    spend === 0 &&
+    optimizerState?.billingBlocked === true
+  ) {
+    diagnosis = 'billing_blocked';
+    likelyProblem = 'Campaign delivery is blocked by ad account billing or payment issues.';
+    recommendedAction = 'resolve_billing';
+    reason =
+      'Optimizer state indicates a billing/payment blockage, so the campaign cannot deliver until account funding or payment authorization is restored.';
+    confidence = 0.98;
+  } else if (impressions === 0 && spend === 0) {
     diagnosis = 'no_delivery';
     likelyProblem = 'Campaign is not delivering or has not started serving.';
     recommendedAction = 'check_delivery_status';

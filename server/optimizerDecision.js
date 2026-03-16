@@ -66,7 +66,23 @@ function buildDecision({ optimizerState }) {
   let requiresHumanApproval = true;
   let confidence = 0.7;
 
-  if (diagnosis === 'no_delivery') {
+  if (diagnosis === 'scheduled_not_started') {
+    decision = 'wait_for_start_window';
+    actionType = 'continue_monitoring';
+    priority = 'medium';
+    reason =
+      'The campaign has a future scheduled start time, so Smartemark should wait for the start window instead of attempting delivery or creative fixes.';
+    requiresHumanApproval = true;
+    confidence = 0.97;
+  } else if (diagnosis === 'billing_blocked') {
+    decision = 'resolve_billing_block';
+    actionType = 'continue_monitoring';
+    priority = 'high';
+    reason =
+      'Billing appears to be blocking delivery, so Smartemark should avoid optimization changes until payment authorization or funding issues are resolved.';
+    requiresHumanApproval = true;
+    confidence = 0.98;
+  } else if (diagnosis === 'no_delivery') {
     decision = 'investigate_delivery';
     actionType = 'check_delivery_status';
     priority = 'high';
