@@ -2364,78 +2364,74 @@ useEffect(() => {
   }, [navImageUrls, resolvedUser]);
 
   // ✅ FB adaccounts/pages/campaigns/metrics now ALL use authFetch (sid + cookies)
-  useEffect(() => {
-    if (!fbConnected) return;
+ useEffect(() => {
+  if (!fbConnected) return;
+  if (adAccounts.length > 0) return;
 
-    authFetch(`/facebook/adaccounts`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((json) => {
-        const list = json.data || [];
-        setAdAccounts(list);
-        touchFbConn();
+  authFetch(`/facebook/adaccounts`)
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((json) => {
+      const list = json.data || [];
+      setAdAccounts(list);
+      touchFbConn();
 
-        if (!selectedAccount && list.length) {
-          const first = String(list[0].id || "").trim();
-          setSelectedAccount(first.replace(/^act_/, ""));
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line
-  }, [fbConnected]);
+      if (!selectedAccount && list.length) {
+        const first = String(list[0].id || "").trim();
+        setSelectedAccount(first.replace(/^act_/, ""));
+      }
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [fbConnected, adAccounts.length]);
 
-  useEffect(() => {
-    if (!fbConnected) return;
+ useEffect(() => {
+  if (!fbConnected) return;
+  if (pages.length > 0) return;
 
-    authFetch(`/facebook/pages`)
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((json) => {
-        const list = json.data || [];
-        setPages(list);
-        touchFbConn();
+  authFetch(`/facebook/pages`)
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((json) => {
+      const list = json.data || [];
+      setPages(list);
+      touchFbConn();
 
-        if (!selectedPageId && list.length) {
-          setSelectedPageId(String(list[0].id || ""));
-        }
-      })
-      .catch(() => {});
-    // eslint-disable-next-line
-  }, [fbConnected]);
+      if (!selectedPageId && list.length) {
+        setSelectedPageId(String(list[0].id || ""));
+      }
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [fbConnected, pages.length]);
 
-  useEffect(() => {
-    if (!selectedAccount) return;
-    const acctId = String(selectedAccount).trim();
 
-    authFetch(`/facebook/adaccount/${acctId}/campaigns`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        const list = Array.isArray(data) ? data : data?.data || [];
-        const activeCount = list.filter(
-          (c) => (c.status || c.effective_status) === "ACTIVE" || (c.status || c.effective_status) === "PAUSED"
-        ).length;
-        setCampaignCount(activeCount);
-      })
-      .catch(() => {});
-  }, [selectedAccount]);
 
-  useEffect(() => {
-    if (!fbConnected || !selectedAccount) return;
-    const acctId = String(selectedAccount).trim();
+useEffect(() => {
+  if (!fbConnected || !selectedAccount) return;
 
-    authFetch(`/facebook/adaccount/${acctId}/campaigns`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        const list = data && data.data ? data.data.slice(0, 2) : [];
-        setCampaigns(list);
+  const acctId = String(selectedAccount).trim();
+  const hasDraft = !!(draftCreatives?.images && draftCreatives.images.length);
 
-        const hasDraft = !!(draftCreatives?.images && draftCreatives.images.length);
+  authFetch(`/facebook/adaccount/${acctId}/campaigns`)
+    .then((res) => (res.ok ? res.json() : Promise.reject()))
+    .then((data) => {
+      const fullList = Array.isArray(data) ? data : data?.data || [];
+      const list = fullList.slice(0, 2);
 
-        if (!selectedCampaignId && list.length > 0 && !hasDraft) {
-          setSelectedCampaignId(list[0].id);
-          setExpandedId(list[0].id);
-        }
-      })
-      .catch(() => {});
-  }, [fbConnected, selectedAccount, launched, draftCreatives?.images, selectedCampaignId]);
+      setCampaigns(list);
+
+      const activeCount = fullList.filter(
+        (c) => ["ACTIVE", "PAUSED"].includes(String(c.status || c.effective_status || "").toUpperCase())
+      ).length;
+      setCampaignCount(activeCount);
+
+      if (!selectedCampaignId && list.length > 0 && !hasDraft) {
+        setSelectedCampaignId(list[0].id);
+        setExpandedId(list[0].id);
+      }
+    })
+    .catch(() => {});
+  // eslint-disable-next-line
+}, [fbConnected, selectedAccount, launched, draftCreatives?.images?.length]);
 
   /* ===================== after FB connect, attach draft images into selected campaign creatives map ===================== */
   useEffect(() => {
@@ -2489,7 +2485,16 @@ useEffect(() => {
 
  useEffect(() => {
   if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
+
   const acctId = String(selectedAccount).trim();
+  const cacheKey = `sm_metrics_last_fetch_${acctId}_${expandedId}`;
+  const now = Date.now();
+
+  try {
+    const last = Number(sessionStorage.getItem(cacheKey) || 0);
+    if (now - last < 60000) return; // 60 sec cooldown
+    sessionStorage.setItem(cacheKey, String(now));
+  } catch {}
 
   authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`)
     .then((res) => (res.ok ? res.json() : Promise.reject()))
@@ -2526,7 +2531,6 @@ useEffect(() => {
       }))
     );
 }, [expandedId, selectedAccount]);
-
   // Persist
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate }));
