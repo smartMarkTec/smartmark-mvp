@@ -880,6 +880,21 @@ async function requireSession(req) {
   return { ok: true, sid, sess, user };
 }
 
+async function markManualOverride(campaignId, patch = {}) {
+  const normalizedCampaignId = String(campaignId || '').trim();
+  if (!normalizedCampaignId) return null;
+
+  const manualOverride =
+    typeof patch.manualOverride === 'boolean' ? patch.manualOverride : true;
+
+  return await updateOptimizerCampaignState(normalizedCampaignId, {
+    manualOverride,
+    manualOverrideType: String(patch.manualOverrideType || '').trim(),
+    manualOverrideReason: String(patch.manualOverrideReason || '').trim(),
+    manualOverrideAt: manualOverride ? new Date().toISOString() : '',
+  });
+}
+
 router.post('/register', async (req, res) => {
   try {
     const { username, email, password } = req.body || {};
@@ -2736,6 +2751,20 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (
       { status: 'PAUSED' },
       { params: { access_token: userToken } }
     );
+
+        try {
+      await markManualOverride(campaignId, {
+        manualOverride: true,
+        manualOverrideType: 'paused_by_user',
+        manualOverrideReason: 'User manually paused campaign.',
+      });
+
+      await updateOptimizerCampaignState(campaignId, {
+        currentStatus: 'PAUSED',
+      });
+    } catch (e) {
+      console.warn('[manual override] failed to mark pause override', e?.message || e);
+    }
     res.json({ success: true, message: `Campaign ${campaignId} paused.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to pause campaign.' });
@@ -2753,6 +2782,20 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/unpause', async
       { status: 'ACTIVE' },
       { params: { access_token: userToken } }
     );
+
+        try {
+      await markManualOverride(campaignId, {
+        manualOverride: false,
+        manualOverrideType: '',
+        manualOverrideReason: '',
+      });
+
+      await updateOptimizerCampaignState(campaignId, {
+        currentStatus: 'ACTIVE',
+      });
+    } catch (e) {
+      console.warn('[manual override] failed to clear override on unpause', e?.message || e);
+    }
     res.json({ success: true, message: `Campaign ${campaignId} unpaused.` });
   } catch (err) {
     res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to unpause campaign.' });

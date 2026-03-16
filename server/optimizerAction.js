@@ -14,9 +14,11 @@ async function executeAction({
     throw new Error('userToken is required');
   }
 
-  const campaignId = String(optimizerState.campaignId || '').trim();
-  const latestDecision = optimizerState.latestDecision || null;
-  const latestMonitoringDecision = optimizerState.latestMonitoringDecision || null;
+ const campaignId = String(optimizerState.campaignId || '').trim();
+const latestDecision = optimizerState.latestDecision || null;
+const latestMonitoringDecision = optimizerState.latestMonitoringDecision || null;
+const manualOverride = !!optimizerState.manualOverride;
+const manualOverrideType = String(optimizerState.manualOverrideType || '').trim();
 
   if (!campaignId) {
     throw new Error('campaignId is required on optimizerState');
@@ -76,6 +78,23 @@ async function executeAction({
       { status: 'ACTIVE' },
       { params: { access_token: userToken } }
     );
+
+    if (manualOverride && actionType === 'unpause_campaign') {
+  return {
+    campaignId,
+    executed: false,
+    status: 'blocked_by_manual_override',
+    actionType,
+    reason:
+      'Campaign mutation was blocked because the user manually overrode campaign state.',
+    actionResult: {
+      manualOverride: true,
+      manualOverrideType,
+    },
+    generatedAt: new Date().toISOString(),
+    mode: 'rule_based_mvp',
+  };
+}
 
     const verifyRes = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
       params: {

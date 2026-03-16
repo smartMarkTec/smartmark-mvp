@@ -1,10 +1,29 @@
 'use strict';
 
 function buildMonitoring({ optimizerState }) {
-  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
-  const latestDecision = optimizerState?.latestDecision || null;
-  const latestAction = optimizerState?.latestAction || null;
-  const metrics = optimizerState?.metricsSnapshot || {};
+ const latestDiagnosis = optimizerState?.latestDiagnosis || null;
+const latestDecision = optimizerState?.latestDecision || null;
+const latestAction = optimizerState?.latestAction || null;
+const metrics = optimizerState?.metricsSnapshot || {};
+const manualOverride = !!optimizerState?.manualOverride;
+const manualOverrideType = String(optimizerState?.manualOverrideType || '').trim();
+
+if (manualOverride) {
+  return {
+    campaignId: String(optimizerState?.campaignId || '').trim(),
+    monitoringDecision: 'manual_override_active',
+    status: 'blocked',
+    reason: 'User manual override is active, so the optimizer should not mutate this campaign.',
+    nextRecommendedStep: 'wait_for_user_to_clear_override',
+    confidence: 0.99,
+    supportingContext: {
+      manualOverride: true,
+      manualOverrideType,
+    },
+    generatedAt: new Date().toISOString(),
+    mode: 'rule_based_mvp',
+  };
+}
 
   if (!latestAction) {
     return {

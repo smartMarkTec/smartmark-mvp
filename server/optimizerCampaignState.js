@@ -100,9 +100,16 @@ async function upsertOptimizerCampaignState(input = {}) {
       input.currentWinner && typeof input.currentWinner === 'object'
         ? input.currentWinner
         : null,
-    activeTestType: String(input.activeTestType || '').trim(),
-    createdAt: timestamp,
-    updatedAt: timestamp,
+   activeTestType: String(input.activeTestType || '').trim(),
+manualOverride:
+  typeof input.manualOverride === 'boolean'
+    ? input.manualOverride
+    : false,
+manualOverrideType: String(input.manualOverrideType || '').trim(),
+manualOverrideReason: String(input.manualOverrideReason || '').trim(),
+manualOverrideAt: String(input.manualOverrideAt || '').trim(),
+createdAt: timestamp,
+updatedAt: timestamp,
   };
 
   if (existingIndex === -1) {
