@@ -1400,7 +1400,7 @@ function MarketerActionsCard({ summary }) {
             fontSize: 14,
           }}
         >
-          SmartMark is preparing to monitor campaign performance.
+          Smartemark is monitoring campaign setup and waiting for live performance data.
         </div>
       ) : (
         items.map((item) => {
