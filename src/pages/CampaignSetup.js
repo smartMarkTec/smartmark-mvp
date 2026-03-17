@@ -2028,6 +2028,7 @@ useEffect(() => {
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
 const [metricsMap, setMetricsMap] = useState({});
 const [publicSummaryMap, setPublicSummaryMap] = useState({});
+const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
 const [launched, setLaunched] = useState(false);
 const [launchResult, setLaunchResult] = useState(null);
 const [loading, setLoading] = useState(false);
@@ -2778,27 +2779,56 @@ useEffect(() => {
           .filter(Boolean)
           .slice(0, 2);
 
-        const existing = getSavedCreatives(campaignId) || {};
-        const nextHeadline =
-          String(data?.meta?.headline || existing?.meta?.headline || previewCopy?.headline || "").trim();
-        const nextBody =
-          String(data?.meta?.body || existing?.meta?.body || previewCopy?.body || "").trim();
-        const nextLink =
-          String(
-            data?.meta?.link ||
-              existing?.meta?.link ||
-              previewCopy?.link ||
-              inferredLink ||
-              ""
-          ).trim();
+        const existingMap = readCreativeMap(resolvedUser, acctId);
+        const prev = existingMap[campaignId] || {};
 
-        if (imgs.length) {
-          const map = readCreativeMap(resolvedUser, acctId);
-          const prev = map[campaignId] || {};
+        const nextHeadline = String(
+          data?.meta?.headline ||
+            prev?.meta?.headline ||
+            previewCopy?.headline ||
+            ""
+        ).trim();
 
-          map[campaignId] = {
+        const nextBody = String(
+          data?.meta?.body ||
+            prev?.meta?.body ||
+            previewCopy?.body ||
+            ""
+        ).trim();
+
+        const nextLink = String(
+          data?.meta?.link ||
+            prev?.meta?.link ||
+            previewCopy?.link ||
+            inferredLink ||
+            ""
+        ).trim();
+
+        const nextImages =
+          imgs.length > 0
+            ? imgs
+            : (Array.isArray(prev?.images) ? prev.images : [])
+                .map(toAbsoluteMedia)
+                .filter(Boolean)
+                .slice(0, 2);
+
+        setCampaignCreativesMap((m) => ({
+          ...m,
+          [campaignId]: {
+            images: nextImages,
+            mediaSelection: "image",
+            meta: {
+              headline: nextHeadline,
+              body: nextBody,
+              link: nextLink,
+            },
+          },
+        }));
+
+        if (nextImages.length) {
+          existingMap[campaignId] = {
             ...prev,
-            images: imgs,
+            images: nextImages,
             mediaSelection: "image",
             time: Date.now(),
             expiresAt:
@@ -2814,8 +2844,8 @@ useEffect(() => {
             },
           };
 
-          writeCreativeMap(resolvedUser, acctId, map);
-          saveFetchableImagesBackup(resolvedUser, imgs);
+          writeCreativeMap(resolvedUser, acctId, existingMap);
+          saveFetchableImagesBackup(resolvedUser, nextImages);
         }
       })
       .catch((err) => {
@@ -3378,6 +3408,20 @@ const payload = {
   const { fee } = calculateFees(budget);
 
 const getSavedCreatives = (campaignId) => {
+  const runtime = campaignCreativesMap[campaignId] || null;
+
+  if (runtime) {
+    return {
+      images: (runtime.images || []).map(toAbsoluteMedia).filter(Boolean).slice(0, 2),
+      mediaSelection: "image",
+      meta: {
+        headline: String(runtime?.meta?.headline || "").trim(),
+        body: String(runtime?.meta?.body || "").trim(),
+        link: String(runtime?.meta?.link || "").trim(),
+      },
+    };
+  }
+
   if (!selectedAccount) {
     return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
   }
