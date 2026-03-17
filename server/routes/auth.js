@@ -53,12 +53,23 @@ const META_CALL_STATS = {
 };
 
 const META_USAGE_DB_KEY = 'meta_api_usage';
+const META_USAGE_ALL_TIME_DB_KEY = 'meta_api_usage_all_time';
 const META_USAGE_KEEP_DAYS = 20; // keep a little extra beyond 15-day review window
 
 function ensureMetaUsageStore() {
   db.data = db.data || {};
-  db.data[META_USAGE_DB_KEY] = db.data[META_USAGE_DB_KEY] || [];
+  db.data[META_USAGE_DB_KEY] = Array.isArray(db.data[META_USAGE_DB_KEY])
+    ? db.data[META_USAGE_DB_KEY]
+    : [];
   return db.data[META_USAGE_DB_KEY];
+}
+
+function ensureMetaUsageAllTimeStore() {
+  db.data = db.data || {};
+  db.data[META_USAGE_ALL_TIME_DB_KEY] = Array.isArray(db.data[META_USAGE_ALL_TIME_DB_KEY])
+    ? db.data[META_USAGE_ALL_TIME_DB_KEY]
+    : [];
+  return db.data[META_USAGE_ALL_TIME_DB_KEY];
 }
 
 function normalizeGraphPath(url) {
@@ -162,15 +173,21 @@ function tryExtractObjectId(url) {
 async function persistMetaUsageRow(row) {
   try {
     await db.read();
-    const store = ensureMetaUsageStore();
 
-    store.push(row);
+    const rollingStore = ensureMetaUsageStore();
+    const allTimeStore = ensureMetaUsageAllTimeStore();
+
+    rollingStore.push(row);
+    allTimeStore.push(row);
 
     const cutoff = Date.now() - META_USAGE_KEEP_DAYS * 24 * 60 * 60 * 1000;
-    db.data[META_USAGE_DB_KEY] = store.filter((r) => {
+    db.data[META_USAGE_DB_KEY] = rollingStore.filter((r) => {
       const t = new Date(r.t || 0).getTime();
       return Number.isFinite(t) && t >= cutoff;
     });
+
+    // all-time store intentionally does NOT prune
+    db.data[META_USAGE_ALL_TIME_DB_KEY] = allTimeStore;
 
     await db.write();
   } catch (e) {
@@ -3522,18 +3539,23 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
 router.get('/facebook/debug/meta-call-stats', async (req, res) => {
   try {
     await db.read();
-    const store = ensureMetaUsageStore();
+
+    const rollingStore = ensureMetaUsageStore();
+    const allTimeStore = ensureMetaUsageAllTimeStore();
 
     const now = Date.now();
     const last15dCutoff = now - 15 * 24 * 60 * 60 * 1000;
 
-    const rows15d = store.filter((r) => {
+    const rows15d = rollingStore.filter((r) => {
       const t = new Date(r.t || 0).getTime();
       return Number.isFinite(t) && t >= last15dCutoff;
     });
 
     const summaryAll15d = summarizeMetaRows(rows15d, { qualifiedOnly: false });
     const summaryQualified15d = summarizeMetaRows(rows15d, { qualifiedOnly: true });
+
+    const summaryAllTimeAll = summarizeMetaRows(allTimeStore, { qualifiedOnly: false });
+    const summaryAllTimeQualified = summarizeMetaRows(allTimeStore, { qualifiedOnly: true });
 
     const qualifiedSuccess = summaryQualified15d.success;
     const qualifiedFail = summaryQualified15d.fail;
@@ -3548,6 +3570,11 @@ router.get('/facebook/debug/meta-call-stats', async (req, res) => {
       rolling15d: {
         allGraphCalls: summaryAll15d,
         qualifiedMarketingCalls: summaryQualified15d,
+      },
+
+      allTime: {
+        allGraphCalls: summaryAllTimeAll,
+        qualifiedMarketingCalls: summaryAllTimeQualified,
       },
 
       standardAccessReadiness: {
@@ -3568,11 +3595,39 @@ router.get('/facebook/debug/meta-call-stats', async (req, res) => {
       recentQualifiedCalls: rows15d
         .filter((r) => r.qualifiedMarketingCall)
         .slice(-100),
+
+      recentAllTimeQualifiedCalls: allTimeStore
+        .filter((r) => r.qualifiedMarketingCall)
+        .slice(-100),
     });
   } catch (err) {
     return res.status(500).json({
       ok: false,
       error: err?.message || 'Failed to read Meta API usage stats.',
+    });
+  }
+});
+
+router.get('/facebook/debug/meta-call-stats-all-time', async (req, res) => {
+  try {
+    await db.read();
+    const allTimeStore = ensureMetaUsageAllTimeStore();
+
+    return res.json({
+      ok: true,
+      totalRows: allTimeStore.length,
+      qualifiedRows: allTimeStore.filter((r) => r.qualifiedMarketingCall).length,
+      summary: {
+        allGraphCalls: summarizeMetaRows(allTimeStore, { qualifiedOnly: false }),
+        qualifiedMarketingCalls: summarizeMetaRows(allTimeStore, { qualifiedOnly: true }),
+      },
+      recentRows: allTimeStore.slice(-200),
+      recentQualifiedRows: allTimeStore.filter((r) => r.qualifiedMarketingCall).slice(-200),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to read all-time Meta API usage stats.',
     });
   }
 });
