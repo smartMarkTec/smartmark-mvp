@@ -991,40 +991,35 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
   const [broken, setBroken] = useState(false);
   const [loaded, setLoaded] = useState(false);
-
-  // ✅ NEW: retry state (fixes “connect → one transient fail → stuck forever”)
   const [retryCount, setRetryCount] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
+  const [displaySrc, setDisplaySrc] = useState("");
 
-  // Normalize + dedupe
   const normalized = useMemo(() => {
-    const arr = (items || []).map(toAbsoluteMedia).filter(Boolean);
-    const seen = new Set();
-    return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
+    return (items || [])
+      .map(toAbsoluteMedia)
+      .filter(Boolean)
+      .slice(0, 2);
   }, [items]);
 
   useEffect(() => {
-  // ✅ prefetch all carousel images so switching/first paint is faster
-  try {
-    (normalized || []).forEach((u) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.src = u;
-    });
-  } catch {}
-}, [normalized]);
+    try {
+      (normalized || []).forEach((u) => {
+        const img = new Image();
+        img.decoding = "async";
+        img.src = u;
+      });
+    } catch {}
+  }, [normalized]);
 
-
-  // Reset state when list changes
   useEffect(() => {
     if (idx >= normalized.length) setIdx(0);
     setBroken(false);
     setLoaded(false);
     setRetryCount(0);
     setRetryNonce(0);
-  }, [normalized]); // eslint-disable-line
+  }, [normalized, idx]);
 
-  // If idx changes, we’re loading a new image
   useEffect(() => {
     setBroken(false);
     setLoaded(false);
@@ -1054,9 +1049,8 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     );
   }
 
-  const base = normalized[idx];
+  const base = normalized[idx] || "";
 
-  // ✅ cache-bust for retries (forces browser to re-request)
   const current = useMemo(() => {
     if (!base) return "";
     if (!retryNonce) return base;
@@ -1064,17 +1058,54 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     return `${base}${sep}smcb=${retryNonce}`;
   }, [base, retryNonce]);
 
-  const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
+  useEffect(() => {
+    if (!current) {
+      setDisplaySrc("");
+      return;
+    }
 
-  // ✅ auto-retry a few times if we hit a transient failure (Render cold start etc.)
+    setDisplaySrc("");
+    setBroken(false);
+    setLoaded(false);
+
+    const probe = new Image();
+    probe.decoding = "async";
+
+    probe.onload = () => {
+      setDisplaySrc(current);
+      setLoaded(true);
+      setBroken(false);
+    };
+
+    probe.onerror = () => {
+      setBroken(true);
+      setLoaded(false);
+    };
+
+    probe.src = current;
+
+    return () => {
+      probe.onload = null;
+      probe.onerror = null;
+    };
+  }, [current]);
+
+  const go = (d) => {
+    setDisplaySrc("");
+    setLoaded(false);
+    setBroken(false);
+    setIdx((p) => (p + d + normalized.length) % normalized.length);
+  };
+
   useEffect(() => {
     if (!broken) return;
     if (retryCount >= 3) return;
 
-    const delay = 350 + retryCount * 450; // small backoff
+    const delay = 350 + retryCount * 450;
     const t = setTimeout(() => {
       setBroken(false);
       setLoaded(false);
+      setDisplaySrc("");
       setRetryCount((c) => c + 1);
       setRetryNonce(Date.now());
     }, delay);
@@ -1092,7 +1123,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
         border: "1px solid rgba(255,255,255,0.06)",
       }}
     >
-      {/* Loading skeleton */}
       {!broken && !loaded && (
         <div
           style={{
@@ -1105,14 +1135,13 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             fontWeight: 800,
             fontSize: 13,
             background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
-            zIndex: 1,
+            zIndex: 2,
           }}
         >
           Loading image…
         </div>
       )}
 
-      {/* Error state (after retries exhausted) */}
       {broken && retryCount >= 3 && (
         <div
           style={{
@@ -1135,6 +1164,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             onClick={() => {
               setBroken(false);
               setLoaded(false);
+              setDisplaySrc("");
               setRetryCount(0);
               setRetryNonce(Date.now());
             }}
@@ -1153,30 +1183,31 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
         </div>
       )}
 
-      {/* Image */}
-     {!broken && (
-  <img
-    key={current} // force reload when URL/nonce changes
-    src={current}
-    alt="Ad"
-    loading="eager"
-    decoding="async"
-    fetchPriority="high"
-    style={{
-      width: "100%",
-      maxHeight: height,
-      height,
-      objectFit: "contain",
-      display: "block",
-      background: "#0f1418",
-    }}
-    onClick={() => onFullscreen && onFullscreen(base)}
-    onLoad={() => setLoaded(true)}
-    onError={() => setBroken(true)}
-    draggable={false}
-  />
-)}
-
+      {!broken && displaySrc && (
+        <img
+          key={`${idx}-${displaySrc}`}
+          src={displaySrc}
+          alt="Ad"
+          loading="eager"
+          decoding="async"
+          fetchPriority="high"
+          style={{
+            width: "100%",
+            maxHeight: height,
+            height,
+            objectFit: "contain",
+            display: "block",
+            background: "#0f1418",
+          }}
+          onClick={() => onFullscreen && onFullscreen(base)}
+          onError={() => {
+            setBroken(true);
+            setLoaded(false);
+            setDisplaySrc("");
+          }}
+          draggable={false}
+        />
+      )}
 
       {normalized.length > 1 && (
         <>
@@ -1193,7 +1224,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       )}
     </div>
   );
-
 }
 
 
