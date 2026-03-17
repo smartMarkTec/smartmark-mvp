@@ -172,10 +172,10 @@ app.post("/api/media/upload", express.json({ limit: "25mb" }), (req, res) => {
 });
 
 
-app.get("/api/media/:filename", (req, res, next) => {
+app.get("/api/media/:filename", async (req, res) => {
   try {
     const raw = String(req.params.filename || "").trim();
-    if (!raw) return res.status(404).json({ error: "Media file not found" });
+    if (!raw) return res.redirect(302, "/__fallback/1200.jpg");
 
     const filename = path.basename(raw);
 
@@ -195,22 +195,55 @@ app.get("/api/media/:filename", (req, res, next) => {
       }
     });
 
-    if (!found) {
-      console.warn("[api/media] 404 file not found:", {
-        filename,
-        generatedPath,
-        tried: candidatePaths,
-      });
-      return res.status(404).json({ error: "Media file not found", filename });
+    if (found) {
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader("Access-Control-Expose-Headers", "Content-Length");
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      return res.sendFile(found);
     }
 
+    console.warn("[api/media] missing file, serving fallback:", {
+      filename,
+      generatedPath,
+      tried: candidatePaths,
+    });
+
+    const fallbackBuf = await sharp({
+      create: {
+        width: 1200,
+        height: 1200,
+        channels: 3,
+        background: { r: 245, g: 245, b: 245 },
+      },
+    })
+      .png()
+      .composite([
+        {
+          input: Buffer.from(
+            `<svg width="1200" height="1200" xmlns="http://www.w3.org/2000/svg">
+              <rect width="1200" height="1200" fill="#f5f5f5"/>
+              <text x="50%" y="48%" text-anchor="middle" font-size="54" font-family="Arial, sans-serif" fill="#222">
+                Creative image unavailable
+              </text>
+              <text x="50%" y="54%" text-anchor="middle" font-size="28" font-family="Arial, sans-serif" fill="#666">
+                Regenerate or refresh creatives
+              </text>
+            </svg>`
+          ),
+          top: 0,
+          left: 0,
+        },
+      ])
+      .toBuffer();
+
+    res.setHeader("Content-Type", "image/png");
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.setHeader("Access-Control-Expose-Headers", "Content-Length");
-    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-    return res.sendFile(found);
+    res.setHeader("Cache-Control", "no-store");
+    return res.status(200).end(fallbackBuf);
   } catch (err) {
     console.error("[api/media] send error:", err);
-    return res.status(500).json({ error: "Failed to serve media" });
+    return res.redirect(302, "/__fallback/1200.jpg");
   }
 });
 
