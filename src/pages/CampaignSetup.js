@@ -1636,6 +1636,19 @@ function getPublicSummaryFromOptimizerState(optimizerState) {
   };
 }
 
+function getFallbackPublicSummary() {
+  return {
+    headline: "Monitoring campaign performance",
+    subtext:
+      "Smartemark is watching campaign data and preparing the next measured move.",
+    stage: "monitoring",
+    tone: "calm",
+    actions: [],
+    updatedAt: new Date().toISOString(),
+    mode: "public_marketer_summary_fallback_v1",
+  };
+}
+
 
 
 const CampaignSetup = () => {
@@ -2775,20 +2788,32 @@ useEffect(() => {
   }
 
 if (shouldFetchSummary) {
-authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/optimizer-state`)
-  .then((res) => (res.ok ? res.json() : Promise.reject()))
-  .then((data) => {
-    const summary = getPublicSummaryFromOptimizerState(data?.optimizerState);
-    if (!summary) return;
+  authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/optimizer-state`)
+    .then(async (res) => {
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+      return res.json();
+    })
+    .then((data) => {
+      const summary =
+        getPublicSummaryFromOptimizerState(data?.optimizerState) ||
+        getFallbackPublicSummary();
 
-    setPublicSummaryMap((m) => ({
-      ...m,
-      [expandedId]: summary,
-    }));
-  })
-  .catch((err) => {
-    console.error("Failed to load optimizer public summary:", err);
-  });
+      setPublicSummaryMap((m) => ({
+        ...m,
+        [expandedId]: summary,
+      }));
+    })
+    .catch((err) => {
+      console.error("Failed to load optimizer public summary:", err);
+
+      setPublicSummaryMap((m) => ({
+        ...m,
+        [expandedId]: getFallbackPublicSummary(),
+      }));
+    });
 }
 }, [expandedId, selectedAccount]);
   // Persist
@@ -4140,85 +4165,11 @@ onClick={() => {
       </div>
     )}
 
-    {!isDraft && publicSummaryMap[id] && (
-      <div
-        style={{
-          width: "100%",
-          background: "linear-gradient(180deg, rgba(96,118,255,0.10), rgba(124,77,255,0.08))",
-          borderRadius: "14px",
-          padding: "14px 14px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          border: "1px solid rgba(124,77,255,0.20)",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ color: "#dfe6ff", fontWeight: 900, fontSize: "0.94rem", letterSpacing: 0.2 }}>
-            Smartemark Marketer
-          </div>
-
-          <div
-            style={{
-              padding: "4px 10px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 900,
-              letterSpacing: 0.35,
-              background: "rgba(255,255,255,0.08)",
-              color: "#eef2ff",
-              textTransform: "capitalize",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {publicSummaryMap[id]?.stage
-              ? String(publicSummaryMap[id].stage).replace(/_/g, " ")
-              : "monitoring"}
-          </div>
-        </div>
-
-        <div style={{ color: "#ffffff", fontWeight: 900, fontSize: "1.02rem", lineHeight: 1.25 }}>
-          {publicSummaryMap[id]?.headline || "Monitoring campaign performance"}
-        </div>
-
-        <div style={{ color: "rgba(234,245,255,0.82)", fontWeight: 600, fontSize: 13, lineHeight: 1.5 }}>
-          {publicSummaryMap[id]?.subtext || "Smartemark is watching campaign performance and preparing the next measured move."}
-        </div>
-
-        {Array.isArray(publicSummaryMap[id]?.actions) && publicSummaryMap[id].actions.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 2 }}>
-            {publicSummaryMap[id].actions.slice(0, 3).map((actionText, idx) => (
-              <div
-                key={`${id}_action_${idx}`}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  padding: "8px 10px",
-                  borderRadius: 10,
-                  background: "rgba(255,255,255,0.04)",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                }}
-              >
-                <div
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: "50%",
-                    background: "#8ea2ff",
-                    flexShrink: 0,
-                  }}
-                />
-                <div style={{ color: "#eef3ff", fontWeight: 800, fontSize: 12.5, lineHeight: 1.35 }}>
-                  {actionText}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    )}
+{!isDraft && (
+  <MarketerActionsCard
+    summary={publicSummaryMap[id] || getFallbackPublicSummary()}
+  />
+)}
 
     <div
       style={{
