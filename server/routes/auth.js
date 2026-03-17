@@ -3286,6 +3286,452 @@ router.get('/facebook/debug/meta-call-stats', async (req, res) => {
   }
 });
 
+/* ------------------------------------------------------------------ */
+/*     Legit autonomous marketer runner: real work + rate safety      */
+/* ------------------------------------------------------------------ */
+
+const AUTORUN_STATE = (global.__SMARTEMARK_AUTORUN_STATE__ =
+  global.__SMARTEMARK_AUTORUN_STATE__ || {
+    startedAt: null,
+    lastStartedLoopAt: null,
+    lastFinishedLoopAt: null,
+    lastLoopSummary: null,
+    loops: 0,
+    isRunning: false,
+  });
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function getEnvNumber(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function parseUsageHeaderPercent(v) {
+  try {
+    if (!v) return 0;
+    if (typeof v === 'number') return v;
+    const parsed = typeof v === 'string' ? JSON.parse(v) : v;
+    const pct = Number(
+      parsed?.call_count ??
+      parsed?.acc_id_util_pct ??
+      parsed?.total_cputime ??
+      parsed?.total_time ??
+      0
+    );
+    return Number.isFinite(pct) ? pct : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function getMetaRateSnapshot(userToken, accountId) {
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+  if (!userToken || !normalizedAccountId) {
+    return {
+      ok: false,
+      accountId: normalizedAccountId,
+      estimatedPercent: 0,
+      headers: {},
+    };
+  }
+
+  try {
+    const resp = await axios.get(
+      `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+      {
+        params: {
+          access_token: userToken,
+          fields: 'id',
+          limit: 1,
+        },
+      }
+    );
+
+    const usageHeaders = {
+      accountUsage: resp?.headers?.['x-ad-account-usage'] || null,
+      appUsage: resp?.headers?.['x-app-usage'] || null,
+      businessUseCaseUsage: resp?.headers?.['x-business-use-case-usage'] || null,
+    };
+
+    const estimatedPercent = Math.max(
+      parseUsageHeaderPercent(usageHeaders.accountUsage),
+      parseUsageHeaderPercent(usageHeaders.appUsage)
+    );
+
+    return {
+      ok: true,
+      accountId: normalizedAccountId,
+      estimatedPercent,
+      headers: usageHeaders,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      accountId: normalizedAccountId,
+      estimatedPercent: 0,
+      headers: {},
+      error: err?.response?.data || err?.message || 'rate snapshot failed',
+    };
+  }
+}
+
+async function bootstrapOptimizerStatesFromMeta({ ownerKey, accountId, userToken }) {
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+  if (!ownerKey || !normalizedAccountId || !userToken) return { bootstrapped: 0 };
+
+  const campaignsRes = await axios.get(
+    `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+    {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,status,effective_status,configured_status,objective,start_time',
+        limit: 50,
+      },
+    }
+  );
+
+  const liveCampaigns = Array.isArray(campaignsRes.data?.data)
+    ? campaignsRes.data.data
+    : [];
+
+  let bootstrapped = 0;
+
+  for (const campaign of liveCampaigns) {
+    const campaignId = String(campaign?.id || '').trim();
+    if (!campaignId) continue;
+
+    await upsertOptimizerCampaignState({
+      campaignId,
+      metaCampaignId: campaignId,
+      accountId: normalizedAccountId,
+      ownerKey,
+      pageId: '',
+      campaignName: String(campaign?.name || '').trim(),
+      niche: '',
+      currentStatus: String(
+        campaign?.effective_status || campaign?.status || 'ACTIVE'
+      ).trim(),
+      optimizationEnabled: true,
+      billingBlocked: false,
+      publicSummary: makeInitialPublicSummary(),
+    });
+
+    bootstrapped += 1;
+  }
+
+  return { bootstrapped };
+}
+
+async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, maxCampaigns = 2 }) {
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+  const out = {
+    accountId: normalizedAccountId,
+    ownerKey,
+    campaignsSeen: 0,
+    campaignsProcessed: 0,
+    details: [],
+  };
+
+  if (!ownerKey || !normalizedAccountId || !userToken) return out;
+
+  const campaignsRes = await axios.get(
+    `https://graph.facebook.com/v18.0/act_${normalizedAccountId}/campaigns`,
+    {
+      params: {
+        access_token: userToken,
+        fields: 'id,name,status,effective_status,objective,start_time',
+        limit: Math.max(1, maxCampaigns),
+      },
+    }
+  );
+
+  const campaigns = Array.isArray(campaignsRes.data?.data) ? campaignsRes.data.data : [];
+  out.campaignsSeen = campaigns.length;
+
+  for (const campaign of campaigns) {
+    const campaignId = String(campaign?.id || '').trim();
+    if (!campaignId) continue;
+
+    const effectiveStatus = String(
+      campaign?.effective_status || campaign?.status || 'ACTIVE'
+    ).toUpperCase();
+
+    await upsertOptimizerCampaignState({
+      campaignId,
+      metaCampaignId: campaignId,
+      accountId: normalizedAccountId,
+      ownerKey,
+      pageId: '',
+      campaignName: String(campaign?.name || '').trim(),
+      niche: '',
+      currentStatus: effectiveStatus,
+      optimizationEnabled: true,
+      billingBlocked: false,
+      publicSummary: makeInitialPublicSummary(),
+    });
+
+    if (['PAUSED', 'ARCHIVED', 'DELETED'].includes(effectiveStatus)) {
+      out.details.push({
+        campaignId,
+        skipped: true,
+        reason: 'inactive_status',
+        status: effectiveStatus,
+      });
+      continue;
+    }
+
+    // Legit monitoring reads: campaign details + insights + adsets + ads
+    const [campaignDetailRes, insightsRes, adsetsRes, adsRes] = await Promise.allSettled([
+      axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+        params: {
+          access_token: userToken,
+          fields: 'id,name,status,effective_status,objective,start_time',
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/${campaignId}/insights`, {
+        params: {
+          access_token: userToken,
+          fields: 'impressions,clicks,spend,cpm,cpp,ctr,actions,reach,unique_clicks',
+          date_preset: 'today',
+          limit: 1,
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/adsets`, {
+        params: {
+          access_token: userToken,
+          fields: 'id,name,status,effective_status,campaign_id,daily_budget,bid_strategy',
+          limit: 25,
+          filtering: JSON.stringify([
+            { field: 'campaign.id', operator: 'IN', value: [campaignId] },
+          ]),
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
+        params: {
+          access_token: userToken,
+          fields: 'id,name,status,effective_status,campaign_id,adset_id',
+          limit: 25,
+          filtering: JSON.stringify([
+            { field: 'campaign.id', operator: 'IN', value: [campaignId] },
+          ]),
+        },
+      }),
+    ]);
+
+    let state = await findOptimizerCampaignStateByCampaignId(campaignId);
+
+    const rawInsight = Array.isArray(insightsRes?.value?.data?.data)
+      ? insightsRes.value.data.data[0] || {}
+      : {};
+
+    const metricsSnapshot = {
+      impressions: Number(rawInsight?.impressions || 0),
+      clicks: Number(rawInsight?.clicks || 0),
+      spend: Number(rawInsight?.spend || 0),
+      ctr: Number(rawInsight?.ctr || 0),
+      reach: Number(rawInsight?.reach || 0),
+      uniqueClicks: Number(rawInsight?.unique_clicks || 0),
+      syncedAt: new Date().toISOString(),
+    };
+
+    state = await updateOptimizerCampaignState(campaignId, {
+      ownerKey,
+      campaignName:
+        String(campaignDetailRes?.value?.data?.name || campaign?.name || '').trim(),
+      currentStatus: String(
+        campaignDetailRes?.value?.data?.effective_status || effectiveStatus
+      ).trim(),
+      metricsSnapshot,
+    });
+
+    const creativesRecord = await (async () => {
+      await ensureUsersAndSessions();
+      await db.read();
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+      return (
+        db.data.campaign_creatives.find((row) => {
+          return (
+            String(row?.campaignId || '').trim() === campaignId &&
+            String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+          );
+        }) || null
+      );
+    })();
+
+    const diagnosis = buildDiagnosis({
+      optimizerState: state,
+      creativesRecord,
+    });
+
+    state = await updateOptimizerCampaignState(campaignId, {
+      latestDiagnosis: diagnosis,
+      publicSummary: buildPublicSummary({
+        optimizerState: { ...state, latestDiagnosis: diagnosis },
+      }),
+    });
+
+    const decision = buildDecision({
+      optimizerState: state,
+    });
+
+    state = await updateOptimizerCampaignState(campaignId, {
+      latestDecision: decision,
+      publicSummary: buildPublicSummary({
+        optimizerState: { ...state, latestDecision: decision },
+      }),
+    });
+
+    const monitoring = buildMonitoring({
+      optimizerState: state,
+    });
+
+    state = await updateOptimizerCampaignState(campaignId, {
+      latestMonitoringDecision: monitoring,
+      publicSummary: buildPublicSummary({
+        optimizerState: { ...state, latestMonitoringDecision: monitoring },
+      }),
+      lastAutoSweepAt: new Date().toISOString(),
+    });
+
+    out.campaignsProcessed += 1;
+    out.details.push({
+      campaignId,
+      status: effectiveStatus,
+      metricsSnapshot,
+      adsetsFetched:
+        adsetsRes.status === 'fulfilled'
+          ? Array.isArray(adsetsRes.value?.data?.data)
+            ? adsetsRes.value.data.data.length
+            : 0
+          : 0,
+      adsFetched:
+        adsRes.status === 'fulfilled'
+          ? Array.isArray(adsRes.value?.data?.data)
+            ? adsRes.value.data.data.length
+            : 0
+          : 0,
+    });
+  }
+
+  return out;
+}
+
+async function runContinuousAutonomousMarketerLoop() {
+  if (AUTORUN_STATE.isRunning) {
+    return { ok: true, skipped: true, reason: 'already_running' };
+  }
+
+  AUTORUN_STATE.isRunning = true;
+  AUTORUN_STATE.startedAt = AUTORUN_STATE.startedAt || new Date().toISOString();
+
+  try {
+    while (true) {
+      AUTORUN_STATE.loops += 1;
+      AUTORUN_STATE.lastStartedLoopAt = new Date().toISOString();
+
+      const ownerKey = String(process.env.OPTIMIZER_AUTORUN_OWNER_KEY || '').trim();
+      const accountId = String(process.env.OPTIMIZER_AUTORUN_ACCOUNT_ID || '')
+        .replace(/^act_/, '')
+        .trim();
+      const userToken = ownerKey ? getFbUserToken(ownerKey) : null;
+
+      const hardSleepMs = getEnvNumber('OPTIMIZER_AUTORUN_SLEEP_MS', 15 * 60 * 1000);
+      const minSleepMs = getEnvNumber('OPTIMIZER_AUTORUN_MIN_SLEEP_MS', 8 * 60 * 1000);
+      const maxCampaignsPerSweep = clamp(
+        getEnvNumber('OPTIMIZER_AUTORUN_MAX_CAMPAIGNS', 2),
+        1,
+        5
+      );
+
+      if (!ownerKey || !accountId || !userToken) {
+        AUTORUN_STATE.lastLoopSummary = {
+          ok: false,
+          reason: 'missing_owner_account_or_token',
+          ownerKey,
+          accountId,
+          at: new Date().toISOString(),
+        };
+        AUTORUN_STATE.lastFinishedLoopAt = new Date().toISOString();
+        await sleep(minSleepMs);
+        continue;
+      }
+
+      await ensureUsersAndSessions();
+      await db.read();
+
+      let states = await getAllOptimizerCampaignStates();
+      if (!Array.isArray(states) || states.length === 0) {
+        await bootstrapOptimizerStatesFromMeta({ ownerKey, accountId, userToken });
+        states = await getAllOptimizerCampaignStates();
+      }
+
+      const rate = await getMetaRateSnapshot(userToken, accountId);
+      const usagePct = Number(rate?.estimatedPercent || 0);
+
+      let loopSleepMs = hardSleepMs;
+      if (usagePct >= 80) loopSleepMs = 60 * 60 * 1000;
+      else if (usagePct >= 60) loopSleepMs = 30 * 60 * 1000;
+      else if (usagePct >= 40) loopSleepMs = 20 * 60 * 1000;
+      else if (usagePct >= 20) loopSleepMs = 12 * 60 * 1000;
+
+      const qualifiedSweep = await runQualifiedMonitoringSweep({
+        ownerKey,
+        accountId,
+        userToken,
+        maxCampaigns: maxCampaignsPerSweep,
+      });
+
+      const scheduledPassResult = await runInternalScheduledPass({
+        minHoursBetweenRuns: 1,
+        limit: maxCampaignsPerSweep,
+      });
+
+      AUTORUN_STATE.lastLoopSummary = {
+        ok: true,
+        at: new Date().toISOString(),
+        ownerKey,
+        accountId,
+        usagePct,
+        nextSleepMs: loopSleepMs,
+        qualifiedSweep,
+        scheduledPassResult,
+      };
+
+      console.log('[autonomous marketer loop] completed', AUTORUN_STATE.lastLoopSummary);
+
+      AUTORUN_STATE.lastFinishedLoopAt = new Date().toISOString();
+      await sleep(loopSleepMs);
+    }
+  } catch (err) {
+    AUTORUN_STATE.lastLoopSummary = {
+      ok: false,
+      at: new Date().toISOString(),
+      error: err?.response?.data || err?.message || 'autonomous loop failed',
+    };
+
+    console.error('[autonomous marketer loop] failed', AUTORUN_STATE.lastLoopSummary);
+    AUTORUN_STATE.lastFinishedLoopAt = new Date().toISOString();
+
+    await sleep(10 * 60 * 1000);
+    AUTORUN_STATE.isRunning = false;
+    return runContinuousAutonomousMarketerLoop();
+  }
+}
+
+router.get('/facebook/debug/autorun-status', async (req, res) => {
+  return res.json({
+    ok: true,
+    autorun: AUTORUN_STATE,
+  });
+});
+
 if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
   try {
     startOptimizerAutoRunner({
@@ -3293,58 +3739,16 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
         await ensureUsersAndSessions();
         await db.read();
 
+        const ownerKey = String(process.env.OPTIMIZER_AUTORUN_OWNER_KEY || '').trim();
+        const accountId = String(process.env.OPTIMIZER_AUTORUN_ACCOUNT_ID || '')
+          .replace(/^act_/, '')
+          .trim();
+        const userToken = ownerKey ? getFbUserToken(ownerKey) : null;
+
         let existingStates = await getAllOptimizerCampaignStates();
 
-        // If no local optimizer states exist yet, bootstrap from known live account + owner env
-        if (!existingStates.length) {
-          const ownerKey = String(process.env.OPTIMIZER_AUTORUN_OWNER_KEY || '').trim();
-          const accountId = String(process.env.OPTIMIZER_AUTORUN_ACCOUNT_ID || '')
-            .replace(/^act_/, '')
-            .trim();
-
-          if (ownerKey && accountId) {
-            const userToken = getFbUserToken(ownerKey);
-
-            if (userToken) {
-              const campaignsRes = await axios.get(
-                `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
-                {
-                  params: {
-                    access_token: userToken,
-                    fields:
-                      'id,name,status,effective_status,configured_status,objective,start_time',
-                    limit: 50,
-                  },
-                }
-              );
-
-              const liveCampaigns = Array.isArray(campaignsRes.data?.data)
-                ? campaignsRes.data.data
-                : [];
-
-              for (const campaign of liveCampaigns) {
-                const campaignId = String(campaign?.id || '').trim();
-                if (!campaignId) continue;
-
-         await upsertOptimizerCampaignState({
-  campaignId,
-  metaCampaignId: campaignId,
-  accountId,
-  ownerKey,
-  pageId: '',
-  campaignName: String(campaign?.name || '').trim(),
-  niche: '',
-  currentStatus: String(
-    campaign?.effective_status || campaign?.status || 'ACTIVE'
-  ).trim(),
-  optimizationEnabled: true,
-  billingBlocked: false,
-  publicSummary: makeInitialPublicSummary(),
-});
-              }
-            }
-          }
-
+        if (!existingStates.length && ownerKey && accountId && userToken) {
+          await bootstrapOptimizerStatesFromMeta({ ownerKey, accountId, userToken });
           existingStates = await getAllOptimizerCampaignStates();
         }
 
@@ -3353,6 +3757,13 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
           limit,
         });
       },
+    });
+
+    runContinuousAutonomousMarketerLoop().catch((err) => {
+      console.error('[autonomous marketer loop] startup error', {
+        message: err?.message || 'unknown error',
+        stack: err?.stack || null,
+      });
     });
 
     global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__ = true;
