@@ -991,41 +991,57 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [idx, setIdx] = useState(0);
   const [broken, setBroken] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [readyMap, setReadyMap] = useState({});
+
+  // ✅ retry state
   const [retryCount, setRetryCount] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
-  const [displaySrc, setDisplaySrc] = useState("");
 
   const normalized = useMemo(() => {
-    return (items || [])
-      .map(toAbsoluteMedia)
-      .filter(Boolean)
-      .slice(0, 2);
+    const arr = (items || []).map(toAbsoluteMedia).filter(Boolean);
+    const seen = new Set();
+    return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
   }, [items]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const nextReady = {};
     try {
       (normalized || []).forEach((u) => {
         const img = new Image();
         img.decoding = "async";
+        img.onload = () => {
+          if (cancelled) return;
+          setReadyMap((prev) => ({ ...prev, [u]: true }));
+        };
+        img.onerror = () => {};
         img.src = u;
       });
     } catch {}
+
+    return () => {
+      cancelled = true;
+    };
   }, [normalized]);
 
   useEffect(() => {
     if (idx >= normalized.length) setIdx(0);
     setBroken(false);
-    setLoaded(false);
     setRetryCount(0);
     setRetryNonce(0);
-  }, [normalized, idx]);
+
+    const currentBase = normalized[Math.min(idx, Math.max(normalized.length - 1, 0))] || "";
+    setLoaded(!!readyMap[currentBase]);
+  }, [normalized, readyMap]); // eslint-disable-line
 
   useEffect(() => {
+    const currentBase = normalized[idx] || "";
     setBroken(false);
-    setLoaded(false);
     setRetryCount(0);
     setRetryNonce(0);
-  }, [idx]);
+    setLoaded(!!readyMap[currentBase]);
+  }, [idx, normalized, readyMap]);
 
   if (!normalized.length) {
     return (
@@ -1049,7 +1065,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     );
   }
 
-  const base = normalized[idx] || "";
+  const base = normalized[idx];
 
   const current = useMemo(() => {
     if (!base) return "";
@@ -1058,44 +1074,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     return `${base}${sep}smcb=${retryNonce}`;
   }, [base, retryNonce]);
 
-  useEffect(() => {
-    if (!current) {
-      setDisplaySrc("");
-      return;
-    }
-
-    setDisplaySrc("");
-    setBroken(false);
-    setLoaded(false);
-
-    const probe = new Image();
-    probe.decoding = "async";
-
-    probe.onload = () => {
-      setDisplaySrc(current);
-      setLoaded(true);
-      setBroken(false);
-    };
-
-    probe.onerror = () => {
-      setBroken(true);
-      setLoaded(false);
-    };
-
-    probe.src = current;
-
-    return () => {
-      probe.onload = null;
-      probe.onerror = null;
-    };
-  }, [current]);
-
-  const go = (d) => {
-    setDisplaySrc("");
-    setLoaded(false);
-    setBroken(false);
-    setIdx((p) => (p + d + normalized.length) % normalized.length);
-  };
+  const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
 
   useEffect(() => {
     if (!broken) return;
@@ -1105,7 +1084,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     const t = setTimeout(() => {
       setBroken(false);
       setLoaded(false);
-      setDisplaySrc("");
       setRetryCount((c) => c + 1);
       setRetryNonce(Date.now());
     }, delay);
@@ -1135,7 +1113,7 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             fontWeight: 800,
             fontSize: 13,
             background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
-            zIndex: 2,
+            zIndex: 1,
           }}
         >
           Loading image…
@@ -1164,7 +1142,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             onClick={() => {
               setBroken(false);
               setLoaded(false);
-              setDisplaySrc("");
               setRetryCount(0);
               setRetryNonce(Date.now());
             }}
@@ -1183,10 +1160,10 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
         </div>
       )}
 
-      {!broken && displaySrc && (
+      {!broken && (
         <img
-          key={`${idx}-${displaySrc}`}
-          src={displaySrc}
+          key={current}
+          src={current}
           alt="Ad"
           loading="eager"
           decoding="async"
@@ -1198,13 +1175,15 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             objectFit: "contain",
             display: "block",
             background: "#0f1418",
+            opacity: loaded ? 1 : 0.01,
+            transition: "opacity 180ms ease",
           }}
           onClick={() => onFullscreen && onFullscreen(base)}
-          onError={() => {
-            setBroken(true);
-            setLoaded(false);
-            setDisplaySrc("");
+          onLoad={() => {
+            setReadyMap((prev) => ({ ...prev, [base]: true }));
+            setLoaded(true);
           }}
+          onError={() => setBroken(true)}
           draggable={false}
         />
       )}

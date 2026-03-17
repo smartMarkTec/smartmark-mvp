@@ -3190,7 +3190,8 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
         recoveredHeadline = firstNonEmpty(
           linkData?.name,
           photoData?.title,
-          creative?.name
+          videoData?.title,
+          linkData?.caption
         );
       }
 
@@ -3258,6 +3259,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       storedLocalImages,
       finalImages,
     });
+
+       if (!recoveredHeadline) {
+      recoveredHeadline = safeMetaFromRecord.headline || '';
+    }
 
     if (!recoveredHeadline && recoveredBody) {
       recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
