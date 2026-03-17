@@ -41,7 +41,7 @@ const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 
 /* ------------------------------------------------------------------ */
-/*                  META API CALL LOGGING / DEBUG COUNTER             */
+/*        META API USAGE TRACKER (GENERAL + QUALIFIED MARKETING)      */
 /* ------------------------------------------------------------------ */
 const META_CALL_STATS = {
   startedAt: new Date().toISOString(),
@@ -52,30 +52,133 @@ const META_CALL_STATS = {
   recent: [],
 };
 
+const META_USAGE_DB_KEY = 'meta_api_usage';
+const META_USAGE_KEEP_DAYS = 20; // keep a little extra beyond 15-day review window
+
+function ensureMetaUsageStore() {
+  db.data = db.data || {};
+  db.data[META_USAGE_DB_KEY] = db.data[META_USAGE_DB_KEY] || [];
+  return db.data[META_USAGE_DB_KEY];
+}
+
+function normalizeGraphPath(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return '';
+
+  try {
+    const u = new URL(raw);
+    return u.pathname || '';
+  } catch {
+    return raw;
+  }
+}
+
 function getMetaLabel(method, url) {
   const m = String(method || 'GET').toUpperCase();
-  const u = String(url || '');
+  const path = normalizeGraphPath(url);
 
-  if (u.includes('/me/adaccounts')) return `${m} me/adaccounts`;
-  if (u.includes('/me/accounts')) return `${m} me/accounts`;
-  if (u.includes('/insights')) return `${m} insights`;
-  if (u.includes('/adimages')) return `${m} adimages`;
-  if (u.includes('/adcreatives')) return `${m} adcreatives`;
-  if (u.includes('/adsets')) return `${m} adsets`;
-  if (u.includes('/ads')) return `${m} ads`;
+  if (path.includes('/me/adaccounts')) return `${m} me/adaccounts`;
+  if (path.includes('/me/accounts')) return `${m} me/accounts`;
+  if (path.includes('/insights')) return `${m} insights`;
+  if (path.includes('/adimages')) return `${m} adimages`;
+  if (path.includes('/adcreatives')) return `${m} adcreatives`;
+  if (/\/adsets(?:\/|$)/.test(path)) return `${m} adsets`;
+  if (/\/ads(?:\/|$)/.test(path)) return `${m} ads`;
 
-  if (/\/act_[^/]+\/campaigns/.test(u)) {
+  if (/\/act_[^/]+\/campaigns(?:\/|$)/.test(path)) {
     return m === 'POST' ? 'POST campaigns_create' : 'GET campaigns_list';
   }
 
-  if (/graph\.facebook\.com\/v18\.0\/[^/?]+$/.test(u)) {
+  if (/\/v\d+\.\d+\/[^/]+$/.test(path)) {
     return `${m} campaign_object_update_or_read`;
   }
 
   return `${m} other`;
 }
 
-function recordMetaCall({ method, url, status, ok }) {
+function getQualifiedMarketingLabel(method, url) {
+  const m = String(method || 'GET').toUpperCase();
+  const path = normalizeGraphPath(url);
+
+  // Strongest calls to rely on for Ads Management Standard Access
+  if (m === 'GET' && /\/act_[^/]+\/campaigns(?:\/|$)/.test(path)) return 'marketing_campaigns_list';
+  if (m === 'GET' && /\/act_[^/]+\/adsets(?:\/|$)/.test(path)) return 'marketing_adsets_list';
+  if (m === 'GET' && /\/act_[^/]+\/ads(?:\/|$)/.test(path)) return 'marketing_ads_list';
+
+  if (m === 'GET' && /\/[^/]+\/insights(?:\/|$)/.test(path)) return 'marketing_insights';
+  if (m === 'POST' && /\/act_[^/]+\/campaigns(?:\/|$)/.test(path)) return 'marketing_campaign_create';
+  if (m === 'POST' && /\/act_[^/]+\/adsets(?:\/|$)/.test(path)) return 'marketing_adset_create';
+  if (m === 'POST' && /\/act_[^/]+\/ads(?:\/|$)/.test(path)) return 'marketing_ad_create';
+  if (m === 'POST' && /\/act_[^/]+\/adimages(?:\/|$)/.test(path)) return 'marketing_adimage_upload';
+  if (m === 'POST' && /\/act_[^/]+\/adcreatives(?:\/|$)/.test(path)) return 'marketing_adcreative_create';
+
+  // Updating campaign/adset/ad objects by ID
+  if (m === 'POST' && /\/v\d+\.\d+\/\d+(?:\/|$)?/.test(path)) {
+    return 'marketing_object_update';
+  }
+
+  return null;
+}
+
+function isQualifiedMarketingCall(method, url) {
+  const path = normalizeGraphPath(url);
+  const m = String(method || 'GET').toUpperCase();
+
+  // Explicitly exclude auth/helper endpoints from "qualified" counting
+  if (path.includes('/me/accounts')) return false;
+  if (path.includes('/me/adaccounts')) return false;
+  if (path.includes('/oauth/')) return false;
+  if (path.includes('/dialog/oauth')) return false;
+  if (!String(url || '').includes('graph.facebook.com')) return false;
+
+  return !!getQualifiedMarketingLabel(m, url);
+}
+
+function inferMetaObjectType(method, url) {
+  const path = normalizeGraphPath(url);
+  const m = String(method || 'GET').toUpperCase();
+
+  if (/\/act_[^/]+\/campaigns(?:\/|$)/.test(path)) return 'campaign';
+  if (/\/act_[^/]+\/adsets(?:\/|$)/.test(path)) return 'adset';
+  if (/\/act_[^/]+\/ads(?:\/|$)/.test(path)) return 'ad';
+  if (/\/insights(?:\/|$)/.test(path)) return 'insights';
+  if (m === 'POST' && /\/v\d+\.\d+\/\d+(?:\/|$)?/.test(path)) return 'object_update';
+  return 'other';
+}
+
+function tryExtractAccountId(url) {
+  const s = String(url || '');
+  const actMatch = s.match(/act_(\d+)/);
+  if (actMatch?.[1]) return actMatch[1];
+  return '';
+}
+
+function tryExtractObjectId(url) {
+  const path = normalizeGraphPath(url);
+  const match = path.match(/\/v\d+\.\d+\/(\d+)(?:\/|$)/);
+  return match?.[1] || '';
+}
+
+async function persistMetaUsageRow(row) {
+  try {
+    await db.read();
+    const store = ensureMetaUsageStore();
+
+    store.push(row);
+
+    const cutoff = Date.now() - META_USAGE_KEEP_DAYS * 24 * 60 * 60 * 1000;
+    db.data[META_USAGE_DB_KEY] = store.filter((r) => {
+      const t = new Date(r.t || 0).getTime();
+      return Number.isFinite(t) && t >= cutoff;
+    });
+
+    await db.write();
+  } catch (e) {
+    console.warn('[META_API_TRACKER] persist failed:', e?.message || e);
+  }
+}
+
+function recordMetaCallMemory({ method, url, status, ok }) {
   const label = getMetaLabel(method, url);
 
   META_CALL_STATS.total += 1;
@@ -102,9 +205,81 @@ function recordMetaCall({ method, url, status, ok }) {
   META_CALL_STATS.recent.push(row);
   if (META_CALL_STATS.recent.length > 200) META_CALL_STATS.recent.shift();
 
+  return row;
+}
+
+function buildMetaUsageRow({ method, url, status, ok }) {
+  const qualified = isQualifiedMarketingCall(method, url);
+  const qualifiedLabel = qualified ? getQualifiedMarketingLabel(method, url) : null;
+
+  return {
+    t: new Date().toISOString(),
+    method: String(method || '').toUpperCase(),
+    url: String(url || ''),
+    path: normalizeGraphPath(url),
+    status: Number(status || 0),
+    ok: !!ok,
+    label: getMetaLabel(method, url),
+
+    qualifiedMarketingCall: qualified,
+    qualifiedLabel,
+    objectType: inferMetaObjectType(method, url),
+
+    accountId: tryExtractAccountId(url),
+    objectId: tryExtractObjectId(url),
+  };
+}
+
+function summarizeMetaRows(rows, { qualifiedOnly = false } = {}) {
+  const source = qualifiedOnly ? rows.filter((r) => r.qualifiedMarketingCall) : rows;
+
+  const summary = {
+    total: source.length,
+    success: source.filter((r) => r.ok).length,
+    fail: source.filter((r) => !r.ok).length,
+    errorRatePct: 0,
+    byLabel: {},
+    byDay: {},
+  };
+
+  summary.errorRatePct =
+    summary.total > 0 ? Number(((summary.fail / summary.total) * 100).toFixed(2)) : 0;
+
+  for (const row of source) {
+    const label = qualifiedOnly
+      ? row.qualifiedLabel || 'unclassified_qualified'
+      : row.label || 'other';
+
+    if (!summary.byLabel[label]) {
+      summary.byLabel[label] = { total: 0, success: 0, fail: 0 };
+    }
+
+    summary.byLabel[label].total += 1;
+    if (row.ok) summary.byLabel[label].success += 1;
+    else summary.byLabel[label].fail += 1;
+
+    const day = String(row.t || '').slice(0, 10);
+    if (!summary.byDay[day]) {
+      summary.byDay[day] = { total: 0, success: 0, fail: 0 };
+    }
+
+    summary.byDay[day].total += 1;
+    if (row.ok) summary.byDay[day].success += 1;
+    else summary.byDay[day].fail += 1;
+  }
+
+  return summary;
+}
+
+async function recordMetaCall({ method, url, status, ok }) {
+  const memoryRow = recordMetaCallMemory({ method, url, status, ok });
+  const dbRow = buildMetaUsageRow({ method, url, status, ok });
+
   console.log(
-    `[META_API] ${row.t} | ${row.label} | ${row.method} ${row.url} | status=${row.status} | ok=${row.ok ? 1 : 0}`
+    `[META_API] ${memoryRow.t} | ${dbRow.label} | ${dbRow.method} ${dbRow.url} | status=${dbRow.status} | ok=${dbRow.ok ? 1 : 0} | qualified=${dbRow.qualifiedMarketingCall ? 1 : 0} | qLabel=${dbRow.qualifiedLabel || 'none'}`
   );
+
+  await persistMetaUsageRow(dbRow);
 }
 
 if (!global.__SMARTMARK_META_AXIOS_LOGGER__) {
@@ -116,11 +291,11 @@ if (!global.__SMARTMARK_META_AXIOS_LOGGER__) {
   });
 
   axios.interceptors.response.use(
-    (response) => {
+    async (response) => {
       try {
         const url = String(response?.config?.url || '');
         if (url.includes('graph.facebook.com')) {
-          recordMetaCall({
+          await recordMetaCall({
             method: response?.config?.method || 'GET',
             url,
             status: response?.status || 200,
@@ -130,11 +305,11 @@ if (!global.__SMARTMARK_META_AXIOS_LOGGER__) {
       } catch {}
       return response;
     },
-    (error) => {
+    async (error) => {
       try {
         const url = String(error?.config?.url || '');
         if (url.includes('graph.facebook.com')) {
-          recordMetaCall({
+          await recordMetaCall({
             method: error?.config?.method || 'GET',
             url,
             status: error?.response?.status || 500,
@@ -148,7 +323,6 @@ if (!global.__SMARTMARK_META_AXIOS_LOGGER__) {
 
   global.__SMARTMARK_META_AXIOS_LOGGER__ = true;
 }
-
 /* ------------------------------------------------------------------ */
 /*                    Small in-process defaults cache                  */
 /* ------------------------------------------------------------------ */
@@ -3054,11 +3228,62 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/cancel', async 
   }
 });
 
-router.get('/facebook/debug/meta-call-stats', (req, res) => {
-  res.json({
-    ok: true,
-    stats: META_CALL_STATS,
-  });
+router.get('/facebook/debug/meta-call-stats', async (req, res) => {
+  try {
+    await db.read();
+    const store = ensureMetaUsageStore();
+
+    const now = Date.now();
+    const last15dCutoff = now - 15 * 24 * 60 * 60 * 1000;
+
+    const rows15d = store.filter((r) => {
+      const t = new Date(r.t || 0).getTime();
+      return Number.isFinite(t) && t >= last15dCutoff;
+    });
+
+    const summaryAll15d = summarizeMetaRows(rows15d, { qualifiedOnly: false });
+    const summaryQualified15d = summarizeMetaRows(rows15d, { qualifiedOnly: true });
+
+    const qualifiedSuccess = summaryQualified15d.success;
+    const qualifiedFail = summaryQualified15d.fail;
+    const qualifiedTotal = summaryQualified15d.total;
+    const qualifiedErrorRatePct = summaryQualified15d.errorRatePct;
+
+    return res.json({
+      ok: true,
+
+      inMemory: META_CALL_STATS,
+
+      rolling15d: {
+        allGraphCalls: summaryAll15d,
+        qualifiedMarketingCalls: summaryQualified15d,
+      },
+
+      standardAccessReadiness: {
+        requirementSuccessfulCalls: 1500,
+        currentSuccessfulQualifiedCalls: qualifiedSuccess,
+        currentFailedQualifiedCalls: qualifiedFail,
+        currentQualifiedTotalCalls: qualifiedTotal,
+        currentQualifiedErrorRatePct: qualifiedErrorRatePct,
+
+        meetsCallThreshold: qualifiedSuccess >= 1500,
+        meetsErrorRateThreshold: qualifiedTotal > 0 ? qualifiedErrorRatePct < 10 : false,
+        likelyReady:
+          qualifiedSuccess >= 1500 &&
+          qualifiedTotal > 0 &&
+          qualifiedErrorRatePct < 10,
+      },
+
+      recentQualifiedCalls: rows15d
+        .filter((r) => r.qualifiedMarketingCall)
+        .slice(-100),
+    });
+  } catch (err) {
+    return res.status(500).json({
+      ok: false,
+      error: err?.message || 'Failed to read Meta API usage stats.',
+    });
+  }
 });
 
 if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
