@@ -1684,41 +1684,79 @@ const minimalPayload = {
       });
     }
 
-    if (usingDebugKey) {
-      return res.json({
-        ok: true,
-        accessMode: 'debug_key',
-        optimizerState: state,
-      });
-    }
+if (usingDebugKey) {
+  return res.json({
+    ok: true,
+    accessMode: 'debug_key',
+    optimizerState: state,
+  });
+}
 
-    const session = await requireSession(req);
-    if (!session.ok) {
-      return res.status(session.status).json({ ok: false, error: session.error });
-    }
+const requestOwnerKey = String(ownerKeyFromReq(req) || '').trim();
 
-    const currentOwnerKey = `user:${String(session.user.username).trim()}`;
+// No usable owner context at all
+if (!requestOwnerKey) {
+  return res.status(401).json({
+    ok: false,
+    error: 'Not authorized to read optimizer campaign state.',
+  });
+}
 
-    if (state.ownerKey && String(state.ownerKey) !== currentOwnerKey) {
-      return res.status(403).json({
-        ok: false,
-        error: 'You do not have access to this optimizer campaign state.',
-      });
-    }
+const stateOwnerKey = String(state.ownerKey || '').trim();
 
-    // If ownerKey was blank in fallback creation, attach it now
-    if (!state.ownerKey) {
-      state = await upsertOptimizerCampaignState({
-        ...state,
-        ownerKey: currentOwnerKey,
-      });
-    }
+// If state has no owner yet, bind it to the current request owner
+if (!stateOwnerKey) {
+  state = await upsertOptimizerCampaignState({
+    ...state,
+    ownerKey: requestOwnerKey,
+  });
+
+  return res.json({
+    ok: true,
+    accessMode: 'owner_key',
+    optimizerState: state,
+  });
+}
+
+// Exact owner match
+if (stateOwnerKey === requestOwnerKey) {
+  return res.json({
+    ok: true,
+    accessMode: 'owner_key',
+    optimizerState: state,
+  });
+}
+
+// If state is still tied to a raw sid (sm_...) but this request resolves to a user:* owner,
+// allow rebinding only when that sid belongs to the same logged-in Smartemark user.
+if (stateOwnerKey.startsWith('sm_') && requestOwnerKey.startsWith('user:')) {
+  await ensureUsersAndSessions();
+  await db.read();
+
+  const sidSession =
+    (db.data.sessions || []).find((s) => String(s.sid || '').trim() === stateOwnerKey) || null;
+
+  const requestUsername = requestOwnerKey.slice(5).trim();
+  const sidUsername = String(sidSession?.username || '').trim();
+
+  if (sidUsername && requestUsername && sidUsername === requestUsername) {
+    state = await upsertOptimizerCampaignState({
+      ...state,
+      ownerKey: requestOwnerKey,
+    });
 
     return res.json({
       ok: true,
-      accessMode: 'session',
+      accessMode: 'owner_key_rebound',
       optimizerState: state,
     });
+  }
+}
+
+return res.status(403).json({
+  ok: false,
+  error: 'You do not have access to this optimizer campaign state.',
+});
   } catch (err) {
     return res.status(500).json({
       ok: false,

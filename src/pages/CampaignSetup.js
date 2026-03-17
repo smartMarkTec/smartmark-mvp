@@ -2774,20 +2774,22 @@ useEffect(() => {
       );
   }
 
-  if (shouldFetchSummary) {
-    authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/optimizer-state`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
-        const summary = getPublicSummaryFromOptimizerState(data?.optimizerState);
-        if (!summary) return;
+if (shouldFetchSummary) {
+authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/optimizer-state`)
+  .then((res) => (res.ok ? res.json() : Promise.reject()))
+  .then((data) => {
+    const summary = getPublicSummaryFromOptimizerState(data?.optimizerState);
+    if (!summary) return;
 
-        setPublicSummaryMap((m) => ({
-          ...m,
-          [expandedId]: summary,
-        }));
-      })
-      .catch(() => {});
-  }
+    setPublicSummaryMap((m) => ({
+      ...m,
+      [expandedId]: summary,
+    }));
+  })
+  .catch((err) => {
+    console.error("Failed to load optimizer public summary:", err);
+  });
+}
 }, [expandedId, selectedAccount]);
   // Persist
   useEffect(() => {
