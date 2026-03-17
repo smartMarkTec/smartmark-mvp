@@ -432,6 +432,18 @@ function absolutePublicUrl(relativePath) {
   return `${base}${rel}`;
 }
 
+function makeInitialPublicSummary(overrides = {}) {
+  return {
+    headline: 'Monitoring campaign performance',
+    subtext: 'Smartemark is preparing to learn from campaign data and improve results over time.',
+    stage: 'monitoring',
+    tone: 'calm',
+    updatedAt: new Date().toISOString(),
+    mode: 'public_marketer_summary_v1',
+    ...overrides,
+  };
+}
+
 const FB_SCOPES = [
   'public_profile',
   'email',
@@ -891,26 +903,35 @@ async function markManualOverride(campaignId, patch = {}) {
   let existing = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
 
   if (!existing) {
-    existing = await upsertOptimizerCampaignState({
-      campaignId: normalizedCampaignId,
-      metaCampaignId: normalizedCampaignId,
-      accountId: String(patch.accountId || '').replace(/^act_/, '').trim(),
-      ownerKey: String(patch.ownerKey || '').trim(),
-      pageId: String(patch.pageId || '').trim(),
-      campaignName: String(patch.campaignName || '').trim(),
-      niche: '',
-      currentStatus: String(patch.currentStatus || '').trim() || 'ACTIVE',
-      optimizationEnabled: true,
-      metricsSnapshot: {},
-      latestAction: null,
-      latestMonitoringDecision: null,
-      currentWinner: null,
-      activeTestType: '',
-      manualOverride,
-      manualOverrideType: String(patch.manualOverrideType || '').trim(),
-      manualOverrideReason: String(patch.manualOverrideReason || '').trim(),
-      manualOverrideAt: manualOverride ? new Date().toISOString() : '',
-    });
+ existing = await upsertOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  metaCampaignId: normalizedCampaignId,
+  accountId: String(patch.accountId || '').replace(/^act_/, '').trim(),
+  ownerKey: String(patch.ownerKey || '').trim(),
+  pageId: String(patch.pageId || '').trim(),
+  campaignName: String(patch.campaignName || '').trim(),
+  niche: '',
+  currentStatus: String(patch.currentStatus || '').trim() || 'ACTIVE',
+  optimizationEnabled: true,
+  metricsSnapshot: {},
+  latestAction: null,
+  latestMonitoringDecision: null,
+  currentWinner: null,
+  activeTestType: '',
+  manualOverride,
+  manualOverrideType: String(patch.manualOverrideType || '').trim(),
+  manualOverrideReason: String(patch.manualOverrideReason || '').trim(),
+  manualOverrideAt: manualOverride ? new Date().toISOString() : '',
+  publicSummary: makeInitialPublicSummary({
+    headline: manualOverride
+      ? 'Manual campaign control detected'
+      : 'Monitoring campaign performance',
+    subtext: manualOverride
+      ? 'Smartemark detected a manual update and will respect your campaign control.'
+      : 'Smartemark is preparing to learn from campaign data and improve results over time.',
+    stage: manualOverride ? 'manual_override' : 'monitoring',
+  }),
+});
     return existing;
   }
 
@@ -1560,14 +1581,7 @@ const optimizerPayload = {
   latestMonitoringDecision: null,
   currentWinner: null,
   activeTestType: '',
-  publicSummary: {
-    headline: 'Monitoring campaign performance',
-    subtext: 'Smartemark is preparing to learn from campaign data and improve results over time.',
-    stage: 'monitoring',
-    tone: 'calm',
-    updatedAt: new Date().toISOString(),
-    mode: 'public_marketer_summary_v1',
-  },
+publicSummary: makeInitialPublicSummary(),
 };
 
       console.log('[optimizer state] launch upsert payload:', optimizerPayload);
@@ -1632,7 +1646,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
 
     // If missing, create a minimal state directly from route params
     if (!state) {
-    const minimalPayload = {
+const minimalPayload = {
   campaignId: String(campaignId || '').trim(),
   metaCampaignId: String(campaignId || '').trim(),
   accountId: String(accountId || '').replace(/^act_/, '').trim(),
@@ -1648,6 +1662,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
   latestMonitoringDecision: null,
   currentWinner: null,
   activeTestType: '',
+  publicSummary: makeInitialPublicSummary(),
 };
 
       console.log('[optimizer state] creating minimal fallback state from route params:', minimalPayload);
@@ -1772,7 +1787,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/seed-optimizer-
 
     const campaign = campaignRes.data || {};
 
-   const payload = {
+ const payload = {
   campaignId: normalizedCampaignId,
   metaCampaignId: normalizedCampaignId,
   accountId: normalizedAccountId,
@@ -1787,6 +1802,7 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/seed-optimizer-
   ).trim(),
   optimizationEnabled: true,
   billingBlocked: false,
+  publicSummary: makeInitialPublicSummary(),
 };
 
     const saved = await upsertOptimizerCampaignState(payload);
@@ -1988,6 +2004,7 @@ const fallbackPayload = {
   latestMonitoringDecision: null,
   currentWinner: null,
   activeTestType: '',
+  publicSummary: makeInitialPublicSummary(),
 };
 
   state = await upsertOptimizerCampaignState(fallbackPayload);
@@ -2544,7 +2561,7 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
         const campaignId = String(campaign?.id || '').trim();
         if (!campaignId) continue;
 
-       await upsertOptimizerCampaignState({
+    await upsertOptimizerCampaignState({
   campaignId,
   metaCampaignId: campaignId,
   accountId,
@@ -2559,6 +2576,7 @@ router.post('/facebook/optimizer/run-scheduled-pass', async (req, res) => {
   ).trim(),
   optimizationEnabled: true,
   billingBlocked: false,
+  publicSummary: makeInitialPublicSummary(),
 });
       }
 
@@ -2625,7 +2643,7 @@ router.post('/facebook/optimizer/backfill-states', async (req, res) => {
         continue;
       }
 
-  const payload = {
+const payload = {
   campaignId,
   metaCampaignId: campaignId,
   accountId,
@@ -2636,6 +2654,7 @@ router.post('/facebook/optimizer/backfill-states', async (req, res) => {
   currentStatus: String(rec?.status || 'ACTIVE').trim(),
   optimizationEnabled: true,
   billingBlocked: false,
+  publicSummary: makeInitialPublicSummary(),
 };
 
       const saved = await upsertOptimizerCampaignState(payload);
@@ -3044,7 +3063,7 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
                 const campaignId = String(campaign?.id || '').trim();
                 if (!campaignId) continue;
 
-            await upsertOptimizerCampaignState({
+         await upsertOptimizerCampaignState({
   campaignId,
   metaCampaignId: campaignId,
   accountId,
@@ -3057,6 +3076,7 @@ if (!global.__SMARTEMARK_OPTIMIZER_AUTORUN_STARTED__) {
   ).trim(),
   optimizationEnabled: true,
   billingBlocked: false,
+  publicSummary: makeInitialPublicSummary(),
 });
               }
             }
