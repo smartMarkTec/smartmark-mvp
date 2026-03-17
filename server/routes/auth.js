@@ -3023,51 +3023,41 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
     return res.status(401).json({ error: 'Not authenticated with Facebook' });
   }
 
+  const fs = require('fs');
+  const path = require('path');
+
+  const generatedDir =
+    process.env.GENERATED_DIR ||
+    (process.env.RENDER ? '/tmp/generated' : path.join(__dirname, '../public/generated'));
+
+  try {
+    fs.mkdirSync(generatedDir, { recursive: true });
+  } catch {}
+
   const normalizeCreativeUrl = (raw) => {
     const s = String(raw || '').trim();
     if (!s) return '';
-
     if (/^data:image\//i.test(s)) return '';
     if (/^blob:/i.test(s)) return '';
 
-    if (/^https?:\/\//i.test(s)) {
-      try {
-        const u = new URL(s);
-
-        if (
-          u.pathname.startsWith('/api/media/') ||
-          u.pathname.startsWith('/media/') ||
-          u.pathname.startsWith('/generated/')
-        ) {
-          const p = u.pathname.startsWith('/media/')
-            ? `/api${u.pathname}`
-            : u.pathname.startsWith('/generated/')
-            ? `/api/media${u.pathname}`
-            : u.pathname;
-
-          return absolutePublicUrl(`${p}${u.search || ''}`);
-        }
-
-        return u.toString();
-      } catch {
-        return s;
-      }
-    }
+    if (/^https?:\/\//i.test(s)) return s;
 
     if (s.startsWith('/api/media/')) return absolutePublicUrl(s);
     if (s.startsWith('/media/')) return absolutePublicUrl(`/api${s}`);
     if (s.startsWith('/generated/')) return absolutePublicUrl(`/api/media${s}`);
-    if (!s.startsWith('/') && /\.(png|jpe?g|webp)$/i.test(s)) return absolutePublicUrl(`/api/media/${s}`);
+    if (!s.startsWith('/') && /\.(png|jpe?g|webp)$/i.test(s)) {
+      return absolutePublicUrl(`/api/media/${s}`);
+    }
 
     return absolutePublicUrl(s.startsWith('/') ? s : `/${s}`);
   };
 
-  const dedupeKeepOrder = (arr, max = 2) => {
+  const dedupeKeepOrder = (arr, max = 20) => {
     const out = [];
     const seen = new Set();
 
     for (const item of Array.isArray(arr) ? arr : []) {
-      const s = normalizeCreativeUrl(item);
+      const s = String(item || '').trim();
       if (!s || seen.has(s)) continue;
       seen.add(s);
       out.push(s);
@@ -3077,33 +3067,61 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
     return out;
   };
 
-  const probeImage = async (url) => {
-    const abs = normalizeCreativeUrl(url);
-    if (!abs) return '';
-
-    try {
-      const probe = await axios.get(abs, {
-        responseType: 'stream',
-        timeout: 10000,
-        validateStatus: (status) => status >= 200 && status < 400,
-      });
-
-      try {
-        probe.data?.destroy?.();
-      } catch {}
-
-      return abs;
-    } catch {
-      return '';
-    }
-  };
-
   const firstNonEmpty = (...vals) => {
     for (const v of vals) {
       const s = String(v || '').trim();
       if (s) return s;
     }
     return '';
+  };
+
+  const cacheRemoteImageToLocal = async (url, tag) => {
+    const abs = normalizeCreativeUrl(url);
+    if (!abs) return '';
+
+    try {
+      const imgRes = await axios.get(abs, {
+        responseType: 'arraybuffer',
+        timeout: 15000,
+        maxBodyLength: 20 * 1024 * 1024,
+        maxContentLength: 20 * 1024 * 1024,
+        validateStatus: (status) => status >= 200 && status < 400,
+        headers: {
+          Accept: 'image/*,*/*',
+          'User-Agent': 'SmartMark/1.0',
+        },
+      });
+
+      const ct = String(imgRes.headers?.['content-type'] || '').toLowerCase();
+      let ext = 'jpg';
+      if (ct.includes('png')) ext = 'png';
+      else if (ct.includes('webp')) ext = 'webp';
+      else if (ct.includes('jpeg') || ct.includes('jpg')) ext = 'jpg';
+
+      const fileName = `fb-cache-${normalizedCampaignId}-${tag}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}.${ext}`;
+      const outPath = path.join(generatedDir, fileName);
+
+      fs.writeFileSync(outPath, Buffer.from(imgRes.data));
+
+      const publicUrl = absolutePublicUrl(`/api/media/${fileName}`);
+      console.log('[creatives] cached image locally', {
+        campaignId: normalizedCampaignId,
+        tag,
+        sourceUrl: abs,
+        publicUrl,
+      });
+
+      return publicUrl;
+    } catch (err) {
+      console.error('[creatives] image cache failed', {
+        campaignId: normalizedCampaignId,
+        tag,
+        sourceUrl: abs,
+        status: err?.response?.status || 0,
+        error: err?.message || err,
+      });
+      return '';
+    }
   };
 
   try {
@@ -3131,14 +3149,6 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       link: String(rec?.meta?.link || '').trim(),
     };
 
-    const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 2);
-    const storedImagesChecked = [];
-
-    for (const img of storedImagesRaw) {
-      const ok = await probeImage(img);
-      if (ok) storedImagesChecked.push(ok);
-    }
-
     const adsRes = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
       params: {
         access_token: userToken,
@@ -3156,26 +3166,25 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
     });
 
     const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+    console.log('[creatives] ads fetched', {
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      adCount: ads.length,
+    });
 
-    const recoveredCandidates = [];
     let recoveredHeadline = safeMetaFromRecord.headline;
     let recoveredBody = safeMetaFromRecord.body;
     let recoveredLink = safeMetaFromRecord.link;
 
-    for (const ad of ads) {
+    const perAdLocalImages = [];
+
+    for (let i = 0; i < ads.length; i += 1) {
+      const ad = ads[i] || {};
       const creative = ad?.creative || {};
       const oss = creative?.object_story_spec || {};
       const linkData = oss?.link_data || {};
       const photoData = oss?.photo_data || {};
       const videoData = oss?.video_data || {};
-
-      recoveredCandidates.push(
-        linkData?.image_url,
-        photoData?.image_url,
-        videoData?.image_url,
-        creative?.image_url,
-        creative?.thumbnail_url
-      );
 
       if (!recoveredHeadline) {
         recoveredHeadline = firstNonEmpty(
@@ -3200,21 +3209,55 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
           videoData?.call_to_action?.value?.link
         );
       }
+
+      const adCandidates = dedupeKeepOrder([
+        linkData?.image_url,
+        photoData?.image_url,
+        videoData?.image_url,
+        creative?.image_url,
+        creative?.thumbnail_url,
+      ], 8);
+
+      console.log('[creatives] ad candidates', {
+        campaignId: normalizedCampaignId,
+        adId: String(ad?.id || ''),
+        adName: String(ad?.name || ''),
+        candidates: adCandidates,
+      });
+
+      let localHit = '';
+      for (let j = 0; j < adCandidates.length; j += 1) {
+        localHit = await cacheRemoteImageToLocal(adCandidates[j], `ad${i + 1}-cand${j + 1}`);
+        if (localHit) break;
+      }
+
+      if (localHit) perAdLocalImages.push(localHit);
+      if (perAdLocalImages.length >= 2) break;
     }
 
-    const recoveredRaw = dedupeKeepOrder(recoveredCandidates, 6);
-    const recoveredChecked = [];
+    const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 4);
+    const storedLocalImages = [];
 
-    for (const img of recoveredRaw) {
-      const ok = await probeImage(img);
-      if (ok) recoveredChecked.push(ok);
-      if (recoveredChecked.length >= 2) break;
+    for (let i = 0; i < storedImagesRaw.length; i += 1) {
+      const img = normalizeCreativeUrl(storedImagesRaw[i]);
+      if (!img) continue;
+
+      if (/\/api\/media\//i.test(img) && !storedLocalImages.includes(img)) {
+        storedLocalImages.push(img);
+      }
     }
 
     const finalImages = dedupeKeepOrder(
-      [...storedImagesChecked, ...recoveredChecked],
+      [...perAdLocalImages, ...storedLocalImages],
       2
     );
+
+    console.log('[creatives] final images selected', {
+      campaignId: normalizedCampaignId,
+      perAdLocalImages,
+      storedLocalImages,
+      finalImages,
+    });
 
     if (!recoveredHeadline && recoveredBody) {
       recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
@@ -3280,7 +3323,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       meta: nextRecord.meta,
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
-      source: recoveredChecked.length ? 'facebook_recovered' : 'stored_record',
+      source: 'facebook_cached_locally',
     });
   } catch (e) {
     console.error('[creatives] failed to load/recover campaign creatives:', e?.response?.data || e?.message || e);
