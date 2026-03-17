@@ -172,8 +172,49 @@ app.post("/api/media/upload", express.json({ limit: "25mb" }), (req, res) => {
 });
 
 
+app.get("/api/media/:filename", (req, res, next) => {
+  try {
+    const raw = String(req.params.filename || "").trim();
+    if (!raw) return res.status(404).json({ error: "Media file not found" });
+
+    const filename = path.basename(raw);
+
+    const candidatePaths = [
+      path.join(generatedPath, filename),
+      path.join(__dirname, "public", "generated", filename),
+      path.join(process.cwd(), "server", "public", "generated", filename),
+      path.join(process.cwd(), "public", "generated", filename),
+      path.join("/tmp/generated", filename),
+    ];
+
+    const found = candidatePaths.find((p) => {
+      try {
+        return fs.existsSync(p) && fs.statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    });
+
+    if (!found) {
+      console.warn("[api/media] 404 file not found:", {
+        filename,
+        generatedPath,
+        tried: candidatePaths,
+      });
+      return res.status(404).json({ error: "Media file not found", filename });
+    }
+
+    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Length");
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    return res.sendFile(found);
+  } catch (err) {
+    console.error("[api/media] send error:", err);
+    return res.status(500).json({ error: "Failed to serve media" });
+  }
+});
+
 app.use("/generated", express.static(generatedPath, staticOpts));
-app.use("/api/media", express.static(generatedPath, staticOpts));
 app.use("/media", express.static(generatedPath, staticOpts));
 
 /** Local fallback image for testing */
