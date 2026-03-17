@@ -2725,12 +2725,16 @@ useEffect(() => {
   if (!expandedId || !selectedAccount || expandedId === "__DRAFT__") return;
 
   const acctId = String(selectedAccount).trim();
-  const metricsCacheKey = `sm_metrics_last_fetch_${acctId}_${expandedId}`;
-  const summaryCacheKey = `sm_summary_last_fetch_${acctId}_${expandedId}`;
+  const campaignId = String(expandedId).trim();
+
+  const metricsCacheKey = `sm_metrics_last_fetch_${acctId}_${campaignId}`;
+  const summaryCacheKey = `sm_summary_last_fetch_${acctId}_${campaignId}`;
+  const creativesCacheKey = `sm_creatives_last_fetch_${acctId}_${campaignId}`;
   const now = Date.now();
 
   let shouldFetchMetrics = true;
   let shouldFetchSummary = true;
+  let shouldFetchCreatives = true;
 
   try {
     const lastMetrics = Number(sessionStorage.getItem(metricsCacheKey) || 0);
@@ -2750,8 +2754,77 @@ useEffect(() => {
     }
   } catch {}
 
+  try {
+    const lastCreatives = Number(sessionStorage.getItem(creativesCacheKey) || 0);
+    if (now - lastCreatives < 15000) {
+      shouldFetchCreatives = false;
+    } else {
+      sessionStorage.setItem(creativesCacheKey, String(now));
+    }
+  } catch {}
+
+  if (shouldFetchCreatives) {
+    authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/creatives`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        const imgs = (Array.isArray(data?.images) ? data.images : [])
+          .map(toAbsoluteMedia)
+          .filter(Boolean)
+          .slice(0, 2);
+
+        const existing = getSavedCreatives(campaignId) || {};
+        const nextHeadline =
+          String(data?.meta?.headline || existing?.meta?.headline || previewCopy?.headline || "").trim();
+        const nextBody =
+          String(data?.meta?.body || existing?.meta?.body || previewCopy?.body || "").trim();
+        const nextLink =
+          String(
+            data?.meta?.link ||
+              existing?.meta?.link ||
+              previewCopy?.link ||
+              inferredLink ||
+              ""
+          ).trim();
+
+        if (imgs.length) {
+          const map = readCreativeMap(resolvedUser, acctId);
+          const prev = map[campaignId] || {};
+
+          map[campaignId] = {
+            ...prev,
+            images: imgs,
+            mediaSelection: "image",
+            time: Date.now(),
+            expiresAt:
+              prev?.expiresAt ||
+              (endDate && !isNaN(new Date(`${endDate}T18:00:00`).getTime())
+                ? new Date(`${endDate}T18:00:00`).getTime()
+                : Date.now() + DEFAULT_CAMPAIGN_TTL_MS),
+            name: prev?.name || data?.name || "Untitled",
+            meta: {
+              headline: nextHeadline,
+              body: nextBody,
+              link: nextLink,
+            },
+          };
+
+          writeCreativeMap(resolvedUser, acctId, map);
+          saveFetchableImagesBackup(resolvedUser, imgs);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load campaign creatives:", err);
+      });
+  }
+
   if (shouldFetchMetrics) {
-    authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/metrics`)
+    authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/metrics`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => {
         const row = Array.isArray(data?.data) && data.data[0] ? data.data[0] : {};
@@ -2772,12 +2845,12 @@ useEffect(() => {
           spend: Number.isFinite(spend) ? spend : 0,
         };
 
-        setMetricsMap((m) => ({ ...m, [expandedId]: normalized }));
+        setMetricsMap((m) => ({ ...m, [campaignId]: normalized }));
       })
       .catch(() =>
         setMetricsMap((m) => ({
           ...m,
-          [expandedId]: {
+          [campaignId]: {
             impressions: 0,
             clicks: 0,
             ctr: 0,
@@ -2787,35 +2860,35 @@ useEffect(() => {
       );
   }
 
-if (shouldFetchSummary) {
-  authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/optimizer-state`)
-    .then(async (res) => {
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      return res.json();
-    })
-    .then((data) => {
-      const summary =
-        getPublicSummaryFromOptimizerState(data?.optimizerState) ||
-        getFallbackPublicSummary();
+  if (shouldFetchSummary) {
+    authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/optimizer-state`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          throw new Error(text || `HTTP ${res.status}`);
+        }
+        return res.json();
+      })
+      .then((data) => {
+        const summary =
+          getPublicSummaryFromOptimizerState(data?.optimizerState) ||
+          getFallbackPublicSummary();
 
-      setPublicSummaryMap((m) => ({
-        ...m,
-        [expandedId]: summary,
-      }));
-    })
-    .catch((err) => {
-      console.error("Failed to load optimizer public summary:", err);
+        setPublicSummaryMap((m) => ({
+          ...m,
+          [campaignId]: summary,
+        }));
+      })
+      .catch((err) => {
+        console.error("Failed to load optimizer public summary:", err);
 
-      setPublicSummaryMap((m) => ({
-        ...m,
-        [expandedId]: getFallbackPublicSummary(),
-      }));
-    });
-}
-}, [expandedId, selectedAccount]);
+        setPublicSummaryMap((m) => ({
+          ...m,
+          [campaignId]: getFallbackPublicSummary(),
+        }));
+      });
+  }
+}, [expandedId, selectedAccount, resolvedUser, endDate, previewCopy?.headline, previewCopy?.body, previewCopy?.link, inferredLink]);
   // Persist
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate }));
@@ -3304,28 +3377,37 @@ const payload = {
 
   const { fee } = calculateFees(budget);
 
-  const getSavedCreatives = (campaignId) => {
-    if (!selectedAccount)
-      return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
-    const acctKey = String(selectedAccount || "").replace(/^act_/, "");
-    const map = readCreativeMap(resolvedUser, acctKey);
+const getSavedCreatives = (campaignId) => {
+  if (!selectedAccount) {
+    return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+  }
 
-    const didPurge = purgeExpiredCreative(map, campaignId);
-    if (didPurge) writeCreativeMap(resolvedUser, acctKey, map);
+  const acctKey = String(selectedAccount || "").replace(/^act_/, "");
+  const map = readCreativeMap(resolvedUser, acctKey);
 
-    const saved = map[campaignId] || null;
-    if (!saved) return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+  const didPurge = purgeExpiredCreative(map, campaignId);
+  if (didPurge) writeCreativeMap(resolvedUser, acctKey, map);
 
-    return {
-      images: (saved.images || []).map(toAbsoluteMedia).filter(Boolean),
-      mediaSelection: "image",
-      meta: {
-        headline: String(saved?.meta?.headline || "").trim(),
-        body: String(saved?.meta?.body || "").trim(),
-        link: String(saved?.meta?.link || "").trim(),
-      },
-    };
+  const saved = map[campaignId] || null;
+  if (!saved) {
+    return { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+  }
+
+  const images = (saved.images || [])
+    .map(toAbsoluteMedia)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  return {
+    images,
+    mediaSelection: "image",
+    meta: {
+      headline: String(saved?.meta?.headline || "").trim(),
+      body: String(saved?.meta?.body || "").trim(),
+      link: String(saved?.meta?.link || "").trim(),
+    },
   };
+};
 
   const hasDraft = draftCreatives.images && draftCreatives.images.length;
 
