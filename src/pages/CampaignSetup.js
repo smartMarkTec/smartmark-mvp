@@ -1619,6 +1619,23 @@ async function ensureFetchableUrls(candidates, max = 2) {
     .slice(0, max);
 }
 
+function getPublicSummaryFromOptimizerState(optimizerState) {
+  const ps = optimizerState?.publicSummary || null;
+  if (!ps) return null;
+
+  return {
+    headline: String(ps.headline || "").trim(),
+    subtext: String(ps.subtext || "").trim(),
+    stage: String(ps.stage || "").trim(),
+    tone: String(ps.tone || "").trim(),
+    actions: Array.isArray(ps.actions)
+      ? ps.actions.map((x) => String(x || "").trim()).filter(Boolean).slice(0, 3)
+      : [],
+    updatedAt: String(ps.updatedAt || "").trim(),
+    mode: String(ps.mode || "").trim(),
+  };
+}
+
 
 
 const CampaignSetup = () => {
@@ -1997,10 +2014,10 @@ useEffect(() => {
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
 const [metricsMap, setMetricsMap] = useState({});
-const [optimizerSummaryMap, setOptimizerSummaryMap] = useState({});
+const [publicSummaryMap, setPublicSummaryMap] = useState({});
 const [launched, setLaunched] = useState(false);
-  const [launchResult, setLaunchResult] = useState(null);
-  const [loading, setLoading] = useState(false);
+const [launchResult, setLaunchResult] = useState(null);
+const [loading, setLoading] = useState(false);
   const [, setCampaignStatus] = useState("ACTIVE");
   const [campaignCount, setCampaignCount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
@@ -2696,7 +2713,7 @@ useEffect(() => {
 
   const acctId = String(selectedAccount).trim();
   const metricsCacheKey = `sm_metrics_last_fetch_${acctId}_${expandedId}`;
-  const summaryCacheKey = `sm_optimizer_summary_last_fetch_${acctId}_${expandedId}`;
+  const summaryCacheKey = `sm_summary_last_fetch_${acctId}_${expandedId}`;
   const now = Date.now();
 
   let shouldFetchMetrics = true;
@@ -2704,14 +2721,20 @@ useEffect(() => {
 
   try {
     const lastMetrics = Number(sessionStorage.getItem(metricsCacheKey) || 0);
-    if (now - lastMetrics < 60000) shouldFetchMetrics = false;
-    else sessionStorage.setItem(metricsCacheKey, String(now));
+    if (now - lastMetrics < 60000) {
+      shouldFetchMetrics = false;
+    } else {
+      sessionStorage.setItem(metricsCacheKey, String(now));
+    }
   } catch {}
 
   try {
     const lastSummary = Number(sessionStorage.getItem(summaryCacheKey) || 0);
-    if (now - lastSummary < 30000) shouldFetchSummary = false;
-    else sessionStorage.setItem(summaryCacheKey, String(now));
+    if (now - lastSummary < 45000) {
+      shouldFetchSummary = false;
+    } else {
+      sessionStorage.setItem(summaryCacheKey, String(now));
+    }
   } catch {}
 
   if (shouldFetchMetrics) {
@@ -2755,15 +2778,15 @@ useEffect(() => {
     authFetch(`/facebook/adaccount/${acctId}/campaign/${expandedId}/optimizer-state`)
       .then((res) => (res.ok ? res.json() : Promise.reject()))
       .then((data) => {
-        const summary = data?.optimizerState?.publicSummary || null;
-        setOptimizerSummaryMap((m) => ({ ...m, [expandedId]: summary }));
-      })
-      .catch(() => {
-        setOptimizerSummaryMap((m) => ({
+        const summary = getPublicSummaryFromOptimizerState(data?.optimizerState);
+        if (!summary) return;
+
+        setPublicSummaryMap((m) => ({
           ...m,
-          [expandedId]: null,
+          [expandedId]: summary,
         }));
-      });
+      })
+      .catch(() => {});
   }
 }, [expandedId, selectedAccount]);
   // Persist
@@ -4107,7 +4130,7 @@ onClick={() => {
 
                     </div>
 
- {isOpen && (
+{isOpen && (
   <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
     {!isDraft && (
       <div style={{ width: "100%" }}>
@@ -4115,8 +4138,84 @@ onClick={() => {
       </div>
     )}
 
-    {!isDraft && (
-      <MarketerActionsCard summary={optimizerSummaryMap[id]} />
+    {!isDraft && publicSummaryMap[id] && (
+      <div
+        style={{
+          width: "100%",
+          background: "linear-gradient(180deg, rgba(96,118,255,0.10), rgba(124,77,255,0.08))",
+          borderRadius: "14px",
+          padding: "14px 14px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          border: "1px solid rgba(124,77,255,0.20)",
+          boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ color: "#dfe6ff", fontWeight: 900, fontSize: "0.94rem", letterSpacing: 0.2 }}>
+            Smartemark Marketer
+          </div>
+
+          <div
+            style={{
+              padding: "4px 10px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 900,
+              letterSpacing: 0.35,
+              background: "rgba(255,255,255,0.08)",
+              color: "#eef2ff",
+              textTransform: "capitalize",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {publicSummaryMap[id]?.stage
+              ? String(publicSummaryMap[id].stage).replace(/_/g, " ")
+              : "monitoring"}
+          </div>
+        </div>
+
+        <div style={{ color: "#ffffff", fontWeight: 900, fontSize: "1.02rem", lineHeight: 1.25 }}>
+          {publicSummaryMap[id]?.headline || "Monitoring campaign performance"}
+        </div>
+
+        <div style={{ color: "rgba(234,245,255,0.82)", fontWeight: 600, fontSize: 13, lineHeight: 1.5 }}>
+          {publicSummaryMap[id]?.subtext || "Smartemark is watching campaign performance and preparing the next measured move."}
+        </div>
+
+        {Array.isArray(publicSummaryMap[id]?.actions) && publicSummaryMap[id].actions.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 2 }}>
+            {publicSummaryMap[id].actions.slice(0, 3).map((actionText, idx) => (
+              <div
+                key={`${id}_action_${idx}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 10px",
+                  borderRadius: 10,
+                  background: "rgba(255,255,255,0.04)",
+                  border: "1px solid rgba(255,255,255,0.06)",
+                }}
+              >
+                <div
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: "#8ea2ff",
+                    flexShrink: 0,
+                  }}
+                />
+                <div style={{ color: "#eef3ff", fontWeight: 800, fontSize: 12.5, lineHeight: 1.35 }}>
+                  {actionText}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     )}
 
     <div
