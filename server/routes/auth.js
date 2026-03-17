@@ -3023,17 +3023,99 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
     return res.status(401).json({ error: 'Not authenticated with Facebook' });
   }
 
+  const normalizeCreativeUrl = (raw) => {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+
+    if (/^data:image\//i.test(s)) return '';
+    if (/^blob:/i.test(s)) return '';
+
+    if (/^https?:\/\//i.test(s)) {
+      try {
+        const u = new URL(s);
+
+        if (
+          u.pathname.startsWith('/api/media/') ||
+          u.pathname.startsWith('/media/') ||
+          u.pathname.startsWith('/generated/')
+        ) {
+          const p = u.pathname.startsWith('/media/')
+            ? `/api${u.pathname}`
+            : u.pathname.startsWith('/generated/')
+            ? `/api/media${u.pathname}`
+            : u.pathname;
+
+          return absolutePublicUrl(`${p}${u.search || ''}`);
+        }
+
+        return u.toString();
+      } catch {
+        return s;
+      }
+    }
+
+    if (s.startsWith('/api/media/')) return absolutePublicUrl(s);
+    if (s.startsWith('/media/')) return absolutePublicUrl(`/api${s}`);
+    if (s.startsWith('/generated/')) return absolutePublicUrl(`/api/media${s}`);
+    if (!s.startsWith('/') && /\.(png|jpe?g|webp)$/i.test(s)) return absolutePublicUrl(`/api/media/${s}`);
+
+    return absolutePublicUrl(s.startsWith('/') ? s : `/${s}`);
+  };
+
+  const dedupeKeepOrder = (arr, max = 2) => {
+    const out = [];
+    const seen = new Set();
+
+    for (const item of Array.isArray(arr) ? arr : []) {
+      const s = normalizeCreativeUrl(item);
+      if (!s || seen.has(s)) continue;
+      seen.add(s);
+      out.push(s);
+      if (out.length >= max) break;
+    }
+
+    return out;
+  };
+
+  const probeImage = async (url) => {
+    const abs = normalizeCreativeUrl(url);
+    if (!abs) return '';
+
+    try {
+      const probe = await axios.get(abs, {
+        responseType: 'stream',
+        timeout: 10000,
+        validateStatus: (status) => status >= 200 && status < 400,
+      });
+
+      try {
+        probe.data?.destroy?.();
+      } catch {}
+
+      return abs;
+    } catch {
+      return '';
+    }
+  };
+
+  const firstNonEmpty = (...vals) => {
+    for (const v of vals) {
+      const s = String(v || '').trim();
+      if (s) return s;
+    }
+    return '';
+  };
+
   try {
     await ensureUsersAndSessions();
     await db.read();
 
     db.data = db.data || {};
-
-    const creativeList = Array.isArray(db.data.campaign_creatives)
+    db.data.campaign_creatives = Array.isArray(db.data.campaign_creatives)
       ? db.data.campaign_creatives
       : [];
 
-    db.data.campaign_creatives = creativeList;
+    const creativeList = db.data.campaign_creatives;
 
     const rec =
       creativeList.find((r) => {
@@ -3049,47 +3131,12 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       link: String(rec?.meta?.link || '').trim(),
     };
 
-    const recordImages = Array.isArray(rec?.images) ? rec.images.filter(Boolean).slice(0, 2) : [];
+    const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 2);
+    const storedImagesChecked = [];
 
-    if (recordImages.length) {
-      const checkedImages = await Promise.all(
-        recordImages.map(async (u) => {
-          try {
-            const abs = absolutePublicUrl(u);
-            const probe = await axios.get(abs, {
-              responseType: 'stream',
-              timeout: 8000,
-              validateStatus: (s) => s >= 200 && s < 400,
-            });
-            try {
-              probe.data?.destroy?.();
-            } catch {}
-            return abs;
-          } catch {
-            return '';
-          }
-        })
-      );
-
-      const okImages = checkedImages.filter(Boolean);
-
-      if (okImages.length === 2) {
-        return res.json({
-          campaignId: normalizedCampaignId,
-          accountId: normalizedAccountId,
-          pageId: rec?.pageId || '',
-          name: rec?.name || '',
-          status: rec?.status || '',
-          mediaSelection: 'image',
-          images: okImages,
-          videos: [],
-          fbVideoIds: [],
-          meta: safeMetaFromRecord,
-          updatedAt: rec?.updatedAt || '',
-          createdAt: rec?.createdAt || '',
-          source: 'stored_record',
-        });
-      }
+    for (const img of storedImagesRaw) {
+      const ok = await probeImage(img);
+      if (ok) storedImagesChecked.push(ok);
     }
 
     const adsRes = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
@@ -3099,7 +3146,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
           'id',
           'name',
           'campaign_id',
-          'creative{id,name,object_story_spec,object_story_id,image_url,thumbnail_url,effective_object_story_id}'
+          'creative{id,name,image_url,thumbnail_url,object_story_spec,effective_object_story_id}'
         ].join(','),
         limit: 25,
         filtering: JSON.stringify([
@@ -3110,67 +3157,70 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
 
     const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
 
-    const orderedImages = [];
+    const recoveredCandidates = [];
     let recoveredHeadline = safeMetaFromRecord.headline;
     let recoveredBody = safeMetaFromRecord.body;
     let recoveredLink = safeMetaFromRecord.link;
-
-    const pushImage = (url) => {
-      const s = String(url || '').trim();
-      if (!s) return;
-      if (orderedImages.includes(s)) return;
-      if (orderedImages.length >= 2) return;
-      orderedImages.push(s);
-    };
-
-    const firstNonEmpty = (...vals) => {
-      for (const v of vals) {
-        const s = String(v || '').trim();
-        if (s) return s;
-      }
-      return '';
-    };
 
     for (const ad of ads) {
       const creative = ad?.creative || {};
       const oss = creative?.object_story_spec || {};
       const linkData = oss?.link_data || {};
       const photoData = oss?.photo_data || {};
+      const videoData = oss?.video_data || {};
 
-      pushImage(linkData?.image_url);
-      pushImage(photoData?.image_url);
-      pushImage(creative?.image_url);
-      pushImage(creative?.thumbnail_url);
+      recoveredCandidates.push(
+        linkData?.image_url,
+        photoData?.image_url,
+        videoData?.image_url,
+        creative?.image_url,
+        creative?.thumbnail_url
+      );
 
       if (!recoveredHeadline) {
         recoveredHeadline = firstNonEmpty(
           linkData?.name,
-          photoData?.title
+          photoData?.title,
+          creative?.name
         );
       }
 
       if (!recoveredBody) {
         recoveredBody = firstNonEmpty(
           linkData?.message,
-          photoData?.message
+          photoData?.message,
+          videoData?.message
         );
       }
 
       if (!recoveredLink) {
         recoveredLink = firstNonEmpty(
           linkData?.link,
-          photoData?.link
+          photoData?.link,
+          videoData?.call_to_action?.value?.link
         );
       }
     }
+
+    const recoveredRaw = dedupeKeepOrder(recoveredCandidates, 6);
+    const recoveredChecked = [];
+
+    for (const img of recoveredRaw) {
+      const ok = await probeImage(img);
+      if (ok) recoveredChecked.push(ok);
+      if (recoveredChecked.length >= 2) break;
+    }
+
+    const finalImages = dedupeKeepOrder(
+      [...storedImagesChecked, ...recoveredChecked],
+      2
+    );
 
     if (!recoveredHeadline && recoveredBody) {
       recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
     }
 
-    const recoveredImages = orderedImages.slice(0, 2);
-
-    if (!recoveredImages.length) {
+    if (!finalImages.length) {
       return res.status(404).json({
         error: 'No live creative images found for this campaign.',
       });
@@ -3186,7 +3236,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       name: String(rec?.name || '').trim(),
       status: String(rec?.status || 'ACTIVE').trim(),
       mediaSelection: 'image',
-      images: recoveredImages,
+      images: finalImages,
       videos: [],
       fbVideoIds: [],
       meta: {
@@ -3206,7 +3256,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
     });
 
     if (idx >= 0) {
-      creativeList[idx] = { ...creativeList[idx], ...nextRecord };
+      creativeList[idx] = {
+        ...creativeList[idx],
+        ...nextRecord,
+      };
     } else {
       creativeList.push(nextRecord);
     }
@@ -3221,13 +3274,13 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       name: nextRecord.name,
       status: nextRecord.status,
       mediaSelection: 'image',
-      images: recoveredImages,
+      images: finalImages,
       videos: [],
       fbVideoIds: [],
       meta: nextRecord.meta,
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
-      source: 'facebook_recovered',
+      source: recoveredChecked.length ? 'facebook_recovered' : 'stored_record',
     });
   } catch (e) {
     console.error('[creatives] failed to load/recover campaign creatives:', e?.response?.data || e?.message || e);
