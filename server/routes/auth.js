@@ -3073,7 +3073,7 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
 
       const okImages = checkedImages.filter(Boolean);
 
-      if (okImages.length) {
+      if (okImages.length === 2) {
         return res.json({
           campaignId: normalizedCampaignId,
           accountId: normalizedAccountId,
@@ -3110,10 +3110,26 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
 
     const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
 
-    const imageSet = new Set();
+    const orderedImages = [];
     let recoveredHeadline = safeMetaFromRecord.headline;
     let recoveredBody = safeMetaFromRecord.body;
     let recoveredLink = safeMetaFromRecord.link;
+
+    const pushImage = (url) => {
+      const s = String(url || '').trim();
+      if (!s) return;
+      if (orderedImages.includes(s)) return;
+      if (orderedImages.length >= 2) return;
+      orderedImages.push(s);
+    };
+
+    const firstNonEmpty = (...vals) => {
+      for (const v of vals) {
+        const s = String(v || '').trim();
+        if (s) return s;
+      }
+      return '';
+    };
 
     for (const ad of ads) {
       const creative = ad?.creative || {};
@@ -3121,47 +3137,38 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       const linkData = oss?.link_data || {};
       const photoData = oss?.photo_data || {};
 
-      const candidates = [
-        linkData?.image_url,
-        photoData?.image_url,
-        creative?.image_url,
-        creative?.thumbnail_url,
-      ]
-        .map((x) => String(x || '').trim())
-        .filter(Boolean);
-
-      for (const u of candidates) {
-        if (imageSet.size < 2) imageSet.add(u);
-      }
+      pushImage(linkData?.image_url);
+      pushImage(photoData?.image_url);
+      pushImage(creative?.image_url);
+      pushImage(creative?.thumbnail_url);
 
       if (!recoveredHeadline) {
-        recoveredHeadline = String(
-          linkData?.name ||
-          photoData?.title ||
-          creative?.name ||
-          ad?.name ||
-          ''
-        ).trim();
+        recoveredHeadline = firstNonEmpty(
+          linkData?.name,
+          photoData?.title
+        );
       }
 
       if (!recoveredBody) {
-        recoveredBody = String(
-          linkData?.message ||
-          photoData?.message ||
-          ''
-        ).trim();
+        recoveredBody = firstNonEmpty(
+          linkData?.message,
+          photoData?.message
+        );
       }
 
       if (!recoveredLink) {
-        recoveredLink = String(
-          linkData?.link ||
-          photoData?.link ||
-          ''
-        ).trim();
+        recoveredLink = firstNonEmpty(
+          linkData?.link,
+          photoData?.link
+        );
       }
     }
 
-    const recoveredImages = Array.from(imageSet).slice(0, 2);
+    if (!recoveredHeadline && recoveredBody) {
+      recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
+    }
+
+    const recoveredImages = orderedImages.slice(0, 2);
 
     if (!recoveredImages.length) {
       return res.status(404).json({
