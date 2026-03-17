@@ -3015,7 +3015,10 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/metrics', async 
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', async (req, res) => {
   const ownerKey = ownerKeyFromReq(req);
   const userToken = getFbUserToken(ownerKey);
+
   const { campaignId, accountId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
 
   if (!userToken) {
     return res.status(401).json({ error: 'Not authenticated with Facebook' });
@@ -3024,135 +3027,172 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
   try {
     await ensureUsersAndSessions();
     await db.read();
-
+    db.data = db.data || {};
     db.data.campaign_creatives = db.data.campaign_creatives || [];
 
-    const normalizedCampaignId = String(campaignId || '').trim();
-    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const rec =
+      db.data.campaign_creatives.find((r) => {
+        return (
+          String(r?.campaignId || '').trim() === normalizedCampaignId &&
+          String(r?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+        );
+      }) || null;
 
-    const existingIndex = db.data.campaign_creatives.findIndex((r) => {
-      return (
-        String(r?.campaignId || '').trim() === normalizedCampaignId &&
-        String(r?.ownerKey || '').trim() === String(ownerKey || '').trim()
-      );
-    });
-
-    const existingRec = existingIndex >= 0 ? db.data.campaign_creatives[existingIndex] : null;
-
-    const imageLooksUsable = (value) => {
-      const s = String(value || '').trim();
-      if (!s) return false;
-      if (s.includes('Creative image unavailable')) return false;
-      if (s.startsWith('blob:')) return false;
-      return true;
+    const safeMetaFromRecord = {
+      headline: '',
+      body: '',
+      link: '',
+      ...(rec?.meta || {}),
     };
 
-    const unique = (arr) => Array.from(new Set((arr || []).filter(Boolean)));
+    const recordImages = Array.isArray(rec?.images) ? rec.images.filter(Boolean) : [];
 
-    const localImages = unique((existingRec?.images || []).filter(imageLooksUsable));
+    // 1) If stored images still exist, use them immediately.
+    if (recordImages.length) {
+      const liveChecked = await Promise.all(
+        recordImages.slice(0, 2).map(async (u) => {
+          try {
+            const abs = absolutePublicUrl(u);
+            const head = await axios.head(abs, {
+              timeout: 8000,
+              validateStatus: (s) => s >= 200 && s < 400,
+            });
+            return head.status >= 200 && head.status < 400 ? abs : '';
+          } catch {
+            return '';
+          }
+        })
+      );
 
-    // If we already have usable images stored, return them fast.
-    if (localImages.length > 0) {
-      return res.json({
-        campaignId: existingRec.campaignId,
-        accountId: existingRec.accountId,
-        pageId: existingRec.pageId,
-        name: existingRec.name,
-        status: existingRec.status,
-        mediaSelection: 'image',
-        images: localImages,
-        videos: [],
-        fbVideoIds: [],
-        updatedAt: existingRec.updatedAt,
-        createdAt: existingRec.createdAt,
-        source: 'stored',
-      });
-    }
+      const okImages = liveChecked.filter(Boolean);
 
-    // Fallback: pull creatives live from Facebook so Smartemark always reflects the active ad account
-    const adsResp = await axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}/ads`, {
-      params: {
-        access_token: userToken,
-        limit: 25,
-        fields: [
-          'id',
-          'name',
-          'status',
-          'effective_status',
-          'creative{id,name,thumbnail_url,image_url,object_story_spec,asset_feed_spec,object_url}'
-        ].join(','),
-      },
-    });
-
-    const ads = Array.isArray(adsResp?.data?.data) ? adsResp.data.data : [];
-
-    const liveImages = [];
-
-    for (const ad of ads) {
-      const creative = ad?.creative || {};
-      const story = creative?.object_story_spec || {};
-      const linkData = story?.link_data || {};
-      const photoData = story?.photo_data || {};
-      const videoData = story?.video_data || {};
-
-      const candidates = [
-        creative?.image_url,
-        creative?.thumbnail_url,
-        creative?.object_url,
-        linkData?.picture,
-        photoData?.image_url,
-        videoData?.image_url,
-      ];
-
-      for (const candidate of candidates) {
-        const s = String(candidate || '').trim();
-        if (imageLooksUsable(s)) liveImages.push(s);
+      if (okImages.length) {
+        return res.json({
+          campaignId: normalizedCampaignId,
+          accountId: normalizedAccountId,
+          pageId: rec?.pageId || '',
+          name: rec?.name || '',
+          status: rec?.status || '',
+          mediaSelection: 'image',
+          images: okImages,
+          videos: [],
+          fbVideoIds: [],
+          meta: safeMetaFromRecord,
+          updatedAt: rec?.updatedAt || '',
+          createdAt: rec?.createdAt || '',
+          source: 'stored_record',
+        });
       }
     }
 
-    const resolvedImages = unique(liveImages);
+    // 2) Stored files are gone (Render /tmp wipe or redeploy). Rebuild from live Meta creatives.
+    const adsRes = await axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
+      params: {
+        access_token: userToken,
+        fields: [
+          'id',
+          'name',
+          'campaign_id',
+          'creative{id,name,object_story_spec,object_story_id,image_url,thumbnail_url,effective_object_story_id}'
+        ].join(','),
+        limit: 25,
+        filtering: JSON.stringify([
+          { field: 'campaign.id', operator: 'IN', value: [normalizedCampaignId] },
+        ]),
+      },
+    });
 
-    if (resolvedImages.length === 0 && existingRec) {
-      return res.json({
-        campaignId: existingRec.campaignId,
-        accountId: existingRec.accountId,
-        pageId: existingRec.pageId,
-        name: existingRec.name,
-        status: existingRec.status,
-        mediaSelection: 'image',
-        images: [],
-        videos: [],
-        fbVideoIds: [],
-        updatedAt: existingRec.updatedAt,
-        createdAt: existingRec.createdAt,
-        source: 'stored_empty',
+    const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+
+    const imageSet = new Set();
+    let recoveredHeadline = String(rec?.meta?.headline || '').trim();
+    let recoveredBody = String(rec?.meta?.body || '').trim();
+    let recoveredLink = String(rec?.meta?.link || '').trim();
+
+    for (const ad of ads) {
+      const creative = ad?.creative || {};
+      const oss = creative?.object_story_spec || {};
+      const linkData = oss?.link_data || {};
+      const photoData = oss?.photo_data || {};
+
+      const candidates = [
+        linkData?.image_url,
+        photoData?.image_url,
+        creative?.image_url,
+        creative?.thumbnail_url,
+      ]
+        .map((x) => String(x || '').trim())
+        .filter(Boolean);
+
+      for (const u of candidates) {
+        if (imageSet.size < 2) imageSet.add(u);
+      }
+
+      if (!recoveredHeadline) {
+        recoveredHeadline = String(
+          linkData?.name ||
+          photoData?.title ||
+          creative?.name ||
+          ''
+        ).trim();
+      }
+
+      if (!recoveredBody) {
+        recoveredBody = String(
+          linkData?.message ||
+          photoData?.message ||
+          ''
+        ).trim();
+      }
+
+      if (!recoveredLink) {
+        recoveredLink = String(
+          linkData?.link ||
+          photoData?.link ||
+          ''
+        ).trim();
+      }
+    }
+
+    const recoveredImages = Array.from(imageSet).slice(0, 2);
+
+    if (!recoveredImages.length) {
+      return res.status(404).json({
+        error: 'No live creative images found for this campaign.',
       });
     }
 
     const nowIso = new Date().toISOString();
+
     const nextRecord = {
-      ownerKey: String(ownerKey || '').trim(),
+      ownerKey: String(rec?.ownerKey || ownerKey || '').trim(),
       campaignId: normalizedCampaignId,
       accountId: normalizedAccountId,
-      pageId: String(existingRec?.pageId || '').trim(),
-      name: String(existingRec?.name || `Campaign ${normalizedCampaignId}`).trim(),
-      status: String(existingRec?.status || 'ACTIVE').trim(),
+      pageId: String(rec?.pageId || '').trim(),
+      name: String(rec?.name || '').trim(),
+      status: String(rec?.status || 'ACTIVE').trim(),
       mediaSelection: 'image',
-      images: resolvedImages,
+      images: recoveredImages,
       videos: [],
       fbVideoIds: [],
+      meta: {
+        headline: recoveredHeadline,
+        body: recoveredBody,
+        link: recoveredLink,
+      },
       updatedAt: nowIso,
-      ...(existingRec?.createdAt ? { createdAt: existingRec.createdAt } : { createdAt: nowIso }),
+      createdAt: rec?.createdAt || nowIso,
     };
 
-    if (existingIndex >= 0) {
-      db.data.campaign_creatives[existingIndex] = {
-        ...db.data.campaign_creatives[existingIndex],
-        ...nextRecord,
-      };
-    } else {
-      db.data.campaign_creatives.push(nextRecord);
-    }
+    const idx = db.data.campaign_creatives.findIndex((r) => {
+      return (
+        String(r?.campaignId || '').trim() === normalizedCampaignId &&
+        String(r?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+      );
+    });
+
+    if (idx >= 0) db.data.campaign_creatives[idx] = { ...db.data.campaign_creatives[idx], ...nextRecord };
+    else db.data.campaign_creatives.push(nextRecord);
 
     await db.write();
 
@@ -3163,18 +3203,17 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       name: nextRecord.name,
       status: nextRecord.status,
       mediaSelection: 'image',
-      images: resolvedImages,
+      images: recoveredImages,
       videos: [],
       fbVideoIds: [],
+      meta: nextRecord.meta,
       updatedAt: nextRecord.updatedAt,
       createdAt: nextRecord.createdAt,
-      source: 'facebook_live',
+      source: 'facebook_recovered',
     });
   } catch (e) {
-    console.error('[creatives route] failed to load creatives:', e?.response?.data || e?.message || e);
-    return res.status(500).json({
-      error: e?.response?.data?.error?.message || e?.message || 'Failed to load creatives.',
-    });
+    console.error('[creatives] failed to load/recover campaign creatives:', e?.response?.data || e?.message || e);
+    return res.status(500).json({ error: e?.message || 'Failed to load creatives.' });
   }
 });
 router.post('/facebook/adaccount/:accountId/campaign/:campaignId/pause', async (req, res) => {
