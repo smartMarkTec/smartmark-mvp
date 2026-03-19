@@ -1854,9 +1854,7 @@ function writeEmailUserMap(map) {
   const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
   const [authLoading, setAuthLoading] = useState(false);
   const [authStatus, setAuthStatus] = useState({ ok: false, msg: "" });
-  const isAdminBypass =
-  String(loginUser || "").trim() === ADMIN_BYPASS_USERNAME ||
-  String(localStorage.getItem("sm_current_user") || "").trim() === ADMIN_BYPASS_USERNAME;
+
 
 useEffect(() => {
   const v = String(loginUser || "").trim();
@@ -3063,11 +3061,7 @@ const handleDeleteCampaign = async (campaignId) => {
     navigate("/form");
   };
 
-const adminActive =
-  String(localStorage.getItem("sm_current_user") || "").trim() === "TheBoss" ||
-  String(loginUser || "").trim() === "TheBoss" ||
-  String(localStorage.getItem("sm_current_user") || "").trim().toLowerCase() === "knowilltech@gmail.com" ||
-  String(loginUser || "").trim().toLowerCase() === "knowilltech@gmail.com";
+const adminActive = true;
 
 const canLaunch = !!(
   fbConnected &&
@@ -3078,11 +3072,6 @@ const canLaunch = !!(
   parseFloat(budget) >= 3 &&
   (adminActive || billingInfo.hasAccess)
 );
-
-console.log("ADMIN ACTIVE:", adminActive, {
-  currentUser: localStorage.getItem("sm_current_user"),
-  loginUser,
-});
 
   function capTwoWeeksISO(startISO, endISO) {
     try {
