@@ -61,6 +61,20 @@ function ensureStoredSid() {
   return sid;
 }
 
+async function stripeFetch(path, opts = {}) {
+  const sid = ensureStoredSid();
+  const headers = { ...(opts.headers || {}) };
+  headers["x-sm-sid"] = sid;
+
+  const rel = String(path || "").startsWith("/") ? String(path) : `/${path}`;
+
+  return fetch(rel, {
+    ...opts,
+    headers,
+    credentials: "include",
+  });
+}
+
 async function authFetch(path, opts = {}) {
   const sid = ensureStoredSid();
   const headers = { ...(opts.headers || {}) };
@@ -1863,34 +1877,33 @@ function normalizeUsername(raw) {
 
 
 const handleLogin = async () => {
-  const uRaw = String(loginUser || "").trim();
-  const uTyped = normalizeUsername(uRaw);
-  const p = String(loginPass || "").trim();
+  const email = String(loginUser || "").trim().toLowerCase();
+  const password = String(loginPass || "").trim();
 
-  if (!uTyped || !p) {
-    setAuthStatus({ ok: false, msg: "Enter CashTag + email." });
+  if (!email || !password) {
+    setAuthStatus({ ok: false, msg: "Enter email + password." });
     return false;
   }
 
-  const ek = emailKey(p);
-  const map = readEmailUserMap();
-  const mappedUser = String(map[ek] || "").trim();
-
-  const tryLogin = async (uTry) => {
+  const tryLogin = async () => {
     const r = await authFetch(`/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: uTry, password: p }),
+      body: JSON.stringify({ username: email, password }),
     });
     const j = await r.json().catch(() => ({}));
     return { r, j };
   };
 
-  const tryRegister = async (uTry) => {
+  const tryRegister = async () => {
     const r = await authFetch(`/register`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: uTry, email: p, password: p }),
+      body: JSON.stringify({
+        username: email,
+        email,
+        password,
+      }),
     });
     const j = await r.json().catch(() => ({}));
     return { r, j };
@@ -1900,30 +1913,19 @@ const handleLogin = async () => {
   setAuthStatus({ ok: false, msg: "Logging in..." });
 
   try {
+    let out = await tryLogin();
     let successUser = "";
 
-    // 1) login with typed username
-    let out = await tryLogin(uTyped);
     if (out.r.ok && out.j?.success) {
-      successUser = uTyped;
+      successUser = String(out.j?.user?.username || email).trim();
     } else {
-      // 2) try auto-register
-      const reg = await tryRegister(uTyped);
+      const reg = await tryRegister();
       if (reg.r.ok && reg.j?.success) {
-        successUser = uTyped;
+        successUser = String(reg.j?.user?.username || email).trim();
       } else {
-        // 3) if email is already tied to another username, login with mapped username
-        if (mappedUser && mappedUser !== uTyped) {
-          const out2 = await tryLogin(mappedUser);
-          if (out2.r.ok && out2.j?.success) {
-            successUser = mappedUser;
-          }
-        }
-
-        // 4) last retry typed login
-        if (!successUser) {
-          out = await tryLogin(uTyped);
-          if (out.r.ok && out.j?.success) successUser = uTyped;
+        out = await tryLogin();
+        if (out.r.ok && out.j?.success) {
+          successUser = String(out.j?.user?.username || email).trim();
         }
       }
     }
@@ -1935,14 +1937,8 @@ const handleLogin = async () => {
 
     try {
       localStorage.setItem("sm_current_user", successUser);
-      localStorage.setItem("smartmark_login_username", successUser); // canonical (no $)
-      localStorage.setItem("smartmark_login_password", p);
-    } catch {}
-
-    // ✅ store mapping (email -> working backend username)
-    try {
-      map[ek] = successUser;
-      writeEmailUserMap(map);
+      localStorage.setItem("smartmark_login_username", email);
+      localStorage.setItem("smartmark_login_password", password);
     } catch {}
 
     setAuthStatus({ ok: true, msg: "Logged in ✅" });
@@ -3090,9 +3086,9 @@ const handleDeleteCampaign = async (campaignId) => {
   try {
     setBillingLoading(true);
 
-    const r = await authFetch(`/api/stripe/billing-status`, {
-      method: "GET",
-    });
+   const r = await stripeFetch(`/api/stripe/billing-status`, {
+  method: "GET",
+});
 
     const j = await r.json().catch(() => ({}));
 
@@ -3140,15 +3136,15 @@ const handleSubscribeToPlan = async () => {
   try {
     setBillingLoading(true);
 
-    const res = await authFetch(`/api/stripe/create-checkout-session-auth`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        plan: selectedPlan,
-      }),
-    });
+  const res = await stripeFetch(`/api/stripe/create-checkout-session-auth`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+  },
+  body: JSON.stringify({
+    plan: selectedPlan,
+  }),
+});
 
     const data = await res.json().catch(() => ({}));
 
@@ -3925,17 +3921,17 @@ const getSavedCreatives = (campaignId) => {
         gap: 12,
       }}
     >
-      <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>
-        Unlock Launch Access
-      </div>
+    <div style={{ fontWeight: 900, color: "#ffffff", textAlign: "center", fontSize: 18 }}>
+  Finish Setup
+</div>
 
-      <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, textAlign: "center" }}>
-        Create your account here, subscribe once, and your campaign launch will unlock automatically.
-      </div>
+<div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, textAlign: "center", lineHeight: 1.5 }}>
+  Create your account, choose a plan, and continue to secure checkout.
+</div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <input
-          type="text"
+          type="email"
           value={loginUser}
           onChange={(e) => {
             const v = e.target.value;
@@ -3945,7 +3941,7 @@ const getSavedCreatives = (campaignId) => {
               if (t) localStorage.setItem("smartmark_login_username", t.replace(/^\$/, ""));
             } catch {}
           }}
-          placeholder="Username"
+          placeholder="email"
           style={{
             background: INPUT_BG,
             borderRadius: 12,
@@ -3959,19 +3955,19 @@ const getSavedCreatives = (campaignId) => {
           }}
         />
 
-        <input
-          type="email"
-          value={loginPass}
-          onChange={(e) => {
-            const v = e.target.value;
-            setLoginPass(v);
-            try {
-              const t = String(v || "").trim();
-              if (t) localStorage.setItem("smartmark_login_password", t);
-            } catch {}
-          }}
-          placeholder="Email"
-          autoComplete="email"
+       <input
+  type="password"
+  value={loginPass}
+  onChange={(e) => {
+    const v = e.target.value;
+    setLoginPass(v);
+    try {
+      const t = String(v || "").trim();
+      if (t) localStorage.setItem("smartmark_login_password", t);
+    } catch {}
+  }}
+  placeholder="Password"
+  autoComplete="current-password"
           style={{
             background: INPUT_BG,
             borderRadius: 12,
@@ -4049,7 +4045,7 @@ const getSavedCreatives = (campaignId) => {
               opacity: billingLoading || authLoading ? 0.7 : 1,
             }}
           >
-            {billingLoading ? "Opening Checkout..." : "Continue to Checkout"}
+            {billingLoading ? "Opening Checkout..." : "Continue Securely"}
           </button>
         </div>
       )}
