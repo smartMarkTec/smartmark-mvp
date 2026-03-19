@@ -3266,13 +3266,31 @@ if (!isValidHttpUrl(websiteUrl)) {
 
 const isRenderMediaUrl = (u) => {
   const s = String(u || "").trim();
-  return s.startsWith(`${MEDIA_ORIGIN}/api/media/`);
+  return s.startsWith(`${RENDER_MEDIA_ORIGIN}/api/media/`);
 };
 
 const forceHostOnRenderMedia = async (candidates) => {
   const norm = (candidates || []).map(toAbsoluteMedia).filter(Boolean);
   const uploaded = await ensureFetchableUrls(norm, 2);
-  const final = (uploaded || []).map(toAbsoluteMedia).filter(Boolean);
+
+  const final = (uploaded || [])
+    .map((u) => {
+      const s = String(u || "").trim();
+      if (!s) return "";
+
+      // force frontend-hosted /api/media URLs onto Render host
+      if (s.startsWith(`${APP_ORIGIN}/api/media/`)) {
+        return s.replace(APP_ORIGIN, RENDER_MEDIA_ORIGIN);
+      }
+
+      if (s.startsWith(`/api/media/`)) {
+        return `${RENDER_MEDIA_ORIGIN}${s}`;
+      }
+
+      return s;
+    })
+    .filter(Boolean);
+
   return final.filter(isRenderMediaUrl).slice(0, 2);
 };
 
