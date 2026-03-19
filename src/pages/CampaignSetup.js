@@ -23,8 +23,8 @@ const APP_ORIGIN = window.location.origin;
 const MEDIA_ORIGIN = APP_ORIGIN;
 
 // Auth bases (unchanged)
-const AUTH_BASE_PRIMARY = "/auth";
-const AUTH_BASE_FALLBACK = "/api/auth";
+const AUTH_BASE_PRIMARY = "/api/auth";
+const AUTH_BASE_FALLBACK = "/auth";
 
 
 
@@ -2946,12 +2946,8 @@ useEffect(() => {
   }, [budget]);
 
 useEffect(() => {
-  if (feePaid) return; // ✅ don't wipe once it's paid
-  try {
-    localStorage.removeItem(withUser(resolvedUser, FEE_PAID_KEY));
-  } catch {}
-  // feePaid already false here, no need to set again
-}, [budget, resolvedUser, feePaid]);
+  // no-op now; billing is controlled by Stripe subscription status
+}, [budget, resolvedUser]);
 
 
 useEffect(() => {
