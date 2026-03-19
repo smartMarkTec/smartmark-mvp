@@ -27,37 +27,36 @@ const plans = [
   {
     name: "Starter",
     price: "$39.99",
-    subtitle: "For business owners getting started",
-    badge: "Simple Start",
-    accentGlow: "rgba(49,225,255,0.20)",
+    subtitle: "Best for getting your business started with simple campaign automation.",
+    badge: "Starter",
+    accentGlow: "rgba(49,225,255,0.18)",
     cta: "Get Started",
     features: [
-      "1 active business / core brand setup",
+      "1 business profile",
       "1 connected ad account",
-      "Up to 2 campaign launches per month",
+      "Up to 2 campaign launches each month",
       "AI-generated ad copy and creatives",
       "Autonomous campaign launch",
-      "Light autonomous optimization",
-      "Basic creative refresh logic",
-      "Basic campaign dashboard",
+      "Basic optimization and creative refresh",
+      "Campaign dashboard",
       "Standard support",
     ],
   },
   {
     name: "Pro",
     price: "$79.99",
-    subtitle: "For businesses wanting stronger automation",
+    subtitle: "Best for businesses that want more campaigns, more testing, and stronger automation.",
     badge: "Most Popular",
-    accentGlow: "rgba(124,77,255,0.24)",
+    accentGlow: "rgba(124,77,255,0.22)",
     featured: true,
     cta: "Choose Pro",
     features: [
       "Everything in Starter",
-      "Up to 5 campaign launches per month",
-      "Higher creative and variant generation capacity",
-      "Stronger autonomous optimization cadence",
+      "Up to 5 campaign launches each month",
+      "More creative and variant generation",
+      "Stronger autonomous optimization",
       "Automatic creative refresh as needed",
-      "Broader test coverage",
+      "Broader testing coverage",
       "More active campaign control",
       "Priority support",
     ],
@@ -65,32 +64,21 @@ const plans = [
   {
     name: "Operator",
     price: "$149.99",
-    subtitle: "For businesses wanting the deepest in-product system",
+    subtitle: "Best for businesses that want the deepest automation and highest performance capacity.",
     badge: "Advanced",
-    accentGlow: "rgba(49,225,255,0.16)",
+    accentGlow: "rgba(49,225,255,0.14)",
     cta: "Choose Operator",
     features: [
       "Everything in Pro",
-      "Up to 10 campaign launches per month",
-      "Highest creative generation intensity",
+      "Up to 10 campaign launches each month",
+      "Highest creative generation capacity",
       "Highest testing intensity",
-      "Deepest autonomous optimization layer available in-product",
-      "Memory / pattern retention over time as the operator system matures",
-      "Highest support priority",
-      "Earliest access to advanced operator capabilities",
+      "Deepest in-product optimization layer",
+      "System memory and pattern retention as platform capabilities expand",
+      "Earliest access to advanced operator features",
+      "Highest priority support",
     ],
   },
-];
-
-const comparisonRows = [
-  ["Active business / core brand setup", "1", "1", "1"],
-  ["Connected ad accounts", "1", "1", "1"],
-  ["Campaign launches / month", "2", "5", "10"],
-  ["AI ad copy + creatives", "Yes", "Yes", "Yes"],
-  ["Autonomous launch", "Yes", "Yes", "Yes"],
-  ["Optimization strength", "Light", "Stronger", "Deepest"],
-  ["Creative refresh / test coverage", "Basic", "Broader", "Highest"],
-  ["Support", "Standard", "Priority", "Highest priority"],
 ];
 
 const Pricing = () => {
@@ -106,18 +94,9 @@ const Pricing = () => {
   const glass = {
     background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
     border: `1px solid ${GLASS_BORDER}`,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
+    boxShadow: "0 10px 30px rgba(0,0,0,0.22)",
     backdropFilter: "blur(8px)",
-  };
-
-  const pageWrap = {
-    minHeight: "100vh",
-    minWidth: "100vw",
-    background: BG_DARK,
-    color: "#fff",
-    fontFamily: FONT,
-    position: "relative",
-    overflowX: "hidden",
+    WebkitBackdropFilter: "blur(8px)",
   };
 
   const openContact = (planName) => {
@@ -129,24 +108,38 @@ const Pricing = () => {
   };
 
   return (
-    <div style={pageWrap}>
+    <div
+      style={{
+        minHeight: "100vh",
+        minWidth: "100vw",
+        background: BG_DARK,
+        color: "#fff",
+        fontFamily: FONT,
+        position: "relative",
+        overflowX: "hidden",
+      }}
+    >
       <style>{`
-        html, body, #root { background: ${BG_DARK}; margin: 0; }
-        @keyframes floatA { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
-        @keyframes floatB { 0%,100% { transform: translateY(0) } 50% { transform: translateY(12px) } }
+        html, body, #root {
+          background: ${BG_DARK};
+          margin: 0;
+        }
+
+        * {
+          box-sizing: border-box;
+        }
       `}</style>
 
       <div
         aria-hidden
         style={{
           position: "absolute",
-          top: "-18vh",
-          right: "-10vw",
-          width: isMobile ? 340 : 760,
-          height: isMobile ? 340 : 760,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}2f, transparent 72%)`,
-          filter: "blur(18px)",
-          animation: "floatA 18s ease-in-out infinite",
+          top: "-16vh",
+          right: "-8vw",
+          width: isMobile ? 280 : 560,
+          height: isMobile ? 280 : 560,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}22, transparent 72%)`,
+          filter: "blur(28px)",
           pointerEvents: "none",
         }}
       />
@@ -155,13 +148,12 @@ const Pricing = () => {
         aria-hidden
         style={{
           position: "absolute",
-          bottom: "-22vh",
-          left: "-12vw",
-          width: isMobile ? 420 : 820,
-          height: isMobile ? 420 : 820,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}29, transparent 72%)`,
-          filter: "blur(18px)",
-          animation: "floatB 22s ease-in-out infinite",
+          bottom: "-18vh",
+          left: "-10vw",
+          width: isMobile ? 320 : 620,
+          height: isMobile ? 320 : 620,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}1e, transparent 72%)`,
+          filter: "blur(30px)",
           pointerEvents: "none",
         }}
       />
@@ -170,9 +162,9 @@ const Pricing = () => {
         style={{
           position: "relative",
           zIndex: 2,
-          maxWidth: 1260,
+          maxWidth: 1220,
           margin: "0 auto",
-          padding: isMobile ? "22px 16px 60px" : "28px 28px 90px",
+          padding: isMobile ? "22px 16px 70px" : "28px 28px 100px",
         }}
       >
         <div
@@ -182,6 +174,7 @@ const Pricing = () => {
             alignItems: isMobile ? "flex-start" : "center",
             flexDirection: isMobile ? "column" : "row",
             gap: isMobile ? 14 : 18,
+            marginBottom: isMobile ? 34 : 56,
           }}
         >
           <button
@@ -237,58 +230,21 @@ const Pricing = () => {
         <div
           style={{
             textAlign: "center",
-            marginTop: isMobile ? 42 : 62,
-            marginBottom: isMobile ? 28 : 42,
+            marginBottom: isMobile ? 24 : 38,
           }}
         >
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 8,
-              padding: "0.55rem 1rem",
-              borderRadius: 999,
-              marginBottom: 18,
-              color: "#eaf5ff",
-              fontWeight: 800,
-              fontSize: 13,
-              letterSpacing: 0.3,
-              ...glass,
-            }}
-          >
-            Pricing
-          </div>
-
           <h1
             style={{
               margin: 0,
-              fontSize: isMobile ? "2.5rem" : "4.3rem",
-              lineHeight: 1.04,
+              fontSize: isMobile ? "2.2rem" : "3.4rem",
+              lineHeight: 1.06,
               fontWeight: 900,
-              letterSpacing: isMobile ? "-0.8px" : "-1.2px",
-              background: `linear-gradient(90deg, #ffffff, ${ACCENT} 50%, ${ACCENT_2})`,
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              textShadow: "0 10px 40px rgba(0,0,0,0.25)",
+              letterSpacing: isMobile ? "-0.6px" : "-1px",
+              color: "#ffffff",
             }}
           >
-            Simple pricing for effortless ads
+            Pricing
           </h1>
-
-          <p
-            style={{
-              maxWidth: 820,
-              margin: "16px auto 0",
-              color: "rgba(255,255,255,0.86)",
-              fontSize: isMobile ? "1rem" : "1.15rem",
-              lineHeight: 1.7,
-              fontWeight: 500,
-            }}
-          >
-            Choose the plan that fits your business. SmarteMark helps you generate ad creatives,
-            launch campaigns, and automate optimization in one clean system.
-          </p>
         </div>
 
         <div
@@ -297,7 +253,7 @@ const Pricing = () => {
             gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
             gap: isMobile ? 18 : 24,
             alignItems: "stretch",
-            marginTop: isMobile ? 20 : 34,
+            marginTop: isMobile ? 16 : 24,
           }}
         >
           {plans.map((plan) => (
@@ -309,11 +265,13 @@ const Pricing = () => {
                 borderRadius: 24,
                 padding: isMobile ? "1.2rem" : "1.45rem",
                 overflow: "hidden",
-                minHeight: isMobile ? "auto" : 640,
-                transform: plan.featured && !isMobile ? "translateY(-10px)" : "none",
+                minHeight: isMobile ? "auto" : 600,
                 boxShadow: plan.featured
-                  ? "0 20px 60px rgba(124,77,255,0.22)"
-                  : "0 10px 30px rgba(0,0,0,0.25)",
+                  ? "0 18px 50px rgba(124,77,255,0.18)"
+                  : "0 10px 28px rgba(0,0,0,0.22)",
+                border: plan.featured
+                  ? "1px solid rgba(124,77,255,0.28)"
+                  : `1px solid ${GLASS_BORDER}`,
               }}
             >
               <div
@@ -388,12 +346,12 @@ const Pricing = () => {
 
                 <div
                   style={{
-                    marginTop: 12,
-                    color: "rgba(255,255,255,0.82)",
+                    marginTop: 14,
+                    color: "rgba(255,255,255,0.84)",
                     fontSize: 15,
-                    lineHeight: 1.6,
+                    lineHeight: 1.65,
                     fontWeight: 500,
-                    minHeight: 48,
+                    minHeight: isMobile ? "auto" : 72,
                   }}
                 >
                   {plan.subtitle}
@@ -404,7 +362,7 @@ const Pricing = () => {
                 onClick={() => openContact(plan.name)}
                 style={{
                   width: "100%",
-                  marginTop: 22,
+                  marginTop: 24,
                   padding: "0.95rem 1.1rem",
                   borderRadius: 999,
                   border: "none",
@@ -416,13 +374,13 @@ const Pricing = () => {
                   fontWeight: 900,
                   cursor: "pointer",
                   boxShadow: plan.featured
-                    ? "0 12px 34px rgba(124,77,255,0.30)"
-                    : "0 10px 26px rgba(15,111,255,0.30)",
+                    ? "0 12px 34px rgba(124,77,255,0.28)"
+                    : "0 10px 26px rgba(15,111,255,0.28)",
                   transition: "transform .15s ease, opacity .2s ease",
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.transform = "translateY(-2px)";
-                  e.currentTarget.style.opacity = "0.95";
+                  e.currentTarget.style.opacity = "0.96";
                 }}
                 onMouseLeave={(e) => {
                   e.currentTarget.style.transform = "translateY(0)";
@@ -434,7 +392,7 @@ const Pricing = () => {
 
               <div
                 style={{
-                  marginTop: 22,
+                  marginTop: 24,
                   borderTop: "1px solid rgba(255,255,255,0.08)",
                   paddingTop: 18,
                 }}
@@ -442,13 +400,13 @@ const Pricing = () => {
                 <div
                   style={{
                     marginBottom: 12,
-                    color: "#eaf5ff",
+                    color: "#ffffff",
                     fontWeight: 800,
                     fontSize: 14,
                     letterSpacing: 0.2,
                   }}
                 >
-                  What’s included
+                  Included in this plan
                 </div>
 
                 <div style={{ display: "grid", gap: 12 }}>
@@ -493,146 +451,6 @@ const Pricing = () => {
 
         <div
           style={{
-            marginTop: isMobile ? 28 : 42,
-            borderRadius: 24,
-            padding: isMobile ? "1rem" : "1.3rem",
-            ...glass,
-          }}
-        >
-          <div
-            style={{
-              fontSize: isMobile ? 22 : 28,
-              fontWeight: 900,
-              marginBottom: 16,
-              background: `linear-gradient(90deg, #ffffff, ${ACCENT})`,
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-            }}
-          >
-            Plan comparison
-          </div>
-
-          <div style={{ overflowX: "auto" }}>
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: 720,
-                color: "#fff",
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      padding: "14px 12px",
-                      color: "rgba(255,255,255,0.72)",
-                      fontSize: 13,
-                      fontWeight: 800,
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    Feature
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "14px 12px",
-                      color: "#fff",
-                      fontSize: 14,
-                      fontWeight: 900,
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    Starter
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "14px 12px",
-                      color: "#fff",
-                      fontSize: 14,
-                      fontWeight: 900,
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    Pro
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "14px 12px",
-                      color: "#fff",
-                      fontSize: 14,
-                      fontWeight: 900,
-                      borderBottom: "1px solid rgba(255,255,255,0.08)",
-                    }}
-                  >
-                    Operator
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {comparisonRows.map((row) => (
-                  <tr key={row[0]}>
-                    <td
-                      style={{
-                        padding: "14px 12px",
-                        borderBottom: "1px solid rgba(255,255,255,0.06)",
-                        color: "rgba(255,255,255,0.88)",
-                        fontSize: 14,
-                        fontWeight: 600,
-                      }}
-                    >
-                      {row[0]}
-                    </td>
-                    <td
-                      style={{
-                        padding: "14px 12px",
-                        borderBottom: "1px solid rgba(255,255,255,0.06)",
-                        textAlign: "center",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: "#eaf5ff",
-                      }}
-                    >
-                      {row[1]}
-                    </td>
-                    <td
-                      style={{
-                        padding: "14px 12px",
-                        borderBottom: "1px solid rgba(255,255,255,0.06)",
-                        textAlign: "center",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: "#eaf5ff",
-                      }}
-                    >
-                      {row[2]}
-                    </td>
-                    <td
-                      style={{
-                        padding: "14px 12px",
-                        borderBottom: "1px solid rgba(255,255,255,0.06)",
-                        textAlign: "center",
-                        fontSize: 14,
-                        fontWeight: 700,
-                        color: "#eaf5ff",
-                      }}
-                    >
-                      {row[3]}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div
-          style={{
             marginTop: isMobile ? 28 : 40,
             textAlign: "center",
             borderRadius: 24,
@@ -642,13 +460,14 @@ const Pricing = () => {
         >
           <div
             style={{
-              fontSize: isMobile ? 22 : 30,
+              fontSize: isMobile ? 22 : 28,
               fontWeight: 900,
               lineHeight: 1.15,
               marginBottom: 10,
+              color: "#ffffff",
             }}
           >
-            Smarter campaign execution, without agency friction
+            Smarter campaign execution without agency friction
           </div>
 
           <div
@@ -661,9 +480,8 @@ const Pricing = () => {
               fontWeight: 500,
             }}
           >
-            Start with the plan that matches your volume today. As SmarteMark grows, your business
-            can move into more powerful automation, stronger optimization, and deeper operator
-            capabilities.
+            Choose the plan that matches your business today. As your needs grow, you can move into
+            more campaign volume, deeper optimization, and stronger automation.
           </div>
         </div>
       </div>
