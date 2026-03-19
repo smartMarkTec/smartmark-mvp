@@ -71,7 +71,16 @@ app.use((req, res, next) => {
 });
 
 if (compression) app.use(compression());
-app.use(express.json({ limit: "50mb" }));
+app.use(
+  express.json({
+    limit: "50mb",
+    verify: (req, _res, buf) => {
+      if (req.originalUrl === "/api/stripe/webhook") {
+        req.rawBody = buf;
+      }
+    },
+  })
+);
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 if (morgan) app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
