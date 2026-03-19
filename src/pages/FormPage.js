@@ -309,7 +309,7 @@ function clearDraftDisabled() {
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
 const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
 // TEMP TESTING: disable gen limit
-const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 2;
+const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 5;
 
 function loadGenQuota() {
   try {
