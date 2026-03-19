@@ -1683,10 +1683,10 @@ const { data: adsetData } = await axios.post(
     billing_event: 'IMPRESSIONS',
     optimization_goal: 'LINK_CLICKS',
     bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    destination_type: 'WEBSITE',
     status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
     start_time: startISO,
     ...(endISO ? { end_time: endISO } : {}),
-    promoted_object: { page_id: pageIdFinal },
     targeting,
   },
   { params: mkParams() }
@@ -1710,22 +1710,31 @@ const { data: adsetData } = await axios.post(
   variantIndex: i + 1,
 });
 
-      const cr = await axios.post(
-        `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
-        {
-          name: `${campaignName} (Image v${i + 1})`,
-          object_story_spec: {
-            page_id: pageIdFinal,
-            link_data: {
-              message: form.adCopy || adCopy || '',
-              link: destinationUrl,
-              image_hash: hash,
-              description: form.description || '',
-            },
+     const creativeMessage = String(form.adCopy || adCopy || '').trim();
+const creativeTitle = String(form.headline || form.campaignName || campaignName || 'Learn More').trim();
+
+const cr = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+  {
+    name: `${campaignName} (Image v${i + 1})`,
+    object_story_spec: {
+      page_id: pageIdFinal,
+      link_data: {
+        link: destinationUrl,
+        message: creativeMessage,
+        name: creativeTitle,
+        image_hash: hash,
+        call_to_action: {
+          type: 'LEARN_MORE',
+          value: {
+            link: destinationUrl,
           },
         },
-        { params: mkParams() }
-      );
+      },
+    },
+  },
+  { params: mkParams() }
+);
 
       console.log('[LAUNCH][ad create]', {
   accountId,
