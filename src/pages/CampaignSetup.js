@@ -78,12 +78,13 @@ async function authFetch(path, opts = {}) {
     });
 
   // ✅ Preferred: /auth/*
-  let res = await doFetch(AUTH_BASE_PRIMARY);
+ // ✅ Preferred: /auth/*
+let res = await doFetch(AUTH_BASE_FALLBACK);
 
-  // ✅ Fallback: /api/auth/* (only if /auth is missing)
-  if (res.status === 404) {
-    res = await doFetch(AUTH_BASE_FALLBACK);
-  }
+// ✅ Fallback: /api/auth/* (only if /auth is missing)
+if (res.status === 404) {
+  res = await doFetch(AUTH_BASE_PRIMARY);
+}
 
   return res;
 
@@ -3206,19 +3207,28 @@ const handleSubscribeToPlan = async () => {
   }
 };
 
+function isValidHttpUrl(u) {
+  try {
+    const x = new URL(String(u || "").trim());
+    return x.protocol === "http:" || x.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 
   const handleLaunch = async () => {
     setLoading(true);
     try {
-      const acctId = String(selectedAccount).trim();
-      const safeBudget = Math.max(3, Number(budget) || 0);
+const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
+const pageId = String(selectedPageId || "").trim();
+const safeBudget = Math.max(3, Number(budget) || 0);
 
-      const { startISO, endISO } = capTwoWeeksISO(
-        startDate ? new Date(`${startDate}T09:00:00`).toISOString() : null,
-        endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
-      );
+const { startISO, endISO } = capTwoWeeksISO(
+  startDate ? new Date(`${startDate}T09:00:00`).toISOString() : null,
+  endDate ? new Date(`${endDate}T18:00:00`).toISOString() : null
+);
 
-      // ✅ ensure websiteUrl is defined in THIS scope (fixes ReferenceError)
 const websiteUrl = (
   form?.websiteUrl ||
   form?.website ||
@@ -3231,12 +3241,11 @@ const websiteUrl = (
   ""
 ).toString().trim();
 
-// ✅ ensure finalHeadline/finalBody exist in THIS scope (fixes ReferenceError)
 const finalHeadline = (
   form?.headline ||
   form?.adHeadline ||
   previewCopy?.headline ||
-  headline ||               // from location.state
+  headline ||
   ""
 ).toString().trim();
 
@@ -3244,64 +3253,60 @@ const finalBody = (
   form?.primaryText ||
   form?.body ||
   previewCopy?.body ||
-  body ||                   // from location.state
+  body ||
   ""
 ).toString().trim();
 
+if (!acctId) throw new Error("Please select a Facebook ad account.");
+if (!pageId) throw new Error("Please select a Facebook page.");
 
-// ✅ LAUNCH IMAGES MUST be REAL, PUBLIC Render /api/media URLs (Meta must fetch them)
+if (!isValidHttpUrl(websiteUrl)) {
+  throw new Error("Please enter a valid website URL starting with http:// or https://");
+}
+
 const isRenderMediaUrl = (u) => {
   const s = String(u || "").trim();
   return s.startsWith(`${MEDIA_ORIGIN}/api/media/`);
 };
 
 const forceHostOnRenderMedia = async (candidates) => {
-  // 1) normalize everything
   const norm = (candidates || []).map(toAbsoluteMedia).filter(Boolean);
-
-  // 2) if any are data:image, upload them to Render media
-  const uploaded = await ensureFetchableUrls(norm, 2); // uploads data:image -> /api/media
+  const uploaded = await ensureFetchableUrls(norm, 2);
   const final = (uploaded || []).map(toAbsoluteMedia).filter(Boolean);
-
-  // 3) HARD REQUIRE: only Render /api/media URLs may go to FB
   return final.filter(isRenderMediaUrl).slice(0, 2);
 };
 
 let candidateImgs = [];
 
-// A) If user selected a real campaign, use saved creatives first
 if (selectedCampaignId && selectedCampaignId !== "__DRAFT__") {
   try {
     const saved = getSavedCreatives(selectedCampaignId);
-    if (Array.isArray(saved?.images)) candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
+    if (Array.isArray(saved?.images)) {
+      candidateImgs = candidateImgs.concat(saved.images.slice(0, 2));
+    }
   } catch {}
 }
 
-// B) Draft creatives (what user just generated)
 if (Array.isArray(draftCreatives?.images) && draftCreatives.images.length) {
   candidateImgs = candidateImgs.concat(draftCreatives.images.slice(0, 2));
 }
 
-// C) Nav state from FormPage
 if (Array.isArray(navImageUrls) && navImageUrls.length) {
   candidateImgs = candidateImgs.concat(navImageUrls.slice(0, 2));
 }
 
-// D) Cached/backup fetchable urls (OAuth safe)
 try {
   candidateImgs = candidateImgs
     .concat(loadFetchableImagesBackup(resolvedUser) || [])
     .concat(getCachedFetchableImages(resolvedUser) || []);
 } catch {}
 
-// E) Last resort: imageDrafts registry
 try {
   candidateImgs = candidateImgs.concat(getLatestDraftImageUrlsFromImageDrafts() || []);
 } catch {}
 
 let filteredImages = await forceHostOnRenderMedia(candidateImgs);
 
-// ✅ last-ditch retry
 if (!filteredImages.length) {
   try {
     filteredImages = await forceHostOnRenderMedia(draftCreatives?.images || []);
@@ -3312,28 +3317,27 @@ if (!filteredImages.length) {
   throw new Error("No launchable images. Please regenerate creatives (images must be hosted on Render /api/media).");
 }
 
-// ✅ Keep fetchable backup fresh so OAuth/refresh never breaks launch
 try {
   saveFetchableImagesBackup(resolvedUser, filteredImages);
 } catch {}
 
-
-
-
 const payload = {
-  form: { ...form, url: websiteUrl, websiteUrl },
+  form: {
+    ...form,
+    url: websiteUrl,
+    websiteUrl,
+  },
 
   budget: safeBudget,
-  campaignType: form?.campaignType || "Website Traffic",
-  pageId: selectedPageId,
+  campaignType: String(form?.campaignType || "Website Traffic").trim(),
+  pageId,
   websiteUrl,
 
-  aiAudience: form?.aiAudience || answers?.aiAudience || "",
-  adCopy: finalHeadline + (finalBody ? `\n\n${finalBody}` : ""),
+  aiAudience: String(form?.aiAudience || answers?.aiAudience || "").trim(),
+  adCopy: [finalHeadline, finalBody].filter(Boolean).join("\n\n"),
   answers: answers || {},
 
   mediaSelection: "image",
-
   imageVariants: filteredImages,
   imageUrls: filteredImages,
   images: filteredImages,
@@ -3341,9 +3345,18 @@ const payload = {
   flightStart: startISO,
   flightEnd: endISO,
 
-  overrideCountPerType: { images: Math.min(2, filteredImages.length) },
+  overrideCountPerType: {
+    images: Math.min(2, filteredImages.length),
+  },
 };
 
+console.log("[SM][launch payload]", {
+  acctId,
+  pageId,
+  websiteUrl,
+  filteredImages,
+  payload,
+});
 
       const res = await authFetch(`/facebook/adaccount/${acctId}/launch-campaign`, {
         method: "POST",
