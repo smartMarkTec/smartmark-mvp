@@ -10,7 +10,7 @@ const ACCENT_2 = "#7c4dff";
 const BTN_BASE = "#0f6fff";
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
-const STRIPE_API_BASE = "https://smartmark-mvp.onrender.com";
+
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
@@ -107,46 +107,33 @@ const Pricing = () => {
     WebkitBackdropFilter: "blur(8px)",
   };
 
-  const startCheckout = async (plan) => {
-    if (!plan?.planKey || loadingPlan) return;
+const startCheckout = async (plan) => {
+  if (!plan?.planKey || loadingPlan) return;
 
-    setLoadingPlan(plan.planKey);
+  setLoadingPlan(plan.planKey);
 
+  try {
     try {
-      try {
-        trackEvent("pricing_cta_click", {
-          page: "pricing",
-          plan: plan.name,
-          planKey: plan.planKey,
-        });
-      } catch {}
-
-      const res = await fetch(`${STRIPE_API_BASE}/api/stripe/create-checkout-session`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          plan: plan.planKey,
-        }),
+      trackEvent("pricing_cta_click", {
+        page: "pricing",
+        plan: plan.name,
+        planKey: plan.planKey,
       });
+    } catch {}
 
-      const data = await res.json();
-
-      if (!res.ok || !data?.ok || !data?.url) {
-        throw new Error(data?.error || "Unable to start checkout");
-      }
-
-      window.location.href = data.url;
-    } catch (err) {
-      console.error("Stripe checkout start failed:", err);
-      alert(
-        err?.message ||
-          "Something went wrong starting checkout. Please try again in a moment."
-      );
-      setLoadingPlan("");
-    }
-  };
+    navigate("/form", {
+      state: {
+        selectedPlan: plan.planKey,
+        selectedPlanName: plan.name,
+        fromPricing: true,
+      },
+    });
+  } catch (err) {
+    console.error("Pricing -> form redirect failed:", err);
+    alert("Something went wrong. Please try again.");
+    setLoadingPlan("");
+  }
+};
 
   return (
     <div
