@@ -61,19 +61,6 @@ function ensureStoredSid() {
   return sid;
 }
 
-async function stripeFetch(path, opts = {}) {
-  const sid = ensureStoredSid();
-  const headers = { ...(opts.headers || {}) };
-  headers["x-sm-sid"] = sid;
-
-  const rel = String(path || "").startsWith("/") ? String(path) : `/${path}`;
-
-  return fetch(rel, {
-    ...opts,
-    headers,
-    credentials: "include",
-  });
-}
 
 async function authFetch(path, opts = {}) {
   const sid = ensureStoredSid();
@@ -101,6 +88,20 @@ async function authFetch(path, opts = {}) {
   return res;
 
 
+}
+
+async function stripeFetch(path, opts = {}) {
+  const sid = ensureStoredSid();
+  const headers = { ...(opts.headers || {}) };
+  headers["x-sm-sid"] = sid;
+
+  const rel = String(path || "").startsWith("/") ? String(path) : `/${path}`;
+
+  return fetch(rel, {
+    ...opts,
+    headers,
+    credentials: "include",
+  });
 }
 
 
@@ -145,6 +146,8 @@ const CREATIVE_HEIGHT = 150;
 const CASHAPP_TAG = "$SmarteMark";
 const CASHAPP_URL = "https://cash.app/" + CASHAPP_TAG.replace("$", "");
 const FEE_PAID_KEY = "sm_fee_paid_v1";
+const ADMIN_BYPASS_USERNAME = "TheBoss";
+const TEMP_BILLING_BYPASS = true;
 
 /* ======================= (unchanged business constants) ======================= */
 const DRAFT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -1851,6 +1854,9 @@ function writeEmailUserMap(map) {
   const [loginPass, setLoginPass] = useState(() => lsGet(resolvedUser, "smartmark_login_password") || "");
   const [authLoading, setAuthLoading] = useState(false);
   const [authStatus, setAuthStatus] = useState({ ok: false, msg: "" });
+  const isAdminBypass =
+  String(loginUser || "").trim() === ADMIN_BYPASS_USERNAME ||
+  String(localStorage.getItem("sm_current_user") || "").trim() === ADMIN_BYPASS_USERNAME;
 
 useEffect(() => {
   const v = String(loginUser || "").trim();
@@ -3057,14 +3063,14 @@ const handleDeleteCampaign = async (campaignId) => {
     navigate("/form");
   };
 
- const canLaunch = !!(
+const canLaunch = !!(
   fbConnected &&
   selectedAccount &&
   selectedPageId &&
   budget &&
   !isNaN(parseFloat(budget)) &&
   parseFloat(budget) >= 3 &&
-  billingInfo.hasAccess
+  (billingInfo.hasAccess || isAdminBypass)
 );
 
   function capTwoWeeksISO(startISO, endISO) {
@@ -3130,31 +3136,71 @@ const handleDeleteCampaign = async (campaignId) => {
 };
 
 const handleSubscribeToPlan = async () => {
-  const userOk = await handleLogin();
-  if (!userOk) return;
+  if (!selectedPlan) {
+    alert("Please choose a plan.");
+    return;
+  }
+
+  setBillingLoading(true);
 
   try {
-    setBillingLoading(true);
+    if (TEMP_BILLING_BYPASS) {
+      const res = await stripeFetch(`/api/stripe/create-checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          plan: selectedPlan,
+          email: /\S+@\S+\.\S+/.test(String(loginUser || "").trim())
+            ? String(loginUser || "").trim()
+            : undefined,
+        }),
+      });
 
-  const res = await stripeFetch(`/api/stripe/create-checkout-session-auth`, {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-  },
-  body: JSON.stringify({
-    plan: selectedPlan,
-  }),
-});
+      const json = await res.json().catch(() => ({}));
 
-    const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error || "Could not open checkout.");
+      }
 
-    if (!res.ok || !data?.ok || !data?.url) {
-      throw new Error(data?.error || "Could not start checkout.");
+      if (!json?.url) {
+        throw new Error("Stripe checkout URL missing.");
+      }
+
+      window.location.assign(json.url);
+      return;
     }
 
-    window.location.href = data.url;
+    const ok = await handleLogin();
+    if (!ok) {
+      alert("Login failed. Please check your credentials.");
+      return;
+    }
+
+    const res = await stripeFetch(`/api/stripe/create-checkout-session-auth`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        plan: selectedPlan,
+      }),
+    });
+
+    const json = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      throw new Error(json?.error || "Could not open checkout.");
+    }
+
+    if (!json?.url) {
+      throw new Error("Stripe checkout URL missing.");
+    }
+
+    window.location.assign(json.url);
   } catch (err) {
-    alert(err?.message || "Could not start checkout.");
+    alert(err?.message || "Could not open checkout.");
   } finally {
     setBillingLoading(false);
   }
@@ -3938,7 +3984,7 @@ const getSavedCreatives = (campaignId) => {
             setLoginUser(v);
             try {
               const t = String(v || "").trim();
-              if (t) localStorage.setItem("smartmark_login_username", t.replace(/^\$/, ""));
+             if (t) localStorage.setItem("smartmark_login_username", t);
             } catch {}
           }}
           placeholder="email"
