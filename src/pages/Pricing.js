@@ -10,6 +10,7 @@ const ACCENT_2 = "#7c4dff";
 const BTN_BASE = "#0f6fff";
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
+const STRIPE_API_BASE = "https://smartmark-mvp.onrender.com";
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
@@ -26,8 +27,10 @@ const useIsMobile = () => {
 const plans = [
   {
     name: "Starter",
+    planKey: "starter",
     price: "$39.99",
-    subtitle: "A clean starting point for business owners who want simple campaign automation without extra complexity.",
+    subtitle:
+      "A clean starting point for business owners who want simple campaign automation without extra complexity.",
     badge: "Starter",
     accentGlow: "rgba(49,225,255,0.18)",
     cta: "Get Started",
@@ -44,8 +47,10 @@ const plans = [
   },
   {
     name: "Pro",
+    planKey: "pro",
     price: "$79.99",
-    subtitle: "Built for businesses that want more launches, more creative testing, and stronger automation performance.",
+    subtitle:
+      "Built for businesses that want more launches, more creative testing, and stronger automation performance.",
     badge: "Most Popular",
     accentGlow: "rgba(124,77,255,0.22)",
     featured: true,
@@ -63,8 +68,10 @@ const plans = [
   },
   {
     name: "Operator",
+    planKey: "operator",
     price: "$149.99",
-    subtitle: "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
+    subtitle:
+      "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
     badge: "Advanced",
     accentGlow: "rgba(49,225,255,0.14)",
     cta: "Choose Operator",
@@ -84,6 +91,7 @@ const plans = [
 const Pricing = () => {
   const navigate = useNavigate();
   const isMobile = useIsMobile();
+  const [loadingPlan, setLoadingPlan] = useState("");
 
   useEffect(() => {
     try {
@@ -99,11 +107,45 @@ const Pricing = () => {
     WebkitBackdropFilter: "blur(8px)",
   };
 
-  const openContact = (planName) => {
+  const startCheckout = async (plan) => {
+    if (!plan?.planKey || loadingPlan) return;
+
+    setLoadingPlan(plan.planKey);
+
     try {
-      trackEvent("pricing_cta_click", { page: "pricing", plan: planName });
-    } catch {}
-    navigate("/login");
+      try {
+        trackEvent("pricing_cta_click", {
+          page: "pricing",
+          plan: plan.name,
+          planKey: plan.planKey,
+        });
+      } catch {}
+
+      const res = await fetch(`${STRIPE_API_BASE}/api/stripe/create-checkout-session`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          plan: plan.planKey,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || !data?.ok || !data?.url) {
+        throw new Error(data?.error || "Unable to start checkout");
+      }
+
+      window.location.href = data.url;
+    } catch (err) {
+      console.error("Stripe checkout start failed:", err);
+      alert(
+        err?.message ||
+          "Something went wrong starting checkout. Please try again in a moment."
+      );
+      setLoadingPlan("");
+    }
   };
 
   return (
@@ -264,197 +306,204 @@ const Pricing = () => {
             marginTop: isMobile ? 16 : 24,
           }}
         >
-          {plans.map((plan) => (
-            <div
-              key={plan.name}
-              style={{
-                ...glass,
-                position: "relative",
-                borderRadius: 24,
-                padding: isMobile ? "1.2rem" : "1.45rem",
-                overflow: "hidden",
-                minHeight: "auto",
-                boxShadow: plan.featured
-                  ? "0 18px 50px rgba(124,77,255,0.18)"
-                  : "0 10px 28px rgba(0,0,0,0.22)",
-                border: plan.featured
-                  ? "1px solid rgba(124,77,255,0.28)"
-                  : `1px solid ${GLASS_BORDER}`,
-              }}
-            >
-              <div
-                aria-hidden
-                style={{
-                  position: "absolute",
-                  top: -40,
-                  right: -30,
-                  width: 160,
-                  height: 160,
-                  borderRadius: "50%",
-                  background: `radial-gradient(circle, ${plan.accentGlow}, transparent 68%)`,
-                  pointerEvents: "none",
-                }}
-              />
+          {plans.map((plan) => {
+            const isLoading = loadingPlan === plan.planKey;
 
+            return (
               <div
+                key={plan.name}
                 style={{
-                  display: "inline-flex",
-                  padding: "0.45rem 0.8rem",
-                  borderRadius: 999,
-                  fontSize: 12,
-                  fontWeight: 900,
-                  letterSpacing: 0.4,
-                  color: plan.featured ? "#ffffff" : ACCENT,
-                  background: plan.featured
-                    ? "linear-gradient(90deg, #7c4dff, #0f6fff)"
-                    : "rgba(49,225,255,0.08)",
+                  ...glass,
+                  position: "relative",
+                  borderRadius: 24,
+                  padding: isMobile ? "1.2rem" : "1.45rem",
+                  overflow: "hidden",
+                  minHeight: "auto",
+                  boxShadow: plan.featured
+                    ? "0 18px 50px rgba(124,77,255,0.18)"
+                    : "0 10px 28px rgba(0,0,0,0.22)",
                   border: plan.featured
-                    ? "1px solid rgba(255,255,255,0.08)"
-                    : "1px solid rgba(49,225,255,0.18)",
+                    ? "1px solid rgba(124,77,255,0.28)"
+                    : `1px solid ${GLASS_BORDER}`,
                 }}
               >
-                {plan.badge}
-              </div>
+                <div
+                  aria-hidden
+                  style={{
+                    position: "absolute",
+                    top: -40,
+                    right: -30,
+                    width: 160,
+                    height: 160,
+                    borderRadius: "50%",
+                    background: `radial-gradient(circle, ${plan.accentGlow}, transparent 68%)`,
+                    pointerEvents: "none",
+                  }}
+                />
 
-              <div style={{ marginTop: 18 }}>
                 <div
                   style={{
-                    fontSize: 28,
+                    display: "inline-flex",
+                    padding: "0.45rem 0.8rem",
+                    borderRadius: 999,
+                    fontSize: 12,
                     fontWeight: 900,
-                    color: "#fff",
-                    letterSpacing: "-0.6px",
+                    letterSpacing: 0.4,
+                    color: plan.featured ? "#ffffff" : ACCENT,
+                    background: plan.featured
+                      ? "linear-gradient(90deg, #7c4dff, #0f6fff)"
+                      : "rgba(49,225,255,0.08)",
+                    border: plan.featured
+                      ? "1px solid rgba(255,255,255,0.08)"
+                      : "1px solid rgba(49,225,255,0.18)",
                   }}
                 >
-                  {plan.name}
+                  {plan.badge}
                 </div>
 
-                <div style={{ marginTop: 12, display: "flex", alignItems: "flex-end", gap: 6 }}>
-                  <span
+                <div style={{ marginTop: 18 }}>
+                  <div
                     style={{
-                      fontSize: isMobile ? 40 : 46,
-                      lineHeight: 1,
+                      fontSize: 28,
                       fontWeight: 900,
                       color: "#fff",
-                      letterSpacing: "-1px",
+                      letterSpacing: "-0.6px",
                     }}
                   >
-                    {plan.price}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 15,
-                      color: "rgba(255,255,255,0.72)",
-                      fontWeight: 700,
-                      paddingBottom: 7,
-                    }}
-                  >
-                    / month
-                  </span>
-                </div>
+                    {plan.name}
+                  </div>
 
-                <div
-                  style={{
-                    marginTop: 14,
-                    color: "rgba(255,255,255,0.84)",
-                    fontSize: 15,
-                    lineHeight: 1.65,
-                    fontWeight: 500,
-                    minHeight: isMobile ? "auto" : 72,
-                  }}
-                >
-                  {plan.subtitle}
-                </div>
-              </div>
-
-              <button
-                onClick={() => openContact(plan.name)}
-                style={{
-                  width: "100%",
-                  marginTop: 24,
-                  padding: "0.95rem 1.1rem",
-                  borderRadius: 999,
-                  border: "none",
-                  background: plan.featured
-                    ? "linear-gradient(90deg, #7c4dff, #0f6fff)"
-                    : BTN_BASE,
-                  color: "#fff",
-                  fontSize: 15,
-                  fontWeight: 900,
-                  cursor: "pointer",
-                  boxShadow: plan.featured
-                    ? "0 12px 34px rgba(124,77,255,0.28)"
-                    : "0 10px 26px rgba(15,111,255,0.28)",
-                  transition: "transform .15s ease, opacity .2s ease",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = "translateY(-2px)";
-                  e.currentTarget.style.opacity = "0.96";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = "translateY(0)";
-                  e.currentTarget.style.opacity = "1";
-                }}
-              >
-                {plan.cta}
-              </button>
-
-              <div
-                style={{
-                  marginTop: 24,
-                  borderTop: "1px solid rgba(255,255,255,0.08)",
-                  paddingTop: 18,
-                }}
-              >
-                <div
-                  style={{
-                    marginBottom: 12,
-                    color: "#ffffff",
-                    fontWeight: 800,
-                    fontSize: 14,
-                    letterSpacing: 0.2,
-                  }}
-                >
-                  Included in this plan
-                </div>
-
-                <div style={{ display: "grid", gap: 12 }}>
-                  {plan.features.map((feature) => (
-                    <div
-                      key={feature}
+                  <div style={{ marginTop: 12, display: "flex", alignItems: "flex-end", gap: 6 }}>
+                    <span
                       style={{
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: 10,
-                        color: "rgba(255,255,255,0.9)",
-                        lineHeight: 1.55,
-                        fontSize: 14.5,
-                        fontWeight: 500,
+                        fontSize: isMobile ? 40 : 46,
+                        lineHeight: 1,
+                        fontWeight: 900,
+                        color: "#fff",
+                        letterSpacing: "-1px",
                       }}
                     >
+                      {plan.price}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 15,
+                        color: "rgba(255,255,255,0.72)",
+                        fontWeight: 700,
+                        paddingBottom: 7,
+                      }}
+                    >
+                      / month
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 14,
+                      color: "rgba(255,255,255,0.84)",
+                      fontSize: 15,
+                      lineHeight: 1.65,
+                      fontWeight: 500,
+                      minHeight: isMobile ? "auto" : 72,
+                    }}
+                  >
+                    {plan.subtitle}
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => startCheckout(plan)}
+                  disabled={!!loadingPlan}
+                  style={{
+                    width: "100%",
+                    marginTop: 24,
+                    padding: "0.95rem 1.1rem",
+                    borderRadius: 999,
+                    border: "none",
+                    background: plan.featured
+                      ? "linear-gradient(90deg, #7c4dff, #0f6fff)"
+                      : BTN_BASE,
+                    color: "#fff",
+                    fontSize: 15,
+                    fontWeight: 900,
+                    cursor: loadingPlan ? "not-allowed" : "pointer",
+                    boxShadow: plan.featured
+                      ? "0 12px 34px rgba(124,77,255,0.28)"
+                      : "0 10px 26px rgba(15,111,255,0.28)",
+                    transition: "transform .15s ease, opacity .2s ease",
+                    opacity: isLoading ? 0.8 : loadingPlan ? 0.6 : 1,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (loadingPlan) return;
+                    e.currentTarget.style.transform = "translateY(-2px)";
+                    e.currentTarget.style.opacity = "0.96";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = "translateY(0)";
+                    e.currentTarget.style.opacity = isLoading ? "0.8" : loadingPlan ? "0.6" : "1";
+                  }}
+                >
+                  {isLoading ? "Redirecting..." : plan.cta}
+                </button>
+
+                <div
+                  style={{
+                    marginTop: 24,
+                    borderTop: "1px solid rgba(255,255,255,0.08)",
+                    paddingTop: 18,
+                  }}
+                >
+                  <div
+                    style={{
+                      marginBottom: 12,
+                      color: "#ffffff",
+                      fontWeight: 800,
+                      fontSize: 14,
+                      letterSpacing: 0.2,
+                    }}
+                  >
+                    Included in this plan
+                  </div>
+
+                  <div style={{ display: "grid", gap: 12 }}>
+                    {plan.features.map((feature) => (
                       <div
+                        key={feature}
                         style={{
-                          minWidth: 20,
-                          height: 20,
-                          borderRadius: 999,
-                          marginTop: 1,
                           display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          background: "rgba(49,225,255,0.12)",
-                          color: ACCENT,
-                          fontSize: 12,
-                          fontWeight: 900,
+                          alignItems: "flex-start",
+                          gap: 10,
+                          color: "rgba(255,255,255,0.9)",
+                          lineHeight: 1.55,
+                          fontSize: 14.5,
+                          fontWeight: 500,
                         }}
                       >
-                        ✓
+                        <div
+                          style={{
+                            minWidth: 20,
+                            height: 20,
+                            borderRadius: 999,
+                            marginTop: 1,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            background: "rgba(49,225,255,0.12)",
+                            color: ACCENT,
+                            fontSize: 12,
+                            fontWeight: 900,
+                          }}
+                        >
+                          ✓
+                        </div>
+                        <span>{feature}</span>
                       </div>
-                      <span>{feature}</span>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div
