@@ -1549,32 +1549,34 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       aiAudience = null;
     }
 
-    let targeting = {
-      geo_locations: { countries: ['US'] },
-      age_min: 18,
-      age_max: 65,
-      targeting_automation: { advantage_audience: 0 },
-    };
+let targeting = {
+  geo_locations: { countries: ['US'] },
+  age_min: 18,
+  age_max: 65,
+};
 
-    if (aiAudience?.location) {
-      const loc = String(aiAudience.location).trim();
-      if (/^[A-Za-z]{2}$/.test(loc)) targeting.geo_locations = { countries: [loc.toUpperCase()] };
-      else if (/united states|usa/i.test(loc)) targeting.geo_locations = { countries: ['US'] };
-      else targeting.geo_locations = { countries: [loc.toUpperCase()] };
-    }
+if (aiAudience?.location) {
+  const loc = String(aiAudience.location).trim();
+  if (/^[A-Za-z]{2}$/.test(loc)) {
+    targeting.geo_locations = { countries: [loc.toUpperCase()] };
+  } else if (/united states|usa/i.test(loc)) {
+    targeting.geo_locations = { countries: ['US'] };
+  }
+}
 
-    if (aiAudience?.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
-      const [min, max] = aiAudience.ageRange.split('-').map(Number);
-      targeting.age_min = min;
-      targeting.age_max = max;
-    }
+if (aiAudience?.ageRange && /^\d{2}-\d{2}$/.test(aiAudience.ageRange)) {
+  const [min, max] = aiAudience.ageRange.split('-').map(Number);
+  targeting.age_min = min;
+  targeting.age_max = max;
+}
 
-    if (aiAudience?.fbInterestIds?.length) {
-      targeting.flexible_spec = [{ interests: aiAudience.fbInterestIds.map((id) => ({ id })) }];
-      targeting.targeting_automation.advantage_audience = 0;
-    } else {
-      targeting.targeting_automation.advantage_audience = 1;
-    }
+if (aiAudience?.fbInterestIds?.length) {
+  targeting.flexible_spec = [
+    {
+      interests: aiAudience.fbInterestIds.map((id) => ({ id: String(id) })),
+    },
+  ];
+}
 
     if (!VALIDATE_ONLY) {
       const existing = await axios.get(`https://graph.facebook.com/v18.0/act_${accountId}/campaigns`, {
@@ -1642,6 +1644,12 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
       }
     }
 
+    console.log('[LAUNCH][campaign create]', {
+  accountId,
+  campaignName,
+  objective: 'OUTCOME_TRAFFIC',
+  status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+});
     const campaignRes = await axios.post(
       `https://graph.facebook.com/v18.0/act_${accountId}/campaigns`,
       {
@@ -1655,30 +1663,34 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     const campaignId = campaignRes.data?.id || 'VALIDATION_ONLY';
 
     const perAdsetBudgetCents = Math.max(100, Math.round((Number(budget) || 0) * 100));
-    const { data: adsetData } = await axios.post(
-      `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
-      {
-        name: `${campaignName} (Image) - ${new Date().toISOString()}`,
-        campaign_id: campaignId,
-        daily_budget: perAdsetBudgetCents,
-        billing_event: 'IMPRESSIONS',
-        optimization_goal: 'LINK_CLICKS',
-        bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
-        status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
-        start_time: startISO,
-        ...(endISO ? { end_time: endISO } : {}),
-        promoted_object: { page_id: pageIdFinal },
-        targeting: {
-          ...targeting,
-          publisher_platforms: ['facebook', 'instagram'],
-          facebook_positions: ['feed', 'marketplace'],
-          instagram_positions: ['stream', 'story', 'reels'],
-          audience_network_positions: [],
-          messenger_positions: [],
-        },
-      },
-      { params: mkParams() }
-    );
+
+console.log('[LAUNCH][adset create]', {
+  accountId,
+  campaignId,
+  pageIdFinal,
+  perAdsetBudgetCents,
+  startISO,
+  endISO,
+  targeting,
+});
+
+const { data: adsetData } = await axios.post(
+  `https://graph.facebook.com/v18.0/act_${accountId}/adsets`,
+  {
+    name: `${campaignName} (Image) - ${new Date().toISOString()}`,
+    campaign_id: campaignId,
+    daily_budget: perAdsetBudgetCents,
+    billing_event: 'IMPRESSIONS',
+    optimization_goal: 'LINK_CLICKS',
+    bid_strategy: 'LOWEST_COST_WITHOUT_CAP',
+    status: NO_SPEND ? 'PAUSED' : 'ACTIVE',
+    start_time: startISO,
+    ...(endISO ? { end_time: endISO } : {}),
+    promoted_object: { page_id: pageIdFinal },
+    targeting,
+  },
+  { params: mkParams() }
+);
     const imageAdSetId = adsetData?.id || null;
 
     const adIds = [];
@@ -1687,6 +1699,16 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
     for (let i = 0; i < needImg; i++) {
       const variant = parsedVariants[i];
       const hash = await uploadImage(variant, i);
+
+      console.log('[LAUNCH][creative create]', {
+  accountId,
+  campaignName,
+  pageIdFinal,
+  destinationUrl,
+  hash,
+  message: form.adCopy || adCopy || '',
+  variantIndex: i + 1,
+});
 
       const cr = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
@@ -1704,6 +1726,14 @@ router.post('/facebook/adaccount/:accountId/launch-campaign', async (req, res) =
         },
         { params: mkParams() }
       );
+
+      console.log('[LAUNCH][ad create]', {
+  accountId,
+  adsetId: imageAdSetId,
+  creativeId: cr.data.id,
+  campaignName,
+  variantIndex: i + 1,
+});
 
       const ad = await axios.post(
         `https://graph.facebook.com/v18.0/act_${accountId}/ads`,
@@ -1813,7 +1843,12 @@ publicSummary: makeInitialPublicSummary(),
         detail = detail.toString('utf8');
       } catch {}
     }
-    console.error('FB Campaign Launch Error:', detail);
+ console.error('FB Campaign Launch Error:', {
+  message: err?.message || '',
+  responseData: err?.response?.data || null,
+  responseStatus: err?.response?.status || null,
+  stack: err?.stack || null,
+});
 
     const msg = String(err?.message || '').toLowerCase();
     if (msg.includes('image') || msg.includes('download') || msg.includes('blob')) {
