@@ -3063,6 +3063,12 @@ const handleDeleteCampaign = async (campaignId) => {
     navigate("/form");
   };
 
+const adminActive =
+  String(localStorage.getItem("sm_current_user") || "").trim() === "TheBoss" ||
+  String(loginUser || "").trim() === "TheBoss" ||
+  String(localStorage.getItem("sm_current_user") || "").trim().toLowerCase() === "knowilltech@gmail.com" ||
+  String(loginUser || "").trim().toLowerCase() === "knowilltech@gmail.com";
+
 const canLaunch = !!(
   fbConnected &&
   selectedAccount &&
@@ -3070,8 +3076,13 @@ const canLaunch = !!(
   budget &&
   !isNaN(parseFloat(budget)) &&
   parseFloat(budget) >= 3 &&
-  (billingInfo.hasAccess || isAdminBypass)
+  (adminActive || billingInfo.hasAccess)
 );
+
+console.log("ADMIN ACTIVE:", adminActive, {
+  currentUser: localStorage.getItem("sm_current_user"),
+  loginUser,
+});
 
   function capTwoWeeksISO(startISO, endISO) {
     try {
