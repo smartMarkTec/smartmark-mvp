@@ -2999,13 +2999,193 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/details', async 
 
   const { campaignId } = req.params;
   if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+
   try {
     const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
-      params: { access_token: userToken, fields: 'id,name,status,start_time,objective,effective_status' },
+      params: {
+        access_token: userToken,
+        fields:
+          'id,name,status,effective_status,configured_status,objective,buying_type,start_time,stop_time,created_time,updated_time,special_ad_categories',
+      },
     });
+
     res.json(response.data);
   } catch (err) {
-    res.status(500).json({ error: err.response?.data?.error?.message || 'Failed to fetch campaign details.' });
+    res.status(500).json({
+      error: err.response?.data?.error?.message || 'Failed to fetch campaign details.',
+      detail: err.response?.data || err.message,
+    });
+  }
+});
+
+router.get('/facebook/adaccount/:accountId/campaign/:campaignId/delivery-debug', async (req, res) => {
+  const ownerKey = ownerKeyFromReq(req);
+  const userToken = getFbUserToken(ownerKey);
+
+  const { campaignId, accountId } = req.params;
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+
+  if (!userToken) {
+    return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  }
+
+  try {
+    const [
+      campaignRes,
+      insightsRes,
+      adsetsRes,
+      adsRes,
+      accountRes,
+    ] = await Promise.all([
+      axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}`, {
+        params: {
+          access_token: userToken,
+          fields:
+            'id,name,status,effective_status,configured_status,objective,buying_type,start_time,stop_time,created_time,updated_time',
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/${normalizedCampaignId}/insights`, {
+        params: {
+          access_token: userToken,
+          fields:
+            'impressions,reach,clicks,unique_clicks,spend,cpm,cpp,ctr,actions',
+          date_preset: 'maximum',
+          limit: 1,
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/adsets`, {
+        params: {
+          access_token: userToken,
+          fields:
+            'id,name,campaign_id,status,effective_status,configured_status,daily_budget,lifetime_budget,billing_event,optimization_goal,bid_strategy,start_time,end_time,targeting',
+          limit: 25,
+          filtering: JSON.stringify([
+            { field: 'campaign.id', operator: 'IN', value: [normalizedCampaignId] },
+          ]),
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}/ads`, {
+        params: {
+          access_token: userToken,
+          fields:
+            'id,name,campaign_id,adset_id,status,effective_status,configured_status,creative{id,name,object_story_spec,image_url,thumbnail_url},issues_info',
+          limit: 25,
+          filtering: JSON.stringify([
+            { field: 'campaign.id', operator: 'IN', value: [normalizedCampaignId] },
+          ]),
+        },
+      }),
+      axios.get(`https://graph.facebook.com/v18.0/act_${normalizedAccountId}`, {
+        params: {
+          access_token: userToken,
+          fields:
+            'id,name,account_status,disable_reason,amount_spent,balance,spend_cap,min_campaign_group_spend_cap',
+        },
+      }),
+    ]);
+
+    const campaign = campaignRes.data || {};
+    const insightRow = Array.isArray(insightsRes.data?.data) ? (insightsRes.data.data[0] || {}) : {};
+    const adsets = Array.isArray(adsetsRes.data?.data) ? adsetsRes.data.data : [];
+    const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+    const account = accountRes.data || {};
+
+    const summary = {
+      campaignActiveLike:
+        ['ACTIVE', 'PAUSED'].includes(String(campaign.effective_status || campaign.status || '').toUpperCase()),
+      hasSpend: Number(insightRow.spend || 0) > 0,
+      hasImpressions: Number(insightRow.impressions || 0) > 0,
+      adsetCount: adsets.length,
+      adCount: ads.length,
+      anyPausedAdset: adsets.some((a) =>
+        ['PAUSED', 'ARCHIVED', 'DELETED'].includes(
+          String(a.effective_status || a.status || '').toUpperCase()
+        )
+      ),
+      anyPausedAd: ads.some((a) =>
+        ['PAUSED', 'ARCHIVED', 'DELETED'].includes(
+          String(a.effective_status || a.status || '').toUpperCase()
+        )
+      ),
+      anyIssuesInfo: ads.some((a) => Array.isArray(a.issues_info) && a.issues_info.length > 0),
+      accountDisabledReason: account.disable_reason || null,
+      accountStatus: account.account_status || null,
+    };
+
+    res.json({
+      ok: true,
+      ownerKey,
+      account: {
+        id: account.id || normalizedAccountId,
+        name: account.name || '',
+        account_status: account.account_status || '',
+        disable_reason: account.disable_reason || '',
+        amount_spent: account.amount_spent || '0',
+        balance: account.balance || '0',
+        spend_cap: account.spend_cap || null,
+        min_campaign_group_spend_cap: account.min_campaign_group_spend_cap || null,
+      },
+      campaign: {
+        id: campaign.id || normalizedCampaignId,
+        name: campaign.name || '',
+        status: campaign.status || '',
+        effective_status: campaign.effective_status || '',
+        configured_status: campaign.configured_status || '',
+        objective: campaign.objective || '',
+        buying_type: campaign.buying_type || '',
+        start_time: campaign.start_time || '',
+        stop_time: campaign.stop_time || '',
+        created_time: campaign.created_time || '',
+        updated_time: campaign.updated_time || '',
+      },
+      insights: {
+        impressions: Number(insightRow.impressions || 0),
+        reach: Number(insightRow.reach || 0),
+        clicks: Number(insightRow.clicks || 0),
+        unique_clicks: Number(insightRow.unique_clicks || 0),
+        spend: Number(insightRow.spend || 0),
+        cpm: Number(insightRow.cpm || 0),
+        cpp: Number(insightRow.cpp || 0),
+        ctr: Number(insightRow.ctr || 0),
+        actions: Array.isArray(insightRow.actions) ? insightRow.actions : [],
+      },
+      adsets: adsets.map((a) => ({
+        id: a.id,
+        name: a.name,
+        status: a.status || '',
+        effective_status: a.effective_status || '',
+        configured_status: a.configured_status || '',
+        daily_budget: a.daily_budget || null,
+        lifetime_budget: a.lifetime_budget || null,
+        billing_event: a.billing_event || '',
+        optimization_goal: a.optimization_goal || '',
+        bid_strategy: a.bid_strategy || '',
+        start_time: a.start_time || '',
+        end_time: a.end_time || '',
+        targeting: a.targeting || {},
+      })),
+      ads: ads.map((a) => ({
+        id: a.id,
+        name: a.name,
+        adset_id: a.adset_id || '',
+        status: a.status || '',
+        effective_status: a.effective_status || '',
+        configured_status: a.configured_status || '',
+        creative_id: a.creative?.id || '',
+        creative_name: a.creative?.name || '',
+        image_url: a.creative?.image_url || a.creative?.thumbnail_url || '',
+        object_story_spec: a.creative?.object_story_spec || {},
+        issues_info: Array.isArray(a.issues_info) ? a.issues_info : [],
+      })),
+      summary,
+    });
+  } catch (err) {
+    console.error('[delivery-debug] failed:', err?.response?.data || err?.message || err);
+    return res.status(500).json({
+      error: err?.response?.data?.error?.message || 'Failed to debug campaign delivery.',
+      detail: err?.response?.data || err?.message,
+    });
   }
 });
 
