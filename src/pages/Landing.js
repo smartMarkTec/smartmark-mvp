@@ -129,6 +129,8 @@ const Landing = () => {
     } catch {}
   };
 
+  const goToPricing = () => navigate("/pricing");
+
   const goToLogin = () => navigate("/login");
 
   const scrollToFaq = () => {
@@ -253,46 +255,75 @@ const Landing = () => {
           zIndex: 2,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 10,
-            width: isMobile ? "100%" : "auto",
-          }}
-        >
-          <img
-            src={smartmarkLogo}
-            alt="SmarteMark"
-            style={{
-              height: 26,
-              width: 26,
-              borderRadius: 10,
-              opacity: 0.92,
-              flex: "0 0 auto",
-            }}
-          />
+   <div
+  style={{
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    width: isMobile ? "100%" : "auto",
+    flexWrap: "wrap",
+  }}
+>
+  <img
+    src={smartmarkLogo}
+    alt="SmarteMark"
+    style={{
+      height: 26,
+      width: 26,
+      borderRadius: 10,
+      opacity: 0.92,
+      flex: "0 0 auto",
+    }}
+  />
 
-          <button
-            onClick={scrollToFaq}
-            style={{
-              fontWeight: 700,
-              fontSize: isMobile ? "0.98rem" : "1rem",
-              color: "#e6faff",
-              borderRadius: 999,
-              padding: "0.55rem 1.1rem",
-              cursor: "pointer",
-              transition: "transform .15s ease",
-              ...glass,
-              width: isMobile ? "86vw" : "auto",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
-            onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
-          >
-            FAQ
-          </button>
-        </div>
+  <button
+    onClick={scrollToFaq}
+    style={{
+      fontWeight: 700,
+      fontSize: isMobile ? "0.94rem" : "0.95rem",
+      color: "#e6faff",
+      borderRadius: 999,
+      padding: "0.5rem 1rem",
+      cursor: "pointer",
+      transition: "transform .15s ease",
+      ...glass,
+      width: isMobile ? "auto" : "auto",
+    }}
+    onMouseEnter={(e) => (e.currentTarget.style.transform = "translateY(-2px)")}
+    onMouseLeave={(e) => (e.currentTarget.style.transform = "translateY(0)")}
+  >
+    FAQ
+  </button>
+
+  <button
+    onClick={goToPricing}
+    style={{
+      fontWeight: 700,
+      fontSize: isMobile ? "0.9rem" : "0.92rem",
+      color: "rgba(255,255,255,0.78)",
+      borderRadius: 999,
+      padding: "0.48rem 0.95rem",
+      cursor: "pointer",
+      transition: "transform .15s ease, color .2s ease, border .2s ease",
+      ...glass,
+      border: "1px solid rgba(255,255,255,0.06)",
+      background:
+        "linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0.015))",
+      boxShadow: "0 8px 22px rgba(0,0,0,0.18)",
+    }}
+    onMouseEnter={(e) => {
+      e.currentTarget.style.transform = "translateY(-2px)";
+      e.currentTarget.style.color = "#eaf5ff";
+    }}
+    onMouseLeave={(e) => {
+      e.currentTarget.style.transform = "translateY(0)";
+      e.currentTarget.style.color = "rgba(255,255,255,0.78)";
+    }}
+  >
+    Pricing
+  </button>
+</div>
 
         <div style={{ display: "flex", gap: "10px" }}>
           <button
