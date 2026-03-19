@@ -1797,21 +1797,15 @@ const resolvedUser = useMemo(() => getUserFromStorage() || stableSid, [stableSid
 
   const [budget, setBudget] = useState(() => lsGet(resolvedUser, "smartmark_last_budget") || "");
 
- const [feePaid, setFeePaid] = useState(() => {
-  try {
-    // 1) session-global (survives resolvedUser changes in same tab/session)
-    if (sessionStorage.getItem(SS_FEE_PAID_GLOBAL_KEY) === "1") return true;
-
-    // 2) user-scoped
-    if (localStorage.getItem(withUser(resolvedUser, FEE_PAID_KEY)) === "1") return true;
-
-    // 3) legacy/global safety (optional but helps on refresh)
-    if (localStorage.getItem(FEE_PAID_KEY) === "1") return true;
-
-    return false;
-  } catch {
-    return false;
-  }
+const [selectedPlan, setSelectedPlan] = useState("starter");
+const [billingLoading, setBillingLoading] = useState(false);
+const [billingInfo, setBillingInfo] = useState({
+  checked: false,
+  hasAccess: false,
+  planKey: "",
+  status: "",
+  email: "",
+  username: "",
 });
 
 // ✅ Email -> backend-username map (so changing username field never breaks login)
@@ -2579,6 +2573,21 @@ useEffect(() => {
   }, [fbConnected]);
 
   useEffect(() => {
+  const currentUser = getUserFromStorage();
+  if (!currentUser) return;
+  refreshBillingStatus();
+  // eslint-disable-next-line
+}, [resolvedUser]);
+
+useEffect(() => {
+  const params = new URLSearchParams(location.search || "");
+  if (params.get("checkout") === "success") {
+    refreshBillingStatus();
+  }
+  // eslint-disable-next-line
+}, [location.search]);
+
+  useEffect(() => {
     const imgs = (Array.isArray(navImageUrls) ? navImageUrls : [])
       .filter(Boolean)
       .slice(0, 2)
@@ -3056,7 +3065,15 @@ const handleDeleteCampaign = async (campaignId) => {
     navigate("/form");
   };
 
-  const canLaunch = !!(fbConnected && selectedAccount && selectedPageId && budget && !isNaN(parseFloat(budget)) && parseFloat(budget) >= 3 && feePaid);
+ const canLaunch = !!(
+  fbConnected &&
+  selectedAccount &&
+  selectedPageId &&
+  budget &&
+  !isNaN(parseFloat(budget)) &&
+  parseFloat(budget) >= 3 &&
+  billingInfo.hasAccess
+);
 
   function capTwoWeeksISO(startISO, endISO) {
     try {
@@ -3073,21 +3090,82 @@ const handleDeleteCampaign = async (campaignId) => {
     }
   }
 
- const handlePayFee = () => {
-  window.open(CASHAPP_URL, "_blank", "noopener,noreferrer");
+ const refreshBillingStatus = async () => {
   try {
-    // ✅ per-user
-    localStorage.setItem(withUser(resolvedUser, FEE_PAID_KEY), "1");
-    // ✅ legacy/global (so refresh still sees it)
-    localStorage.setItem(FEE_PAID_KEY, "1");
-  } catch {}
+    setBillingLoading(true);
+
+    const r = await authFetch(`/api/stripe/billing-status`, {
+      method: "GET",
+    });
+
+    const j = await r.json().catch(() => ({}));
+
+    if (!r.ok || !j?.ok) {
+      setBillingInfo({
+        checked: true,
+        hasAccess: false,
+        planKey: "",
+        status: "",
+        email: "",
+        username: "",
+      });
+      return false;
+    }
+
+    setBillingInfo({
+      checked: true,
+      hasAccess: !!j?.billing?.hasAccess,
+      planKey: String(j?.billing?.planKey || "").trim(),
+      status: String(j?.billing?.status || "").trim(),
+      email: String(j?.user?.email || "").trim(),
+      username: String(j?.user?.username || "").trim(),
+    });
+
+    return !!j?.billing?.hasAccess;
+  } catch {
+    setBillingInfo({
+      checked: true,
+      hasAccess: false,
+      planKey: "",
+      status: "",
+      email: "",
+      username: "",
+    });
+    return false;
+  } finally {
+    setBillingLoading(false);
+  }
+};
+
+const handleSubscribeToPlan = async () => {
+  const userOk = await handleLogin();
+  if (!userOk) return;
 
   try {
-    // ✅ session-global (so resolvedUser changes don't break the UI)
-    sessionStorage.setItem(SS_FEE_PAID_GLOBAL_KEY, "1");
-  } catch {}
+    setBillingLoading(true);
 
-  setFeePaid(true);
+    const res = await authFetch(`/api/stripe/create-checkout-session-auth`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        plan: selectedPlan,
+      }),
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok || !data?.ok || !data?.url) {
+      throw new Error(data?.error || "Could not start checkout.");
+    }
+
+    window.location.href = data.url;
+  } catch (err) {
+    alert(err?.message || "Could not start checkout.");
+  } finally {
+    setBillingLoading(false);
+  }
 };
 
 
@@ -3824,124 +3902,164 @@ const getSavedCreatives = (campaignId) => {
               />
             </div>
 
-            <div style={{ color: "#b7f5c2", fontWeight: 800 }}>
-              SmartMark Fee: <span style={{ color: ACCENT_ALT }}>${fee.toFixed(2)}</span>
-            </div>
+<div style={{ color: "#b7f5c2", fontWeight: 800 }}>
+  Subscription Required:{" "}
+  <span style={{ color: ACCENT_ALT }}>
+    {billingInfo.hasAccess
+      ? `${billingInfo.planKey || "active"} plan active`
+      : "choose a plan below"}
+  </span>
+</div>
 
-            {(() => {
-              const n = Number(budget);
-              const show = Number.isFinite(n) && n >= 3;
-              if (!show) return null;
+{(() => {
+  const n = Number(budget);
+  const show = Number.isFinite(n) && n >= 3;
+  if (!show) return null;
 
-              return (
-                <div
-                  style={{
-                    marginTop: 6,
-                    borderRadius: 16,
-                    padding: "14px 14px",
-                    ...GLASS,
-                    color: WHITE,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>Pay SmartMark Fee to Launch</div>
+  return (
+    <div
+      style={{
+        marginTop: 6,
+        borderRadius: 16,
+        padding: "14px 14px",
+        ...GLASS,
+        color: WHITE,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+      }}
+    >
+      <div style={{ fontWeight: 900, color: "#bdfdf0", textAlign: "center" }}>
+        Unlock Launch Access
+      </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <input
-                      type="text"
-                      value={loginUser}
-                     onChange={(e) => {
-  const v = e.target.value;
-  setLoginUser(v);
+      <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, textAlign: "center" }}>
+        Create your account here, subscribe once, and your campaign launch will unlock automatically.
+      </div>
 
-  // ✅ keep global last-typed username canonical (no $)
-  try {
-    const t = String(v || "").trim();
-    if (t) localStorage.setItem("smartmark_login_username", t.replace(/^\$/, ""));
-  } catch {}
-}}
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <input
+          type="text"
+          value={loginUser}
+          onChange={(e) => {
+            const v = e.target.value;
+            setLoginUser(v);
+            try {
+              const t = String(v || "").trim();
+              if (t) localStorage.setItem("smartmark_login_username", t.replace(/^\$/, ""));
+            } catch {}
+          }}
+          placeholder="Username"
+          style={{
+            background: INPUT_BG,
+            borderRadius: 12,
+            padding: "10px 12px",
+            border: `1px solid ${INPUT_BORDER}`,
+            width: "100%",
+            color: TEXT_DIM,
+            fontSize: "1.02rem",
+            fontWeight: 800,
+            outline: "none",
+          }}
+        />
 
-                      placeholder="$CashTag"
-                      style={{
-                        background: INPUT_BG,
-                        borderRadius: 12,
-                        padding: "10px 12px",
-                        border: `1px solid ${INPUT_BORDER}`,
-                        width: "100%",
-                        color: TEXT_DIM,
-                        fontSize: "1.02rem",
-                        fontWeight: 800,
-                        outline: "none",
-                      }}
-                    />
+        <input
+          type="email"
+          value={loginPass}
+          onChange={(e) => {
+            const v = e.target.value;
+            setLoginPass(v);
+            try {
+              const t = String(v || "").trim();
+              if (t) localStorage.setItem("smartmark_login_password", t);
+            } catch {}
+          }}
+          placeholder="Email"
+          autoComplete="email"
+          style={{
+            background: INPUT_BG,
+            borderRadius: 12,
+            padding: "10px 12px",
+            border: `1px solid ${INPUT_BORDER}`,
+            width: "100%",
+            color: TEXT_DIM,
+            fontSize: "1.02rem",
+            fontWeight: 800,
+            outline: "none",
+          }}
+        />
 
-                  <input
-  type="email"
-  value={loginPass}
-  onChange={(e) => {
-    const v = e.target.value;
-    setLoginPass(v);
+        <select
+          value={selectedPlan}
+          onChange={(e) => setSelectedPlan(e.target.value)}
+          style={{
+            background: INPUT_BG,
+            borderRadius: 12,
+            padding: "10px 12px",
+            border: `1px solid ${INPUT_BORDER}`,
+            width: "100%",
+            color: TEXT_DIM,
+            fontSize: "1.02rem",
+            fontWeight: 800,
+            outline: "none",
+          }}
+        >
+          <option value="starter">Starter — $39.99 / month</option>
+          <option value="pro">Pro — $79.99 / month</option>
+          <option value="operator">Operator — $149.99 / month</option>
+        </select>
 
-    // ✅ ALSO write to the global keys that Login.js reads
-    try {
-      const t = String(v || "").trim();
-      if (t) localStorage.setItem("smartmark_login_password", t);
-    } catch {}
-  }}
-  placeholder="Email"
-  autoComplete="email"
-  style={{
-    background: INPUT_BG,
-    borderRadius: 12,
-    padding: "10px 12px",
-    border: `1px solid ${INPUT_BORDER}`,
-    width: "100%",
-    color: TEXT_DIM,
-    fontSize: "1.02rem",
-    fontWeight: 800,
-    outline: "none",
-  }}
-/>
+        {!!authStatus.msg && (
+          <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, textAlign: "center" }}>
+            {authStatus.msg}
+          </div>
+        )}
 
+        {billingInfo.checked && (
+          <div
+            style={{
+              color: billingInfo.hasAccess ? "#8ff0c2" : "rgba(255,255,255,0.72)",
+              fontWeight: 800,
+              fontSize: 12,
+              textAlign: "center",
+            }}
+          >
+            {billingInfo.hasAccess
+              ? `Subscription active: ${billingInfo.planKey || "active"}`
+              : "No active subscription on this account yet"}
+          </div>
+        )}
+      </div>
 
-                    {!!authStatus.msg && (
-                      <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12, textAlign: "center" }}>
-                        {authStatus.msg}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={{ display: "flex", justifyContent: "center" }}>
-         <button
-  type="button"
-onClick={() => {
-  trackEvent("setup_fee_click", { page: "setup" });
-  handlePayFee();
-}}
-
-
-
-  style={{
-    background: feePaid ? `linear-gradient(90deg, ${ACCENT}, ${ACCENT_2})` : BTN_BASE,
-    color: WHITE,
-    boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
-    border: "none",
-    borderRadius: 12,
-    fontWeight: 900,
-    padding: "10px 18px",
-    cursor: "pointer",
-    minWidth: 170,
-  }}
->
-  Setup Fee
-</button>
-
-                  </div>
-                </div>
-              );
-            })()}
+      {!billingInfo.hasAccess && (
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <button
+            type="button"
+            onClick={() => {
+              trackEvent("setup_checkout_click", { page: "setup", plan: selectedPlan });
+              handleSubscribeToPlan();
+            }}
+            disabled={billingLoading || authLoading}
+            style={{
+              background: `linear-gradient(90deg, ${BTN_BASE}, ${ACCENT_2})`,
+              color: WHITE,
+              boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
+              border: "none",
+              borderRadius: 12,
+              fontWeight: 900,
+              padding: "10px 18px",
+              cursor: billingLoading || authLoading ? "not-allowed" : "pointer",
+              minWidth: 210,
+              opacity: billingLoading || authLoading ? 0.7 : 1,
+            }}
+          >
+            {billingLoading ? "Opening Checkout..." : "Continue to Checkout"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+})()}
           </div>
 
 <button
