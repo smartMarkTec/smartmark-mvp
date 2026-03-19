@@ -2,6 +2,7 @@
 import React, { useEffect } from "react";
 import { Routes, Route, useLocation } from "react-router-dom";
 import Landing from "./pages/Landing";
+import Pricing from "./pages/Pricing";
 import FormPage from "./pages/FormPage";
 import CampaignSetup from "./pages/CampaignSetup";
 import Login from "./pages/Login";
@@ -56,8 +57,9 @@ function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/pricing" element={<Pricing />} />
       <Route path="/form" element={<FormPage />} />
-      <Route path="/setup" element={<CampaignSetup />} /> {/* no auth guard */}
+      <Route path="/setup" element={<CampaignSetup />} />
       <Route path="/login" element={<Login />} />
       <Route path="/confirmation" element={<Confirmation />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
