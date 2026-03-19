@@ -22,8 +22,6 @@ const fs = require("fs");
 const sharp = require("sharp");
 const crypto = require("crypto");
 
-
-
 // Optional deps
 let compression = null;
 try {
@@ -170,7 +168,6 @@ app.post("/api/media/upload", express.json({ limit: "25mb" }), (req, res) => {
     return res.status(500).json({ ok: false, error: e?.message || "Upload failed" });
   }
 });
-
 
 app.get("/api/media/:filename", async (req, res) => {
   try {
@@ -360,8 +357,6 @@ app.use("/auth", authRoutes);
 // ✅ Backward-compat alias (some clients still hit /api/whoami)
 app.get("/api/whoami", (req, res) => res.redirect(307, "/auth/whoami"));
 
-
-
 /* IMPORTANT: staticAds is your ONLY generation path now */
 const staticAdsRoutes = require("./routes/staticAds");
 app.use("/api", staticAdsRoutes);
@@ -369,6 +364,10 @@ app.use("/api", staticAdsRoutes);
 /* ✅ GPT + summarize routes (fixes /api/summarize-ad-copy 404) */
 const gptRoutes = require("./routes/gpt");
 app.use("/api", gptRoutes);
+
+/* ✅ Stripe routes */
+const stripeRoutes = require("./routes/stripe");
+app.use("/api/stripe", stripeRoutes);
 
 /* (optional) legacy proxy alias — keep only if your frontend still calls /proxy-img */
 const { proxyImgHandler, proxyHeadHandler } = require("./routes/staticAds");

@@ -27,34 +27,34 @@ const plans = [
   {
     name: "Starter",
     price: "$39.99",
-    subtitle: "Best for getting your business started with simple campaign automation.",
+    subtitle: "A clean starting point for business owners who want simple campaign automation without extra complexity.",
     badge: "Starter",
     accentGlow: "rgba(49,225,255,0.18)",
     cta: "Get Started",
     features: [
-      "1 business profile",
+      "1 active business setup",
       "1 connected ad account",
-      "Up to 2 campaign launches each month",
+      "Up to 2 campaign launches per month",
       "AI-generated ad copy and creatives",
       "Autonomous campaign launch",
       "Basic optimization and creative refresh",
-      "Campaign dashboard",
+      "Core campaign dashboard",
       "Standard support",
     ],
   },
   {
     name: "Pro",
     price: "$79.99",
-    subtitle: "Best for businesses that want more campaigns, more testing, and stronger automation.",
+    subtitle: "Built for businesses that want more launches, more creative testing, and stronger automation performance.",
     badge: "Most Popular",
     accentGlow: "rgba(124,77,255,0.22)",
     featured: true,
     cta: "Choose Pro",
     features: [
       "Everything in Starter",
-      "Up to 5 campaign launches each month",
+      "Up to 5 campaign launches per month",
       "More creative and variant generation",
-      "Stronger autonomous optimization",
+      "Stronger autonomous optimization cadence",
       "Automatic creative refresh as needed",
       "Broader testing coverage",
       "More active campaign control",
@@ -64,18 +64,18 @@ const plans = [
   {
     name: "Operator",
     price: "$149.99",
-    subtitle: "Best for businesses that want the deepest automation and highest performance capacity.",
+    subtitle: "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
     badge: "Advanced",
     accentGlow: "rgba(49,225,255,0.14)",
     cta: "Choose Operator",
     features: [
       "Everything in Pro",
-      "Up to 10 campaign launches each month",
+      "Up to 10 campaign launches per month",
       "Highest creative generation capacity",
       "Highest testing intensity",
-      "Deepest in-product optimization layer",
-      "System memory and pattern retention as platform capabilities expand",
-      "Earliest access to advanced operator features",
+      "Deepest autonomous optimization layer",
+      "Pattern memory as operator capabilities expand",
+      "Earliest access to advanced features",
       "Highest priority support",
     ],
   },
@@ -103,7 +103,6 @@ const Pricing = () => {
     try {
       trackEvent("pricing_cta_click", { page: "pricing", plan: planName });
     } catch {}
-
     navigate("/login");
   };
 
@@ -111,18 +110,27 @@ const Pricing = () => {
     <div
       style={{
         minHeight: "100vh",
-        minWidth: "100vw",
+        width: "100%",
         background: BG_DARK,
         color: "#fff",
         fontFamily: FONT,
         position: "relative",
         overflowX: "hidden",
+        overflowY: "visible",
       }}
     >
       <style>{`
         html, body, #root {
           background: ${BG_DARK};
           margin: 0;
+          padding: 0;
+          width: 100%;
+          min-height: 100%;
+          overflow-x: hidden;
+        }
+
+        body {
+          overscroll-behavior-y: auto;
         }
 
         * {
@@ -265,7 +273,7 @@ const Pricing = () => {
                 borderRadius: 24,
                 padding: isMobile ? "1.2rem" : "1.45rem",
                 overflow: "hidden",
-                minHeight: isMobile ? "auto" : 600,
+                minHeight: "auto",
                 boxShadow: plan.featured
                   ? "0 18px 50px rgba(124,77,255,0.18)"
                   : "0 10px 28px rgba(0,0,0,0.22)",
