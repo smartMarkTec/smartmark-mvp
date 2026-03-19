@@ -177,7 +177,7 @@ router.post("/create-checkout-session", async (req, res) => {
       allow_promotion_codes: true,
       billing_address_collection: "auto",
       success_url: `${clientUrl}/confirmation?session_id={CHECKOUT_SESSION_ID}&plan=${rawPlan}`,
-      cancel_url: `${clientUrl}/pricing`,
+      cancel_url: `${clientUrl}/setup`,
       metadata: {
         planKey: rawPlan,
         planName: PLAN_NAME_MAP[rawPlan],
