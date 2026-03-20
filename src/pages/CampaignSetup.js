@@ -4073,9 +4073,9 @@ const getSavedCreatives = (campaignId) => {
             outline: "none",
           }}
         >
-          <option value="starter">Starter — $39.99 / month</option>
-          <option value="pro">Pro — $79.99 / month</option>
-          <option value="operator">Operator — $149.99 / month</option>
+          <option value="starter">Starter — $79.99 / month</option>
+          <option value="pro">Pro — $109.99 / month</option>
+          <option value="operator">Operator — $179.99 / month</option>
         </select>
 
         {!!authStatus.msg && (

@@ -28,7 +28,7 @@ const plans = [
   {
     name: "Starter",
     planKey: "starter",
-    price: "$39.99",
+    price: "$79.99",
     subtitle:
       "A clean starting point for business owners who want simple campaign automation without extra complexity.",
     badge: "Starter",
@@ -48,7 +48,7 @@ const plans = [
   {
     name: "Pro",
     planKey: "pro",
-    price: "$79.99",
+    price: "$109.99",
     subtitle:
       "Built for businesses that want more launches, more creative testing, and stronger automation performance.",
     badge: "Most Popular",
@@ -69,7 +69,7 @@ const plans = [
   {
     name: "Operator",
     planKey: "operator",
-    price: "$149.99",
+    price: "$179.99",
     subtitle:
       "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
     badge: "Advanced",
