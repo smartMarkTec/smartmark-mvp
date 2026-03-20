@@ -398,40 +398,26 @@ const startCheckout = async (plan) => {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => startCheckout(plan)}
-                  disabled={!!loadingPlan}
-                  style={{
-                    width: "100%",
-                    marginTop: 24,
-                    padding: "0.95rem 1.1rem",
-                    borderRadius: 999,
-                    border: "none",
-                    background: plan.featured
-                      ? "linear-gradient(90deg, #7c4dff, #0f6fff)"
-                      : BTN_BASE,
-                    color: "#fff",
-                    fontSize: 15,
-                    fontWeight: 900,
-                    cursor: loadingPlan ? "not-allowed" : "pointer",
-                    boxShadow: plan.featured
-                      ? "0 12px 34px rgba(124,77,255,0.28)"
-                      : "0 10px 26px rgba(15,111,255,0.28)",
-                    transition: "transform .15s ease, opacity .2s ease",
-                    opacity: isLoading ? 0.8 : loadingPlan ? 0.6 : 1,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (loadingPlan) return;
-                    e.currentTarget.style.transform = "translateY(-2px)";
-                    e.currentTarget.style.opacity = "0.96";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = "translateY(0)";
-                    e.currentTarget.style.opacity = isLoading ? "0.8" : loadingPlan ? "0.6" : "1";
-                  }}
-                >
-                  {isLoading ? "Redirecting..." : plan.cta}
-                </button>
+            <button
+  disabled
+  style={{
+    width: "100%",
+    marginTop: 24,
+    padding: "0.95rem 1.1rem",
+    borderRadius: 999,
+    border: "none",
+    background: "rgba(255,255,255,0.10)",
+    color: "rgba(255,255,255,0.65)",
+    fontSize: 15,
+    fontWeight: 900,
+    cursor: "not-allowed",
+    boxShadow: "none",
+    transition: "opacity .2s ease",
+    opacity: 0.7,
+  }}
+>
+  Coming Soon
+</button>
 
                 <div
                   style={{
