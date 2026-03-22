@@ -11,6 +11,29 @@ const { buildDecision } = require('./optimizerDecision');
 const { executeAction } = require('./optimizerAction');
 const { buildMonitoring } = require('./optimizerMonitoring');
 
+function normalizeActionType(value) {
+  return String(value || '').trim();
+}
+
+function isNonExecutableActionType(actionType) {
+  return [
+    '',
+    'none',
+    'continue_monitoring',
+    'run_diagnosis_first',
+    'run_decision_first',
+    'wait_for_start_time',
+  ].includes(normalizeActionType(actionType));
+}
+
+async function safeReloadState(campaignId, label) {
+  const state = await findOptimizerCampaignStateByCampaignId(String(campaignId || '').trim());
+  if (!state) {
+    throw new Error(`Optimizer state missing ${label}`);
+  }
+  return state;
+}
+
 async function runFullOptimizerCycle({
   campaignId,
   accountId,
@@ -28,11 +51,27 @@ async function runFullOptimizerCycle({
   if (typeof loadCreativesRecord !== 'function') {
     throw new Error('loadCreativesRecord function is required');
   }
+  if (typeof persistDiagnosis !== 'function') {
+    throw new Error('persistDiagnosis function is required');
+  }
+  if (typeof persistDecision !== 'function') {
+    throw new Error('persistDecision function is required');
+  }
+  if (typeof persistAction !== 'function') {
+    throw new Error('persistAction function is required');
+  }
+  if (typeof persistMonitoring !== 'function') {
+    throw new Error('persistMonitoring function is required');
+  }
+
+  const normalizedCampaignId = String(campaignId).trim();
+  const normalizedAccountId = String(accountId).replace(/^act_/, '').trim();
+  const normalizedOwnerKey = String(ownerKey || '').trim();
 
   const cycle = {
-    campaignId: String(campaignId).trim(),
-    accountId: String(accountId).replace(/^act_/, '').trim(),
-    ownerKey: String(ownerKey || '').trim(),
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    ownerKey: normalizedOwnerKey,
     startedAt: new Date().toISOString(),
     metricsSync: null,
     diagnosis: null,
@@ -42,93 +81,91 @@ async function runFullOptimizerCycle({
     decisionAfterMonitoring: null,
     secondAction: null,
     finishedAt: null,
+    mode: 'full_cycle_v2',
   };
 
   const syncResult = await syncCampaignMetricsToOptimizerState({
     userToken,
-    campaignId: cycle.campaignId,
-    accountId: cycle.accountId,
-    ownerKey: cycle.ownerKey,
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    ownerKey: normalizedOwnerKey,
   });
 
-  cycle.metricsSync = syncResult.snapshot;
+  cycle.metricsSync = syncResult?.snapshot || null;
 
-  let state = await findOptimizerCampaignStateByCampaignId(cycle.campaignId);
-  if (!state) throw new Error('Optimizer state missing after metrics sync');
+  let state = await safeReloadState(normalizedCampaignId, 'after metrics sync');
 
-  const creativesRecord = await loadCreativesRecord(cycle.campaignId, cycle.accountId);
+  const creativesRecord = await loadCreativesRecord(
+    normalizedCampaignId,
+    normalizedAccountId
+  );
 
   const diagnosis = buildDiagnosis({
     optimizerState: state,
     creativesRecord,
   });
-  state = await persistDiagnosis(cycle.campaignId, diagnosis);
+  await persistDiagnosis(normalizedCampaignId, diagnosis);
   cycle.diagnosis = diagnosis;
+
+  state = await safeReloadState(normalizedCampaignId, 'after diagnosis');
 
   const decisionBeforeAction = buildDecision({
     optimizerState: state,
   });
-  state = await persistDecision(cycle.campaignId, decisionBeforeAction);
+  await persistDecision(normalizedCampaignId, decisionBeforeAction);
   cycle.decisionBeforeAction = decisionBeforeAction;
+
+  state = await safeReloadState(normalizedCampaignId, 'after first decision');
 
   const action = await executeAction({
     optimizerState: state,
     userToken,
   });
-  state = await persistAction(cycle.campaignId, action);
+  await persistAction(normalizedCampaignId, action);
   cycle.action = action;
+
+  state = await safeReloadState(normalizedCampaignId, 'after first action');
 
   const monitoring = buildMonitoring({
     optimizerState: state,
   });
-  state = await persistMonitoring(cycle.campaignId, monitoring);
+  await persistMonitoring(normalizedCampaignId, monitoring);
   cycle.monitoring = monitoring;
 
-  const refreshedState = await findOptimizerCampaignStateByCampaignId(cycle.campaignId);
-  if (!refreshedState) throw new Error('Optimizer state missing after monitoring');
+  state = await safeReloadState(normalizedCampaignId, 'after monitoring');
 
   const decisionAfterMonitoring = buildDecision({
-    optimizerState: refreshedState,
+    optimizerState: state,
   });
-  state = await persistDecision(cycle.campaignId, decisionAfterMonitoring);
+  await persistDecision(normalizedCampaignId, decisionAfterMonitoring);
   cycle.decisionAfterMonitoring = decisionAfterMonitoring;
 
-  const firstActionType = String(action?.actionType || '').trim();
-  const secondActionType = String(decisionAfterMonitoring?.actionType || '').trim();
+  state = await safeReloadState(normalizedCampaignId, 'after post-monitoring decision');
+
+  const firstActionType = normalizeActionType(action?.actionType);
+  const secondActionType = normalizeActionType(decisionAfterMonitoring?.actionType);
 
   const shouldRunSecondAction =
-    secondActionType &&
-    secondActionType !== firstActionType &&
-    ![
-      'continue_monitoring',
-      'run_diagnosis_first',
-      'run_decision_first',
-      'none',
-    ].includes(secondActionType);
+    !isNonExecutableActionType(secondActionType) &&
+    secondActionType !== firstActionType;
 
   if (shouldRunSecondAction) {
-    const stateBeforeSecondAction = await findOptimizerCampaignStateByCampaignId(cycle.campaignId);
-    if (!stateBeforeSecondAction) {
-      throw new Error('Optimizer state missing before second action');
-    }
-
     const secondAction = await executeAction({
-      optimizerState: stateBeforeSecondAction,
+      optimizerState: state,
       userToken,
     });
 
-    state = await persistAction(cycle.campaignId, secondAction);
+    await persistAction(normalizedCampaignId, secondAction);
     cycle.secondAction = secondAction;
+
+    state = await safeReloadState(normalizedCampaignId, 'after second action');
   }
 
   cycle.finishedAt = new Date().toISOString();
 
-  const finalState = await findOptimizerCampaignStateByCampaignId(cycle.campaignId);
-  if (!finalState) throw new Error('Final optimizer state missing after full cycle');
-
   return {
     cycle,
-    optimizerState: finalState,
+    optimizerState: state,
   };
 }
 
