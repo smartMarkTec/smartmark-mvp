@@ -710,11 +710,20 @@ function parseAndVerifyOAuthState(stateRaw) {
 }
 
 router.get('/facebook', (req, res) => {
-  let sid = req.cookies?.[COOKIE_NAME];
-  if (!sid) {
+  let sid =
+    String(
+      req.query?.sm_sid ||
+      req.query?.sid ||
+      req.cookies?.[COOKIE_NAME] ||
+      ''
+    ).trim();
+
+  if (!isSidLike(sid)) {
     sid = `sm_${nanoid(24)}`;
-    setSessionCookie(res, sid);
   }
+
+  setSessionCookie(res, sid);
+  req.smSid = sid;
 
   const fallback = `${FRONTEND_URL}/setup`;
   const rawReturnTo = String(req.query.return_to || '').trim();
