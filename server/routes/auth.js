@@ -427,11 +427,20 @@ const DEBUG_KEY_HEADER = 'x-smartemark-debug-key';
 
 function computeCookieDomain() {
   if (process.env.COOKIE_DOMAIN) return process.env.COOKIE_DOMAIN;
-  if (process.env.RENDER_EXTERNAL_URL) {
-    try {
-      return new URL(process.env.RENDER_EXTERNAL_URL).hostname;
-    } catch {}
-  }
+
+  try {
+    if (process.env.FRONTEND_URL) {
+      const host = new URL(process.env.FRONTEND_URL).hostname.toLowerCase();
+
+      if (host === 'localhost') return undefined;
+      if (host === 'www.smartemark.com' || host === 'smartemark.com') {
+        return '.smartemark.com';
+      }
+
+      return host;
+    }
+  } catch {}
+
   return undefined;
 }
 
