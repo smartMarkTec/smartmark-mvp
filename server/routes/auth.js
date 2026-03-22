@@ -971,41 +971,86 @@ router.get('/debug/fbtoken-owners', async (req, res) => {
   }
 });
 
-router.get('/facebook/defaults', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  const DEFAULTS = defaultsFor(ownerKey);
-  const userToken = getFbUserToken(ownerKey);
+async function resolveFacebookTokenFromReq(req) {
+  await ensureUsersAndSessions();
+  await db.read();
 
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  const candidates = [];
+  const seen = new Set();
+
+  const add = (v) => {
+    const s = String(v || "").trim();
+    if (!s || seen.has(s)) return;
+    seen.add(s);
+    candidates.push(s);
+  };
+
+  const reqOwner = ownerKeyFromReq(req);
+  const sid = getSidFromReq(req);
+
+  add(reqOwner);
+  add(sid);
+
+  const sess =
+    sid
+      ? (db.data.sessions || []).find((s) => String(s.sid || "").trim() === String(sid).trim())
+      : null;
+
+  if (sess?.username) add(`user:${String(sess.username).trim()}`);
+
+  for (const key of candidates) {
+    const token = getFbUserToken(key);
+    if (token) {
+      return { ownerKey: key, userToken: token };
+    }
+  }
+
+  return { ownerKey: reqOwner || sid || "", userToken: null };
+}
+
+router.get('/facebook/defaults', async (req, res) => {
+  const DEFAULTS = defaultsFor(ownerKeyFromReq(req));
+  const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req);
+
+  if (!userToken) {
+    return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  }
+
   await refreshDefaults(userToken, ownerKey);
+
+  const resolvedDefaults = defaultsFor(ownerKey);
 
   res.json({
     ok: true,
-    adAccountId: DEFAULTS.adAccountId,
-    pageId: DEFAULTS.pageId,
-    adAccounts: DEFAULTS.adAccounts,
-    pages: DEFAULTS.pages,
+    adAccountId: resolvedDefaults.adAccountId,
+    pageId: resolvedDefaults.pageId,
+    adAccounts: resolvedDefaults.adAccounts,
+    pages: resolvedDefaults.pages,
   });
 });
 
 router.get('/facebook/adaccounts', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  const DEFAULTS = defaultsFor(ownerKey);
-  const userToken = getFbUserToken(ownerKey);
+  const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req);
 
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  if (!userToken) {
+    return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  }
+
   await refreshDefaults(userToken, ownerKey);
+  const DEFAULTS = defaultsFor(ownerKey);
 
   return res.json({ data: DEFAULTS.adAccounts || [] });
 });
 
 router.get('/facebook/pages', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  const DEFAULTS = defaultsFor(ownerKey);
-  const userToken = getFbUserToken(ownerKey);
+  const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req);
 
-  if (!userToken) return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  if (!userToken) {
+    return res.status(401).json({ error: 'Not authenticated with Facebook' });
+  }
+
   await refreshDefaults(userToken, ownerKey);
+  const DEFAULTS = defaultsFor(ownerKey);
 
   return res.json({ data: DEFAULTS.pages || [] });
 });
@@ -2967,8 +3012,7 @@ const payload = {
 });
 
 router.get('/facebook/adaccount/:accountId/campaigns', async (req, res) => {
-  const ownerKey = ownerKeyFromReq(req);
-  const userToken = getFbUserToken(ownerKey);
+ const { ownerKey, userToken } = await resolveFacebookTokenFromReq(req);
   const { accountId } = req.params;
   const normalizedAccountId = String(accountId || '').replace(/^act_/, '');
 
