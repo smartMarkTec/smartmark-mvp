@@ -3816,7 +3816,8 @@ const getSavedCreatives = (campaignId) => {
       `?ctxKey=${encodeURIComponent(safeCtx)}&facebook_connected=1`;
 
     // ✅ Start OAuth on SAME-ORIGIN so session cookies land on your app domain
-    window.location.assign(`/auth/facebook?return_to=${encodeURIComponent(returnTo)}`);
+const sid = ensureStoredSid();
+window.location.assign(`/auth/facebook?sm_sid=${encodeURIComponent(sid)}&return_to=${encodeURIComponent(returnTo)}`);
   }}
   style={{
     padding: "14px 22px",
