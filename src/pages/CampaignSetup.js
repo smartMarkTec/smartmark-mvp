@@ -2677,14 +2677,44 @@ useEffect(() => {
 
       setCampaigns(list);
 
-      const activeCount = fullList.filter(
-        (c) => ["ACTIVE", "PAUSED"].includes(String(c.status || c.effective_status || "").toUpperCase())
+      const activeCount = fullList.filter((c) =>
+        ["ACTIVE", "PAUSED"].includes(
+          String(c.status || c.effective_status || "").toUpperCase()
+        )
       ).length;
       setCampaignCount(activeCount);
 
-      if (!selectedCampaignId && list.length > 0 && !hasDraft) {
-        setSelectedCampaignId(list[0].id);
-        setExpandedId(list[0].id);
+      const firstLiveId = String(list?.[0]?.id || "").trim();
+
+      // always prefer a real live campaign after reconnect / relaunch
+      if (firstLiveId) {
+        const currentSelected = String(selectedCampaignId || "").trim();
+        const currentExpanded = String(expandedId || "").trim();
+
+        const selectedStillExists = list.some(
+          (c) => String(c?.id || "").trim() === currentSelected
+        );
+        const expandedStillExists = list.some(
+          (c) => String(c?.id || "").trim() === currentExpanded
+        );
+
+        if (
+          !hasDraft &&
+          (!currentSelected ||
+            currentSelected === "__DRAFT__" ||
+            !selectedStillExists)
+        ) {
+          setSelectedCampaignId(firstLiveId);
+        }
+
+        if (
+          !hasDraft &&
+          (!currentExpanded ||
+            currentExpanded === "__DRAFT__" ||
+            !expandedStillExists)
+        ) {
+          setExpandedId(firstLiveId);
+        }
       }
     })
     .catch(() => {});
@@ -2746,53 +2776,23 @@ useEffect(() => {
 
   const acctId = String(selectedAccount).trim();
   const campaignId = String(expandedId).trim();
+  let cancelled = false;
 
-  const metricsCacheKey = `sm_metrics_last_fetch_${acctId}_${campaignId}`;
-  const summaryCacheKey = `sm_summary_last_fetch_${acctId}_${campaignId}`;
-  const creativesCacheKey = `sm_creatives_last_fetch_${acctId}_${campaignId}`;
-  const now = Date.now();
+  const pullCampaignData = async () => {
+    try {
+      const [creativesRes, metricsRes, summaryRes] = await Promise.allSettled([
+        authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/creatives`),
+        authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/metrics`),
+        authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/optimizer-state`),
+      ]);
 
-  let shouldFetchMetrics = true;
-  let shouldFetchSummary = true;
-  let shouldFetchCreatives = true;
+      if (
+        !cancelled &&
+        creativesRes.status === "fulfilled" &&
+        creativesRes.value?.ok
+      ) {
+        const data = await creativesRes.value.json().catch(() => ({}));
 
-  try {
-    const lastMetrics = Number(sessionStorage.getItem(metricsCacheKey) || 0);
-    if (now - lastMetrics < 60000) {
-      shouldFetchMetrics = false;
-    } else {
-      sessionStorage.setItem(metricsCacheKey, String(now));
-    }
-  } catch {}
-
-  try {
-    const lastSummary = Number(sessionStorage.getItem(summaryCacheKey) || 0);
-    if (now - lastSummary < 45000) {
-      shouldFetchSummary = false;
-    } else {
-      sessionStorage.setItem(summaryCacheKey, String(now));
-    }
-  } catch {}
-
-  try {
-    const lastCreatives = Number(sessionStorage.getItem(creativesCacheKey) || 0);
-    if (now - lastCreatives < 15000) {
-      shouldFetchCreatives = false;
-    } else {
-      sessionStorage.setItem(creativesCacheKey, String(now));
-    }
-  } catch {}
-
-  if (shouldFetchCreatives) {
-    authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/creatives`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `HTTP ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data) => {
         const imgs = (Array.isArray(data?.images) ? data.images : [])
           .map(toAbsoluteMedia)
           .filter(Boolean)
@@ -2844,38 +2844,36 @@ useEffect(() => {
           },
         }));
 
-        if (nextImages.length) {
-          existingMap[campaignId] = {
-            ...prev,
-            images: nextImages,
-            mediaSelection: "image",
-            time: Date.now(),
-            expiresAt:
-              prev?.expiresAt ||
-              (endDate && !isNaN(new Date(`${endDate}T18:00:00`).getTime())
-                ? new Date(`${endDate}T18:00:00`).getTime()
-                : Date.now() + DEFAULT_CAMPAIGN_TTL_MS),
-            name: prev?.name || data?.name || "Untitled",
-            meta: {
-              headline: nextHeadline,
-              body: nextBody,
-              link: nextLink,
-            },
-          };
+        existingMap[campaignId] = {
+          ...prev,
+          images: nextImages,
+          mediaSelection: "image",
+          time: Date.now(),
+          expiresAt:
+            prev?.expiresAt ||
+            (endDate && !isNaN(new Date(`${endDate}T18:00:00`).getTime())
+              ? new Date(`${endDate}T18:00:00`).getTime()
+              : Date.now() + DEFAULT_CAMPAIGN_TTL_MS),
+          name: prev?.name || data?.name || "Untitled",
+          meta: {
+            headline: nextHeadline,
+            body: nextBody,
+            link: nextLink,
+          },
+        };
 
-          writeCreativeMap(resolvedUser, acctId, existingMap);
+        writeCreativeMap(resolvedUser, acctId, existingMap);
+        if (nextImages.length) {
           saveFetchableImagesBackup(resolvedUser, nextImages);
         }
-      })
-      .catch((err) => {
-        console.error("Failed to load campaign creatives:", err);
-      });
-  }
+      }
 
-  if (shouldFetchMetrics) {
-    authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/metrics`)
-      .then((res) => (res.ok ? res.json() : Promise.reject()))
-      .then((data) => {
+      if (
+        !cancelled &&
+        metricsRes.status === "fulfilled" &&
+        metricsRes.value?.ok
+      ) {
+        const data = await metricsRes.value.json().catch(() => ({}));
         const row = Array.isArray(data?.data) && data.data[0] ? data.data[0] : {};
 
         const impressions = Number(row?.impressions);
@@ -2883,42 +2881,30 @@ useEffect(() => {
         const spend = Number(row?.spend);
         const ctr = Number(row?.ctr);
 
-        const normalized = {
-          impressions: Number.isFinite(impressions) ? impressions : 0,
-          clicks: Number.isFinite(clicks) ? clicks : 0,
-          ctr: Number.isFinite(ctr)
-            ? ctr
-            : Number.isFinite(impressions) && impressions > 0 && Number.isFinite(clicks)
-            ? (clicks / impressions) * 100
-            : 0,
-          spend: Number.isFinite(spend) ? spend : 0,
-        };
-
-        setMetricsMap((m) => ({ ...m, [campaignId]: normalized }));
-      })
-      .catch(() =>
         setMetricsMap((m) => ({
           ...m,
           [campaignId]: {
-            impressions: 0,
-            clicks: 0,
-            ctr: 0,
-            spend: 0,
+            impressions: Number.isFinite(impressions) ? impressions : 0,
+            clicks: Number.isFinite(clicks) ? clicks : 0,
+            ctr:
+              Number.isFinite(ctr)
+                ? ctr
+                : Number.isFinite(impressions) &&
+                  impressions > 0 &&
+                  Number.isFinite(clicks)
+                ? (clicks / impressions) * 100
+                : 0,
+            spend: Number.isFinite(spend) ? spend : 0,
           },
-        }))
-      );
-  }
+        }));
+      }
 
-  if (shouldFetchSummary) {
-    authFetch(`/facebook/adaccount/${acctId}/campaign/${campaignId}/optimizer-state`)
-      .then(async (res) => {
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          throw new Error(text || `HTTP ${res.status}`);
-        }
-        return res.json();
-      })
-      .then((data) => {
+      if (
+        !cancelled &&
+        summaryRes.status === "fulfilled" &&
+        summaryRes.value?.ok
+      ) {
+        const data = await summaryRes.value.json().catch(() => ({}));
         const summary =
           getPublicSummaryFromOptimizerState(data?.optimizerState) ||
           getFallbackPublicSummary();
@@ -2927,17 +2913,29 @@ useEffect(() => {
           ...m,
           [campaignId]: summary,
         }));
-      })
-      .catch((err) => {
-        console.error("Failed to load optimizer public summary:", err);
+      }
+    } catch (err) {
+      console.error("Failed to refresh campaign panel:", err);
+    }
+  };
 
-        setPublicSummaryMap((m) => ({
-          ...m,
-          [campaignId]: getFallbackPublicSummary(),
-        }));
-      });
-  }
-}, [expandedId, selectedAccount, resolvedUser, endDate, previewCopy?.headline, previewCopy?.body, previewCopy?.link, inferredLink]);
+  pullCampaignData();
+  const interval = setInterval(pullCampaignData, 20000);
+
+  return () => {
+    cancelled = true;
+    clearInterval(interval);
+  };
+}, [
+  expandedId,
+  selectedAccount,
+  resolvedUser,
+  endDate,
+  previewCopy?.headline,
+  previewCopy?.body,
+  previewCopy?.link,
+  inferredLink,
+]);
   // Persist
   useEffect(() => {
     lsSet(resolvedUser, "smartmark_last_campaign_fields", JSON.stringify({ ...form, startDate, endDate }));
