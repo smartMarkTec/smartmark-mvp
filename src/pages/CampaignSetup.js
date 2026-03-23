@@ -1011,7 +1011,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   const [loaded, setLoaded] = useState(false);
   const [readyMap, setReadyMap] = useState({});
 
-  // ✅ retry state
   const [retryCount, setRetryCount] = useState(0);
   const [retryNonce, setRetryNonce] = useState(0);
 
@@ -1021,10 +1020,23 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
   }, [items]);
 
+  const base = normalized[idx] || "";
+
+  const current = useMemo(() => {
+    if (!base) return "";
+    if (!retryNonce) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}smcb=${retryNonce}`;
+  }, [base, retryNonce]);
+
+  const go = (d) => {
+    if (!normalized.length) return;
+    setIdx((p) => (p + d + normalized.length) % normalized.length);
+  };
+
   useEffect(() => {
     let cancelled = false;
 
-    const nextReady = {};
     try {
       (normalized || []).forEach((u) => {
         const img = new Image();
@@ -1049,9 +1061,10 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     setRetryCount(0);
     setRetryNonce(0);
 
-    const currentBase = normalized[Math.min(idx, Math.max(normalized.length - 1, 0))] || "";
+    const currentBase =
+      normalized[Math.min(idx, Math.max(normalized.length - 1, 0))] || "";
     setLoaded(!!readyMap[currentBase]);
-  }, [normalized, readyMap]); // eslint-disable-line
+  }, [idx, normalized, readyMap]);
 
   useEffect(() => {
     const currentBase = normalized[idx] || "";
@@ -1061,14 +1074,20 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     setLoaded(!!readyMap[currentBase]);
   }, [idx, normalized, readyMap]);
 
-  const base = normalized[idx] || "";
+  useEffect(() => {
+    if (!broken) return;
+    if (retryCount >= 3) return;
 
-  const current = useMemo(() => {
-    if (!base) return "";
-    if (!retryNonce) return base;
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}smcb=${retryNonce}`;
-  }, [base, retryNonce]);
+    const delay = 350 + retryCount * 450;
+    const t = setTimeout(() => {
+      setBroken(false);
+      setLoaded(false);
+      setRetryCount((c) => c + 1);
+      setRetryNonce(Date.now());
+    }, delay);
+
+    return () => clearTimeout(t);
+  }, [broken, retryCount]);
 
   if (!normalized.length) {
     return (
@@ -1092,23 +1111,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     );
   }
 
-  const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
-
-  useEffect(() => {
-    if (!broken) return;
-    if (retryCount >= 3) return;
-
-    const delay = 350 + retryCount * 450;
-    const t = setTimeout(() => {
-      setBroken(false);
-      setLoaded(false);
-      setRetryCount((c) => c + 1);
-      setRetryNonce(Date.now());
-    }, delay);
-
-    return () => clearTimeout(t);
-  }, [broken, retryCount]);
-
   return (
     <div
       style={{
@@ -1130,7 +1132,8 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             color: "rgba(255,255,255,0.55)",
             fontWeight: 800,
             fontSize: 13,
-            background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
             zIndex: 1,
           }}
         >
@@ -1151,7 +1154,8 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
             color: "rgba(255,255,255,0.62)",
             fontWeight: 900,
             fontSize: 13,
-            background: "linear-gradient(180deg, rgba(255,60,60,0.08), rgba(255,255,255,0.02))",
+            background:
+              "linear-gradient(180deg, rgba(255,60,60,0.08), rgba(255,255,255,0.02))",
           }}
         >
           <div>Image failed to load</div>
