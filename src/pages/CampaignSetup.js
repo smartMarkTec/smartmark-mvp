@@ -1061,6 +1061,15 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
     setLoaded(!!readyMap[currentBase]);
   }, [idx, normalized, readyMap]);
 
+  const base = normalized[idx] || "";
+
+  const current = useMemo(() => {
+    if (!base) return "";
+    if (!retryNonce) return base;
+    const sep = base.includes("?") ? "&" : "?";
+    return `${base}${sep}smcb=${retryNonce}`;
+  }, [base, retryNonce]);
+
   if (!normalized.length) {
     return (
       <div
@@ -1082,15 +1091,6 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
       </div>
     );
   }
-
-  const base = normalized[idx];
-
-  const current = useMemo(() => {
-    if (!base) return "";
-    if (!retryNonce) return base;
-    const sep = base.includes("?") ? "&" : "?";
-    return `${base}${sep}smcb=${retryNonce}`;
-  }, [base, retryNonce]);
 
   const go = (d) => setIdx((p) => (p + d + normalized.length) % normalized.length);
 
