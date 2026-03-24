@@ -785,7 +785,7 @@ function normalizeSmartCopy(raw = {}, answers = {}) {
 
 function syncCreativesToDraftKeys({ ctxKey, imageUrls, headline, body, overlay, answers, mediaSelection }) {
   try {
-    const imgs = (imageUrls || []).filter(Boolean).slice(0, 2).map(toAbsoluteMedia);
+   const imgs = (imageUrls || []).filter(Boolean).slice(0, 1).map(toAbsoluteMedia);
 
     const payload = {
       ctxKey: ctxKey || getActiveCtx(),
@@ -1729,98 +1729,44 @@ try {
     }
   }
 
-  async function generatePosterBPair(runToken) {
-    const tA = `${runToken}-A`;
-    const tB = `${runToken}-B`;
+async function generatePosterBPair(runToken) {
+  const tA = `${runToken}-A`;
 
-    const rawA = await summarizeAdCopy(answers, { regenerateToken: tA, variant: "A" });
-    const rawB = await summarizeAdCopy(answers, { regenerateToken: tB, variant: "B" });
+  const rawA = await summarizeAdCopy(answers, {
+    regenerateToken: tA,
+    variant: "A",
+  });
 
-    let copyA = normalizeSmartCopy(rawA, answers);
-    let copyB = normalizeSmartCopy(rawB, answers);
+  const copyA = normalizeSmartCopy(rawA, answers);
 
-    const same =
-      (copyA.headline || "").toLowerCase() === (copyB.headline || "").toLowerCase() &&
-      (copyA.subline || "").toLowerCase() === (copyB.subline || "").toLowerCase();
+  const urlA = await handleGenerateStaticAd("poster_b", copyA, {
+    regenerateToken: tA,
+    silent: true,
+  });
 
-    if (same) {
-      const rawB2 = await summarizeAdCopy(answers, { regenerateToken: `${tB}-2`, variant: "B2" });
-      copyB = normalizeSmartCopy(rawB2, answers);
-    }
+  const urls = urlA ? [urlA] : [];
 
-    const [urlA, urlB] = await Promise.all([
-      handleGenerateStaticAd("poster_b", copyA, { regenerateToken: tA, silent: true }),
-      handleGenerateStaticAd("poster_b", copyB, { regenerateToken: tB, silent: true }),
-    ]);
-
-    let urls = [urlA, urlB].filter(Boolean).slice(0, 2);
-
-    if (urls.length === 1) {
-      try {
-        const missingToken = `${runToken}-B-retry`;
-        const rawBRetry = await summarizeAdCopy(answers, { regenerateToken: missingToken, variant: "B_RETRY" });
-        const copyBRetry = normalizeSmartCopy(rawBRetry, answers);
-        const urlRetry = await handleGenerateStaticAd("poster_b", copyBRetry, {
-          regenerateToken: missingToken,
-          silent: true,
-        });
-        if (urlRetry) urls = [urls[0], urlRetry];
-      } catch {}
-    }
-
-    if (urls.length === 1) urls = [urls[0], urls[0]];
-    if (urls.length === 0) urls = [];
-
-    if (urls[0]) {
-      saveImageDraftById(creativeIdFromUrl(urls[0]), {
-        headline: (copyA.headline || "").slice(0, 55),
-        body: copyA.subline || "",
-        overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
-      });
-    }
-    if (urls[1]) {
-      saveImageDraftById(creativeIdFromUrl(urls[1]), {
-        headline: (copyB.headline || "").slice(0, 55),
-        body: copyB.subline || "",
-        overlay: normalizeOverlayCTA(copyB.cta || answers?.cta || ""),
-      });
-    }
-
-    setImageUrls(urls);
-    setActiveImage(0);
-    setImageUrl(urls[0] || "");
-
-    // Cache previews for 24h (so they don't go blank after deploy/restart)
-    try {
-      const ctx = getActiveCtx();
-      const c = await cacheImagesFor24h(ctx, urls);
-      const cached = c?.dataUrls?.filter(Boolean).slice(0, 2) || [];
-      if (cached.length) setImageDataUrls(cached);
-    } catch {}
-
-    setResult({
-      headline: copyA.headline,
-      body: copyA.subline,
-      offer: copyA.offer,
-      bullets: copyA.bullets,
-      disclaimers: copyA.disclaimers,
-      image_overlay_text: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
-    });
-
-    const ctxKey = getActiveCtx();
-
-    syncCreativesToDraftKeys({
-      ctxKey,
-      imageUrls: urls,
-      headline: copyA.headline,
-      body: copyA.subline,
+  if (urls[0]) {
+    saveImageDraftById(creativeIdFromUrl(urls[0]), {
+      headline: (copyA.headline || "").slice(0, 55),
+      body: copyA.subline || "",
       overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
-      answers,
-      mediaSelection: "image",
     });
-
-    return urls;
   }
+
+  setImageUrls(urls);
+  setActiveImage(0);
+  setImageUrl(urls[0] || "");
+
+  return {
+    urls,
+    primary: {
+      headline: (copyA.headline || "").slice(0, 55),
+      body: copyA.subline || "",
+      overlay: normalizeOverlayCTA(copyA.cta || answers?.cta || ""),
+    },
+  };
+}
 
   async function handleRegenerateImage() {
     if (!canRunImageGen()) {
@@ -2528,7 +2474,7 @@ try {
             );
 
             const cached = (imageDataUrls || []).filter(Boolean).slice(0, 2);
-            const imgA = cached.length ? cached : imageUrls.map(abs).slice(0, 2);
+           const imgA = (cached.length ? cached : imageUrls.map(abs)).slice(0, 1);
 
             const ctxKey = getActiveCtx() || buildCtxKey(answers || {});
             setActiveCtx(ctxKey);
