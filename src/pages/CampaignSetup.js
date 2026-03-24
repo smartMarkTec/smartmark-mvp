@@ -1528,6 +1528,66 @@ function MarketerActionsCard({ summary }) {
   );
 }
 
+function PendingCreativeTestCard({ optimizerCreativeState }) {
+  const generatedCreatives = Array.isArray(optimizerCreativeState?.generatedCreatives)
+    ? optimizerCreativeState.generatedCreatives
+    : [];
+
+  const pending = optimizerCreativeState?.pendingCreativeTest || null;
+
+  if (!generatedCreatives.length) return null;
+
+  return (
+    <div
+      style={{
+        width: "100%",
+        background: "#14191e",
+        borderRadius: "12px",
+        padding: "10px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        border: `1px solid ${INPUT_BORDER}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
+        <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem" }}>
+          AI Variants
+        </div>
+        <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12 }}>
+          {pending?.status || "generated"}
+        </div>
+      </div>
+
+      {!!pending && (
+        <div
+          style={{
+            color: "rgba(255,255,255,0.72)",
+            fontWeight: 700,
+            fontSize: 12,
+            lineHeight: 1.45,
+          }}
+        >
+          {pending.variantCount || generatedCreatives.length} variant
+          {(pending.variantCount || generatedCreatives.length) === 1 ? "" : "s"} ready.
+          {pending.creativeGoal ? ` Goal: ${pending.creativeGoal}.` : ""}
+        </div>
+      )}
+
+      <ImageCarousel
+        items={generatedCreatives.map((x) => x.url).filter(Boolean)}
+        height={CREATIVE_HEIGHT}
+      />
+    </div>
+  );
+}
+
 /* ======================================================================= */
 /* ============================== MAIN =================================== */
 /* ======================================================================= */
@@ -1677,6 +1737,46 @@ function getFallbackPublicSummary() {
     actions: [],
     updatedAt: new Date().toISOString(),
     mode: "public_marketer_summary_fallback_v1",
+  };
+}
+
+function getOptimizerCreativeStateFromOptimizerState(optimizerState) {
+  const generatedCreatives = Array.isArray(optimizerState?.generatedCreatives)
+    ? optimizerState.generatedCreatives
+        .map((x) => ({
+          id: String(x?.id || "").trim(),
+          url: toAbsoluteMedia(x?.url || x?.imageUrl || ""),
+          headline: String(x?.headline || "").trim(),
+          body: String(x?.body || "").trim(),
+          status: String(x?.status || "generated").trim(),
+          sourceActionType: String(x?.sourceActionType || "").trim(),
+          goal: String(x?.goal || "").trim(),
+          createdAt: String(x?.createdAt || "").trim(),
+        }))
+        .filter((x) => x.url)
+    : [];
+
+  const pendingCreativeTest =
+    optimizerState?.pendingCreativeTest &&
+    typeof optimizerState.pendingCreativeTest === "object"
+      ? {
+          status: String(optimizerState.pendingCreativeTest.status || "").trim(),
+          sourceActionType: String(
+            optimizerState.pendingCreativeTest.sourceActionType || ""
+          ).trim(),
+          variantCount: Number(optimizerState.pendingCreativeTest.variantCount || 0),
+          creativeGoal: String(
+            optimizerState.pendingCreativeTest.creativeGoal || ""
+          ).trim(),
+          generatedAt: String(
+            optimizerState.pendingCreativeTest.generatedAt || ""
+          ).trim(),
+        }
+      : null;
+
+  return {
+    generatedCreatives,
+    pendingCreativeTest,
   };
 }
 
@@ -2037,6 +2137,7 @@ useEffect(() => {
 const [metricsMap, setMetricsMap] = useState({});
 const [publicSummaryMap, setPublicSummaryMap] = useState({});
 const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
+const [optimizerCreativeMap, setOptimizerCreativeMap] = useState({});
 const [launched, setLaunched] = useState(false);
 const [launchResult, setLaunchResult] = useState(null);
 const [loading, setLoading] = useState(false);
@@ -2903,21 +3004,31 @@ useEffect(() => {
         }));
       }
 
-      if (
-        !cancelled &&
-        summaryRes.status === "fulfilled" &&
-        summaryRes.value?.ok
-      ) {
-        const data = await summaryRes.value.json().catch(() => ({}));
-        const summary =
-          getPublicSummaryFromOptimizerState(data?.optimizerState) ||
-          getFallbackPublicSummary();
+   if (
+  !cancelled &&
+  summaryRes.status === "fulfilled" &&
+  summaryRes.value?.ok
+) {
+  const data = await summaryRes.value.json().catch(() => ({}));
+  const optimizerState = data?.optimizerState || null;
 
-        setPublicSummaryMap((m) => ({
-          ...m,
-          [campaignId]: summary,
-        }));
-      }
+  const summary =
+    getPublicSummaryFromOptimizerState(optimizerState) ||
+    getFallbackPublicSummary();
+
+  setPublicSummaryMap((m) => ({
+    ...m,
+    [campaignId]: summary,
+  }));
+
+  const optimizerCreativeState =
+    getOptimizerCreativeStateFromOptimizerState(optimizerState);
+
+  setOptimizerCreativeMap((m) => ({
+    ...m,
+    [campaignId]: optimizerCreativeState,
+  }));
+}
     } catch (err) {
       console.error("Failed to refresh campaign panel:", err);
     }
@@ -4491,8 +4602,8 @@ window.location.assign(`/auth/facebook?sm_sid=${encodeURIComponent(sid)}&return_
     )}
 
 {!isDraft && (
-  <MarketerActionsCard
-    summary={publicSummaryMap[id] || getFallbackPublicSummary()}
+  <PendingCreativeTestCard
+    optimizerCreativeState={optimizerCreativeMap[id] || null}
   />
 )}
 
