@@ -632,6 +632,54 @@ function absolutePublicUrl(relativePath) {
   return `${base}${rel}`;
 }
 
+function buildGeneratedCreativePatchFromAction(action) {
+  const imageUrls = Array.isArray(action?.actionResult?.imageUrls)
+    ? action.actionResult.imageUrls.filter(Boolean)
+    : [];
+
+  if (!imageUrls.length) {
+    return {};
+  }
+
+  const generatedAt = String(action?.generatedAt || new Date().toISOString()).trim();
+  const actionType = String(action?.actionType || '').trim();
+  const goal = String(action?.actionResult?.creativeGoal || '').trim();
+
+  const generatedCreatives = imageUrls.map((url, idx) => ({
+    id: `gen_${Date.now()}_${idx + 1}`,
+    url: String(url || '').trim(),
+    headline: '',
+    body: '',
+    status: 'generated',
+    sourceActionType: actionType,
+    goal,
+    createdAt: generatedAt,
+    meta: {
+      generationReason: String(action?.actionResult?.generationReason || '').trim(),
+      generationPrompt: String(action?.actionResult?.generationPrompt || '').trim(),
+    },
+  }));
+
+  return {
+    generatedCreatives,
+    pendingCreativeTest: {
+      status: 'ready',
+      sourceActionType: actionType,
+      variantCount: imageUrls.length,
+      creativeGoal: goal,
+      generatedAt,
+      imageUrls,
+    },
+    latestCreativeMeta: {
+      sourceActionType: actionType,
+      creativeGoal: goal,
+      generationReason: String(action?.actionResult?.generationReason || '').trim(),
+      generatedAt,
+      imageUrls,
+    },
+  };
+}
+
 function makeInitialPublicSummary(overrides = {}) {
   return {
     headline: 'Monitoring campaign performance',
@@ -1110,17 +1158,18 @@ async function runInternalScheduledPass({ minHoursBetweenRuns = 1, limit = 10 })
         latestDecision: decision,
       });
     },
-    persistAction: async (campaignIdArg, action) => {
-      const nextStatus =
-        action?.actionResult?.campaign?.effectiveStatus ||
-        action?.actionResult?.campaign?.status ||
-        null;
+   persistAction: async (campaignIdArg, action) => {
+  const nextStatus =
+    action?.actionResult?.campaign?.effectiveStatus ||
+    action?.actionResult?.campaign?.status ||
+    null;
 
-      return await updateOptimizerCampaignState(campaignIdArg, {
-        latestAction: action,
-        ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
-      });
-    },
+  return await updateOptimizerCampaignState(campaignIdArg, {
+    latestAction: action,
+    ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
+    ...buildGeneratedCreativePatchFromAction(action),
+  });
+},
     persistMonitoring: async (campaignIdArg, monitoring) => {
       return await updateOptimizerCampaignState(campaignIdArg, {
         latestMonitoringDecision: monitoring,
@@ -2610,6 +2659,7 @@ state = await updateOptimizerCampaignState(normalizedCampaignId, {
   publicSummary: buildPublicSummary({
     optimizerState: actionPatchedState,
   }),
+  ...buildGeneratedCreativePatchFromAction(action),
 });
 
     console.log('[optimizer action] persisted for campaign:', normalizedCampaignId);
@@ -2793,11 +2843,18 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-full-cycle'
           latestDecision: decision,
         });
       },
-      persistAction: async (campaignIdArg, action) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestAction: action,
-        });
-      },
+     persistAction: async (campaignIdArg, action) => {
+  const nextStatus =
+    action?.actionResult?.campaign?.effectiveStatus ||
+    action?.actionResult?.campaign?.status ||
+    null;
+
+  return await updateOptimizerCampaignState(campaignIdArg, {
+    latestAction: action,
+    ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
+    ...buildGeneratedCreativePatchFromAction(action),
+  });
+},
       persistMonitoring: async (campaignIdArg, monitoring) => {
         return await updateOptimizerCampaignState(campaignIdArg, {
           latestMonitoringDecision: monitoring,

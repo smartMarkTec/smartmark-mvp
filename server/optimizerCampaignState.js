@@ -1,4 +1,3 @@
-// server/optimizerCampaignState.js
 'use strict';
 
 const db = require('./db');
@@ -17,6 +16,38 @@ function nowIso() {
 
 function normalizeId(value) {
   return String(value || '').trim();
+}
+
+function safeObject(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function safeNullableObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function safeArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeCreativeVariants(value) {
+  return safeArray(value)
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+
+      return {
+        id: String(item.id || '').trim(),
+        url: String(item.url || item.imageUrl || '').trim(),
+        headline: String(item.headline || '').trim(),
+        body: String(item.body || '').trim(),
+        status: String(item.status || 'generated').trim(),
+        sourceActionType: String(item.sourceActionType || '').trim(),
+        goal: String(item.goal || '').trim(),
+        createdAt: String(item.createdAt || nowIso()).trim(),
+        meta: safeObject(item.meta, {}),
+      };
+    })
+    .filter((x) => x && x.url);
 }
 
 async function getAllOptimizerCampaignStates() {
@@ -84,32 +115,38 @@ async function upsertOptimizerCampaignState(input = {}) {
       typeof input.optimizationEnabled === 'boolean'
         ? input.optimizationEnabled
         : true,
-    metricsSnapshot:
-      input.metricsSnapshot && typeof input.metricsSnapshot === 'object'
-        ? input.metricsSnapshot
-        : {},
-    latestAction:
-      input.latestAction && typeof input.latestAction === 'object'
-        ? input.latestAction
-        : null,
-    latestMonitoringDecision:
-      input.latestMonitoringDecision && typeof input.latestMonitoringDecision === 'object'
-        ? input.latestMonitoringDecision
-        : null,
-    currentWinner:
-      input.currentWinner && typeof input.currentWinner === 'object'
-        ? input.currentWinner
-        : null,
-   activeTestType: String(input.activeTestType || '').trim(),
-manualOverride:
-  typeof input.manualOverride === 'boolean'
-    ? input.manualOverride
-    : false,
-manualOverrideType: String(input.manualOverrideType || '').trim(),
-manualOverrideReason: String(input.manualOverrideReason || '').trim(),
-manualOverrideAt: String(input.manualOverrideAt || '').trim(),
-createdAt: timestamp,
-updatedAt: timestamp,
+
+    billingBlocked:
+      typeof input.billingBlocked === 'boolean'
+        ? input.billingBlocked
+        : false,
+
+    metricsSnapshot: safeObject(input.metricsSnapshot, {}),
+
+    latestDiagnosis: safeNullableObject(input.latestDiagnosis),
+    latestDecision: safeNullableObject(input.latestDecision),
+    latestAction: safeNullableObject(input.latestAction),
+    latestMonitoringDecision: safeNullableObject(input.latestMonitoringDecision),
+
+    publicSummary: safeNullableObject(input.publicSummary),
+
+    currentWinner: safeNullableObject(input.currentWinner),
+    activeTestType: String(input.activeTestType || '').trim(),
+
+    generatedCreatives: normalizeCreativeVariants(input.generatedCreatives),
+    pendingCreativeTest: safeNullableObject(input.pendingCreativeTest),
+    latestCreativeMeta: safeObject(input.latestCreativeMeta, {}),
+
+    manualOverride:
+      typeof input.manualOverride === 'boolean'
+        ? input.manualOverride
+        : false,
+    manualOverrideType: String(input.manualOverrideType || '').trim(),
+    manualOverrideReason: String(input.manualOverrideReason || '').trim(),
+    manualOverrideAt: String(input.manualOverrideAt || '').trim(),
+
+    createdAt: timestamp,
+    updatedAt: timestamp,
   };
 
   if (existingIndex === -1) {
@@ -152,9 +189,59 @@ async function updateOptimizerCampaignState(campaignId, patch = {}) {
   const existing = list[index];
   const timestamp = nowIso();
 
+  const normalizedPatch = {
+    ...patch,
+  };
+
+  if ('metricsSnapshot' in normalizedPatch) {
+    normalizedPatch.metricsSnapshot = safeObject(normalizedPatch.metricsSnapshot, {});
+  }
+
+  if ('latestDiagnosis' in normalizedPatch) {
+    normalizedPatch.latestDiagnosis = safeNullableObject(normalizedPatch.latestDiagnosis);
+  }
+
+  if ('latestDecision' in normalizedPatch) {
+    normalizedPatch.latestDecision = safeNullableObject(normalizedPatch.latestDecision);
+  }
+
+  if ('latestAction' in normalizedPatch) {
+    normalizedPatch.latestAction = safeNullableObject(normalizedPatch.latestAction);
+  }
+
+  if ('latestMonitoringDecision' in normalizedPatch) {
+    normalizedPatch.latestMonitoringDecision = safeNullableObject(
+      normalizedPatch.latestMonitoringDecision
+    );
+  }
+
+  if ('publicSummary' in normalizedPatch) {
+    normalizedPatch.publicSummary = safeNullableObject(normalizedPatch.publicSummary);
+  }
+
+  if ('currentWinner' in normalizedPatch) {
+    normalizedPatch.currentWinner = safeNullableObject(normalizedPatch.currentWinner);
+  }
+
+  if ('generatedCreatives' in normalizedPatch) {
+    normalizedPatch.generatedCreatives = normalizeCreativeVariants(
+      normalizedPatch.generatedCreatives
+    );
+  }
+
+  if ('pendingCreativeTest' in normalizedPatch) {
+    normalizedPatch.pendingCreativeTest = safeNullableObject(
+      normalizedPatch.pendingCreativeTest
+    );
+  }
+
+  if ('latestCreativeMeta' in normalizedPatch) {
+    normalizedPatch.latestCreativeMeta = safeObject(normalizedPatch.latestCreativeMeta, {});
+  }
+
   const merged = {
     ...existing,
-    ...patch,
+    ...normalizedPatch,
     updatedAt: timestamp,
     createdAt: existing.createdAt || timestamp,
   };
