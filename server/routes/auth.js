@@ -26,7 +26,7 @@ const {
 const {
   syncCampaignMetricsToOptimizerState,
 } = require('../optimizerMetricsSync');
-const { buildDiagnosis } = require('../optimizerDiagnosis');
+const { buildDiagnosisAsync } = require('../optimizerDiagnosis');
 const { buildDecision } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
 const { buildMonitoring } = require('../optimizerMonitoring');
@@ -2390,10 +2390,10 @@ if (
   if (refreshed) state = refreshed;
 }
 
-    const diagnosis = buildDiagnosis({
-      optimizerState: state,
-      creativesRecord,
-    });
+   const diagnosis = await buildDiagnosisAsync({
+  optimizerState: state,
+  creativesRecord,
+});
 
     console.log('[optimizer diagnosis] input state summary:', {
   campaignId: normalizedCampaignId,
@@ -4197,10 +4197,10 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
       );
     })();
 
-    const diagnosis = buildDiagnosis({
-      optimizerState: state,
-      creativesRecord,
-    });
+   const diagnosis = await buildDiagnosisAsync({
+  optimizerState: state,
+  creativesRecord,
+});
 
     state = await updateOptimizerCampaignState(campaignId, {
       latestDiagnosis: diagnosis,

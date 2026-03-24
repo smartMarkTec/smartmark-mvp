@@ -6,7 +6,7 @@ const {
 const {
   syncCampaignMetricsToOptimizerState,
 } = require('./optimizerMetricsSync');
-const { buildDiagnosis } = require('./optimizerDiagnosis');
+const { buildDiagnosisAsync } = require('./optimizerDiagnosis');
 const { buildDecision } = require('./optimizerDecision');
 const { executeAction } = require('./optimizerAction');
 const { buildMonitoring } = require('./optimizerMonitoring');
@@ -81,7 +81,7 @@ async function runFullOptimizerCycle({
     decisionAfterMonitoring: null,
     secondAction: null,
     finishedAt: null,
-    mode: 'full_cycle_v2',
+    mode: 'full_cycle_v3_ai_diagnosis',
   };
 
   const syncResult = await syncCampaignMetricsToOptimizerState({
@@ -100,7 +100,7 @@ async function runFullOptimizerCycle({
     normalizedAccountId
   );
 
-  const diagnosis = buildDiagnosis({
+  const diagnosis = await buildDiagnosisAsync({
     optimizerState: state,
     creativesRecord,
   });
