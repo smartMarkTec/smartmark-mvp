@@ -1028,41 +1028,108 @@ router.get('/debug/fbtoken-owners', async (req, res) => {
   }
 });
 
-async function resolveFacebookTokenFromReq(req) {
+async function resolveFacebookTokenFromReq(req, options = {}) {
   await ensureUsersAndSessions();
   await db.read();
+
+  db.data = db.data || {};
+  db.data.sessions = db.data.sessions || [];
+  db.data.campaign_creatives = db.data.campaign_creatives || [];
 
   const candidates = [];
   const seen = new Set();
 
   const add = (v) => {
-    const s = String(v || "").trim();
+    const s = String(v || '').trim();
     if (!s || seen.has(s)) return;
     seen.add(s);
     candidates.push(s);
   };
 
+  const campaignId = String(options?.campaignId || req.params?.campaignId || '').trim();
+  const accountId = String(options?.accountId || req.params?.accountId || '').replace(/^act_/, '').trim();
+  const preferredOwnerKey = String(options?.preferredOwnerKey || '').trim();
+
   const reqOwner = ownerKeyFromReq(req);
   const sid = getSidFromReq(req);
+  const debugOwnerKey = getDebugOwnerKeyOverride(req);
 
+  add(preferredOwnerKey);
+  add(debugOwnerKey);
+  add(req.body?.ownerKey);
+  add(req.body?.owner_key);
+  add(req.query?.ownerKey);
+  add(req.query?.owner_key);
   add(reqOwner);
   add(sid);
 
   const sess =
     sid
-      ? (db.data.sessions || []).find((s) => String(s.sid || "").trim() === String(sid).trim())
+      ? (db.data.sessions || []).find((s) => String(s.sid || '').trim() === String(sid).trim())
       : null;
 
   if (sess?.username) add(`user:${String(sess.username).trim()}`);
 
+  if (campaignId && accountId) {
+    const exactState = await findExactOptimizerCampaignState({
+      campaignId,
+      accountId,
+      ownerKey: preferredOwnerKey || debugOwnerKey || '',
+    });
+
+    add(exactState?.ownerKey);
+
+    const looseState = await findOptimizerCampaignStateByCampaignId(campaignId);
+    add(looseState?.ownerKey);
+
+    const creativeRecord =
+      db.data.campaign_creatives.find((row) => {
+        return (
+          String(row?.campaignId || '').trim() === campaignId &&
+          String(row?.accountId || '').replace(/^act_/, '').trim() === accountId
+        );
+      }) || null;
+
+    add(creativeRecord?.ownerKey);
+  }
+
+  const expanded = [...candidates];
+
   for (const key of candidates) {
-    const token = getFbUserToken(key);
-    if (token) {
-      return { ownerKey: key, userToken: token };
+    if (String(key).startsWith('user:')) {
+      const username = String(key).slice(5).trim();
+
+      for (const s of db.data.sessions) {
+        if (String(s?.username || '').trim() === username) {
+          expanded.push(String(s.sid || '').trim());
+        }
+      }
+    }
+
+    if (/^sm_/i.test(String(key))) {
+      const matchingSession =
+        db.data.sessions.find((s) => String(s?.sid || '').trim() === String(key).trim()) || null;
+
+      if (matchingSession?.username) {
+        expanded.push(`user:${String(matchingSession.username).trim()}`);
+      }
     }
   }
 
-  return { ownerKey: reqOwner || sid || "", userToken: null };
+  for (const key of expanded) {
+    const normalized = String(key || '').trim();
+    if (!normalized) continue;
+
+    const token = getFbUserToken(normalized);
+    if (token) {
+      return { ownerKey: normalized, userToken: token };
+    }
+  }
+
+  return {
+    ownerKey: preferredOwnerKey || debugOwnerKey || reqOwner || sid || '',
+    userToken: null,
+  };
 }
 
 router.get('/facebook/defaults', async (req, res) => {
@@ -2029,33 +2096,55 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
     const { campaignId, accountId } = req.params;
     const usingDebugKey = hasValidDebugKey(req);
 
-    let state = await findOptimizerCampaignStateByCampaignId(campaignId);
+const normalizedCampaignId = String(campaignId || '').trim();
+const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
 
-    // If missing, create a minimal state directly from route params
-    if (!state) {
-const minimalPayload = {
-  campaignId: String(campaignId || '').trim(),
-  metaCampaignId: String(campaignId || '').trim(),
-  accountId: String(accountId || '').replace(/^act_/, '').trim(),
-  ownerKey: '',
-  pageId: '',
-  campaignName: '',
-  niche: '',
-  currentStatus: 'ACTIVE',
-  optimizationEnabled: true,
-  billingBlocked: false,
-  metricsSnapshot: {},
-  latestAction: null,
-  latestMonitoringDecision: null,
-  currentWinner: null,
-  activeTestType: '',
-  publicSummary: makeInitialPublicSummary(),
-};
+let debugOwnerKey = '';
 
-      console.log('[optimizer state] creating minimal fallback state from route params:', minimalPayload);
+if (usingDebugKey) {
+  debugOwnerKey = String(
+    getDebugOwnerKeyOverride(req) ||
+    req.body?.ownerKey ||
+    req.body?.owner_key ||
+    ''
+  ).trim();
+}
 
-      state = await upsertOptimizerCampaignState(minimalPayload);
-    }
+let state = await findExactOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: debugOwnerKey,
+});
+
+if (!state) {
+  state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+}
+
+// If missing, create a minimal state directly from route params
+if (!state) {
+  const minimalPayload = {
+    campaignId: normalizedCampaignId,
+    metaCampaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    ownerKey: debugOwnerKey,
+    pageId: '',
+    campaignName: '',
+    niche: '',
+    currentStatus: 'ACTIVE',
+    optimizationEnabled: true,
+    billingBlocked: false,
+    metricsSnapshot: {},
+    latestAction: null,
+    latestMonitoringDecision: null,
+    currentWinner: null,
+    activeTestType: '',
+    publicSummary: makeInitialPublicSummary(),
+  };
+
+  console.log('[optimizer state] creating minimal fallback state from route params:', minimalPayload);
+
+  state = await upsertOptimizerCampaignState(minimalPayload);
+}
 
     if (!state) {
       return res.status(404).json({
@@ -2715,12 +2804,16 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
     let userToken = null;
 
 if (usingDebugKey) {
-  const resolved = await resolveFacebookTokenFromReq(req);
+  const resolved = await resolveFacebookTokenFromReq(req, {
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    preferredOwnerKey: String(state?.ownerKey || debugOwnerKey || '').trim(),
+  });
 
   ownerKey = String(
     resolved?.ownerKey ||
     state.ownerKey ||
-    getDebugOwnerKeyOverride(req) ||
+    debugOwnerKey ||
     req.body?.ownerKey ||
     req.body?.owner_key ||
     ''
@@ -2745,6 +2838,8 @@ if (usingDebugKey) {
       ok: false,
       error: 'No Facebook token available for action execution.',
       ownerKey,
+      stateOwnerKey: String(state?.ownerKey || '').trim() || null,
+      debugOwnerKey: debugOwnerKey || null,
       resolvedOwnerKey: resolved?.ownerKey || null,
     });
   }
