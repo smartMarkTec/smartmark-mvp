@@ -1,5 +1,7 @@
 'use strict';
 
+const { runOptimizerBrainDiagnosis } = require('./optimizerBrain');
+
 function toNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -72,7 +74,7 @@ function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
 
-function buildDiagnosis({ optimizerState, creativesRecord = null }) {
+function buildFallbackDiagnosis({ optimizerState, creativesRecord = null }) {
   const metrics = optimizerState?.metricsSnapshot || {};
 
   const spend = toNumber(metrics.spend, 0);
@@ -254,10 +256,135 @@ function buildDiagnosis({ optimizerState, creativesRecord = null }) {
     },
     creativeContext,
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v2',
+    mode: 'fallback_rule_based_v1',
   };
+}
+
+function attachSharedContext({ base, optimizerState, creativesRecord }) {
+  const metrics = optimizerState?.metricsSnapshot || {};
+  const spend = toNumber(metrics.spend, 0);
+  const impressions = toNumber(metrics.impressions, 0);
+  const reach = toNumber(metrics.reach, 0);
+  const clicks = toNumber(metrics.clicks, 0);
+  const linkClicks = toNumber(
+    metrics.linkClicks != null ? metrics.linkClicks : metrics.uniqueClicks,
+    0
+  );
+  const conversions = toNumber(metrics.conversions, 0);
+
+  const ctr = deriveCtr(clicks || linkClicks, impressions, metrics.ctr);
+  const cpc = deriveCpc(spend, linkClicks, metrics.cpc);
+  const frequency = deriveFrequency(impressions, reach, metrics.frequency);
+  const conversionRate = deriveConversionRate(
+    conversions,
+    linkClicks,
+    metrics.conversionRate
+  );
+
+  const latestAction = optimizerState?.latestAction || null;
+  const inspectedCampaign = latestAction?.actionResult?.campaign || null;
+
+  const currentStatus = normalizeStatus(
+    optimizerState?.currentStatus ||
+      inspectedCampaign?.effectiveStatus ||
+      inspectedCampaign?.status
+  );
+
+  const inspectedStartTime = String(
+    inspectedCampaign?.startTime || optimizerState?.startTime || ''
+  ).trim();
+
+  const nowMs = Date.now();
+  const startMs = inspectedStartTime ? new Date(inspectedStartTime).getTime() : NaN;
+  const hasFutureStart = Number.isFinite(startMs) && startMs > nowMs;
+  const hasAnyDelivery = impressions > 0 || spend > 0;
+  const hasMeaningfulDelivery = impressions >= 250 || spend >= 5;
+  const hasSomeClickSignal = clicks > 0 || linkClicks > 0;
+
+  return {
+    ...base,
+    campaignId: String(optimizerState?.campaignId || '').trim(),
+    metricsSummary: {
+      spend,
+      impressions,
+      reach,
+      clicks,
+      linkClicks,
+      ctr: Number.isFinite(ctr) ? ctr : 0,
+      cpc: toNullableNumber(cpc),
+      frequency: toNullableNumber(frequency),
+      conversions,
+      conversionRate: toNullableNumber(conversionRate),
+    },
+    deliveryContext: {
+      currentStatus,
+      hasFutureStart,
+      inspectedStartTime: inspectedStartTime || null,
+      billingBlocked: optimizerState?.billingBlocked === true,
+      hasAnyDelivery,
+      hasMeaningfulDelivery,
+      hasSomeClickSignal,
+    },
+    creativeContext: pickPrimaryCreativeContext(creativesRecord),
+  };
+}
+
+function buildDiagnosis({ optimizerState, creativesRecord = null }) {
+  const useAiBrain = String(process.env.OPTIMIZER_USE_AI_BRAIN || '1').trim() === '1';
+
+  const fallback = buildFallbackDiagnosis({
+    optimizerState,
+    creativesRecord,
+  });
+
+  if (!useAiBrain) {
+    return fallback;
+  }
+
+  return attachSharedContext({
+    base: fallback,
+    optimizerState,
+    creativesRecord,
+  });
+}
+
+async function buildDiagnosisAsync({ optimizerState, creativesRecord = null }) {
+  const useAiBrain = String(process.env.OPTIMIZER_USE_AI_BRAIN || '1').trim() === '1';
+
+  const fallback = buildFallbackDiagnosis({
+    optimizerState,
+    creativesRecord,
+  });
+
+  if (!useAiBrain) {
+    return fallback;
+  }
+
+  try {
+    const aiResult = await runOptimizerBrainDiagnosis({
+      optimizerState,
+      creativesRecord,
+    });
+
+    return attachSharedContext({
+      base: aiResult,
+      optimizerState,
+      creativesRecord,
+    });
+  } catch (err) {
+    return attachSharedContext({
+      base: {
+        ...fallback,
+        reason: `${fallback.reason} AI fallback triggered: ${String(err?.message || 'unknown error')}`,
+        mode: 'fallback_rule_based_v1',
+      },
+      optimizerState,
+      creativesRecord,
+    });
+  }
 }
 
 module.exports = {
   buildDiagnosis,
+  buildDiagnosisAsync,
 };

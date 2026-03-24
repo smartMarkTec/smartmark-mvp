@@ -11,6 +11,14 @@ function normalizeActionType(value) {
   return String(value || '').trim();
 }
 
+function getInternalApiBase() {
+  return (
+    process.env.PUBLIC_BASE_URL ||
+    process.env.RENDER_EXTERNAL_URL ||
+    'https://smartmark-mvp.onrender.com'
+  ).replace(/\/+$/, '');
+}
+
 function shouldBlockMutationForManualOverride(actionType) {
   return [
     'unpause_campaign',
@@ -40,7 +48,7 @@ function buildBaseSkippedResult({
     actionType: normalizeActionType(actionType) || 'none',
     reason,
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v3',
+    mode: 'rule_based_mvp_v4',
     ...extra,
   };
 }
@@ -111,6 +119,68 @@ function buildCreativeGenerationPlan({ optimizerState }) {
     variantCount,
     creativeGoal,
     reason,
+  };
+}
+
+function inferBusinessContext(optimizerState) {
+  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
+  const latestDecision = optimizerState?.latestDecision || null;
+  const latestAction = optimizerState?.latestAction || null;
+  const metrics = optimizerState?.metricsSnapshot || {};
+
+  const currentCopy =
+    String(latestAction?.actionResult?.updatedPrimaryText || '').trim() ||
+    String(latestAction?.actionResult?.previousPrimaryText || '').trim() ||
+    String(optimizerState?.latestCreativeMeta?.body || '').trim() ||
+    '';
+
+  const campaignName = String(optimizerState?.campaignName || '').trim() || 'Smartemark Campaign';
+  const niche = String(optimizerState?.niche || '').trim();
+
+  return {
+    campaignName,
+    niche,
+    diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+    decision: String(latestDecision?.decision || '').trim(),
+    currentCopy,
+    ctr: Number(metrics?.ctr || 0),
+    impressions: Number(metrics?.impressions || 0),
+    clicks: Number(metrics?.clicks || 0),
+    spend: Number(metrics?.spend || 0),
+    frequency: Number(metrics?.frequency || 0),
+  };
+}
+
+function buildCreativePromptContext({ optimizerState, variantCount, creativeGoal }) {
+  const ctx = inferBusinessContext(optimizerState);
+
+  const businessType = ctx.niche || 'local business';
+  const hookDirection =
+    creativeGoal === 'launch_ab_creative_test'
+      ? 'Create distinct visual angles that feel different enough for an A/B test.'
+      : creativeGoal === 'test_two_fresh_angles'
+      ? 'Create stronger, clearer ad concepts with sharper visual hooks.'
+      : creativeGoal === 'support_copy_refresh_with_new_visual'
+      ? 'Create a cleaner, more compelling visual that supports the refreshed ad copy.'
+      : 'Create a stronger visual hook for performance improvement.';
+
+  const prompt = [
+    `Business type: ${businessType}.`,
+    `Campaign name: ${ctx.campaignName}.`,
+    `Diagnosis: ${ctx.diagnosis || 'performance improvement needed'}.`,
+    `Decision: ${ctx.decision || 'refresh creative'}.`,
+    ctx.currentCopy ? `Current ad copy: ${ctx.currentCopy}` : '',
+    `Goal: ${creativeGoal}.`,
+    hookDirection,
+    `Generate ${variantCount} static ad creative ${variantCount === 1 ? 'concept' : 'concepts'} suitable for Meta ads.`,
+    'Make the image clean, modern, attention-grabbing, and conversion-oriented.',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return {
+    prompt,
+    businessType,
   };
 }
 
@@ -233,51 +303,100 @@ async function executePrimaryTextRefresh({
     reason:
       'Created a replacement ad creative with refreshed primary text and updated the ad to use it.',
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v3',
+    mode: 'rule_based_mvp_v4',
   };
 }
 
-function buildCreativeGenerationCapacityResult({
+async function executeCreativeGeneration({
   optimizerState,
   actionType,
 }) {
   const campaignId = String(optimizerState?.campaignId || '').trim();
-  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
-  const latestDecision = optimizerState?.latestDecision || null;
-  const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
-
   const plan = buildCreativeGenerationPlan({ optimizerState });
 
-  const forcedVariantCount =
+  const variantCount =
     actionType === 'generate_two_creative_variants'
       ? 2
       : actionType === 'generate_single_creative_variant'
       ? 1
       : plan.variantCount;
 
-  return buildBaseSkippedResult({
-    campaignId,
-    actionType,
-    status: 'creative_generation_ready_not_executed',
-    reason:
-      'Smartemark identified that fresh creatives should be generated, and the action layer now has the capacity to request this next.',
-    extra: {
-      actionResult: {
-        productionSafeNow: false,
-        generationReady: true,
-        variantCount: forcedVariantCount,
-        creativeGoal: plan.creativeGoal,
-        generationReason: plan.reason,
-        diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
-        decision: String(latestDecision?.decision || '').trim(),
-        monitoringDecision: String(
-          latestMonitoringDecision?.monitoringDecision || ''
-        ).trim(),
-        nextSystemRequirement:
-          'Wire this action into FormPage/image generation pipeline so AI can request 1 or 2 fresh variants dynamically.',
-      },
-    },
+  const { prompt, businessType } = buildCreativePromptContext({
+    optimizerState,
+    variantCount,
+    creativeGoal: plan.creativeGoal,
   });
+
+  const apiBase = getInternalApiBase();
+
+  const requestBody = {
+    prompt,
+    businessType,
+    styleTemplate: 'poster_b',
+    count: variantCount,
+  };
+
+  const response = await axios.post(
+    `${apiBase}/api/generate-static-ad`,
+    requestBody,
+    {
+      timeout: 120000,
+      maxBodyLength: 20 * 1024 * 1024,
+      maxContentLength: 20 * 1024 * 1024,
+    }
+  );
+
+  const data = response.data || {};
+  const imageUrls = Array.isArray(data?.imageUrls)
+    ? data.imageUrls.filter(Boolean).slice(0, variantCount)
+    : Array.isArray(data?.imageVariants)
+    ? data.imageVariants.filter(Boolean).slice(0, variantCount)
+    : [];
+
+  if (!imageUrls.length) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType,
+      status: 'creative_generation_failed',
+      reason:
+        'Smartemark called the image generation pipeline, but no image URLs were returned.',
+      extra: {
+        actionResult: {
+          generationReady: true,
+          creativeGoal: plan.creativeGoal,
+          requestedVariantCount: variantCount,
+          requestBody,
+          rawResponse: data,
+        },
+      },
+    });
+  }
+
+  return {
+    campaignId,
+    executed: true,
+    status: 'completed',
+    actionType,
+    actionResult: {
+      mutationType: 'generate_creative_variants',
+      generationReady: true,
+      creativeGoal: plan.creativeGoal,
+      generationReason: plan.reason,
+      requestedVariantCount: variantCount,
+      generatedVariantCount: imageUrls.length,
+      imageUrls,
+      generationPrompt: prompt,
+      generatorResponse: data,
+      nextSystemRequirement:
+        'Review generated variants, store them to campaign creative state, and later wire controlled Meta creative swap/testing.',
+    },
+    reason:
+      variantCount === 2
+        ? 'Generated two fresh creative variants for AI-directed testing.'
+        : 'Generated one fresh replacement creative variant.',
+    generatedAt: new Date().toISOString(),
+    mode: 'rule_based_mvp_v4',
+  };
 }
 
 async function executeAction({
@@ -314,7 +433,6 @@ async function executeAction({
   }
 
   const actionType = normalizeActionType(latestDecision.actionType);
-  const diagnosis = String(latestDiagnosis?.diagnosis || '').trim();
   const monitoringDecision = String(
     latestMonitoringDecision?.monitoringDecision || ''
   ).trim();
@@ -370,7 +488,7 @@ async function executeAction({
       reason:
         'Checked campaign delivery status from Meta before attempting optimization changes.',
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v3',
+      mode: 'rule_based_mvp_v4',
     };
   }
 
@@ -416,7 +534,7 @@ async function executeAction({
       reason:
         'Campaign was unpaused because delivery conditions indicated status-based blockage.',
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v3',
+      mode: 'rule_based_mvp_v4',
     };
   }
 
@@ -437,7 +555,7 @@ async function executeAction({
     actionType === 'test_new_audience_or_creative' ||
     actionType === 'test_offer_or_audience_angle'
   ) {
-    return buildCreativeGenerationCapacityResult({
+    return await executeCreativeGeneration({
       optimizerState,
       actionType,
     });
