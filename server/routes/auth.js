@@ -1214,7 +1214,34 @@ async function findExactOptimizerCampaignState({ campaignId, accountId, ownerKey
 
   if (!rows.length) return null;
 
+  function scoreRow(row) {
+    const metrics = row?.metricsSnapshot || {};
+    const hasMetrics =
+      Number(metrics?.impressions || 0) > 0 ||
+      Number(metrics?.spend || 0) > 0 ||
+      Number(metrics?.clicks || 0) > 0 ||
+      Number(metrics?.linkClicks || 0) > 0;
+
+    const hasDiagnosis = !!row?.latestDiagnosis;
+    const hasDecision = !!row?.latestDecision;
+    const hasAction = !!row?.latestAction;
+    const hasGeneratedCreatives = Array.isArray(row?.generatedCreatives) && row.generatedCreatives.length > 0;
+    const hasPendingCreativeTest = !!row?.pendingCreativeTest;
+
+    return (
+      (hasDecision ? 1000 : 0) +
+      (hasDiagnosis ? 500 : 0) +
+      (hasAction ? 250 : 0) +
+      (hasMetrics ? 120 : 0) +
+      (hasPendingCreativeTest ? 60 : 0) +
+      (hasGeneratedCreatives ? 40 : 0)
+    );
+  }
+
   rows.sort((a, b) => {
+    const scoreDiff = scoreRow(b) - scoreRow(a);
+    if (scoreDiff !== 0) return scoreDiff;
+
     const aUpdated = new Date(a?.updatedAt || a?.createdAt || 0).getTime();
     const bUpdated = new Date(b?.updatedAt || b?.createdAt || 0).getTime();
     return bUpdated - aUpdated;
