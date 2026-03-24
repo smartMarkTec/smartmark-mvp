@@ -7,6 +7,10 @@ function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
 
+function normalizeActionType(value) {
+  return String(value || '').trim();
+}
+
 function shouldBlockMutationForManualOverride(actionType) {
   return [
     'unpause_campaign',
@@ -14,10 +18,12 @@ function shouldBlockMutationForManualOverride(actionType) {
     'update_headline',
     'duplicate_ad',
     'prepare_fresh_creative_variant',
+    'generate_single_creative_variant',
+    'generate_two_creative_variants',
     'test_new_audience_or_creative',
     'test_offer_or_audience_angle',
     'test_new_primary_text_or_headline',
-  ].includes(String(actionType || '').trim());
+  ].includes(normalizeActionType(actionType));
 }
 
 function buildBaseSkippedResult({
@@ -31,10 +37,10 @@ function buildBaseSkippedResult({
     campaignId,
     executed: false,
     status,
-    actionType: String(actionType || '').trim() || 'none',
+    actionType: normalizeActionType(actionType) || 'none',
     reason,
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v2',
+    mode: 'rule_based_mvp_v3',
     ...extra,
   };
 }
@@ -57,6 +63,54 @@ async function fetchCampaignStatus({ campaignId, userToken }) {
     configuredStatus: String(campaign.configured_status || '').trim(),
     objective: String(campaign.objective || '').trim(),
     startTime: String(campaign.start_time || '').trim(),
+  };
+}
+
+function buildCreativeGenerationPlan({ optimizerState }) {
+  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
+  const latestDecision = optimizerState?.latestDecision || null;
+  const metrics = optimizerState?.metricsSnapshot || {};
+
+  const diagnosis = String(latestDiagnosis?.diagnosis || '').trim();
+  const decision = String(latestDecision?.decision || '').trim();
+  const ctr = Number(metrics?.ctr || 0);
+  const frequency = Number(metrics?.frequency || 0);
+  const impressions = Number(metrics?.impressions || 0);
+
+  let variantCount = 1;
+  let reason =
+    'Smartemark wants a fresh creative direction, but a single replacement concept is enough for the next step.';
+  let creativeGoal = 'refresh_visual_hook';
+
+  if (
+    diagnosis === 'creative_fatigue_risk' ||
+    decision === 'prepare_refresh' ||
+    (frequency >= 2.5 && impressions >= 800)
+  ) {
+    variantCount = 2;
+    creativeGoal = 'launch_ab_creative_test';
+    reason =
+      'Smartemark sees signs of fatigue or unclear creative strength, so two fresh variants should be generated for controlled testing.';
+  } else if (
+    diagnosis === 'weak_engagement' ||
+    diagnosis === 'high_cpc' ||
+    decision === 'improve_efficiency'
+  ) {
+    variantCount = 2;
+    creativeGoal = 'test_two_fresh_angles';
+    reason =
+      'Smartemark wants to test two different visual directions because response quality is weak enough to justify creative comparison.';
+  } else if (diagnosis === 'low_ctr' && ctr < 0.9) {
+    variantCount = 1;
+    creativeGoal = 'support_copy_refresh_with_new_visual';
+    reason =
+      'Low CTR is present, but Smartemark can start with one stronger replacement visual before escalating to a broader A/B test.';
+  }
+
+  return {
+    variantCount,
+    creativeGoal,
+    reason,
   };
 }
 
@@ -179,8 +233,51 @@ async function executePrimaryTextRefresh({
     reason:
       'Created a replacement ad creative with refreshed primary text and updated the ad to use it.',
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v2',
+    mode: 'rule_based_mvp_v3',
   };
+}
+
+function buildCreativeGenerationCapacityResult({
+  optimizerState,
+  actionType,
+}) {
+  const campaignId = String(optimizerState?.campaignId || '').trim();
+  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
+  const latestDecision = optimizerState?.latestDecision || null;
+  const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
+
+  const plan = buildCreativeGenerationPlan({ optimizerState });
+
+  const forcedVariantCount =
+    actionType === 'generate_two_creative_variants'
+      ? 2
+      : actionType === 'generate_single_creative_variant'
+      ? 1
+      : plan.variantCount;
+
+  return buildBaseSkippedResult({
+    campaignId,
+    actionType,
+    status: 'creative_generation_ready_not_executed',
+    reason:
+      'Smartemark identified that fresh creatives should be generated, and the action layer now has the capacity to request this next.',
+    extra: {
+      actionResult: {
+        productionSafeNow: false,
+        generationReady: true,
+        variantCount: forcedVariantCount,
+        creativeGoal: plan.creativeGoal,
+        generationReason: plan.reason,
+        diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+        decision: String(latestDecision?.decision || '').trim(),
+        monitoringDecision: String(
+          latestMonitoringDecision?.monitoringDecision || ''
+        ).trim(),
+        nextSystemRequirement:
+          'Wire this action into FormPage/image generation pipeline so AI can request 1 or 2 fresh variants dynamically.',
+      },
+    },
+  });
 }
 
 async function executeAction({
@@ -196,9 +293,9 @@ async function executeAction({
   }
 
   const campaignId = String(optimizerState.campaignId || '').trim();
-  const latestDecision = optimizerState.latestDecision || null;
-  const latestMonitoringDecision = optimizerState.latestMonitoringDecision || null;
-  const latestDiagnosis = optimizerState.latestDiagnosis || null;
+  const latestDecision = optimizerState?.latestDecision || null;
+  const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
+  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
 
   const manualOverride = !!optimizerState.manualOverride;
   const manualOverrideType = String(optimizerState.manualOverrideType || '').trim();
@@ -216,7 +313,7 @@ async function executeAction({
     });
   }
 
-  const actionType = String(latestDecision.actionType || '').trim();
+  const actionType = normalizeActionType(latestDecision.actionType);
   const diagnosis = String(latestDiagnosis?.diagnosis || '').trim();
   const monitoringDecision = String(
     latestMonitoringDecision?.monitoringDecision || ''
@@ -273,7 +370,7 @@ async function executeAction({
       reason:
         'Checked campaign delivery status from Meta before attempting optimization changes.',
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v2',
+      mode: 'rule_based_mvp_v3',
     };
   }
 
@@ -319,7 +416,7 @@ async function executeAction({
       reason:
         'Campaign was unpaused because delivery conditions indicated status-based blockage.',
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v2',
+      mode: 'rule_based_mvp_v3',
     };
   }
 
@@ -335,22 +432,14 @@ async function executeAction({
 
   if (
     actionType === 'prepare_fresh_creative_variant' ||
+    actionType === 'generate_single_creative_variant' ||
+    actionType === 'generate_two_creative_variants' ||
     actionType === 'test_new_audience_or_creative' ||
     actionType === 'test_offer_or_audience_angle'
   ) {
-    return buildBaseSkippedResult({
-      campaignId,
+    return buildCreativeGenerationCapacityResult({
+      optimizerState,
       actionType,
-      status: 'planned_not_executed',
-      reason:
-        'This optimization path has been identified, but Smartemark is not yet allowed to execute this mutation automatically in production.',
-      extra: {
-        actionResult: {
-          diagnosis,
-          monitoringDecision,
-          productionSafeNow: false,
-        },
-      },
     });
   }
 
