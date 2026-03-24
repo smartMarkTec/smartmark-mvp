@@ -1,11 +1,13 @@
 'use strict';
 
+const { runOptimizerBrainDecision } = require('./optimizerBrain');
+
 function toNumber(value, fallback = 0) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
 }
 
-function buildDecision({ optimizerState }) {
+function buildFallbackDecision({ optimizerState }) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
   const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
   const latestAction = optimizerState?.latestAction || null;
@@ -45,7 +47,7 @@ function buildDecision({ optimizerState }) {
           conversions,
         },
         generatedAt: new Date().toISOString(),
-        mode: 'rule_based_mvp_v3',
+        mode: 'fallback_rule_based_v1',
       };
     }
 
@@ -75,7 +77,7 @@ function buildDecision({ optimizerState }) {
           ctr,
         },
         generatedAt: new Date().toISOString(),
-        mode: 'rule_based_mvp_v3',
+        mode: 'fallback_rule_based_v1',
       };
     }
 
@@ -98,7 +100,7 @@ function buildDecision({ optimizerState }) {
           conversions,
         },
         generatedAt: new Date().toISOString(),
-        mode: 'rule_based_mvp_v3',
+        mode: 'fallback_rule_based_v1',
       };
     }
   }
@@ -120,7 +122,7 @@ function buildDecision({ optimizerState }) {
         conversions,
       },
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v3',
+      mode: 'fallback_rule_based_v1',
     };
   }
 
@@ -250,10 +252,74 @@ function buildDecision({ optimizerState }) {
       frequency,
     },
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v3',
+    mode: 'fallback_rule_based_v1',
   };
+}
+
+function attachDecisionContext({ base, optimizerState }) {
+  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
+  const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
+  const latestAction = optimizerState?.latestAction || null;
+  const metrics = optimizerState?.metricsSnapshot || {};
+
+  return {
+    ...base,
+    campaignId: String(optimizerState?.campaignId || '').trim(),
+    supportingContext: {
+      diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+      recommendedAction: String(latestDiagnosis?.recommendedAction || '').trim(),
+      lastActionType: String(latestAction?.actionType || '').trim(),
+      lastActionStatus: String(latestAction?.status || '').trim(),
+      monitoringDecision: String(
+        latestMonitoringDecision?.monitoringDecision || ''
+      ).trim(),
+      spend: toNumber(metrics.spend, 0),
+      impressions: toNumber(metrics.impressions, 0),
+      linkClicks: toNumber(
+        metrics.linkClicks != null ? metrics.linkClicks : metrics.uniqueClicks,
+        0
+      ),
+      conversions: toNumber(metrics.conversions, 0),
+      ctr: toNumber(metrics.ctr, 0),
+      frequency: toNumber(metrics.frequency, 0),
+    },
+  };
+}
+
+function buildDecision({ optimizerState }) {
+  return buildFallbackDecision({ optimizerState });
+}
+
+async function buildDecisionAsync({ optimizerState }) {
+  const useAiBrain = String(process.env.OPTIMIZER_USE_AI_BRAIN || '1').trim() === '1';
+  const fallback = buildFallbackDecision({ optimizerState });
+
+  if (!useAiBrain) {
+    return fallback;
+  }
+
+  try {
+    const aiResult = await runOptimizerBrainDecision({
+      optimizerState,
+    });
+
+    return attachDecisionContext({
+      base: aiResult,
+      optimizerState,
+    });
+  } catch (err) {
+    return attachDecisionContext({
+      base: {
+        ...fallback,
+        reason: `${fallback.reason} AI fallback triggered: ${String(err?.message || 'unknown error')}`,
+        mode: 'fallback_rule_based_v1',
+      },
+      optimizerState,
+    });
+  }
 }
 
 module.exports = {
   buildDecision,
+  buildDecisionAsync,
 };

@@ -121,14 +121,8 @@ Rules:
   const response = await client.responses.create({
     model: MODEL,
     input: [
-      {
-        role: 'system',
-        content: systemPrompt,
-      },
-      {
-        role: 'user',
-        content: JSON.stringify(input),
-      },
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(input) },
     ],
     temperature: 0.2,
     max_output_tokens: 500,
@@ -156,6 +150,115 @@ Rules:
   };
 }
 
+async function runOptimizerBrainDecision({
+  optimizerState,
+}) {
+  const client = getClient();
+
+  const allowedDecisions = [
+    'restore_delivery',
+    'hold_after_copy_refresh',
+    'hold_after_delivery_restore',
+    'wait_for_start_window',
+    'resolve_billing_block',
+    'investigate_delivery',
+    'hold_and_monitor',
+    'launch_creative_test',
+    'refresh_copy',
+    'adjust_angle',
+    'prepare_refresh',
+    'test_two_creative_angles',
+    'test_single_creative_angle',
+    'insufficient_context',
+  ];
+
+  const allowedActionTypes = [
+    'unpause_campaign',
+    'continue_monitoring',
+    'check_delivery_status',
+    'update_primary_text',
+    'generate_single_creative_variant',
+    'generate_two_creative_variants',
+    'run_diagnosis_first',
+    'wait_for_start_time',
+  ];
+
+  const systemPrompt = `
+You are Smartemark's autonomous marketer decision engine.
+
+You receive campaign metrics, diagnosis, monitoring state, and recent action history.
+Your job is to decide the next best marketer move.
+
+Return ONLY valid JSON with this exact shape:
+{
+  "decision": "one of the allowed values",
+  "actionType": "one of the allowed values",
+  "priority": "low | medium | high",
+  "reason": "string",
+  "requiresHumanApproval": true,
+  "confidence": 0.0
+}
+
+Rules:
+- Be conservative.
+- Prefer continue_monitoring when there is not enough trustworthy new signal.
+- If delivery is blocked, prioritize restoring delivery.
+- If copy was just refreshed, do not immediately refresh again.
+- If weak engagement or fatigue suggest creative testing, choose one or two creative variants depending on how strong the evidence is.
+- Action type must be from the allowed list.
+- Confidence must be from 0 to 1.
+- Output JSON only. No markdown.
+`.trim();
+
+  const input = {
+    campaignId: String(optimizerState?.campaignId || '').trim(),
+    campaignName: String(optimizerState?.campaignName || '').trim(),
+    niche: String(optimizerState?.niche || '').trim(),
+    currentStatus: String(optimizerState?.currentStatus || '').trim(),
+    metricsSnapshot: optimizerState?.metricsSnapshot || {},
+    latestDiagnosis: optimizerState?.latestDiagnosis || null,
+    latestMonitoringDecision: optimizerState?.latestMonitoringDecision || null,
+    latestAction: optimizerState?.latestAction || null,
+    manualOverride: !!optimizerState?.manualOverride,
+    allowedDecisions,
+    allowedActionTypes,
+  };
+
+  const response = await client.responses.create({
+    model: MODEL,
+    input: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: JSON.stringify(input) },
+    ],
+    temperature: 0.2,
+    max_output_tokens: 500,
+  });
+
+  const text = String(response.output_text || '').trim();
+  const parsed = safeJsonParse(text);
+
+  if (!parsed || typeof parsed !== 'object') {
+    throw new Error('Optimizer brain returned invalid JSON for decision');
+  }
+
+  const priorityRaw = String(parsed.priority || '').trim().toLowerCase();
+  const priority = ['low', 'medium', 'high'].includes(priorityRaw)
+    ? priorityRaw
+    : 'medium';
+
+  return {
+    decision: normalizeAllowedValue(parsed.decision, allowedDecisions, 'hold_and_monitor'),
+    actionType: normalizeAllowedValue(parsed.actionType, allowedActionTypes, 'continue_monitoring'),
+    priority,
+    reason: String(parsed.reason || 'AI decision did not provide a detailed reason.').trim(),
+    requiresHumanApproval: true,
+    confidence: clampConfidence(parsed.confidence, 0.75),
+    generatedAt: new Date().toISOString(),
+    mode: 'ai_brain_v1',
+  };
+}
+
 module.exports = {
   runOptimizerBrainDiagnosis,
+  runOptimizerBrainDecision,
 };

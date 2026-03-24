@@ -7,7 +7,7 @@ const {
   syncCampaignMetricsToOptimizerState,
 } = require('./optimizerMetricsSync');
 const { buildDiagnosisAsync } = require('./optimizerDiagnosis');
-const { buildDecision } = require('./optimizerDecision');
+const { buildDecisionAsync } = require('./optimizerDecision');
 const { executeAction } = require('./optimizerAction');
 const { buildMonitoring } = require('./optimizerMonitoring');
 
@@ -109,9 +109,9 @@ async function runFullOptimizerCycle({
 
   state = await safeReloadState(normalizedCampaignId, 'after diagnosis');
 
-  const decisionBeforeAction = buildDecision({
-    optimizerState: state,
-  });
+ const decisionBeforeAction = await buildDecisionAsync({
+  optimizerState: state,
+});
   await persistDecision(normalizedCampaignId, decisionBeforeAction);
   cycle.decisionBeforeAction = decisionBeforeAction;
 
@@ -134,9 +134,9 @@ async function runFullOptimizerCycle({
 
   state = await safeReloadState(normalizedCampaignId, 'after monitoring');
 
-  const decisionAfterMonitoring = buildDecision({
-    optimizerState: state,
-  });
+ const decisionAfterMonitoring = await buildDecisionAsync({
+  optimizerState: state,
+});
   await persistDecision(normalizedCampaignId, decisionAfterMonitoring);
   cycle.decisionAfterMonitoring = decisionAfterMonitoring;
 
