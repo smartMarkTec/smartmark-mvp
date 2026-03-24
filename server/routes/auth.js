@@ -2714,36 +2714,41 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
     let ownerKey = '';
     let userToken = null;
 
-    if (usingDebugKey) {
-      ownerKey = String(
-        state.ownerKey ||
-        getDebugOwnerKeyOverride(req) ||
-        req.body?.ownerKey ||
-        req.body?.owner_key ||
-        ''
-      ).trim();
+if (usingDebugKey) {
+  const resolved = await resolveFacebookTokenFromReq(req);
 
-      if (!ownerKey) {
-        return res.status(401).json({
-          ok: false,
-          error: 'No ownerKey found on optimizer state for action execution.',
-        });
-      }
+  ownerKey = String(
+    resolved?.ownerKey ||
+    state.ownerKey ||
+    getDebugOwnerKeyOverride(req) ||
+    req.body?.ownerKey ||
+    req.body?.owner_key ||
+    ''
+  ).trim();
 
-      userToken =
-        getFbUserToken(ownerKey) ||
-        String(req.body?.userToken || req.query?.userToken || '').trim() ||
-        String(req.body?.fbUserToken || req.query?.fbUserToken || '').trim() ||
-        '';
+  userToken =
+    resolved?.userToken ||
+    getFbUserToken(ownerKey) ||
+    String(req.body?.userToken || req.query?.userToken || '').trim() ||
+    String(req.body?.fbUserToken || req.query?.fbUserToken || '').trim() ||
+    '';
 
-      if (!userToken) {
-        return res.status(401).json({
-          ok: false,
-          error: 'No Facebook token available for action execution.',
-          ownerKey,
-        });
-      }
-    } else {
+  if (!ownerKey) {
+    return res.status(401).json({
+      ok: false,
+      error: 'No ownerKey found on optimizer state for action execution.',
+    });
+  }
+
+  if (!userToken) {
+    return res.status(401).json({
+      ok: false,
+      error: 'No Facebook token available for action execution.',
+      ownerKey,
+      resolvedOwnerKey: resolved?.ownerKey || null,
+    });
+  }
+} else {
       const session = await requireSession(req);
       if (!session.ok) {
         return res.status(session.status).json({ ok: false, error: session.error });
