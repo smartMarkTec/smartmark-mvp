@@ -3,6 +3,8 @@
 const axios = require('axios');
 const { buildUpdatedPrimaryText } = require('./optimizerCopy');
 
+const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v18.0';
+
 function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
 }
@@ -19,6 +21,10 @@ function getInternalApiBase() {
   ).replace(/\/+$/, '');
 }
 
+function getGraphBase() {
+  return `https://graph.facebook.com/${GRAPH_VERSION}`;
+}
+
 function shouldBlockMutationForManualOverride(actionType) {
   return [
     'unpause_campaign',
@@ -31,6 +37,8 @@ function shouldBlockMutationForManualOverride(actionType) {
     'test_new_audience_or_creative',
     'test_offer_or_audience_angle',
     'test_new_primary_text_or_headline',
+    'promote_generated_creative_variants',
+    'launch_generated_creative_test',
   ].includes(normalizeActionType(actionType));
 }
 
@@ -48,13 +56,63 @@ function buildBaseSkippedResult({
     actionType: normalizeActionType(actionType) || 'none',
     reason,
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v4',
+    mode: 'ai_directed_marketer_v1',
     ...extra,
   };
 }
 
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function dedupeStrings(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map((v) => String(v || '').trim()).filter(Boolean))];
+}
+
+function getActionConfig(optimizerState) {
+  const latestDecision = optimizerState?.latestDecision || null;
+
+  return (
+    latestDecision?.actionConfig ||
+    latestDecision?.actionMeta ||
+    latestDecision?.actionPayload ||
+    latestDecision?.executionPlan ||
+    {}
+  );
+}
+
+function getPendingGeneratedCreativeState(optimizerState) {
+  const latestAction = optimizerState?.latestAction?.actionResult || null;
+  const statePending = optimizerState?.pendingCreativeTest || null;
+
+  const stateUrls = Array.isArray(statePending?.imageUrls) ? statePending.imageUrls : [];
+  const actionUrls = Array.isArray(latestAction?.imageUrls) ? latestAction.imageUrls : [];
+
+  const urls = dedupeStrings([...stateUrls, ...actionUrls]);
+
+  if (!urls.length) return null;
+
+  return {
+    creativeGoal:
+      String(statePending?.creativeGoal || latestAction?.creativeGoal || '').trim() ||
+      'launch_ab_creative_test',
+    generationReason:
+      String(statePending?.generationReason || latestAction?.generationReason || '').trim(),
+    imageUrls: urls,
+    generationPrompt:
+      String(statePending?.generationPrompt || latestAction?.generationPrompt || '').trim(),
+    generatorResponse:
+      statePending?.generatorResponse || latestAction?.generatorResponse || null,
+    generatedVariantCount: safeNumber(
+      statePending?.generatedVariantCount || latestAction?.generatedVariantCount || urls.length,
+      urls.length
+    ),
+  };
+}
+
 async function fetchCampaignStatus({ campaignId, userToken }) {
-  const response = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}`, {
+  const response = await axios.get(`${getGraphBase()}/${campaignId}`, {
     params: {
       access_token: userToken,
       fields: 'id,name,status,effective_status,configured_status,objective,start_time',
@@ -184,6 +242,220 @@ function buildCreativePromptContext({ optimizerState, variantCount, creativeGoal
   };
 }
 
+async function fetchCampaignAds({ campaignId, userToken, limit = 50 }) {
+  const res = await axios.get(`${getGraphBase()}/${campaignId}/ads`, {
+    params: {
+      access_token: userToken,
+      fields: [
+        'id',
+        'name',
+        'status',
+        'effective_status',
+        'adset_id',
+        'campaign_id',
+        'tracking_specs',
+        'creative{id,name,object_story_spec,effective_object_story_id}',
+      ].join(','),
+      limit,
+    },
+  });
+
+  return Array.isArray(res.data?.data) ? res.data.data : [];
+}
+
+function pickControlAd(ads) {
+  const candidates = (Array.isArray(ads) ? ads : []).filter(
+    (ad) =>
+      ad &&
+      ad.id &&
+      ad.adset_id &&
+      ad.creative &&
+      ad.creative.id &&
+      ad.creative.object_story_spec &&
+      (
+        ad.creative.object_story_spec.link_data ||
+        ad.creative.object_story_spec.photo_data
+      )
+  );
+
+  const active = candidates.find((ad) =>
+    ['ACTIVE'].includes(normalizeStatus(ad.effective_status || ad.status))
+  );
+
+  return active || candidates[0] || null;
+}
+
+function clone(value) {
+  return value ? JSON.parse(JSON.stringify(value)) : value;
+}
+
+function getDestinationLink(objectStorySpec) {
+  const linkData = objectStorySpec?.link_data || null;
+  if (linkData?.link) return String(linkData.link).trim();
+  return '';
+}
+
+function buildChallengerObjectStorySpec({ controlAd, imageHash, imageUrl, variantLabel }) {
+  const baseSpec = clone(controlAd?.creative?.object_story_spec || {});
+  if (!baseSpec || typeof baseSpec !== 'object') {
+    throw new Error('Control ad is missing object_story_spec');
+  }
+
+  if (baseSpec.link_data) {
+    const linkData = baseSpec.link_data || {};
+    return {
+      ...baseSpec,
+      link_data: {
+        ...linkData,
+        image_hash: imageHash,
+      },
+    };
+  }
+
+  if (baseSpec.photo_data) {
+    const photoData = baseSpec.photo_data || {};
+    const link = String(photoData.link || '').trim() || getDestinationLink(baseSpec);
+
+    return {
+      ...baseSpec,
+      photo_data: {
+        ...photoData,
+        image_hash: imageHash,
+        ...(link ? { link } : {}),
+        ...(photoData.caption ? { caption: photoData.caption } : {}),
+      },
+    };
+  }
+
+  throw new Error(
+    `Unsupported control ad story spec for promotion. Variant ${variantLabel} needs link_data or photo_data.`
+  );
+}
+
+async function downloadImageAsBase64(url) {
+  const res = await axios.get(url, {
+    responseType: 'arraybuffer',
+    timeout: 120000,
+    maxContentLength: 25 * 1024 * 1024,
+  });
+
+  const contentType = String(res.headers?.['content-type'] || '').toLowerCase();
+  if (!contentType.startsWith('image/')) {
+    throw new Error(`Generated asset is not an image: ${url}`);
+  }
+
+  return Buffer.from(res.data).toString('base64');
+}
+
+async function uploadAdImage({ accountId, userToken, imageUrl, variantLabel }) {
+  const bytes = await downloadImageAsBase64(imageUrl);
+
+  const payload = {
+    bytes,
+    name: `smartemark_${variantLabel}_${Date.now()}`,
+  };
+
+  const res = await axios.post(`${getGraphBase()}/act_${accountId}/adimages`, payload, {
+    params: { access_token: userToken },
+    timeout: 120000,
+    maxBodyLength: 30 * 1024 * 1024,
+  });
+
+  const images = res.data?.images || {};
+  const firstImage = Object.values(images)[0] || {};
+  const imageHash = String(firstImage.hash || '').trim();
+
+  if (!imageHash) {
+    throw new Error(`Meta image upload did not return an image hash for ${variantLabel}`);
+  }
+
+  return {
+    imageHash,
+    uploadResponse: res.data || null,
+  };
+}
+
+async function createAdCreativeFromVariant({
+  accountId,
+  userToken,
+  controlAd,
+  imageHash,
+  imageUrl,
+  variantIndex,
+  variantLabel,
+  aiDecisionSummary,
+}) {
+  const objectStorySpec = buildChallengerObjectStorySpec({
+    controlAd,
+    imageHash,
+    imageUrl,
+    variantLabel,
+  });
+
+  const creativeName = [
+    'Smartemark AI Challenger',
+    variantLabel,
+    aiDecisionSummary ? `- ${aiDecisionSummary}` : '',
+    new Date().toISOString(),
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const payload = {
+    name: creativeName.slice(0, 255),
+    object_story_spec: JSON.stringify(objectStorySpec),
+  };
+
+  const res = await axios.post(`${getGraphBase()}/act_${accountId}/adcreatives`, payload, {
+    params: { access_token: userToken },
+  });
+
+  const creativeId = String(res.data?.id || '').trim();
+  if (!creativeId) {
+    throw new Error(`Meta did not return a creative id for ${variantLabel}`);
+  }
+
+  return {
+    creativeId,
+    objectStorySpec,
+    creativeCreateResponse: res.data || null,
+  };
+}
+
+async function createChallengerAd({
+  accountId,
+  userToken,
+  controlAd,
+  creativeId,
+  variantLabel,
+  launchStatus,
+}) {
+  const payload = {
+    name: `${String(controlAd?.name || 'Smartemark Control').trim()} | AI Challenger ${variantLabel}`.slice(0, 255),
+    adset_id: String(controlAd?.adset_id || '').trim(),
+    creative: JSON.stringify({ creative_id: creativeId }),
+    status: launchStatus,
+  };
+
+  if (!payload.adset_id) {
+    throw new Error(`Control ad missing adset_id for ${variantLabel}`);
+  }
+
+  const res = await axios.post(`${getGraphBase()}/act_${accountId}/ads`, payload, {
+    params: { access_token: userToken },
+  });
+
+  const adId = String(res.data?.id || '').trim();
+  if (!adId) {
+    throw new Error(`Meta did not return an ad id for ${variantLabel}`);
+  }
+
+  return {
+    adId,
+    adCreateResponse: res.data || null,
+  };
+}
+
 async function executePrimaryTextRefresh({
   optimizerState,
   userToken,
@@ -197,15 +469,7 @@ async function executePrimaryTextRefresh({
     latestMonitoringDecision: optimizerState.latestMonitoringDecision || null,
   });
 
-  const adsRes = await axios.get(`https://graph.facebook.com/v18.0/${campaignId}/ads`, {
-    params: {
-      access_token: userToken,
-      fields: 'id,name,creative{id,name,object_story_spec,effective_object_story_id}',
-      limit: 10,
-    },
-  });
-
-  const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+  const ads = await fetchCampaignAds({ campaignId, userToken, limit: 20 });
   const ad = ads.find(
     (item) =>
       item &&
@@ -240,7 +504,7 @@ async function executePrimaryTextRefresh({
   };
 
   const creativeCreateRes = await axios.post(
-    `https://graph.facebook.com/v18.0/act_${accountId}/adcreatives`,
+    `${getGraphBase()}/act_${accountId}/adcreatives`,
     {
       name: `Smartemark Copy Refresh ${new Date().toISOString()}`,
       object_story_spec: JSON.stringify(newObjectStorySpec),
@@ -271,7 +535,7 @@ async function executePrimaryTextRefresh({
   }
 
   const adUpdateRes = await axios.post(
-    `https://graph.facebook.com/v18.0/${ad.id}`,
+    `${getGraphBase()}/${ad.id}`,
     {
       creative: JSON.stringify({ creative_id: newCreativeId }),
     },
@@ -303,7 +567,7 @@ async function executePrimaryTextRefresh({
     reason:
       'Created a replacement ad creative with refreshed primary text and updated the ad to use it.',
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v4',
+    mode: 'ai_directed_marketer_v1',
   };
 }
 
@@ -313,18 +577,24 @@ async function executeCreativeGeneration({
 }) {
   const campaignId = String(optimizerState?.campaignId || '').trim();
   const plan = buildCreativeGenerationPlan({ optimizerState });
+  const actionConfig = getActionConfig(optimizerState);
 
   const variantCount =
-    actionType === 'generate_two_creative_variants'
+    safeNumber(actionConfig?.variantCount, 0) > 0
+      ? safeNumber(actionConfig.variantCount, 0)
+      : actionType === 'generate_two_creative_variants'
       ? 2
       : actionType === 'generate_single_creative_variant'
       ? 1
       : plan.variantCount;
 
+  const creativeGoal =
+    String(actionConfig?.creativeGoal || '').trim() || plan.creativeGoal;
+
   const { prompt, businessType } = buildCreativePromptContext({
     optimizerState,
     variantCount,
-    creativeGoal: plan.creativeGoal,
+    creativeGoal,
   });
 
   const apiBase = getInternalApiBase();
@@ -332,7 +602,7 @@ async function executeCreativeGeneration({
   const requestBody = {
     prompt,
     businessType,
-    styleTemplate: 'poster_b',
+    styleTemplate: String(actionConfig?.styleTemplate || 'poster_b').trim(),
     count: variantCount,
   };
 
@@ -363,7 +633,7 @@ async function executeCreativeGeneration({
       extra: {
         actionResult: {
           generationReady: true,
-          creativeGoal: plan.creativeGoal,
+          creativeGoal,
           requestedVariantCount: variantCount,
           requestBody,
           rawResponse: data,
@@ -380,22 +650,221 @@ async function executeCreativeGeneration({
     actionResult: {
       mutationType: 'generate_creative_variants',
       generationReady: true,
-      creativeGoal: plan.creativeGoal,
+      pendingPromotionReady: true,
+      creativeGoal,
       generationReason: plan.reason,
       requestedVariantCount: variantCount,
       generatedVariantCount: imageUrls.length,
       imageUrls,
       generationPrompt: prompt,
       generatorResponse: data,
+      promotionIntent:
+        String(actionConfig?.promotionIntent || '').trim() || 'launch_generated_creative_test',
       nextSystemRequirement:
-        'Review generated variants, store them to campaign creative state, and later wire controlled Meta creative swap/testing.',
+        'Generated variants are ready for AI-driven Meta promotion into challenger ads.',
     },
     reason:
-      variantCount === 2
-        ? 'Generated two fresh creative variants for AI-directed testing.'
+      imageUrls.length >= 2
+        ? 'Generated fresh creative variants for AI-directed challenger testing.'
         : 'Generated one fresh replacement creative variant.',
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v4',
+    mode: 'ai_directed_marketer_v1',
+  };
+}
+
+async function executeCreativePromotion({
+  optimizerState,
+  userToken,
+}) {
+  const campaignId = String(optimizerState?.campaignId || '').trim();
+  const accountId = String(optimizerState?.accountId || '').replace(/^act_/, '').trim();
+  const actionConfig = getActionConfig(optimizerState);
+  const pending = getPendingGeneratedCreativeState(optimizerState);
+
+  if (!accountId) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'missing_account_id',
+      reason: 'Optimizer state is missing accountId, so Meta promotion cannot run.',
+    });
+  }
+
+  if (!pending?.imageUrls?.length) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'no_generated_variants_available',
+      reason:
+        'There are no generated creative variants ready to promote into Meta challenger ads.',
+    });
+  }
+
+  const campaign = await fetchCampaignStatus({ campaignId, userToken });
+  const ads = await fetchCampaignAds({ campaignId, userToken, limit: 50 });
+  const controlAd = pickControlAd(ads);
+
+  if (!controlAd) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'no_control_ad_found',
+      reason:
+        'Smartemark could not find a control ad with a reusable object_story_spec for challenger promotion.',
+      extra: {
+          actionResult: {
+            campaign,
+            scannedAdCount: ads.length,
+          },
+      },
+    });
+  }
+
+  const desiredLiveStatus = normalizeStatus(
+    actionConfig?.challengerStatus ||
+    actionConfig?.launchStatus ||
+    (safeNumber(actionConfig?.activateImmediately, 0) ? 'ACTIVE' : 'PAUSED') ||
+    'PAUSED'
+  );
+
+  const launchStatus = desiredLiveStatus === 'ACTIVE' ? 'ACTIVE' : 'PAUSED';
+  const aiDecisionSummary = String(
+    optimizerState?.latestDecision?.decision || optimizerState?.latestDiagnosis?.diagnosis || ''
+  ).trim();
+
+  const variantResults = [];
+  const errors = [];
+
+  for (let i = 0; i < pending.imageUrls.length; i += 1) {
+    const imageUrl = String(pending.imageUrls[i] || '').trim();
+    if (!imageUrl) continue;
+
+    const variantIndex = i + 1;
+    const variantLabel = `v${variantIndex}`;
+
+    try {
+      const upload = await uploadAdImage({
+        accountId,
+        userToken,
+        imageUrl,
+        variantLabel,
+      });
+
+      const creative = await createAdCreativeFromVariant({
+        accountId,
+        userToken,
+        controlAd,
+        imageHash: upload.imageHash,
+        imageUrl,
+        variantIndex,
+        variantLabel,
+        aiDecisionSummary,
+      });
+
+      const ad = await createChallengerAd({
+        accountId,
+        userToken,
+        controlAd,
+        creativeId: creative.creativeId,
+        variantLabel,
+        launchStatus,
+      });
+
+      variantResults.push({
+        variantIndex,
+        variantLabel,
+        sourceImageUrl: imageUrl,
+        imageHash: upload.imageHash,
+        creativeId: creative.creativeId,
+        adId: ad.adId,
+        status: launchStatus,
+        uploadResponse: upload.uploadResponse,
+        creativeCreateResponse: creative.creativeCreateResponse,
+        adCreateResponse: ad.adCreateResponse,
+      });
+    } catch (err) {
+      errors.push({
+        variantIndex,
+        variantLabel,
+        sourceImageUrl: imageUrl,
+        error: err?.response?.data || err?.message || String(err),
+      });
+    }
+  }
+
+  if (!variantResults.length) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'promotion_failed',
+      reason:
+        'Smartemark attempted to promote generated variants, but none were successfully created as Meta challenger ads.',
+      extra: {
+        actionResult: {
+          mutationType: 'promote_generated_creative_variants',
+          campaign,
+          controlAdId: String(controlAd?.id || '').trim(),
+          attemptedVariantCount: pending.imageUrls.length,
+          errors,
+        },
+      },
+    });
+  }
+
+  const controlAdIds = dedupeStrings([String(controlAd.id || '').trim()]);
+  const candidateAdIds = dedupeStrings(variantResults.map((v) => v.adId));
+  const creativeIds = dedupeStrings(variantResults.map((v) => v.creativeId));
+  const imageHashes = dedupeStrings(variantResults.map((v) => v.imageHash));
+
+  return {
+    campaignId,
+    executed: true,
+    status: errors.length ? 'completed_with_partial_errors' : 'completed',
+    actionType: 'promote_generated_creative_variants',
+    actionResult: {
+      mutationType: 'promote_generated_creative_variants',
+      livePromotionReady: true,
+      promotionStatus: launchStatus === 'ACTIVE' ? 'live' : 'staged',
+      creativeGoal: pending.creativeGoal,
+      generationReason: pending.generationReason,
+      generationPrompt: pending.generationPrompt,
+      campaign,
+      controlAd: {
+        id: String(controlAd?.id || '').trim(),
+        name: String(controlAd?.name || '').trim(),
+        adsetId: String(controlAd?.adset_id || '').trim(),
+        creativeId: String(controlAd?.creative?.id || '').trim(),
+        effectiveStatus: String(controlAd?.effective_status || controlAd?.status || '').trim(),
+      },
+      controlAdIds,
+      candidateAdIds,
+      metaCreativeIds: creativeIds,
+      metaImageHashes: imageHashes,
+      sourceGeneratedCreatives: pending.imageUrls,
+      variants: variantResults,
+      errors,
+      testStartedAt: new Date().toISOString(),
+      pendingCreativeTest: {
+        status: launchStatus === 'ACTIVE' ? 'live' : 'staged',
+        creativeGoal: pending.creativeGoal,
+        generationReason: pending.generationReason,
+        generatedVariantCount: pending.generatedVariantCount,
+        imageUrls: pending.imageUrls,
+        controlAdIds,
+        candidateAdIds,
+        metaCreativeIds: creativeIds,
+        metaImageHashes: imageHashes,
+        launchedVariantCount: variantResults.length,
+        launchStatus,
+        startedAt: new Date().toISOString(),
+      },
+    },
+    reason:
+      launchStatus === 'ACTIVE'
+        ? 'Promoted AI-generated creative variants into live Meta challenger ads.'
+        : 'Promoted AI-generated creative variants into staged Meta challenger ads ready for activation.',
+    generatedAt: new Date().toISOString(),
+    mode: 'ai_directed_marketer_v1',
   };
 }
 
@@ -414,7 +883,6 @@ async function executeAction({
   const campaignId = String(optimizerState.campaignId || '').trim();
   const latestDecision = optimizerState?.latestDecision || null;
   const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
-  const latestDiagnosis = optimizerState?.latestDiagnosis || null;
 
   const manualOverride = !!optimizerState.manualOverride;
   const manualOverrideType = String(optimizerState.manualOverrideType || '').trim();
@@ -488,7 +956,7 @@ async function executeAction({
       reason:
         'Checked campaign delivery status from Meta before attempting optimization changes.',
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v4',
+      mode: 'ai_directed_marketer_v1',
     };
   }
 
@@ -514,7 +982,7 @@ async function executeAction({
     }
 
     const writeRes = await axios.post(
-      `https://graph.facebook.com/v18.0/${campaignId}`,
+      `${getGraphBase()}/${campaignId}`,
       { status: 'ACTIVE' },
       { params: { access_token: userToken } }
     );
@@ -534,7 +1002,7 @@ async function executeAction({
       reason:
         'Campaign was unpaused because delivery conditions indicated status-based blockage.',
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v4',
+      mode: 'ai_directed_marketer_v1',
     };
   }
 
@@ -561,6 +1029,16 @@ async function executeAction({
     });
   }
 
+  if (
+    actionType === 'promote_generated_creative_variants' ||
+    actionType === 'launch_generated_creative_test'
+  ) {
+    return await executeCreativePromotion({
+      optimizerState,
+      userToken,
+    });
+  }
+
   if (monitoringDecision === 'delivery_blocked') {
     return buildBaseSkippedResult({
       campaignId,
@@ -575,7 +1053,7 @@ async function executeAction({
     campaignId,
     actionType,
     status: 'not_implemented',
-    reason: `Action type "${actionType}" is not implemented yet in the MVP action executor.`,
+    reason: `Action type "${actionType}" is not implemented yet in the action executor.`,
   });
 }
 

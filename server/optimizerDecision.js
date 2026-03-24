@@ -7,11 +7,29 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function hasPendingGeneratedCreativeReady(optimizerState) {
+  const pending = optimizerState?.pendingCreativeTest || null;
+  const latestAction = optimizerState?.latestAction?.actionResult || null;
+
+  const pendingUrls = Array.isArray(pending?.imageUrls) ? pending.imageUrls : [];
+  const latestUrls = Array.isArray(latestAction?.imageUrls) ? latestAction.imageUrls : [];
+
+  const pendingStatus = String(pending?.status || '').trim().toLowerCase();
+
+  const promotionReady =
+    pendingStatus === 'ready' ||
+    latestAction?.pendingPromotionReady === true ||
+    latestAction?.generationReady === true;
+
+  return promotionReady && (pendingUrls.length > 0 || latestUrls.length > 0);
+}
+
 function buildFallbackDecision({ optimizerState }) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
   const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
   const latestAction = optimizerState?.latestAction || null;
   const metrics = optimizerState?.metricsSnapshot || {};
+  
 
   const spend = toNumber(metrics.spend, 0);
   const impressions = toNumber(metrics.impressions, 0);
@@ -22,6 +40,7 @@ function buildFallbackDecision({ optimizerState }) {
   const conversions = toNumber(metrics.conversions, 0);
   const ctr = toNumber(metrics.ctr, 0);
   const frequency = toNumber(metrics.frequency, 0);
+  const pendingCreativeReady = hasPendingGeneratedCreativeReady(optimizerState);
 
   if (latestMonitoringDecision) {
     const monitoringDecision = String(
@@ -103,6 +122,34 @@ function buildFallbackDecision({ optimizerState }) {
         mode: 'fallback_rule_based_v1',
       };
     }
+  }
+
+    if (pendingCreativeReady) {
+    return {
+      campaignId: String(optimizerState?.campaignId || '').trim(),
+      decision: 'promote_generated_creatives',
+      actionType: 'promote_generated_creative_variants',
+      priority: 'high',
+      reason:
+        'Smartemark already has generated creative variants ready, so the next move is to promote them into Meta challenger ads for testing.',
+      requiresHumanApproval: true,
+      confidence: 0.93,
+      actionMeta: {
+        challengerStatus: 'ACTIVE',
+        creativeGoal: 'launch_ab_creative_test',
+      },
+      supportingContext: {
+        diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+        spend,
+        impressions,
+        linkClicks,
+        conversions,
+        ctr,
+        frequency,
+      },
+      generatedAt: new Date().toISOString(),
+      mode: 'fallback_rule_based_v1',
+    };
   }
 
   if (!latestDiagnosis) {
