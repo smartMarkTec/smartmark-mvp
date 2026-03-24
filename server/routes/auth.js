@@ -27,7 +27,7 @@ const {
   syncCampaignMetricsToOptimizerState,
 } = require('../optimizerMetricsSync');
 const { buildDiagnosisAsync } = require('../optimizerDiagnosis');
-const { buildDecision } = require('../optimizerDecision');
+const { buildDecisionAsync } = require('../optimizerDecision');
 const { executeAction } = require('../optimizerAction');
 const { buildMonitoring } = require('../optimizerMonitoring');
 const { buildPublicSummary } = require('../optimizerPublicSummary');
@@ -2472,9 +2472,9 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-decision', 
       }
     }
 
-    const decision = buildDecision({
-      optimizerState: state,
-    });
+ const decision = await buildDecisionAsync({
+  optimizerState: state,
+});
 
     console.log('[optimizer decision] input summary:', {
       campaignId: normalizedCampaignId,
@@ -4209,9 +4209,9 @@ async function runQualifiedMonitoringSweep({ ownerKey, accountId, userToken, max
       }),
     });
 
-    const decision = buildDecision({
-      optimizerState: state,
-    });
+    const decision = await buildDecisionAsync({
+  optimizerState: state,
+});
 
     state = await updateOptimizerCampaignState(campaignId, {
       latestDecision: decision,
