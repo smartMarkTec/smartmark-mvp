@@ -1130,6 +1130,46 @@ async function ensureUsersAndSessions() {
   await db.write();
 }
 
+async function findExactOptimizerCampaignState({ campaignId, accountId, ownerKey = '' }) {
+  const normalizedCampaignId = String(campaignId || '').trim();
+  const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+  const normalizedOwnerKey = String(ownerKey || '').trim();
+
+  const states = await getAllOptimizerCampaignStates();
+
+  const rows = (Array.isArray(states) ? states : []).filter((row) => {
+    return (
+      String(row?.campaignId || '').trim() === normalizedCampaignId &&
+      String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId &&
+      (!normalizedOwnerKey || String(row?.ownerKey || '').trim() === normalizedOwnerKey)
+    );
+  });
+
+  if (!rows.length) return null;
+
+  rows.sort((a, b) => {
+    const aUpdated = new Date(a?.updatedAt || a?.createdAt || 0).getTime();
+    const bUpdated = new Date(b?.updatedAt || b?.createdAt || 0).getTime();
+    return bUpdated - aUpdated;
+  });
+
+  return rows[0] || null;
+}
+
+async function updateExactOptimizerCampaignState({ campaignId, accountId, ownerKey = '', patch = {} }) {
+  const current = await findExactOptimizerCampaignState({ campaignId, accountId, ownerKey });
+  if (!current) return null;
+
+  return await upsertOptimizerCampaignState({
+    ...current,
+    ...patch,
+    campaignId: String(current.campaignId || campaignId || '').trim(),
+    metaCampaignId: String(current.metaCampaignId || current.campaignId || campaignId || '').trim(),
+    accountId: String(current.accountId || accountId || '').replace(/^act_/, '').trim(),
+    ownerKey: String(ownerKey || current.ownerKey || '').trim(),
+  });
+}
+
 async function runInternalScheduledPass({ minHoursBetweenRuns = 1, limit = 10 }) {
   return await runScheduledOptimizerPass({
     getUserTokenForOwnerKey: (ownerKeyArg) => getFbUserToken(ownerKeyArg),
@@ -2299,12 +2339,18 @@ if (usingDebugKey) {
   }
 
   if (ownerKey.startsWith('sm_') && debugOwnerKey.startsWith('user:')) {
-    await updateOptimizerCampaignState(normalizedCampaignId, {
-      ownerKey: debugOwnerKey,
+    await updateExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: ownerKey,
+      patch: { ownerKey: debugOwnerKey },
     });
   } else if (ownerKey) {
-    await updateOptimizerCampaignState(normalizedCampaignId, {
+    await updateExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
       ownerKey,
+      patch: { ownerKey },
     });
   }
 } else {
@@ -2331,10 +2377,14 @@ if (usingDebugKey) {
       ownerKey,
     });
 
-    if (ownerKey) {
-      await updateOptimizerCampaignState(normalizedCampaignId, { ownerKey });
+      if (ownerKey) {
+      await updateExactOptimizerCampaignState({
+        campaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        ownerKey,
+        patch: { ownerKey },
+      });
     }
-
     return res.json({
       ok: true,
       accessMode: usingDebugKey ? 'debug_key' : 'session',
@@ -2358,42 +2408,65 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-diagnosis',
     const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
-   let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    let debugOwnerKey = '';
 
-if (!state) {
-  await ensureUsersAndSessions();
-  await db.read();
-  db.data.campaign_creatives = db.data.campaign_creatives || [];
+    if (usingDebugKey) {
+      debugOwnerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+    }
 
-  const creativeRecordForBackfill =
-    db.data.campaign_creatives.find((row) => {
-      return (
-        String(row?.campaignId || '').trim() === normalizedCampaignId &&
-        String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
-      );
-    }) || null;
+    let state = await findExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: debugOwnerKey,
+    });
 
-const fallbackPayload = {
-  campaignId: normalizedCampaignId,
-  metaCampaignId: normalizedCampaignId,
-  accountId: normalizedAccountId,
-  ownerKey: String(creativeRecordForBackfill?.ownerKey || '').trim(),
-  pageId: String(creativeRecordForBackfill?.pageId || '').trim(),
-  campaignName: String(creativeRecordForBackfill?.name || '').trim(),
-  niche: '',
-  currentStatus: String(creativeRecordForBackfill?.status || 'ACTIVE').trim(),
-  optimizationEnabled: true,
-  billingBlocked: false,
-  metricsSnapshot: {},
-  latestAction: null,
-  latestMonitoringDecision: null,
-  currentWinner: null,
-  activeTestType: '',
-  publicSummary: makeInitialPublicSummary(),
-};
+    if (!state) {
+      state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    }
 
-  state = await upsertOptimizerCampaignState(fallbackPayload);
-}
+    if (!state) {
+      await ensureUsersAndSessions();
+      await db.read();
+      db.data.campaign_creatives = db.data.campaign_creatives || [];
+
+      const creativeRecordForBackfill =
+        db.data.campaign_creatives.find((row) => {
+          return (
+            String(row?.campaignId || '').trim() === normalizedCampaignId &&
+            String(row?.accountId || '').replace(/^act_/, '').trim() === normalizedAccountId
+          );
+        }) || null;
+
+      const fallbackPayload = {
+        campaignId: normalizedCampaignId,
+        metaCampaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        ownerKey: String(
+          debugOwnerKey ||
+          creativeRecordForBackfill?.ownerKey ||
+          ''
+        ).trim(),
+        pageId: String(creativeRecordForBackfill?.pageId || '').trim(),
+        campaignName: String(creativeRecordForBackfill?.name || '').trim(),
+        niche: '',
+        currentStatus: String(creativeRecordForBackfill?.status || 'ACTIVE').trim(),
+        optimizationEnabled: true,
+        billingBlocked: false,
+        metricsSnapshot: {},
+        latestAction: null,
+        latestMonitoringDecision: null,
+        currentWinner: null,
+        activeTestType: '',
+        publicSummary: makeInitialPublicSummary(),
+      };
+
+      state = await upsertOptimizerCampaignState(fallbackPayload);
+    }
 
     if (String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId) {
       return res.status(403).json({
@@ -2430,12 +2503,17 @@ const fallbackPayload = {
     );
   }) || null;
 
-// If metricsSnapshot is still empty but creatives exist, refresh state from DB before diagnosis
+// If metricsSnapshot is still empty, refresh exact state before diagnosis
 if (
   state &&
   (!state.metricsSnapshot || Object.keys(state.metricsSnapshot).length === 0)
 ) {
-  const refreshed = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+  const refreshed = await findExactOptimizerCampaignState({
+    campaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    ownerKey: String(state?.ownerKey || debugOwnerKey || '').trim(),
+  });
+
   if (refreshed) state = refreshed;
 }
 
@@ -2459,11 +2537,16 @@ console.log('[optimizer diagnosis] result:', diagnosis);
   latestDiagnosis: diagnosis,
 };
 
-state = await updateOptimizerCampaignState(normalizedCampaignId, {
-  latestDiagnosis: diagnosis,
-  publicSummary: buildPublicSummary({
-    optimizerState: diagnosisPatchedState,
-  }),
+state = await updateExactOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: String(state?.ownerKey || debugOwnerKey || '').trim(),
+  patch: {
+    latestDiagnosis: diagnosis,
+    publicSummary: buildPublicSummary({
+      optimizerState: diagnosisPatchedState,
+    }),
+  },
 });
 
     console.log('[optimizer diagnosis] persisted for campaign:', normalizedCampaignId);
@@ -2489,7 +2572,26 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-decision', 
     const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
-    let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+      let debugOwnerKey = '';
+
+    if (usingDebugKey) {
+      debugOwnerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+    }
+
+    let state = await findExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: debugOwnerKey,
+    });
+
+    if (!state) {
+      state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    }
 
     if (!state) {
       return res.status(404).json({
@@ -2497,7 +2599,6 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-decision', 
         error: 'No optimizer campaign state found for this campaign.',
       });
     }
-
     if (String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId) {
       return res.status(403).json({
         ok: false,
@@ -2540,11 +2641,16 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-decision', 
   latestDecision: decision,
 };
 
-state = await updateOptimizerCampaignState(normalizedCampaignId, {
-  latestDecision: decision,
-  publicSummary: buildPublicSummary({
-    optimizerState: decisionPatchedState,
-  }),
+state = await updateExactOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: String(state?.ownerKey || debugOwnerKey || '').trim(),
+  patch: {
+    latestDecision: decision,
+    publicSummary: buildPublicSummary({
+      optimizerState: decisionPatchedState,
+    }),
+  },
 });
 
     console.log('[optimizer decision] persisted for campaign:', normalizedCampaignId);
@@ -2570,7 +2676,26 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
     const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
-    let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+     let debugOwnerKey = '';
+
+    if (usingDebugKey) {
+      debugOwnerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+    }
+
+    let state = await findExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: debugOwnerKey,
+    });
+
+    if (!state) {
+      state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    }
 
     if (!state) {
       return res.status(404).json({
@@ -2590,7 +2715,13 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
     let userToken = null;
 
     if (usingDebugKey) {
-      ownerKey = String(state.ownerKey || '').trim();
+      ownerKey = String(
+        state.ownerKey ||
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
 
       if (!ownerKey) {
         return res.status(401).json({
@@ -2599,7 +2730,11 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
         });
       }
 
-      userToken = getFbUserToken(ownerKey);
+      userToken =
+        getFbUserToken(ownerKey) ||
+        String(req.body?.userToken || req.query?.userToken || '').trim() ||
+        String(req.body?.fbUserToken || req.query?.fbUserToken || '').trim() ||
+        '';
 
       if (!userToken) {
         return res.status(401).json({
@@ -2654,14 +2789,18 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-action', as
   latestAction: action,
 };
 
-state = await updateOptimizerCampaignState(normalizedCampaignId, {
-  latestAction: action,
-  publicSummary: buildPublicSummary({
-    optimizerState: actionPatchedState,
-  }),
-  ...buildGeneratedCreativePatchFromAction(action),
+state = await updateExactOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: String(state?.ownerKey || debugOwnerKey || ownerKey || '').trim(),
+  patch: {
+    latestAction: action,
+    publicSummary: buildPublicSummary({
+      optimizerState: actionPatchedState,
+    }),
+    ...buildGeneratedCreativePatchFromAction(action),
+  },
 });
-
     console.log('[optimizer action] persisted for campaign:', normalizedCampaignId);
 
     return res.json({
@@ -2686,7 +2825,26 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-monitoring'
     const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
     const usingDebugKey = hasValidDebugKey(req);
 
-    let state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    let debugOwnerKey = '';
+
+    if (usingDebugKey) {
+      debugOwnerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        ''
+      ).trim();
+    }
+
+    let state = await findExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: debugOwnerKey,
+    });
+
+    if (!state) {
+      state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    }
 
     if (!state) {
       return res.status(404).json({
@@ -2694,7 +2852,6 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-monitoring'
         error: 'No optimizer campaign state found for this campaign.',
       });
     }
-
     if (String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId) {
       return res.status(403).json({
         ok: false,
@@ -2738,13 +2895,17 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-monitoring'
   latestMonitoringDecision: monitoring,
 };
 
-state = await updateOptimizerCampaignState(normalizedCampaignId, {
-  latestMonitoringDecision: monitoring,
-  publicSummary: buildPublicSummary({
-    optimizerState: monitoringPatchedState,
-  }),
+state = await updateExactOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: String(state?.ownerKey || debugOwnerKey || '').trim(),
+  patch: {
+    latestMonitoringDecision: monitoring,
+    publicSummary: buildPublicSummary({
+      optimizerState: monitoringPatchedState,
+    }),
+  },
 });
-
     console.log('[optimizer monitoring] persisted for campaign:', normalizedCampaignId);
 
     return res.json({
