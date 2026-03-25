@@ -31,11 +31,7 @@ const processSteps = [
 ];
 
 const faqList = [
-  {
-    question: "How much does each campaign cost?",
-    answer:
-      "Each campaign has a simple $25 setup fee. No hidden fees. You pay only when you launch a campaign.",
-  },
+ 
   {
     question: "Do I need any ad experience or an agency?",
     answer:
