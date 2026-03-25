@@ -39,6 +39,8 @@ function shouldBlockMutationForManualOverride(actionType) {
     'test_new_primary_text_or_headline',
     'promote_generated_creative_variants',
     'launch_generated_creative_test',
+    'pause_losing_creative_variant',
+    'declare_creative_winner',
   ].includes(normalizeActionType(actionType));
 }
 
@@ -868,6 +870,159 @@ async function executeCreativePromotion({
   };
 }
 
+async function executePauseLosingCreativeVariant({
+  optimizerState,
+  userToken,
+}) {
+  const campaignId = String(optimizerState?.campaignId || '').trim();
+  const actionConfig = getActionConfig(optimizerState);
+  const pendingCreativeTest = optimizerState?.pendingCreativeTest || null;
+
+  const controlAdIds = Array.isArray(pendingCreativeTest?.controlAdIds)
+    ? pendingCreativeTest.controlAdIds.filter(Boolean).map((v) => String(v).trim())
+    : [];
+
+  const candidateAdIds = Array.isArray(pendingCreativeTest?.candidateAdIds)
+    ? pendingCreativeTest.candidateAdIds.filter(Boolean).map((v) => String(v).trim())
+    : [];
+
+  const allKnownAdIds = dedupeStrings([...controlAdIds, ...candidateAdIds]);
+
+  const explicitLoserAdIds = dedupeStrings(
+    []
+      .concat(actionConfig?.loserAdIds || [])
+      .concat(actionConfig?.pauseAdIds || [])
+      .map((v) => String(v || '').trim())
+      .filter(Boolean)
+  );
+
+  const explicitWinnerAdId = String(
+    actionConfig?.winnerAdId ||
+    actionConfig?.winningAdId ||
+    actionConfig?.keepAdId ||
+    ''
+  ).trim();
+
+  let loserAdIds = explicitLoserAdIds;
+
+  if (!loserAdIds.length && explicitWinnerAdId) {
+    loserAdIds = allKnownAdIds.filter((id) => id !== explicitWinnerAdId);
+  }
+
+  if (!loserAdIds.length) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'pause_losing_creative_variant',
+      status: 'missing_loser_selection',
+      reason:
+        'Smartemark did not receive loser ad ids or a winner ad id, so it cannot safely resolve the creative test yet.',
+      extra: {
+        actionResult: {
+          mutationType: 'pause_losing_creative_variant',
+          controlAdIds,
+          candidateAdIds,
+          knownAdIds: allKnownAdIds,
+        },
+      },
+    });
+  }
+
+  const pauseResults = [];
+  const errors = [];
+
+  for (const adId of loserAdIds) {
+    try {
+      const writeRes = await axios.post(
+        `${getGraphBase()}/${adId}`,
+        { status: 'PAUSED' },
+        {
+          params: {
+            access_token: userToken,
+          },
+        }
+      );
+
+      pauseResults.push({
+        adId,
+        paused: true,
+        writeResponse: writeRes.data || null,
+      });
+    } catch (err) {
+      errors.push({
+        adId,
+        error: err?.response?.data || err?.message || String(err),
+      });
+    }
+  }
+
+  if (!pauseResults.length) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'pause_losing_creative_variant',
+      status: 'pause_failed',
+      reason:
+        'Smartemark attempted to pause the losing creative variants, but none of the pause mutations succeeded.',
+      extra: {
+        actionResult: {
+          mutationType: 'pause_losing_creative_variant',
+          loserAdIds,
+          winnerAdId: explicitWinnerAdId || null,
+          errors,
+        },
+      },
+    });
+  }
+
+  const survivingCandidateAdIds = candidateAdIds.filter((id) => !loserAdIds.includes(id));
+  const survivingControlAdIds = controlAdIds.filter((id) => !loserAdIds.includes(id));
+
+  const resolvedWinnerAdId =
+    explicitWinnerAdId ||
+    survivingCandidateAdIds[0] ||
+    survivingControlAdIds[0] ||
+    '';
+
+  const winnerType = controlAdIds.includes(resolvedWinnerAdId)
+    ? 'control'
+    : candidateAdIds.includes(resolvedWinnerAdId)
+    ? 'challenger'
+    : '';
+
+  return {
+    campaignId,
+    executed: true,
+    status: errors.length ? 'completed_with_partial_errors' : 'completed',
+    actionType: 'pause_losing_creative_variant',
+    actionResult: {
+      mutationType: 'pause_losing_creative_variant',
+      pausedLoserAdIds: loserAdIds,
+      winnerAdId: resolvedWinnerAdId || null,
+      winnerType: winnerType || null,
+      controlAdIds,
+      candidateAdIds,
+      survivingControlAdIds,
+      survivingCandidateAdIds,
+      pauseResults,
+      errors,
+      resolvedAt: new Date().toISOString(),
+      pendingCreativeTest: {
+        ...(pendingCreativeTest || {}),
+        status: 'resolved',
+        winnerAdId: resolvedWinnerAdId || null,
+        winnerType: winnerType || null,
+        pausedLoserAdIds: loserAdIds,
+        resolvedAt: new Date().toISOString(),
+      },
+    },
+    reason:
+      resolvedWinnerAdId
+        ? 'Paused the losing creative variant(s) and resolved the live creative test.'
+        : 'Paused the selected losing creative variant(s).',
+    generatedAt: new Date().toISOString(),
+    mode: 'ai_directed_marketer_v1',
+  };
+}
+
 async function executeAction({
   optimizerState,
   userToken,
@@ -1034,6 +1189,16 @@ async function executeAction({
     actionType === 'launch_generated_creative_test'
   ) {
     return await executeCreativePromotion({
+      optimizerState,
+      userToken,
+    });
+  }
+
+  if (
+    actionType === 'pause_losing_creative_variant' ||
+    actionType === 'declare_creative_winner'
+  ) {
+    return await executePauseLosingCreativeVariant({
       optimizerState,
       userToken,
     });

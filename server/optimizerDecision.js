@@ -24,6 +24,25 @@ function hasPendingGeneratedCreativeReady(optimizerState) {
   return promotionReady && (pendingUrls.length > 0 || latestUrls.length > 0);
 }
 
+function hasLiveCreativeTest(optimizerState) {
+  const pending = optimizerState?.pendingCreativeTest || null;
+  const pendingStatus = String(pending?.status || '').trim().toLowerCase();
+
+  const controlAdIds = Array.isArray(pending?.controlAdIds)
+    ? pending.controlAdIds.filter(Boolean)
+    : [];
+
+  const candidateAdIds = Array.isArray(pending?.candidateAdIds)
+    ? pending.candidateAdIds.filter(Boolean)
+    : [];
+
+  return (
+    (pendingStatus === 'live' || pendingStatus === 'staged') &&
+    controlAdIds.length > 0 &&
+    candidateAdIds.length > 0
+  );
+}
+
 function buildFallbackDecision({ optimizerState }) {
   const latestDiagnosis = optimizerState?.latestDiagnosis || null;
   const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
@@ -41,6 +60,7 @@ function buildFallbackDecision({ optimizerState }) {
   const ctr = toNumber(metrics.ctr, 0);
   const frequency = toNumber(metrics.frequency, 0);
   const pendingCreativeReady = hasPendingGeneratedCreativeReady(optimizerState);
+  const liveCreativeTest = hasLiveCreativeTest(optimizerState);
 
   if (latestMonitoringDecision) {
     const monitoringDecision = String(
@@ -124,7 +144,7 @@ function buildFallbackDecision({ optimizerState }) {
     }
   }
 
-    if (pendingCreativeReady) {
+  if (pendingCreativeReady) {
     return {
       campaignId: String(optimizerState?.campaignId || '').trim(),
       decision: 'promote_generated_creatives',
@@ -150,6 +170,82 @@ function buildFallbackDecision({ optimizerState }) {
       generatedAt: new Date().toISOString(),
       mode: 'fallback_rule_based_v1',
     };
+  }
+
+  if (liveCreativeTest && latestMonitoringDecision) {
+    const monitoringDecision = String(
+      latestMonitoringDecision.monitoringDecision || ''
+    ).trim();
+
+    const pending = optimizerState?.pendingCreativeTest || null;
+    const controlAdIds = Array.isArray(pending?.controlAdIds)
+      ? pending.controlAdIds.filter(Boolean).map((v) => String(v).trim())
+      : [];
+    const candidateAdIds = Array.isArray(pending?.candidateAdIds)
+      ? pending.candidateAdIds.filter(Boolean).map((v) => String(v).trim())
+      : [];
+
+    if (monitoringDecision === 'creative_test_challenger_underperforming') {
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'resolve_creative_test_keep_control',
+        actionType: 'pause_losing_creative_variant',
+        priority: 'high',
+        reason:
+          'The live creative test suggests the challenger is underperforming, so Smartemark should keep the control ad live and pause the losing challenger ads.',
+        requiresHumanApproval: true,
+        confidence: 0.86,
+        actionMeta: {
+          winnerAdId: controlAdIds[0] || '',
+          loserAdIds: candidateAdIds,
+        },
+        supportingContext: {
+          diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+          monitoringDecision,
+          spend,
+          impressions,
+          linkClicks,
+          conversions,
+          ctr,
+          frequency,
+          controlAdIds,
+          candidateAdIds,
+        },
+        generatedAt: new Date().toISOString(),
+        mode: 'fallback_rule_based_v1',
+      };
+    }
+
+    if (monitoringDecision === 'creative_test_has_promising_signal') {
+      return {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'resolve_creative_test_keep_challenger',
+        actionType: 'pause_losing_creative_variant',
+        priority: 'high',
+        reason:
+          'The live creative test shows promising challenger signal, so Smartemark should keep the challenger live and pause the losing control ad.',
+        requiresHumanApproval: true,
+        confidence: 0.8,
+        actionMeta: {
+          winnerAdId: candidateAdIds[0] || '',
+          loserAdIds: controlAdIds,
+        },
+        supportingContext: {
+          diagnosis: String(latestDiagnosis?.diagnosis || '').trim(),
+          monitoringDecision,
+          spend,
+          impressions,
+          linkClicks,
+          conversions,
+          ctr,
+          frequency,
+          controlAdIds,
+          candidateAdIds,
+        },
+        generatedAt: new Date().toISOString(),
+        mode: 'fallback_rule_based_v1',
+      };
+    }
   }
 
   if (!latestDiagnosis) {
@@ -339,6 +435,8 @@ function buildDecision({ optimizerState }) {
 
 async function buildDecisionAsync({ optimizerState }) {
   const pendingCreativeReady = hasPendingGeneratedCreativeReady(optimizerState);
+  const liveCreativeTest = hasLiveCreativeTest(optimizerState);
+  const latestMonitoringDecision = optimizerState?.latestMonitoringDecision || null;
 
   if (pendingCreativeReady) {
     return attachDecisionContext({
@@ -360,6 +458,64 @@ async function buildDecisionAsync({ optimizerState }) {
       },
       optimizerState,
     });
+  }
+
+  if (liveCreativeTest) {
+    const monitoringDecision = String(
+      latestMonitoringDecision?.monitoringDecision || ''
+    ).trim();
+
+    const pending = optimizerState?.pendingCreativeTest || null;
+    const controlAdIds = Array.isArray(pending?.controlAdIds)
+      ? pending.controlAdIds.filter(Boolean).map((v) => String(v).trim())
+      : [];
+    const candidateAdIds = Array.isArray(pending?.candidateAdIds)
+      ? pending.candidateAdIds.filter(Boolean).map((v) => String(v).trim())
+      : [];
+
+    if (monitoringDecision === 'creative_test_challenger_underperforming') {
+      return attachDecisionContext({
+        base: {
+          campaignId: String(optimizerState?.campaignId || '').trim(),
+          decision: 'resolve_creative_test_keep_control',
+          actionType: 'pause_losing_creative_variant',
+          priority: 'high',
+          reason:
+            'The live creative test suggests the challenger is underperforming, so Smartemark should keep the control ad live and pause the losing challenger ads.',
+          requiresHumanApproval: true,
+          confidence: 0.86,
+          actionMeta: {
+            winnerAdId: controlAdIds[0] || '',
+            loserAdIds: candidateAdIds,
+          },
+          generatedAt: new Date().toISOString(),
+          mode: 'state_priority_v1',
+        },
+        optimizerState,
+      });
+    }
+
+    if (monitoringDecision === 'creative_test_has_promising_signal') {
+      return attachDecisionContext({
+        base: {
+          campaignId: String(optimizerState?.campaignId || '').trim(),
+          decision: 'resolve_creative_test_keep_challenger',
+          actionType: 'pause_losing_creative_variant',
+          priority: 'high',
+          reason:
+            'The live creative test shows promising challenger signal, so Smartemark should keep the challenger live and pause the losing control ad.',
+          requiresHumanApproval: true,
+          confidence: 0.8,
+          actionMeta: {
+            winnerAdId: candidateAdIds[0] || '',
+            loserAdIds: controlAdIds,
+          },
+          generatedAt: new Date().toISOString(),
+          mode: 'state_priority_v1',
+        },
+        optimizerState,
+      });
+    }
   }
 
   try {
