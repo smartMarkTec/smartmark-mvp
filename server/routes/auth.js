@@ -2142,61 +2142,36 @@ publicSummary: makeInitialPublicSummary(),
     res.status(500).json({ error: errorMsg, detail });
   }
 });
-
 router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state', async (req, res) => {
   try {
     const { campaignId, accountId } = req.params;
     const usingDebugKey = hasValidDebugKey(req);
 
-const normalizedCampaignId = String(campaignId || '').trim();
-const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
+    const normalizedCampaignId = String(campaignId || '').trim();
+    const normalizedAccountId = String(accountId || '').replace(/^act_/, '').trim();
 
-let debugOwnerKey = '';
+    let debugOwnerKey = '';
 
-if (usingDebugKey) {
-  debugOwnerKey = String(
-    getDebugOwnerKeyOverride(req) ||
-    req.body?.ownerKey ||
-    req.body?.owner_key ||
-    ''
-  ).trim();
-}
+    if (usingDebugKey) {
+      debugOwnerKey = String(
+        getDebugOwnerKeyOverride(req) ||
+        req.body?.ownerKey ||
+        req.body?.owner_key ||
+        req.query?.ownerKey ||
+        req.query?.owner_key ||
+        ''
+      ).trim();
+    }
 
-let state = await findExactOptimizerCampaignState({
-  campaignId: normalizedCampaignId,
-  accountId: normalizedAccountId,
-  ownerKey: debugOwnerKey,
-});
+    let state = await findExactOptimizerCampaignState({
+      campaignId: normalizedCampaignId,
+      accountId: normalizedAccountId,
+      ownerKey: debugOwnerKey,
+    });
 
-if (!state) {
-  state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
-}
-
-// If missing, create a minimal state directly from route params
-if (!state) {
-  const minimalPayload = {
-    campaignId: normalizedCampaignId,
-    metaCampaignId: normalizedCampaignId,
-    accountId: normalizedAccountId,
-    ownerKey: debugOwnerKey,
-    pageId: '',
-    campaignName: '',
-    niche: '',
-    currentStatus: 'ACTIVE',
-    optimizationEnabled: true,
-    billingBlocked: false,
-    metricsSnapshot: {},
-    latestAction: null,
-    latestMonitoringDecision: null,
-    currentWinner: null,
-    activeTestType: '',
-    publicSummary: makeInitialPublicSummary(),
-  };
-
-  console.log('[optimizer state] creating minimal fallback state from route params:', minimalPayload);
-
-  state = await upsertOptimizerCampaignState(minimalPayload);
-}
+    if (!state) {
+      state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+    }
 
     if (!state) {
       return res.status(404).json({
@@ -2205,86 +2180,83 @@ if (!state) {
       });
     }
 
-    if (String(state.accountId || '').replace(/^act_/, '') !== String(accountId || '').replace(/^act_/, '')) {
+    if (
+      String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId
+    ) {
       return res.status(403).json({
         ok: false,
         error: 'Account ID does not match this optimizer campaign state.',
       });
     }
 
-if (usingDebugKey) {
-  return res.json({
-    ok: true,
-    accessMode: 'debug_key',
-    optimizerState: state,
-  });
-}
+    if (usingDebugKey) {
+      return res.json({
+        ok: true,
+        accessMode: 'debug_key',
+        optimizerState: state,
+      });
+    }
 
-const requestOwnerKey = String(ownerKeyFromReq(req) || '').trim();
+    const requestOwnerKey = String(ownerKeyFromReq(req) || '').trim();
 
-// No usable owner context at all
-if (!requestOwnerKey) {
-  return res.status(401).json({
-    ok: false,
-    error: 'Not authorized to read optimizer campaign state.',
-  });
-}
+    if (!requestOwnerKey) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Not authorized to read optimizer campaign state.',
+      });
+    }
 
-const stateOwnerKey = String(state.ownerKey || '').trim();
+    const stateOwnerKey = String(state.ownerKey || '').trim();
 
-// If state has no owner yet, bind it to the current request owner
-if (!stateOwnerKey) {
-  state = await upsertOptimizerCampaignState({
-    ...state,
-    ownerKey: requestOwnerKey,
-  });
+    if (!stateOwnerKey) {
+      state = await upsertOptimizerCampaignState({
+        ...state,
+        ownerKey: requestOwnerKey,
+      });
 
-  return res.json({
-    ok: true,
-    accessMode: 'owner_key',
-    optimizerState: state,
-  });
-}
+      return res.json({
+        ok: true,
+        accessMode: 'owner_key',
+        optimizerState: state,
+      });
+    }
 
-// Exact owner match
-if (stateOwnerKey === requestOwnerKey) {
-  return res.json({
-    ok: true,
-    accessMode: 'owner_key',
-    optimizerState: state,
-  });
-}
+    if (stateOwnerKey === requestOwnerKey) {
+      return res.json({
+        ok: true,
+        accessMode: 'owner_key',
+        optimizerState: state,
+      });
+    }
 
-// If state is still tied to a raw sid (sm_...) but this request resolves to a user:* owner,
-// allow rebinding only when that sid belongs to the same logged-in Smartemark user.
-if (stateOwnerKey.startsWith('sm_') && requestOwnerKey.startsWith('user:')) {
-  await ensureUsersAndSessions();
-  await db.read();
+    if (stateOwnerKey.startsWith('sm_') && requestOwnerKey.startsWith('user:')) {
+      await ensureUsersAndSessions();
+      await db.read();
 
-  const sidSession =
-    (db.data.sessions || []).find((s) => String(s.sid || '').trim() === stateOwnerKey) || null;
+      const sidSession =
+        (db.data.sessions || []).find((s) => String(s.sid || '').trim() === stateOwnerKey) || null;
 
-  const requestUsername = requestOwnerKey.slice(5).trim();
-  const sidUsername = String(sidSession?.username || '').trim();
+      const requestUsername = requestOwnerKey.slice(5).trim();
+      const sidUsername = String(sidSession?.username || '').trim();
 
-  if (sidUsername && requestUsername && sidUsername === requestUsername) {
-    state = await upsertOptimizerCampaignState({
-      ...state,
-      ownerKey: requestOwnerKey,
+      if (sidUsername && requestUsername && sidUsername === requestUsername) {
+        state = await upsertOptimizerCampaignState({
+          ...state,
+          ownerKey: requestOwnerKey,
+        });
+
+        return res.json({
+          ok: true,
+          accessMode: 'owner_key_rebound',
+          optimizerState: state,
+        });
+      }
+    }
+
+    return res.status(403).json({
+      ok: false,
+      error: 'You do not have access to this optimizer campaign state.',
     });
-
-    return res.json({
-      ok: true,
-      accessMode: 'owner_key_rebound',
-      optimizerState: state,
-    });
-  }
-}
-
-return res.status(403).json({
-  ok: false,
-  error: 'You do not have access to this optimizer campaign state.',
-});
   } catch (err) {
     return res.status(500).json({
       ok: false,
