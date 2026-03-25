@@ -338,34 +338,41 @@ function buildDecision({ optimizerState }) {
 }
 
 async function buildDecisionAsync({ optimizerState }) {
-  const useAiBrain = String(process.env.OPTIMIZER_USE_AI_BRAIN || '1').trim() === '1';
-  const fallback = buildFallbackDecision({ optimizerState });
+  const pendingCreativeReady = hasPendingGeneratedCreativeReady(optimizerState);
 
-  if (!useAiBrain) {
-    return fallback;
+  if (pendingCreativeReady) {
+    return {
+      campaignId: String(optimizerState?.campaignId || '').trim(),
+      decision: 'promote_generated_creatives',
+      actionType: 'promote_generated_creative_variants',
+      priority: 'high',
+      reason:
+        'Smartemark already has generated creative variants ready, so the next move is to promote them into Meta challenger ads for testing.',
+      requiresHumanApproval: true,
+      confidence: 0.95,
+      actionMeta: {
+        challengerStatus: 'ACTIVE',
+        creativeGoal: 'launch_ab_creative_test',
+      },
+      generatedAt: new Date().toISOString(),
+      mode: 'state_priority_v1',
+    };
   }
 
   try {
-    const aiResult = await runOptimizerBrainDecision({
+    const aiDecision = await runOptimizerBrainDecision({
       optimizerState,
     });
 
-    return attachDecisionContext({
-      base: aiResult,
-      optimizerState,
-    });
+    if (aiDecision && typeof aiDecision === 'object') {
+      return aiDecision;
+    }
   } catch (err) {
-    return attachDecisionContext({
-      base: {
-        ...fallback,
-        reason: `${fallback.reason} AI fallback triggered: ${String(err?.message || 'unknown error')}`,
-        mode: 'fallback_rule_based_v1',
-      },
-      optimizerState,
-    });
+    console.warn('[optimizer decision] ai brain failed, using fallback:', err?.message || err);
   }
-}
 
+  return buildFallbackDecision({ optimizerState });
+}
 module.exports = {
   buildDecision,
   buildDecisionAsync,
