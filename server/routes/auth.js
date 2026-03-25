@@ -633,51 +633,76 @@ function absolutePublicUrl(relativePath) {
 }
 
 function buildGeneratedCreativePatchFromAction(action) {
-  const imageUrls = Array.isArray(action?.actionResult?.imageUrls)
-    ? action.actionResult.imageUrls.filter(Boolean)
+  const result = action?.actionResult || null;
+  const imageUrls = Array.isArray(result?.imageUrls)
+    ? result.imageUrls.filter(Boolean)
+    : Array.isArray(result?.sourceGeneratedCreatives)
+    ? result.sourceGeneratedCreatives.filter(Boolean)
     : [];
 
-  if (!imageUrls.length) {
-    return {};
+  const generatedAt = String(
+    action?.generatedAt ||
+    result?.generatedAt ||
+    result?.testStartedAt ||
+    new Date().toISOString()
+  ).trim();
+
+  const sourceActionType = String(action?.actionType || '').trim();
+  const creativeGoal = String(result?.creativeGoal || '').trim();
+  const generationReason = String(result?.generationReason || '').trim();
+  const generationPrompt = String(result?.generationPrompt || '').trim();
+
+  const patch = {};
+
+  if (imageUrls.length) {
+    const generatedCreatives = imageUrls.map((url, index) => ({
+      id: `gen_${Date.now()}_${index + 1}`,
+      url: String(url).trim(),
+      headline: '',
+      body: '',
+      status: 'generated',
+      sourceActionType,
+      goal: creativeGoal,
+      createdAt: generatedAt,
+      meta: {
+        generationReason,
+        generationPrompt,
+      },
+    }));
+
+    patch.generatedCreatives = generatedCreatives;
+    patch.latestCreativeMeta = {
+      sourceActionType,
+      creativeGoal,
+      generationReason,
+      generatedAt,
+      imageUrls,
+    };
   }
 
-  const generatedAt = String(action?.generatedAt || new Date().toISOString()).trim();
-  const actionType = String(action?.actionType || '').trim();
-  const goal = String(action?.actionResult?.creativeGoal || '').trim();
-
-  const generatedCreatives = imageUrls.map((url, idx) => ({
-    id: `gen_${Date.now()}_${idx + 1}`,
-    url: String(url || '').trim(),
-    headline: '',
-    body: '',
-    status: 'generated',
-    sourceActionType: actionType,
-    goal,
-    createdAt: generatedAt,
-    meta: {
-      generationReason: String(action?.actionResult?.generationReason || '').trim(),
-      generationPrompt: String(action?.actionResult?.generationPrompt || '').trim(),
-    },
-  }));
-
-  return {
-    generatedCreatives,
-    pendingCreativeTest: {
+  if (result?.pendingCreativeTest && typeof result.pendingCreativeTest === 'object') {
+    patch.pendingCreativeTest = {
+      ...result.pendingCreativeTest,
+      sourceActionType:
+        String(result.pendingCreativeTest.sourceActionType || sourceActionType).trim(),
+    };
+  } else if (imageUrls.length) {
+    patch.pendingCreativeTest = {
       status: 'ready',
-      sourceActionType: actionType,
+      sourceActionType,
       variantCount: imageUrls.length,
-      creativeGoal: goal,
+      creativeGoal,
       generatedAt,
       imageUrls,
-    },
-    latestCreativeMeta: {
-      sourceActionType: actionType,
-      creativeGoal: goal,
-      generationReason: String(action?.actionResult?.generationReason || '').trim(),
-      generatedAt,
-      imageUrls,
-    },
-  };
+    };
+  }
+
+  if (result?.promotionStatus === 'live' || result?.promotionStatus === 'staged') {
+    patch.activeTestType = 'creative';
+    patch.currentWinner = null;
+  }
+
+  return patch;
 }
 
 function makeInitialPublicSummary(overrides = {}) {
