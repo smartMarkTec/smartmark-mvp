@@ -2738,6 +2738,55 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-decision', 
       }
     }
 
+    if (
+      !state?.latestDiagnosis ||
+      !state?.metricsSnapshot ||
+      Object.keys(state.metricsSnapshot || {}).length === 0
+    ) {
+      let resolvedOwnerKey = String(state?.ownerKey || debugOwnerKey || '').trim();
+      let resolvedUserToken = null;
+
+      if (usingDebugKey) {
+        const resolved = await resolveFacebookTokenFromReq(req, {
+          campaignId: normalizedCampaignId,
+          accountId: normalizedAccountId,
+          preferredOwnerKey: resolvedOwnerKey,
+        });
+
+        resolvedOwnerKey = String(
+          resolved?.ownerKey ||
+          resolvedOwnerKey
+        ).trim();
+
+        resolvedUserToken = resolved?.userToken || null;
+      } else {
+        const session = await requireSession(req);
+        if (session.ok) {
+          resolvedOwnerKey = `user:${String(session.user.username).trim()}`;
+          resolvedUserToken = getFbUserToken(resolvedOwnerKey);
+        }
+      }
+
+      if (resolvedOwnerKey && resolvedUserToken) {
+        await syncCampaignMetricsToOptimizerState({
+          userToken: resolvedUserToken,
+          campaignId: normalizedCampaignId,
+          accountId: normalizedAccountId,
+          ownerKey: resolvedOwnerKey,
+        });
+
+        const refreshed = await findExactOptimizerCampaignState({
+          campaignId: normalizedCampaignId,
+          accountId: normalizedAccountId,
+          ownerKey: resolvedOwnerKey,
+        });
+
+        if (refreshed) {
+          state = refreshed;
+        }
+      }
+    }
+
  const decision = await buildDecisionAsync({
   optimizerState: state,
 });

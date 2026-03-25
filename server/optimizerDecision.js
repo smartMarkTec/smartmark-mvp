@@ -341,22 +341,25 @@ async function buildDecisionAsync({ optimizerState }) {
   const pendingCreativeReady = hasPendingGeneratedCreativeReady(optimizerState);
 
   if (pendingCreativeReady) {
-    return {
-      campaignId: String(optimizerState?.campaignId || '').trim(),
-      decision: 'promote_generated_creatives',
-      actionType: 'promote_generated_creative_variants',
-      priority: 'high',
-      reason:
-        'Smartemark already has generated creative variants ready, so the next move is to promote them into Meta challenger ads for testing.',
-      requiresHumanApproval: true,
-      confidence: 0.95,
-      actionMeta: {
-        challengerStatus: 'ACTIVE',
-        creativeGoal: 'launch_ab_creative_test',
+    return attachDecisionContext({
+      base: {
+        campaignId: String(optimizerState?.campaignId || '').trim(),
+        decision: 'promote_generated_creatives',
+        actionType: 'promote_generated_creative_variants',
+        priority: 'high',
+        reason:
+          'Smartemark already has generated creative variants ready, so the next move is to promote them into Meta challenger ads for testing.',
+        requiresHumanApproval: true,
+        confidence: 0.95,
+        actionMeta: {
+          challengerStatus: 'ACTIVE',
+          creativeGoal: 'launch_ab_creative_test',
+        },
+        generatedAt: new Date().toISOString(),
+        mode: 'state_priority_v1',
       },
-      generatedAt: new Date().toISOString(),
-      mode: 'state_priority_v1',
-    };
+      optimizerState,
+    });
   }
 
   try {
@@ -365,7 +368,10 @@ async function buildDecisionAsync({ optimizerState }) {
     });
 
     if (aiDecision && typeof aiDecision === 'object') {
-      return aiDecision;
+      return attachDecisionContext({
+        base: aiDecision,
+        optimizerState,
+      });
     }
   } catch (err) {
     console.warn('[optimizer decision] ai brain failed, using fallback:', err?.message || err);
