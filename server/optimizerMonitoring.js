@@ -29,6 +29,7 @@ function buildMonitoring({ optimizerState }) {
   const latestDecision = optimizerState?.latestDecision || null;
   const latestAction = optimizerState?.latestAction || null;
   const metrics = optimizerState?.metricsSnapshot || {};
+  const pendingCreativeTest = optimizerState?.pendingCreativeTest || null;
   const manualOverride = !!optimizerState?.manualOverride;
   const manualOverrideType = String(optimizerState?.manualOverrideType || '').trim();
 
@@ -40,7 +41,9 @@ function buildMonitoring({ optimizerState }) {
     metrics?.linkClicks != null ? metrics?.linkClicks : metrics?.uniqueClicks,
     0
   );
+  const conversions = toNumber(metrics?.conversions, 0);
   const ctr = Number.isFinite(Number(metrics?.ctr)) ? Number(metrics.ctr) : 0;
+  const frequency = Number.isFinite(Number(metrics?.frequency)) ? Number(metrics.frequency) : 0;
 
   if (manualOverride) {
     return {
@@ -56,7 +59,7 @@ function buildMonitoring({ optimizerState }) {
         manualOverrideType,
       },
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v2',
+      mode: 'rule_based_mvp_v3',
     };
   }
 
@@ -69,7 +72,7 @@ function buildMonitoring({ optimizerState }) {
       nextRecommendedStep: 'run_action_first',
       confidence: 0.98,
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v2',
+      mode: 'rule_based_mvp_v3',
     };
   }
 
@@ -89,8 +92,23 @@ function buildMonitoring({ optimizerState }) {
     latestAction?.generatedAt ||
     latestAction?.actionResult?.executedAt ||
     latestAction?.actionResult?.mutatedAt ||
+    latestAction?.actionResult?.testStartedAt ||
     '';
   const minutesAfterLatestAction = minutesSince(actionGeneratedAt);
+
+  const pendingStatus = String(pendingCreativeTest?.status || '').trim().toLowerCase();
+  const candidateAdIds = Array.isArray(pendingCreativeTest?.candidateAdIds)
+    ? pendingCreativeTest.candidateAdIds.filter(Boolean)
+    : [];
+  const controlAdIds = Array.isArray(pendingCreativeTest?.controlAdIds)
+    ? pendingCreativeTest.controlAdIds.filter(Boolean)
+    : [];
+  const launchedVariantCount = toNumber(
+    pendingCreativeTest?.launchedVariantCount != null
+      ? pendingCreativeTest.launchedVariantCount
+      : candidateAdIds.length,
+    candidateAdIds.length
+  );
 
   let monitoringDecision = 'continue_monitoring';
   let status = 'stable';
@@ -98,7 +116,50 @@ function buildMonitoring({ optimizerState }) {
   let nextRecommendedStep = 'wait_for_next_cycle';
   let confidence = 0.72;
 
-  if (actionType === 'check_delivery_status' && campaignStatus === 'PAUSED') {
+  if (pendingStatus === 'ready') {
+    monitoringDecision = 'creative_variants_ready_for_launch';
+    status = 'attention_needed';
+    reason =
+      'Smartemark has generated creative variants ready, so the next step is to promote them into Meta challenger ads.';
+    nextRecommendedStep = 'promote_generated_creative_variants';
+    confidence = 0.98;
+  } else if (pendingStatus === 'live' || pendingStatus === 'staged') {
+    const lowTestSignal =
+      impressions < 1200 ||
+      linkClicks < 20 ||
+      spend < 12 ||
+      (minutesAfterLatestAction != null && minutesAfterLatestAction < 45);
+
+    if (lowTestSignal) {
+      monitoringDecision = 'creative_test_collecting_data';
+      status = 'monitoring';
+      reason =
+        'A creative test is active, but Smartemark should wait for more signal before declaring a winner or loser.';
+      nextRecommendedStep = 'keep_monitoring_creative_test';
+      confidence = 0.95;
+    } else if (ctr < 0.8 && linkClicks >= 20) {
+      monitoringDecision = 'creative_test_challenger_underperforming';
+      status = 'attention_needed';
+      reason =
+        'There is enough post-launch signal to suspect the current creative test is underperforming and should be resolved soon.';
+      nextRecommendedStep = 'evaluate_and_pause_loser';
+      confidence = 0.84;
+    } else if (ctr >= 1.2 || conversions >= 1) {
+      monitoringDecision = 'creative_test_has_promising_signal';
+      status = 'monitoring';
+      reason =
+        'The live creative test is showing encouraging signal, so Smartemark should prepare to evaluate a winner once enough data accumulates.';
+      nextRecommendedStep = 'evaluate_winner_when_threshold_met';
+      confidence = 0.82;
+    } else {
+      monitoringDecision = 'creative_test_in_progress';
+      status = 'monitoring';
+      reason =
+        'A creative challenger is live, and Smartemark should continue observing the test until there is enough signal to judge the result.';
+      nextRecommendedStep = 'keep_monitoring_creative_test';
+      confidence = 0.88;
+    }
+  } else if (actionType === 'check_delivery_status' && campaignStatus === 'PAUSED') {
     monitoringDecision = 'delivery_blocked';
     status = 'attention_needed';
     reason =
@@ -160,6 +221,27 @@ function buildMonitoring({ optimizerState }) {
       confidence = 0.84;
     }
   } else if (
+    actionType === 'promote_generated_creative_variants' &&
+    actionExecuted &&
+    (actionStatus === 'completed' || actionStatus === 'completed_with_partial_errors')
+  ) {
+    monitoringDecision = 'creative_test_collecting_data';
+    status = 'monitoring';
+    reason =
+      'Generated creative variants were promoted into Meta, so Smartemark should now collect test data before deciding a winner.';
+    nextRecommendedStep = 'keep_monitoring_creative_test';
+    confidence = 0.97;
+  } else if (
+    actionType === 'generate_single_creative_variant' ||
+    actionType === 'generate_two_creative_variants'
+  ) {
+    monitoringDecision = 'creative_variants_ready_for_launch';
+    status = 'attention_needed';
+    reason =
+      'Smartemark generated fresh creative variants, and the next step is to launch them into a live challenger test.';
+    nextRecommendedStep = 'promote_generated_creative_variants';
+    confidence = 0.96;
+  } else if (
     diagnosis === 'no_delivery' &&
     decision === 'investigate_delivery'
   ) {
@@ -203,11 +285,17 @@ function buildMonitoring({ optimizerState }) {
       impressions,
       clicks,
       linkClicks,
+      conversions,
       ctr,
+      frequency,
       campaignStatus,
+      pendingCreativeTestStatus: pendingStatus,
+      candidateAdIds,
+      controlAdIds,
+      launchedVariantCount,
     },
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v2',
+    mode: 'rule_based_mvp_v3',
   };
 }
 
