@@ -1,5 +1,5 @@
 // src/pages/Landing.js
-import React, { useEffect, useState } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
@@ -171,7 +171,7 @@ const Landing = () => {
         html, body { scroll-behavior: smooth; }
         @keyframes floatA { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-14px) } }
         @keyframes floatB { 0%,100% { transform: translateY(0) } 50% { transform: translateY(12px) } }
-        /* remove the iOS blue tap highlight on the video card */
+        
         
       `}</style>
 
@@ -520,7 +520,6 @@ const Landing = () => {
         }}
       >
 
-         {/* PUT THE CONTACT BLOCK RIGHT HERE */}
 
       <div style={{ height: 24 }} />
 
