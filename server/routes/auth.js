@@ -642,9 +642,9 @@ function buildGeneratedCreativePatchFromAction(action) {
 
   const generatedAt = String(
     action?.generatedAt ||
-    result?.generatedAt ||
-    result?.testStartedAt ||
-    new Date().toISOString()
+      result?.generatedAt ||
+      result?.testStartedAt ||
+      new Date().toISOString()
   ).trim();
 
   const sourceActionType = String(action?.actionType || '').trim();
@@ -654,6 +654,9 @@ function buildGeneratedCreativePatchFromAction(action) {
 
   const patch = {};
 
+  // --------------------------------------------------
+  // 1) Generated creatives / ready-to-launch state
+  // --------------------------------------------------
   if (imageUrls.length) {
     const generatedCreatives = imageUrls.map((url, index) => ({
       id: `gen_${Date.now()}_${index + 1}`,
@@ -697,14 +700,51 @@ function buildGeneratedCreativePatchFromAction(action) {
     };
   }
 
+  // --------------------------------------------------
+  // 2) Promotion into live/staged challenger test
+  // --------------------------------------------------
   if (result?.promotionStatus === 'live' || result?.promotionStatus === 'staged') {
     patch.activeTestType = 'creative';
     patch.currentWinner = null;
   }
 
+  // --------------------------------------------------
+  // 3) Winner/loser resolution persistence
+  // --------------------------------------------------
+  if (
+    sourceActionType === 'pause_losing_creative_variant' &&
+    result?.pendingCreativeTest &&
+    typeof result.pendingCreativeTest === 'object'
+  ) {
+    const resolvedWinnerAdId = String(result?.winnerAdId || '').trim();
+    const resolvedWinnerType = String(result?.winnerType || '').trim();
+    const resolvedAt = String(
+      result?.resolvedAt || result?.pendingCreativeTest?.resolvedAt || generatedAt
+    ).trim();
+
+    patch.pendingCreativeTest = {
+      ...result.pendingCreativeTest,
+      sourceActionType,
+      status: 'resolved',
+      winnerAdId: resolvedWinnerAdId || null,
+      winnerType: resolvedWinnerType || null,
+      resolvedAt,
+    };
+
+    patch.currentWinner = resolvedWinnerAdId
+      ? {
+          adId: resolvedWinnerAdId,
+          winnerType: resolvedWinnerType || null,
+          resolvedAt,
+        }
+      : null;
+
+    patch.activeTestType = '';
+    patch.generatedCreatives = [];
+  }
+
   return patch;
 }
-
 function makeInitialPublicSummary(overrides = {}) {
   return {
     headline: 'Monitoring campaign performance',
@@ -1289,6 +1329,26 @@ async function updateExactOptimizerCampaignState({ campaignId, accountId, ownerK
   });
 }
 
+async function updateBestKnownOptimizerCampaignState({ campaignId, patch = {} }) {
+  const normalizedCampaignId = String(campaignId || '').trim();
+  if (!normalizedCampaignId) return null;
+
+  const current = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+
+  if (current?.campaignId && current?.accountId) {
+    const exact = await updateExactOptimizerCampaignState({
+      campaignId: String(current.campaignId || normalizedCampaignId).trim(),
+      accountId: String(current.accountId || '').replace(/^act_/, '').trim(),
+      ownerKey: String(current.ownerKey || '').trim(),
+      patch,
+    });
+
+    if (exact) return exact;
+  }
+
+  return await updateOptimizerCampaignState(normalizedCampaignId, patch);
+}
+
 async function runInternalScheduledPass({ minHoursBetweenRuns = 1, limit = 10 }) {
   return await runScheduledOptimizerPass({
     getUserTokenForOwnerKey: (ownerKeyArg) => getFbUserToken(ownerKeyArg),
@@ -1307,33 +1367,45 @@ async function runInternalScheduledPass({ minHoursBetweenRuns = 1, limit = 10 })
         }) || null
       );
     },
-    persistDiagnosis: async (campaignIdArg, diagnosis) => {
-      return await updateOptimizerCampaignState(campaignIdArg, {
-        latestDiagnosis: diagnosis,
-      });
+persistDiagnosis: async (campaignIdArg, diagnosis) => {
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestDiagnosis: diagnosis,
     },
-    persistDecision: async (campaignIdArg, decision) => {
-      return await updateOptimizerCampaignState(campaignIdArg, {
-        latestDecision: decision,
-      });
+  });
+},
+persistDecision: async (campaignIdArg, decision) => {
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestDecision: decision,
     },
-   persistAction: async (campaignIdArg, action) => {
+  });
+},
+persistAction: async (campaignIdArg, action) => {
   const nextStatus =
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
 
-  return await updateOptimizerCampaignState(campaignIdArg, {
-    latestAction: action,
-    ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
-    ...buildGeneratedCreativePatchFromAction(action),
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestAction: action,
+      ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
+      ...buildGeneratedCreativePatchFromAction(action),
+    },
   });
 },
-    persistMonitoring: async (campaignIdArg, monitoring) => {
-      return await updateOptimizerCampaignState(campaignIdArg, {
-        latestMonitoringDecision: monitoring,
-      });
+persistMonitoring: async (campaignIdArg, monitoring) => {
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestMonitoringDecision: monitoring,
     },
+  });
+},
     minHoursBetweenRuns,
     limit,
   });
@@ -3167,33 +3239,45 @@ router.post('/facebook/adaccount/:accountId/campaign/:campaignId/run-full-cycle'
           }) || null
         );
       },
-      persistDiagnosis: async (campaignIdArg, diagnosis) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestDiagnosis: diagnosis,
-        });
-      },
-      persistDecision: async (campaignIdArg, decision) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestDecision: decision,
-        });
-      },
-     persistAction: async (campaignIdArg, action) => {
+persistDiagnosis: async (campaignIdArg, diagnosis) => {
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestDiagnosis: diagnosis,
+    },
+  });
+},
+persistDecision: async (campaignIdArg, decision) => {
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestDecision: decision,
+    },
+  });
+},
+persistAction: async (campaignIdArg, action) => {
   const nextStatus =
     action?.actionResult?.campaign?.effectiveStatus ||
     action?.actionResult?.campaign?.status ||
     null;
 
-  return await updateOptimizerCampaignState(campaignIdArg, {
-    latestAction: action,
-    ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
-    ...buildGeneratedCreativePatchFromAction(action),
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestAction: action,
+      ...(nextStatus ? { currentStatus: String(nextStatus).trim() } : {}),
+      ...buildGeneratedCreativePatchFromAction(action),
+    },
   });
 },
-      persistMonitoring: async (campaignIdArg, monitoring) => {
-        return await updateOptimizerCampaignState(campaignIdArg, {
-          latestMonitoringDecision: monitoring,
-        });
-      },
+persistMonitoring: async (campaignIdArg, monitoring) => {
+  return await updateBestKnownOptimizerCampaignState({
+    campaignId: campaignIdArg,
+    patch: {
+      latestMonitoringDecision: monitoring,
+    },
+  });
+},
     });
 
     console.log('[optimizer full cycle] completed:', {
