@@ -109,29 +109,28 @@ async function stripeFetch(path, opts = {}) {
 /* ======================= Visual Theme (Landing-style tech palette) ======================= */
 const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
-const DARK_BG = "#0b0f14"; // landing BG
-const ACCENT = "#31e1ff"; // electric cyan
-const ACCENT_2 = "#7c4dff"; // violet
-const BTN_BASE = "#0f6fff"; // brand blue
-const BTN_BASE_HOVER = "#2e82ff";
+const DARK_BG = "#f8fafc";
+const ACCENT = "#4f46e5";
+const ACCENT_2 = "#6366f1";
+const BTN_BASE = "#4f46e5";
+const BTN_BASE_HOVER = "#4338ca";
 
-const GLOW_A = "rgba(49,225,255,0.22)";
-const GLOW_B = "rgba(124,77,255,0.18)";
+const GLOW_A = "rgba(79,70,229,0.08)";
+const GLOW_B = "rgba(99,102,241,0.06)";
 
-// aliases used in UI sections
 const GLOW_TEAL = GLOW_A;
-const ACCENT_ALT = ACCENT; // keep legacy refs working
+const ACCENT_ALT = ACCENT;
 
-const CARD_BG = "rgba(20, 24, 31, 0.78)";
-const EDGE_BG = "rgba(255,255,255,0.06)";
-const PANEL_BG = "rgba(18, 22, 28, 0.72)";
+const CARD_BG = "#ffffff";
+const EDGE_BG = "#e5e7eb";
+const PANEL_BG = "#ffffff";
 
-const INPUT_BG = "rgba(255,255,255,0.04)";
-const INPUT_BORDER = "rgba(255,255,255,0.08)";
+const INPUT_BG = "#ffffff";
+const INPUT_BORDER = "#e5e7eb";
 
-const TEXT_MAIN = "#ffffff";
-const TEXT_DIM = "#eaf5ff";
-const TEXT_MUTED = "rgba(255,255,255,0.72)";
+const TEXT_MAIN = "#0f172a";
+const TEXT_DIM = "#334155";
+const TEXT_MUTED = "#64748b";
 const WHITE = "#ffffff";
 
 /* “glass” helper like landing */
@@ -4179,12 +4178,35 @@ const getSavedCreatives = (campaignId) => {
 
   const hasDraft = draftCreatives.images && draftCreatives.images.length;
 
- const rightPaneCampaigns = [
-  ...campaigns.map((c) => ({ ...c, __isDraft: false })),
-  ...(hasDraft ? [{ id: "__DRAFT__", name: form.campaignName || "Untitled", __isDraft: true }] : []),
-]
-  .filter(Boolean)
-  .slice(0, 3);
+  const selectedCampaignCreatives =
+    selectedCampaignId === "__DRAFT__"
+      ? {
+          images: draftCreatives?.images || [],
+          mediaSelection: "image",
+          meta: {
+            headline: String(previewCopy?.headline || headline || "").trim(),
+            body: String(previewCopy?.body || body || "").trim(),
+            link: String(previewCopy?.link || inferredLink || "").trim(),
+          },
+        }
+      : selectedCampaignId
+      ? getSavedCreatives(selectedCampaignId)
+      : { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
+
+  const selectedOptimizerSummary =
+    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+      ? publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()
+      : getFallbackPublicSummary();
+
+  const selectedOptimizerState =
+    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+      ? optimizerStateMap[selectedCampaignId] || null
+      : null;
+
+  const selectedOptimizerCreativeState =
+    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+      ? optimizerCreativeMap[selectedCampaignId] || null
+      : null;
 
   /* ================================ UI ================================ */
   return (
@@ -4708,42 +4730,107 @@ const getSavedCreatives = (campaignId) => {
       </>
     )}
 
-    {setupTab === "campaign" && (
-      <>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
-            Campaign
-          </div>
-          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
-            Metrics, campaign settings, billing, and launch controls.
-          </div>
-        </div>
+ {setupTab === "campaign" && (
+  <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
+        Campaign
+      </div>
+      <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+        Metrics, AI updates, billing, and launch controls.
+      </div>
+    </div>
 
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.55fr) minmax(320px, 0.85fr)",
+        gap: 18,
+        alignItems: "start",
+      }}
+    >
+      {/* LEFT SIDE: main campaign dashboard */}
+      <div
+        style={{
+          background: "#ffffff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 20,
+          padding: 22,
+          display: "flex",
+          flexDirection: "column",
+          gap: 18,
+          minHeight: 620,
+        }}
+      >
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.55fr) minmax(320px, 0.85fr)",
-            gap: 18,
-            alignItems: "start",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
           }}
         >
-          <div
+          <div>
+            <div
+              style={{
+                color: "#0f172a",
+                fontWeight: 900,
+                fontSize: 18,
+                marginBottom: 6,
+              }}
+            >
+              Active Campaign
+            </div>
+            <div
+              style={{
+                color: "#64748b",
+                fontWeight: 700,
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            >
+              Select a draft or live campaign to manage.
+            </div>
+          </div>
+
+          <select
+            value={selectedCampaignId}
+            onChange={(e) => {
+              setSelectedCampaignId(e.target.value);
+              setExpandedId(e.target.value);
+            }}
             style={{
-              background: "#ffffff",
+              padding: "12px 14px",
+              borderRadius: 12,
+              fontSize: 14,
+              width: "100%",
               border: "1px solid #e5e7eb",
-              borderRadius: 20,
-              padding: 22,
-              display: "flex",
-              flexDirection: "column",
-              gap: 18,
-              minHeight: 620,
+              background: "#ffffff",
+              color: "#0f172a",
+              fontWeight: 800,
+              outline: "none",
             }}
           >
-            {selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? (
+            <option value="">Select a campaign</option>
+            {hasDraft && (
+              <option value="__DRAFT__">
+                {(form.campaignName || "Untitled")} (Draft)
+              </option>
+            )}
+            {campaigns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name || "Campaign"}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedCampaignId ? (
+          <>
+            {selectedCampaignId !== "__DRAFT__" ? (
               <>
                 <MarketerActionsCard
-                  summary={publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()}
-                  optimizerState={optimizerStateMap[selectedCampaignId] || null}
+                  summary={selectedOptimizerSummary}
+                  optimizerState={selectedOptimizerState}
                 />
 
                 <div
@@ -4760,13 +4847,21 @@ const getSavedCreatives = (campaignId) => {
             ) : (
               <div
                 style={{
-                  color: "#64748b",
-                  fontWeight: 700,
-                  fontSize: 14,
-                  lineHeight: 1.6,
+                  background: "#ffffff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 16,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
                 }}
               >
-                Launch a campaign to begin seeing live metrics and AI updates here.
+                <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 16 }}>
+                  Draft Campaign
+                </div>
+                <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
+                  This campaign is ready to review and launch.
+                </div>
               </div>
             )}
 
@@ -4775,923 +4870,379 @@ const getSavedCreatives = (campaignId) => {
                 background: "#ffffff",
                 border: "1px solid #e5e7eb",
                 borderRadius: 16,
-                padding: 14,
-              }}
-            >
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-                Campaign Copy
-              </div>
-              <PreviewCard
-                headline={previewCopy?.headline || headline || creativesPreview?.headline || ""}
-                body={previewCopy?.body || body || creativesPreview?.body || ""}
-                link={previewCopy?.link || inferredLink || creativesPreview?.link || ""}
-              />
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-            }}
-          >
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e5e7eb",
-                borderRadius: 20,
-                padding: 18,
+                padding: 16,
                 display: "flex",
                 flexDirection: "column",
-                gap: 14,
+                gap: 12,
               }}
             >
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18 }}>
-                Campaign Settings
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>Campaign Name</label>
-                <input
-                  type="text"
-                  value={form.campaignName || ""}
-                  onChange={(e) => setForm({ ...form, campaignName: e.target.value })}
-                  placeholder="Type a name..."
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    width: "100%",
-                    color: "#0f172a",
-                    fontSize: "14px",
-                    fontWeight: 800,
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>Daily Budget</label>
-                <input
-                  type="number"
-                  placeholder="Minimum $3/day"
-                  min={3}
-                  step={1}
-                  value={budget}
-                  onChange={(e) => setBudget(e.target.value)}
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #e5e7eb",
-                    borderRadius: 12,
-                    padding: "12px 14px",
-                    width: "100%",
-                    color: "#0f172a",
-                    fontSize: "14px",
-                    fontWeight: 800,
-                    outline: "none",
-                  }}
-                />
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>From</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 12,
-                      padding: "12px 14px",
-                      width: "100%",
-                      color: "#0f172a",
-                      fontSize: "14px",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  />
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>To</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(clampEndForStart(startDate, e.target.value))}
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 12,
-                      padding: "12px 14px",
-                      width: "100%",
-                      color: "#0f172a",
-                      fontSize: "14px",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ color: "#94a3b8", fontWeight: 700, fontSize: 12 }}>
-                Max duration is 14 days. End auto-adjusts if needed.
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: "#ffffff",
-                border: "1px solid #e5e7eb",
-                borderRadius: 20,
-                padding: 18,
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-              }}
-            >
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18 }}>
-                Account & Billing
-              </div>
-
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
-                  Ad Account
-                </div>
-                <select
-                  value={selectedAccount}
-                  onChange={(e) => setSelectedAccount(e.target.value)}
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    fontSize: "14px",
-                    width: "100%",
-                    outline: "none",
-                    border: "1px solid #e5e7eb",
-                    background: "#ffffff",
-                    color: "#0f172a",
-                    fontWeight: 800,
-                  }}
-                >
-                  <option value="">Select an ad account</option>
-                  {adAccounts.map((ac) => {
-                    const v = String(ac.id || "").replace(/^act_/, "");
-                    return (
-                      <option key={ac.id} value={v}>
-                        {ac.name ? `${ac.name} (${v})` : v}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-
-              <div>
-                <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
-                  Facebook Page
-                </div>
-                <select
-                  value={selectedPageId}
-                  onChange={(e) => setSelectedPageId(e.target.value)}
-                  style={{
-                    padding: "12px 14px",
-                    borderRadius: 12,
-                    fontSize: "14px",
-                    width: "100%",
-                    outline: "none",
-                    border: "1px solid #e5e7eb",
-                    background: "#ffffff",
-                    color: "#0f172a",
-                    fontWeight: 800,
-                  }}
-                >
-                  <option value="">Select a page</option>
-                  {pages.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                onClick={openFbPaymentPopup}
-                style={{
-                  width: "100%",
-                  padding: "12px 16px",
-                  borderRadius: 12,
-                  border: "1px solid #e5e7eb",
-                  background: "#ffffff",
-                  color: "#0f172a",
-                  fontWeight: 900,
-                  fontSize: "14px",
-                  cursor: "pointer",
-                }}
-              >
-                Add Payment Method
-              </button>
-
-              <div style={{ color: "#0f172a", fontWeight: 800, fontSize: 13 }}>
-                Subscription Required:{" "}
-                <span style={{ color: "#4f46e5" }}>
-                  {billingInfo.hasAccess
-                    ? `${billingInfo.planKey || "active"} plan active`
-                    : "choose a plan below"}
-                </span>
-              </div>
-
-              {(() => {
-                const n = Number(budget);
-                const show = Number.isFinite(n) && n >= 3;
-                if (!show) return null;
-
-                return (
-                  <div
-                    style={{
-                      background: "#f8fafc",
-                      border: "1px solid #e5e7eb",
-                      borderRadius: 16,
-                      padding: 14,
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 10,
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, color: "#0f172a", fontSize: 16 }}>
-                      Finish Setup
-                    </div>
-
-                    <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
-                      Create your account, choose a plan, and continue to checkout.
-                    </div>
-
-                    <input
-                      type="email"
-                      value={loginUser}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setLoginUser(v);
-                        try {
-                          const t = String(v || "").trim();
-                          if (t) localStorage.setItem("smartmark_login_username", t);
-                        } catch {}
-                      }}
-                      placeholder="email"
-                      style={{
-                        background: "#ffffff",
-                        borderRadius: 12,
-                        padding: "12px 14px",
-                        border: "1px solid #e5e7eb",
-                        width: "100%",
-                        color: "#0f172a",
-                        fontSize: "14px",
-                        fontWeight: 800,
-                        outline: "none",
-                      }}
-                    />
-
-                    <input
-                      type="password"
-                      value={loginPass}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        setLoginPass(v);
-                        try {
-                          const t = String(v || "").trim();
-                          if (t) localStorage.setItem("smartmark_login_password", t);
-                        } catch {}
-                      }}
-                      placeholder="Password"
-                      autoComplete="current-password"
-                      style={{
-                        background: "#ffffff",
-                        borderRadius: 12,
-                        padding: "12px 14px",
-                        border: "1px solid #e5e7eb",
-                        width: "100%",
-                        color: "#0f172a",
-                        fontSize: "14px",
-                        fontWeight: 800,
-                        outline: "none",
-                      }}
-                    />
-
-                    <select
-                      value={selectedPlan}
-                      onChange={(e) => setSelectedPlan(e.target.value)}
-                      style={{
-                        background: "#ffffff",
-                        borderRadius: 12,
-                        padding: "12px 14px",
-                        border: "1px solid #e5e7eb",
-                        width: "100%",
-                        color: "#0f172a",
-                        fontSize: "14px",
-                        fontWeight: 800,
-                        outline: "none",
-                      }}
-                    >
-                      <option value="starter">Starter — $79.99 / month</option>
-                      <option value="pro">Pro — $109.99 / month</option>
-                      <option value="operator">Operator — $179.99 / month</option>
-                    </select>
-
-                    {!!authStatus.msg && (
-                      <div style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>
-                        {authStatus.msg}
-                      </div>
-                    )}
-
-                    {billingInfo.checked && (
-                      <div
-                        style={{
-                          color: billingInfo.hasAccess ? "#16a34a" : "#64748b",
-                          fontWeight: 800,
-                          fontSize: 12,
-                        }}
-                      >
-                        {billingInfo.hasAccess
-                          ? `Subscription active: ${billingInfo.planKey || "active"}`
-                          : "No active subscription on this account yet"}
-                      </div>
-                    )}
-
-                    {!billingInfo.hasAccess && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          trackEvent("setup_checkout_click", { page: "setup", plan: selectedPlan });
-                          handleSubscribeToPlan();
-                        }}
-                        disabled={billingLoading || authLoading}
-                        style={{
-                          background: "linear-gradient(90deg, #4f46e5, #6366f1)",
-                          color: "#ffffff",
-                          border: "none",
-                          borderRadius: 12,
-                          fontWeight: 900,
-                          padding: "11px 16px",
-                          cursor: billingLoading || authLoading ? "not-allowed" : "pointer",
-                          opacity: billingLoading || authLoading ? 0.7 : 1,
-                        }}
-                      >
-                        {billingLoading ? "Opening Checkout..." : "Continue Securely"}
-                      </button>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            <button
-              onClick={() => {
-                trackEvent("launch_campaign", { page: "setup" });
-                handleLaunch();
-              }}
-              disabled={loading || campaignCount >= 2 || !canLaunch}
-              style={{
-                background: campaignCount >= 2 || !canLaunch ? "#cbd5e1" : "#4f46e5",
-                color: campaignCount >= 2 || !canLaunch ? "#64748b" : "#ffffff",
-                border: "none",
-                borderRadius: 14,
-                fontWeight: 900,
-                fontSize: "15px",
-                padding: "15px 20px",
-                boxShadow: "0 10px 20px rgba(79,70,229,0.15)",
-                cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
-                opacity: loading || campaignCount >= 2 || !canLaunch ? 0.7 : 1,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 10,
-              }}
-            >
-              {campaignCount >= 2 ? (
-                "Limit Reached"
-              ) : loading ? (
-                <>
-                  <span
-                    aria-hidden
-                    style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: "50%",
-                      border: "3px solid rgba(255,255,255,0.25)",
-                      borderTopColor: "#ffffff",
-                      animation: "smSpin 0.9s linear infinite",
-                    }}
-                  />
-                  Launching…
-                </>
-              ) : launched ? (
-                "Campaign launched ✅"
-              ) : (
-                "Launch Campaign"
-              )}
-            </button>
-
-            <style>
-              {`@keyframes smSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}
-            </style>
-
-            {launched && launchResult && (
               <div
                 style={{
-                  color: "#16a34a",
-                  fontWeight: 900,
-                  fontSize: "0.98rem",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 10,
+                  flexWrap: "wrap",
                 }}
               >
-                Campaign launched! ID: {launchResult.campaignId || "--"}
-              </div>
-            )}
-          </div>
-        </div>
-      </>
-    )}
-  </div>
-</main>
-
-        {/* RIGHT PANE */}
-        <aside
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: isMobile ? "center" : "flex-start",
-            width: isMobile ? "100vw" : "100%",
-            marginTop: isMobile ? 8 : 0,
-            gap: "1.6rem",
-            minWidth: isMobile ? "100vw" : 400,
-            maxWidth: 560,
-          }}
-        >
-  <div
-  style={{
-    background: CARD_BG,
-    borderRadius: "18px",
-    padding: isMobile ? "22px 16px" : "24px 22px 26px",
-    color: TEXT_MAIN,
-    width: isMobile ? "97vw" : "100%",
-    maxWidth: "99vw",
-    border: `1px solid ${INPUT_BORDER}`,
-    boxShadow: "0 12px 36px rgba(0,0,0,0.3)",
-    display: "flex",
-    flexDirection: "column",
-    gap: "0.9rem",
-    minHeight: "600px",
-    maxHeight: isMobile ? "none" : "78vh",
-    overflowY: "auto",
-    scrollbarWidth: "thin",
-  }}
->
-            <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ fontSize: "1.08rem", fontWeight: 900, color: WHITE, letterSpacing: 0.3 }}>Active Campaigns</div>
-     <div style={{ display: "flex", gap: "0.6rem" }}>
-  {campaigns.length < 2 && (
-    <button
-      onClick={handleNewCampaign}
-      style={{
-        background: ACCENT_ALT,
-        color: WHITE,
-        border: "none",
-        borderRadius: 10,
-        fontWeight: 900,
-        fontSize: 20,
-        width: 36,
-        height: 36,
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-      }}
-      title="New Campaign"
-    >
-      <FaPlus />
-    </button>
-  )}
-</div>
-            </div>
-
-            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-              {rightPaneCampaigns.map((c) => {
-                const isDraft = !!c.__isDraft;
-                const id = c.id;
-                const isOpen = expandedId === id;
-                const name = isDraft ? form.campaignName || "Untitled" : c.name || "Campaign";
-               const websiteUrlPreview = (
-  form?.websiteUrl ||
-  form?.website ||
-  answers?.websiteUrl ||
-  answers?.website ||
-  answers?.url ||
-  answers?.link ||
-  inferredLink ||
-  previewCopy?.link ||
-  ""
-).toString().trim();
-
-
-                const creatives = isDraft
-                  ? {
-                      ...draftCreatives,
-                      meta: {
-                        headline: String(headline || "").trim(),
-                        body: String(body || "").trim(),
-                        link: websiteUrlPreview || "https://your-smartmark-site.com",
-                      },
-                    }
-                  : getSavedCreatives(id);
-
-                return (
+                <div>
                   <div
-                    key={id}
                     style={{
-                      width: "100%",
-                      background: PANEL_BG,
-                      borderRadius: "12px",
-                      padding: "8px",
-                      border: `1px solid ${INPUT_BORDER}`,
-                      boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+                      color: "#0f172a",
+                      fontWeight: 900,
+                      fontSize: 18,
+                      lineHeight: 1.2,
                     }}
                   >
+                    Campaign Copy
+                  </div>
+                  <div
+                    style={{
+                      color: "#64748b",
+                      fontWeight: 700,
+                      fontSize: 12,
+                      marginTop: 4,
+                    }}
+                  >
+                    Current ad copy and destination link for this campaign.
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: "7px 11px",
+                    borderRadius: 999,
+                    background: "#eef2ff",
+                    color: "#4f46e5",
+                    fontWeight: 900,
+                    fontSize: 12,
+                  }}
+                >
+                  {selectedCampaignId === "__DRAFT__" ? "Draft Campaign" : "Live Campaign"}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 14,
+                  padding: 14,
+                  background: "#f8fafc",
+                }}
+              >
+                <div
+                  style={{
+                    color: "#0f172a",
+                    fontWeight: 900,
+                    fontSize: 16,
+                    lineHeight: 1.3,
+                    marginBottom: 8,
+                  }}
+                >
+                  {selectedCampaignCreatives?.meta?.headline || "No headline yet"}
+                </div>
+
+                <div
+                  style={{
+                    color: "#475569",
+                    fontWeight: 600,
+                    fontSize: 13,
+                    lineHeight: 1.6,
+                    marginBottom: 10,
+                    whiteSpace: "pre-wrap",
+                  }}
+                >
+                  {selectedCampaignCreatives?.meta?.body || "No body copy yet"}
+                </div>
+
+                <div
+                  style={{
+                    color: "#4f46e5",
+                    fontWeight: 800,
+                    fontSize: 12,
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {selectedCampaignCreatives?.meta?.link || "No destination link yet"}
+                </div>
+              </div>
+            </div>
+
+            {!!selectedCampaignCreatives?.images?.length && (
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 16,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 16 }}>
+                    Campaign Creatives
+                  </div>
+
+                  {selectedCampaignId !== "__DRAFT__" && selectedOptimizerCreativeState?.generatedCreatives?.length ? (
                     <div
-                      onClick={() => {
-                        setExpandedId(isOpen ? null : id);
-                        if (!isDraft) setSelectedCampaignId(id);
-                      }}
                       style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        cursor: "pointer",
-                        padding: "8px 10px",
-                        borderRadius: 10,
-                        background: "#161c21",
-                        border: `1px solid ${INPUT_BORDER}`,
+                        padding: "7px 11px",
+                        borderRadius: 999,
+                        background: "#eef2ff",
+                        color: "#4f46e5",
+                        fontWeight: 900,
+                        fontSize: 12,
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, color: WHITE, fontWeight: 900 }}>
-                        <FaChevronDown style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.18s" }} />
-                        <span>{name}</span>
-                        {isDraft && (
-                          <span
-                            style={{
-                              marginLeft: 8,
-                              padding: "2px 8px",
-                              borderRadius: 999,
-                              background: "#2d5b45",
-                              color: "#aef4da",
-                              fontSize: 11,
-                              fontWeight: 900,
-                              letterSpacing: 0.5,
-                            }}
-                          >
-                            IN&nbsp;PROGRESS
-                          </span>
-                        )}
-                      </div>
-
-{isDraft ? (
-  <button
-    type="button"
-    onClick={(e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      try {
-        setDraftDisabled(resolvedUser, true);
-      } catch {}
-
-      try {
-        purgeDraftStorages(resolvedUser);
-      } catch {}
-      try {
-        purgeDraftArtifactsEverywhere();
-      } catch {}
-
-      try {
-        localStorage.removeItem(LS_INFLIGHT_KEY(resolvedUser));
-        localStorage.removeItem(LS_INFLIGHT_KEY("anon"));
-        localStorage.removeItem(FB_CONNECT_INFLIGHT_KEY);
-
-        localStorage.removeItem(LS_BACKUP_KEY(resolvedUser));
-        localStorage.removeItem(SETUP_CREATIVE_BACKUP_KEY);
-
-        localStorage.removeItem(LS_FETCHABLE_KEY(resolvedUser));
-        localStorage.removeItem(SETUP_FETCHABLE_IMAGES_KEY);
-
-        localStorage.removeItem(LS_PREVIEW_KEY(resolvedUser));
-        localStorage.removeItem(SETUP_PREVIEW_BACKUP_KEY);
-
-        localStorage.removeItem("sm_image_cache_v1");
-        localStorage.removeItem("u:anon:sm_image_cache_v1");
-        localStorage.removeItem("smartmark.imageDrafts.v1");
-      } catch {}
-
-      try {
-        handleClearDraft();
-      } catch {}
-
-      setDraftCreatives({ images: [], mediaSelection: "image" });
-      setExpandedId(null);
-      setSelectedCampaignId("");
-    }}
-    title="Discard draft"
-    aria-label="Discard draft"
-    style={{
-      background: "#5b2d2d",
-      color: "#ffecec",
-      border: "none",
-      borderRadius: 10,
-      fontWeight: 900,
-      width: 28,
-      height: 28,
-      lineHeight: "28px",
-      textAlign: "center",
-      cursor: "pointer",
-      boxShadow: "0 1px 6px rgba(0,0,0,0.25)",
-    }}
-  >
-    ×
-  </button>
-) : (
-  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-    <div style={{ color: "#89f0cc", fontSize: 12, fontWeight: 900 }}>
-      {c.status || c.effective_status || "ACTIVE"}
-    </div>
-
-    <button
-      type="button"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const currentStatus = String(c.status || c.effective_status || "ACTIVE").toUpperCase();
-        const currentlyPaused = currentStatus === "PAUSED";
-        handlePauseUnpauseCampaign(id, currentlyPaused);
-      }}
-      disabled={loading}
-      title={String(c.status || c.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? "Unpause" : "Pause"}
-      style={{
-        background:
-          String(c.status || c.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
-            ? "#22dd7f"
-            : "#ffd966",
-        color: "#0f1418",
-        border: "none",
-        borderRadius: 10,
-        fontWeight: 900,
-        fontSize: 16,
-        width: 32,
-        height: 32,
-        cursor: loading ? "not-allowed" : "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-        opacity: loading ? 0.6 : 1,
-      }}
-    >
-      {String(c.status || c.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? <FaPlay /> : <FaPause />}
-    </button>
-
-    <button
-      type="button"
-      onClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        handleDeleteCampaign(id);
-      }}
-      disabled={loading}
-      title="Delete"
-      style={{
-        background: "#f44336",
-        color: WHITE,
-        border: "none",
-        borderRadius: 10,
-        fontWeight: 900,
-        fontSize: 15,
-        width: 32,
-        height: 32,
-        cursor: loading ? "not-allowed" : "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
-        opacity: loading ? 0.6 : 1,
-      }}
-    >
-      <FaTrash />
-    </button>
-  </div>
-)}
-
+                      {selectedOptimizerCreativeState?.pendingCreativeTest?.status === "live"
+                        ? "A/B testing"
+                        : "Strategizing"}
                     </div>
+                  ) : null}
+                </div>
 
-{isOpen && (
-  <div
-    style={{
-      marginTop: 12,
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
-    }}
-  >
-    {!isDraft && (
-      <MarketerActionsCard
-        summary={publicSummaryMap[id] || getFallbackPublicSummary()}
-        optimizerState={optimizerStateMap[id] || null}
-      />
-    )}
+                <CreativeThumbGrid
+                  items={selectedCampaignCreatives.images}
+                  labels={selectedCampaignCreatives.images.map((_, idx) => `Creative ${idx + 1}`)}
+                  height={210}
+                  onOpen={(url) => {
+                    setModalImg(url);
+                    setShowImageModal(true);
+                  }}
+                />
+              </div>
+            )}
 
-    {!isDraft && (
-      <div
-        style={{
-          width: "100%",
-          background: "linear-gradient(180deg, rgba(20,25,30,0.96), rgba(17,22,28,0.94))",
-          borderRadius: 18,
-          padding: 14,
-          border: `1px solid ${INPUT_BORDER}`,
-          boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
-        }}
-      >
-        <MetricsRow metrics={metricsMap[id]} />
+            {selectedCampaignId !== "__DRAFT__" &&
+              !!selectedOptimizerCreativeState?.generatedCreatives?.length && (
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 16,
+                    padding: 16,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 16 }}>
+                    Challenger Creatives
+                  </div>
+
+                  <CreativeThumbGrid
+                    items={selectedOptimizerCreativeState.generatedCreatives.map((x) => x.url)}
+                    labels={selectedOptimizerCreativeState.generatedCreatives.map((_, idx) => `Challenger ${idx + 1}`)}
+                    height={210}
+                    onOpen={(url) => {
+                      setModalImg(url);
+                      setShowImageModal(true);
+                    }}
+                  />
+                </div>
+              )}
+          </>
+        ) : (
+          <div
+            style={{
+              color: "#64748b",
+              fontWeight: 700,
+              fontSize: 14,
+              lineHeight: 1.6,
+            }}
+          >
+            Select a campaign to view metrics, AI updates, creatives, and launch settings.
+          </div>
+        )}
       </div>
-    )}
 
-    {!isDraft && (
-      <PendingCreativeTestCard
-        optimizerCreativeState={optimizerCreativeMap[id] || null}
-        originalImages={creatives?.images || []}
-        onOpenImage={(url) => {
-          setModalImg(url);
-          setShowImageModal(true);
-        }}
-      />
-    )}
-
-    <div
-      style={{
-        width: "100%",
-        background: "linear-gradient(180deg, rgba(20,25,30,0.96), rgba(17,22,28,0.94))",
-        borderRadius: 18,
-        padding: 16,
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        border: `1px solid ${INPUT_BORDER}`,
-        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
-      }}
-    >
+      {/* RIGHT SIDE: drawer */}
       <div
         style={{
+          background: "#ffffff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 20,
+          padding: 20,
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 10,
-          flexWrap: "wrap",
+          flexDirection: "column",
+          gap: 16,
+          position: isMobile ? "static" : "sticky",
+          top: 24,
         }}
       >
         <div>
-          <div
-            style={{
-              color: TEXT_MAIN,
-              fontWeight: 900,
-              fontSize: 18,
-              lineHeight: 1.2,
-            }}
-          >
-            Campaign Copy
+          <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 6 }}>
+            Campaign Settings
           </div>
-          <div
+          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
+            Budget, duration, billing, and launch.
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>Campaign Name</label>
+          <input
+            type="text"
+            value={form.campaignName}
+            onChange={(e) => setForm((prev) => ({ ...prev, campaignName: e.target.value }))}
+            placeholder="Campaign name"
             style={{
-              color: "rgba(255,255,255,0.66)",
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid #e5e7eb",
+              background: "#ffffff",
+              color: "#0f172a",
               fontWeight: 700,
-              fontSize: 12,
-              marginTop: 4,
+              fontSize: 14,
+              outline: "none",
+            }}
+          />
+        </div>
+
+ <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+  <label style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>Budget</label>
+  <input
+    type="number"
+    min="1"
+    value={budget}
+    onChange={(e) => setBudget(e.target.value)}
+    placeholder="Enter budget"
+    style={{
+      padding: "12px 14px",
+      borderRadius: 12,
+      border: "1px solid #e5e7eb",
+      background: "#ffffff",
+      color: "#0f172a",
+      fontWeight: 700,
+      fontSize: 14,
+      outline: "none",
+    }}
+  />
+</div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <label style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>Campaign Duration</label>
+          <select
+            value={form.durationDays}
+            onChange={(e) => setForm((prev) => ({ ...prev, durationDays: e.target.value }))}
+            style={{
+              padding: "12px 14px",
+              borderRadius: 12,
+              border: "1px solid #e5e7eb",
+              background: "#ffffff",
+              color: "#0f172a",
+              fontWeight: 700,
+              fontSize: 14,
+              outline: "none",
             }}
           >
-            Current ad copy and destination link attached to this campaign.
-          </div>
+            <option value="3">3 days</option>
+            <option value="5">5 days</option>
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+          </select>
         </div>
 
-        <div
-          style={{
-            padding: "7px 11px",
-            borderRadius: 999,
-            background: "rgba(255,255,255,0.06)",
-            color: "#ffffff",
-            fontWeight: 900,
-            fontSize: 12,
-            border: "1px solid rgba(255,255,255,0.05)",
-          }}
-        >
-          {isDraft ? "Draft Campaign" : "Live Campaign"}
-        </div>
-      </div>
+<div
+  style={{
+    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    padding: 14,
+    background: "#f8fafc",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  }}
+>
+  <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 14 }}>
+    Payment Method
+  </div>
+  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+    {billingLoading
+      ? "Checking billing status..."
+      : billingInfo?.hasAccess
+      ? "Billing connected and ready."
+      : "Complete billing before launch."}
+  </div>
+</div>
 
-      <div
-        style={{
-          borderRadius: 16,
-          padding: 12,
-          background: "rgba(255,255,255,0.03)",
-          border: "1px solid rgba(255,255,255,0.06)",
-        }}
-      >
-        <PreviewCard
-          headline={creatives?.meta?.headline || previewCopy?.headline}
-          body={creatives?.meta?.body || previewCopy?.body}
-          link={creatives?.meta?.link || previewCopy?.link}
-        />
-      </div>
+   <div
+  style={{
+    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    padding: 14,
+    background: "#f8fafc",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 8,
+    }}
+  >
+    <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 14 }}>
+      Launch Summary
+    </div>
+    <div style={{ color: "#4f46e5", fontWeight: 900, fontSize: 13 }}>
+      ${calculateFees(budget).total || 0}
     </div>
   </div>
-)}
-                  </div>
-                );
-              })}
-            </div>
 
-            <div
-              style={{
-                width: "100%",
-                marginTop: 8,
-                background: "#14191e",
-                borderRadius: "12px",
-                padding: "12px",
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                border: `1px solid ${INPUT_BORDER}`,
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Ad Account</div>
-                <select
-                  value={selectedAccount}
-                  onChange={(e) => setSelectedAccount(e.target.value)}
-                  style={{
-                    padding: "12px",
-                    borderRadius: "12px",
-                    fontSize: "1rem",
-                    width: "100%",
-                    outline: "none",
-                    border: `1px solid ${INPUT_BORDER}`,
-                    background: "#1a2025",
-                    color: TEXT_DIM,
-                    marginTop: 6,
-                    fontWeight: 800,
-                  }}
-                >
-                  <option value="">Select an ad account</option>
-                  {adAccounts.map((ac) => {
-                    const v = String(ac.id || "").replace(/^act_/, "");
-                    return (
-                      <option key={ac.id} value={v}>
-                        {ac.name ? `${ac.name} (${v})` : v}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
+  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+    Ad spend: ${Number(budget || 0) || 0}
+  </div>
+  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12 }}>
+    Smartemark fee: ${calculateFees(budget).fee || 0}
+  </div>
+</div>
 
-              <div>
-                <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Facebook Page</div>
-                <select
-                  value={selectedPageId}
-                  onChange={(e) => setSelectedPageId(e.target.value)}
-                  style={{
-                    padding: "12px",
-                    borderRadius: "12px",
-                    fontSize: "1rem",
-                    width: "100%",
-                    outline: "none",
-                    border: `1px solid ${INPUT_BORDER}`,
-                    background: "#1a2025",
-                    color: TEXT_DIM,
-                    marginTop: 6,
-                    fontWeight: 800,
-                  }}
-                >
-                  <option value="">Select a page</option>
-                  {pages.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <ImageModal open={showImageModal} imageUrl={modalImg} onClose={() => setShowImageModal(false)} />
-        </aside>
+      <button
+  onClick={handleLaunch}
+  disabled={loading || !canLaunch}
+  style={{
+    width: "100%",
+    border: "none",
+    borderRadius: 14,
+    padding: "14px 16px",
+    background: loading || !canLaunch ? "#a5b4fc" : "#4f46e5",
+    color: "#ffffff",
+    fontWeight: 900,
+    fontSize: 15,
+    cursor: loading || !canLaunch ? "not-allowed" : "pointer",
+  }}
+>
+  {loading ? "Launching..." : "Launch Campaign"}
+</button>
       </div>
     </div>
-  );
+  </>
+)}
+  </div>
+</main>
+
+      <ImageModal
+        open={showImageModal}
+        imageUrl={modalImg}
+        onClose={() => setShowImageModal(false)}
+      />
+    </div>
+  </div>
+);
 };
 
 export default CampaignSetup;
