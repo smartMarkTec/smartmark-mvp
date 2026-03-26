@@ -1508,7 +1508,7 @@ function summarizeOptimizerEntry(kind, payload) {
     return {
       kind: "Decision",
       title: actionType
-        ? `Chose ${actionType.replace(/_/g, " ")}`
+        ? actionType.replace(/_/g, " ")
         : "Chose the next move",
       detail:
         String(payload.reason || "").trim() ||
@@ -1520,12 +1520,11 @@ function summarizeOptimizerEntry(kind, payload) {
 
   if (kind === "action") {
     const actionType = String(payload.actionType || "").trim();
-    const executed = payload.executed === false ? "Observed only" : "Took action";
     return {
       kind: "Action",
       title: actionType
-        ? `${executed}: ${actionType.replace(/_/g, " ")}`
-        : executed,
+        ? actionType.replace(/_/g, " ")
+        : "Updated campaign state",
       detail:
         String(payload.summary || "").trim() ||
         String(payload.reason || "").trim() ||
@@ -1576,27 +1575,20 @@ function MarketerActionsCard({ summary, optimizerState }) {
   const safeSummary = summary || getFallbackPublicSummary();
   const history = buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
-  const toneStyles = marketerToneStyles(safeSummary?.tone);
-  const Icon = marketerIconForStage(safeSummary?.stage);
 
   return (
     <div
       style={{
         width: "100%",
-        borderRadius: 18,
-        padding: 16,
+        padding: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 14,
-        background:
-          "linear-gradient(180deg, rgba(20,25,30,0.98), rgba(16,21,27,0.96))",
-        border: `1px solid ${INPUT_BORDER}`,
-        boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
-        overflow: "hidden",
+        gap: 12,
       }}
     >
       <div
         style={{
+          padding: "0 0 6px 0",
           display: "flex",
           justifyContent: "space-between",
           alignItems: "flex-start",
@@ -1604,61 +1596,28 @@ function MarketerActionsCard({ summary, optimizerState }) {
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1 }}>
+        <div>
           <div
             style={{
-              width: 44,
-              height: 44,
-              minWidth: 44,
-              borderRadius: 14,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: toneStyles.iconBg,
-              color: toneStyles.iconColor,
-              border: "1px solid rgba(255,255,255,0.05)",
+              color: "#0f172a",
+              fontWeight: 900,
+              fontSize: 18,
+              lineHeight: 1.2,
+              marginBottom: 4,
             }}
           >
-            <Icon size={16} />
+            AI Update
           </div>
-
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div
-              style={{
-                color: TEXT_MAIN,
-                fontWeight: 900,
-                fontSize: 18,
-                lineHeight: 1.2,
-                marginBottom: 4,
-              }}
-            >
-              AI Overview
-            </div>
-
-            <div
-              style={{
-                color: "rgba(255,255,255,0.92)",
-                fontWeight: 800,
-                fontSize: 14,
-                lineHeight: 1.35,
-                marginBottom: 4,
-              }}
-            >
-              {latest?.title || safeSummary?.headline || "Monitoring campaign performance"}
-            </div>
-
-            <div
-              style={{
-                color: TEXT_MUTED,
-                fontWeight: 700,
-                fontSize: 12,
-                lineHeight: 1.45,
-              }}
-            >
-              {latest?.detail ||
-                safeSummary?.subtext ||
-                "Smartemark is evaluating performance and choosing the next measured move."}
-            </div>
+          <div
+            style={{
+              color: "#475569",
+              fontWeight: 700,
+              fontSize: 13,
+              lineHeight: 1.5,
+              maxWidth: 620,
+            }}
+          >
+            {latest?.title || safeSummary?.headline || "Monitoring campaign performance"}
           </div>
         </div>
 
@@ -1666,11 +1625,10 @@ function MarketerActionsCard({ summary, optimizerState }) {
           style={{
             padding: "7px 11px",
             borderRadius: 999,
-            background: toneStyles.iconBg,
-            color: toneStyles.iconColor,
+            background: "#eef2ff",
+            color: "#4f46e5",
             fontWeight: 900,
             fontSize: 12,
-            border: "1px solid rgba(255,255,255,0.05)",
             whiteSpace: "nowrap",
           }}
         >
@@ -1680,34 +1638,18 @@ function MarketerActionsCard({ summary, optimizerState }) {
 
       <div
         style={{
-          position: "relative",
+          background: "#ffffff",
+          border: "1px solid #e5e7eb",
           borderRadius: 16,
-          padding: "14px 14px 12px",
-          background: "rgba(255,255,255,0.03)",
-          border: "1px solid rgba(255,255,255,0.06)",
-          maxHeight: expanded ? 420 : 108,
+          padding: 14,
+          maxHeight: expanded ? 360 : 104,
           overflow: "hidden",
+          position: "relative",
           transition: "max-height 220ms ease",
         }}
       >
         <div
           style={{
-            color: TEXT_MAIN,
-            fontWeight: 900,
-            fontSize: 13,
-            marginBottom: 10,
-            letterSpacing: 0.2,
-          }}
-        >
-          Recent AI history
-        </div>
-
-        <div
-          style={{
-            color: "rgba(255,255,255,0.76)",
-            fontWeight: 600,
-            fontSize: 12,
-            lineHeight: 1.6,
             display: "flex",
             flexDirection: "column",
             gap: 10,
@@ -1719,21 +1661,21 @@ function MarketerActionsCard({ summary, optimizerState }) {
                 key={item.id}
                 style={{
                   paddingBottom: 10,
-                  borderBottom: "1px solid rgba(255,255,255,0.05)",
+                  borderBottom: "1px solid #eef2f7",
                 }}
               >
                 <div
                   style={{
                     display: "flex",
                     justifyContent: "space-between",
-                    gap: 10,
                     alignItems: "center",
+                    gap: 10,
                     marginBottom: 5,
                   }}
                 >
                   <div
                     style={{
-                      color: "#ffffff",
+                      color: "#111827",
                       fontWeight: 800,
                       fontSize: 12,
                     }}
@@ -1742,7 +1684,7 @@ function MarketerActionsCard({ summary, optimizerState }) {
                   </div>
                   <div
                     style={{
-                      color: "rgba(255,255,255,0.48)",
+                      color: "#94a3b8",
                       fontWeight: 800,
                       fontSize: 11,
                       whiteSpace: "nowrap",
@@ -1754,9 +1696,9 @@ function MarketerActionsCard({ summary, optimizerState }) {
 
                 <div
                   style={{
-                    color: "rgba(255,255,255,0.88)",
-                    fontWeight: 700,
-                    fontSize: 12,
+                    color: "#0f172a",
+                    fontWeight: 800,
+                    fontSize: 13,
                     marginBottom: item.detail ? 4 : 0,
                   }}
                 >
@@ -1766,9 +1708,9 @@ function MarketerActionsCard({ summary, optimizerState }) {
                 {!!item.detail && (
                   <div
                     style={{
-                      color: "rgba(255,255,255,0.66)",
+                      color: "#64748b",
                       fontWeight: 600,
-                      fontSize: 11,
+                      fontSize: 12,
                       lineHeight: 1.5,
                     }}
                   >
@@ -1778,7 +1720,14 @@ function MarketerActionsCard({ summary, optimizerState }) {
               </div>
             ))
           ) : (
-            <div>
+            <div
+              style={{
+                color: "#64748b",
+                fontWeight: 600,
+                fontSize: 12,
+                lineHeight: 1.5,
+              }}
+            >
               Smartemark is building its latest diagnosis and action trail for this campaign.
             </div>
           )}
@@ -1791,17 +1740,24 @@ function MarketerActionsCard({ summary, optimizerState }) {
               left: 0,
               right: 0,
               bottom: 0,
-              height: 46,
+              height: 42,
               background:
-                "linear-gradient(180deg, rgba(20,25,30,0), rgba(20,25,30,0.98))",
+                "linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.98))",
               pointerEvents: "none",
             }}
           />
         )}
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-        <div style={{ color: "rgba(255,255,255,0.52)", fontWeight: 800, fontSize: 11 }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>
           {safeSummary?.updatedAt ? `Updated ${timeAgoShort(safeSummary.updatedAt)}` : "Recently updated"}
         </div>
 
@@ -1809,9 +1765,9 @@ function MarketerActionsCard({ summary, optimizerState }) {
           type="button"
           onClick={() => setExpanded((v) => !v)}
           style={{
-            background: "rgba(255,255,255,0.06)",
-            color: "#ffffff",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background: "#f8fafc",
+            color: "#0f172a",
+            border: "1px solid #e5e7eb",
             borderRadius: 10,
             padding: "8px 12px",
             fontWeight: 900,
@@ -1847,44 +1803,22 @@ function PendingCreativeTestCard({
 
   const statusLabel =
     status === "live"
-      ? "Live Test"
+      ? "A/B testing"
       : status === "ready"
-      ? "Ready"
+      ? "Strategizing"
       : status === "resolved"
       ? "Resolved"
       : "Generated";
-
-  const statusBg =
-    status === "live"
-      ? "rgba(49,225,255,0.14)"
-      : status === "ready"
-      ? "rgba(143,240,194,0.14)"
-      : status === "resolved"
-      ? "rgba(255,210,122,0.14)"
-      : "rgba(255,255,255,0.08)";
-
-  const statusColor =
-    status === "live"
-      ? "#7ee7ff"
-      : status === "ready"
-      ? "#8ff0c2"
-      : status === "resolved"
-      ? "#ffd27a"
-      : "#ffffff";
 
   return (
     <>
       <div
         style={{
           width: "100%",
-          background: "linear-gradient(180deg, rgba(20,25,30,0.98), rgba(16,21,27,0.96))",
-          borderRadius: 18,
-          padding: 16,
+          padding: 0,
           display: "flex",
           flexDirection: "column",
-          gap: 14,
-          border: `1px solid ${INPUT_BORDER}`,
-          boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+          gap: 12,
         }}
       >
         <div
@@ -1897,19 +1831,26 @@ function PendingCreativeTestCard({
           }}
         >
           <div>
-            <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18 }}>
+            <div
+              style={{
+                color: "#0f172a",
+                fontWeight: 900,
+                fontSize: 18,
+                lineHeight: 1.2,
+                marginBottom: 4,
+              }}
+            >
               Ad Creatives
             </div>
             <div
               style={{
-                color: "rgba(255,255,255,0.68)",
+                color: "#64748b",
                 fontWeight: 700,
-                fontSize: 12,
-                marginTop: 4,
-                lineHeight: 1.45,
+                fontSize: 13,
+                lineHeight: 1.5,
               }}
             >
-              Smartemark is comparing your live creatives against AI challengers.
+              Current creatives and any AI challengers for this campaign.
             </div>
           </div>
 
@@ -1917,11 +1858,10 @@ function PendingCreativeTestCard({
             style={{
               padding: "7px 11px",
               borderRadius: 999,
-              background: statusBg,
-              color: statusColor,
+              background: "#eef2ff",
+              color: "#4f46e5",
               fontWeight: 900,
               fontSize: 12,
-              border: "1px solid rgba(255,255,255,0.06)",
             }}
           >
             {statusLabel}
@@ -1930,89 +1870,44 @@ function PendingCreativeTestCard({
 
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-            gap: 12,
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 16,
+            padding: 14,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 16,
+            flexWrap: "wrap",
           }}
         >
-          <div
-            style={{
-              borderRadius: 14,
-              padding: 12,
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-              Control
+          <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
+                Originals
+              </div>
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 22 }}>
+                {original.length}
+              </div>
             </div>
-            <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 20 }}>
-              {original.length}
+
+            <div>
+              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
+                Challengers
+              </div>
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 22 }}>
+                {variants.length}
+              </div>
             </div>
           </div>
 
-          <div
-            style={{
-              borderRadius: 14,
-              padding: 12,
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-              Challengers
-            </div>
-            <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 20 }}>
-              {variants.length}
-            </div>
-          </div>
-
-          <div
-            style={{
-              borderRadius: 14,
-              padding: 12,
-              background: "rgba(255,255,255,0.03)",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-              Goal
-            </div>
-            <div style={{ color: TEXT_MAIN, fontWeight: 800, fontSize: 12, lineHeight: 1.4 }}>
-              {pending?.creativeGoal ? String(pending.creativeGoal).replace(/_/g, " ") : "Creative testing"}
-            </div>
-          </div>
-        </div>
-
-        <div
-          style={{
-            borderRadius: 14,
-            padding: "12px 12px",
-            background: "rgba(255,255,255,0.035)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: "rgba(255,255,255,0.72)",
-            fontWeight: 700,
-            fontSize: 12,
-            lineHeight: 1.5,
-          }}
-        >
-          {status === "live" && "AI strategizing is in progress. Smartemark is collecting live data before choosing a winner."}
-          {status === "ready" && "AI challengers are prepared and waiting to enter a controlled test."}
-          {status === "resolved" && "This creative round has been resolved and a winner has been chosen."}
-          {!["live", "ready", "resolved"].includes(status) &&
-            `${pending?.variantCount || variants.length} challenger${
-              (pending?.variantCount || variants.length) === 1 ? "" : "s"
-            } prepared.`}
-        </div>
-
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button
             type="button"
             onClick={() => setShowModal(true)}
             style={{
-              background: "rgba(255,255,255,0.06)",
-              color: "#ffffff",
-              border: "1px solid rgba(255,255,255,0.06)",
+              background: "#f8fafc",
+              color: "#0f172a",
+              border: "1px solid #e5e7eb",
               borderRadius: 10,
               padding: "9px 14px",
               fontWeight: 900,
@@ -2020,7 +1915,7 @@ function PendingCreativeTestCard({
               cursor: "pointer",
             }}
           >
-            View creative library
+            View creatives
           </button>
         </div>
       </div>
@@ -2031,8 +1926,8 @@ function PendingCreativeTestCard({
             position: "fixed",
             inset: 0,
             zIndex: 1008,
-            background: "rgba(7,10,14,0.78)",
-            backdropFilter: "blur(10px)",
+            background: "rgba(15,23,42,0.40)",
+            backdropFilter: "blur(6px)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -2046,14 +1941,14 @@ function PendingCreativeTestCard({
               width: "min(980px, 96vw)",
               maxHeight: "88vh",
               overflowY: "auto",
-              background: "linear-gradient(180deg, rgba(18,23,29,0.98), rgba(14,18,24,0.98))",
-              border: "1px solid rgba(255,255,255,0.08)",
+              background: "#ffffff",
+              border: "1px solid #e5e7eb",
               borderRadius: 24,
-              padding: 20,
-              boxShadow: "0 25px 70px rgba(0,0,0,0.45)",
+              padding: 22,
+              boxShadow: "0 30px 80px rgba(15,23,42,0.18)",
               display: "flex",
               flexDirection: "column",
-              gap: 18,
+              gap: 20,
             }}
           >
             <div
@@ -2066,18 +1961,18 @@ function PendingCreativeTestCard({
               }}
             >
               <div>
-                <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 22 }}>
+                <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 22 }}>
                   Creative Library
                 </div>
                 <div
                   style={{
-                    color: TEXT_MUTED,
+                    color: "#64748b",
                     fontWeight: 700,
                     fontSize: 13,
                     marginTop: 4,
                   }}
                 >
-                  Original control creatives and AI challenger creatives for this campaign.
+                  Originals first. AI challengers appear here only when they exist.
                 </div>
               </div>
 
@@ -2085,9 +1980,9 @@ function PendingCreativeTestCard({
                 type="button"
                 onClick={() => setShowModal(false)}
                 style={{
-                  background: "rgba(255,255,255,0.06)",
-                  color: "#ffffff",
-                  border: "1px solid rgba(255,255,255,0.06)",
+                  background: "#f8fafc",
+                  color: "#0f172a",
+                  border: "1px solid #e5e7eb",
                   borderRadius: 10,
                   padding: "9px 14px",
                   fontWeight: 900,
@@ -2101,13 +1996,13 @@ function PendingCreativeTestCard({
 
             {!!original.length && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 15 }}>
+                <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 15 }}>
                   Current Ad Creatives
                 </div>
                 <CreativeThumbGrid
                   items={original}
                   labels={original.map((_, idx) =>
-                    original.length === 1 ? "Control Creative" : `Control Creative ${idx + 1}`
+                    original.length === 1 ? "Creative" : `Creative ${idx + 1}`
                   )}
                   onOpen={(url) => onOpenImage && onOpenImage(url)}
                   height={190}
@@ -2117,8 +2012,8 @@ function PendingCreativeTestCard({
 
             {!!variants.length && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 15 }}>
-                  AI Strategizing
+                <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 15 }}>
+                  AI Challengers
                 </div>
                 <CreativeThumbGrid
                   items={variants}
@@ -4395,36 +4290,36 @@ const getSavedCreatives = (campaignId) => {
           zIndex: 1,
         }}
       >
-       <main
+     <main
   style={{
-    background: EDGE_BG,
-    border: `1px solid ${INPUT_BORDER}`,
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
     borderRadius: "24px",
-    boxShadow: "0 18px 54px rgba(0,0,0,0.35)",
-    padding: isMobile ? "18px 14px" : "18px",
-    minWidth: isMobile ? "98vw" : 600,
-    maxWidth: isMobile ? "100vw" : 700,
-    flex: "0 1 690px",
+    boxShadow: "0 18px 54px rgba(15,23,42,0.08)",
+    padding: isMobile ? "0" : "0",
+    minWidth: isMobile ? "98vw" : 760,
+    maxWidth: "1280px",
+    width: "100%",
+    flex: "1 1 auto",
     display: "flex",
     flexDirection: isMobile ? "column" : "row",
-    gap: isMobile ? 16 : 18,
+    gap: 0,
     alignItems: "stretch",
     marginBottom: isMobile ? 24 : 0,
-    minHeight: "680px",
+    overflow: "hidden",
   }}
 >
   <div
     style={{
-      width: isMobile ? "100%" : 210,
-      minWidth: isMobile ? "100%" : 210,
-      borderRadius: 20,
-      background: "linear-gradient(180deg, rgba(16,21,27,0.98), rgba(14,18,24,0.96))",
-      border: `1px solid ${INPUT_BORDER}`,
-      padding: isMobile ? 12 : 14,
+      width: isMobile ? "100%" : 220,
+      minWidth: isMobile ? "100%" : 220,
+      background: "#ffffff",
+      borderRight: isMobile ? "none" : "1px solid #e5e7eb",
+      borderBottom: isMobile ? "1px solid #e5e7eb" : "none",
+      padding: isMobile ? "14px" : "18px 14px",
       display: "flex",
       flexDirection: isMobile ? "row" : "column",
       gap: 10,
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
     }}
   >
     {[
@@ -4432,26 +4327,19 @@ const getSavedCreatives = (campaignId) => {
         key: "connect",
         step: "01",
         title: "Connect Facebook",
-        subtitle: "Link your ad account",
-        ready: !!fbConnected,
+        subtitle: "Ad account details",
       },
       {
         key: "creatives",
         step: "02",
         title: "Ad Creatives",
-        subtitle: "View originals and challengers",
-        ready:
-          !!(
-            (draftCreatives?.images && draftCreatives.images.length) ||
-            (Array.isArray(navImageUrls) && navImageUrls.length)
-          ),
+        subtitle: "Originals and challengers",
       },
       {
         key: "campaign",
         step: "03",
         title: "Campaign",
-        subtitle: "Budget, billing, launch",
-        ready: !!(budget && Number(budget) >= 3),
+        subtitle: "Metrics, settings, launch",
       },
     ].map((item) => {
       const active = setupTab === item.key;
@@ -4467,31 +4355,27 @@ const getSavedCreatives = (campaignId) => {
             gap: 12,
             width: "100%",
             textAlign: "left",
-            borderRadius: 16,
-            padding: isMobile ? "12px 10px" : "14px 12px",
-            border: active
-              ? "1px solid rgba(49,225,255,0.22)"
-              : "1px solid rgba(255,255,255,0.05)",
-            background: active
-              ? "linear-gradient(180deg, rgba(49,225,255,0.14), rgba(124,77,255,0.10))"
-              : "rgba(255,255,255,0.025)",
+            borderRadius: 14,
+            padding: isMobile ? "12px 10px" : "12px 12px",
+            border: active ? "1px solid #c7d2fe" : "1px solid transparent",
+            background: active ? "#eef2ff" : "transparent",
             cursor: "pointer",
-            boxShadow: active ? "0 12px 28px rgba(49,225,255,0.10)" : "none",
+            transition: "all 180ms ease",
           }}
         >
           <div
             style={{
-              width: 36,
-              height: 36,
-              minWidth: 36,
-              borderRadius: 12,
+              width: 32,
+              height: 32,
+              minWidth: 32,
+              borderRadius: 10,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: active ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)",
-              color: active ? "#ffffff" : "rgba(255,255,255,0.72)",
+              background: active ? "#4f46e5" : "#f1f5f9",
+              color: active ? "#ffffff" : "#475569",
               fontWeight: 900,
-              fontSize: 12,
+              fontSize: 11,
             }}
           >
             {item.step}
@@ -4500,11 +4384,11 @@ const getSavedCreatives = (campaignId) => {
           <div style={{ minWidth: 0, flex: 1 }}>
             <div
               style={{
-                color: "#ffffff",
+                color: "#0f172a",
                 fontWeight: 900,
                 fontSize: 14,
                 lineHeight: 1.2,
-                marginBottom: 3,
+                marginBottom: 2,
               }}
             >
               {item.title}
@@ -4512,7 +4396,7 @@ const getSavedCreatives = (campaignId) => {
             {!isMobile && (
               <div
                 style={{
-                  color: "rgba(255,255,255,0.62)",
+                  color: "#64748b",
                   fontWeight: 700,
                   fontSize: 11,
                   lineHeight: 1.3,
@@ -4522,18 +4406,6 @@ const getSavedCreatives = (campaignId) => {
               </div>
             )}
           </div>
-
-          {!isMobile && (
-            <div
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: 999,
-                background: item.ready ? "#8ff0c2" : "rgba(255,255,255,0.16)",
-                boxShadow: item.ready ? "0 0 12px rgba(143,240,194,0.55)" : "none",
-              }}
-            />
-          )}
         </button>
       );
     })}
@@ -4542,57 +4414,49 @@ const getSavedCreatives = (campaignId) => {
   <div
     style={{
       flex: 1,
-      borderRadius: 22,
-      background: "linear-gradient(180deg, rgba(18,23,29,0.98), rgba(14,18,24,0.96))",
-      border: `1px solid ${INPUT_BORDER}`,
-      padding: isMobile ? "18px 14px" : "22px 22px 20px",
+      background: "#f8fafc",
+      padding: isMobile ? "16px" : "24px",
       display: "flex",
       flexDirection: "column",
       gap: 18,
-      minHeight: 640,
-      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+      minHeight: 720,
     }}
   >
     {setupTab === "connect" && (
       <>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 24, lineHeight: 1.15 }}>
+          <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
             Connect Facebook
           </div>
-          <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-            Link your Facebook Ads account so Smartemark can launch, monitor, and optimize campaigns in the background.
+          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+            Link your Facebook Ads account so Smartemark can launch, monitor, and optimize campaigns.
           </div>
         </div>
 
         <div
           style={{
-            flex: 1,
-            borderRadius: 22,
-            padding: isMobile ? 18 : 26,
-            background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02))",
-            border: "1px solid rgba(255,255,255,0.06)",
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 20,
+            padding: isMobile ? 18 : 28,
             display: "flex",
             flexDirection: "column",
-            alignItems: "center",
+            gap: 22,
+            minHeight: 520,
             justifyContent: "center",
-            gap: 18,
-            minHeight: 420,
+            alignItems: "center",
           }}
         >
           <div
             style={{
-              width: 78,
-              height: 78,
-              borderRadius: 24,
+              width: 76,
+              height: 76,
+              borderRadius: 22,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              background: fbConnected
-                ? "linear-gradient(135deg, rgba(49,225,255,0.18), rgba(124,77,255,0.18))"
-                : "linear-gradient(135deg, rgba(24,119,242,0.24), rgba(24,119,242,0.12))",
-              border: "1px solid rgba(255,255,255,0.08)",
-              boxShadow: "0 18px 40px rgba(0,0,0,0.22)",
-              color: "#ffffff",
+              background: "#eef2ff",
+              color: "#4f46e5",
               fontSize: 30,
               fontWeight: 900,
             }}
@@ -4600,13 +4464,13 @@ const getSavedCreatives = (campaignId) => {
             f
           </div>
 
-          <div style={{ textAlign: "center", maxWidth: 420 }}>
-            <div style={{ color: "#ffffff", fontWeight: 900, fontSize: 22, marginBottom: 8 }}>
+          <div style={{ textAlign: "center", maxWidth: 560 }}>
+            <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, marginBottom: 8 }}>
               {fbConnected ? "Facebook Ads Connected" : "Connect your ad account"}
             </div>
-            <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+            <div style={{ color: "#64748b", fontWeight: 700, fontSize: 15, lineHeight: 1.7 }}>
               {fbConnected
-                ? "Your Meta connection is active. Smartemark can now read campaign data and manage optimization decisions."
+                ? "Your Meta connection is active. Smartemark can now read campaign data, monitor performance, and manage optimization decisions."
                 : "Start here first. Once connected, you’ll be able to review creatives and finish campaign setup."}
             </div>
           </div>
@@ -4682,18 +4546,17 @@ const getSavedCreatives = (campaignId) => {
             }}
             style={{
               padding: "14px 24px",
-              borderRadius: 16,
+              borderRadius: 14,
               border: "none",
               background: fbConnected
-                ? `linear-gradient(90deg, ${BTN_BASE}, ${ACCENT_2})`
+                ? "linear-gradient(90deg, #4f46e5, #6366f1)"
                 : "#1877F2",
-              color: WHITE,
+              color: "#ffffff",
               fontWeight: 900,
-              fontSize: "1.05rem",
-              boxShadow: "0 12px 28px rgba(24,119,242,0.28)",
-              letterSpacing: "0.3px",
+              fontSize: "1rem",
               cursor: "pointer",
               minWidth: 260,
+              boxShadow: "0 10px 24px rgba(79,70,229,0.18)",
             }}
           >
             {fbConnected ? "Facebook Ads Connected" : "Connect Facebook Ads"}
@@ -4701,43 +4564,48 @@ const getSavedCreatives = (campaignId) => {
 
           <div
             style={{
+              width: "100%",
               display: "grid",
               gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
-              gap: 12,
-              width: "100%",
-              maxWidth: 520,
-              marginTop: 6,
+              gap: 14,
+              maxWidth: 680,
             }}
           >
             <div
               style={{
+                background: "#ffffff",
+                border: "1px solid #e5e7eb",
                 borderRadius: 16,
-                padding: 14,
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                padding: 18,
               }}
             >
-              <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 11, marginBottom: 5 }}>
+              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
                 Ad Accounts
               </div>
-              <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18 }}>
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 24, marginBottom: 10 }}>
                 {adAccounts.length}
+              </div>
+              <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+                {selectedAccount ? `Selected: ${selectedAccount}` : "Choose your ad account in the Campaign tab"}
               </div>
             </div>
 
             <div
               style={{
+                background: "#ffffff",
+                border: "1px solid #e5e7eb",
                 borderRadius: 16,
-                padding: 14,
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
+                padding: 18,
               }}
             >
-              <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 11, marginBottom: 5 }}>
-                Pages
+              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
+                Facebook Pages
               </div>
-              <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18 }}>
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 24, marginBottom: 10 }}>
                 {pages.length}
+              </div>
+              <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+                {selectedPageId ? "Page selected" : "Select a page in the Campaign tab"}
               </div>
             </div>
           </div>
@@ -4748,36 +4616,62 @@ const getSavedCreatives = (campaignId) => {
     {setupTab === "creatives" && (
       <>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 24, lineHeight: 1.15 }}>
+          <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
             Ad Creatives
           </div>
-          <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-            Review your initial creatives and keep future AI challengers organized in one clean place.
+          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+            Keep your original creatives here. AI challengers appear only when Smartemark creates them.
           </div>
         </div>
 
         <div
           style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 20,
+            padding: 22,
             display: "flex",
             flexDirection: "column",
-            gap: 14,
+            gap: 18,
+            minHeight: 520,
           }}
         >
           {!!((draftCreatives?.images && draftCreatives.images.length) || (Array.isArray(navImageUrls) && navImageUrls.length)) && (
-            <div
-              style={{
-                borderRadius: 18,
-                padding: 16,
-                background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02))",
-                border: "1px solid rgba(255,255,255,0.06)",
-                boxShadow: "0 12px 28px rgba(0,0,0,0.18)",
-              }}
-            >
-              <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18, marginBottom: 6 }}>
-                Initial Generation
-              </div>
-              <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 12, marginBottom: 14 }}>
-                These are the creatives generated from your form inputs and business context.
+            <>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 4 }}>
+                    Current Ad Creatives
+                  </div>
+                  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+                    Your original generated assets.
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    padding: "7px 11px",
+                    borderRadius: 999,
+                    background: "#eef2ff",
+                    color: "#4f46e5",
+                    fontWeight: 900,
+                    fontSize: 12,
+                  }}
+                >
+                  {optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest?.status === "live"
+                    ? "A/B testing"
+                    : optimizerCreativeMap[selectedCampaignId || ""]?.generatedCreatives?.length
+                    ? "Strategizing"
+                    : "Ready"}
+                </div>
               </div>
 
               <CreativeThumbGrid
@@ -4790,14 +4684,14 @@ const getSavedCreatives = (campaignId) => {
                 labels={((draftCreatives?.images && draftCreatives.images.length
                   ? draftCreatives.images
                   : navImageUrls
-                ) || []).map((_, idx) => `Initial Creative ${idx + 1}`)}
-                height={190}
+                ) || []).map((_, idx) => `Creative ${idx + 1}`)}
+                height={210}
                 onOpen={(url) => {
                   setModalImg(url);
                   setShowImageModal(true);
                 }}
               />
-            </div>
+            </>
           )}
 
           {selectedCampaignId && selectedCampaignId !== "__DRAFT__" && (
@@ -4810,37 +4704,6 @@ const getSavedCreatives = (campaignId) => {
               }}
             />
           )}
-
-          <div
-            style={{
-              borderRadius: 18,
-              padding: 16,
-              background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.018))",
-              border: "1px solid rgba(255,255,255,0.06)",
-            }}
-          >
-            <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18, marginBottom: 6 }}>
-              Campaign Copy
-            </div>
-            <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 12, marginBottom: 14 }}>
-              The live campaign copy stays here while Smartemark manages the creative testing around it.
-            </div>
-
-            <div
-              style={{
-                borderRadius: 16,
-                padding: 12,
-                background: "rgba(255,255,255,0.03)",
-                border: "1px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              <PreviewCard
-                headline={previewCopy?.headline || headline || ""}
-                body={previewCopy?.body || body || ""}
-                link={previewCopy?.link || inferredLink || ""}
-              />
-            </div>
-          </div>
         </div>
       </>
     )}
@@ -4848,458 +4711,503 @@ const getSavedCreatives = (campaignId) => {
     {setupTab === "campaign" && (
       <>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 24, lineHeight: 1.15 }}>
+          <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
             Campaign
           </div>
-          <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-            Set your campaign details, billing, and launch settings in one place.
+          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+            Metrics, campaign settings, billing, and launch controls.
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.55fr) minmax(320px, 0.85fr)",
+            gap: 18,
+            alignItems: "start",
+          }}
+        >
           <div
             style={{
-              borderRadius: 18,
-              padding: 16,
-              background: "linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02))",
-              border: "1px solid rgba(255,255,255,0.06)",
+              background: "#ffffff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 20,
+              padding: 22,
               display: "flex",
               flexDirection: "column",
-              gap: 14,
+              gap: 18,
+              minHeight: 620,
             }}
           >
-            <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18 }}>
-              Campaign Settings
-            </div>
+            {selectedCampaignId && selectedCampaignId !== "__DRAFT__" ? (
+              <>
+                <MarketerActionsCard
+                  summary={publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()}
+                  optimizerState={optimizerStateMap[selectedCampaignId] || null}
+                />
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={{ color: WHITE, fontWeight: 800, fontSize: "0.98rem" }}>Campaign Name</label>
+                <div
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 16,
+                    padding: 14,
+                  }}
+                >
+                  <MetricsRow metrics={metricsMap[selectedCampaignId]} />
+                </div>
+              </>
+            ) : (
               <div
                 style={{
-                  background: INPUT_BG,
-                  borderRadius: 12,
-                  padding: "10px 12px",
-                  border: `1px solid ${INPUT_BORDER}`,
+                  color: "#64748b",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  lineHeight: 1.6,
                 }}
               >
+                Launch a campaign to begin seeing live metrics and AI updates here.
+              </div>
+            )}
+
+            <div
+              style={{
+                background: "#ffffff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 16,
+                padding: 14,
+              }}
+            >
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+                Campaign Copy
+              </div>
+              <PreviewCard
+                headline={previewCopy?.headline || headline || creativesPreview?.headline || ""}
+                body={previewCopy?.body || body || creativesPreview?.body || ""}
+                link={previewCopy?.link || inferredLink || creativesPreview?.link || ""}
+              />
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div
+              style={{
+                background: "#ffffff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 20,
+                padding: 18,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18 }}>
+                Campaign Settings
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>Campaign Name</label>
                 <input
                   type="text"
                   value={form.campaignName || ""}
                   onChange={(e) => setForm({ ...form, campaignName: e.target.value })}
                   placeholder="Type a name..."
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    outline: "none",
+                    background: "#ffffff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 12,
+                    padding: "12px 14px",
                     width: "100%",
-                    color: TEXT_DIM,
-                    fontSize: "1.02rem",
+                    color: "#0f172a",
+                    fontSize: "14px",
                     fontWeight: 800,
+                    outline: "none",
                   }}
                 />
               </div>
-            </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ color: WHITE, fontWeight: 900, fontSize: "0.98rem" }}>Campaign Duration</div>
-              <div
-                style={{
-                  ...GLASS,
-                  borderRadius: 14,
-                  padding: "12px 12px",
-                  display: "grid",
-                  gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
-                  gap: 10,
-                }}
-              >
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.9rem" }}>From</label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      border: `1px solid ${INPUT_BORDER}`,
-                      width: "100%",
-                      color: TEXT_DIM,
-                      fontSize: "0.98rem",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  />
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <label style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: "0.9rem" }}>To</label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(clampEndForStart(startDate, e.target.value))}
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      border: `1px solid ${INPUT_BORDER}`,
-                      width: "100%",
-                      color: TEXT_DIM,
-                      fontSize: "0.98rem",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: "0.9rem" }}>
-                Max duration is 14 days. End will auto-adjust if needed.
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <label style={{ color: WHITE, fontWeight: 800, fontSize: "0.98rem" }}>Daily Budget ($)</label>
-              <div
-                style={{
-                  background: INPUT_BG,
-                  borderRadius: 12,
-                  padding: "10px 12px",
-                  border: `1px solid ${INPUT_BORDER}`,
-                }}
-              >
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>Daily Budget</label>
                 <input
                   type="number"
-                  placeholder="Enter daily budget (minimum $3/day)"
+                  placeholder="Minimum $3/day"
                   min={3}
                   step={1}
                   value={budget}
                   onChange={(e) => setBudget(e.target.value)}
                   style={{
-                    background: "transparent",
-                    border: "none",
-                    outline: "none",
+                    background: "#ffffff",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 12,
+                    padding: "12px 14px",
                     width: "100%",
-                    color: TEXT_DIM,
-                    fontSize: "1.02rem",
+                    color: "#0f172a",
+                    fontSize: "14px",
                     fontWeight: 800,
+                    outline: "none",
                   }}
                 />
               </div>
-            </div>
-          </div>
 
-          <div
-            style={{
-              borderRadius: 18,
-              padding: 16,
-              background: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.018))",
-              border: "1px solid rgba(255,255,255,0.06)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-            }}
-          >
-            <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 18 }}>
-              Ad Account & Page
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>From</label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: "12px 14px",
+                      width: "100%",
+                      color: "#0f172a",
+                      fontSize: "14px",
+                      fontWeight: 800,
+                      outline: "none",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <label style={{ color: "#334155", fontWeight: 800, fontSize: 13 }}>To</label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(clampEndForStart(startDate, e.target.value))}
+                    style={{
+                      background: "#ffffff",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 12,
+                      padding: "12px 14px",
+                      width: "100%",
+                      color: "#0f172a",
+                      fontSize: "14px",
+                      fontWeight: 800,
+                      outline: "none",
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ color: "#94a3b8", fontWeight: 700, fontSize: 12 }}>
+                Max duration is 14 days. End auto-adjusts if needed.
+              </div>
             </div>
 
-            <div>
-              <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Ad Account</div>
-              <select
-                value={selectedAccount}
-                onChange={(e) => setSelectedAccount(e.target.value)}
-                style={{
-                  padding: "12px",
-                  borderRadius: "12px",
-                  fontSize: "1rem",
-                  width: "100%",
-                  outline: "none",
-                  border: `1px solid ${INPUT_BORDER}`,
-                  background: "#1a2025",
-                  color: TEXT_DIM,
-                  marginTop: 6,
-                  fontWeight: 800,
-                }}
-              >
-                <option value="">Select an ad account</option>
-                {adAccounts.map((ac) => {
-                  const v = String(ac.id || "").replace(/^act_/, "");
-                  return (
-                    <option key={ac.id} value={v}>
-                      {ac.name ? `${ac.name} (${v})` : v}
+            <div
+              style={{
+                background: "#ffffff",
+                border: "1px solid #e5e7eb",
+                borderRadius: 20,
+                padding: 18,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
+              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18 }}>
+                Account & Billing
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
+                  Ad Account
+                </div>
+                <select
+                  value={selectedAccount}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    fontSize: "14px",
+                    width: "100%",
+                    outline: "none",
+                    border: "1px solid #e5e7eb",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    fontWeight: 800,
+                  }}
+                >
+                  <option value="">Select an ad account</option>
+                  {adAccounts.map((ac) => {
+                    const v = String(ac.id || "").replace(/^act_/, "");
+                    return (
+                      <option key={ac.id} value={v}>
+                        {ac.name ? `${ac.name} (${v})` : v}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 13, color: "#334155", marginBottom: 8 }}>
+                  Facebook Page
+                </div>
+                <select
+                  value={selectedPageId}
+                  onChange={(e) => setSelectedPageId(e.target.value)}
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    fontSize: "14px",
+                    width: "100%",
+                    outline: "none",
+                    border: "1px solid #e5e7eb",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    fontWeight: 800,
+                  }}
+                >
+                  <option value="">Select a page</option>
+                  {pages.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
                     </option>
-                  );
-                })}
-              </select>
-            </div>
+                  ))}
+                </select>
+              </div>
 
-            <div>
-              <div style={{ fontWeight: 900, fontSize: "0.98rem", color: WHITE }}>Facebook Page</div>
-              <select
-                value={selectedPageId}
-                onChange={(e) => setSelectedPageId(e.target.value)}
+              <button
+                onClick={openFbPaymentPopup}
                 style={{
-                  padding: "12px",
-                  borderRadius: "12px",
-                  fontSize: "1rem",
                   width: "100%",
-                  outline: "none",
-                  border: `1px solid ${INPUT_BORDER}`,
-                  background: "#1a2025",
-                  color: TEXT_DIM,
-                  marginTop: 6,
-                  fontWeight: 800,
+                  padding: "12px 16px",
+                  borderRadius: 12,
+                  border: "1px solid #e5e7eb",
+                  background: "#ffffff",
+                  color: "#0f172a",
+                  fontWeight: 900,
+                  fontSize: "14px",
+                  cursor: "pointer",
                 }}
               >
-                <option value="">Select a page</option>
-                {pages.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+                Add Payment Method
+              </button>
+
+              <div style={{ color: "#0f172a", fontWeight: 800, fontSize: 13 }}>
+                Subscription Required:{" "}
+                <span style={{ color: "#4f46e5" }}>
+                  {billingInfo.hasAccess
+                    ? `${billingInfo.planKey || "active"} plan active`
+                    : "choose a plan below"}
+                </span>
+              </div>
+
+              {(() => {
+                const n = Number(budget);
+                const show = Number.isFinite(n) && n >= 3;
+                if (!show) return null;
+
+                return (
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e5e7eb",
+                      borderRadius: 16,
+                      padding: 14,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, color: "#0f172a", fontSize: 16 }}>
+                      Finish Setup
+                    </div>
+
+                    <div style={{ color: "#64748b", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+                      Create your account, choose a plan, and continue to checkout.
+                    </div>
+
+                    <input
+                      type="email"
+                      value={loginUser}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setLoginUser(v);
+                        try {
+                          const t = String(v || "").trim();
+                          if (t) localStorage.setItem("smartmark_login_username", t);
+                        } catch {}
+                      }}
+                      placeholder="email"
+                      style={{
+                        background: "#ffffff",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        border: "1px solid #e5e7eb",
+                        width: "100%",
+                        color: "#0f172a",
+                        fontSize: "14px",
+                        fontWeight: 800,
+                        outline: "none",
+                      }}
+                    />
+
+                    <input
+                      type="password"
+                      value={loginPass}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setLoginPass(v);
+                        try {
+                          const t = String(v || "").trim();
+                          if (t) localStorage.setItem("smartmark_login_password", t);
+                        } catch {}
+                      }}
+                      placeholder="Password"
+                      autoComplete="current-password"
+                      style={{
+                        background: "#ffffff",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        border: "1px solid #e5e7eb",
+                        width: "100%",
+                        color: "#0f172a",
+                        fontSize: "14px",
+                        fontWeight: 800,
+                        outline: "none",
+                      }}
+                    />
+
+                    <select
+                      value={selectedPlan}
+                      onChange={(e) => setSelectedPlan(e.target.value)}
+                      style={{
+                        background: "#ffffff",
+                        borderRadius: 12,
+                        padding: "12px 14px",
+                        border: "1px solid #e5e7eb",
+                        width: "100%",
+                        color: "#0f172a",
+                        fontSize: "14px",
+                        fontWeight: 800,
+                        outline: "none",
+                      }}
+                    >
+                      <option value="starter">Starter — $79.99 / month</option>
+                      <option value="pro">Pro — $109.99 / month</option>
+                      <option value="operator">Operator — $179.99 / month</option>
+                    </select>
+
+                    {!!authStatus.msg && (
+                      <div style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>
+                        {authStatus.msg}
+                      </div>
+                    )}
+
+                    {billingInfo.checked && (
+                      <div
+                        style={{
+                          color: billingInfo.hasAccess ? "#16a34a" : "#64748b",
+                          fontWeight: 800,
+                          fontSize: 12,
+                        }}
+                      >
+                        {billingInfo.hasAccess
+                          ? `Subscription active: ${billingInfo.planKey || "active"}`
+                          : "No active subscription on this account yet"}
+                      </div>
+                    )}
+
+                    {!billingInfo.hasAccess && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          trackEvent("setup_checkout_click", { page: "setup", plan: selectedPlan });
+                          handleSubscribeToPlan();
+                        }}
+                        disabled={billingLoading || authLoading}
+                        style={{
+                          background: "linear-gradient(90deg, #4f46e5, #6366f1)",
+                          color: "#ffffff",
+                          border: "none",
+                          borderRadius: 12,
+                          fontWeight: 900,
+                          padding: "11px 16px",
+                          cursor: billingLoading || authLoading ? "not-allowed" : "pointer",
+                          opacity: billingLoading || authLoading ? 0.7 : 1,
+                        }}
+                      >
+                        {billingLoading ? "Opening Checkout..." : "Continue Securely"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <button
-              onClick={openFbPaymentPopup}
+              onClick={() => {
+                trackEvent("launch_campaign", { page: "setup" });
+                handleLaunch();
+              }}
+              disabled={loading || campaignCount >= 2 || !canLaunch}
               style={{
-                width: "100%",
-                padding: "12px 16px",
-                borderRadius: "14px",
+                background: campaignCount >= 2 || !canLaunch ? "#cbd5e1" : "#4f46e5",
+                color: campaignCount >= 2 || !canLaunch ? "#64748b" : "#ffffff",
                 border: "none",
-                background: "#2f7a5d",
-                color: WHITE,
+                borderRadius: 14,
                 fontWeight: 900,
-                fontSize: "1rem",
-                cursor: "pointer",
-                boxShadow: "0 2px 10px rgba(12,63,46,0.5)",
+                fontSize: "15px",
+                padding: "15px 20px",
+                boxShadow: "0 10px 20px rgba(79,70,229,0.15)",
+                cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
+                opacity: loading || campaignCount >= 2 || !canLaunch ? 0.7 : 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 10,
               }}
             >
-              Add Payment Method
+              {campaignCount >= 2 ? (
+                "Limit Reached"
+              ) : loading ? (
+                <>
+                  <span
+                    aria-hidden
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      border: "3px solid rgba(255,255,255,0.25)",
+                      borderTopColor: "#ffffff",
+                      animation: "smSpin 0.9s linear infinite",
+                    }}
+                  />
+                  Launching…
+                </>
+              ) : launched ? (
+                "Campaign launched ✅"
+              ) : (
+                "Launch Campaign"
+              )}
             </button>
-          </div>
 
-          <div style={{ color: "#b7f5c2", fontWeight: 800 }}>
-            Subscription Required:{" "}
-            <span style={{ color: ACCENT_ALT }}>
-              {billingInfo.hasAccess
-                ? `${billingInfo.planKey || "active"} plan active`
-                : "choose a plan below"}
-            </span>
-          </div>
+            <style>
+              {`@keyframes smSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}
+            </style>
 
-          {(() => {
-            const n = Number(budget);
-            const show = Number.isFinite(n) && n >= 3;
-            if (!show) return null;
-
-            return (
+            {launched && launchResult && (
               <div
                 style={{
-                  borderRadius: 18,
-                  padding: "16px 16px",
-                  ...GLASS,
-                  color: WHITE,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
+                  color: "#16a34a",
+                  fontWeight: 900,
+                  fontSize: "0.98rem",
                 }}
               >
-                <div style={{ fontWeight: 900, color: "#ffffff", fontSize: 18 }}>
-                  Finish Setup
-                </div>
-
-                <div style={{ color: TEXT_MUTED, fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-                  Create your account, choose a plan, and continue to secure checkout.
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <input
-                    type="email"
-                    value={loginUser}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setLoginUser(v);
-                      try {
-                        const t = String(v || "").trim();
-                        if (t) localStorage.setItem("smartmark_login_username", t);
-                      } catch {}
-                    }}
-                    placeholder="email"
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      border: `1px solid ${INPUT_BORDER}`,
-                      width: "100%",
-                      color: TEXT_DIM,
-                      fontSize: "1.02rem",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  />
-
-                  <input
-                    type="password"
-                    value={loginPass}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      setLoginPass(v);
-                      try {
-                        const t = String(v || "").trim();
-                        if (t) localStorage.setItem("smartmark_login_password", t);
-                      } catch {}
-                    }}
-                    placeholder="Password"
-                    autoComplete="current-password"
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      border: `1px solid ${INPUT_BORDER}`,
-                      width: "100%",
-                      color: TEXT_DIM,
-                      fontSize: "1.02rem",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  />
-
-                  <select
-                    value={selectedPlan}
-                    onChange={(e) => setSelectedPlan(e.target.value)}
-                    style={{
-                      background: INPUT_BG,
-                      borderRadius: 12,
-                      padding: "10px 12px",
-                      border: `1px solid ${INPUT_BORDER}`,
-                      width: "100%",
-                      color: TEXT_DIM,
-                      fontSize: "1.02rem",
-                      fontWeight: 800,
-                      outline: "none",
-                    }}
-                  >
-                    <option value="starter">Starter — $79.99 / month</option>
-                    <option value="pro">Pro — $109.99 / month</option>
-                    <option value="operator">Operator — $179.99 / month</option>
-                  </select>
-
-                  {!!authStatus.msg && (
-                    <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12 }}>
-                      {authStatus.msg}
-                    </div>
-                  )}
-
-                  {billingInfo.checked && (
-                    <div
-                      style={{
-                        color: billingInfo.hasAccess ? "#8ff0c2" : "rgba(255,255,255,0.72)",
-                        fontWeight: 800,
-                        fontSize: 12,
-                      }}
-                    >
-                      {billingInfo.hasAccess
-                        ? `Subscription active: ${billingInfo.planKey || "active"}`
-                        : "No active subscription on this account yet"}
-                    </div>
-                  )}
-                </div>
-
-                {!billingInfo.hasAccess && (
-                  <div style={{ display: "flex", justifyContent: "flex-start" }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        trackEvent("setup_checkout_click", { page: "setup", plan: selectedPlan });
-                        handleSubscribeToPlan();
-                      }}
-                      disabled={billingLoading || authLoading}
-                      style={{
-                        background: `linear-gradient(90deg, ${BTN_BASE}, ${ACCENT_2})`,
-                        color: WHITE,
-                        boxShadow: "0 12px 30px rgba(15,111,255,0.25)",
-                        border: "none",
-                        borderRadius: 12,
-                        fontWeight: 900,
-                        padding: "10px 18px",
-                        cursor: billingLoading || authLoading ? "not-allowed" : "pointer",
-                        minWidth: 210,
-                        opacity: billingLoading || authLoading ? 0.7 : 1,
-                      }}
-                    >
-                      {billingLoading ? "Opening Checkout..." : "Continue Securely"}
-                    </button>
-                  </div>
-                )}
+                Campaign launched! ID: {launchResult.campaignId || "--"}
               </div>
-            );
-          })()}
-
-          <button
-            onClick={() => {
-              trackEvent("launch_campaign", { page: "setup" });
-              handleLaunch();
-            }}
-            disabled={loading || campaignCount >= 2 || !canLaunch}
-            style={{
-              background: campaignCount >= 2 || !canLaunch ? "#8b8d90" : ACCENT,
-              color: "#0f1418",
-              border: "none",
-              borderRadius: 16,
-              fontWeight: 900,
-              fontSize: "1.03rem",
-              padding: "15px 22px",
-              boxShadow: "0 12px 28px rgba(12,196,190,0.22)",
-              cursor: loading || campaignCount >= 2 || !canLaunch ? "not-allowed" : "pointer",
-              opacity: loading || campaignCount >= 2 || !canLaunch ? 0.6 : 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-            }}
-          >
-            {campaignCount >= 2 ? (
-              "Limit Reached"
-            ) : loading ? (
-              <>
-                <span
-                  aria-hidden
-                  style={{
-                    width: 18,
-                    height: 18,
-                    borderRadius: "50%",
-                    border: "3px solid rgba(15,20,24,0.25)",
-                    borderTopColor: "#0f1418",
-                    animation: "smSpin 0.9s linear infinite",
-                  }}
-                />
-                Launching…
-              </>
-            ) : launched ? (
-              "Campaign launched ✅"
-            ) : (
-              "Launch Campaign"
             )}
-          </button>
-
-          <style>
-            {`@keyframes smSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}
-          </style>
-
-          {launched && launchResult && (
-            <div
-              style={{
-                color: "#1eea78",
-                fontWeight: 900,
-                fontSize: "0.98rem",
-                textShadow: "0 2px 8px #0a893622",
-              }}
-            >
-              Campaign launched! ID: {launchResult.campaignId || "--"}
-            </div>
-          )}
+          </div>
         </div>
       </>
     )}
