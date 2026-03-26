@@ -3954,65 +3954,70 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
     let recoveredBody = safeMetaFromRecord.body;
     let recoveredLink = safeMetaFromRecord.link;
 
-    const perAdLocalImages = [];
+const perAdLocalImages = [];
+const shouldRecacheFromMeta = storedLocalImages.length === 0;
 
-    for (let i = 0; i < ads.length; i += 1) {
-      const ad = ads[i] || {};
-      const creative = ad?.creative || {};
-      const oss = creative?.object_story_spec || {};
-      const linkData = oss?.link_data || {};
-      const photoData = oss?.photo_data || {};
-      const videoData = oss?.video_data || {};
+for (let i = 0; i < ads.length; i += 1) {
+  const ad = ads[i] || {};
+  const creative = ad?.creative || {};
+  const oss = creative?.object_story_spec || {};
+  const linkData = oss?.link_data || {};
+  const photoData = oss?.photo_data || {};
+  const videoData = oss?.video_data || {};
 
-      if (!recoveredHeadline) {
-        recoveredHeadline = firstNonEmpty(
-          linkData?.name,
-          photoData?.title,
-          videoData?.title,
-          linkData?.caption
-        );
-      }
+  if (!recoveredHeadline) {
+    recoveredHeadline = firstNonEmpty(
+      linkData?.name,
+      photoData?.title,
+      videoData?.title,
+      linkData?.caption
+    );
+  }
 
-      if (!recoveredBody) {
-        recoveredBody = firstNonEmpty(
-          linkData?.message,
-          photoData?.message,
-          videoData?.message
-        );
-      }
+  if (!recoveredBody) {
+    recoveredBody = firstNonEmpty(
+      linkData?.message,
+      photoData?.message,
+      videoData?.message
+    );
+  }
 
-      if (!recoveredLink) {
-        recoveredLink = firstNonEmpty(
-          linkData?.link,
-          photoData?.link,
-          videoData?.call_to_action?.value?.link
-        );
-      }
+  if (!recoveredLink) {
+    recoveredLink = firstNonEmpty(
+      linkData?.link,
+      photoData?.link,
+      videoData?.call_to_action?.value?.link
+    );
+  }
 
-      const adCandidates = dedupeKeepOrder([
-        linkData?.image_url,
-        photoData?.image_url,
-        videoData?.image_url,
-        creative?.image_url,
-        creative?.thumbnail_url,
-      ], 8);
+  if (!shouldRecacheFromMeta) {
+    continue;
+  }
 
-      console.log('[creatives] ad candidates', {
-        campaignId: normalizedCampaignId,
-        adId: String(ad?.id || ''),
-        adName: String(ad?.name || ''),
-        candidates: adCandidates,
-      });
+  const adCandidates = dedupeKeepOrder([
+    linkData?.image_url,
+    photoData?.image_url,
+    videoData?.image_url,
+    creative?.image_url,
+    creative?.thumbnail_url,
+  ], 8);
 
-      let localHit = '';
-      for (let j = 0; j < adCandidates.length; j += 1) {
-        localHit = await cacheRemoteImageToLocal(adCandidates[j], `ad${i + 1}-cand${j + 1}`);
-        if (localHit) break;
-      }
+  console.log('[creatives] ad candidates', {
+    campaignId: normalizedCampaignId,
+    adId: String(ad?.id || ''),
+    adName: String(ad?.name || ''),
+    candidates: adCandidates,
+  });
 
-      if (localHit) perAdLocalImages.push(localHit);
-      if (perAdLocalImages.length >= 2) break;
-    }
+  let localHit = '';
+  for (let j = 0; j < adCandidates.length; j += 1) {
+    localHit = await cacheRemoteImageToLocal(adCandidates[j], `ad${i + 1}-cand${j + 1}`);
+    if (localHit) break;
+  }
+
+  if (localHit) perAdLocalImages.push(localHit);
+  if (perAdLocalImages.length >= 2) break;
+}
 
     const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 4);
     const storedLocalImages = [];
@@ -4026,31 +4031,38 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       }
     }
 
-    const finalImages = dedupeKeepOrder(
-      [...perAdLocalImages, ...storedLocalImages],
-      2
-    );
+const existingUsableLocalImages = dedupeKeepOrder(
+  storedLocalImages.filter((img) => /\/api\/media\//i.test(String(img || ''))),
+  2
+);
 
-    console.log('[creatives] final images selected', {
-      campaignId: normalizedCampaignId,
-      perAdLocalImages,
-      storedLocalImages,
-      finalImages,
-    });
+const finalImages =
+  existingUsableLocalImages.length > 0
+    ? existingUsableLocalImages
+    : dedupeKeepOrder([...perAdLocalImages, ...storedLocalImages], 2);
 
-       if (!recoveredHeadline) {
-      recoveredHeadline = safeMetaFromRecord.headline || '';
-    }
+console.log('[creatives] final images selected', {
+  campaignId: normalizedCampaignId,
+  perAdLocalImages,
+  storedLocalImages,
+  existingUsableLocalImages,
+  finalImages,
+  reusedExistingLocal: existingUsableLocalImages.length > 0,
+});
 
-    if (!recoveredHeadline && recoveredBody) {
-      recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
-    }
+if (!recoveredHeadline) {
+  recoveredHeadline = safeMetaFromRecord.headline || '';
+}
 
-    if (!finalImages.length) {
-      return res.status(404).json({
-        error: 'No live creative images found for this campaign.',
-      });
-    }
+if (!recoveredHeadline && recoveredBody) {
+  recoveredHeadline = String(recoveredBody).split('\n')[0].trim().slice(0, 90);
+}
+
+if (!finalImages.length) {
+  return res.status(404).json({
+    error: 'No live creative images found for this campaign.',
+  });
+}
 
     const nowIso = new Date().toISOString();
 

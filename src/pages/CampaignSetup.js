@@ -1642,22 +1642,29 @@ function MarketerActionsCard({ summary }) {
   );
 }
 
-function PendingCreativeTestCard({ optimizerCreativeState, onOpenImage }) {
+function PendingCreativeTestCard({
+  optimizerCreativeState,
+  originalImages = [],
+  onOpenImage,
+}) {
   const generatedCreatives = Array.isArray(optimizerCreativeState?.generatedCreatives)
     ? optimizerCreativeState.generatedCreatives
     : [];
 
   const pending = optimizerCreativeState?.pendingCreativeTest || null;
 
-  if (!generatedCreatives.length) return null;
+  const original = (originalImages || []).map(toAbsoluteMedia).filter(Boolean);
+  const variants = generatedCreatives.map((x) => x.url).map(toAbsoluteMedia).filter(Boolean);
+
+  if (!original.length && !variants.length) return null;
 
   const status = String(pending?.status || "generated").trim().toLowerCase();
 
   const statusLabel =
     status === "live"
-      ? "Live"
+      ? "Live Test"
       : status === "ready"
-      ? "Ready"
+      ? "Ready to Launch"
       : status === "resolved"
       ? "Resolved"
       : "Generated";
@@ -1680,20 +1687,18 @@ function PendingCreativeTestCard({ optimizerCreativeState, onOpenImage }) {
       ? "#ffd27a"
       : "#ffffff";
 
-  const variantUrls = generatedCreatives.map((x) => x.url).filter(Boolean);
-
   return (
     <div
       style={{
         width: "100%",
         background: "#14191e",
-        borderRadius: 16,
+        borderRadius: 18,
         padding: 14,
         display: "flex",
         flexDirection: "column",
-        gap: 14,
+        gap: 16,
         border: `1px solid ${INPUT_BORDER}`,
-        boxShadow: "0 10px 24px rgba(0,0,0,0.22)",
+        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
       }}
     >
       <div
@@ -1707,7 +1712,7 @@ function PendingCreativeTestCard({ optimizerCreativeState, onOpenImage }) {
       >
         <div>
           <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 17 }}>
-            AI Variants
+            Creative Test
           </div>
           <div
             style={{
@@ -1717,8 +1722,7 @@ function PendingCreativeTestCard({ optimizerCreativeState, onOpenImage }) {
               marginTop: 3,
             }}
           >
-            {generatedCreatives.length} variant{generatedCreatives.length === 1 ? "" : "s"}
-            {pending?.creativeGoal ? ` • Goal: ${pending.creativeGoal}` : ""}
+            Smartemark is tracking the original creative against AI-generated challengers.
           </div>
         </div>
 
@@ -1737,12 +1741,72 @@ function PendingCreativeTestCard({ optimizerCreativeState, onOpenImage }) {
         </div>
       </div>
 
-      <CreativeThumbGrid
-        items={variantUrls}
-        labels={variantUrls.map((_, idx) => `Variant ${idx + 1}`)}
-        onOpen={onOpenImage}
-        height={CREATIVE_HEIGHT}
-      />
+      {!!original.length && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div
+            style={{
+              color: TEXT_MAIN,
+              fontWeight: 900,
+              fontSize: 14,
+            }}
+          >
+            Original Creative
+          </div>
+
+          <CreativeThumbGrid
+            items={original}
+            labels={original.map((_, idx) =>
+              original.length === 1 ? "Control Creative" : `Control Creative ${idx + 1}`
+            )}
+            onOpen={onOpenImage}
+            height={CREATIVE_HEIGHT}
+          />
+        </div>
+      )}
+
+      {!!variants.length && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div
+            style={{
+              color: TEXT_MAIN,
+              fontWeight: 900,
+              fontSize: 14,
+            }}
+          >
+            AI Variants
+          </div>
+
+          <CreativeThumbGrid
+            items={variants}
+            labels={variants.map((_, idx) => `Challenger ${idx + 1}`)}
+            onOpen={onOpenImage}
+            height={CREATIVE_HEIGHT}
+          />
+        </div>
+      )}
+
+      {!!pending && (
+        <div
+          style={{
+            borderRadius: 14,
+            padding: "12px 12px",
+            background: "rgba(255,255,255,0.035)",
+            border: "1px solid rgba(255,255,255,0.06)",
+            color: "rgba(255,255,255,0.72)",
+            fontWeight: 700,
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}
+        >
+          {status === "live" && "Smartemark has launched the challenger ads and is collecting live performance data before choosing a winner."}
+          {status === "ready" && "Smartemark has prepared the AI challengers and they are ready to be launched into a controlled creative test."}
+          {status === "resolved" && "This creative test has been resolved and Smartemark has selected a winner."}
+          {!["live", "ready", "resolved"].includes(status) &&
+            `${pending.variantCount || variants.length} variant${
+              (pending.variantCount || variants.length) === 1 ? "" : "s"
+            } prepared for testing.`}
+        </div>
+      )}
     </div>
   );
 }
