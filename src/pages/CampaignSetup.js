@@ -1501,143 +1501,321 @@ function buildPublicActionItems(summary) {
   ];
 }
 
-function MarketerActionsCard({ summary }) {
-  const items = buildPublicActionItems(summary);
+function buildOptimizerHistoryItems(optimizerState) {
+  const rows = [];
+
+  const pushItem = (label, payload, fallbackText) => {
+    if (!payload || typeof payload !== "object") return;
+
+    const generatedAt = String(payload.generatedAt || payload.updatedAt || "").trim();
+
+    const title =
+      String(payload.headline || "").trim() ||
+      String(payload.monitoringDecision || "").trim() ||
+      String(payload.actionType || "").trim() ||
+      String(payload.primaryFinding || "").trim() ||
+      fallbackText;
+
+    const detail =
+      String(payload.reason || "").trim() ||
+      String(payload.summary || "").trim() ||
+      String(payload.subtext || "").trim() ||
+      String(payload.recommendedAction || "").trim() ||
+      "";
+
+    rows.push({
+      id: `${label}-${generatedAt || Math.random().toString(16).slice(2)}`,
+      label,
+      title,
+      detail,
+      timeLabel: generatedAt ? timeAgoShort(generatedAt) : "recent",
+      ts: generatedAt ? new Date(generatedAt).getTime() : 0,
+    });
+  };
+
+  pushItem("Diagnosis", optimizerState?.latestDiagnosis, "Reviewed campaign performance");
+  pushItem("Decision", optimizerState?.latestDecision, "Chose the next move");
+  pushItem("Action", optimizerState?.latestAction, "Took an optimization action");
+  pushItem("Monitoring", optimizerState?.latestMonitoringDecision, "Checked live delivery");
+
+  return rows.sort((a, b) => b.ts - a.ts).slice(0, 4);
+}
+
+function MarketerActionsCard({ summary, optimizerState }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const safeSummary = summary || getFallbackPublicSummary();
+  const history = buildOptimizerHistoryItems(optimizerState);
+  const toneStyles = marketerToneStyles(safeSummary?.tone);
+  const Icon = marketerIconForStage(safeSummary?.stage);
+
+  const actions = Array.isArray(safeSummary?.actions)
+    ? safeSummary.actions.filter(Boolean).slice(0, 3)
+    : [];
 
   return (
     <div
       style={{
         width: "100%",
-        background: "#14191e",
-        borderRadius: "12px",
-        padding: "10px",
+        borderRadius: 18,
+        padding: 16,
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: 14,
+        background:
+          "linear-gradient(180deg, rgba(20,25,30,0.98), rgba(16,21,27,0.96))",
         border: `1px solid ${INPUT_BORDER}`,
+        boxShadow: "0 18px 42px rgba(0,0,0,0.28)",
+        overflow: "hidden",
       }}
     >
       <div
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 2,
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
         }}
       >
-        <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem" }}>
-          Actions
+        <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1 }}>
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              minWidth: 44,
+              borderRadius: 14,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: toneStyles.iconBg,
+              color: toneStyles.iconColor,
+              border: "1px solid rgba(255,255,255,0.05)",
+            }}
+          >
+            <Icon size={16} />
+          </div>
+
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                color: TEXT_MAIN,
+                fontWeight: 900,
+                fontSize: 18,
+                lineHeight: 1.2,
+                marginBottom: 4,
+              }}
+            >
+              AI Overview
+            </div>
+
+            <div
+              style={{
+                color: "rgba(255,255,255,0.92)",
+                fontWeight: 800,
+                fontSize: 14,
+                lineHeight: 1.35,
+                marginBottom: 4,
+              }}
+            >
+              {safeSummary?.headline || "Monitoring campaign performance"}
+            </div>
+
+            <div
+              style={{
+                color: TEXT_MUTED,
+                fontWeight: 700,
+                fontSize: 12,
+                lineHeight: 1.45,
+              }}
+            >
+              {safeSummary?.subtext ||
+                "Smartemark is checking campaign performance and choosing the next measured move."}
+            </div>
+          </div>
         </div>
-        <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12 }}>
-          Autonomous Marketer
+
+        <div
+          style={{
+            padding: "7px 11px",
+            borderRadius: 999,
+            background: toneStyles.iconBg,
+            color: toneStyles.iconColor,
+            fontWeight: 900,
+            fontSize: 12,
+            border: "1px solid rgba(255,255,255,0.05)",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {safeSummary?.stage ? String(safeSummary.stage).replace(/_/g, " ") : "monitoring"}
         </div>
       </div>
 
-      {!items.length ? (
-        <div
-          style={{
-            borderRadius: 14,
-            padding: "14px 14px",
-            background: "rgba(255,255,255,0.03)",
-            border: "1px solid rgba(255,255,255,0.06)",
-            color: TEXT_MUTED,
-            fontWeight: 700,
-            fontSize: 14,
-          }}
-        >
-          Smartemark is monitoring campaign setup and waiting for live performance data.
-        </div>
-      ) : (
-        items.map((item) => {
-          const Icon = marketerIconForStage(item.stage);
-          const toneStyles = marketerToneStyles(item.tone);
-
-          return (
+      {!!actions.length && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {actions.map((item, idx) => (
             <div
-              key={item.id}
+              key={`${item}-${idx}`}
               style={{
-                borderRadius: 14,
-                padding: "14px 14px",
-                background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.025))",
-                border: `1px solid ${toneStyles.border}`,
-                display: "flex",
-                alignItems: "flex-start",
-                justifyContent: "space-between",
-                gap: 12,
+                padding: "7px 10px",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.05)",
+                color: "#eaf5ff",
+                fontWeight: 800,
+                fontSize: 11,
+                border: "1px solid rgba(255,255,255,0.05)",
               }}
             >
-              <div style={{ display: "flex", gap: 12, minWidth: 0, flex: 1 }}>
-                <div
-                  style={{
-                    width: 42,
-                    height: 42,
-                    minWidth: 42,
-                    borderRadius: 999,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    background: toneStyles.iconBg,
-                    color: toneStyles.iconColor,
-                    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.04)",
-                  }}
-                >
-                  <Icon size={16} />
-                </div>
+              {item}
+            </div>
+          ))}
+        </div>
+      )}
 
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div
-                    style={{
-                      color: TEXT_MAIN,
-                      fontWeight: 900,
-                      fontSize: 15,
-                      lineHeight: 1.2,
-                      marginBottom: 4,
-                    }}
-                  >
-                    {item.title}
-                  </div>
+      <div
+        style={{
+          position: "relative",
+          borderRadius: 16,
+          padding: "14px 14px 12px",
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          maxHeight: expanded ? 420 : 110,
+          overflow: "hidden",
+          transition: "max-height 220ms ease",
+        }}
+      >
+        <div
+          style={{
+            color: TEXT_MAIN,
+            fontWeight: 900,
+            fontSize: 13,
+            marginBottom: 10,
+            letterSpacing: 0.2,
+          }}
+        >
+          Latest AI thinking
+        </div>
 
-                  <div
-                    style={{
-                      color: TEXT_MUTED,
-                      fontWeight: 700,
-                      fontSize: 12,
-                      marginBottom: item.detail ? 6 : 0,
-                    }}
-                  >
-                    {item.subtitle}
-                  </div>
-
-                  {!!item.detail && (
-                    <div
-                      style={{
-                        color: "rgba(255,255,255,0.72)",
-                        fontWeight: 600,
-                        fontSize: 12,
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      {item.detail}
-                    </div>
-                  )}
-                </div>
-              </div>
-
+        <div
+          style={{
+            color: "rgba(255,255,255,0.76)",
+            fontWeight: 600,
+            fontSize: 12,
+            lineHeight: 1.6,
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          {history.length ? (
+            history.map((item) => (
               <div
+                key={item.id}
                 style={{
-                  color: TEXT_MUTED,
-                  fontWeight: 800,
-                  fontSize: 12,
-                  whiteSpace: "nowrap",
-                  paddingTop: 2,
+                  paddingBottom: 10,
+                  borderBottom: "1px solid rgba(255,255,255,0.05)",
                 }}
               >
-                {item.timeLabel}
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    alignItems: "center",
+                    marginBottom: 5,
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "#ffffff",
+                      fontWeight: 800,
+                      fontSize: 12,
+                    }}
+                  >
+                    {item.label}
+                  </div>
+                  <div
+                    style={{
+                      color: "rgba(255,255,255,0.48)",
+                      fontWeight: 800,
+                      fontSize: 11,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {item.timeLabel}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    color: "rgba(255,255,255,0.88)",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    marginBottom: item.detail ? 4 : 0,
+                  }}
+                >
+                  {item.title}
+                </div>
+
+                {!!item.detail && (
+                  <div
+                    style={{
+                      color: "rgba(255,255,255,0.66)",
+                      fontWeight: 600,
+                      fontSize: 11,
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {item.detail}
+                  </div>
+                )}
               </div>
+            ))
+          ) : (
+            <div>
+              Smartemark is building its latest diagnosis and action trail for this campaign.
             </div>
-          );
-        })
-      )}
+          )}
+        </div>
+
+        {!expanded && (
+          <div
+            style={{
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              height: 46,
+              background:
+                "linear-gradient(180deg, rgba(20,25,30,0), rgba(20,25,30,0.98))",
+              pointerEvents: "none",
+            }}
+          />
+        )}
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+        <div style={{ color: "rgba(255,255,255,0.52)", fontWeight: 800, fontSize: 11 }}>
+          {safeSummary?.updatedAt ? `Updated ${timeAgoShort(safeSummary.updatedAt)}` : "Recently updated"}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          style={{
+            background: "rgba(255,255,255,0.06)",
+            color: "#ffffff",
+            border: "1px solid rgba(255,255,255,0.06)",
+            borderRadius: 10,
+            padding: "8px 12px",
+            fontWeight: 900,
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+        >
+          {expanded ? "Hide details" : "Peek inside AI"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -2361,6 +2539,7 @@ const [metricsMap, setMetricsMap] = useState({});
 const [publicSummaryMap, setPublicSummaryMap] = useState({});
 const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
 const [optimizerCreativeMap, setOptimizerCreativeMap] = useState({});
+const [optimizerStateMap, setOptimizerStateMap] = useState({});
 const [launched, setLaunched] = useState(false);
 const [launchResult, setLaunchResult] = useState(null);
 const [loading, setLoading] = useState(false);
@@ -3232,31 +3411,36 @@ useEffect(() => {
         }));
       }
 
-      if (
-        !cancelled &&
-        summaryRes.status === "fulfilled" &&
-        summaryRes.value?.ok
-      ) {
-        const data = await summaryRes.value.json().catch(() => ({}));
-        const optimizerState = data?.optimizerState || null;
+if (
+  !cancelled &&
+  summaryRes.status === "fulfilled" &&
+  summaryRes.value?.ok
+) {
+  const data = await summaryRes.value.json().catch(() => ({}));
+  const optimizerState = data?.optimizerState || null;
 
-        const summary =
-          getPublicSummaryFromOptimizerState(optimizerState) ||
-          getFallbackPublicSummary();
+  setOptimizerStateMap((m) => ({
+    ...m,
+    [campaignId]: optimizerState,
+  }));
 
-        setPublicSummaryMap((m) => ({
-          ...m,
-          [campaignId]: summary,
-        }));
+  const summary =
+    getPublicSummaryFromOptimizerState(optimizerState) ||
+    getFallbackPublicSummary();
 
-        const optimizerCreativeState =
-          getOptimizerCreativeStateFromOptimizerState(optimizerState);
+  setPublicSummaryMap((m) => ({
+    ...m,
+    [campaignId]: summary,
+  }));
 
-        setOptimizerCreativeMap((m) => ({
-          ...m,
-          [campaignId]: optimizerCreativeState,
-        }));
-      }
+  const optimizerCreativeState =
+    getOptimizerCreativeStateFromOptimizerState(optimizerState);
+
+  setOptimizerCreativeMap((m) => ({
+    ...m,
+    [campaignId]: optimizerCreativeState,
+  }));
+}
     } catch (err) {
       console.error("Failed to refresh campaign panel:", err);
     }
@@ -4824,102 +5008,147 @@ window.location.assign(`/auth/facebook?sm_sid=${encodeURIComponent(sid)}&return_
                     </div>
 
 {isOpen && (
-  <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 10 }}>
+  <div
+    style={{
+      marginTop: 12,
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}
+  >
     {!isDraft && (
-      <div style={{ width: "100%" }}>
+      <MarketerActionsCard
+        summary={publicSummaryMap[id] || getFallbackPublicSummary()}
+        optimizerState={optimizerStateMap[id] || null}
+      />
+    )}
+
+    {!isDraft && (
+      <div
+        style={{
+          width: "100%",
+          background: "linear-gradient(180deg, rgba(20,25,30,0.96), rgba(17,22,28,0.94))",
+          borderRadius: 18,
+          padding: 14,
+          border: `1px solid ${INPUT_BORDER}`,
+          boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
+        }}
+      >
         <MetricsRow metrics={metricsMap[id]} />
       </div>
     )}
 
-{!isDraft && (
-<PendingCreativeTestCard
-  optimizerCreativeState={optimizerCreativeMap[id] || null}
-  originalImages={creatives?.images || []}
-  onOpenImage={(url) => {
-    setModalImg(url);
-    setShowImageModal(true);
-  }}
-/>
-)}
-
-<div
-  style={{
-    width: "100%",
-    background: "#14191e",
-    borderRadius: 16,
-    padding: 14,
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
-    border: `1px solid ${INPUT_BORDER}`,
-    boxShadow: "0 10px 24px rgba(0,0,0,0.22)",
-  }}
->
-  <div
-    style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 10,
-      flexWrap: "wrap",
-    }}
-  >
-    <div>
-      <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 17 }}>
-        Creatives
-      </div>
-      <div
-        style={{
-          color: "rgba(255,255,255,0.68)",
-          fontWeight: 700,
-          fontSize: 12,
-          marginTop: 3,
+    {!isDraft && (
+      <PendingCreativeTestCard
+        optimizerCreativeState={optimizerCreativeMap[id] || null}
+        originalImages={creatives?.images || []}
+        onOpenImage={(url) => {
+          setModalImg(url);
+          setShowImageModal(true);
         }}
-      >
-        {creatives?.images?.length || 0} image
-        {(creatives?.images?.length || 0) === 1 ? "" : "s"} attached
-      </div>
-    </div>
+      />
+    )}
 
     <div
       style={{
-        padding: "6px 10px",
-        borderRadius: 999,
-        background: "rgba(255,255,255,0.06)",
-        color: "#ffffff",
-        fontWeight: 900,
-        fontSize: 12,
-        border: "1px solid rgba(255,255,255,0.06)",
+        width: "100%",
+        background: "linear-gradient(180deg, rgba(20,25,30,0.96), rgba(17,22,28,0.94))",
+        borderRadius: 18,
+        padding: 16,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        border: `1px solid ${INPUT_BORDER}`,
+        boxShadow: "0 14px 34px rgba(0,0,0,0.24)",
       }}
     >
-      {isDraft ? "Draft" : "Live Campaign"}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              color: TEXT_MAIN,
+              fontWeight: 900,
+              fontSize: 18,
+              lineHeight: 1.2,
+            }}
+          >
+            Campaign Assets
+          </div>
+          <div
+            style={{
+              color: "rgba(255,255,255,0.66)",
+              fontWeight: 700,
+              fontSize: 12,
+              marginTop: 4,
+            }}
+          >
+            Creative previews and ad copy currently attached to this campaign.
+          </div>
+        </div>
+
+        <div
+          style={{
+            padding: "7px 11px",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.06)",
+            color: "#ffffff",
+            fontWeight: 900,
+            fontSize: 12,
+            border: "1px solid rgba(255,255,255,0.05)",
+          }}
+        >
+          {isDraft ? "Draft Campaign" : "Live Campaign"}
+        </div>
+      </div>
+
+      <CreativeThumbGrid
+        items={creatives.images}
+        labels={(creatives.images || []).map((_, idx) =>
+          isDraft ? `Draft Creative ${idx + 1}` : `Creative ${idx + 1}`
+        )}
+        height={CREATIVE_HEIGHT}
+        onOpen={(url) => {
+          setModalImg(url);
+          setShowImageModal(true);
+        }}
+      />
+
+      <div
+        style={{
+          borderRadius: 16,
+          padding: 12,
+          background: "rgba(255,255,255,0.03)",
+          border: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        <PreviewCard
+          headline={creatives?.meta?.headline || previewCopy?.headline}
+          body={creatives?.meta?.body || previewCopy?.body}
+          link={creatives?.meta?.link || previewCopy?.link}
+        />
+      </div>
+
+      {(!creatives.images || creatives.images.length === 0) && (
+        <div
+          style={{
+            color: TEXT_MUTED,
+            fontWeight: 800,
+            padding: "2px 2px",
+            fontSize: 13,
+          }}
+        >
+          No creatives saved for this campaign yet.
+        </div>
+      )}
     </div>
-  </div>
-
-  <CreativeThumbGrid
-    items={creatives.images}
-    labels={(creatives.images || []).map((_, idx) =>
-      isDraft ? `Draft Creative ${idx + 1}` : `Creative ${idx + 1}`
-    )}
-    height={CREATIVE_HEIGHT}
-    onOpen={(url) => {
-      setModalImg(url);
-      setShowImageModal(true);
-    }}
-  />
-
-  <PreviewCard
-    headline={creatives?.meta?.headline || previewCopy?.headline}
-    body={creatives?.meta?.body || previewCopy?.body}
-    link={creatives?.meta?.link || previewCopy?.link}
-  />
-
-  {(!creatives.images || creatives.images.length === 0) && (
-    <div style={{ color: TEXT_MUTED, fontWeight: 800, padding: "4px 2px" }}>
-      No creatives saved for this campaign yet.
-    </div>
-  )}
-</div>
   </div>
 )}
                   </div>
