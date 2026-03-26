@@ -3950,12 +3950,29 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       adCount: ads.length,
     });
 
-    let recoveredHeadline = safeMetaFromRecord.headline;
-    let recoveredBody = safeMetaFromRecord.body;
-    let recoveredLink = safeMetaFromRecord.link;
+   let recoveredHeadline = safeMetaFromRecord.headline;
+let recoveredBody = safeMetaFromRecord.body;
+let recoveredLink = safeMetaFromRecord.link;
+
+const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 4);
+const storedLocalImages = [];
+
+for (let i = 0; i < storedImagesRaw.length; i += 1) {
+  const img = normalizeCreativeUrl(storedImagesRaw[i]);
+  if (!img) continue;
+
+  if (/\/api\/media\//i.test(img) && !storedLocalImages.includes(img)) {
+    storedLocalImages.push(img);
+  }
+}
+
+const existingUsableLocalImages = dedupeKeepOrder(
+  storedLocalImages.filter((img) => /\/api\/media\//i.test(String(img || ''))),
+  2
+);
 
 const perAdLocalImages = [];
-const shouldRecacheFromMeta = storedLocalImages.length === 0;
+const shouldRecacheFromMeta = existingUsableLocalImages.length === 0;
 
 for (let i = 0; i < ads.length; i += 1) {
   const ad = ads[i] || {};
@@ -4018,23 +4035,6 @@ for (let i = 0; i < ads.length; i += 1) {
   if (localHit) perAdLocalImages.push(localHit);
   if (perAdLocalImages.length >= 2) break;
 }
-
-    const storedImagesRaw = dedupeKeepOrder(rec?.images || [], 4);
-    const storedLocalImages = [];
-
-    for (let i = 0; i < storedImagesRaw.length; i += 1) {
-      const img = normalizeCreativeUrl(storedImagesRaw[i]);
-      if (!img) continue;
-
-      if (/\/api\/media\//i.test(img) && !storedLocalImages.includes(img)) {
-        storedLocalImages.push(img);
-      }
-    }
-
-const existingUsableLocalImages = dedupeKeepOrder(
-  storedLocalImages.filter((img) => /\/api\/media\//i.test(String(img || ''))),
-  2
-);
 
 const finalImages =
   existingUsableLocalImages.length > 0
