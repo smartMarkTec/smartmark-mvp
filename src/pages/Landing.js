@@ -4,103 +4,62 @@ import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG = "#eef2ff";
-const SURFACE = "#ffffff";
-const SURFACE_ALT = "#f7f8ff";
-const TEXT = "#111827";
-const TEXT_SOFT = "#667085";
-const BORDER = "#dbe4ff";
-const ACCENT = "#5b5cf0";
-const ACCENT_2 = "#8b5cf6";
-const ACCENT_3 = "#4f8cff";
-const BTN_BASE = "#4f6bff";
-const BTN_BASE_HOVER = "#3e58eb";
+
+const BG = "#d9dcff";
+const BG_2 = "#eef1ff";
+const SURFACE = "rgba(255,255,255,0.78)";
+const SURFACE_SOFT = "rgba(255,255,255,0.62)";
+const BORDER = "rgba(94, 99, 255, 0.14)";
+const TEXT = "#151826";
+const TEXT_SOFT = "#6b7280";
+
+const PURPLE_DARK = "#6b63ff";
+const PURPLE = "#8d86ff";
+const PURPLE_LIGHT = "#c8c5ff";
+const BLUE_SOFT = "#9fb4ff";
+const BTN = "#4d6bff";
+const BTN_HOVER = "#3f5cf0";
 
 const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/mqeqaozw";
 
-const heroStats = [
-  { value: "5 min", label: "to launch" },
-  { value: "AI", label: "creative generation" },
-  { value: "Live", label: "campaign metrics" },
-];
-
 const processSteps = [
-  {
-    step: "01",
-    title: "Answer a few questions",
-    body: "Tell Smartemark about the business, offer, and website.",
-  },
-  {
-    step: "02",
-    title: "Generate campaign assets",
-    body: "AI prepares ad copy, angles, and visuals in minutes.",
-  },
-  {
-    step: "03",
-    title: "Connect Facebook and review",
-    body: "Hook in your account, confirm settings, and approve the campaign.",
-  },
-  {
-    step: "04",
-    title: "Launch and monitor",
-    body: "Track performance and keep optimization inside one clean dashboard.",
-  },
+  { num: "01", title: "Business info" },
+  { num: "02", title: "AI builds ads" },
+  { num: "03", title: "Connect Facebook" },
+  { num: "04", title: "Launch" },
 ];
 
-const featureRows = [
+const featureCards = [
   {
-    title: "A simpler path than Ads Manager",
-    body: "Smartemark is built for business owners who want results without getting buried in Meta’s interface.",
+    title: "Simpler setup",
+    body: "A cleaner flow than Ads Manager.",
   },
   {
-    title: "AI-generated copy and creatives",
-    body: "From one business input, Smartemark builds launch-ready marketing assets fast.",
+    title: "AI creatives",
+    body: "Copy and assets in one place.",
   },
   {
-    title: "Facebook connection and live metrics",
-    body: "Launch from one place and keep the campaign view clean, visual, and easy to explain in demos.",
-  },
-  {
-    title: "Made for a real sales flow",
-    body: "The product is designed so you can open it on a call, walk through it quickly, and close with confidence.",
-  },
-];
-
-const benefitCards = [
-  {
-    title: "Built for speed",
-    body: "Get from business info to campaign setup without the usual agency delay.",
-  },
-  {
-    title: "Built for simplicity",
-    body: "A cleaner interface for owners who do not want to learn complicated ad tools.",
-  },
-  {
-    title: "Built for control",
-    body: "Keep launch settings, billing, and campaign monitoring all in one flow.",
+    title: "Live metrics",
+    body: "Track campaigns inside Smartemark.",
   },
 ];
 
 const faqList = [
   {
     question: "Do I need ad experience?",
-    answer:
-      "No. Smartemark is built to reduce complexity and help you launch without needing to learn the full ad platform.",
+    answer: "No. Smartemark is built to keep campaign setup simple.",
   },
   {
-    question: "Does Smartemark create the ad copy too?",
-    answer:
-      "Yes. It helps generate campaign copy and creative direction so you can move faster.",
+    question: "Does it help make the ads?",
+    answer: "Yes. It helps generate copy and creative direction fast.",
   },
   {
-    question: "Can I still control the campaign?",
-    answer:
-      "Yes. You still choose the business inputs, review the setup, and control launch decisions.",
+    question: "Can I still control the launch?",
+    answer: "Yes. You review the setup and decide when to launch.",
   },
   {
-    question: "Who is this best for?",
-    answer:
-      "It is best for businesses that want a faster, simpler way to launch Facebook ads without relying fully on an agency.",
+    question: "Who is it for?",
+    answer: "Businesses that want a faster, cleaner way to run Facebook ads.",
   },
 ];
 
@@ -204,14 +163,12 @@ const Landing = () => {
     boxSizing: "border-box",
   };
 
-  const cardShadow = "0 20px 60px rgba(91,92,240,0.10)";
-
   return (
     <div
       style={{
         minHeight: "100vh",
         width: "100%",
-        background: `linear-gradient(180deg, ${BG} 0%, #f7f7ff 34%, #eef4ff 100%)`,
+        background: `linear-gradient(180deg, ${BG} 0%, ${BG_2} 42%, #f5f6ff 100%)`,
         fontFamily: FONT,
         color: TEXT,
         position: "relative",
@@ -231,24 +188,24 @@ const Landing = () => {
 
         @keyframes floatA {
           0%,100% { transform: translateY(0px) translateX(0px); }
-          50% { transform: translateY(-18px) translateX(10px); }
+          50% { transform: translateY(-14px) translateX(8px); }
         }
 
         @keyframes floatB {
           0%,100% { transform: translateY(0px) translateX(0px); }
-          50% { transform: translateY(18px) translateX(-12px); }
+          50% { transform: translateY(14px) translateX(-10px); }
         }
       `}</style>
 
       <div
         style={{
           position: "absolute",
-          top: -140,
+          top: -120,
           right: -180,
-          width: isMobile ? 340 : 620,
-          height: isMobile ? 340 : 620,
-          background: "radial-gradient(circle, rgba(91,92,240,0.22) 0%, rgba(91,92,240,0.05) 40%, transparent 72%)",
-          filter: "blur(20px)",
+          width: isMobile ? 320 : 620,
+          height: isMobile ? 320 : 620,
+          background: "radial-gradient(circle, rgba(107,99,255,0.26) 0%, rgba(107,99,255,0.08) 42%, transparent 72%)",
+          filter: "blur(24px)",
           pointerEvents: "none",
           animation: "floatA 18s ease-in-out infinite",
         }}
@@ -256,12 +213,12 @@ const Landing = () => {
       <div
         style={{
           position: "absolute",
-          top: 220,
-          left: -150,
-          width: isMobile ? 280 : 520,
-          height: isMobile ? 280 : 520,
-          background: "radial-gradient(circle, rgba(139,92,246,0.18) 0%, rgba(139,92,246,0.04) 42%, transparent 72%)",
-          filter: "blur(22px)",
+          top: 180,
+          left: -160,
+          width: isMobile ? 260 : 520,
+          height: isMobile ? 260 : 520,
+          background: "radial-gradient(circle, rgba(159,180,255,0.22) 0%, rgba(159,180,255,0.06) 42%, transparent 72%)",
+          filter: "blur(26px)",
           pointerEvents: "none",
           animation: "floatB 20s ease-in-out infinite",
         }}
@@ -279,30 +236,23 @@ const Landing = () => {
         >
           <div
             style={{
-              background: "rgba(255,255,255,0.74)",
-              backdropFilter: "blur(14px)",
+              background: SURFACE,
+              backdropFilter: "blur(16px)",
               border: `1px solid ${BORDER}`,
               borderRadius: 22,
-              padding: isMobile ? "14px 14px" : "16px 20px",
+              padding: isMobile ? "14px" : "16px 20px",
               display: "flex",
               flexDirection: isMobile ? "column" : "row",
               alignItems: isMobile ? "stretch" : "center",
               justifyContent: "space-between",
-              gap: 14,
-              boxShadow: "0 12px 40px rgba(79,107,255,0.08)",
+              gap: 12,
+              boxShadow: "0 18px 40px rgba(88, 89, 202, 0.08)",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                minWidth: 0,
-              }}
-            >
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <img
                 src={smartmarkLogo}
-                alt="SmarteMark"
+                alt="Smartemark"
                 style={{
                   width: 34,
                   height: 34,
@@ -310,7 +260,9 @@ const Landing = () => {
                   flex: "0 0 auto",
                 }}
               />
-              <div style={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.8 }}>Smartemark</div>
+              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.7 }}>
+                Smartemark
+              </div>
             </div>
 
             <div
@@ -328,7 +280,7 @@ const Landing = () => {
                   border: "none",
                   background: "transparent",
                   color: TEXT_SOFT,
-                  fontWeight: 800,
+                  fontWeight: 700,
                   fontSize: 15,
                   cursor: "pointer",
                   padding: "10px 12px",
@@ -343,7 +295,7 @@ const Landing = () => {
                   border: "none",
                   background: "transparent",
                   color: TEXT_SOFT,
-                  fontWeight: 800,
+                  fontWeight: 700,
                   fontSize: 15,
                   cursor: "pointer",
                   padding: "10px 12px",
@@ -358,7 +310,7 @@ const Landing = () => {
                   border: "none",
                   background: "transparent",
                   color: TEXT,
-                  fontWeight: 800,
+                  fontWeight: 700,
                   fontSize: 15,
                   cursor: "pointer",
                   padding: "10px 12px",
@@ -369,16 +321,23 @@ const Landing = () => {
 
               <button
                 onClick={() => openEarlyAccess("header_start_campaign")}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = BTN_HOVER;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = BTN;
+                }}
                 style={{
                   border: "none",
-                  background: BTN_BASE,
+                  background: BTN,
                   color: "#fff",
-                  fontWeight: 900,
+                  fontWeight: 700,
                   fontSize: 15,
                   borderRadius: 999,
                   padding: "13px 18px",
                   cursor: "pointer",
-                  boxShadow: "0 14px 34px rgba(79,107,255,0.24)",
+                  transition: "background .18s ease",
+                  boxShadow: "0 12px 28px rgba(77,107,255,0.22)",
                 }}
               >
                 Get Started
@@ -394,7 +353,7 @@ const Landing = () => {
             width: "100%",
             maxWidth: 1180,
             paddingTop: isMobile ? 30 : 34,
-            paddingBottom: isMobile ? 44 : 54,
+            paddingBottom: isMobile ? 46 : 58,
             position: "relative",
             zIndex: 2,
           }}
@@ -402,23 +361,23 @@ const Landing = () => {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "1.08fr 0.92fr",
-              gap: isMobile ? 20 : 28,
+              gridTemplateColumns: isMobile ? "1fr" : "1.02fr 0.98fr",
+              gap: isMobile ? 18 : 26,
               alignItems: "stretch",
-              background: "linear-gradient(135deg, rgba(255,255,255,0.94), rgba(247,248,255,0.94))",
+              background: "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(246,247,255,0.82))",
               border: `1px solid ${BORDER}`,
               borderRadius: 34,
-              boxShadow: cardShadow,
+              boxShadow: "0 22px 56px rgba(88, 89, 202, 0.10)",
               overflow: "hidden",
             }}
           >
             <div
               style={{
-                padding: isMobile ? "28px 20px 24px" : "52px 48px 46px",
+                padding: isMobile ? "28px 20px 24px" : "50px 46px 44px",
                 display: "flex",
                 flexDirection: "column",
                 justifyContent: "center",
-                gap: 18,
+                gap: 16,
               }}
             >
               <div
@@ -428,41 +387,40 @@ const Landing = () => {
                   alignSelf: "flex-start",
                   padding: "8px 12px",
                   borderRadius: 999,
-                  background: "#eef2ff",
-                  color: ACCENT,
-                  fontWeight: 900,
+                  background: "rgba(107,99,255,0.08)",
+                  color: PURPLE_DARK,
+                  fontWeight: 700,
                   fontSize: 12,
                   border: `1px solid ${BORDER}`,
                 }}
               >
-                AI-powered campaign launch system
+                AI-powered ad workflow
               </div>
 
               <h1
                 style={{
                   margin: 0,
-                  fontSize: isMobile ? "2.8rem" : "5rem",
+                  fontSize: isMobile ? "2.9rem" : "4.7rem",
                   lineHeight: 0.98,
-                  letterSpacing: isMobile ? "-1.5px" : "-3px",
-                  fontWeight: 900,
-                  color: "#0f172a",
-                  maxWidth: 680,
+                  letterSpacing: isMobile ? "-1.8px" : "-3px",
+                  fontWeight: 700,
+                  color: "#111320",
+                  maxWidth: 660,
                 }}
               >
-                Launch better Facebook ads without the usual mess
+                Launch ads with a cleaner system
               </h1>
 
               <div
                 style={{
-                  fontSize: isMobile ? "1.05rem" : "1.35rem",
-                  lineHeight: 1.6,
+                  fontSize: isMobile ? "1.02rem" : "1.22rem",
+                  lineHeight: 1.7,
                   color: TEXT_SOFT,
-                  maxWidth: 650,
+                  maxWidth: 600,
                   fontWeight: 500,
                 }}
               >
-                Smartemark helps businesses move from idea to campaign faster with AI-generated copy,
-                creative workflow, Facebook connection, and a cleaner launch experience.
+                Smartemark helps you go from business info to campaign launch in one modern flow.
               </div>
 
               <div
@@ -475,16 +433,23 @@ const Landing = () => {
               >
                 <button
                   onClick={() => openEarlyAccess("hero_get_started")}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = BTN_HOVER;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = BTN;
+                  }}
                   style={{
                     border: "none",
-                    background: BTN_BASE,
+                    background: BTN,
                     color: "#fff",
-                    fontWeight: 900,
+                    fontWeight: 700,
                     fontSize: 16,
                     borderRadius: 999,
                     padding: "15px 22px",
                     cursor: "pointer",
-                    boxShadow: "0 14px 34px rgba(79,107,255,0.24)",
+                    transition: "background .18s ease",
+                    boxShadow: "0 14px 34px rgba(77,107,255,0.22)",
                   }}
                 >
                   Get Started
@@ -494,16 +459,16 @@ const Landing = () => {
                   onClick={goToPricing}
                   style={{
                     border: `1px solid ${BORDER}`,
-                    background: "#f3f4f6",
+                    background: "rgba(255,255,255,0.72)",
                     color: TEXT,
-                    fontWeight: 800,
+                    fontWeight: 700,
                     fontSize: 16,
                     borderRadius: 999,
                     padding: "15px 22px",
                     cursor: "pointer",
                   }}
                 >
-                  View Pricing
+                  Pricing
                 </button>
               </div>
 
@@ -515,20 +480,30 @@ const Landing = () => {
                   marginTop: 10,
                 }}
               >
-                {heroStats.map((item) => (
+                {featureCards.map((item) => (
                   <div
-                    key={item.label}
+                    key={item.title}
                     style={{
-                      minWidth: 110,
-                      background: "#ffffff",
+                      minWidth: isMobile ? "100%" : 150,
+                      background: "rgba(255,255,255,0.66)",
                       border: `1px solid ${BORDER}`,
                       borderRadius: 18,
                       padding: "14px 16px",
                     }}
                   >
-                    <div style={{ fontSize: 20, fontWeight: 900, color: "#111827" }}>{item.value}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: TEXT_SOFT, marginTop: 4 }}>
-                      {item.label}
+                    <div style={{ fontSize: 16, fontWeight: 700, color: "#171923" }}>
+                      {item.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: TEXT_SOFT,
+                        marginTop: 5,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {item.body}
                     </div>
                   </div>
                 ))}
@@ -537,10 +512,10 @@ const Landing = () => {
 
             <div
               style={{
-                minHeight: isMobile ? 320 : 620,
+                minHeight: isMobile ? 340 : 620,
                 position: "relative",
                 background:
-                  "linear-gradient(145deg, rgba(240,243,255,1) 0%, rgba(228,232,255,1) 38%, rgba(208,211,255,0.95) 60%, rgba(184,188,255,0.98) 100%)",
+                  "linear-gradient(145deg, #d4d6ff 0%, #cbc8ff 24%, #b4afff 46%, #9a92ff 68%, #ececff 100%)",
                 overflow: "hidden",
               }}
             >
@@ -549,9 +524,9 @@ const Landing = () => {
                   position: "absolute",
                   inset: 0,
                   background:
-                    "linear-gradient(120deg, transparent 10%, rgba(255,255,255,0.78) 32%, rgba(255,255,255,0.16) 46%, transparent 60%)",
+                    "linear-gradient(120deg, transparent 12%, rgba(255,255,255,0.74) 33%, rgba(255,255,255,0.12) 46%, transparent 61%)",
                   transform: "skewX(-16deg)",
-                  left: "8%",
+                  left: "6%",
                 }}
               />
               <div
@@ -559,22 +534,23 @@ const Landing = () => {
                   position: "absolute",
                   inset: 0,
                   background:
-                    "linear-gradient(120deg, transparent 32%, rgba(255,255,255,0.58) 48%, rgba(121,93,255,0.18) 66%, transparent 78%)",
+                    "linear-gradient(120deg, transparent 34%, rgba(255,255,255,0.52) 50%, rgba(149,141,255,0.26) 65%, transparent 78%)",
                   transform: "skewX(-18deg)",
-                  left: "26%",
+                  left: "28%",
                 }}
               />
+
               <div
                 style={{
                   position: "absolute",
-                  top: isMobile ? 20 : 34,
-                  right: isMobile ? 16 : 28,
-                  left: isMobile ? 16 : 34,
-                  background: "rgba(255,255,255,0.82)",
+                  top: isMobile ? 18 : 28,
+                  right: isMobile ? 16 : 26,
+                  left: isMobile ? 16 : 28,
+                  background: "rgba(255,255,255,0.76)",
                   backdropFilter: "blur(12px)",
-                  border: `1px solid ${BORDER}`,
+                  border: `1px solid rgba(255,255,255,0.45)`,
                   borderRadius: 24,
-                  boxShadow: "0 16px 44px rgba(91,92,240,0.12)",
+                  boxShadow: "0 18px 42px rgba(91,92,240,0.10)",
                   padding: isMobile ? 16 : 20,
                 }}
               >
@@ -584,22 +560,23 @@ const Landing = () => {
                     justifyContent: "space-between",
                     alignItems: "center",
                     gap: 10,
-                    marginBottom: 18,
+                    marginBottom: 16,
                   }}
                 >
                   <div>
-                    <div style={{ fontSize: 20, fontWeight: 900 }}>Smartemark Dashboard</div>
-                    <div style={{ fontSize: 13, color: TEXT_SOFT, marginTop: 4 }}>
-                      Cleaner launch flow. Better presentation.
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>Smartemark</div>
+                    <div style={{ fontSize: 12, color: TEXT_SOFT, marginTop: 4 }}>
+                      Campaign workspace
                     </div>
                   </div>
+
                   <div
                     style={{
-                      background: "#eef2ff",
-                      color: ACCENT,
+                      background: "rgba(107,99,255,0.10)",
+                      color: PURPLE_DARK,
                       borderRadius: 999,
                       padding: "7px 10px",
-                      fontWeight: 900,
+                      fontWeight: 700,
                       fontSize: 12,
                     }}
                   >
@@ -612,7 +589,7 @@ const Landing = () => {
                     display: "grid",
                     gridTemplateColumns: "repeat(3, 1fr)",
                     gap: 10,
-                    marginBottom: 14,
+                    marginBottom: 12,
                   }}
                 >
                   {[
@@ -623,39 +600,35 @@ const Landing = () => {
                     <div
                       key={label}
                       style={{
-                        background: "#ffffff",
+                        background: "rgba(255,255,255,0.82)",
                         border: `1px solid ${BORDER}`,
                         borderRadius: 16,
                         padding: "14px 12px",
                       }}
                     >
-                      <div style={{ fontSize: 11, fontWeight: 800, color: TEXT_SOFT }}>{label}</div>
-                      <div style={{ fontSize: 19, fontWeight: 900, marginTop: 6 }}>{value}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SOFT }}>{label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>{value}</div>
                     </div>
                   ))}
                 </div>
 
                 <div
                   style={{
-                    background: SURFACE_ALT,
+                    background: "rgba(255,255,255,0.62)",
                     border: `1px solid ${BORDER}`,
                     borderRadius: 18,
-                    padding: 16,
+                    padding: 15,
                     display: "flex",
                     flexDirection: "column",
                     gap: 10,
                   }}
                 >
-                  <div style={{ fontWeight: 900, fontSize: 15 }}>AI campaign summary</div>
-                  <div style={{ fontSize: 13, color: TEXT_SOFT, lineHeight: 1.6 }}>
-                    Smartemark generated copy, connected the campaign flow, and keeps performance visible
-                    inside a simpler workspace.
-                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>AI status</div>
                   <div
                     style={{
                       height: 10,
                       borderRadius: 999,
-                      background: "#e6eaff",
+                      background: "rgba(107,99,255,0.12)",
                       overflow: "hidden",
                     }}
                   >
@@ -664,9 +637,27 @@ const Landing = () => {
                         width: "72%",
                         height: "100%",
                         borderRadius: 999,
-                        background: `linear-gradient(90deg, ${ACCENT_3}, ${ACCENT_2})`,
+                        background: "linear-gradient(90deg, #88a0ff, #8d86ff, #6b63ff)",
                       }}
                     />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {["Copy", "Creatives", "Metrics"].map((chip) => (
+                      <div
+                        key={chip}
+                        style={{
+                          padding: "6px 10px",
+                          borderRadius: 999,
+                          background: "rgba(255,255,255,0.7)",
+                          border: `1px solid ${BORDER}`,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          color: "#42455a",
+                        }}
+                      >
+                        {chip}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -674,19 +665,22 @@ const Landing = () => {
               <div
                 style={{
                   position: "absolute",
-                  right: isMobile ? 18 : 34,
-                  bottom: isMobile ? 18 : 30,
-                  width: isMobile ? 180 : 220,
-                  background: "rgba(255,255,255,0.85)",
-                  border: `1px solid ${BORDER}`,
+                  left: isMobile ? 16 : 28,
+                  right: isMobile ? 16 : "auto",
+                  bottom: isMobile ? 18 : 28,
+                  width: isMobile ? "auto" : 220,
+                  background: "rgba(255,255,255,0.72)",
+                  border: `1px solid rgba(255,255,255,0.45)`,
                   borderRadius: 20,
                   padding: 14,
-                  boxShadow: "0 18px 42px rgba(91,92,240,0.14)",
+                  boxShadow: "0 16px 34px rgba(91,92,240,0.10)",
                 }}
               >
-                <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 8 }}>Launch status</div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                  Ready to launch
+                </div>
                 <div style={{ fontSize: 12, color: TEXT_SOFT, lineHeight: 1.5 }}>
-                  Copy ready. Budget set. Facebook connected. Campaign ready to launch.
+                  Facebook connected. Budget set. Ads ready.
                 </div>
               </div>
             </div>
@@ -699,7 +693,7 @@ const Landing = () => {
           style={{
             width: "100%",
             maxWidth: 1180,
-            paddingBottom: isMobile ? 24 : 40,
+            paddingBottom: isMobile ? 46 : 64,
           }}
         >
           <div
@@ -711,34 +705,34 @@ const Landing = () => {
           >
             <div
               style={{
-                background: "rgba(255,255,255,0.72)",
+                background: SURFACE_SOFT,
                 border: `1px solid ${BORDER}`,
-                borderRadius: 20,
+                borderRadius: 22,
                 padding: "20px 18px",
-                fontSize: isMobile ? 20 : 24,
-                fontWeight: 900,
+                fontSize: isMobile ? 22 : 26,
+                fontWeight: 700,
                 lineHeight: 1.2,
-                boxShadow: "0 14px 36px rgba(91,92,240,0.06)",
+                boxShadow: "0 14px 32px rgba(88, 89, 202, 0.06)",
               }}
             >
-              Simpler campaign setup for real business owners
+              A better way to present your product
             </div>
 
-            {["Meta-ready workflow", "AI-generated creatives", "Cleaner sales demos"].map((label) => (
+            {["Clean UI", "AI workflow", "Modern launch flow"].map((label) => (
               <div
                 key={label}
                 style={{
-                  background: "rgba(255,255,255,0.72)",
+                  background: SURFACE_SOFT,
                   border: `1px solid ${BORDER}`,
-                  borderRadius: 20,
+                  borderRadius: 22,
                   padding: "20px 18px",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   textAlign: "center",
-                  fontWeight: 900,
+                  fontWeight: 700,
                   color: TEXT,
-                  boxShadow: "0 14px 36px rgba(91,92,240,0.06)",
+                  boxShadow: "0 14px 32px rgba(88, 89, 202, 0.06)",
                 }}
               >
                 {label}
@@ -753,24 +747,18 @@ const Landing = () => {
           style={{
             width: "100%",
             maxWidth: 1180,
-            paddingTop: isMobile ? 18 : 22,
-            paddingBottom: isMobile ? 52 : 70,
+            paddingBottom: isMobile ? 50 : 70,
           }}
         >
-          <div
-            style={{
-              textAlign: "center",
-              marginBottom: 22,
-            }}
-          >
+          <div style={{ textAlign: "center", marginBottom: 22 }}>
             <div
               style={{
                 display: "inline-flex",
                 padding: "8px 12px",
                 borderRadius: 999,
-                background: "#eef2ff",
-                color: ACCENT,
-                fontWeight: 900,
+                background: "rgba(107,99,255,0.08)",
+                color: PURPLE_DARK,
+                fontWeight: 700,
                 fontSize: 12,
                 border: `1px solid ${BORDER}`,
                 marginBottom: 14,
@@ -778,22 +766,15 @@ const Landing = () => {
             >
               How it works
             </div>
-            <div style={{ fontSize: isMobile ? 30 : 46, fontWeight: 900, letterSpacing: -1.4 }}>
-              A clean flow from idea to launch
-            </div>
+
             <div
               style={{
-                marginTop: 10,
-                color: TEXT_SOFT,
-                fontSize: isMobile ? 15 : 18,
-                lineHeight: 1.7,
-                maxWidth: 760,
-                marginLeft: "auto",
-                marginRight: "auto",
+                fontSize: isMobile ? 30 : 44,
+                fontWeight: 700,
+                letterSpacing: -1.4,
               }}
             >
-              The page is longer now on purpose so it feels more like a full product landing page, not a
-              short placeholder.
+              Simple from start to finish
             </div>
           </div>
 
@@ -806,14 +787,14 @@ const Landing = () => {
           >
             {processSteps.map((item) => (
               <div
-                key={item.step}
+                key={item.num}
                 style={{
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,248,255,0.96))",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.88), rgba(247,248,255,0.78))",
                   border: `1px solid ${BORDER}`,
                   borderRadius: 24,
                   padding: "22px 20px",
-                  minHeight: 220,
-                  boxShadow: "0 18px 42px rgba(91,92,240,0.08)",
+                  minHeight: 200,
+                  boxShadow: "0 18px 40px rgba(88, 89, 202, 0.08)",
                 }}
               >
                 <div
@@ -821,9 +802,9 @@ const Landing = () => {
                     width: 42,
                     height: 42,
                     borderRadius: 12,
-                    background: "#eef2ff",
-                    color: ACCENT,
-                    fontWeight: 900,
+                    background: "rgba(107,99,255,0.08)",
+                    color: PURPLE_DARK,
+                    fontWeight: 700,
                     fontSize: 14,
                     display: "flex",
                     alignItems: "center",
@@ -831,12 +812,11 @@ const Landing = () => {
                     marginBottom: 18,
                   }}
                 >
-                  {item.step}
+                  {item.num}
                 </div>
-                <div style={{ fontSize: 22, fontWeight: 900, lineHeight: 1.15, marginBottom: 10 }}>
+                <div style={{ fontSize: 21, fontWeight: 700, lineHeight: 1.15 }}>
                   {item.title}
                 </div>
-                <div style={{ color: TEXT_SOFT, fontSize: 15, lineHeight: 1.7 }}>{item.body}</div>
               </div>
             ))}
           </div>
@@ -848,7 +828,7 @@ const Landing = () => {
           style={{
             width: "100%",
             maxWidth: 1180,
-            paddingBottom: isMobile ? 48 : 70,
+            paddingBottom: isMobile ? 48 : 72,
           }}
         >
           <div
@@ -864,7 +844,7 @@ const Landing = () => {
                 border: `1px solid ${BORDER}`,
                 borderRadius: 28,
                 padding: isMobile ? "24px 20px" : "30px 28px",
-                boxShadow: cardShadow,
+                boxShadow: "0 20px 50px rgba(88, 89, 202, 0.08)",
               }}
             >
               <div
@@ -872,9 +852,9 @@ const Landing = () => {
                   display: "inline-flex",
                   padding: "8px 12px",
                   borderRadius: 999,
-                  background: "#eef2ff",
-                  color: ACCENT,
-                  fontWeight: 900,
+                  background: "rgba(107,99,255,0.08)",
+                  color: PURPLE_DARK,
+                  fontWeight: 700,
                   fontSize: 12,
                   border: `1px solid ${BORDER}`,
                   marginBottom: 14,
@@ -883,8 +863,15 @@ const Landing = () => {
                 Why Smartemark
               </div>
 
-              <div style={{ fontSize: isMobile ? 30 : 42, fontWeight: 900, lineHeight: 1.04, letterSpacing: -1.4 }}>
-                Show a serious product in your demos
+              <div
+                style={{
+                  fontSize: isMobile ? 30 : 40,
+                  fontWeight: 700,
+                  lineHeight: 1.06,
+                  letterSpacing: -1.3,
+                }}
+              >
+                Cleaner. Faster. Easier to show.
               </div>
 
               <div
@@ -892,60 +879,42 @@ const Landing = () => {
                   marginTop: 14,
                   color: TEXT_SOFT,
                   fontSize: isMobile ? 15 : 17,
-                  lineHeight: 1.8,
+                  lineHeight: 1.75,
                 }}
               >
-                This design direction feels more premium, more modern, and more trustworthy. It gives you a
-                page that looks like a real SaaS company rather than a quick placeholder page.
-              </div>
-
-              <div
-                style={{
-                  marginTop: 24,
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 14,
-                }}
-              >
-                {benefitCards.map((card) => (
-                  <div
-                    key={card.title}
-                    style={{
-                      background: SURFACE_ALT,
-                      border: `1px solid ${BORDER}`,
-                      borderRadius: 18,
-                      padding: "18px 16px",
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>{card.title}</div>
-                    <div style={{ color: TEXT_SOFT, lineHeight: 1.7, fontSize: 15 }}>{card.body}</div>
-                  </div>
-                ))}
+                A landing page that feels more modern without being loud.
               </div>
             </div>
 
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "1fr",
+                gridTemplateColumns: "1fr 1fr",
                 gap: 14,
               }}
             >
-              {featureRows.map((row) => (
+              {[
+                "Soft gradients",
+                "Less text",
+                "Longer page",
+                "Better visuals",
+              ].map((item) => (
                 <div
-                  key={row.title}
+                  key={item}
                   style={{
-                    background: "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(247,248,255,0.96))",
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.88), rgba(247,248,255,0.78))",
                     border: `1px solid ${BORDER}`,
-                    borderRadius: 24,
-                    padding: "24px 22px",
-                    boxShadow: "0 18px 42px rgba(91,92,240,0.08)",
+                    borderRadius: 22,
+                    padding: "24px 20px",
+                    minHeight: 130,
+                    display: "flex",
+                    alignItems: "flex-end",
+                    fontWeight: 700,
+                    fontSize: 20,
+                    boxShadow: "0 16px 34px rgba(88, 89, 202, 0.08)",
                   }}
                 >
-                  <div style={{ fontWeight: 900, fontSize: 22, marginBottom: 10, lineHeight: 1.15 }}>
-                    {row.title}
-                  </div>
-                  <div style={{ color: TEXT_SOFT, fontSize: 15, lineHeight: 1.75 }}>{row.body}</div>
+                  {item}
                 </div>
               ))}
             </div>
@@ -958,16 +927,16 @@ const Landing = () => {
           style={{
             width: "100%",
             maxWidth: 1180,
-            paddingBottom: isMobile ? 52 : 72,
+            paddingBottom: isMobile ? 52 : 74,
           }}
         >
           <div
             style={{
-              background: "linear-gradient(135deg, rgba(79,107,255,0.96), rgba(139,92,246,0.96))",
+              background: "linear-gradient(135deg, rgba(93,88,255,0.96), rgba(141,134,255,0.96), rgba(200,197,255,0.92))",
               borderRadius: 32,
               padding: isMobile ? "28px 20px" : "42px 38px",
               color: "#fff",
-              boxShadow: "0 22px 60px rgba(91,92,240,0.24)",
+              boxShadow: "0 24px 60px rgba(88, 89, 202, 0.20)",
             }}
           >
             <div
@@ -979,8 +948,15 @@ const Landing = () => {
               }}
             >
               <div>
-                <div style={{ fontSize: isMobile ? 30 : 44, fontWeight: 900, lineHeight: 1.04, letterSpacing: -1.4 }}>
-                  Ready to show Smartemark with more confidence?
+                <div
+                  style={{
+                    fontSize: isMobile ? 30 : 42,
+                    fontWeight: 700,
+                    lineHeight: 1.06,
+                    letterSpacing: -1.4,
+                  }}
+                >
+                  Build trust before the demo even starts
                 </div>
                 <div
                   style={{
@@ -988,11 +964,10 @@ const Landing = () => {
                     color: "rgba(255,255,255,0.88)",
                     fontSize: isMobile ? 15 : 18,
                     lineHeight: 1.7,
-                    maxWidth: 720,
+                    maxWidth: 700,
                   }}
                 >
-                  Give yourself a cleaner home page, a longer story, and a stronger first impression before
-                  the user even reaches the product.
+                  A calmer page. Better color. More premium feel.
                 </div>
               </div>
 
@@ -1009,8 +984,8 @@ const Landing = () => {
                   style={{
                     border: "none",
                     background: "#ffffff",
-                    color: ACCENT,
-                    fontWeight: 900,
+                    color: PURPLE_DARK,
+                    fontWeight: 700,
                     fontSize: 15,
                     borderRadius: 999,
                     padding: "14px 20px",
@@ -1023,10 +998,10 @@ const Landing = () => {
                 <button
                   onClick={goToLogin}
                   style={{
-                    border: "1px solid rgba(255,255,255,0.22)",
+                    border: "1px solid rgba(255,255,255,0.24)",
                     background: "rgba(255,255,255,0.10)",
                     color: "#ffffff",
-                    fontWeight: 900,
+                    fontWeight: 700,
                     fontSize: 15,
                     borderRadius: 999,
                     padding: "14px 20px",
@@ -1055,9 +1030,9 @@ const Landing = () => {
                 display: "inline-flex",
                 padding: "8px 12px",
                 borderRadius: 999,
-                background: "#eef2ff",
-                color: ACCENT,
-                fontWeight: 900,
+                background: "rgba(107,99,255,0.08)",
+                color: PURPLE_DARK,
+                fontWeight: 700,
                 fontSize: 12,
                 border: `1px solid ${BORDER}`,
                 marginBottom: 14,
@@ -1065,30 +1040,35 @@ const Landing = () => {
             >
               FAQ
             </div>
-            <div style={{ fontSize: isMobile ? 30 : 44, fontWeight: 900, letterSpacing: -1.4 }}>
-              Frequently asked questions
+            <div
+              style={{
+                fontSize: isMobile ? 30 : 42,
+                fontWeight: 700,
+                letterSpacing: -1.4,
+              }}
+            >
+              Questions
             </div>
           </div>
 
-          <div
-            style={{
-              display: "grid",
-              gap: 14,
-            }}
-          >
+          <div style={{ display: "grid", gap: 14 }}>
             {faqList.map((item) => (
               <div
                 key={item.question}
                 style={{
-                  background: "rgba(255,255,255,0.9)",
+                  background: "rgba(255,255,255,0.84)",
                   border: `1px solid ${BORDER}`,
                   borderRadius: 22,
                   padding: isMobile ? "18px 16px" : "20px 20px",
-                  boxShadow: "0 16px 42px rgba(91,92,240,0.06)",
+                  boxShadow: "0 14px 34px rgba(88, 89, 202, 0.06)",
                 }}
               >
-                <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>{item.question}</div>
-                <div style={{ color: TEXT_SOFT, lineHeight: 1.75, fontSize: 15 }}>{item.answer}</div>
+                <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>
+                  {item.question}
+                </div>
+                <div style={{ color: TEXT_SOFT, lineHeight: 1.7, fontSize: 15 }}>
+                  {item.answer}
+                </div>
               </div>
             ))}
           </div>
@@ -1106,7 +1086,7 @@ const Landing = () => {
                 border: `1px solid ${BORDER}`,
                 background: "#ffffff",
                 color: TEXT,
-                fontWeight: 800,
+                fontWeight: 700,
                 fontSize: 15,
                 borderRadius: 999,
                 padding: "13px 18px",
@@ -1138,7 +1118,7 @@ const Landing = () => {
               gap: 10,
               color: TEXT_SOFT,
               fontSize: 13,
-              fontWeight: 700,
+              fontWeight: 600,
             }}
           >
             <div>Smartemark</div>
@@ -1161,7 +1141,7 @@ const Landing = () => {
           style={{
             position: "fixed",
             inset: 0,
-            background: "rgba(15, 23, 42, 0.50)",
+            background: "rgba(15, 23, 42, 0.44)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1177,7 +1157,7 @@ const Landing = () => {
               padding: isMobile ? "18px 16px" : "22px 20px",
               background: "#ffffff",
               border: `1px solid ${BORDER}`,
-              boxShadow: "0 28px 70px rgba(91,92,240,0.18)",
+              boxShadow: "0 28px 70px rgba(88, 89, 202, 0.18)",
               position: "relative",
             }}
           >
@@ -1195,19 +1175,19 @@ const Landing = () => {
                 background: "#f7f8ff",
                 color: TEXT,
                 cursor: "pointer",
-                fontWeight: 900,
+                fontWeight: 700,
                 lineHeight: 1,
               }}
             >
               ×
             </button>
 
-            <div style={{ fontWeight: 900, fontSize: isMobile ? 22 : 24, marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: isMobile ? 22 : 24, marginBottom: 8 }}>
               Early Access
             </div>
 
-            <div style={{ color: TEXT_SOFT, lineHeight: 1.7, fontWeight: 600 }}>
-              Smartemark is onboarding a limited number of users. Join the list and we’ll reach out.
+            <div style={{ color: TEXT_SOFT, lineHeight: 1.7, fontWeight: 500 }}>
+              Join the list and we’ll reach out.
             </div>
 
             <div style={{ height: 12 }} />
@@ -1227,7 +1207,7 @@ const Landing = () => {
                       background: "#ffffff",
                       color: TEXT,
                       outline: "none",
-                      fontWeight: 700,
+                      fontWeight: 600,
                       fontSize: 15,
                     }}
                   />
@@ -1245,7 +1225,7 @@ const Landing = () => {
                       background: "#ffffff",
                       color: TEXT,
                       outline: "none",
-                      fontWeight: 700,
+                      fontWeight: 600,
                       fontSize: 15,
                     }}
                   />
@@ -1256,12 +1236,12 @@ const Landing = () => {
                       marginTop: 4,
                       padding: "0.9rem 1.2rem",
                       fontSize: "1rem",
-                      background: BTN_BASE,
+                      background: BTN,
                       color: "#fff",
                       border: "none",
                       borderRadius: 999,
-                      fontWeight: 900,
-                      boxShadow: "0 14px 34px rgba(79,107,255,0.24)",
+                      fontWeight: 700,
+                      boxShadow: "0 14px 34px rgba(77,107,255,0.24)",
                       cursor: "pointer",
                     }}
                   >
@@ -1271,10 +1251,10 @@ const Landing = () => {
               </form>
             ) : (
               <div style={{ marginTop: 10 }}>
-                <div style={{ fontWeight: 900, fontSize: 18, color: TEXT }}>
-                  Thank you — we’ll reach out soon.
+                <div style={{ fontWeight: 700, fontSize: 18, color: TEXT }}>
+                  Thank you
                 </div>
-                <div style={{ marginTop: 8, color: TEXT_SOFT, fontWeight: 600, lineHeight: 1.7 }}>
+                <div style={{ marginTop: 8, color: TEXT_SOFT, fontWeight: 500, lineHeight: 1.7 }}>
                   {eaServerOk ? (
                     <>Your request was received.</>
                   ) : (
@@ -1283,8 +1263,8 @@ const Landing = () => {
                       <a
                         href={mailtoHref}
                         style={{
-                          color: ACCENT,
-                          fontWeight: 900,
+                          color: PURPLE_DARK,
+                          fontWeight: 700,
                           textDecoration: "none",
                         }}
                       >
@@ -1306,7 +1286,7 @@ const Landing = () => {
                     border: `1px solid ${BORDER}`,
                     borderRadius: 999,
                     cursor: "pointer",
-                    fontWeight: 800,
+                    fontWeight: 700,
                   }}
                 >
                   Close
