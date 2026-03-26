@@ -2235,100 +2235,151 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/optimizer-state'
       ).trim();
     }
 
-    let state = await findExactOptimizerCampaignState({
+let state = await findExactOptimizerCampaignState({
+  campaignId: normalizedCampaignId,
+  accountId: normalizedAccountId,
+  ownerKey: debugOwnerKey,
+});
+
+if (!state) {
+  state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+}
+
+if (
+  state &&
+  String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId
+) {
+  return res.status(403).json({
+    ok: false,
+    error: 'Account ID does not match this optimizer campaign state.',
+  });
+}
+
+if (usingDebugKey) {
+  if (!state) {
+    state = await upsertOptimizerCampaignState({
       campaignId: normalizedCampaignId,
+      metaCampaignId: normalizedCampaignId,
       accountId: normalizedAccountId,
-      ownerKey: debugOwnerKey,
+      ownerKey: debugOwnerKey || '',
+      pageId: '',
+      campaignName: '',
+      niche: '',
+      currentStatus: '',
+      optimizationEnabled: true,
+      billingBlocked: false,
+      metricsSnapshot: {},
+      latestDiagnosis: null,
+      latestDecision: null,
+      latestAction: null,
+      latestMonitoringDecision: null,
+      generatedCreatives: [],
+      pendingCreativeTest: null,
+      activeTestType: '',
+      currentWinner: null,
+      publicSummary: makeInitialPublicSummary(),
+    });
+  }
+
+  return res.json({
+    ok: true,
+    accessMode: 'debug_key',
+    optimizerState: state,
+    recoveredByFallback: !debugOwnerKey,
+  });
+}
+
+const requestOwnerKey = String(ownerKeyFromReq(req) || '').trim();
+
+if (!requestOwnerKey) {
+  return res.status(401).json({
+    ok: false,
+    error: 'Not authorized to read optimizer campaign state.',
+  });
+}
+
+if (!state) {
+  state = await upsertOptimizerCampaignState({
+    campaignId: normalizedCampaignId,
+    metaCampaignId: normalizedCampaignId,
+    accountId: normalizedAccountId,
+    ownerKey: requestOwnerKey,
+    pageId: '',
+    campaignName: '',
+    niche: '',
+    currentStatus: '',
+    optimizationEnabled: true,
+    billingBlocked: false,
+    metricsSnapshot: {},
+    latestDiagnosis: null,
+    latestDecision: null,
+    latestAction: null,
+    latestMonitoringDecision: null,
+    generatedCreatives: [],
+    pendingCreativeTest: null,
+    activeTestType: '',
+    currentWinner: null,
+    publicSummary: makeInitialPublicSummary(),
+  });
+
+  return res.json({
+    ok: true,
+    accessMode: 'owner_key_bootstrap',
+    optimizerState: state,
+  });
+}
+
+const stateOwnerKey = String(state.ownerKey || '').trim();
+
+if (!stateOwnerKey) {
+  state = await upsertOptimizerCampaignState({
+    ...state,
+    ownerKey: requestOwnerKey,
+  });
+
+  return res.json({
+    ok: true,
+    accessMode: 'owner_key',
+    optimizerState: state,
+  });
+}
+
+if (stateOwnerKey === requestOwnerKey) {
+  return res.json({
+    ok: true,
+    accessMode: 'owner_key',
+    optimizerState: state,
+  });
+}
+
+if (stateOwnerKey.startsWith('sm_') && requestOwnerKey.startsWith('user:')) {
+  await ensureUsersAndSessions();
+  await db.read();
+
+  const sidSession =
+    (db.data.sessions || []).find((s) => String(s.sid || '').trim() === stateOwnerKey) || null;
+
+  const requestUsername = requestOwnerKey.slice(5).trim();
+  const sidUsername = String(sidSession?.username || '').trim();
+
+  if (sidUsername && requestUsername && sidUsername === requestUsername) {
+    state = await upsertOptimizerCampaignState({
+      ...state,
+      ownerKey: requestOwnerKey,
     });
 
-    if (!state) {
-      state = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
-    }
-
-    if (!state) {
-      return res.status(404).json({
-        ok: false,
-        error: 'No optimizer campaign state found for this campaign.',
-      });
-    }
-
-    if (
-      String(state.accountId || '').replace(/^act_/, '').trim() !== normalizedAccountId
-    ) {
-      return res.status(403).json({
-        ok: false,
-        error: 'Account ID does not match this optimizer campaign state.',
-      });
-    }
-
-    if (usingDebugKey) {
-      return res.json({
-        ok: true,
-        accessMode: 'debug_key',
-        optimizerState: state,
-      });
-    }
-
-    const requestOwnerKey = String(ownerKeyFromReq(req) || '').trim();
-
-    if (!requestOwnerKey) {
-      return res.status(401).json({
-        ok: false,
-        error: 'Not authorized to read optimizer campaign state.',
-      });
-    }
-
-    const stateOwnerKey = String(state.ownerKey || '').trim();
-
-    if (!stateOwnerKey) {
-      state = await upsertOptimizerCampaignState({
-        ...state,
-        ownerKey: requestOwnerKey,
-      });
-
-      return res.json({
-        ok: true,
-        accessMode: 'owner_key',
-        optimizerState: state,
-      });
-    }
-
-    if (stateOwnerKey === requestOwnerKey) {
-      return res.json({
-        ok: true,
-        accessMode: 'owner_key',
-        optimizerState: state,
-      });
-    }
-
-    if (stateOwnerKey.startsWith('sm_') && requestOwnerKey.startsWith('user:')) {
-      await ensureUsersAndSessions();
-      await db.read();
-
-      const sidSession =
-        (db.data.sessions || []).find((s) => String(s.sid || '').trim() === stateOwnerKey) || null;
-
-      const requestUsername = requestOwnerKey.slice(5).trim();
-      const sidUsername = String(sidSession?.username || '').trim();
-
-      if (sidUsername && requestUsername && sidUsername === requestUsername) {
-        state = await upsertOptimizerCampaignState({
-          ...state,
-          ownerKey: requestOwnerKey,
-        });
-
-        return res.json({
-          ok: true,
-          accessMode: 'owner_key_rebound',
-          optimizerState: state,
-        });
-      }
-    }
-
-    return res.status(403).json({
-      ok: false,
-      error: 'You do not have access to this optimizer campaign state.',
+    return res.json({
+      ok: true,
+      accessMode: 'owner_key_rebound',
+      optimizerState: state,
     });
+  }
+}
+
+return res.status(403).json({
+  ok: false,
+  error: 'You do not have access to this optimizer campaign state.',
+});
   } catch (err) {
     return res.status(500).json({
       ok: false,
