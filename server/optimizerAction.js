@@ -83,17 +83,19 @@ function getActionConfig(optimizerState) {
     {}
   );
 }
-
 function getPendingGeneratedCreativeState(optimizerState) {
   const latestAction = optimizerState?.latestAction?.actionResult || null;
   const statePending = optimizerState?.pendingCreativeTest || null;
 
   const stateUrls = Array.isArray(statePending?.imageUrls) ? statePending.imageUrls : [];
   const actionUrls = Array.isArray(latestAction?.imageUrls) ? latestAction.imageUrls : [];
+  const actionSourceUrls = Array.isArray(latestAction?.sourceGeneratedCreatives)
+    ? latestAction.sourceGeneratedCreatives
+    : [];
 
-  const urls = dedupeStrings([...stateUrls, ...actionUrls]);
+  const urls = dedupeStrings([...stateUrls, ...actionUrls, ...actionSourceUrls]);
 
-  if (!urls.length) return null;
+  if (!urls.length && !statePending && !latestAction) return null;
 
   return {
     creativeGoal:
@@ -110,6 +112,105 @@ function getPendingGeneratedCreativeState(optimizerState) {
       statePending?.generatedVariantCount || latestAction?.generatedVariantCount || urls.length,
       urls.length
     ),
+    status: String(
+      statePending?.status ||
+      latestAction?.pendingCreativeTest?.status ||
+      latestAction?.promotionStatus ||
+      ''
+    ).trim(),
+    startedAt: String(
+      statePending?.startedAt ||
+      statePending?.generatedAt ||
+      latestAction?.testStartedAt ||
+      latestAction?.generatedAt ||
+      ''
+    ).trim(),
+    controlAdIds: dedupeStrings(statePending?.controlAdIds || latestAction?.controlAdIds || []),
+    candidateAdIds: dedupeStrings(statePending?.candidateAdIds || latestAction?.candidateAdIds || []),
+    launchedVariantCount: safeNumber(
+      statePending?.launchedVariantCount || latestAction?.launchedVariantCount || 0,
+      0
+    ),
+    winnerAdId: String(statePending?.winnerAdId || latestAction?.winnerAdId || '').trim(),
+    winnerType: String(statePending?.winnerType || latestAction?.winnerType || '').trim(),
+  };
+}
+
+function hoursSinceIso(iso) {
+  const ts = new Date(String(iso || '').trim()).getTime();
+  if (!Number.isFinite(ts)) return Infinity;
+  return Math.max(0, (Date.now() - ts) / (1000 * 60 * 60));
+}
+
+function getCreativeTestGuard(optimizerState) {
+  const pending = optimizerState?.pendingCreativeTest || null;
+  const pendingState = getPendingGeneratedCreativeState(optimizerState);
+  const latestMonitoringDecision = String(
+    optimizerState?.latestMonitoringDecision?.monitoringDecision || ''
+  ).trim();
+
+  const status = String(
+    pending?.status || pendingState?.status || ''
+  ).trim().toLowerCase();
+
+  const candidateAdIds = dedupeStrings(
+    []
+      .concat(pending?.candidateAdIds || [])
+      .concat(pendingState?.candidateAdIds || [])
+  );
+
+  const controlAdIds = dedupeStrings(
+    []
+      .concat(pending?.controlAdIds || [])
+      .concat(pendingState?.controlAdIds || [])
+  );
+
+  const unresolvedLiveLike =
+    ['ready', 'live', 'staged'].includes(status) &&
+    latestMonitoringDecision !== 'creative_test_resolved';
+
+  const startedAt = String(
+    pending?.startedAt ||
+    pending?.generatedAt ||
+    pendingState?.startedAt ||
+    optimizerState?.latestAction?.generatedAt ||
+    ''
+  ).trim();
+
+  const hoursOpen = hoursSinceIso(startedAt);
+
+  return {
+    status,
+    unresolvedLiveLike,
+    candidateAdIds,
+    controlAdIds,
+    startedAt,
+    hoursOpen,
+    hasWinner: !!String(pending?.winnerAdId || pendingState?.winnerAdId || '').trim(),
+  };
+}
+
+function shouldBlockNewCreativeRound(optimizerState, minCreativeTestHours = 72) {
+  const guard = getCreativeTestGuard(optimizerState);
+
+  if (!guard.unresolvedLiveLike) {
+    return { blocked: false, reason: '', guard };
+  }
+
+  if (guard.hoursOpen < minCreativeTestHours) {
+    return {
+      blocked: true,
+      reason:
+        `A creative test is already ${guard.status || 'active'} and has only been open for ${guard.hoursOpen.toFixed(1)} hours. Smartemark should observe the current test before generating another challenger round.`,
+      guard,
+    };
+  }
+
+  return {
+    blocked: true,
+    reason:
+      `A prior creative test is still unresolved (${guard.status || 'active'}). Smartemark should resolve or retire it before opening a new challenger round.`,
+    guard,
   };
 }
 
@@ -581,6 +682,36 @@ async function executeCreativeGeneration({
   const plan = buildCreativeGenerationPlan({ optimizerState });
   const actionConfig = getActionConfig(optimizerState);
 
+  const minCreativeTestHours =
+    safeNumber(
+      actionConfig?.minCreativeTestHours,
+      safeNumber(process.env.SMARTEMARK_MIN_CREATIVE_TEST_HOURS, 72)
+    ) || 72;
+
+  const guardCheck = shouldBlockNewCreativeRound(optimizerState, minCreativeTestHours);
+
+  if (guardCheck.blocked) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType,
+      status: 'blocked_by_active_creative_test',
+      reason: guardCheck.reason,
+      extra: {
+        actionResult: {
+          mutationType: 'generate_creative_variants',
+          guard: {
+            status: guardCheck.guard.status,
+            hoursOpen: guardCheck.guard.hoursOpen,
+            candidateAdIds: guardCheck.guard.candidateAdIds,
+            controlAdIds: guardCheck.guard.controlAdIds,
+            startedAt: guardCheck.guard.startedAt,
+            minCreativeTestHours,
+          },
+        },
+      },
+    });
+  }
+
   const variantCount =
     safeNumber(actionConfig?.variantCount, 0) > 0
       ? safeNumber(actionConfig.variantCount, 0)
@@ -682,6 +813,41 @@ async function executeCreativePromotion({
   const accountId = String(optimizerState?.accountId || '').replace(/^act_/, '').trim();
   const actionConfig = getActionConfig(optimizerState);
   const pending = getPendingGeneratedCreativeState(optimizerState);
+
+  const minCreativeTestHours =
+    safeNumber(
+      actionConfig?.minCreativeTestHours,
+      safeNumber(process.env.SMARTEMARK_MIN_CREATIVE_TEST_HOURS, 72)
+    ) || 72;
+
+  const guard = getCreativeTestGuard(optimizerState);
+
+  if (
+    ['live', 'staged'].includes(guard.status) &&
+    guard.candidateAdIds.length > 0 &&
+    guard.hoursOpen < minCreativeTestHours
+  ) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'blocked_by_live_creative_test',
+      reason:
+        `A challenger round is already ${guard.status} and only ${guard.hoursOpen.toFixed(1)} hours old. Smartemark should observe this test before promoting another round.`,
+      extra: {
+        actionResult: {
+          mutationType: 'promote_generated_creative_variants',
+          guard: {
+            status: guard.status,
+            hoursOpen: guard.hoursOpen,
+            candidateAdIds: guard.candidateAdIds,
+            controlAdIds: guard.controlAdIds,
+            startedAt: guard.startedAt,
+            minCreativeTestHours,
+          },
+        },
+      },
+    });
+  }
 
   if (!accountId) {
     return buildBaseSkippedResult({
