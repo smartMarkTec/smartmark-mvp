@@ -1227,7 +1227,121 @@ function ImageCarousel({ items = [], onFullscreen, height = 220 }) {
   );
 }
 
+function CreativeThumbGrid({ items = [], labels = [], onOpen, height = 170 }) {
+  const normalized = useMemo(() => {
+    const arr = (items || []).map(toAbsoluteMedia).filter(Boolean);
+    const seen = new Set();
+    return arr.filter((u) => (seen.has(u) ? false : (seen.add(u), true)));
+  }, [items]);
 
+  if (!normalized.length) {
+    return (
+      <div
+        style={{
+          height,
+          width: "100%",
+          background: "#0f1418",
+          color: "rgba(255,255,255,0.55)",
+          fontWeight: 800,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 15,
+          borderRadius: 14,
+          border: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        No images
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: normalized.length > 1 ? "repeat(2, minmax(0, 1fr))" : "1fr",
+        gap: 12,
+      }}
+    >
+      {normalized.map((url, idx) => (
+        <button
+          key={`${url}-${idx}`}
+          type="button"
+          onClick={() => onOpen && onOpen(url)}
+          style={{
+            background: "linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02))",
+            border: "1px solid rgba(255,255,255,0.07)",
+            borderRadius: 16,
+            padding: 10,
+            cursor: "pointer",
+            textAlign: "left",
+            boxShadow: "0 8px 24px rgba(0,0,0,0.22)",
+          }}
+        >
+          <div
+            style={{
+              width: "100%",
+              height,
+              borderRadius: 12,
+              overflow: "hidden",
+              background: "#0f1418",
+              border: "1px solid rgba(255,255,255,0.05)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <img
+              src={url}
+              alt={labels[idx] || `Creative ${idx + 1}`}
+              style={{
+                width: "100%",
+                height: "100%",
+                objectFit: "contain",
+                display: "block",
+                background: "#0f1418",
+              }}
+              draggable={false}
+            />
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            <div
+              style={{
+                color: "#ffffff",
+                fontWeight: 900,
+                fontSize: 13,
+                lineHeight: 1.2,
+              }}
+            >
+              {labels[idx] || `Creative ${idx + 1}`}
+            </div>
+
+            <div
+              style={{
+                color: "rgba(255,255,255,0.62)",
+                fontWeight: 800,
+                fontSize: 11,
+                whiteSpace: "nowrap",
+              }}
+            >
+              Tap to expand
+            </div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
 
 
 
@@ -1528,7 +1642,7 @@ function MarketerActionsCard({ summary }) {
   );
 }
 
-function PendingCreativeTestCard({ optimizerCreativeState }) {
+function PendingCreativeTestCard({ optimizerCreativeState, onOpenImage }) {
   const generatedCreatives = Array.isArray(optimizerCreativeState?.generatedCreatives)
     ? optimizerCreativeState.generatedCreatives
     : [];
@@ -1537,17 +1651,49 @@ function PendingCreativeTestCard({ optimizerCreativeState }) {
 
   if (!generatedCreatives.length) return null;
 
+  const status = String(pending?.status || "generated").trim().toLowerCase();
+
+  const statusLabel =
+    status === "live"
+      ? "Live"
+      : status === "ready"
+      ? "Ready"
+      : status === "resolved"
+      ? "Resolved"
+      : "Generated";
+
+  const statusBg =
+    status === "live"
+      ? "rgba(49,225,255,0.14)"
+      : status === "ready"
+      ? "rgba(143,240,194,0.14)"
+      : status === "resolved"
+      ? "rgba(255,210,122,0.14)"
+      : "rgba(255,255,255,0.08)";
+
+  const statusColor =
+    status === "live"
+      ? "#7ee7ff"
+      : status === "ready"
+      ? "#8ff0c2"
+      : status === "resolved"
+      ? "#ffd27a"
+      : "#ffffff";
+
+  const variantUrls = generatedCreatives.map((x) => x.url).filter(Boolean);
+
   return (
     <div
       style={{
         width: "100%",
         background: "#14191e",
-        borderRadius: "12px",
-        padding: "10px",
+        borderRadius: 16,
+        padding: 14,
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: 14,
         border: `1px solid ${INPUT_BORDER}`,
+        boxShadow: "0 10px 24px rgba(0,0,0,0.22)",
       }}
     >
       <div
@@ -1555,33 +1701,46 @@ function PendingCreativeTestCard({ optimizerCreativeState }) {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          gap: 10,
+          flexWrap: "wrap",
         }}
       >
-        <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem" }}>
-          AI Variants
+        <div>
+          <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 17 }}>
+            AI Variants
+          </div>
+          <div
+            style={{
+              color: "rgba(255,255,255,0.68)",
+              fontWeight: 700,
+              fontSize: 12,
+              marginTop: 3,
+            }}
+          >
+            {generatedCreatives.length} variant{generatedCreatives.length === 1 ? "" : "s"}
+            {pending?.creativeGoal ? ` • Goal: ${pending.creativeGoal}` : ""}
+          </div>
         </div>
-        <div style={{ color: TEXT_MUTED, fontWeight: 800, fontSize: 12 }}>
-          {pending?.status || "generated"}
+
+        <div
+          style={{
+            padding: "6px 10px",
+            borderRadius: 999,
+            background: statusBg,
+            color: statusColor,
+            fontWeight: 900,
+            fontSize: 12,
+            border: "1px solid rgba(255,255,255,0.06)",
+          }}
+        >
+          {statusLabel}
         </div>
       </div>
 
-      {!!pending && (
-        <div
-          style={{
-            color: "rgba(255,255,255,0.72)",
-            fontWeight: 700,
-            fontSize: 12,
-            lineHeight: 1.45,
-          }}
-        >
-          {pending.variantCount || generatedCreatives.length} variant
-          {(pending.variantCount || generatedCreatives.length) === 1 ? "" : "s"} ready.
-          {pending.creativeGoal ? ` Goal: ${pending.creativeGoal}.` : ""}
-        </div>
-      )}
-
-      <ImageCarousel
-        items={generatedCreatives.map((x) => x.url).filter(Boolean)}
+      <CreativeThumbGrid
+        items={variantUrls}
+        labels={variantUrls.map((_, idx) => `Variant ${idx + 1}`)}
+        onOpen={onOpenImage}
         height={CREATIVE_HEIGHT}
       />
     </div>
@@ -4602,66 +4761,93 @@ window.location.assign(`/auth/facebook?sm_sid=${encodeURIComponent(sid)}&return_
     )}
 
 {!isDraft && (
-  <PendingCreativeTestCard
-    optimizerCreativeState={optimizerCreativeMap[id] || null}
-  />
+ <PendingCreativeTestCard
+  optimizerCreativeState={optimizerCreativeMap[id] || null}
+  onOpenImage={(url) => {
+    setModalImg(url);
+    setShowImageModal(true);
+  }}
+/>
 )}
+
+<div
+  style={{
+    width: "100%",
+    background: "#14191e",
+    borderRadius: 16,
+    padding: 14,
+    display: "flex",
+    flexDirection: "column",
+    gap: 14,
+    border: `1px solid ${INPUT_BORDER}`,
+    boxShadow: "0 10px 24px rgba(0,0,0,0.22)",
+  }}
+>
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 10,
+      flexWrap: "wrap",
+    }}
+  >
+    <div>
+      <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: 17 }}>
+        Creatives
+      </div>
+      <div
+        style={{
+          color: "rgba(255,255,255,0.68)",
+          fontWeight: 700,
+          fontSize: 12,
+          marginTop: 3,
+        }}
+      >
+        {creatives?.images?.length || 0} image
+        {(creatives?.images?.length || 0) === 1 ? "" : "s"} attached
+      </div>
+    </div>
 
     <div
       style={{
-        width: "100%",
-        background: "#14191e",
-        borderRadius: "12px",
-        padding: "10px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        border: `1px solid ${INPUT_BORDER}`,
+        padding: "6px 10px",
+        borderRadius: 999,
+        background: "rgba(255,255,255,0.06)",
+        color: "#ffffff",
+        fontWeight: 900,
+        fontSize: 12,
+        border: "1px solid rgba(255,255,255,0.06)",
       }}
     >
-      <div style={{ color: TEXT_MAIN, fontWeight: 900, fontSize: "1rem", marginBottom: 2 }}>Creatives</div>
-
-      <div style={{ borderRadius: 16, overflow: "hidden", ...GLASS }}>
-        <div
-          style={{
-            padding: "10px 12px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            color: TEXT_DIM,
-            fontWeight: 900,
-            fontSize: "0.95rem",
-            borderBottom: `1px solid ${INPUT_BORDER}`,
-            background: "rgba(255,255,255,0.03)",
-          }}
-        >
-          <span>Images</span>
-        </div>
-
-        <div style={{ padding: 10 }}>
-          <ImageCarousel
-            items={creatives.images}
-            height={CREATIVE_HEIGHT}
-            onFullscreen={(url) => {
-              setModalImg(url);
-              setShowImageModal(true);
-            }}
-          />
-
-          <PreviewCard
-            headline={creatives?.meta?.headline || previewCopy?.headline}
-            body={creatives?.meta?.body || previewCopy?.body}
-            link={creatives?.meta?.link || previewCopy?.link}
-          />
-        </div>
-      </div>
-
-      {(!creatives.images || creatives.images.length === 0) && (
-        <div style={{ color: TEXT_MUTED, fontWeight: 800, padding: "8px 4px" }}>
-          No creatives saved for this campaign yet.
-        </div>
-      )}
+      {isDraft ? "Draft" : "Live Campaign"}
     </div>
+  </div>
+
+  <CreativeThumbGrid
+    items={creatives.images}
+    labels={(creatives.images || []).map((_, idx) =>
+      isDraft ? `Draft Creative ${idx + 1}` : `Creative ${idx + 1}`
+    )}
+    height={CREATIVE_HEIGHT}
+    onOpen={(url) => {
+      setModalImg(url);
+      setShowImageModal(true);
+    }}
+  />
+
+  <PreviewCard
+    headline={creatives?.meta?.headline || previewCopy?.headline}
+    body={creatives?.meta?.body || previewCopy?.body}
+    link={creatives?.meta?.link || previewCopy?.link}
+  />
+
+  {(!creatives.images || creatives.images.length === 0) && (
+    <div style={{ color: TEXT_MUTED, fontWeight: 800, padding: "4px 2px" }}>
+      No creatives saved for this campaign yet.
+    </div>
+  )}
+</div>
   </div>
 )}
                   </div>
