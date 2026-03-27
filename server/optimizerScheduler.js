@@ -12,27 +12,127 @@ function hoursBetween(earlierIso, laterIso) {
   return Math.abs(b - a) / (1000 * 60 * 60);
 }
 
-function isEligibleForCycle(state, nowIso, minHoursBetweenRuns = 1) {
-  if (!state || typeof state !== 'object') return false;
-  if (!state.optimizationEnabled) return false;
-  if (!state.campaignId || !state.accountId || !state.ownerKey) return false;
+function getPendingCreativeStatus(state) {
+  return String(state?.pendingCreativeTest?.status || '').trim().toLowerCase();
+}
 
-  const lastRunAt =
+function hasLiveCreativeTest(state) {
+  const pendingStatus = getPendingCreativeStatus(state);
+
+  const controlAdIds = Array.isArray(state?.pendingCreativeTest?.controlAdIds)
+    ? state.pendingCreativeTest.controlAdIds.filter(Boolean)
+    : [];
+
+  const candidateAdIds = Array.isArray(state?.pendingCreativeTest?.candidateAdIds)
+    ? state.pendingCreativeTest.candidateAdIds.filter(Boolean)
+    : [];
+
+  return (
+    (pendingStatus === 'live' || pendingStatus === 'staged') &&
+    controlAdIds.length > 0 &&
+    candidateAdIds.length > 0
+  );
+}
+
+function hasReadyCreativePromotion(state) {
+  const pendingStatus = getPendingCreativeStatus(state);
+  const imageUrls = Array.isArray(state?.pendingCreativeTest?.imageUrls)
+    ? state.pendingCreativeTest.imageUrls.filter(Boolean)
+    : [];
+
+  return pendingStatus === 'ready' && imageUrls.length > 0;
+}
+
+function hasResolvedCreativeTest(state) {
+  return getPendingCreativeStatus(state) === 'resolved';
+}
+
+function getLastRunAt(state) {
+  return (
     state?.latestMonitoringDecision?.generatedAt ||
     state?.latestAction?.generatedAt ||
     state?.latestDecision?.generatedAt ||
     state?.latestDiagnosis?.generatedAt ||
     state?.metricsSnapshot?.lastSyncedAt ||
     state?.updatedAt ||
-    null;
+    null
+  );
+}
 
-  if (!lastRunAt) return true;
+function getEffectiveMinGapHours(state, minHoursBetweenRuns = 1) {
+  const configuredGap = Number.isFinite(Number(minHoursBetweenRuns))
+    ? Number(minHoursBetweenRuns)
+    : 1;
 
-  const minGap = Number.isFinite(Number(minHoursBetweenRuns))
-  ? Number(minHoursBetweenRuns)
-  : 1;
+  if (hasReadyCreativePromotion(state)) {
+    return 0;
+  }
 
-return hoursBetween(lastRunAt, nowIso) >= minGap;
+  if (hasLiveCreativeTest(state)) {
+    return Math.min(configuredGap, 0.25);
+  }
+
+  return configuredGap;
+}
+
+function getEligibilityReason(state, nowIso, minHoursBetweenRuns = 1) {
+  if (!state || typeof state !== 'object') {
+    return { eligible: false, reason: 'invalid_state' };
+  }
+
+  if (!state.optimizationEnabled) {
+    return { eligible: false, reason: 'optimization_disabled' };
+  }
+
+  if (state.billingBlocked) {
+    return { eligible: false, reason: 'billing_blocked' };
+  }
+
+  if (state.manualOverride) {
+    return { eligible: false, reason: 'manual_override_active' };
+  }
+
+  if (!state.campaignId || !state.accountId || !state.ownerKey) {
+    return { eligible: false, reason: 'missing_identity_fields' };
+  }
+
+  const lastRunAt = getLastRunAt(state);
+  const minGap = getEffectiveMinGapHours(state, minHoursBetweenRuns);
+
+  if (!lastRunAt) {
+    return { eligible: true, reason: 'no_previous_run' };
+  }
+
+  const elapsed = hoursBetween(lastRunAt, nowIso);
+
+  if (elapsed >= minGap) {
+    if (hasReadyCreativePromotion(state)) {
+      return { eligible: true, reason: 'ready_for_promotion' };
+    }
+
+    if (hasLiveCreativeTest(state)) {
+      return { eligible: true, reason: 'live_test_needs_monitoring' };
+    }
+
+    if (hasResolvedCreativeTest(state)) {
+      return { eligible: true, reason: 'resolved_test_followup' };
+    }
+
+    return { eligible: true, reason: 'normal_cycle_due' };
+  }
+
+  return {
+    eligible: false,
+    reason: hasLiveCreativeTest(state)
+      ? 'live_test_waiting_for_gap'
+      : hasReadyCreativePromotion(state)
+      ? 'ready_test_waiting_for_gap'
+      : 'min_gap_not_reached',
+  };
+}
+
+function isEligibleForCycle(state, nowIso, minHoursBetweenRuns = 1) {
+  return getEligibilityReason(state, nowIso, minHoursBetweenRuns).eligible;
 }
 
 async function runScheduledOptimizerPass({
@@ -55,13 +155,48 @@ async function runScheduledOptimizerPass({
   const nowIso = new Date().toISOString();
   const allStates = await getAllOptimizerCampaignStates();
 
-  const eligible = allStates
-    .filter((state) => isEligibleForCycle(state, nowIso, minHoursBetweenRuns))
+  const scoredStates = allStates
+    .map((state) => {
+      const eligibility = getEligibilityReason(state, nowIso, minHoursBetweenRuns);
+
+      let priority = 0;
+      if (hasReadyCreativePromotion(state)) priority = 300;
+      else if (hasLiveCreativeTest(state)) priority = 200;
+      else if (hasResolvedCreativeTest(state)) priority = 120;
+      else priority = 50;
+
+      return {
+        state,
+        ...eligibility,
+        priority,
+      };
+    })
+    .filter((item) => item.eligible)
+    .sort((a, b) => {
+      if (b.priority !== a.priority) return b.priority - a.priority;
+
+      const aUpdated = new Date(
+        a.state?.updatedAt ||
+        a.state?.latestMonitoringDecision?.generatedAt ||
+        a.state?.latestAction?.generatedAt ||
+        0
+      ).getTime();
+
+      const bUpdated = new Date(
+        b.state?.updatedAt ||
+        b.state?.latestMonitoringDecision?.generatedAt ||
+        b.state?.latestAction?.generatedAt ||
+        0
+      ).getTime();
+
+      return aUpdated - bUpdated;
+    })
     .slice(0, Number(limit || 10));
 
   const results = [];
 
-  for (const state of eligible) {
+  for (const item of scoredStates) {
+    const state = item.state;
     const ownerKey = String(state.ownerKey || '').trim();
     const userToken = getUserTokenForOwnerKey(ownerKey);
 
@@ -73,6 +208,7 @@ async function runScheduledOptimizerPass({
         ok: false,
         skipped: true,
         reason: 'No Facebook token available for ownerKey.',
+        eligibilityReason: item.reason,
       });
       continue;
     }
@@ -96,6 +232,7 @@ async function runScheduledOptimizerPass({
         ownerKey,
         ok: true,
         skipped: false,
+        eligibilityReason: item.reason,
         cycle: result.cycle,
       });
     } catch (err) {
@@ -105,6 +242,7 @@ async function runScheduledOptimizerPass({
         ownerKey,
         ok: false,
         skipped: false,
+        eligibilityReason: item.reason,
         error: err?.message || 'Scheduled optimizer pass failed.',
       });
     }
@@ -113,7 +251,7 @@ async function runScheduledOptimizerPass({
   return {
     startedAt: nowIso,
     checked: allStates.length,
-    eligible: eligible.length,
+    eligible: scoredStates.length,
     processed: results.length,
     results,
   };
