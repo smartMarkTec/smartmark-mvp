@@ -4,12 +4,22 @@ import smartmarkLogo from "../assets/smartmark-logo.svg";
 import { trackEvent } from "../analytics/gaEvents";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
-const BG_DARK = "#0b0f14";
-const ACCENT = "#31e1ff";
-const ACCENT_2 = "#7c4dff";
-const BTN_BASE = "#0f6fff";
-const BTN_BASE_HOVER = "#2e82ff";
-const GLASS_BORDER = "rgba(255,255,255,0.08)";
+const BG =
+  "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";
+const TEXT = "#101426";
+const TEXT_SOFT = "#66708b";
+const PURPLE = "#5d59ea";
+const PURPLE_2 = "#7b72ff";
+const BLUE = "#4c63ff";
+const BLUE_HOVER = "#4058f4";
+const BORDER = "rgba(93, 89, 234, 0.13)";
+const PANEL = "rgba(255,255,255,0.80)";
+const PANEL_STRONG = "rgba(255,255,255,0.92)";
+const SHADOW = "0 18px 46px rgba(83, 77, 212, 0.12)";
+const SOFT_SHADOW = "0 10px 28px rgba(83, 77, 212, 0.08)";
+const BTN = "linear-gradient(135deg, #4c63ff 0%, #5f56eb 56%, #786dff 100%)";
+const BTN_HOVER =
+  "linear-gradient(135deg, #4358f4 0%, #554ce4 56%, #6f63fc 100%)";
 
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
@@ -31,7 +41,7 @@ const plans = [
     subtitle:
       "A clean starting point for business owners who want simple campaign automation without extra complexity.",
     badge: "Starter",
-    accentGlow: "rgba(49,225,255,0.18)",
+    accentGlow: "rgba(76,99,255,0.16)",
     cta: "Get Started",
     features: [
       "1 active business setup",
@@ -51,7 +61,7 @@ const plans = [
     subtitle:
       "Built for businesses that want more launches, more creative testing, and stronger automation performance.",
     badge: "Most Popular",
-    accentGlow: "rgba(124,77,255,0.22)",
+    accentGlow: "rgba(123,114,255,0.18)",
     featured: true,
     cta: "Choose Pro",
     features: [
@@ -72,7 +82,7 @@ const plans = [
     subtitle:
       "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
     badge: "Advanced",
-    accentGlow: "rgba(49,225,255,0.14)",
+    accentGlow: "rgba(93,89,234,0.14)",
     cta: "Choose Operator",
     features: [
       "Everything in Pro",
@@ -99,9 +109,10 @@ const Pricing = () => {
   }, []);
 
   const glass = {
-    background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
-    border: `1px solid ${GLASS_BORDER}`,
-    boxShadow: "0 10px 30px rgba(0,0,0,0.22)",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.84), rgba(255,255,255,0.74))",
+    border: `1px solid ${BORDER}`,
+    boxShadow: SHADOW,
     backdropFilter: "blur(10px)",
     WebkitBackdropFilter: "blur(10px)",
   };
@@ -139,8 +150,8 @@ const Pricing = () => {
       style={{
         minHeight: "100vh",
         width: "100%",
-        background: BG_DARK,
-        color: "#fff",
+        background: BG,
+        color: TEXT,
         fontFamily: FONT,
         position: "relative",
         overflowX: "hidden",
@@ -149,7 +160,7 @@ const Pricing = () => {
     >
       <style>{`
         html, body, #root {
-          background: ${BG_DARK};
+          background: ${BG};
           margin: 0;
           padding: 0;
           width: 100%;
@@ -172,12 +183,14 @@ const Pricing = () => {
           position: "absolute",
           inset: 0,
           backgroundImage: `
-            linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)
+            linear-gradient(rgba(93, 89, 234, 0.045) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(93, 89, 234, 0.045) 1px, transparent 1px)
           `,
-          backgroundSize: isMobile ? "34px 34px" : "46px 46px",
-          maskImage: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.08))",
-          WebkitMaskImage: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.08))",
+          backgroundSize: isMobile ? "36px 36px" : "52px 52px",
+          maskImage:
+            "linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.10))",
+          WebkitMaskImage:
+            "linear-gradient(180deg, rgba(0,0,0,0.42), rgba(0,0,0,0.10))",
           pointerEvents: "none",
         }}
       />
@@ -186,26 +199,28 @@ const Pricing = () => {
         aria-hidden
         style={{
           position: "absolute",
-          top: "-18vh",
-          right: "-10vw",
-          width: isMobile ? 300 : 620,
-          height: isMobile ? 300 : 620,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}20, transparent 72%)`,
+          top: "-16vh",
+          right: "-8vw",
+          width: isMobile ? 260 : 520,
+          height: isMobile ? 260 : 520,
+          background:
+            "radial-gradient(40% 40% at 50% 50%, rgba(123,114,255,0.20), transparent 72%)",
+          filter: "blur(30px)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          bottom: "-18vh",
+          left: "-10vw",
+          width: isMobile ? 320 : 620,
+          height: isMobile ? 320 : 620,
+          background:
+            "radial-gradient(40% 40% at 50% 50%, rgba(76,99,255,0.16), transparent 72%)",
           filter: "blur(32px)",
-          pointerEvents: "none",
-        }}
-      />
-
-      <div
-        aria-hidden
-        style={{
-          position: "absolute",
-          bottom: "-20vh",
-          left: "-12vw",
-          width: isMobile ? 340 : 700,
-          height: isMobile ? 340 : 700,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}22, transparent 72%)`,
-          filter: "blur(34px)",
           pointerEvents: "none",
         }}
       />
@@ -217,12 +232,12 @@ const Pricing = () => {
           top: "18%",
           left: "50%",
           transform: "translateX(-50%)",
-          width: isMobile ? "88%" : "72%",
+          width: isMobile ? "88%" : "76%",
           height: isMobile ? 180 : 240,
           borderRadius: 999,
           background:
-            "linear-gradient(90deg, rgba(49,225,255,0.06), rgba(124,77,255,0.10), rgba(49,225,255,0.04))",
-          filter: "blur(36px)",
+            "linear-gradient(90deg, rgba(76,99,255,0.06), rgba(123,114,255,0.10), rgba(76,99,255,0.04))",
+          filter: "blur(38px)",
           pointerEvents: "none",
         }}
       />
@@ -255,14 +270,14 @@ const Pricing = () => {
               gap: 10,
               padding: "0.75rem 1rem",
               borderRadius: 999,
-              color: "#eaf5ff",
+              color: TEXT,
               cursor: "pointer",
             }}
           >
             <img
               src={smartmarkLogo}
               alt="SmarteMark"
-              style={{ width: 24, height: 24, borderRadius: 8, opacity: 0.92 }}
+              style={{ width: 24, height: 24, borderRadius: 8, opacity: 0.95 }}
             />
             <span style={{ fontWeight: 800, fontSize: 14 }}>SmarteMark</span>
           </button>
@@ -273,23 +288,26 @@ const Pricing = () => {
               padding: isMobile ? "0.8rem 1.3rem" : "0.9rem 1.7rem",
               fontSize: 15,
               color: "#fff",
-              background: BTN_BASE,
+              background: BLUE,
               border: "none",
               borderRadius: 999,
               fontWeight: 800,
-              boxShadow: "0 10px 26px rgba(15,111,255,0.35)",
+              boxShadow: "0 10px 26px rgba(76,99,255,0.24)",
               cursor: "pointer",
-              transition: "transform .15s ease, background .2s ease, box-shadow .2s ease",
+              transition:
+                "transform .15s ease, background .2s ease, box-shadow .2s ease",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.background = BTN_BASE_HOVER;
+              e.currentTarget.style.background = BLUE_HOVER;
               e.currentTarget.style.transform = "translateY(-2px)";
-              e.currentTarget.style.boxShadow = "0 14px 36px rgba(15,111,255,0.45)";
+              e.currentTarget.style.boxShadow =
+                "0 14px 36px rgba(76,99,255,0.32)";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.background = BTN_BASE;
+              e.currentTarget.style.background = BLUE;
               e.currentTarget.style.transform = "translateY(0)";
-              e.currentTarget.style.boxShadow = "0 10px 26px rgba(15,111,255,0.35)";
+              e.currentTarget.style.boxShadow =
+                "0 10px 26px rgba(76,99,255,0.24)";
             }}
           >
             Login
@@ -312,9 +330,9 @@ const Pricing = () => {
               fontSize: 12,
               fontWeight: 900,
               letterSpacing: 0.4,
-              color: ACCENT,
-              background: "rgba(49,225,255,0.08)",
-              border: "1px solid rgba(49,225,255,0.16)",
+              color: PURPLE,
+              background: "rgba(255,255,255,0.62)",
+              border: `1px solid ${BORDER}`,
               marginBottom: 18,
             }}
           >
@@ -324,11 +342,11 @@ const Pricing = () => {
           <h1
             style={{
               margin: 0,
-              fontSize: isMobile ? "2.35rem" : "3.6rem",
+              fontSize: isMobile ? "2.35rem" : "3.55rem",
               lineHeight: 1.04,
               fontWeight: 900,
-              letterSpacing: isMobile ? "-0.7px" : "-1.15px",
-              color: "#ffffff",
+              letterSpacing: isMobile ? "-0.7px" : "-1.1px",
+              color: TEXT,
             }}
           >
             Choose your plan
@@ -338,13 +356,13 @@ const Pricing = () => {
             style={{
               maxWidth: 760,
               margin: "14px auto 0",
-              color: "rgba(255,255,255,0.78)",
+              color: TEXT_SOFT,
               fontSize: isMobile ? 15 : 17,
               lineHeight: 1.7,
               fontWeight: 500,
             }}
           >
-            A clean, dark interface with simple pricing for businesses that want autonomous campaign execution.
+            Simple pricing for businesses that want AI-powered campaign launch and management without agency friction.
           </div>
         </div>
 
@@ -371,11 +389,11 @@ const Pricing = () => {
                   overflow: "hidden",
                   minHeight: "auto",
                   boxShadow: plan.featured
-                    ? "0 18px 50px rgba(124,77,255,0.18)"
-                    : "0 10px 28px rgba(0,0,0,0.22)",
+                    ? "0 18px 50px rgba(123,114,255,0.14)"
+                    : SOFT_SHADOW,
                   border: plan.featured
-                    ? "1px solid rgba(124,77,255,0.28)"
-                    : `1px solid ${GLASS_BORDER}`,
+                    ? "1px solid rgba(123,114,255,0.24)"
+                    : `1px solid ${BORDER}`,
                 }}
               >
                 <div
@@ -400,13 +418,11 @@ const Pricing = () => {
                     fontSize: 12,
                     fontWeight: 900,
                     letterSpacing: 0.4,
-                    color: plan.featured ? "#ffffff" : ACCENT,
+                    color: plan.featured ? "#fff" : PURPLE,
                     background: plan.featured
-                      ? "linear-gradient(90deg, #7c4dff, #0f6fff)"
-                      : "rgba(49,225,255,0.08)",
-                    border: plan.featured
-                      ? "1px solid rgba(255,255,255,0.08)"
-                      : "1px solid rgba(49,225,255,0.18)",
+                      ? "linear-gradient(90deg, #5f56eb, #786dff)"
+                      : "rgba(93,89,234,0.08)",
+                    border: `1px solid ${BORDER}`,
                   }}
                 >
                   {plan.badge}
@@ -417,20 +433,27 @@ const Pricing = () => {
                     style={{
                       fontSize: 28,
                       fontWeight: 900,
-                      color: "#fff",
+                      color: TEXT,
                       letterSpacing: "-0.6px",
                     }}
                   >
                     {plan.name}
                   </div>
 
-                  <div style={{ marginTop: 12, display: "flex", alignItems: "flex-end", gap: 6 }}>
+                  <div
+                    style={{
+                      marginTop: 12,
+                      display: "flex",
+                      alignItems: "flex-end",
+                      gap: 6,
+                    }}
+                  >
                     <span
                       style={{
                         fontSize: isMobile ? 40 : 46,
                         lineHeight: 1,
                         fontWeight: 900,
-                        color: "#fff",
+                        color: TEXT,
                         letterSpacing: "-1px",
                       }}
                     >
@@ -439,7 +462,7 @@ const Pricing = () => {
                     <span
                       style={{
                         fontSize: 15,
-                        color: "rgba(255,255,255,0.72)",
+                        color: TEXT_SOFT,
                         fontWeight: 700,
                         paddingBottom: 7,
                       }}
@@ -451,7 +474,7 @@ const Pricing = () => {
                   <div
                     style={{
                       marginTop: 14,
-                      color: "rgba(255,255,255,0.84)",
+                      color: TEXT_SOFT,
                       fontSize: 15,
                       lineHeight: 1.65,
                       fontWeight: 500,
@@ -470,14 +493,14 @@ const Pricing = () => {
                     padding: "0.95rem 1.1rem",
                     borderRadius: 999,
                     border: "none",
-                    background: "rgba(255,255,255,0.10)",
-                    color: "rgba(255,255,255,0.65)",
+                    background: "rgba(93,89,234,0.10)",
+                    color: "rgba(16,20,38,0.60)",
                     fontSize: 15,
                     fontWeight: 900,
                     cursor: "not-allowed",
                     boxShadow: "none",
                     transition: "opacity .2s ease",
-                    opacity: 0.7,
+                    opacity: 0.75,
                   }}
                 >
                   Coming Soon
@@ -486,14 +509,14 @@ const Pricing = () => {
                 <div
                   style={{
                     marginTop: 24,
-                    borderTop: "1px solid rgba(255,255,255,0.08)",
+                    borderTop: "1px solid rgba(16,20,38,0.08)",
                     paddingTop: 18,
                   }}
                 >
                   <div
                     style={{
                       marginBottom: 12,
-                      color: "#ffffff",
+                      color: TEXT,
                       fontWeight: 800,
                       fontSize: 14,
                       letterSpacing: 0.2,
@@ -510,7 +533,7 @@ const Pricing = () => {
                           display: "flex",
                           alignItems: "flex-start",
                           gap: 10,
-                          color: "rgba(255,255,255,0.9)",
+                          color: TEXT,
                           lineHeight: 1.55,
                           fontSize: 14.5,
                           fontWeight: 500,
@@ -525,8 +548,8 @@ const Pricing = () => {
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            background: "rgba(49,225,255,0.12)",
-                            color: ACCENT,
+                            background: "rgba(93,89,234,0.10)",
+                            color: PURPLE,
                             fontSize: 12,
                             fontWeight: 900,
                           }}
@@ -558,7 +581,7 @@ const Pricing = () => {
               fontWeight: 900,
               lineHeight: 1.15,
               marginBottom: 10,
-              color: "#ffffff",
+              color: TEXT,
             }}
           >
             Smarter campaign execution without agency friction
@@ -568,7 +591,7 @@ const Pricing = () => {
             style={{
               maxWidth: 760,
               margin: "0 auto",
-              color: "rgba(255,255,255,0.82)",
+              color: TEXT_SOFT,
               fontSize: isMobile ? 15 : 16,
               lineHeight: 1.7,
               fontWeight: 500,
