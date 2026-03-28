@@ -202,7 +202,8 @@ function FAQItem({ item, open, onToggle }) {
 
 export default function Landing() {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 920);
-  const [openFaq, setOpenFaq] = useState(0);
+  const [openFaq, setOpenFaq] = useState(-1);
+  const [showDemoModal, setShowDemoModal] = useState(false);
 
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth <= 920);
@@ -211,7 +212,17 @@ export default function Landing() {
   }, []);
 
   const openDemoPopup = () => {
-    window.dispatchEvent(new CustomEvent("openEarlyAccessModal"));
+    setShowDemoModal(true);
+  };
+
+  const closeDemoPopup = () => {
+    setShowDemoModal(false);
+  };
+
+  const handleDemoSubmit = (e) => {
+    e.preventDefault();
+    setShowDemoModal(false);
+    window.location.href = "/form";
   };
 
   const scrollToFaq = () => {
@@ -280,6 +291,38 @@ export default function Landing() {
               }}
             >
               <button
+                onClick={() => (window.location.href = "/pricing")}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: TEXT_SOFT,
+                  fontWeight: 800,
+                  fontSize: 15,
+                  cursor: "pointer",
+                  fontFamily: FONT,
+                  padding: "10px 6px",
+                }}
+              >
+                Pricing
+              </button>
+
+              <button
+                onClick={() => (window.location.href = "/login")}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  color: TEXT_SOFT,
+                  fontWeight: 800,
+                  fontSize: 15,
+                  cursor: "pointer",
+                  fontFamily: FONT,
+                  padding: "10px 6px",
+                }}
+              >
+                Login
+              </button>
+
+              <button
                 onClick={scrollToFaq}
                 style={{
                   background: "transparent",
@@ -294,6 +337,7 @@ export default function Landing() {
               >
                 FAQ
               </button>
+
               <CTAButton onClick={openDemoPopup}>Launch Campaign</CTAButton>
             </div>
           </div>
@@ -717,19 +761,6 @@ export default function Landing() {
 
             <div
               style={{
-                color: TEXT,
-                fontSize: isMobile ? 40 : 58,
-                lineHeight: 1,
-                letterSpacing: "-0.05em",
-                fontWeight: 700,
-                marginBottom: 20,
-              }}
-            >
-              Questions before you launch
-            </div>
-
-            <div
-              style={{
                 display: "grid",
                 gap: 14,
               }}
@@ -744,6 +775,154 @@ export default function Landing() {
               ))}
             </div>
           </section>
+
+          {showDemoModal && (
+            <div
+              onClick={closeDemoPopup}
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 9999,
+                background: "rgba(12,16,36,0.42)",
+                backdropFilter: "blur(6px)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 20,
+              }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: "min(520px, 94vw)",
+                  background: "#ffffff",
+                  border: `1px solid ${BORDER}`,
+                  borderRadius: 28,
+                  boxShadow: SHADOW,
+                  padding: 24,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 18,
+                }}
+              >
+                <div>
+                  <div
+                    style={{
+                      color: TEXT,
+                      fontSize: 28,
+                      fontWeight: 800,
+                      lineHeight: 1.05,
+                      letterSpacing: "-0.04em",
+                      marginBottom: 8,
+                    }}
+                  >
+                    Get started
+                  </div>
+                  <div
+                    style={{
+                      color: TEXT_SOFT,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      lineHeight: 1.65,
+                    }}
+                  >
+                    Enter your info and continue to the demo flow.
+                  </div>
+                </div>
+
+                <form
+                  onSubmit={handleDemoSubmit}
+                  style={{ display: "flex", flexDirection: "column", gap: 12 }}
+                >
+                  <input
+                    type="text"
+                    placeholder="Your name"
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "14px 16px",
+                      borderRadius: 16,
+                      border: `1px solid ${BORDER}`,
+                      outline: "none",
+                      fontFamily: FONT,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      color: TEXT,
+                      background: "#ffffff",
+                    }}
+                  />
+
+                  <input
+                    type="email"
+                    placeholder="Email"
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "14px 16px",
+                      borderRadius: 16,
+                      border: `1px solid ${BORDER}`,
+                      outline: "none",
+                      fontFamily: FONT,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      color: TEXT,
+                      background: "#ffffff",
+                    }}
+                  />
+
+                  <input
+                    type="text"
+                    placeholder="Business name"
+                    required
+                    style={{
+                      width: "100%",
+                      padding: "14px 16px",
+                      borderRadius: 16,
+                      border: `1px solid ${BORDER}`,
+                      outline: "none",
+                      fontFamily: FONT,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      color: TEXT,
+                      background: "#ffffff",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 12,
+                      justifyContent: "flex-end",
+                      flexWrap: "wrap",
+                      marginTop: 6,
+                    }}
+                  >
+                    <CTAButton onClick={closeDemoPopup} secondary>
+                      Cancel
+                    </CTAButton>
+                    <button
+                      type="submit"
+                      style={{
+                        appearance: "none",
+                        border: "none",
+                        background: BTN,
+                        color: "#fff",
+                        borderRadius: 999,
+                        padding: "15px 24px",
+                        fontSize: 16,
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        fontFamily: FONT,
+                        boxShadow: "0 12px 28px rgba(93,89,234,0.20)",
+                      }}
+                    >
+                      Continue
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
