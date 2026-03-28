@@ -9,11 +9,11 @@ import { trackEvent } from "../analytics/gaEvents";
 /* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "#cfd3ff";
-const SURFACE = "#dde1ff";
-const TEAL = "#7b72ff";
-const TEAL_SOFT = "rgba(123,114,255,0.20)";
-const EDGE = "rgba(93,89,234,0.12)";
+const DARK_BG = "linear-gradient(115deg, #ececf3 0%, #e5e8f7 34%, #c8c9ff 68%, #9ea0ff 100%)";
+const SURFACE = "rgba(255,255,255,0.62)";
+const TEAL = "#6d67f4";
+const TEAL_SOFT = "rgba(109,103,244,0.18)";
+const EDGE = "rgba(109,103,244,0.12)";
 const SIDE_CHAT_LIMIT = 5;
 
 /* -------- Backend endpoints (proxy through Vercel) -------- */
@@ -1967,7 +1967,19 @@ async function generatePosterBPair(runToken) {
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
 
-       <div
+            <div
+        aria-hidden
+        style={{
+          position: "fixed",
+          inset: 0,
+          pointerEvents: "none",
+          zIndex: 0,
+          background:
+            "linear-gradient(120deg, rgba(255,255,255,0.12) 18%, rgba(255,255,255,0.00) 34%, rgba(123,114,255,0.14) 58%, rgba(109,103,244,0.18) 100%)",
+        }}
+      />
+
+      <div
         aria-hidden
         style={{
           position: "fixed",
@@ -1975,7 +1987,7 @@ async function generatePosterBPair(runToken) {
           right: "-10vw",
           width: 640,
           height: 640,
-          background: "radial-gradient(40% 40% at 50% 50%, rgba(123,114,255,0.18), transparent 70%)",
+          background: "radial-gradient(42% 42% at 50% 50%, rgba(123,114,255,0.22), transparent 72%)",
           filter: "blur(18px)",
           pointerEvents: "none",
           zIndex: 0,
@@ -2015,7 +2027,7 @@ async function generatePosterBPair(runToken) {
               fontSize: "2.25rem",
               lineHeight: 1.2,
               letterSpacing: "-0.5px",
-              color: "#e9feff",
+             color: "#171b2f",
               textAlign: "center",
               fontWeight: 900,
             }}
@@ -2031,7 +2043,7 @@ async function generatePosterBPair(runToken) {
           maxWidth: 780,
           marginTop: 18,
           marginBottom: 22,
-          background: SURFACE,
+         background: "linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0.52))",
           borderRadius: 18,
           border: `1px solid ${EDGE}`,
           boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
@@ -2044,7 +2056,7 @@ async function generatePosterBPair(runToken) {
       >
         <div
           style={{
-            color: "#6f66f5",
+           color: "#6d67f4",
             fontSize: 15,
             fontWeight: 900,
             marginBottom: 10,
@@ -2066,7 +2078,7 @@ async function generatePosterBPair(runToken) {
             overflowY: "auto",
             marginBottom: 16,
             padding: 16,
-            background: "#eef1ff",
+            background: "rgba(241,243,255,0.92)",
             borderRadius: 12,
             border: `1px solid ${EDGE}`,
             display: "flex",
