@@ -1414,27 +1414,13 @@ function MetricsRow({ metrics }) {
     { key: "cpc", label: "CPC", value: normalized.cpc },
   ];
 
-  const cardStyle = {
-    minWidth: 160,
-    background: "#1e252a",
-    border: "1px solid rgba(255,255,255,0.06)",
-    color: "#eafff6",
-    borderRadius: 14,
-    padding: "10px 12px",
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    gap: 6,
-    boxShadow: "0 2px 10px rgba(0,0,0,0.25)",
-  };
-
   return (
     <div style={{ position: "relative", width: "100%" }}>
       <div
         style={{
-          marginBottom: 8,
-          color: normalized.hasDelivery ? "#89f0cc" : "rgba(255,255,255,0.72)",
-          fontWeight: 800,
+          marginBottom: 10,
+          color: normalized.hasDelivery ? "#6ee7b7" : "#94a3b8",
+          fontWeight: 900,
           fontSize: 12,
           letterSpacing: 0.2,
         }}
@@ -1444,20 +1430,49 @@ function MetricsRow({ metrics }) {
 
       <div
         style={{
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
           gap: 12,
-          overflowX: "auto",
-          padding: "6px 2px",
-          scrollSnapType: "x proximity",
-          scrollbarWidth: "none",
         }}
       >
         {cards.map((c) => (
-          <div key={c.key} style={{ ...cardStyle, scrollSnapAlign: "start" }}>
-            <div style={{ fontSize: 12, color: TEXT_MUTED, fontWeight: 900, letterSpacing: 0.3 }}>
+          <div
+            key={c.key}
+            style={{
+              minHeight: 86,
+              background: "linear-gradient(180deg, #182029 0%, #10161d 100%)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              color: "#f8fffc",
+              borderRadius: 16,
+              padding: "14px 14px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              gap: 8,
+              boxShadow: "0 12px 24px rgba(15,23,42,0.16)",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                color: "rgba(203,213,225,0.72)",
+                fontWeight: 900,
+                letterSpacing: 0.3,
+              }}
+            >
               {c.label}
             </div>
-            <div style={{ fontSize: 20, fontWeight: 900 }}>{c.value}</div>
+
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 900,
+                lineHeight: 1.1,
+                color: "#f8fffc",
+              }}
+            >
+              {c.value}
+            </div>
           </div>
         ))}
       </div>
@@ -1600,15 +1615,19 @@ function buildOptimizerHistoryItems(optimizerState) {
 }
 
 function MarketerActionsCard({ summary, optimizerState }) {
-  const [expanded, setExpanded] = useState(false);
-
   const safeSummary = summary || getFallbackPublicSummary();
   const history = buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
 
-  const stageLabel = safeSummary?.stage
-    ? String(safeSummary.stage).replace(/_/g, " ")
-    : "monitoring";
+  const headline =
+    latest?.title ||
+    safeSummary?.headline ||
+    "Monitoring campaign performance";
+
+  const detail =
+    latest?.detail ||
+    safeSummary?.subtext ||
+    "Smartemark is monitoring the campaign and preparing the next measured move.";
 
   return (
     <div
@@ -1621,13 +1640,13 @@ function MarketerActionsCard({ summary, optimizerState }) {
     >
       <div
         style={{
-          borderRadius: 22,
+          borderRadius: 16,
           padding: 18,
           background:
-            "linear-gradient(135deg, rgba(86,80,230,0.96), rgba(108,100,255,0.94), rgba(206,210,255,0.88))",
+            "linear-gradient(135deg, rgba(82,72,224,0.98), rgba(104,93,246,0.95), rgba(190,191,255,0.88))",
           color: "#ffffff",
           boxShadow: "0 18px 40px rgba(91,87,232,0.18)",
-          border: "1px solid rgba(255,255,255,0.18)",
+          border: "1px solid rgba(255,255,255,0.16)",
           display: "flex",
           flexDirection: "column",
           gap: 14,
@@ -1651,17 +1670,18 @@ function MarketerActionsCard({ summary, optimizerState }) {
                 marginBottom: 6,
               }}
             >
-              AI Update
+              AI Ad Manager
             </div>
             <div
               style={{
                 fontSize: 15,
-                fontWeight: 800,
-                lineHeight: 1.5,
-                color: "rgba(255,255,255,0.96)",
+                fontWeight: 900,
+                lineHeight: 1.45,
+                color: "rgba(255,255,255,0.98)",
+                textTransform: "capitalize",
               }}
             >
-              {latest?.title || safeSummary?.headline || "Monitoring campaign performance"}
+              {headline}
             </div>
           </div>
 
@@ -1669,34 +1689,31 @@ function MarketerActionsCard({ summary, optimizerState }) {
             style={{
               padding: "8px 12px",
               borderRadius: 999,
-              background: "rgba(255,255,255,0.18)",
-              border: "1px solid rgba(255,255,255,0.22)",
+              background: "rgba(255,255,255,0.16)",
+              border: "1px solid rgba(255,255,255,0.16)",
               color: "#ffffff",
               fontWeight: 900,
               fontSize: 12,
-              textTransform: "capitalize",
               whiteSpace: "nowrap",
             }}
           >
-            {stageLabel}
+            Monitoring
           </div>
         </div>
 
         <div
           style={{
-            background: "rgba(255,255,255,0.14)",
-            border: "1px solid rgba(255,255,255,0.18)",
-            borderRadius: 16,
+            background: "rgba(255,255,255,0.12)",
+            border: "1px solid rgba(255,255,255,0.14)",
+            borderRadius: 14,
             padding: 14,
             fontSize: 14,
             lineHeight: 1.65,
-            color: "rgba(255,255,255,0.94)",
-            fontWeight: 700,
+            color: "rgba(255,255,255,0.96)",
+            fontWeight: 800,
           }}
         >
-          {latest?.detail ||
-            safeSummary?.subtext ||
-            "Smartemark is monitoring the campaign and preparing the next measured move."}
+          {detail}
         </div>
 
         <div
@@ -1710,97 +1727,43 @@ function MarketerActionsCard({ summary, optimizerState }) {
         >
           <div
             style={{
-              color: "rgba(255,255,255,0.82)",
+              color: "rgba(255,255,255,0.84)",
               fontWeight: 800,
               fontSize: 12,
             }}
           >
-            {safeSummary?.updatedAt ? `Updated ${timeAgoShort(safeSummary.updatedAt)}` : "Recently updated"}
+            {safeSummary?.updatedAt
+              ? `Updated ${timeAgoShort(safeSummary.updatedAt)}`
+              : "Recently updated"}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
+          <div
             style={{
-              background: "#ffffff",
-              color: "#3f3aa8",
-              border: "none",
-              borderRadius: 999,
-              padding: "10px 14px",
-              fontWeight: 900,
-              fontSize: 12,
-              cursor: "pointer",
-              boxShadow: "0 10px 24px rgba(15,23,42,0.10)",
+              display: "flex",
+              gap: 8,
+              flexWrap: "wrap",
             }}
           >
-            {expanded ? "Hide details" : "Peek inside AI"}
-          </button>
-        </div>
-      </div>
-
-      {expanded && (
-        <div
-          style={{
-            background: "#ffffff",
-            border: "1px solid #e5e7eb",
-            borderRadius: 18,
-            padding: 16,
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          {history.length ? (
-            history.map((item) => (
+            {["Watch", "Compare", "Adjust"].map((chip) => (
               <div
-                key={item.id}
+                key={chip}
                 style={{
-                  borderBottom: "1px solid #eef2f7",
-                  paddingBottom: 12,
+                  padding: "8px 12px",
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.14)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  color: "#ffffff",
+                  fontWeight: 900,
+                  fontSize: 11,
+                  letterSpacing: 0.2,
                 }}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 5,
-                  }}
-                >
-                  <div style={{ color: "#4f46e5", fontWeight: 900, fontSize: 12 }}>
-                    {item.kind}
-                  </div>
-                  <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>
-                    {item.timeLabel}
-                  </div>
-                </div>
-
-                <div style={{ color: "#111827", fontWeight: 900, fontSize: 14, marginBottom: 4 }}>
-                  {item.title}
-                </div>
-
-                {!!item.detail && (
-                  <div
-                    style={{
-                      color: "#64748b",
-                      fontWeight: 600,
-                      fontSize: 12,
-                      lineHeight: 1.6,
-                    }}
-                  >
-                    {item.detail}
-                  </div>
-                )}
+                {chip}
               </div>
-            ))
-          ) : (
-            <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
-              Smartemark is still building the latest activity trail for this campaign.
-            </div>
-          )}
+            ))}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -2181,9 +2144,9 @@ function getPublicSummaryFromOptimizerState(optimizerState) {
 
 function getFallbackPublicSummary() {
   return {
-    headline: "Monitoring campaign performance",
+    headline: "Continue monitoring",
     subtext:
-      "Smartemark is watching campaign data and preparing the next measured move.",
+      "Smartemark is reviewing delivery, click volume, and creative performance before making the next move.",
     stage: "monitoring",
     tone: "calm",
     actions: [],
@@ -3588,26 +3551,34 @@ const handlePauseUnpauseCampaign = async (campaignId, currentlyPaused) => {
 };
 
 const handleDeleteCampaign = async (campaignId) => {
-  if (!selectedAccount) return;
-
-  const acctId = String(selectedAccount).trim();
   const idToDelete = String(campaignId || "").trim();
 
   if (!idToDelete || idToDelete === "__DRAFT__") {
     handleClearDraft();
+    setSelectedCampaignId("");
+    setExpandedId(null);
+    setShowCampaignMenu(false);
     alert("Draft discarded.");
     return;
   }
 
-  if (!window.confirm("Delete this campaign? (It will be archived in Facebook)")) return;
+  if (!selectedAccount) {
+    alert("No ad account selected.");
+    return;
+  }
+
+  const acctId = String(selectedAccount).trim();
+
+  if (!window.confirm("Delete this campaign?")) return;
 
   setLoading(true);
   try {
     const r = await authFetch(`/facebook/adaccount/${acctId}/campaign/${idToDelete}/cancel`, {
       method: "POST",
     });
+
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j?.error || "Archive failed");
+    if (!r.ok) throw new Error(j?.error || "Delete failed");
 
     try {
       const map = readCreativeMap(resolvedUser, acctId);
@@ -3618,7 +3589,7 @@ const handleDeleteCampaign = async (campaignId) => {
     } catch {}
 
     setCampaigns((prev) =>
-      Array.isArray(prev) ? prev.filter((c) => c?.id !== idToDelete) : prev
+      Array.isArray(prev) ? prev.filter((c) => String(c?.id || "") !== idToDelete) : prev
     );
 
     setMetricsMap((m) => {
@@ -3626,25 +3597,40 @@ const handleDeleteCampaign = async (campaignId) => {
       return rest;
     });
 
+    setPublicSummaryMap((m) => {
+      const { [idToDelete]: _, ...rest } = m || {};
+      return rest;
+    });
+
+    setOptimizerCreativeMap((m) => {
+      const { [idToDelete]: _, ...rest } = m || {};
+      return rest;
+    });
+
+    setOptimizerStateMap((m) => {
+      const { [idToDelete]: _, ...rest } = m || {};
+      return rest;
+    });
+
+    setCampaignCreativesMap((m) => {
+      const { [idToDelete]: _, ...rest } = m || {};
+      return rest;
+    });
+
     if (selectedCampaignId === idToDelete) setSelectedCampaignId("");
     if (expandedId === idToDelete) setExpandedId(null);
 
+    setShowCampaignMenu(false);
     setCampaignStatus("ARCHIVED");
     setLaunched(false);
     setLaunchResult(null);
 
-    try {
-      const rr = await authFetch(`/facebook/adaccount/${acctId}/campaigns`);
-      const data = await rr.json().catch(() => ({}));
-      const list = data && data.data ? data.data.slice(0, 2) : [];
-      setCampaigns(list);
-    } catch {}
-
     alert("Campaign deleted.");
   } catch (e) {
     alert("Could not delete campaign: " + (e?.message || ""));
+  } finally {
+    setLoading(false);
   }
-  setLoading(false);
 };
 
   const handleNewCampaign = () => {
@@ -4855,203 +4841,241 @@ const getSavedCreatives = (campaignId) => {
                 gap: 12,
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      color: "#111827",
-                      fontWeight: 900,
-                      fontSize: 18,
-                      marginBottom: 6,
-                    }}
-                  >
-                    Active Campaign
-                  </div>
-                  <div
-                    style={{
-                      color: "#667085",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    Select a draft or live campaign to manage.
-                  </div>
-                </div>
+         <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: 12,
+    flexWrap: "wrap",
+  }}
+>
+  <div>
+    <div
+      style={{
+        color: "#111827",
+        fontWeight: 900,
+        fontSize: 18,
+        marginBottom: 6,
+      }}
+    >
+      Active Campaign
+    </div>
+    <div
+      style={{
+        color: "#667085",
+        fontWeight: 700,
+        fontSize: 13,
+        lineHeight: 1.5,
+      }}
+    >
+      Select a draft or live campaign to manage.
+    </div>
+  </div>
 
-                <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
-                  {selectedLiveCampaign && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const currentStatus = String(
-                          selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE"
-                        ).toUpperCase();
-                        const currentlyPaused = currentStatus === "PAUSED";
-                        handlePauseUnpauseCampaign(selectedLiveCampaign.id, currentlyPaused);
-                      }}
-                      disabled={loading}
-                      title={
-                        String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
-                          ? "Unpause"
-                          : "Pause"
-                      }
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 10,
-                        border: "1px solid #dbe4ff",
-                        background:
-                          String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
-                            ? "#dcfce7"
-                            : "#fef3c7",
-                        color: "#111827",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: loading ? "not-allowed" : "pointer",
-                        opacity: loading ? 0.6 : 1,
-                      }}
-                    >
-                      {String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? (
-                        <FaPlay />
-                      ) : (
-                        <FaPause />
-                      )}
-                    </button>
-                  )}
+  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+    {selectedCampaignId === "__DRAFT__" && (
+      <button
+        type="button"
+        onClick={handleClearDraft}
+        title="Remove Draft"
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          border: "1px solid #ffd6d6",
+          background: "#fff1f2",
+          color: "#b42318",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+        }}
+      >
+        <FaTrash />
+      </button>
+    )}
 
-                  {selectedLiveCampaign && (
-                    <button
-                      type="button"
-                      onClick={() => setShowCampaignMenu((v) => !v)}
-                      title="Campaign actions"
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 10,
-                        border: "1px solid #dbe4ff",
-                        background: "#ffffff",
-                        color: "#111827",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <FaEllipsisV />
-                    </button>
-                  )}
+    <button
+      type="button"
+      onClick={handleNewCampaign}
+      title="New Campaign"
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        border: "1px solid #dbe4ff",
+        background: "#eef2ff",
+        color: "#5b5cf0",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+      }}
+    >
+      <FaPlus />
+    </button>
+  </div>
+</div>
 
-                  {showCampaignMenu && selectedLiveCampaign && (
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 42,
-                        right: 42,
-                        minWidth: 170,
-                        background: "#ffffff",
-                        border: "1px solid #e5e7eb",
-                        borderRadius: 14,
-                        boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
-                        padding: 8,
-                        zIndex: 20,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 6,
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={openEditCurrentCampaign}
-                        style={{
-                          background: "#ffffff",
-                          color: "#111827",
-                          border: "none",
-                          textAlign: "left",
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          fontWeight: 800,
-                          fontSize: 13,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Edit budget + duration
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowCampaignMenu(false);
-                          handleDeleteCampaign(selectedLiveCampaign.id);
-                        }}
-                        style={{
-                          background: "#ffffff",
-                          color: "#b42318",
-                          border: "none",
-                          textAlign: "left",
-                          padding: "10px 12px",
-                          borderRadius: 10,
-                          fontWeight: 800,
-                          fontSize: 13,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Delete campaign
-                      </button>
-                    </div>
-                  )}
+<div style={{ position: "relative", display: "flex", gap: 10, alignItems: "center" }}>
+  <select
+    value={selectedCampaignId}
+    onChange={(e) => {
+      setSelectedCampaignId(e.target.value);
+      setExpandedId(e.target.value);
+      setShowCampaignMenu(false);
+    }}
+    style={{
+      padding: "12px 14px",
+      borderRadius: 12,
+      fontSize: 14,
+      width: "100%",
+      border: "1px solid #dbe4ff",
+      background: "#ffffff",
+      color: "#111827",
+      fontWeight: 800,
+      outline: "none",
+      appearance: "auto",
+    }}
+  >
+    <option value="">Select a campaign</option>
+    {hasDraft && (
+      <option value="__DRAFT__">
+        {(form.campaignName || "Untitled")} (Draft)
+      </option>
+    )}
+    {campaigns.map((c) => (
+      <option key={c.id} value={c.id}>
+        {c.name || "Campaign"}
+      </option>
+    ))}
+  </select>
 
-                    {selectedCampaignId === "__DRAFT__" && (
-                    <button
-                      type="button"
-                      onClick={handleClearDraft}
-                      title="Remove Draft"
-                      style={{
-                        width: 34,
-                        height: 34,
-                        borderRadius: 10,
-                        border: "1px solid #ffd6d6",
-                        background: "#fff1f2",
-                        color: "#b42318",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                      }}
-                    >
-                      <FaTrash />
-                    </button>
-                  )}
+  {selectedLiveCampaign && (
+    <button
+      type="button"
+      onClick={() => {
+        const currentStatus = String(
+          selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE"
+        ).toUpperCase();
+        const currentlyPaused = currentStatus === "PAUSED";
+        handlePauseUnpauseCampaign(selectedLiveCampaign.id, currentlyPaused);
+      }}
+      disabled={loading}
+      title={
+        String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
+          ? "Unpause"
+          : "Pause"
+      }
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        border: "1px solid #dbe4ff",
+        background:
+          String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
+            ? "#dcfce7"
+            : "#fef3c7",
+        color: "#111827",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: loading ? "not-allowed" : "pointer",
+        opacity: loading ? 0.6 : 1,
+        flex: "0 0 auto",
+      }}
+    >
+      {String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? (
+        <FaPlay />
+      ) : (
+        <FaPause />
+      )}
+    </button>
+  )}
 
-                  <button
-                    type="button"
-                    onClick={handleNewCampaign}
-                    title="New Campaign"
-                    style={{
-                      width: 34,
-                      height: 34,
-                      borderRadius: 10,
-                      border: "1px solid #dbe4ff",
-                      background: "#eef2ff",
-                      color: "#5b5cf0",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <FaPlus />
-                  </button>
-                </div>
-              </div>
+  {selectedLiveCampaign && (
+    <button
+      type="button"
+      onClick={() => setShowCampaignMenu((v) => !v)}
+      title="Campaign actions"
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: 10,
+        border: "1px solid #dbe4ff",
+        background: "#ffffff",
+        color: "#111827",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        flex: "0 0 auto",
+      }}
+    >
+      <FaEllipsisV />
+    </button>
+  )}
+
+  {showCampaignMenu && selectedLiveCampaign && (
+    <div
+      style={{
+        position: "absolute",
+        top: 46,
+        right: 0,
+        minWidth: 170,
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 14,
+        boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
+        padding: 8,
+        zIndex: 20,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+      }}
+    >
+      <button
+        type="button"
+        onClick={openEditCurrentCampaign}
+        style={{
+          background: "#ffffff",
+          color: "#111827",
+          border: "none",
+          textAlign: "left",
+          padding: "10px 12px",
+          borderRadius: 10,
+          fontWeight: 800,
+          fontSize: 13,
+          cursor: "pointer",
+        }}
+      >
+        Edit budget + duration
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          setShowCampaignMenu(false);
+          handleDeleteCampaign(selectedLiveCampaign.id);
+        }}
+        style={{
+          background: "#ffffff",
+          color: "#b42318",
+          border: "none",
+          textAlign: "left",
+          padding: "10px 12px",
+          borderRadius: 10,
+          fontWeight: 800,
+          fontSize: 13,
+          cursor: "pointer",
+        }}
+      >
+        Delete campaign
+      </button>
+    </div>
+  )}
+</div>
 
               <select
                 value={selectedCampaignId}

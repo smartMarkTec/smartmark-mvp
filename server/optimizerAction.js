@@ -165,6 +165,12 @@ function getCreativeTestGuard(optimizerState) {
       .concat(pendingState?.controlAdIds || [])
   );
 
+  const imageUrls = dedupeStrings(
+    []
+      .concat(pending?.imageUrls || [])
+      .concat(pendingState?.imageUrls || [])
+  );
+
   const unresolvedLiveLike =
     ['ready', 'live', 'staged'].includes(status) &&
     latestMonitoringDecision !== 'creative_test_resolved';
@@ -184,6 +190,7 @@ function getCreativeTestGuard(optimizerState) {
     unresolvedLiveLike,
     candidateAdIds,
     controlAdIds,
+    imageUrls,
     startedAt,
     hoursOpen,
     hasWinner: !!String(pending?.winnerAdId || pendingState?.winnerAdId || '').trim(),
@@ -381,11 +388,18 @@ function pickControlAd(ads) {
       )
   );
 
-  const active = candidates.find((ad) =>
+  const nonAiChallengers = candidates.filter((ad) => {
+    const name = String(ad?.name || '').toLowerCase();
+    return !name.includes('ai challenger');
+  });
+
+  const basePool = nonAiChallengers.length ? nonAiChallengers : candidates;
+
+  const active = basePool.find((ad) =>
     ['ACTIVE'].includes(normalizeStatus(ad.effective_status || ad.status))
   );
 
-  return active || candidates[0] || null;
+  return active || basePool[0] || null;
 }
 
 function clone(value) {
@@ -704,6 +718,7 @@ async function executeCreativeGeneration({
             hoursOpen: guardCheck.guard.hoursOpen,
             candidateAdIds: guardCheck.guard.candidateAdIds,
             controlAdIds: guardCheck.guard.controlAdIds,
+            imageUrls: guardCheck.guard.imageUrls,
             startedAt: guardCheck.guard.startedAt,
             minCreativeTestHours,
           },
@@ -823,16 +838,18 @@ async function executeCreativePromotion({
   const guard = getCreativeTestGuard(optimizerState);
 
   if (
-    ['live', 'staged'].includes(guard.status) &&
-    guard.candidateAdIds.length > 0 &&
-    guard.hoursOpen < minCreativeTestHours
+    guard.unresolvedLiveLike &&
+    (
+      guard.candidateAdIds.length > 0 ||
+      (['live', 'staged'].includes(guard.status) && guard.controlAdIds.length > 0)
+    )
   ) {
     return buildBaseSkippedResult({
       campaignId,
       actionType: 'promote_generated_creative_variants',
-      status: 'blocked_by_live_creative_test',
+      status: 'blocked_by_existing_creative_test',
       reason:
-        `A challenger round is already ${guard.status} and only ${guard.hoursOpen.toFixed(1)} hours old. Smartemark should observe this test before promoting another round.`,
+        `A creative test is already ${guard.status || 'active'}. Smartemark must monitor or resolve the current test before promoting another creative round.`,
       extra: {
         actionResult: {
           mutationType: 'promote_generated_creative_variants',
@@ -841,6 +858,7 @@ async function executeCreativePromotion({
             hoursOpen: guard.hoursOpen,
             candidateAdIds: guard.candidateAdIds,
             controlAdIds: guard.controlAdIds,
+            imageUrls: guard.imageUrls,
             startedAt: guard.startedAt,
             minCreativeTestHours,
           },
@@ -865,6 +883,17 @@ async function executeCreativePromotion({
       status: 'no_generated_variants_available',
       reason:
         'There are no generated creative variants ready to promote into Meta challenger ads.',
+      extra: {
+        actionResult: {
+          mutationType: 'promote_generated_creative_variants',
+          guard: {
+            status: guard.status,
+            candidateAdIds: guard.candidateAdIds,
+            controlAdIds: guard.controlAdIds,
+            imageUrls: guard.imageUrls,
+          },
+        },
+      },
     });
   }
 
