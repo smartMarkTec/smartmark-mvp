@@ -9,11 +9,11 @@ import { trackEvent } from "../analytics/gaEvents";
 /* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "#11161c";
-const SURFACE = "#1b2026";
-const TEAL = "#14e7b9";
-const TEAL_SOFT = "rgba(20,231,185,0.22)";
-const EDGE = "rgba(255,255,255,0.06)";
+const DARK_BG = "#151933";
+const SURFACE = "#1d2245";
+const TEAL = "#7b72ff";
+const TEAL_SOFT = "rgba(123,114,255,0.24)";
+const EDGE = "rgba(255,255,255,0.08)";
 
 const SIDE_CHAT_LIMIT = 5;
 
@@ -309,7 +309,7 @@ function clearDraftDisabled() {
 const IMAGE_GEN_QUOTA_KEY = "sm_image_gen_quota_v1";
 const IMAGE_GEN_WINDOW_MS = 24 * 60 * 60 * 1000;
 // TEMP TESTING: disable gen limit
-const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 5;
+const IMAGE_GEN_MAX_RUNS_PER_WINDOW = 3;
 
 function loadGenQuota() {
   try {
@@ -1366,6 +1366,33 @@ const displayLink = normalizeUrlForCopy(
     setImgFail({});
   }
 
+    function clearCreativeStateForRegeneration() {
+    try {
+      purgeCreativeDraftKeys();
+      lsRemove(IMAGE_CACHE_KEY);
+      lsRemove(IMAGE_DRAFTS_KEY);
+
+      try {
+        localStorage.removeItem("smartmark_last_image_url");
+        localStorage.removeItem("smartmark_last_video_url");
+        localStorage.removeItem("smartmark_last_fb_video_id");
+      } catch {}
+    } catch {}
+
+    setResult(null);
+    setImageUrls([]);
+    setActiveImage(0);
+    setImageUrl("");
+    setHasGenerated(false);
+    setImageEditing(false);
+    setImageDataUrls([]);
+    setImgFail({});
+    setEditHeadline("");
+    setEditBody("");
+    setEditCTA("");
+    setEditLink((answers?.url || "").toString().trim());
+  }
+
 /* Autosave */
 useEffect(() => {
   const t = setTimeout(() => {
@@ -1776,18 +1803,29 @@ async function generatePosterBPair(runToken) {
       return;
     }
 
-    // ✅ Track regenerate click
     trackEvent("generate_creatives", {
       page: "form",
       action: "regenerate",
     });
 
     setImageLoading(true);
+    setError("");
+
     try {
+      // new regeneration run = new context
+      const nextCtx = buildCtxKey(answers || {});
+      setActiveCtx(nextCtx);
+
+      // immediately clear current creative + any persisted setup drafts
+      clearCreativeStateForRegeneration();
+
       bumpImageGenCount();
       await warmBackend();
+
       const token = getRandomString();
       await generatePosterBPair(token);
+
+      setHasGenerated(true);
     } catch (e) {
       console.error("handleRegenerateImage failed:", e?.message || e);
       setError("Image regeneration failed. Please try again.");
@@ -1930,7 +1968,7 @@ async function generatePosterBPair(runToken) {
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
 
-      <div
+       <div
         aria-hidden
         style={{
           position: "fixed",
@@ -1938,7 +1976,7 @@ async function generatePosterBPair(runToken) {
           right: "-10vw",
           width: 640,
           height: 640,
-          background: "radial-gradient(40% 40% at 50% 50%, rgba(20,231,185,0.22), transparent 70%)",
+          background: "radial-gradient(40% 40% at 50% 50%, rgba(123,114,255,0.24), transparent 70%)",
           filter: "blur(18px)",
           pointerEvents: "none",
           zIndex: 0,
@@ -2007,7 +2045,7 @@ async function generatePosterBPair(runToken) {
       >
         <div
           style={{
-            color: "#9dffe9",
+            color: "#c9c4ff",
             fontSize: 15,
             fontWeight: 900,
             marginBottom: 10,
