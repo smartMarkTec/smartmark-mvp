@@ -489,7 +489,7 @@ async function buildDecisionAsync({ optimizerState }) {
             loserAdIds: candidateAdIds,
           },
           generatedAt: new Date().toISOString(),
-          mode: 'state_priority_v1',
+          mode: 'state_priority_v2',
         },
         optimizerState,
       });
@@ -511,7 +511,39 @@ async function buildDecisionAsync({ optimizerState }) {
             loserAdIds: controlAdIds,
           },
           generatedAt: new Date().toISOString(),
-          mode: 'state_priority_v1',
+          mode: 'state_priority_v2',
+        },
+        optimizerState,
+      });
+    }
+
+    if (monitoringDecision === 'creative_test_force_resolution') {
+      const keepControl = controlAdIds[0] || '';
+      const keepChallenger = candidateAdIds[0] || '';
+
+      const winnerAdId = keepChallenger || keepControl || '';
+      const loserAdIds = winnerAdId
+        ? [...controlAdIds, ...candidateAdIds].filter((id) => id !== winnerAdId)
+        : [];
+
+      return attachDecisionContext({
+        base: {
+          campaignId: String(optimizerState?.campaignId || '').trim(),
+          decision: keepChallenger
+            ? 'force_resolve_keep_best_challenger'
+            : 'force_resolve_keep_control',
+          actionType: 'pause_losing_creative_variant',
+          priority: 'high',
+          reason:
+            'The creative test has been open long enough or has enough signal that Smartemark should stop waiting, keep one winner, and pause the remaining loser ads.',
+          requiresHumanApproval: true,
+          confidence: 0.88,
+          actionMeta: {
+            winnerAdId,
+            loserAdIds,
+          },
+          generatedAt: new Date().toISOString(),
+          mode: 'state_priority_v2',
         },
         optimizerState,
       });

@@ -16,12 +16,36 @@ function minutesSince(value) {
   return Math.max(0, Math.floor((Date.now() - ms) / 60000));
 }
 
+function hoursSince(value) {
+  const ms = parseIsoMs(value);
+  if (!ms) return null;
+  return Math.max(0, (Date.now() - ms) / 3600000);
+}
+
 function normalizeActionType(value) {
   return String(value || '').trim();
 }
 
 function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const s = String(value || '').trim();
+    if (s) return s;
+  }
+  return '';
+}
+
+function dedupeStrings(values) {
+  return [
+    ...new Set(
+      (Array.isArray(values) ? values : [])
+        .map((v) => String(v || '').trim())
+        .filter(Boolean)
+    ),
+  ];
 }
 
 function buildMonitoring({ optimizerState }) {
@@ -44,6 +68,7 @@ function buildMonitoring({ optimizerState }) {
   const conversions = toNumber(metrics?.conversions, 0);
   const ctr = Number.isFinite(Number(metrics?.ctr)) ? Number(metrics.ctr) : 0;
   const frequency = Number.isFinite(Number(metrics?.frequency)) ? Number(metrics.frequency) : 0;
+  const cpc = Number.isFinite(Number(metrics?.cpc)) ? Number(metrics.cpc) : 0;
 
   if (manualOverride) {
     return {
@@ -59,7 +84,7 @@ function buildMonitoring({ optimizerState }) {
         manualOverrideType,
       },
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v3',
+      mode: 'rule_based_mvp_v4',
     };
   }
 
@@ -72,7 +97,7 @@ function buildMonitoring({ optimizerState }) {
       nextRecommendedStep: 'run_action_first',
       confidence: 0.98,
       generatedAt: new Date().toISOString(),
-      mode: 'rule_based_mvp_v3',
+      mode: 'rule_based_mvp_v4',
     };
   }
 
@@ -93,16 +118,13 @@ function buildMonitoring({ optimizerState }) {
     latestAction?.actionResult?.executedAt ||
     latestAction?.actionResult?.mutatedAt ||
     latestAction?.actionResult?.testStartedAt ||
+    pendingCreativeTest?.startedAt ||
     '';
   const minutesAfterLatestAction = minutesSince(actionGeneratedAt);
 
   const pendingStatus = String(pendingCreativeTest?.status || '').trim().toLowerCase();
-  const candidateAdIds = Array.isArray(pendingCreativeTest?.candidateAdIds)
-    ? pendingCreativeTest.candidateAdIds.filter(Boolean)
-    : [];
-  const controlAdIds = Array.isArray(pendingCreativeTest?.controlAdIds)
-    ? pendingCreativeTest.controlAdIds.filter(Boolean)
-    : [];
+  const candidateAdIds = dedupeStrings(pendingCreativeTest?.candidateAdIds || []);
+  const controlAdIds = dedupeStrings(pendingCreativeTest?.controlAdIds || []);
   const launchedVariantCount = toNumber(
     pendingCreativeTest?.launchedVariantCount != null
       ? pendingCreativeTest.launchedVariantCount
@@ -110,13 +132,34 @@ function buildMonitoring({ optimizerState }) {
     candidateAdIds.length
   );
 
+  const testStartedAt = firstNonEmpty(
+    pendingCreativeTest?.startedAt,
+    latestAction?.actionResult?.testStartedAt,
+    latestAction?.generatedAt
+  );
+  const testHoursOpen = hoursSince(testStartedAt);
+
+  const MIN_TEST_LINK_CLICKS = 35;
+  const MIN_TEST_IMPRESSIONS = 2500;
+  const MIN_TEST_SPEND = 20;
+  const FORCE_DECISION_HOURS = 72;
+  const STRONG_WINNER_CTR = 1.1;
+  const CLEAR_LOSER_CTR = 0.8;
+
   let monitoringDecision = 'continue_monitoring';
   let status = 'stable';
   let reason = 'No critical follow-up condition detected.';
   let nextRecommendedStep = 'wait_for_next_cycle';
   let confidence = 0.72;
 
-  if (pendingStatus === 'ready') {
+  if (pendingStatus === 'resolved') {
+    monitoringDecision = 'creative_test_resolved';
+    status = 'stable';
+    reason =
+      'The current creative test has already been resolved, so Smartemark should monitor the winning ad before taking another step.';
+    nextRecommendedStep = 'monitor_winner_performance';
+    confidence = 0.98;
+  } else if (pendingStatus === 'ready') {
     monitoringDecision = 'creative_variants_ready_for_launch';
     status = 'attention_needed';
     reason =
@@ -124,33 +167,57 @@ function buildMonitoring({ optimizerState }) {
     nextRecommendedStep = 'promote_generated_creative_variants';
     confidence = 0.98;
   } else if (pendingStatus === 'live' || pendingStatus === 'staged') {
+    const hasLiveTestIds = controlAdIds.length > 0 && candidateAdIds.length > 0;
+
     const lowTestSignal =
-      impressions < 1200 ||
-      linkClicks < 20 ||
-      spend < 12 ||
+      impressions < MIN_TEST_IMPRESSIONS ||
+      linkClicks < MIN_TEST_LINK_CLICKS ||
+      spend < MIN_TEST_SPEND ||
       (minutesAfterLatestAction != null && minutesAfterLatestAction < 45);
 
-    if (lowTestSignal) {
+    const enoughSignalToJudge =
+      impressions >= MIN_TEST_IMPRESSIONS &&
+      linkClicks >= MIN_TEST_LINK_CLICKS &&
+      spend >= MIN_TEST_SPEND;
+
+    const forcedDecisionByTime =
+      testHoursOpen != null && testHoursOpen >= FORCE_DECISION_HOURS;
+
+    if (!hasLiveTestIds) {
+      monitoringDecision = 'creative_test_state_incomplete';
+      status = 'attention_needed';
+      reason =
+        'A creative test appears open, but the test state is missing control or challenger ad ids, so Smartemark should not open another round.';
+      nextRecommendedStep = 'repair_test_state_then_evaluate';
+      confidence = 0.9;
+    } else if (lowTestSignal && !forcedDecisionByTime) {
       monitoringDecision = 'creative_test_collecting_data';
       status = 'monitoring';
       reason =
         'A creative test is active, but Smartemark should wait for more signal before declaring a winner or loser.';
       nextRecommendedStep = 'keep_monitoring_creative_test';
       confidence = 0.95;
-    } else if (ctr < 0.8 && linkClicks >= 20) {
+    } else if (ctr <= CLEAR_LOSER_CTR && enoughSignalToJudge) {
       monitoringDecision = 'creative_test_challenger_underperforming';
       status = 'attention_needed';
       reason =
-        'There is enough post-launch signal to suspect the current creative test is underperforming and should be resolved soon.';
+        'There is enough signal to resolve the test, and the current performance is weak enough that Smartemark should keep the control and pause the challenger.';
       nextRecommendedStep = 'evaluate_and_pause_loser';
-      confidence = 0.84;
-    } else if (ctr >= 1.2 || conversions >= 1) {
+      confidence = 0.9;
+    } else if ((ctr >= STRONG_WINNER_CTR || conversions >= 1) && enoughSignalToJudge) {
       monitoringDecision = 'creative_test_has_promising_signal';
-      status = 'monitoring';
+      status = 'attention_needed';
       reason =
-        'The live creative test is showing encouraging signal, so Smartemark should prepare to evaluate a winner once enough data accumulates.';
-      nextRecommendedStep = 'evaluate_winner_when_threshold_met';
-      confidence = 0.82;
+        'There is enough signal to resolve the test, and the challenger performance looks strong enough that Smartemark should keep the challenger and pause the loser.';
+      nextRecommendedStep = 'evaluate_and_pause_loser';
+      confidence = 0.88;
+    } else if (enoughSignalToJudge || forcedDecisionByTime) {
+      monitoringDecision = 'creative_test_force_resolution';
+      status = 'attention_needed';
+      reason =
+        'The creative test has enough signal or has been open long enough that Smartemark should stop waiting, keep one winner, and pause the loser.';
+      nextRecommendedStep = 'force_winner_decision';
+      confidence = forcedDecisionByTime ? 0.93 : 0.86;
     } else {
       monitoringDecision = 'creative_test_in_progress';
       status = 'monitoring';
@@ -281,21 +348,32 @@ function buildMonitoring({ optimizerState }) {
       actionExecuted,
       actionStatus,
       minutesAfterLatestAction,
+      testStartedAt,
+      testHoursOpen,
       spend,
       impressions,
       clicks,
       linkClicks,
       conversions,
       ctr,
+      cpc,
       frequency,
       campaignStatus,
       pendingCreativeTestStatus: pendingStatus,
       candidateAdIds,
       controlAdIds,
       launchedVariantCount,
+      thresholds: {
+        minTestLinkClicks: MIN_TEST_LINK_CLICKS,
+        minTestImpressions: MIN_TEST_IMPRESSIONS,
+        minTestSpend: MIN_TEST_SPEND,
+        forceDecisionHours: FORCE_DECISION_HOURS,
+        strongWinnerCtr: STRONG_WINNER_CTR,
+        clearLoserCtr: CLEAR_LOSER_CTR,
+      },
     },
     generatedAt: new Date().toISOString(),
-    mode: 'rule_based_mvp_v3',
+    mode: 'rule_based_mvp_v4',
   };
 }
 
