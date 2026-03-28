@@ -78,7 +78,7 @@ const plans = [
   {
     name: "Operator",
     planKey: "operator",
-    price: "$149",
+    price: "$249",
     subtitle:
       "For businesses that want the deepest automation layer, the highest campaign capacity, and the strongest in-product system.",
     badge: "Advanced",
