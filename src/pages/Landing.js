@@ -439,89 +439,87 @@ export default function Landing() {
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-                        gap: 12,
-                      }}
-                    >
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
-                        }}
-                      >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-                          Impressions
-                        </div>
-                        <div style={{ color: TEXT, fontWeight: 900, fontSize: 26, marginBottom: 8 }}>
-                          11.9K
-                        </div>
-                        <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 12, lineHeight: 1.45 }}>
-                          Campaign reach building
-                        </div>
-                      </div>
+                   <div
+  style={{
+    display: "grid",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gap: 12,
+  }}
+>
+  <div
+    style={{
+      background: "#ffffff",
+      border: `1px solid ${BORDER}`,
+      borderRadius: 18,
+      padding: 16,
+    }}
+  >
+    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+      Impressions
+    </div>
+    <div style={{ color: TEXT, fontWeight: 900, fontSize: 30, marginBottom: 2 }}>
+      34.2K
+    </div>
+  </div>
 
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
-                        }}
-                      >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-                          CTR
-                        </div>
-                        <div style={{ color: TEXT, fontWeight: 900, fontSize: 26, marginBottom: 8 }}>
-                          0.89%
-                        </div>
-                        <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 12, lineHeight: 1.45 }}>
-                          Signal for creative decisions
-                        </div>
-                      </div>
+  <div
+    style={{
+      background: "#ffffff",
+      border: `1px solid ${BORDER}`,
+      borderRadius: 18,
+      padding: 16,
+    }}
+  >
+    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+      CTR
+    </div>
+    <div style={{ color: TEXT, fontWeight: 900, fontSize: 30, marginBottom: 2 }}>
+      4.3%
+    </div>
+  </div>
 
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
-                        }}
-                      >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-                          Clicks
-                        </div>
-                        <div style={{ color: TEXT, fontWeight: 900, fontSize: 26, marginBottom: 8 }}>
-                          106
-                        </div>
-                        <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 12, lineHeight: 1.45 }}>
-                          Traffic from active ads
-                        </div>
-                      </div>
+  <div
+    style={{
+      background: "#ffffff",
+      border: `1px solid ${BORDER}`,
+      borderRadius: 18,
+      padding: 16,
+    }}
+  >
+    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+      Clicks
+    </div>
+    <div style={{ color: TEXT, fontWeight: 900, fontSize: 30, marginBottom: 2 }}>
+      1,472
+    </div>
+  </div>
 
-                      <div
-                        style={{
-                          background: "#ffffff",
-                          border: `1px solid ${BORDER}`,
-                          borderRadius: 18,
-                          padding: 16,
-                        }}
-                      >
-                        <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-                          AI Status
-                        </div>
-                        <div style={{ color: TEXT, fontWeight: 900, fontSize: 26, marginBottom: 8 }}>
-                          Monitoring
-                        </div>
-                        <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 12, lineHeight: 1.45 }}>
-                          Watching for next move
-                        </div>
-                      </div>
-                    </div>
+  <div
+    style={{
+      background: "#ffffff",
+      border: `1px solid ${BORDER}`,
+      borderRadius: 18,
+      padding: 16,
+    }}
+  >
+    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
+      AI Status
+    </div>
+    <div style={{ color: TEXT, fontWeight: 900, fontSize: 26, marginBottom: 6 }}>
+      Optimizing
+    </div>
+    <div
+      style={{
+        color: "#6b63f4",
+        fontWeight: 800,
+        fontSize: 13,
+        lineHeight: 1.35,
+      }}
+    >
+      Scaling winners and refreshing creatives
+    </div>
+  </div>
+</div>
 
                     <div
                       style={{
