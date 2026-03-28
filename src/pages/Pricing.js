@@ -11,7 +11,6 @@ const BTN_BASE = "#0f6fff";
 const BTN_BASE_HOVER = "#2e82ff";
 const GLASS_BORDER = "rgba(255,255,255,0.08)";
 
-
 const useIsMobile = () => {
   const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
 
@@ -103,37 +102,37 @@ const Pricing = () => {
     background: "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.03))",
     border: `1px solid ${GLASS_BORDER}`,
     boxShadow: "0 10px 30px rgba(0,0,0,0.22)",
-    backdropFilter: "blur(8px)",
-    WebkitBackdropFilter: "blur(8px)",
+    backdropFilter: "blur(10px)",
+    WebkitBackdropFilter: "blur(10px)",
   };
 
-const startCheckout = async (plan) => {
-  if (!plan?.planKey || loadingPlan) return;
+  const startCheckout = async (plan) => {
+    if (!plan?.planKey || loadingPlan) return;
 
-  setLoadingPlan(plan.planKey);
+    setLoadingPlan(plan.planKey);
 
-  try {
     try {
-      trackEvent("pricing_cta_click", {
-        page: "pricing",
-        plan: plan.name,
-        planKey: plan.planKey,
-      });
-    } catch {}
+      try {
+        trackEvent("pricing_cta_click", {
+          page: "pricing",
+          plan: plan.name,
+          planKey: plan.planKey,
+        });
+      } catch {}
 
-    navigate("/form", {
-      state: {
-        selectedPlan: plan.planKey,
-        selectedPlanName: plan.name,
-        fromPricing: true,
-      },
-    });
-  } catch (err) {
-    console.error("Pricing -> form redirect failed:", err);
-    alert("Something went wrong. Please try again.");
-    setLoadingPlan("");
-  }
-};
+      navigate("/form", {
+        state: {
+          selectedPlan: plan.planKey,
+          selectedPlanName: plan.name,
+          fromPricing: true,
+        },
+      });
+    } catch (err) {
+      console.error("Pricing -> form redirect failed:", err);
+      alert("Something went wrong. Please try again.");
+      setLoadingPlan("");
+    }
+  };
 
   return (
     <div
@@ -171,12 +170,14 @@ const startCheckout = async (plan) => {
         aria-hidden
         style={{
           position: "absolute",
-          top: "-16vh",
-          right: "-8vw",
-          width: isMobile ? 280 : 560,
-          height: isMobile ? 280 : 560,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}22, transparent 72%)`,
-          filter: "blur(28px)",
+          inset: 0,
+          backgroundImage: `
+            linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px)
+          `,
+          backgroundSize: isMobile ? "34px 34px" : "46px 46px",
+          maskImage: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.08))",
+          WebkitMaskImage: "linear-gradient(180deg, rgba(0,0,0,0.55), rgba(0,0,0,0.08))",
           pointerEvents: "none",
         }}
       />
@@ -185,12 +186,43 @@ const startCheckout = async (plan) => {
         aria-hidden
         style={{
           position: "absolute",
-          bottom: "-18vh",
-          left: "-10vw",
-          width: isMobile ? 320 : 620,
-          height: isMobile ? 320 : 620,
-          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}1e, transparent 72%)`,
-          filter: "blur(30px)",
+          top: "-18vh",
+          right: "-10vw",
+          width: isMobile ? 300 : 620,
+          height: isMobile ? 300 : 620,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT}20, transparent 72%)`,
+          filter: "blur(32px)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          bottom: "-20vh",
+          left: "-12vw",
+          width: isMobile ? 340 : 700,
+          height: isMobile ? 340 : 700,
+          background: `radial-gradient(40% 40% at 50% 50%, ${ACCENT_2}22, transparent 72%)`,
+          filter: "blur(34px)",
+          pointerEvents: "none",
+        }}
+      />
+
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: "18%",
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: isMobile ? "88%" : "72%",
+          height: isMobile ? 180 : 240,
+          borderRadius: 999,
+          background:
+            "linear-gradient(90deg, rgba(49,225,255,0.06), rgba(124,77,255,0.10), rgba(49,225,255,0.04))",
+          filter: "blur(36px)",
           pointerEvents: "none",
         }}
       />
@@ -267,21 +299,53 @@ const startCheckout = async (plan) => {
         <div
           style={{
             textAlign: "center",
-            marginBottom: isMobile ? 24 : 38,
+            marginBottom: isMobile ? 28 : 42,
           }}
         >
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "0.5rem 0.9rem",
+              borderRadius: 999,
+              fontSize: 12,
+              fontWeight: 900,
+              letterSpacing: 0.4,
+              color: ACCENT,
+              background: "rgba(49,225,255,0.08)",
+              border: "1px solid rgba(49,225,255,0.16)",
+              marginBottom: 18,
+            }}
+          >
+            Smartemark Pricing
+          </div>
+
           <h1
             style={{
               margin: 0,
-              fontSize: isMobile ? "2.2rem" : "3.4rem",
-              lineHeight: 1.06,
+              fontSize: isMobile ? "2.35rem" : "3.6rem",
+              lineHeight: 1.04,
               fontWeight: 900,
-              letterSpacing: isMobile ? "-0.6px" : "-1px",
+              letterSpacing: isMobile ? "-0.7px" : "-1.15px",
               color: "#ffffff",
             }}
           >
-            Pricing
+            Choose your plan
           </h1>
+
+          <div
+            style={{
+              maxWidth: 760,
+              margin: "14px auto 0",
+              color: "rgba(255,255,255,0.78)",
+              fontSize: isMobile ? 15 : 17,
+              lineHeight: 1.7,
+              fontWeight: 500,
+            }}
+          >
+            A clean, dark interface with simple pricing for businesses that want autonomous campaign execution.
+          </div>
         </div>
 
         <div
@@ -398,26 +462,26 @@ const startCheckout = async (plan) => {
                   </div>
                 </div>
 
-            <button
-  disabled
-  style={{
-    width: "100%",
-    marginTop: 24,
-    padding: "0.95rem 1.1rem",
-    borderRadius: 999,
-    border: "none",
-    background: "rgba(255,255,255,0.10)",
-    color: "rgba(255,255,255,0.65)",
-    fontSize: 15,
-    fontWeight: 900,
-    cursor: "not-allowed",
-    boxShadow: "none",
-    transition: "opacity .2s ease",
-    opacity: 0.7,
-  }}
->
-  Coming Soon
-</button>
+                <button
+                  disabled
+                  style={{
+                    width: "100%",
+                    marginTop: 24,
+                    padding: "0.95rem 1.1rem",
+                    borderRadius: 999,
+                    border: "none",
+                    background: "rgba(255,255,255,0.10)",
+                    color: "rgba(255,255,255,0.65)",
+                    fontSize: 15,
+                    fontWeight: 900,
+                    cursor: "not-allowed",
+                    boxShadow: "none",
+                    transition: "opacity .2s ease",
+                    opacity: 0.7,
+                  }}
+                >
+                  Coming Soon
+                </button>
 
                 <div
                   style={{
