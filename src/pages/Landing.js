@@ -8,9 +8,7 @@ const BG = "linear-gradient(180deg, #cfd3ff 0%, #e6e8ff 42%, #f4f5ff 100%)";
 const TEXT = "#101426";
 const TEXT_SOFT = "#626b86";
 const PURPLE = "#5d59ea";
-const PURPLE_2 = "#7b72ff";
 const BORDER = "rgba(93, 89, 234, 0.13)";
-const PANEL = "rgba(255,255,255,0.88)";
 const PANEL_STRONG = "rgba(255,255,255,0.94)";
 const BTN = "linear-gradient(135deg, #4c63ff 0%, #5f56eb 56%, #786dff 100%)";
 const BTN_HOVER = "linear-gradient(135deg, #4358f4 0%, #554ce4 56%, #6f63fc 100%)";
@@ -46,16 +44,16 @@ function CTAButton({ children, onClick, secondary = false }) {
       onMouseLeave={() => setHover(false)}
       style={{
         appearance: "none",
-        border: secondary ? `1px solid ${BORDER}` : "none",
-        background: secondary ? "rgba(255,255,255,0.82)" : hover ? BTN_HOVER : BTN,
-        color: secondary ? TEXT : "#fff",
+        border: secondary ? "none" : "none",
+        background: hover ? BTN_HOVER : BTN,
+        color: "#fff",
         borderRadius: 999,
         padding: "15px 24px",
         fontSize: 16,
         fontWeight: 800,
         cursor: "pointer",
         fontFamily: FONT,
-        boxShadow: secondary ? "none" : "0 12px 28px rgba(93,89,234,0.20)",
+        boxShadow: "0 12px 28px rgba(93,89,234,0.20)",
         transition: "all 160ms ease",
       }}
     >
@@ -81,54 +79,6 @@ function SectionTag({ children }) {
       }}
     >
       {children}
-    </div>
-  );
-}
-
-function MetricCard({ label, value, sub }) {
-  return (
-    <div
-      style={{
-        background: "rgba(15, 20, 48, 0.96)",
-        borderRadius: 22,
-        padding: 22,
-        minHeight: 150,
-        boxShadow: "0 16px 34px rgba(15,20,48,0.14)",
-      }}
-    >
-      <div
-        style={{
-          color: "rgba(255,255,255,0.66)",
-          fontSize: 12,
-          fontWeight: 800,
-          marginBottom: 14,
-          textTransform: "uppercase",
-          letterSpacing: 0.3,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          color: "#fff",
-          fontSize: 40,
-          fontWeight: 800,
-          lineHeight: 1,
-          marginBottom: 14,
-        }}
-      >
-        {value}
-      </div>
-      <div
-        style={{
-          color: "rgba(255,255,255,0.74)",
-          fontSize: 14,
-          fontWeight: 700,
-          lineHeight: 1.5,
-        }}
-      >
-        {sub}
-      </div>
     </div>
   );
 }
@@ -376,10 +326,10 @@ export default function Landing() {
                 <h1
                   style={{
                     margin: "22px 0 18px",
-                    fontSize: isMobile ? 54 : 88,
-                    lineHeight: isMobile ? 0.97 : 0.93,
-                    letterSpacing: "-0.06em",
-                    fontWeight: 700,
+                    fontSize: isMobile ? 50 : 78,
+                    lineHeight: isMobile ? 0.98 : 0.95,
+                    letterSpacing: "-0.055em",
+                    fontWeight: 600,
                     color: TEXT,
                     maxWidth: 700,
                   }}
@@ -412,12 +362,7 @@ export default function Landing() {
                     marginBottom: 28,
                   }}
                 >
-                  <CTAButton onClick={openDemoPopup}>
-                    Get Started <FaArrowRight style={{ marginLeft: 8 }} />
-                  </CTAButton>
-                  <CTAButton onClick={openDemoPopup} secondary>
-                    Launch Campaign
-                  </CTAButton>
+                  <CTAButton onClick={openDemoPopup}>Launch Campaign</CTAButton>
                 </div>
 
                 <div
@@ -616,9 +561,7 @@ export default function Landing() {
                         justifyContent: "center",
                       }}
                     >
-                      <CTAButton onClick={openDemoPopup} secondary>
-                        Start Now
-                      </CTAButton>
+                      <CTAButton onClick={openDemoPopup}>Get Started</CTAButton>
                     </div>
                   </div>
                 </div>
@@ -650,17 +593,15 @@ export default function Landing() {
                   style={{
                     marginTop: 14,
                     color: TEXT,
-                    fontSize: isMobile ? 40 : 62,
-                    lineHeight: 0.98,
-                    letterSpacing: "-0.055em",
+                    fontSize: isMobile ? 38 : 52,
+                    lineHeight: 1,
+                    letterSpacing: "-0.05em",
                     fontWeight: 700,
                   }}
                 >
-                  From business info to managed ads
+                  How it works
                 </div>
               </div>
-
-              <CTAButton onClick={openDemoPopup}>Get Started</CTAButton>
             </div>
 
             <div
@@ -668,6 +609,7 @@ export default function Landing() {
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
                 gap: 18,
+                marginBottom: 26,
               }}
             >
               {[
@@ -745,6 +687,15 @@ export default function Landing() {
                   </div>
                 </div>
               ))}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+              }}
+            >
+              <CTAButton onClick={openDemoPopup}>Get Started</CTAButton>
             </div>
           </section>
 
@@ -897,9 +848,7 @@ export default function Landing() {
                       marginTop: 6,
                     }}
                   >
-                    <CTAButton onClick={closeDemoPopup} secondary>
-                      Cancel
-                    </CTAButton>
+                    <CTAButton onClick={closeDemoPopup}>Cancel</CTAButton>
                     <button
                       type="submit"
                       style={{
