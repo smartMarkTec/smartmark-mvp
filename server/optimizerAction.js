@@ -4,6 +4,8 @@ const axios = require('axios');
 const { buildUpdatedPrimaryText } = require('./optimizerCopy');
 
 const GRAPH_VERSION = process.env.META_GRAPH_VERSION || 'v18.0';
+const MAX_TOTAL_ADS_PER_CAMPAIGN = 3;
+const MAX_CHALLENGER_ADS_PER_CAMPAIGN = 2;
 
 function normalizeStatus(value) {
   return String(value || '').trim().toUpperCase();
@@ -83,6 +85,7 @@ function getActionConfig(optimizerState) {
     {}
   );
 }
+
 function getPendingGeneratedCreativeState(optimizerState) {
   const latestAction = optimizerState?.latestAction?.actionResult || null;
   const statePending = optimizerState?.pendingCreativeTest || null;
@@ -373,6 +376,25 @@ async function fetchCampaignAds({ campaignId, userToken, limit = 50 }) {
   return Array.isArray(res.data?.data) ? res.data.data : [];
 }
 
+function isAiChallengerAd(ad) {
+  const name = String(ad?.name || '').toLowerCase();
+  return name.includes('ai challenger');
+}
+
+function summarizeExistingAdSet(ads) {
+  const allAds = Array.isArray(ads) ? ads : [];
+  const challengers = allAds.filter(isAiChallengerAd);
+  const controls = allAds.filter((ad) => !isAiChallengerAd(ad));
+
+  return {
+    totalAds: allAds.length,
+    challengerAds: challengers,
+    controlAds: controls,
+    challengerCount: challengers.length,
+    controlCount: controls.length,
+  };
+}
+
 function pickControlAd(ads) {
   const candidates = (Array.isArray(ads) ? ads : []).filter(
     (ad) =>
@@ -388,11 +410,7 @@ function pickControlAd(ads) {
       )
   );
 
-  const nonAiChallengers = candidates.filter((ad) => {
-    const name = String(ad?.name || '').toLowerCase();
-    return !name.includes('ai challenger');
-  });
-
+  const nonAiChallengers = candidates.filter((ad) => !isAiChallengerAd(ad));
   const basePool = nonAiChallengers.length ? nonAiChallengers : candidates;
 
   const active = basePool.find((ad) =>
@@ -412,7 +430,7 @@ function getDestinationLink(objectStorySpec) {
   return '';
 }
 
-function buildChallengerObjectStorySpec({ controlAd, imageHash, imageUrl, variantLabel }) {
+function buildChallengerObjectStorySpec({ controlAd, imageHash, variantLabel }) {
   const baseSpec = clone(controlAd?.creative?.object_story_spec || {});
   if (!baseSpec || typeof baseSpec !== 'object') {
     throw new Error('Control ad is missing object_story_spec');
@@ -497,15 +515,12 @@ async function createAdCreativeFromVariant({
   userToken,
   controlAd,
   imageHash,
-  imageUrl,
-  variantIndex,
   variantLabel,
   aiDecisionSummary,
 }) {
   const objectStorySpec = buildChallengerObjectStorySpec({
     controlAd,
     imageHash,
-    imageUrl,
     variantLabel,
   });
 
@@ -899,6 +914,7 @@ async function executeCreativePromotion({
 
   const campaign = await fetchCampaignStatus({ campaignId, userToken });
   const ads = await fetchCampaignAds({ campaignId, userToken, limit: 50 });
+  const summary = summarizeExistingAdSet(ads);
   const controlAd = pickControlAd(ads);
 
   if (!controlAd) {
@@ -909,10 +925,58 @@ async function executeCreativePromotion({
       reason:
         'Smartemark could not find a control ad with a reusable object_story_spec for challenger promotion.',
       extra: {
-          actionResult: {
-            campaign,
-            scannedAdCount: ads.length,
+        actionResult: {
+          campaign,
+          scannedAdCount: ads.length,
+        },
+      },
+    });
+  }
+
+  if (summary.challengerCount >= MAX_CHALLENGER_ADS_PER_CAMPAIGN || summary.totalAds >= MAX_TOTAL_ADS_PER_CAMPAIGN) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'blocked_by_ad_cap',
+      reason:
+        'Smartemark found enough existing ads in this campaign already, so it will monitor and resolve the current test instead of creating more ads.',
+      extra: {
+        actionResult: {
+          mutationType: 'promote_generated_creative_variants',
+          campaign,
+          existingAds: {
+            totalAds: summary.totalAds,
+            challengerCount: summary.challengerCount,
+            controlCount: summary.controlCount,
+            challengerAdIds: summary.challengerAds.map((ad) => String(ad.id || '').trim()),
+            controlAdIds: summary.controlAds.map((ad) => String(ad.id || '').trim()),
           },
+        },
+      },
+    });
+  }
+
+  const remainingSlots = Math.min(
+    MAX_CHALLENGER_ADS_PER_CAMPAIGN - summary.challengerCount,
+    MAX_TOTAL_ADS_PER_CAMPAIGN - summary.totalAds
+  );
+
+  if (remainingSlots <= 0) {
+    return buildBaseSkippedResult({
+      campaignId,
+      actionType: 'promote_generated_creative_variants',
+      status: 'blocked_by_ad_cap',
+      reason:
+        'No challenger slots remain for this campaign. Smartemark should observe and resolve the current ads before creating anything else.',
+      extra: {
+        actionResult: {
+          mutationType: 'promote_generated_creative_variants',
+          campaign,
+          existingAds: {
+            totalAds: summary.totalAds,
+            challengerCount: summary.challengerCount,
+          },
+        },
       },
     });
   }
@@ -931,13 +995,14 @@ async function executeCreativePromotion({
 
   const variantResults = [];
   const errors = [];
+  const imageUrlsToPromote = pending.imageUrls.slice(0, remainingSlots);
 
-  for (let i = 0; i < pending.imageUrls.length; i += 1) {
-    const imageUrl = String(pending.imageUrls[i] || '').trim();
+  for (let i = 0; i < imageUrlsToPromote.length; i += 1) {
+    const imageUrl = String(imageUrlsToPromote[i] || '').trim();
     if (!imageUrl) continue;
 
     const variantIndex = i + 1;
-    const variantLabel = `v${variantIndex}`;
+    const variantLabel = `v${summary.challengerCount + variantIndex}`;
 
     try {
       const upload = await uploadAdImage({
@@ -952,8 +1017,6 @@ async function executeCreativePromotion({
         userToken,
         controlAd,
         imageHash: upload.imageHash,
-        imageUrl,
-        variantIndex,
         variantLabel,
         aiDecisionSummary,
       });
@@ -1001,7 +1064,11 @@ async function executeCreativePromotion({
           mutationType: 'promote_generated_creative_variants',
           campaign,
           controlAdId: String(controlAd?.id || '').trim(),
-          attemptedVariantCount: pending.imageUrls.length,
+          attemptedVariantCount: imageUrlsToPromote.length,
+          existingAdsBeforePromotion: {
+            totalAds: summary.totalAds,
+            challengerCount: summary.challengerCount,
+          },
           errors,
         },
       },
@@ -1009,7 +1076,10 @@ async function executeCreativePromotion({
   }
 
   const controlAdIds = dedupeStrings([String(controlAd.id || '').trim()]);
-  const candidateAdIds = dedupeStrings(variantResults.map((v) => v.adId));
+  const candidateAdIds = dedupeStrings([
+    ...summary.challengerAds.map((ad) => String(ad.id || '').trim()),
+    ...variantResults.map((v) => v.adId),
+  ]);
   const creativeIds = dedupeStrings(variantResults.map((v) => v.creativeId));
   const imageHashes = dedupeStrings(variantResults.map((v) => v.imageHash));
 
@@ -1037,7 +1107,7 @@ async function executeCreativePromotion({
       candidateAdIds,
       metaCreativeIds: creativeIds,
       metaImageHashes: imageHashes,
-      sourceGeneratedCreatives: pending.imageUrls,
+      sourceGeneratedCreatives: imageUrlsToPromote,
       variants: variantResults,
       errors,
       testStartedAt: new Date().toISOString(),
@@ -1046,7 +1116,7 @@ async function executeCreativePromotion({
         creativeGoal: pending.creativeGoal,
         generationReason: pending.generationReason,
         generatedVariantCount: pending.generatedVariantCount,
-        imageUrls: pending.imageUrls,
+        imageUrls: imageUrlsToPromote,
         controlAdIds,
         candidateAdIds,
         metaCreativeIds: creativeIds,
@@ -1058,8 +1128,8 @@ async function executeCreativePromotion({
     },
     reason:
       launchStatus === 'ACTIVE'
-        ? 'Promoted AI-generated creative variants into live Meta challenger ads.'
-        : 'Promoted AI-generated creative variants into staged Meta challenger ads ready for activation.',
+        ? 'Promoted AI-generated creative variants into a limited live Meta challenger test.'
+        : 'Promoted AI-generated creative variants into a limited staged Meta challenger test.',
     generatedAt: new Date().toISOString(),
     mode: 'ai_directed_marketer_v1',
   };

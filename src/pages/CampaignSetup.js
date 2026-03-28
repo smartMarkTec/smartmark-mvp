@@ -1619,15 +1619,21 @@ function MarketerActionsCard({ summary, optimizerState }) {
   const history = buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
 
+  const pending = optimizerState?.pendingCreativeTest || null;
+  const pendingStatus = String(pending?.status || "").trim().toLowerCase();
+  const isTesting = pendingStatus === "live" || pendingStatus === "ready" || pendingStatus === "staged";
+
   const headline =
-    latest?.title ||
-    safeSummary?.headline ||
-    "Monitoring campaign performance";
+    isTesting
+      ? "Creative test in progress"
+      : latest?.title || safeSummary?.headline || "Monitoring campaign performance";
 
   const detail =
-    latest?.detail ||
-    safeSummary?.subtext ||
-    "Smartemark is monitoring the campaign and preparing the next measured move.";
+    isTesting
+      ? "Smartemark is running a controlled creative test with a limited number of ads and waiting for enough data before choosing a winner."
+      : latest?.detail ||
+        safeSummary?.subtext ||
+        "Smartemark is monitoring the campaign and will only make changes when the data clearly supports it.";
 
   return (
     <div
@@ -1675,10 +1681,9 @@ function MarketerActionsCard({ summary, optimizerState }) {
             <div
               style={{
                 fontSize: 15,
-                fontWeight: 900,
+                fontWeight: 800,
                 lineHeight: 1.45,
                 color: "rgba(255,255,255,0.98)",
-                textTransform: "capitalize",
               }}
             >
               {headline}
@@ -1697,7 +1702,7 @@ function MarketerActionsCard({ summary, optimizerState }) {
               whiteSpace: "nowrap",
             }}
           >
-            Monitoring
+            {isTesting ? "A/B Testing" : "Monitoring"}
           </div>
         </div>
 
@@ -1710,7 +1715,7 @@ function MarketerActionsCard({ summary, optimizerState }) {
             fontSize: 14,
             lineHeight: 1.65,
             color: "rgba(255,255,255,0.96)",
-            fontWeight: 800,
+            fontWeight: 700,
           }}
         >
           {detail}
@@ -1735,32 +1740,6 @@ function MarketerActionsCard({ summary, optimizerState }) {
             {safeSummary?.updatedAt
               ? `Updated ${timeAgoShort(safeSummary.updatedAt)}`
               : "Recently updated"}
-          </div>
-
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-            }}
-          >
-            {["Watch", "Compare", "Adjust"].map((chip) => (
-              <div
-                key={chip}
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 999,
-                  background: "rgba(255,255,255,0.14)",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  color: "#ffffff",
-                  fontWeight: 900,
-                  fontSize: 11,
-                  letterSpacing: 0.2,
-                }}
-              >
-                {chip}
-              </div>
-            ))}
           </div>
         </div>
       </div>
@@ -4709,98 +4688,229 @@ const getSavedCreatives = (campaignId) => {
       </>
     )}
 
-    {setupTab === "creatives" && (
-      <>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
-            Creatives
-          </div>
-          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
-            This is where users see campaign visuals and AI creative activity.
-          </div>
-        </div>
+  {setupTab === "creatives" && (
+  <>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
+        Creatives
+      </div>
+      <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+        Current visuals, copy, and AI creative activity for this campaign.
+      </div>
+    </div>
 
-        <div
-          style={{
-            background: "#ffffff",
-            border: "1px solid #e5e7eb",
-            borderRadius: 20,
-            padding: 22,
-            display: "flex",
-            flexDirection: "column",
-            gap: 18,
-            minHeight: 520,
-          }}
-        >
-          {selectedCampaignId ? (
-            <>
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div>
-                  <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 4 }}>
-                    Campaign Creatives
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #e5e7eb",
+        borderRadius: 20,
+        padding: 22,
+        display: "flex",
+        flexDirection: "column",
+        gap: 18,
+        minHeight: 520,
+      }}
+    >
+      {selectedCampaignId ? (
+        <>
+          {(() => {
+            const creativeMeta = selectedCampaignCreatives?.meta || {};
+            const images = (selectedCampaignCreatives?.images || []).slice(0, 2);
+            const pending = optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest || null;
+            const pendingStatus = String(pending?.status || "").trim().toLowerCase();
+            const isTesting =
+              pendingStatus === "live" ||
+              pendingStatus === "ready" ||
+              pendingStatus === "staged";
+
+            return (
+              <>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div>
+                    <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 4 }}>
+                      Campaign Creatives
+                    </div>
+                    <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+                      Smartemark stores the current visuals and copy here.
+                    </div>
                   </div>
-                  <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
-                    Smartemark stores the current visuals here and updates this page when AI starts testing.
+
+                  <div
+                    style={{
+                      padding: "7px 11px",
+                      borderRadius: 999,
+                      background: "#eef2ff",
+                      color: "#4f46e5",
+                      fontWeight: 900,
+                      fontSize: 12,
+                    }}
+                  >
+                    {isTesting ? "A/B Testing" : "Monitoring"}
                   </div>
                 </div>
+
+                {images.length ? (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: images.length > 1 ? "repeat(2, minmax(0, 1fr))" : "1fr",
+                      gap: 16,
+                    }}
+                  >
+                    {images.map((img, idx) => (
+                      <div
+                        key={`${img}-${idx}`}
+                        style={{
+                          border: "1px solid #e5e7eb",
+                          borderRadius: 18,
+                          overflow: "hidden",
+                          background: "#f8fafc",
+                        }}
+                      >
+                        <div
+                          style={{
+                            background: "#0f172a",
+                            minHeight: 280,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => {
+                            setModalImg(img);
+                            setShowImageModal(true);
+                          }}
+                        >
+                          <img
+                            src={toAbsoluteMedia(img)}
+                            alt={`Creative ${idx + 1}`}
+                            style={{
+                              width: "100%",
+                              height: 280,
+                              objectFit: "contain",
+                              display: "block",
+                              background: "#0f172a",
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+                          <div>
+                            <div
+                              style={{
+                                color: "#98a2b3",
+                                fontWeight: 800,
+                                fontSize: 11,
+                                textTransform: "uppercase",
+                                letterSpacing: 0.4,
+                                marginBottom: 6,
+                              }}
+                            >
+                              Primary Copy
+                            </div>
+                            <div
+                              style={{
+                                color: "#111827",
+                                fontWeight: 700,
+                                fontSize: 14,
+                                lineHeight: 1.6,
+                              }}
+                            >
+                              {String(creativeMeta?.body || previewCopy?.body || "No copy available yet.").trim()}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div
+                              style={{
+                                color: "#98a2b3",
+                                fontWeight: 800,
+                                fontSize: 11,
+                                textTransform: "uppercase",
+                                letterSpacing: 0.4,
+                                marginBottom: 6,
+                              }}
+                            >
+                              Headline
+                            </div>
+                            <div
+                              style={{
+                                color: "#111827",
+                                fontWeight: 800,
+                                fontSize: 14,
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              {String(creativeMeta?.headline || previewCopy?.headline || "No headline available yet.").trim()}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      border: "1px dashed #dbe4ff",
+                      borderRadius: 16,
+                      padding: 18,
+                      background: "#f8fafc",
+                      color: "#64748b",
+                      fontWeight: 700,
+                      fontSize: 14,
+                    }}
+                  >
+                    No creatives available yet.
+                  </div>
+                )}
 
                 <div
                   style={{
-                    padding: "7px 11px",
-                    borderRadius: 999,
-                    background: "#eef2ff",
-                    color: "#4f46e5",
-                    fontWeight: 900,
-                    fontSize: 12,
+                    border: "1px solid #e5e7eb",
+                    borderRadius: 16,
+                    padding: 16,
+                    background: "#f8fafc",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
                   }}
                 >
-                  {optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest?.status === "live"
-                    ? "A/B testing in progress"
-                    : optimizerCreativeMap[selectedCampaignId || ""]?.generatedCreatives?.length
-                    ? "AI preparing next move"
-                    : "Monitoring"}
+                  <div style={{ color: "#111827", fontWeight: 900, fontSize: 15 }}>
+                    AI Overview
+                  </div>
+                  <div
+                    style={{
+                      color: "#64748b",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {isTesting
+                      ? "Smartemark is running a limited creative test and comparing performance before picking a winner. It will not keep creating more ads unless the data clearly justifies another round."
+                      : "Smartemark is monitoring the current ads and will only create a new test when the campaign data shows a real need for it."}
+                  </div>
                 </div>
-              </div>
-
-              <CreativeThumbGrid
-                items={(selectedCampaignCreatives?.images || []).slice(0, 2)}
-                labels={((selectedCampaignCreatives?.images || []).slice(0, 2)).map(
-                  (_, idx) => `Creative ${idx + 1}`
-                )}
-                height={210}
-                onOpen={(url) => {
-                  setModalImg(url);
-                  setShowImageModal(true);
-                }}
-              />
-
-              {selectedCampaignId !== "__DRAFT__" && (
-                <PendingCreativeTestCard
-                  optimizerCreativeState={optimizerCreativeMap[selectedCampaignId] || null}
-                  originalImages={(getSavedCreatives(selectedCampaignId)?.images || []).slice(0, 2)}
-                  onOpenImage={(url) => {
-                    setModalImg(url);
-                    setShowImageModal(true);
-                  }}
-                />
-              )}
-            </>
-          ) : (
-            <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
-              Select a campaign to view its creative library and AI update status.
-            </div>
-          )}
+              </>
+            );
+          })()}
+        </>
+      ) : (
+        <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+          Select a campaign to view its creatives and AI activity.
         </div>
-      </>
-    )}
+      )}
+    </div>
+  </>
+)}
 
     {setupTab === "campaign" && (
       <>
@@ -4834,280 +4944,249 @@ const getSavedCreatives = (campaignId) => {
               boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 12,
-              }}
-            >
-         <div
+           <div
   style={{
     display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
+    flexDirection: "column",
     gap: 12,
-    flexWrap: "wrap",
   }}
 >
-  <div>
-    <div
-      style={{
-        color: "#111827",
-        fontWeight: 900,
-        fontSize: 18,
-        marginBottom: 6,
-      }}
-    >
-      Active Campaign
+  <div
+    style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "flex-start",
+      gap: 12,
+      flexWrap: "wrap",
+    }}
+  >
+    <div>
+      <div
+        style={{
+          color: "#111827",
+          fontWeight: 900,
+          fontSize: 18,
+          marginBottom: 6,
+        }}
+      >
+        Active Campaign
+      </div>
+      <div
+        style={{
+          color: "#667085",
+          fontWeight: 700,
+          fontSize: 13,
+          lineHeight: 1.5,
+        }}
+      >
+        Select a draft or live campaign to manage.
+      </div>
     </div>
-    <div
-      style={{
-        color: "#667085",
-        fontWeight: 700,
-        fontSize: 13,
-        lineHeight: 1.5,
-      }}
-    >
-      Select a draft or live campaign to manage.
-    </div>
-  </div>
 
-  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-    {selectedCampaignId === "__DRAFT__" && (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      {selectedCampaignId === "__DRAFT__" && (
+        <button
+          type="button"
+          onClick={handleClearDraft}
+          title="Remove Draft"
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 10,
+            border: "1px solid #ffd6d6",
+            background: "#fff1f2",
+            color: "#b42318",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+          }}
+        >
+          <FaTrash />
+        </button>
+      )}
+
       <button
         type="button"
-        onClick={handleClearDraft}
-        title="Remove Draft"
+        onClick={handleNewCampaign}
+        title="New Campaign"
         style={{
           width: 34,
           height: 34,
           borderRadius: 10,
-          border: "1px solid #ffd6d6",
-          background: "#fff1f2",
-          color: "#b42318",
+          border: "1px solid #dbe4ff",
+          background: "#eef2ff",
+          color: "#5b5cf0",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           cursor: "pointer",
         }}
       >
-        <FaTrash />
+        <FaPlus />
       </button>
-    )}
-
-    <button
-      type="button"
-      onClick={handleNewCampaign}
-      title="New Campaign"
-      style={{
-        width: 34,
-        height: 34,
-        borderRadius: 10,
-        border: "1px solid #dbe4ff",
-        background: "#eef2ff",
-        color: "#5b5cf0",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-      }}
-    >
-      <FaPlus />
-    </button>
+    </div>
   </div>
-</div>
 
-<div style={{ position: "relative", display: "flex", gap: 10, alignItems: "center" }}>
-  <select
-    value={selectedCampaignId}
-    onChange={(e) => {
-      setSelectedCampaignId(e.target.value);
-      setExpandedId(e.target.value);
-      setShowCampaignMenu(false);
-    }}
-    style={{
-      padding: "12px 14px",
-      borderRadius: 12,
-      fontSize: 14,
-      width: "100%",
-      border: "1px solid #dbe4ff",
-      background: "#ffffff",
-      color: "#111827",
-      fontWeight: 800,
-      outline: "none",
-      appearance: "auto",
-    }}
-  >
-    <option value="">Select a campaign</option>
-    {hasDraft && (
-      <option value="__DRAFT__">
-        {(form.campaignName || "Untitled")} (Draft)
-      </option>
-    )}
-    {campaigns.map((c) => (
-      <option key={c.id} value={c.id}>
-        {c.name || "Campaign"}
-      </option>
-    ))}
-  </select>
-
-  {selectedLiveCampaign && (
-    <button
-      type="button"
-      onClick={() => {
-        const currentStatus = String(
-          selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE"
-        ).toUpperCase();
-        const currentlyPaused = currentStatus === "PAUSED";
-        handlePauseUnpauseCampaign(selectedLiveCampaign.id, currentlyPaused);
+  <div style={{ position: "relative", display: "flex", gap: 10, alignItems: "center" }}>
+    <select
+      value={selectedCampaignId}
+      onChange={(e) => {
+        setSelectedCampaignId(e.target.value);
+        setExpandedId(e.target.value);
+        setShowCampaignMenu(false);
       }}
-      disabled={loading}
-      title={
-        String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
-          ? "Unpause"
-          : "Pause"
-      }
       style={{
-        width: 34,
-        height: 34,
-        borderRadius: 10,
+        padding: "12px 14px",
+        borderRadius: 12,
+        fontSize: 14,
+        width: "100%",
         border: "1px solid #dbe4ff",
-        background:
-          String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
-            ? "#dcfce7"
-            : "#fef3c7",
+        background: "#ffffff",
         color: "#111827",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: loading ? "not-allowed" : "pointer",
-        opacity: loading ? 0.6 : 1,
-        flex: "0 0 auto",
+        fontWeight: 800,
+        outline: "none",
+        appearance: "auto",
       }}
     >
-      {String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? (
-        <FaPlay />
-      ) : (
-        <FaPause />
+      <option value="">Select a campaign</option>
+      {hasDraft && (
+        <option value="__DRAFT__">
+          {(form.campaignName || "Untitled")} (Draft)
+        </option>
       )}
-    </button>
-  )}
+      {campaigns.map((c) => (
+        <option key={c.id} value={c.id}>
+          {c.name || "Campaign"}
+        </option>
+      ))}
+    </select>
 
-  {selectedLiveCampaign && (
-    <button
-      type="button"
-      onClick={() => setShowCampaignMenu((v) => !v)}
-      title="Campaign actions"
-      style={{
-        width: 34,
-        height: 34,
-        borderRadius: 10,
-        border: "1px solid #dbe4ff",
-        background: "#ffffff",
-        color: "#111827",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        flex: "0 0 auto",
-      }}
-    >
-      <FaEllipsisV />
-    </button>
-  )}
-
-  {showCampaignMenu && selectedLiveCampaign && (
-    <div
-      style={{
-        position: "absolute",
-        top: 46,
-        right: 0,
-        minWidth: 170,
-        background: "#ffffff",
-        border: "1px solid #e5e7eb",
-        borderRadius: 14,
-        boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
-        padding: 8,
-        zIndex: 20,
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-      }}
-    >
-      <button
-        type="button"
-        onClick={openEditCurrentCampaign}
-        style={{
-          background: "#ffffff",
-          color: "#111827",
-          border: "none",
-          textAlign: "left",
-          padding: "10px 12px",
-          borderRadius: 10,
-          fontWeight: 800,
-          fontSize: 13,
-          cursor: "pointer",
-        }}
-      >
-        Edit budget + duration
-      </button>
-
+    {selectedLiveCampaign && (
       <button
         type="button"
         onClick={() => {
-          setShowCampaignMenu(false);
-          handleDeleteCampaign(selectedLiveCampaign.id);
+          const currentStatus = String(
+            selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE"
+          ).toUpperCase();
+          const currentlyPaused = currentStatus === "PAUSED";
+          handlePauseUnpauseCampaign(selectedLiveCampaign.id, currentlyPaused);
         }}
+        disabled={loading}
+        title={
+          String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
+            ? "Unpause"
+            : "Pause"
+        }
         style={{
-          background: "#ffffff",
-          color: "#b42318",
-          border: "none",
-          textAlign: "left",
-          padding: "10px 12px",
+          width: 34,
+          height: 34,
           borderRadius: 10,
-          fontWeight: 800,
-          fontSize: 13,
-          cursor: "pointer",
+          border: "1px solid #dbe4ff",
+          background:
+            String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED"
+              ? "#dcfce7"
+              : "#fef3c7",
+          color: "#111827",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: loading ? "not-allowed" : "pointer",
+          opacity: loading ? 0.6 : 1,
+          flex: "0 0 auto",
         }}
       >
-        Delete campaign
+        {String(selectedLiveCampaign?.status || selectedLiveCampaign?.effective_status || "ACTIVE").toUpperCase() === "PAUSED" ? (
+          <FaPlay />
+        ) : (
+          <FaPause />
+        )}
       </button>
-    </div>
-  )}
-</div>
+    )}
 
-              <select
-                value={selectedCampaignId}
-                onChange={(e) => {
-                  setSelectedCampaignId(e.target.value);
-                  setExpandedId(e.target.value);
-                }}
-                style={{
-                  padding: "12px 14px",
-                  borderRadius: 12,
-                  fontSize: 14,
-                  width: "100%",
-                  border: "1px solid #dbe4ff",
-                  background: "#ffffff",
-                  color: "#111827",
-                  fontWeight: 800,
-                  outline: "none",
-                }}
-              >
-                <option value="">Select a campaign</option>
-                {hasDraft && (
-                  <option value="__DRAFT__">
-                    {(form.campaignName || "Untitled")} (Draft)
-                  </option>
-                )}
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name || "Campaign"}
-                  </option>
-                ))}
-              </select>
-            </div>
+    {selectedLiveCampaign && (
+      <button
+        type="button"
+        onClick={() => setShowCampaignMenu((v) => !v)}
+        title="Campaign actions"
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 10,
+          border: "1px solid #dbe4ff",
+          background: "#ffffff",
+          color: "#111827",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          flex: "0 0 auto",
+        }}
+      >
+        <FaEllipsisV />
+      </button>
+    )}
+
+    {showCampaignMenu && selectedLiveCampaign && (
+      <div
+        style={{
+          position: "absolute",
+          top: 46,
+          right: 0,
+          minWidth: 170,
+          background: "#ffffff",
+          border: "1px solid #e5e7eb",
+          borderRadius: 14,
+          boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
+          padding: 8,
+          zIndex: 20,
+          display: "flex",
+          flexDirection: "column",
+          gap: 6,
+        }}
+      >
+        <button
+          type="button"
+          onClick={openEditCurrentCampaign}
+          style={{
+            background: "#ffffff",
+            color: "#111827",
+            border: "none",
+            textAlign: "left",
+            padding: "10px 12px",
+            borderRadius: 10,
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Edit budget + duration
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowCampaignMenu(false);
+            handleDeleteCampaign(selectedLiveCampaign.id);
+          }}
+          style={{
+            background: "#ffffff",
+            color: "#b42318",
+            border: "none",
+            textAlign: "left",
+            padding: "10px 12px",
+            borderRadius: 10,
+            fontWeight: 800,
+            fontSize: 13,
+            cursor: "pointer",
+          }}
+        >
+          Delete campaign
+        </button>
+      </div>
+    )}
+  </div>
+</div>
 
             {selectedCampaignId ? (
               <>
