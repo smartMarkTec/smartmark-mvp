@@ -457,7 +457,7 @@ export default function Landing() {
     <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
       Impressions
     </div>
-    <div style={{ color: TEXT, fontWeight: 900, fontSize: 30, marginBottom: 2 }}>
+    <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
       34.2K
     </div>
   </div>
@@ -473,7 +473,7 @@ export default function Landing() {
     <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
       CTR
     </div>
-    <div style={{ color: TEXT, fontWeight: 900, fontSize: 30, marginBottom: 2 }}>
+    <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
       4.3%
     </div>
   </div>
@@ -489,7 +489,7 @@ export default function Landing() {
     <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
       Clicks
     </div>
-    <div style={{ color: TEXT, fontWeight: 900, fontSize: 30, marginBottom: 2 }}>
+    <div style={{ color: TEXT, fontWeight: 700, fontSize: 30, marginBottom: 2 }}>
       1,472
     </div>
   </div>
@@ -505,7 +505,7 @@ export default function Landing() {
   <div style={{ color: "#7b849f", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
     AI Status
   </div>
-  <div style={{ color: TEXT, fontWeight: 700, fontSize: 26, marginBottom: 2 }}>
+  <div style={{ color: TEXT, fontWeight: 500, fontSize: 26, marginBottom: 2 }}>
     Optimizing
   </div>
 </div>
