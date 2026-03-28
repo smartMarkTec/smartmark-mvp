@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useEffect, useState } from "react";
-import { FaArrowRight, FaBolt, FaChartLine, FaCheckCircle, FaChevronDown } from "react-icons/fa";
+import { FaArrowRight, FaBolt, FaCheckCircle, FaChevronDown } from "react-icons/fa";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
@@ -34,7 +34,7 @@ const FAQS = [
   },
 ];
 
-function CTAButton({ children, onClick, secondary = false }) {
+function CTAButton({ children, onClick }) {
   const [hover, setHover] = useState(false);
 
   return (
@@ -44,7 +44,7 @@ function CTAButton({ children, onClick, secondary = false }) {
       onMouseLeave={() => setHover(false)}
       style={{
         appearance: "none",
-        border: secondary ? "none" : "none",
+        border: "none",
         background: hover ? BTN_HOVER : BTN,
         color: "#fff",
         borderRadius: 999,
@@ -326,10 +326,10 @@ export default function Landing() {
                 <h1
                   style={{
                     margin: "22px 0 18px",
-                    fontSize: isMobile ? 50 : 78,
-                    lineHeight: isMobile ? 0.98 : 0.95,
-                    letterSpacing: "-0.055em",
-                    fontWeight: 600,
+                    fontSize: isMobile ? 48 : 72,
+                    lineHeight: isMobile ? 1.0 : 0.96,
+                    letterSpacing: "-0.05em",
+                    fontWeight: 500,
                     color: TEXT,
                     maxWidth: 700,
                   }}
@@ -349,9 +349,8 @@ export default function Landing() {
                     marginBottom: 24,
                   }}
                 >
-                  Smartemark takes in your business info, builds creatives, launches campaigns,
-                  and manages performance — without an agency and without needing to learn Ads
-                  Manager.
+                  Smartemark learns your business, generates your creatives, launches campaigns,
+                  and manages campaign performance — without an agency and without ad experience.
                 </div>
 
                 <div
@@ -577,30 +576,24 @@ export default function Landing() {
             <div
               style={{
                 display: "flex",
+                flexDirection: "column",
                 alignItems: "center",
-                justifyContent: "space-between",
-                gap: 16,
-                flexWrap: "wrap",
-                marginBottom: 20,
+                justifyContent: "center",
+                gap: 12,
+                marginBottom: 28,
+                textAlign: "center",
               }}
             >
-              <div>
-                <SectionTag>
-                  <FaChartLine />
-                  How it works
-                </SectionTag>
-                <div
-                  style={{
-                    marginTop: 14,
-                    color: TEXT,
-                    fontSize: isMobile ? 38 : 52,
-                    lineHeight: 1,
-                    letterSpacing: "-0.05em",
-                    fontWeight: 700,
-                  }}
-                >
-                  How it works
-                </div>
+              <div
+                style={{
+                  color: TEXT,
+                  fontSize: isMobile ? 38 : 52,
+                  lineHeight: 1,
+                  letterSpacing: "-0.05em",
+                  fontWeight: 700,
+                }}
+              >
+                How it works
               </div>
             </div>
 
@@ -609,7 +602,7 @@ export default function Landing() {
                 display: "grid",
                 gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
                 gap: 18,
-                marginBottom: 26,
+                marginBottom: 34,
               }}
             >
               {[
@@ -693,6 +686,7 @@ export default function Landing() {
               style={{
                 display: "flex",
                 justifyContent: "center",
+                marginTop: 10,
               }}
             >
               <CTAButton onClick={openDemoPopup}>Get Started</CTAButton>
