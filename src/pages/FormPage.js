@@ -9,11 +9,11 @@ import { trackEvent } from "../analytics/gaEvents";
 /* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "linear-gradient(115deg, #ececf3 0%, #e5e8f7 34%, #c8c9ff 68%, #9ea0ff 100%)";
-const SURFACE = "rgba(255,255,255,0.62)";
-const TEAL = "#6d67f4";
-const TEAL_SOFT = "rgba(109,103,244,0.18)";
-const EDGE = "rgba(109,103,244,0.12)";
+const DARK_BG = "linear-gradient(180deg, #f4f1eb 0%, #eeece7 40%, #e8e6f4 72%, #dddaf3 100%)";
+const SURFACE = "rgba(255,255,255,0.72)";
+const TEAL = "#6f66f5";
+const TEAL_SOFT = "rgba(111,102,245,0.14)";
+const EDGE = "rgba(80,72,120,0.10)";
 const SIDE_CHAT_LIMIT = 5;
 
 /* -------- Backend endpoints (proxy through Vercel) -------- */
@@ -1967,7 +1967,7 @@ async function generatePosterBPair(runToken) {
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
 
-            <div
+                 <div
         aria-hidden
         style={{
           position: "fixed",
@@ -1975,7 +1975,7 @@ async function generatePosterBPair(runToken) {
           pointerEvents: "none",
           zIndex: 0,
           background:
-            "linear-gradient(120deg, rgba(255,255,255,0.12) 18%, rgba(255,255,255,0.00) 34%, rgba(123,114,255,0.14) 58%, rgba(109,103,244,0.18) 100%)",
+            "linear-gradient(120deg, rgba(255,255,255,0.26) 10%, rgba(255,255,255,0.04) 34%, rgba(141,133,241,0.10) 62%, rgba(111,102,245,0.14) 100%)",
         }}
       />
 
@@ -1983,35 +1983,35 @@ async function generatePosterBPair(runToken) {
         aria-hidden
         style={{
           position: "fixed",
-          top: "-15vh",
-          right: "-10vw",
+          top: "-12vh",
+          right: "-8vw",
           width: 640,
           height: 640,
-          background: "radial-gradient(42% 42% at 50% 50%, rgba(123,114,255,0.22), transparent 72%)",
-          filter: "blur(18px)",
+          background: "radial-gradient(42% 42% at 50% 50%, rgba(137,128,246,0.18), transparent 72%)",
+          filter: "blur(24px)",
           pointerEvents: "none",
           zIndex: 0,
         }}
       />
-
-      <div style={{ width: "100%", maxWidth: 980, padding: "24px 20px 0", boxSizing: "border-box" }}>
+       <div style={{ width: "100%", maxWidth: 980, padding: "28px 20px 0", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <button
             onClick={() => navigate("/")}
             style={{
-              background: "#202824e0",
-              color: "#fff",
-              border: "1px solid rgba(255,255,255,0.06)",
-              borderRadius: "1.1rem",
-              padding: "10px 18px",
+              background: "rgba(255,255,255,0.74)",
+              color: "#4d4a5d",
+              border: "1px solid rgba(80,72,120,0.10)",
+              borderRadius: "1.2rem",
+              padding: "11px 18px",
               fontWeight: 700,
               fontSize: "1rem",
-              letterSpacing: "0.6px",
               cursor: "pointer",
-              boxShadow: "0 2px 10px 0 rgba(0,0,0,0.25)",
+              boxShadow: "0 8px 24px rgba(66,54,120,0.10)",
               display: "flex",
               alignItems: "center",
               gap: 8,
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
             }}
             aria-label="Back"
           >
@@ -2020,16 +2020,16 @@ async function generatePosterBPair(runToken) {
           </button>
         </div>
 
-        <div style={{ display: "flex", justifyContent: "center", marginTop: 16 }}>
+        <div style={{ display: "flex", justifyContent: "center", marginTop: 18 }}>
           <h1
             style={{
               margin: 0,
-              fontSize: "2.25rem",
-              lineHeight: 1.2,
-              letterSpacing: "-0.5px",
-             color: "#171b2f",
+              fontSize: "2.45rem",
+              lineHeight: 1.15,
+              letterSpacing: "-0.8px",
+              color: "#1a1a22",
               textAlign: "center",
-              fontWeight: 900,
+              fontWeight: 700,
             }}
           >
             Create your ad
@@ -2037,71 +2037,74 @@ async function generatePosterBPair(runToken) {
         </div>
       </div>
 
-      <div
+         <div
         style={{
           width: "100%",
-          maxWidth: 780,
-          marginTop: 18,
-          marginBottom: 22,
-         background: "linear-gradient(180deg, rgba(255,255,255,0.62), rgba(255,255,255,0.52))",
-          borderRadius: 18,
+          maxWidth: 760,
+          marginTop: 20,
+          marginBottom: 26,
+          background: "rgba(255,255,255,0.68)",
+          borderRadius: 28,
           border: `1px solid ${EDGE}`,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.25)",
-          padding: "28px 28px 22px 28px",
+          boxShadow: "0 16px 42px rgba(66,54,120,0.10)",
+          padding: "26px 26px 22px 26px",
           display: "flex",
           flexDirection: "column",
           alignItems: "stretch",
           zIndex: 1,
+          backdropFilter: "blur(14px)",
+          WebkitBackdropFilter: "blur(14px)",
         }}
       >
-        <div
+             <div
           style={{
-           color: "#6d67f4",
-            fontSize: 15,
-            fontWeight: 900,
-            marginBottom: 10,
-            letterSpacing: 1.6,
-            textTransform: "uppercase",
+            color: "#7a728f",
+            fontSize: 14,
+            fontWeight: 700,
+            marginBottom: 12,
+            letterSpacing: 0.6,
             textAlign: "center",
           }}
         >
           AI Ad Manager
         </div>
 
-        <div
+            <div
           ref={chatBoxRef}
           className="chat-scroll"
           style={{
             width: "100%",
-            minHeight: 240,
-            maxHeight: 480,
+            minHeight: 250,
+            maxHeight: 500,
             overflowY: "auto",
             marginBottom: 16,
             padding: 16,
-            background: "rgba(241,243,255,0.92)",
-            borderRadius: 12,
+            background: "rgba(255,255,255,0.46)",
+            borderRadius: 22,
             border: `1px solid ${EDGE}`,
             display: "flex",
             flexDirection: "column",
-            gap: 10,
+            gap: 12,
           }}
         >
           {chatHistory.slice(-40).map((msg, i) => {
             const isGPT = msg.from === "gpt";
             return (
-              <div
+                <div
                 key={i}
                 style={{
                   alignSelf: isGPT ? "flex-start" : "flex-end",
-                  color: isGPT ? "#d6fff8" : "#0e1519",
-                  background: isGPT ? "#0f151a" : TEAL,
-                  border: isGPT ? `1px solid ${EDGE}` : "none",
-                  borderRadius: isGPT ? "14px 16px 16px 8px" : "16px 12px 8px 16px",
-                  padding: "10px 14px",
+                  color: isGPT ? "#262331" : "#1f1a2d",
+                  background: isGPT ? "rgba(255,255,255,0.92)" : "rgba(233,228,255,0.96)",
+                  border: `1px solid ${EDGE}`,
+                  borderRadius: 20,
+                  padding: "12px 15px",
                   maxWidth: "85%",
                   whiteSpace: "pre-wrap",
                   wordBreak: "break-word",
-                  boxShadow: isGPT ? "none" : `0 2px 12px ${TEAL_SOFT}`,
+                  boxShadow: "0 4px 16px rgba(66,54,120,0.06)",
+                  fontWeight: 500,
+                  lineHeight: 1.55,
                 }}
               >
                 {msg.text}
@@ -2111,24 +2114,37 @@ async function generatePosterBPair(runToken) {
         </div>
 
         {!loading && (
-          <form onSubmit={handleUserInput} style={{ width: "100%", display: "flex", gap: 10, alignItems: "center" }}>
+               <form
+            onSubmit={handleUserInput}
+            style={{
+              width: "100%",
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              background: "rgba(255,255,255,0.88)",
+              border: `1px solid ${EDGE}`,
+              borderRadius: 22,
+              padding: 8,
+              boxShadow: "0 8px 24px rgba(66,54,120,0.06)",
+            }}
+          >
             <button
               type="button"
               onClick={hardResetChat}
               title="Reset chat"
               aria-label="Reset chat"
               style={{
-                background: "#23262a",
-                color: "#9cefdc",
-                border: `1px solid ${EDGE}`,
-                borderRadius: 12,
-                padding: "0 14px",
-                height: 48,
+                background: "transparent",
+                color: "#7d7794",
+                border: "none",
+                borderRadius: 14,
+                width: 44,
+                height: 44,
                 cursor: "pointer",
-                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
+                flex: "0 0 auto",
               }}
             >
               <FaSyncAlt />
@@ -2139,34 +2155,35 @@ async function generatePosterBPair(runToken) {
               onChange={(e) => setInput(e.target.value)}
               disabled={loading}
               autoFocus
-              placeholder="Your answer…"
+              placeholder="How can I help you today?"
               aria-label="Your answer"
               autoComplete="off"
               style={{
                 flex: 1,
-                padding: "14px 18px",
-                borderRadius: 12,
-                border: `1px solid ${EDGE}`,
+                padding: "14px 8px",
+                borderRadius: 14,
+                border: "none",
                 outline: "none",
                 fontSize: "1.05rem",
-                fontWeight: 700,
-                background: "#23262a",
-                color: "#fff",
-                boxShadow: `0 1.5px 8px ${TEAL_SOFT}`,
+                fontWeight: 500,
+                background: "transparent",
+                color: "#24212f",
+                boxShadow: "none",
               }}
             />
             <button
               type="submit"
               style={{
-                background: TEAL,
-                color: "#0e1519",
+                background: "transparent",
+                color: "#6f66f5",
                 border: "none",
-                borderRadius: 12,
+                borderRadius: 14,
+                width: 44,
+                height: 44,
                 fontWeight: 900,
-                fontSize: "1.2rem",
-                padding: "0 18px",
+                fontSize: "1.1rem",
                 cursor: "pointer",
-                height: 48,
+                flex: "0 0 auto",
               }}
               disabled={loading}
               tabIndex={0}
@@ -2185,8 +2202,8 @@ async function generatePosterBPair(runToken) {
         {error && <div style={{ color: "#f35e68", marginTop: 18, textAlign: "center" }}>{error}</div>}
       </div>
 
-      <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 4, marginBottom: 10 }}>
-        <div style={{ color: "#bdfdf0", fontWeight: 900, letterSpacing: 0.6, opacity: 0.9 }}>Ad Previews</div>
+         <div style={{ width: "100%", display: "flex", justifyContent: "center", marginTop: 8, marginBottom: 14 }}>
+        <div style={{ color: "#7a728f", fontWeight: 700, letterSpacing: 0.2, opacity: 0.95 }}>Ad Previews</div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "center", gap: 34, flexWrap: "wrap", width: "100%", paddingBottom: 8 }}>
