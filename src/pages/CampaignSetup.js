@@ -121,27 +121,27 @@ async function stripeFetch(path, opts = {}) {
 /* ======================= Visual Theme (Landing-style tech palette) ======================= */
 const MODERN_FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
-const DARK_BG = "#eef2ff";
-const ACCENT = "#5b5cf0";
-const ACCENT_2 = "#7c3aed";
-const BTN_BASE = "#5b5cf0";
-const BTN_BASE_HOVER = "#4c46e0";
+const DARK_BG = "linear-gradient(180deg, #d6dbff 0%, #edf1ff 42%, #f7f8ff 100%)";
+const ACCENT = "#5b57e8";
+const ACCENT_2 = "#7b6dff";
+const BTN_BASE = "#5650e6";
+const BTN_BASE_HOVER = "#473fd6";
 
-const GLOW_A = "rgba(91,92,240,0.14)";
-const GLOW_B = "rgba(124,58,237,0.10)";
+const GLOW_A = "rgba(91,87,232,0.16)";
+const GLOW_B = "rgba(123,109,255,0.12)";
 
 const GLOW_TEAL = GLOW_A;
 const ACCENT_ALT = ACCENT;
 
-const CARD_BG = "#ffffff";
-const EDGE_BG = "#dbe4ff";
-const PANEL_BG = "#f7f9ff";
+const CARD_BG = "rgba(255,255,255,0.88)";
+const EDGE_BG = "rgba(110,102,255,0.16)";
+const PANEL_BG = "rgba(247,248,255,0.92)";
 
 const INPUT_BG = "#ffffff";
-const INPUT_BORDER = "#dbe4ff";
+const INPUT_BORDER = "rgba(110,102,255,0.16)";
 
-const TEXT_MAIN = "#111827";
-const TEXT_DIM = "#374151";
+const TEXT_MAIN = "#141827";
+const TEXT_DIM = "#384152";
 const TEXT_MUTED = "#667085";
 const WHITE = "#ffffff";
 /* “glass” helper like landing */
@@ -1606,83 +1606,148 @@ function MarketerActionsCard({ summary, optimizerState }) {
   const history = buildOptimizerHistoryItems(optimizerState);
   const latest = history[0] || null;
 
+  const stageLabel = safeSummary?.stage
+    ? String(safeSummary.stage).replace(/_/g, " ")
+    : "monitoring";
+
   return (
     <div
       style={{
         width: "100%",
-        padding: 0,
         display: "flex",
         flexDirection: "column",
-        gap: 12,
+        gap: 14,
       }}
     >
       <div
         style={{
-          padding: "0 0 6px 0",
+          borderRadius: 22,
+          padding: 18,
+          background:
+            "linear-gradient(135deg, rgba(86,80,230,0.96), rgba(108,100,255,0.94), rgba(206,210,255,0.88))",
+          color: "#ffffff",
+          boxShadow: "0 18px 40px rgba(91,87,232,0.18)",
+          border: "1px solid rgba(255,255,255,0.18)",
           display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          gap: 12,
-          flexWrap: "wrap",
-        }}
-      >
-        <div>
-          <div
-            style={{
-              color: "#0f172a",
-              fontWeight: 900,
-              fontSize: 18,
-              lineHeight: 1.2,
-              marginBottom: 4,
-            }}
-          >
-            AI Update
-          </div>
-          <div
-            style={{
-              color: "#475569",
-              fontWeight: 700,
-              fontSize: 13,
-              lineHeight: 1.5,
-              maxWidth: 620,
-            }}
-          >
-            {latest?.title || safeSummary?.headline || "Monitoring campaign performance"}
-          </div>
-        </div>
-
-        <div
-          style={{
-            padding: "7px 11px",
-            borderRadius: 999,
-            background: "#eef2ff",
-            color: "#4f46e5",
-            fontWeight: 900,
-            fontSize: 12,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {safeSummary?.stage ? String(safeSummary.stage).replace(/_/g, " ") : "monitoring"}
-        </div>
-      </div>
-
-      <div
-        style={{
-          background: "#ffffff",
-          border: "1px solid #e5e7eb",
-          borderRadius: 16,
-          padding: 14,
-          maxHeight: expanded ? 360 : 104,
-          overflow: "hidden",
-          position: "relative",
-          transition: "max-height 220ms ease",
+          flexDirection: "column",
+          gap: 14,
         }}
       >
         <div
           style={{
             display: "flex",
-            flexDirection: "column",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                fontWeight: 900,
+                fontSize: 22,
+                lineHeight: 1.1,
+                marginBottom: 6,
+              }}
+            >
+              AI Update
+            </div>
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 800,
+                lineHeight: 1.5,
+                color: "rgba(255,255,255,0.96)",
+              }}
+            >
+              {latest?.title || safeSummary?.headline || "Monitoring campaign performance"}
+            </div>
+          </div>
+
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 999,
+              background: "rgba(255,255,255,0.18)",
+              border: "1px solid rgba(255,255,255,0.22)",
+              color: "#ffffff",
+              fontWeight: 900,
+              fontSize: 12,
+              textTransform: "capitalize",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {stageLabel}
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "rgba(255,255,255,0.14)",
+            border: "1px solid rgba(255,255,255,0.18)",
+            borderRadius: 16,
+            padding: 14,
+            fontSize: 14,
+            lineHeight: 1.65,
+            color: "rgba(255,255,255,0.94)",
+            fontWeight: 700,
+          }}
+        >
+          {latest?.detail ||
+            safeSummary?.subtext ||
+            "Smartemark is monitoring the campaign and preparing the next measured move."}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
             gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div
+            style={{
+              color: "rgba(255,255,255,0.82)",
+              fontWeight: 800,
+              fontSize: 12,
+            }}
+          >
+            {safeSummary?.updatedAt ? `Updated ${timeAgoShort(safeSummary.updatedAt)}` : "Recently updated"}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            style={{
+              background: "#ffffff",
+              color: "#3f3aa8",
+              border: "none",
+              borderRadius: 999,
+              padding: "10px 14px",
+              fontWeight: 900,
+              fontSize: 12,
+              cursor: "pointer",
+              boxShadow: "0 10px 24px rgba(15,23,42,0.10)",
+            }}
+          >
+            {expanded ? "Hide details" : "Peek inside AI"}
+          </button>
+        </div>
+      </div>
+
+      {expanded && (
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #e5e7eb",
+            borderRadius: 18,
+            padding: 16,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
           }}
         >
           {history.length ? (
@@ -1690,8 +1755,8 @@ function MarketerActionsCard({ summary, optimizerState }) {
               <div
                 key={item.id}
                 style={{
-                  paddingBottom: 10,
                   borderBottom: "1px solid #eef2f7",
+                  paddingBottom: 12,
                 }}
               >
                 <div
@@ -1703,35 +1768,15 @@ function MarketerActionsCard({ summary, optimizerState }) {
                     marginBottom: 5,
                   }}
                 >
-                  <div
-                    style={{
-                      color: "#111827",
-                      fontWeight: 800,
-                      fontSize: 12,
-                    }}
-                  >
+                  <div style={{ color: "#4f46e5", fontWeight: 900, fontSize: 12 }}>
                     {item.kind}
                   </div>
-                  <div
-                    style={{
-                      color: "#94a3b8",
-                      fontWeight: 800,
-                      fontSize: 11,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                  <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>
                     {item.timeLabel}
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    color: "#0f172a",
-                    fontWeight: 800,
-                    fontSize: 13,
-                    marginBottom: item.detail ? 4 : 0,
-                  }}
-                >
+                <div style={{ color: "#111827", fontWeight: 900, fontSize: 14, marginBottom: 4 }}>
                   {item.title}
                 </div>
 
@@ -1741,7 +1786,7 @@ function MarketerActionsCard({ summary, optimizerState }) {
                       color: "#64748b",
                       fontWeight: 600,
                       fontSize: 12,
-                      lineHeight: 1.5,
+                      lineHeight: 1.6,
                     }}
                   >
                     {item.detail}
@@ -1750,64 +1795,12 @@ function MarketerActionsCard({ summary, optimizerState }) {
               </div>
             ))
           ) : (
-            <div
-              style={{
-                color: "#64748b",
-                fontWeight: 600,
-                fontSize: 12,
-                lineHeight: 1.5,
-              }}
-            >
-              Smartemark is building its latest diagnosis and action trail for this campaign.
+            <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
+              Smartemark is still building the latest activity trail for this campaign.
             </div>
           )}
         </div>
-
-        {!expanded && (
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
-              bottom: 0,
-              height: 42,
-              background:
-                "linear-gradient(180deg, rgba(255,255,255,0), rgba(255,255,255,0.98))",
-              pointerEvents: "none",
-            }}
-          />
-        )}
-      </div>
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          gap: 12,
-        }}
-      >
-        <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11 }}>
-          {safeSummary?.updatedAt ? `Updated ${timeAgoShort(safeSummary.updatedAt)}` : "Recently updated"}
-        </div>
-
-        <button
-          type="button"
-          onClick={() => setExpanded((v) => !v)}
-          style={{
-            background: "#f8fafc",
-            color: "#0f172a",
-            border: "1px solid #e5e7eb",
-            borderRadius: 10,
-            padding: "8px 12px",
-            fontWeight: 900,
-            fontSize: 12,
-            cursor: "pointer",
-          }}
-        >
-          {expanded ? "Hide details" : "Peek inside AI"}
-        </button>
-      </div>
+      )}
     </div>
   );
 }
@@ -4242,10 +4235,12 @@ const getSavedCreatives = (campaignId) => {
     ? optimizerStateMap[selectedCampaignId] || null
     : null;
 
-const selectedOptimizerSummary =
-  selectedCampaignId && selectedCampaignId !== "__DRAFT__"
-    ? publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()
-    : getFallbackPublicSummary();
+  const selectedOptimizerSummary =
+    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+      ? publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()
+      : getFallbackPublicSummary();
+
+  const showLaunchPane = !selectedCampaignId || selectedCampaignId === "__DRAFT__";
 
   const selectedCampaignSettings =
     selectedCampaignId && selectedCampaignId !== "__DRAFT__"
@@ -4307,7 +4302,7 @@ const selectedOptimizerSummary =
       style={{
         minHeight: "100vh",
         minWidth: "100vw",
-        background: DARK_BG,
+        background: typeof DARK_BG === "string" ? DARK_BG : "#eef2ff",
         fontFamily: MODERN_FONT,
         padding: 0,
         display: "flex",
@@ -4407,10 +4402,10 @@ const selectedOptimizerSummary =
       >
      <main
   style={{
-    background: "#f8fafc",
-    border: "1px solid #e5e7eb",
-    borderRadius: "24px",
-    boxShadow: "0 18px 54px rgba(15,23,42,0.08)",
+      background: "linear-gradient(180deg, rgba(255,255,255,0.88), rgba(247,248,255,0.82))",
+    border: "1px solid rgba(110,102,255,0.14)",
+    borderRadius: "28px",
+    boxShadow: "0 22px 56px rgba(88, 89, 202, 0.10)",
     padding: isMobile ? "0" : "0",
     minWidth: isMobile ? "98vw" : 760,
     maxWidth: "1280px",
@@ -4832,10 +4827,10 @@ const selectedOptimizerSummary =
           </div>
         </div>
 
-        <div
+         <div
           style={{
             display: "grid",
-            gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.55fr) minmax(320px, 0.9fr)",
+            gridTemplateColumns: "1fr",
             gap: 18,
             alignItems: "start",
           }}
@@ -5014,6 +5009,28 @@ const selectedOptimizerSummary =
                     </div>
                   )}
 
+                    {selectedCampaignId === "__DRAFT__" && (
+                    <button
+                      type="button"
+                      onClick={handleClearDraft}
+                      title="Remove Draft"
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 10,
+                        border: "1px solid #ffd6d6",
+                        background: "#fff1f2",
+                        color: "#b42318",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <FaTrash />
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={handleNewCampaign}
@@ -5109,102 +5126,7 @@ const selectedOptimizerSummary =
                   </div>
                 )}
 
-                <div
-                  style={{
-                    background: "#ffffff",
-                    border: "1px solid #dbe4ff",
-                    borderRadius: 16,
-                    padding: 16,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 12,
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "flex-start",
-                      gap: 10,
-                      flexWrap: "wrap",
-                    }}
-                  >
-                    <div>
-                      <div
-                        style={{
-                          color: "#111827",
-                          fontWeight: 900,
-                          fontSize: 18,
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        Campaign Settings
-                      </div>
-                      <div
-                        style={{
-                          color: "#667085",
-                          fontWeight: 700,
-                          fontSize: 12,
-                          marginTop: 4,
-                        }}
-                      >
-                        Saved settings for this campaign only.
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        padding: "7px 11px",
-                        borderRadius: 999,
-                        background: "#eef2ff",
-                        color: "#5b5cf0",
-                        fontWeight: 900,
-                        fontSize: 12,
-                      }}
-                    >
-                      {selectedCampaignId === "__DRAFT__" ? "Draft Campaign" : "Live Campaign"}
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      border: "1px solid #dbe4ff",
-                      borderRadius: 14,
-                      padding: 14,
-                      background: "#f7f9ff",
-                      display: "grid",
-                      gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
-                      gap: 12,
-                    }}
-                  >
-                    <div>
-                      <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                        Budget
-                      </div>
-                      <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
-                        {displayedCampaignSettings.budget || "—"}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                        Start
-                      </div>
-                      <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
-                        {displayedCampaignSettings.startDate || "—"}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                        End
-                      </div>
-                      <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
-                        {displayedCampaignSettings.endDate || "—"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
+  
               </>
             ) : (
               <div
@@ -5215,24 +5137,25 @@ const selectedOptimizerSummary =
                   lineHeight: 1.6,
                 }}
               >
-                Select a campaign to view metrics, AI updates, copy, and launch settings.
+                Select a campaign to view metrics and AI updates, or hit the plus button to start a new one.
               </div>
             )}
           </div>
-          <div
-            style={{
-              background: "#ffffff",
-              border: "1px solid #dbe4ff",
-              borderRadius: 22,
-              padding: 20,
-              display: "flex",
-              flexDirection: "column",
-              gap: 16,
-              position: isMobile ? "static" : "sticky",
-              top: 24,
-              boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
-            }}
-          >
+          {showLaunchPane && (
+            <div
+              style={{
+                background: "#ffffff",
+                border: "1px solid #dbe4ff",
+                borderRadius: 22,
+                padding: 20,
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+                position: isMobile ? "static" : "sticky",
+                top: 24,
+                boxShadow: "0 16px 40px rgba(91,92,240,0.08)",
+              }}
+            >
             <div>
               <div style={{ color: "#111827", fontWeight: 900, fontSize: 18, marginBottom: 6 }}>
                 New Campaign
@@ -5479,7 +5402,8 @@ const selectedOptimizerSummary =
             >
               {loading ? "Working..." : "Launch Campaign"}
             </button>
-          </div>
+            </div>
+          )}
         </div>
       </>
     )}
