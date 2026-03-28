@@ -1,166 +1,339 @@
-import React, { useRef, useEffect, useState } from "react";
+/* eslint-disable */
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import smartmarkLogo from "../assets/smartmark-logo.svg";
-import { trackEvent } from "../analytics/gaEvents";
+import {
+  FaArrowRight,
+  FaBolt,
+  FaBrain,
+  FaBullseye,
+  FaChartLine,
+  FaCheckCircle,
+  FaChevronDown,
+  FaFacebookF,
+  FaMagic,
+  FaPlayCircle,
+  FaRocket,
+  FaShieldAlt,
+  FaSlidersH,
+} from "react-icons/fa";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
-const BG = "#d9dcff";
-const BG_2 = "#eef1ff";
-const SURFACE = "rgba(255,255,255,0.78)";
-const SURFACE_SOFT = "rgba(255,255,255,0.62)";
-const BORDER = "rgba(94, 99, 255, 0.14)";
-const TEXT = "#151826";
-const TEXT_SOFT = "#6b7280";
+const BG = "linear-gradient(180deg, #cfd5ff 0%, #e9ecff 40%, #f4f6ff 100%)";
+const PANEL = "rgba(255,255,255,0.86)";
+const PANEL_STRONG = "rgba(255,255,255,0.94)";
+const BORDER = "rgba(92, 89, 236, 0.14)";
+const TEXT = "#101426";
+const TEXT_SOFT = "#5f6781";
+const PURPLE = "#5b57e8";
+const PURPLE_2 = "#7a70ff";
+const PURPLE_3 = "#9088ff";
+const DARK_PURPLE = "#29235c";
+const BTN = "linear-gradient(135deg, #4c63ff 0%, #6257ee 55%, #7c6dff 100%)";
+const BTN_HOVER = "linear-gradient(135deg, #4058f7 0%, #564ce6 55%, #7365ff 100%)";
+const SHADOW = "0 18px 50px rgba(74, 71, 199, 0.16)";
+const SOFT_SHADOW = "0 10px 30px rgba(74, 71, 199, 0.10)";
 
-const PURPLE_DARK = "#6b63ff";
-const PURPLE = "#8d86ff";
-const PURPLE_LIGHT = "#c8c5ff";
-const BLUE_SOFT = "#9fb4ff";
-const BTN = "#4d6bff";
-const BTN_HOVER = "#3f5cf0";
-
-const EARLY_ACCESS_ENDPOINT = "https://formspree.io/f/mqeqaozw";
-
-const processSteps = [
-  { num: "01", title: "Business info" },
-  { num: "02", title: "AI builds ads" },
-  { num: "03", title: "Connect Facebook" },
-  { num: "04", title: "Launch" },
-];
-
-const featureCards = [
+const FAQS = [
   {
-    title: "Simpler setup",
-    body: "A cleaner flow than Ads Manager.",
+    q: "Do I need ad experience?",
+    a: "No. Smartemark is built for business owners who do not want to learn Ads Manager or hire an agency just to get started.",
   },
   {
-    title: "AI creatives",
-    body: "Copy and assets in one place.",
+    q: "What does the AI actually do?",
+    a: "It takes in your business info, creates ad creatives and copy, launches your campaign, then monitors performance and manages next steps.",
   },
   {
-    title: "Live metrics",
-    body: "Track campaigns inside Smartemark.",
+    q: "Do I still connect my own Facebook account?",
+    a: "Yes. You connect your own Meta ad account so campaigns launch under your business, not under an outside agency setup.",
+  },
+  {
+    q: "Is this an agency?",
+    a: "No. Smartemark is AI marketing automation software. The goal is to give you a cleaner, easier system without agency dependency.",
   },
 ];
 
-const faqList = [
+const CAROUSEL_ITEMS = [
   {
-    question: "Do I need ad experience?",
-    answer: "No. Smartemark is built to keep campaign setup simple.",
+    eyebrow: "01",
+    title: "Give business info",
+    body: "Describe your business, offer, and goal. Smartemark takes in the information and turns it into a campaign plan.",
+    icon: <FaBrain />,
   },
   {
-    question: "Does it help make the ads?",
-    answer: "Yes. It helps generate copy and creative direction fast.",
+    eyebrow: "02",
+    title: "AI creates the ads",
+    body: "The AI generates creatives, copy, and launch-ready assets so you do not have to build ads manually.",
+    icon: <FaMagic />,
   },
   {
-    question: "Can I still control the launch?",
-    answer: "Yes. You review the setup and decide when to launch.",
+    eyebrow: "03",
+    title: "Connect Facebook",
+    body: "Use your own ad account, keep control, and launch without getting buried in Meta’s usual complexity.",
+    icon: <FaFacebookF />,
   },
   {
-    question: "Who is it for?",
-    answer: "Businesses that want a faster, cleaner way to run Facebook ads.",
+    eyebrow: "04",
+    title: "Launch and manage",
+    body: "The system launches campaigns, watches performance, and moves toward the next logical action like a digital marketer would.",
+    icon: <FaChartLine />,
   },
 ];
 
-const useIsMobile = () => {
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 750);
+const RESULT_CARDS = [
+  { label: "Impressions", value: "11.9K", sub: "Campaign reach building" },
+  { label: "CTR", value: "0.89%", sub: "Signal for creative decisions" },
+  { label: "Clicks", value: "106", sub: "Traffic from active ads" },
+  { label: "AI Status", value: "Monitoring", sub: "Watching for next move" },
+];
+
+function CTAButton({ children, onClick, secondary = false, fullWidth = false }) {
+  const [hover, setHover] = useState(false);
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        appearance: "none",
+        border: secondary ? `1px solid ${BORDER}` : "none",
+        background: secondary ? "rgba(255,255,255,0.78)" : hover ? BTN_HOVER : BTN,
+        color: secondary ? TEXT : "#fff",
+        borderRadius: 999,
+        padding: "15px 24px",
+        fontSize: 16,
+        fontWeight: 800,
+        cursor: "pointer",
+        fontFamily: FONT,
+        width: fullWidth ? "100%" : "auto",
+        boxShadow: secondary ? "none" : "0 12px 28px rgba(91,87,232,0.24)",
+        transition: "all 160ms ease",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function SectionTag({ children }) {
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "9px 14px",
+        borderRadius: 999,
+        border: `1px solid ${BORDER}`,
+        background: "rgba(255,255,255,0.56)",
+        color: PURPLE,
+        fontWeight: 800,
+        fontSize: 13,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, sub }) {
+  return (
+    <div
+      style={{
+        background: "rgba(10, 15, 35, 0.92)",
+        borderRadius: 22,
+        padding: 20,
+        minHeight: 132,
+        boxShadow: "0 14px 34px rgba(10,15,35,0.16)",
+        border: "1px solid rgba(255,255,255,0.04)",
+      }}
+    >
+      <div
+        style={{
+          color: "rgba(255,255,255,0.62)",
+          fontSize: 12,
+          fontWeight: 800,
+          marginBottom: 12,
+          textTransform: "uppercase",
+          letterSpacing: 0.35,
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          color: "#ffffff",
+          fontSize: 34,
+          fontWeight: 800,
+          lineHeight: 1.05,
+          marginBottom: 12,
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          color: "rgba(255,255,255,0.72)",
+          fontSize: 13,
+          fontWeight: 700,
+          lineHeight: 1.5,
+        }}
+      >
+        {sub}
+      </div>
+    </div>
+  );
+}
+
+function InfoCard({ icon, title, body }) {
+  return (
+    <div
+      style={{
+        background: PANEL_STRONG,
+        border: `1px solid ${BORDER}`,
+        borderRadius: 28,
+        padding: 26,
+        boxShadow: SOFT_SHADOW,
+        minHeight: 220,
+      }}
+    >
+      <div
+        style={{
+          width: 50,
+          height: 50,
+          borderRadius: 16,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "linear-gradient(135deg, rgba(91,87,232,0.14), rgba(123,109,255,0.14))",
+          color: PURPLE,
+          fontSize: 18,
+          marginBottom: 18,
+        }}
+      >
+        {icon}
+      </div>
+      <div
+        style={{
+          color: TEXT,
+          fontSize: 24,
+          fontWeight: 800,
+          lineHeight: 1.15,
+          marginBottom: 10,
+        }}
+      >
+        {title}
+      </div>
+      <div
+        style={{
+          color: TEXT_SOFT,
+          fontSize: 15,
+          fontWeight: 600,
+          lineHeight: 1.7,
+        }}
+      >
+        {body}
+      </div>
+    </div>
+  );
+}
+
+function FAQItem({ item, open, onToggle }) {
+  return (
+    <div
+      style={{
+        background: PANEL_STRONG,
+        border: `1px solid ${BORDER}`,
+        borderRadius: 22,
+        overflow: "hidden",
+        boxShadow: SOFT_SHADOW,
+      }}
+    >
+      <button
+        onClick={onToggle}
+        style={{
+          width: "100%",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          padding: "22px 22px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 14,
+          textAlign: "left",
+          fontFamily: FONT,
+        }}
+      >
+        <span
+          style={{
+            color: TEXT,
+            fontSize: 18,
+            fontWeight: 800,
+            lineHeight: 1.35,
+          }}
+        >
+          {item.q}
+        </span>
+
+        <span
+          style={{
+            color: PURPLE,
+            flex: "0 0 auto",
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 180ms ease",
+          }}
+        >
+          <FaChevronDown />
+        </span>
+      </button>
+
+      {open && (
+        <div
+          style={{
+            padding: "0 22px 22px",
+            color: TEXT_SOFT,
+            fontSize: 15,
+            fontWeight: 600,
+            lineHeight: 1.75,
+          }}
+        >
+          {item.a}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Landing() {
+  const navigate = useNavigate();
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 900);
+  const [carouselIndex, setCarouselIndex] = useState(0);
+  const [openFaq, setOpenFaq] = useState(0);
 
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth <= 750);
+    const onResize = () => setIsMobile(window.innerWidth <= 900);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  return isMobile;
-};
-
-const Landing = () => {
-  const navigate = useNavigate();
-  const faqRef = useRef(null);
-  const isMobile = useIsMobile();
-
   useEffect(() => {
-    trackEvent("view_landing", { page: "landing" });
+    const id = setInterval(() => {
+      setCarouselIndex((prev) => (prev + 1) % CAROUSEL_ITEMS.length);
+    }, 3500);
+    return () => clearInterval(id);
   }, []);
 
-  const [eaOpen, setEaOpen] = useState(false);
-  const [eaName, setEaName] = useState("");
-  const [eaEmail, setEaEmail] = useState("");
-  const [eaSubmitted, setEaSubmitted] = useState(false);
-  const [eaServerOk, setEaServerOk] = useState(false);
+  const activeCarousel = useMemo(() => CAROUSEL_ITEMS[carouselIndex], [carouselIndex]);
 
-  const openEarlyAccess = (source = "cta") => {
-    try {
-      trackEvent("start_campaign", { page: "landing", mode: "early_access", source });
-    } catch {}
-    setEaSubmitted(false);
-    setEaServerOk(false);
-    setEaOpen(true);
+  const goToSetup = () => {
+    navigate("/setup");
   };
-
-  const closeEarlyAccess = () => setEaOpen(false);
-
-  useEffect(() => {
-    if (!eaOpen) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") closeEarlyAccess();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [eaOpen]);
-
-  const mailtoHref = `mailto:knowwilltech@gmail.com?subject=${encodeURIComponent(
-    "SmartMark Early Access"
-  )}&body=${encodeURIComponent(
-    `Name: ${eaName.trim()}\nEmail: ${eaEmail.trim()}\n\nRequested Early Access from Landing page.`
-  )}`;
-
-  const submitEarlyAccess = async (e) => {
-    e.preventDefault();
-    if (!eaName.trim() || !eaEmail.trim()) return;
-
-    let ok = false;
-
-    try {
-      const fd = new FormData();
-      fd.append("name", eaName.trim());
-      fd.append("email", eaEmail.trim());
-      fd.append("source", "smartmark-landing");
-
-      const res = await fetch(EARLY_ACCESS_ENDPOINT, {
-        method: "POST",
-        headers: { Accept: "application/json" },
-        body: fd,
-      });
-
-      ok = !!res.ok;
-    } catch {}
-
-    setEaServerOk(ok);
-    setEaSubmitted(true);
-
-    try {
-      trackEvent("early_access_submit", { page: "landing", ok });
-    } catch {}
-  };
-
-  const goToPricing = () => navigate("/pricing");
-  const goToLogin = () => navigate("/login");
 
   const scrollToFaq = () => {
-    const el = faqRef.current;
-    if (!el) return;
-    const top = window.scrollY + el.getBoundingClientRect().top - 24;
-    window.scrollTo({ top, behavior: "smooth" });
-  };
-
-  const sectionWrap = {
-    width: "100%",
-    display: "flex",
-    justifyContent: "center",
-    padding: isMobile ? "0 14px" : "0 24px",
-    boxSizing: "border-box",
+    const el = document.getElementById("landing-faq");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   return (
@@ -168,1136 +341,792 @@ const Landing = () => {
       style={{
         minHeight: "100vh",
         width: "100%",
-        background: `linear-gradient(180deg, ${BG} 0%, ${BG_2} 42%, #f5f6ff 100%)`,
+        background: BG,
         fontFamily: FONT,
         color: TEXT,
-        position: "relative",
-        overflowX: "hidden",
       }}
     >
-      <style>{`
-        html, body, #root {
-          margin: 0;
-          min-height: 100%;
-          background: ${BG};
-        }
-
-        * {
-          box-sizing: border-box;
-        }
-
-        @keyframes floatA {
-          0%,100% { transform: translateY(0px) translateX(0px); }
-          50% { transform: translateY(-14px) translateX(8px); }
-        }
-
-        @keyframes floatB {
-          0%,100% { transform: translateY(0px) translateX(0px); }
-          50% { transform: translateY(14px) translateX(-10px); }
-        }
-      `}</style>
-
       <div
         style={{
-          position: "absolute",
-          top: -120,
-          right: -180,
-          width: isMobile ? 320 : 620,
-          height: isMobile ? 320 : 620,
-          background: "radial-gradient(circle, rgba(107,99,255,0.26) 0%, rgba(107,99,255,0.08) 42%, transparent 72%)",
-          filter: "blur(24px)",
-          pointerEvents: "none",
-          animation: "floatA 18s ease-in-out infinite",
+          position: "relative",
+          overflow: "hidden",
         }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          top: 180,
-          left: -160,
-          width: isMobile ? 260 : 520,
-          height: isMobile ? 260 : 520,
-          background: "radial-gradient(circle, rgba(159,180,255,0.22) 0%, rgba(159,180,255,0.06) 42%, transparent 72%)",
-          filter: "blur(26px)",
-          pointerEvents: "none",
-          animation: "floatB 20s ease-in-out infinite",
-        }}
-      />
-
-      <div style={sectionWrap}>
+      >
         <div
           style={{
-            width: "100%",
-            maxWidth: 1180,
-            padding: isMobile ? "18px 0 0" : "24px 0 0",
+            position: "absolute",
+            inset: 0,
+            pointerEvents: "none",
+            background:
+              "radial-gradient(circle at 12% 12%, rgba(123,109,255,0.18), transparent 28%), radial-gradient(circle at 85% 22%, rgba(91,87,232,0.20), transparent 26%), linear-gradient(125deg, rgba(255,255,255,0.18) 30%, rgba(124,109,255,0.14) 58%, rgba(91,87,232,0.20) 100%)",
+          }}
+        />
+
+        <div
+          style={{
+            maxWidth: 1220,
+            margin: "0 auto",
+            padding: isMobile ? "18px 18px 70px" : "20px 26px 88px",
             position: "relative",
-            zIndex: 2,
+            zIndex: 1,
           }}
         >
           <div
             style={{
-              background: SURFACE,
-              backdropFilter: "blur(16px)",
-              border: `1px solid ${BORDER}`,
-              borderRadius: 22,
-              padding: isMobile ? "14px" : "16px 20px",
               display: "flex",
-              flexDirection: isMobile ? "column" : "row",
-              alignItems: isMobile ? "stretch" : "center",
               justifyContent: "space-between",
-              gap: 12,
-              boxShadow: "0 18px 40px rgba(88, 89, 202, 0.08)",
+              alignItems: "center",
+              gap: 18,
+              flexWrap: "wrap",
+              marginBottom: isMobile ? 26 : 34,
+              padding: "8px 4px",
             }}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <img
-                src={smartmarkLogo}
-                alt="Smartemark"
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: 10,
-                  flex: "0 0 auto",
-                }}
-              />
-              <div style={{ fontSize: 24, fontWeight: 800, letterSpacing: -0.7 }}>
-                Smartemark
-              </div>
+            <div
+              style={{
+                fontSize: 30,
+                fontWeight: 900,
+                color: TEXT,
+                letterSpacing: -1.1,
+              }}
+            >
+              Smartemark
             </div>
 
             <div
               style={{
                 display: "flex",
+                gap: 12,
                 flexWrap: "wrap",
                 alignItems: "center",
-                justifyContent: isMobile ? "space-between" : "flex-end",
-                gap: 10,
               }}
             >
               <button
                 onClick={scrollToFaq}
                 style={{
-                  border: "none",
                   background: "transparent",
+                  border: "none",
                   color: TEXT_SOFT,
-                  fontWeight: 700,
+                  fontWeight: 800,
                   fontSize: 15,
                   cursor: "pointer",
-                  padding: "10px 12px",
+                  fontFamily: FONT,
+                  padding: "10px 6px",
                 }}
               >
                 FAQ
               </button>
-
-              <button
-                onClick={goToPricing}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: TEXT_SOFT,
-                  fontWeight: 700,
-                  fontSize: 15,
-                  cursor: "pointer",
-                  padding: "10px 12px",
-                }}
-              >
-                Pricing
-              </button>
-
-              <button
-                onClick={goToLogin}
-                style={{
-                  border: "none",
-                  background: "transparent",
-                  color: TEXT,
-                  fontWeight: 700,
-                  fontSize: 15,
-                  cursor: "pointer",
-                  padding: "10px 12px",
-                }}
-              >
-                Login
-              </button>
-
-              <button
-                onClick={() => openEarlyAccess("header_start_campaign")}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = BTN_HOVER;
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = BTN;
-                }}
-                style={{
-                  border: "none",
-                  background: BTN,
-                  color: "#fff",
-                  fontWeight: 700,
-                  fontSize: 15,
-                  borderRadius: 999,
-                  padding: "13px 18px",
-                  cursor: "pointer",
-                  transition: "background .18s ease",
-                  boxShadow: "0 12px 28px rgba(77,107,255,0.22)",
-                }}
-              >
-                Get Started
-              </button>
+              <CTAButton onClick={goToSetup}>Launch Campaign</CTAButton>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1180,
-            paddingTop: isMobile ? 30 : 34,
-            paddingBottom: isMobile ? 46 : 58,
-            position: "relative",
-            zIndex: 2,
-          }}
-        >
-          <div
+          <section
             style={{
-              display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "1.02fr 0.98fr",
-              gap: isMobile ? 18 : 26,
-              alignItems: "stretch",
-              background: "linear-gradient(135deg, rgba(255,255,255,0.88), rgba(246,247,255,0.82))",
+              background: "linear-gradient(135deg, rgba(255,255,255,0.80), rgba(255,255,255,0.66))",
               border: `1px solid ${BORDER}`,
-              borderRadius: 34,
-              boxShadow: "0 22px 56px rgba(88, 89, 202, 0.10)",
+              borderRadius: 36,
               overflow: "hidden",
+              boxShadow: SHADOW,
+              display: "grid",
+              gridTemplateColumns: "1fr",
             }}
           >
             <div
               style={{
-                padding: isMobile ? "28px 20px 24px" : "50px 46px 44px",
-                display: "flex",
-                flexDirection: "column",
-                justifyContent: "center",
-                gap: 16,
+                padding: isMobile ? "28px 22px 28px" : "46px 46px 42px",
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1.1fr) minmax(360px, 0.9fr)",
+                gap: isMobile ? 28 : 34,
+                alignItems: "stretch",
               }}
             >
               <div
                 style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  alignSelf: "flex-start",
-                  padding: "8px 12px",
-                  borderRadius: 999,
-                  background: "rgba(107,99,255,0.08)",
-                  color: PURPLE_DARK,
-                  fontWeight: 700,
-                  fontSize: 12,
-                  border: `1px solid ${BORDER}`,
-                }}
-              >
-                AI-powered ad workflow
-              </div>
-
-              <h1
-                style={{
-                  margin: 0,
-                  fontSize: isMobile ? "2.9rem" : "4.7rem",
-                  lineHeight: 0.98,
-                  letterSpacing: isMobile ? "-1.8px" : "-3px",
-                  fontWeight: 700,
-                  color: "#111320",
-                  maxWidth: 660,
-                }}
-              >
-                Launch ads with a cleaner system
-              </h1>
-
-              <div
-                style={{
-                  fontSize: isMobile ? "1.02rem" : "1.22rem",
-                  lineHeight: 1.7,
-                  color: TEXT_SOFT,
-                  maxWidth: 600,
-                  fontWeight: 500,
-                }}
-              >
-                Smartemark helps you go from business info to campaign launch in one modern flow.
-              </div>
-
-              <div
-                style={{
                   display: "flex",
-                  flexWrap: "wrap",
-                  gap: 12,
-                  marginTop: 4,
+                  flexDirection: "column",
+                  justifyContent: "center",
+                  minWidth: 0,
                 }}
               >
-                <button
-                  onClick={() => openEarlyAccess("hero_get_started")}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = BTN_HOVER;
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = BTN;
-                  }}
-                  style={{
-                    border: "none",
-                    background: BTN,
-                    color: "#fff",
-                    fontWeight: 700,
-                    fontSize: 16,
-                    borderRadius: 999,
-                    padding: "15px 22px",
-                    cursor: "pointer",
-                    transition: "background .18s ease",
-                    boxShadow: "0 14px 34px rgba(77,107,255,0.22)",
-                  }}
-                >
-                  Get Started
-                </button>
+                <SectionTag>
+                  <FaBolt />
+                  AI marketing automation
+                </SectionTag>
 
-                <button
-                  onClick={goToPricing}
+                <h1
                   style={{
-                    border: `1px solid ${BORDER}`,
-                    background: "rgba(255,255,255,0.72)",
+                    margin: "22px 0 18px",
+                    fontSize: isMobile ? 54 : 86,
+                    lineHeight: isMobile ? 0.98 : 0.95,
+                    letterSpacing: "-0.055em",
+                    fontWeight: 700,
                     color: TEXT,
-                    fontWeight: 700,
-                    fontSize: 16,
-                    borderRadius: 999,
-                    padding: "15px 22px",
-                    cursor: "pointer",
+                    maxWidth: 760,
                   }}
                 >
-                  Pricing
-                </button>
-              </div>
+                  Launch ads
+                  <br />
+                  effortlessly
+                </h1>
 
-              <div
-                style={{
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 12,
-                  marginTop: 10,
-                }}
-              >
-                {featureCards.map((item) => (
-                  <div
-                    key={item.title}
-                    style={{
-                      minWidth: isMobile ? "100%" : 150,
-                      background: "rgba(255,255,255,0.66)",
-                      border: `1px solid ${BORDER}`,
-                      borderRadius: 18,
-                      padding: "14px 16px",
-                    }}
-                  >
-                    <div style={{ fontSize: 16, fontWeight: 700, color: "#171923" }}>
-                      {item.title}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: TEXT_SOFT,
-                        marginTop: 5,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {item.body}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+                <div
+                  style={{
+                    color: TEXT_SOFT,
+                    fontSize: isMobile ? 18 : 21,
+                    lineHeight: 1.65,
+                    fontWeight: 500,
+                    maxWidth: 760,
+                    marginBottom: 24,
+                  }}
+                >
+                  Smartemark takes in your business info, builds creatives, launches campaigns,
+                  and manages performance — without an agency and without needing to learn Ads
+                  Manager.
+                </div>
 
-            <div
-              style={{
-                minHeight: isMobile ? 340 : 620,
-                position: "relative",
-                background:
-                  "linear-gradient(145deg, #d4d6ff 0%, #cbc8ff 24%, #b4afff 46%, #9a92ff 68%, #ececff 100%)",
-                overflow: "hidden",
-              }}
-            >
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background:
-                    "linear-gradient(120deg, transparent 12%, rgba(255,255,255,0.74) 33%, rgba(255,255,255,0.12) 46%, transparent 61%)",
-                  transform: "skewX(-16deg)",
-                  left: "6%",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background:
-                    "linear-gradient(120deg, transparent 34%, rgba(255,255,255,0.52) 50%, rgba(149,141,255,0.26) 65%, transparent 78%)",
-                  transform: "skewX(-18deg)",
-                  left: "28%",
-                }}
-              />
-
-              <div
-                style={{
-                  position: "absolute",
-                  top: isMobile ? 18 : 28,
-                  right: isMobile ? 16 : 26,
-                  left: isMobile ? 16 : 28,
-                  background: "rgba(255,255,255,0.76)",
-                  backdropFilter: "blur(12px)",
-                  border: `1px solid rgba(255,255,255,0.45)`,
-                  borderRadius: 24,
-                  boxShadow: "0 18px 42px rgba(91,92,240,0.10)",
-                  padding: isMobile ? 16 : 20,
-                }}
-              >
                 <div
                   style={{
                     display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 10,
-                    marginBottom: 16,
+                    gap: 14,
+                    flexWrap: "wrap",
+                    marginBottom: 28,
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: 18, fontWeight: 700 }}>Smartemark</div>
-                    <div style={{ fontSize: 12, color: TEXT_SOFT, marginTop: 4 }}>
-                      Campaign workspace
-                    </div>
-                  </div>
-
-                  <div
-                    style={{
-                      background: "rgba(107,99,255,0.10)",
-                      color: PURPLE_DARK,
-                      borderRadius: 999,
-                      padding: "7px 10px",
-                      fontWeight: 700,
-                      fontSize: 12,
-                    }}
-                  >
-                    Live
-                  </div>
+                  <CTAButton onClick={goToSetup}>
+                    Get Started <FaArrowRight style={{ marginLeft: 8 }} />
+                  </CTAButton>
+                  <CTAButton onClick={goToSetup} secondary>
+                    Launch Campaign
+                  </CTAButton>
                 </div>
 
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: 10,
-                    marginBottom: 12,
+                    gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+                    gap: 14,
+                    maxWidth: 820,
                   }}
                 >
-                  {[
-                    ["CTR", "2.8%"],
-                    ["CPC", "$1.92"],
-                    ["Spend", "$84"],
-                  ].map(([label, value]) => (
+                  <div
+                    style={{
+                      background: "rgba(255,255,255,0.72)",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 22,
+                      padding: 18,
+                    }}
+                  >
+                    <div style={{ color: PURPLE, fontWeight: 900, fontSize: 13, marginBottom: 8 }}>
+                      No agency needed
+                    </div>
+                    <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 14, lineHeight: 1.65 }}>
+                      Business owners can launch without hiring marketers or learning complicated ad tools.
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "rgba(255,255,255,0.72)",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 22,
+                      padding: 18,
+                    }}
+                  >
+                    <div style={{ color: PURPLE, fontWeight: 900, fontSize: 13, marginBottom: 8 }}>
+                      AI creates and launches
+                    </div>
+                    <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 14, lineHeight: 1.65 }}>
+                      Smartemark turns your input into creatives, copy, and launch-ready campaigns.
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: "rgba(255,255,255,0.72)",
+                      border: `1px solid ${BORDER}`,
+                      borderRadius: 22,
+                      padding: 18,
+                    }}
+                  >
+                    <div style={{ color: PURPLE, fontWeight: 900, fontSize: 13, marginBottom: 8 }}>
+                      Monitors next moves
+                    </div>
+                    <div style={{ color: TEXT_SOFT, fontWeight: 700, fontSize: 14, lineHeight: 1.65 }}>
+                      It observes campaign performance and moves toward the next reasonable action.
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div
+                style={{
+                  minWidth: 0,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 16,
+                  justifyContent: "center",
+                }}
+              >
+                <div
+                  style={{
+                    position: "relative",
+                    borderRadius: 32,
+                    overflow: "hidden",
+                    minHeight: isMobile ? 430 : 620,
+                    border: `1px solid rgba(255,255,255,0.34)`,
+                    background:
+                      "linear-gradient(140deg, rgba(255,255,255,0.22) 0%, rgba(247,248,255,0.42) 32%, rgba(136,127,255,0.26) 72%, rgba(87,80,224,0.28) 100%)",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.35)",
+                    padding: 20,
+                  }}
+                >
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background:
+                        "linear-gradient(120deg, rgba(255,255,255,0.40) 20%, transparent 31%, rgba(124,109,255,0.18) 58%, rgba(84,77,224,0.20) 100%)",
+                      pointerEvents: "none",
+                    }}
+                  />
+
+                  <div
+                    style={{
+                      position: "relative",
+                      zIndex: 1,
+                      display: "grid",
+                      gap: 14,
+                    }}
+                  >
                     <div
-                      key={label}
                       style={{
                         background: "rgba(255,255,255,0.82)",
                         border: `1px solid ${BORDER}`,
-                        borderRadius: 16,
-                        padding: "14px 12px",
+                        borderRadius: 26,
+                        padding: 22,
+                        boxShadow: SOFT_SHADOW,
                       }}
                     >
-                      <div style={{ fontSize: 11, fontWeight: 700, color: TEXT_SOFT }}>{label}</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, marginTop: 6 }}>{value}</div>
-                    </div>
-                  ))}
-                </div>
-
-                <div
-                  style={{
-                    background: "rgba(255,255,255,0.62)",
-                    border: `1px solid ${BORDER}`,
-                    borderRadius: 18,
-                    padding: 15,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 10,
-                  }}
-                >
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>AI status</div>
-                  <div
-                    style={{
-                      height: 10,
-                      borderRadius: 999,
-                      background: "rgba(107,99,255,0.12)",
-                      overflow: "hidden",
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: "72%",
-                        height: "100%",
-                        borderRadius: 999,
-                        background: "linear-gradient(90deg, #88a0ff, #8d86ff, #6b63ff)",
-                      }}
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {["Copy", "Creatives", "Metrics"].map((chip) => (
                       <div
-                        key={chip}
                         style={{
-                          padding: "6px 10px",
-                          borderRadius: 999,
-                          background: "rgba(255,255,255,0.7)",
-                          border: `1px solid ${BORDER}`,
-                          fontSize: 12,
-                          fontWeight: 700,
-                          color: "#42455a",
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          gap: 12,
+                          marginBottom: 18,
                         }}
                       >
-                        {chip}
+                        <div>
+                          <div
+                            style={{
+                              color: TEXT,
+                              fontSize: 18,
+                              fontWeight: 900,
+                              marginBottom: 4,
+                            }}
+                          >
+                            AI ad manager
+                          </div>
+                          <div
+                            style={{
+                              color: TEXT_SOFT,
+                              fontSize: 14,
+                              fontWeight: 700,
+                            }}
+                          >
+                            Campaign automation in motion
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            padding: "8px 12px",
+                            borderRadius: 999,
+                            background: "rgba(91,87,232,0.12)",
+                            color: PURPLE,
+                            fontWeight: 900,
+                            fontSize: 12,
+                          }}
+                        >
+                          Live
+                        </div>
                       </div>
-                    ))}
+
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                          gap: 12,
+                          marginBottom: 14,
+                        }}
+                      >
+                        {RESULT_CARDS.map((item) => (
+                          <div
+                            key={item.label}
+                            style={{
+                              background: "#ffffff",
+                              border: `1px solid ${BORDER}`,
+                              borderRadius: 18,
+                              padding: 16,
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: "#7b849f",
+                                fontWeight: 800,
+                                fontSize: 12,
+                                marginBottom: 8,
+                              }}
+                            >
+                              {item.label}
+                            </div>
+                            <div
+                              style={{
+                                color: TEXT,
+                                fontWeight: 900,
+                                fontSize: 28,
+                                marginBottom: 8,
+                                lineHeight: 1,
+                              }}
+                            >
+                              {item.value}
+                            </div>
+                            <div
+                              style={{
+                                color: TEXT_SOFT,
+                                fontWeight: 700,
+                                fontSize: 12,
+                                lineHeight: 1.45,
+                              }}
+                            >
+                              {item.sub}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div
+                        style={{
+                          background: "linear-gradient(135deg, rgba(91,87,232,0.96), rgba(123,109,255,0.82))",
+                          color: "#fff",
+                          borderRadius: 20,
+                          padding: 18,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: 15,
+                            fontWeight: 900,
+                            marginBottom: 10,
+                          }}
+                        >
+                          AI workflow
+                        </div>
+
+                        <div
+                          style={{
+                            height: 12,
+                            borderRadius: 999,
+                            background: "rgba(255,255,255,0.24)",
+                            overflow: "hidden",
+                            marginBottom: 12,
+                          }}
+                        >
+                          <div
+                            style={{
+                              width: `${28 + carouselIndex * 22}%`,
+                              height: "100%",
+                              borderRadius: 999,
+                              background: "rgba(255,255,255,0.88)",
+                              transition: "width 320ms ease",
+                            }}
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                            gap: 8,
+                          }}
+                        >
+                          {CAROUSEL_ITEMS.map((item, idx) => (
+                            <button
+                              key={item.eyebrow}
+                              onClick={() => setCarouselIndex(idx)}
+                              style={{
+                                border: "none",
+                                cursor: "pointer",
+                                fontFamily: FONT,
+                                padding: "9px 8px",
+                                borderRadius: 999,
+                                background:
+                                  idx === carouselIndex
+                                    ? "rgba(255,255,255,0.24)"
+                                    : "rgba(255,255,255,0.10)",
+                                color: "#fff",
+                                fontWeight: 800,
+                                fontSize: 12,
+                              }}
+                            >
+                              {item.eyebrow}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        background: "rgba(255,255,255,0.80)",
+                        border: `1px solid ${BORDER}`,
+                        borderRadius: 24,
+                        padding: 20,
+                        boxShadow: SOFT_SHADOW,
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: TEXT,
+                          fontWeight: 900,
+                          fontSize: 18,
+                          marginBottom: 8,
+                        }}
+                      >
+                        {activeCarousel.title}
+                      </div>
+                      <div
+                        style={{
+                          color: TEXT_SOFT,
+                          fontWeight: 700,
+                          fontSize: 15,
+                          lineHeight: 1.7,
+                          marginBottom: 16,
+                        }}
+                      >
+                        {activeCarousel.body}
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          gap: 10,
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 8,
+                            padding: "10px 13px",
+                            borderRadius: 999,
+                            background: "rgba(91,87,232,0.08)",
+                            color: PURPLE,
+                            fontWeight: 800,
+                            fontSize: 13,
+                          }}
+                        >
+                          {activeCarousel.icon}
+                          Step {activeCarousel.eyebrow}
+                        </div>
+
+                        <CTAButton onClick={goToSetup} secondary>
+                          Start Now
+                        </CTAButton>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
-
-              <div
-                style={{
-                  position: "absolute",
-                  left: isMobile ? 16 : 28,
-                  right: isMobile ? 16 : "auto",
-                  bottom: isMobile ? 18 : 28,
-                  width: isMobile ? "auto" : 220,
-                  background: "rgba(255,255,255,0.72)",
-                  border: `1px solid rgba(255,255,255,0.45)`,
-                  borderRadius: 20,
-                  padding: 14,
-                  boxShadow: "0 16px 34px rgba(91,92,240,0.10)",
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-                  Ready to launch
-                </div>
-                <div style={{ fontSize: 12, color: TEXT_SOFT, lineHeight: 1.5 }}>
-                  Facebook connected. Budget set. Ads ready.
-                </div>
-              </div>
             </div>
-          </div>
-        </div>
-      </div>
+          </section>
 
-      <div style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1180,
-            paddingBottom: isMobile ? 46 : 64,
-          }}
-        >
-          <div
+          <section
             style={{
+              marginTop: 30,
               display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)",
-              gap: 14,
-            }}
-          >
-            <div
-              style={{
-                background: SURFACE_SOFT,
-                border: `1px solid ${BORDER}`,
-                borderRadius: 22,
-                padding: "20px 18px",
-                fontSize: isMobile ? 22 : 26,
-                fontWeight: 700,
-                lineHeight: 1.2,
-                boxShadow: "0 14px 32px rgba(88, 89, 202, 0.06)",
-              }}
-            >
-              A better way to present your product
-            </div>
-
-            {["Clean UI", "AI workflow", "Modern launch flow"].map((label) => (
-              <div
-                key={label}
-                style={{
-                  background: SURFACE_SOFT,
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 22,
-                  padding: "20px 18px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  textAlign: "center",
-                  fontWeight: 700,
-                  color: TEXT,
-                  boxShadow: "0 14px 32px rgba(88, 89, 202, 0.06)",
-                }}
-              >
-                {label}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1180,
-            paddingBottom: isMobile ? 50 : 70,
-          }}
-        >
-          <div style={{ textAlign: "center", marginBottom: 22 }}>
-            <div
-              style={{
-                display: "inline-flex",
-                padding: "8px 12px",
-                borderRadius: 999,
-                background: "rgba(107,99,255,0.08)",
-                color: PURPLE_DARK,
-                fontWeight: 700,
-                fontSize: 12,
-                border: `1px solid ${BORDER}`,
-                marginBottom: 14,
-              }}
-            >
-              How it works
-            </div>
-
-            <div
-              style={{
-                fontSize: isMobile ? 30 : 44,
-                fontWeight: 700,
-                letterSpacing: -1.4,
-              }}
-            >
-              Simple from start to finish
-            </div>
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "repeat(4, 1fr)",
-              gap: 16,
-            }}
-          >
-            {processSteps.map((item) => (
-              <div
-                key={item.num}
-                style={{
-                  background: "linear-gradient(180deg, rgba(255,255,255,0.88), rgba(247,248,255,0.78))",
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 24,
-                  padding: "22px 20px",
-                  minHeight: 200,
-                  boxShadow: "0 18px 40px rgba(88, 89, 202, 0.08)",
-                }}
-              >
-                <div
-                  style={{
-                    width: 42,
-                    height: 42,
-                    borderRadius: 12,
-                    background: "rgba(107,99,255,0.08)",
-                    color: PURPLE_DARK,
-                    fontWeight: 700,
-                    fontSize: 14,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    marginBottom: 18,
-                  }}
-                >
-                  {item.num}
-                </div>
-                <div style={{ fontSize: 21, fontWeight: 700, lineHeight: 1.15 }}>
-                  {item.title}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      <div style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1180,
-            paddingBottom: isMobile ? 48 : 72,
-          }}
-        >
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: isMobile ? "1fr" : "0.95fr 1.05fr",
+              gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
               gap: 18,
             }}
           >
-            <div
-              style={{
-                background: SURFACE,
-                border: `1px solid ${BORDER}`,
-                borderRadius: 28,
-                padding: isMobile ? "24px 20px" : "30px 28px",
-                boxShadow: "0 20px 50px rgba(88, 89, 202, 0.08)",
-              }}
-            >
-              <div
-                style={{
-                  display: "inline-flex",
-                  padding: "8px 12px",
-                  borderRadius: 999,
-                  background: "rgba(107,99,255,0.08)",
-                  color: PURPLE_DARK,
-                  fontWeight: 700,
-                  fontSize: 12,
-                  border: `1px solid ${BORDER}`,
-                  marginBottom: 14,
-                }}
-              >
-                Why Smartemark
-              </div>
+            <InfoCard
+              icon={<FaRocket />}
+              title="Built for simple launch"
+              body="Business owners should be able to move from idea to live campaign without needing a marketer, media buyer, or complex agency workflow."
+            />
+            <InfoCard
+              icon={<FaBullseye />}
+              title="Focused on automation"
+              body="The product is about AI automation, not just ad creation. Smartemark should think, launch, observe, and manage the campaign lifecycle."
+            />
+            <InfoCard
+              icon={<FaShieldAlt />}
+              title="Use your own account"
+              body="You stay in control by connecting your own Facebook ad account while Smartemark handles the heavy lifting around campaign execution."
+            />
+          </section>
 
-              <div
-                style={{
-                  fontSize: isMobile ? 30 : 40,
-                  fontWeight: 700,
-                  lineHeight: 1.06,
-                  letterSpacing: -1.3,
-                }}
-              >
-                Cleaner. Faster. Easier to show.
-              </div>
-
-              <div
-                style={{
-                  marginTop: 14,
-                  color: TEXT_SOFT,
-                  fontSize: isMobile ? 15 : 17,
-                  lineHeight: 1.75,
-                }}
-              >
-                A landing page that feels more modern without being loud.
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: 14,
-              }}
-            >
-              {[
-                "Soft gradients",
-                "Less text",
-                "Longer page",
-                "Better visuals",
-              ].map((item) => (
-                <div
-                  key={item}
-                  style={{
-                    background: "linear-gradient(180deg, rgba(255,255,255,0.88), rgba(247,248,255,0.78))",
-                    border: `1px solid ${BORDER}`,
-                    borderRadius: 22,
-                    padding: "24px 20px",
-                    minHeight: 130,
-                    display: "flex",
-                    alignItems: "flex-end",
-                    fontWeight: 700,
-                    fontSize: 20,
-                    boxShadow: "0 16px 34px rgba(88, 89, 202, 0.08)",
-                  }}
-                >
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1180,
-            paddingBottom: isMobile ? 52 : 74,
-          }}
-        >
-          <div
+          <section
             style={{
-              background: "linear-gradient(135deg, rgba(93,88,255,0.96), rgba(141,134,255,0.96), rgba(200,197,255,0.92))",
-              borderRadius: 32,
-              padding: isMobile ? "28px 20px" : "42px 38px",
-              color: "#fff",
-              boxShadow: "0 24px 60px rgba(88, 89, 202, 0.20)",
+              marginTop: 64,
             }}
           >
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: isMobile ? "1fr" : "1fr auto",
-                gap: 18,
+                display: "flex",
                 alignItems: "center",
+                justifyContent: "space-between",
+                gap: 16,
+                flexWrap: "wrap",
+                marginBottom: 20,
               }}
             >
               <div>
+                <SectionTag>
+                  <FaPlayCircle />
+                  How it works
+                </SectionTag>
                 <div
                   style={{
-                    fontSize: isMobile ? 30 : 42,
+                    marginTop: 14,
+                    color: TEXT,
+                    fontSize: isMobile ? 38 : 60,
+                    lineHeight: 1,
+                    letterSpacing: "-0.05em",
                     fontWeight: 700,
-                    lineHeight: 1.06,
-                    letterSpacing: -1.4,
                   }}
                 >
-                  Build trust before the demo even starts
+                  From business info to managed ads
                 </div>
+              </div>
+
+              <CTAButton onClick={goToSetup}>Get Started</CTAButton>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "repeat(4, minmax(0, 1fr))",
+                gap: 18,
+              }}
+            >
+              {CAROUSEL_ITEMS.map((item) => (
                 <div
+                  key={item.eyebrow}
                   style={{
-                    marginTop: 12,
-                    color: "rgba(255,255,255,0.88)",
-                    fontSize: isMobile ? 15 : 18,
-                    lineHeight: 1.7,
-                    maxWidth: 700,
+                    background: PANEL_STRONG,
+                    border: `1px solid ${BORDER}`,
+                    borderRadius: 30,
+                    padding: 22,
+                    boxShadow: SOFT_SHADOW,
+                    minHeight: 250,
                   }}
                 >
-                  A calmer page. Better color. More premium feel.
+                  <div
+                    style={{
+                      width: 44,
+                      height: 44,
+                      borderRadius: 14,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "rgba(91,87,232,0.10)",
+                      color: PURPLE,
+                      fontWeight: 900,
+                      fontSize: 14,
+                      marginBottom: 20,
+                    }}
+                  >
+                    {item.eyebrow}
+                  </div>
+
+                  <div
+                    style={{
+                      color: TEXT,
+                      fontWeight: 800,
+                      fontSize: 26,
+                      lineHeight: 1.08,
+                      marginBottom: 12,
+                    }}
+                  >
+                    {item.title}
+                  </div>
+
+                  <div
+                    style={{
+                      color: TEXT_SOFT,
+                      fontWeight: 600,
+                      fontSize: 15,
+                      lineHeight: 1.75,
+                    }}
+                  >
+                    {item.body}
+                  </div>
                 </div>
+              ))}
+            </div>
+          </section>
+
+          <section
+            style={{
+              marginTop: 64,
+              display: "grid",
+              gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 0.95fr) minmax(0, 1.05fr)",
+              gap: 20,
+            }}
+          >
+            <div
+              style={{
+                background: "linear-gradient(135deg, rgba(255,255,255,0.92), rgba(243,245,255,0.86))",
+                border: `1px solid ${BORDER}`,
+                borderRadius: 32,
+                padding: isMobile ? 24 : 30,
+                boxShadow: SHADOW,
+              }}
+            >
+              <SectionTag>
+                <FaSlidersH />
+                What Smartemark does
+              </SectionTag>
+
+              <div
+                style={{
+                  marginTop: 18,
+                  color: TEXT,
+                  fontSize: isMobile ? 36 : 52,
+                  lineHeight: 0.98,
+                  fontWeight: 700,
+                  letterSpacing: "-0.05em",
+                  marginBottom: 18,
+                }}
+              >
+                Cleaner launch.
+                <br />
+                Smarter management.
+              </div>
+
+              <div
+                style={{
+                  color: TEXT_SOFT,
+                  fontSize: 16,
+                  lineHeight: 1.8,
+                  fontWeight: 600,
+                  marginBottom: 22,
+                  maxWidth: 620,
+                }}
+              >
+                Smartemark is designed to act like a digital marketer in software form. It should
+                understand your business, create the ads, launch the campaign, then keep watching
+                for the next best move.
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gap: 12,
+                  marginBottom: 24,
+                }}
+              >
+                {[
+                  "Takes in business info and campaign goals",
+                  "Builds ad creatives and copy with AI",
+                  "Launches directly through your connected Facebook account",
+                  "Monitors performance and manages next steps",
+                ].map((item) => (
+                  <div
+                    key={item}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      color: TEXT,
+                      fontWeight: 700,
+                      fontSize: 15,
+                    }}
+                  >
+                    <span style={{ color: PURPLE }}>
+                      <FaCheckCircle />
+                    </span>
+                    <span>{item}</span>
+                  </div>
+                ))}
               </div>
 
               <div
                 style={{
                   display: "flex",
-                  flexWrap: "wrap",
                   gap: 12,
-                  justifyContent: isMobile ? "flex-start" : "flex-end",
+                  flexWrap: "wrap",
                 }}
               >
-                <button
-                  onClick={() => openEarlyAccess("mid_page_cta")}
-                  style={{
-                    border: "none",
-                    background: "#ffffff",
-                    color: PURPLE_DARK,
-                    fontWeight: 700,
-                    fontSize: 15,
-                    borderRadius: 999,
-                    padding: "14px 20px",
-                    cursor: "pointer",
-                  }}
-                >
+                <CTAButton onClick={goToSetup}>Launch Campaign</CTAButton>
+                <CTAButton onClick={goToSetup} secondary>
                   Get Started
-                </button>
-
-                <button
-                  onClick={goToLogin}
-                  style={{
-                    border: "1px solid rgba(255,255,255,0.24)",
-                    background: "rgba(255,255,255,0.10)",
-                    color: "#ffffff",
-                    fontWeight: 700,
-                    fontSize: 15,
-                    borderRadius: 999,
-                    padding: "14px 20px",
-                    cursor: "pointer",
-                  }}
-                >
-                  Login
-                </button>
+                </CTAButton>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
 
-      <div ref={faqRef} style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 980,
-            paddingBottom: isMobile ? 46 : 68,
-          }}
-        >
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
             <div
               style={{
-                display: "inline-flex",
-                padding: "8px 12px",
-                borderRadius: 999,
-                background: "rgba(107,99,255,0.08)",
-                color: PURPLE_DARK,
-                fontWeight: 700,
-                fontSize: 12,
-                border: `1px solid ${BORDER}`,
-                marginBottom: 14,
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "repeat(2, minmax(0, 1fr))",
+                gap: 16,
               }}
             >
-              FAQ
+              {RESULT_CARDS.map((card) => (
+                <MetricCard
+                  key={card.label}
+                  label={card.label}
+                  value={card.value}
+                  sub={card.sub}
+                />
+              ))}
             </div>
+          </section>
+
+          <section
+            id="landing-faq"
+            style={{
+              marginTop: 72,
+              paddingBottom: 30,
+            }}
+          >
+            <div style={{ marginBottom: 18 }}>
+              <SectionTag>FAQ</SectionTag>
+            </div>
+
             <div
               style={{
-                fontSize: isMobile ? 30 : 42,
-                fontWeight: 700,
-                letterSpacing: -1.4,
-              }}
-            >
-              Questions
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: 14 }}>
-            {faqList.map((item) => (
-              <div
-                key={item.question}
-                style={{
-                  background: "rgba(255,255,255,0.84)",
-                  border: `1px solid ${BORDER}`,
-                  borderRadius: 22,
-                  padding: isMobile ? "18px 16px" : "20px 20px",
-                  boxShadow: "0 14px 34px rgba(88, 89, 202, 0.06)",
-                }}
-              >
-                <div style={{ fontWeight: 700, fontSize: 18, marginBottom: 8 }}>
-                  {item.question}
-                </div>
-                <div style={{ color: TEXT_SOFT, lineHeight: 1.7, fontSize: 15 }}>
-                  {item.answer}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div
-            style={{
-              marginTop: 26,
-              display: "flex",
-              justifyContent: "center",
-            }}
-          >
-            <button
-              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-              style={{
-                border: `1px solid ${BORDER}`,
-                background: "#ffffff",
                 color: TEXT,
-                fontWeight: 700,
-                fontSize: 15,
-                borderRadius: 999,
-                padding: "13px 18px",
-                cursor: "pointer",
-              }}
-            >
-              Back to top
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div style={sectionWrap}>
-        <div
-          style={{
-            width: "100%",
-            maxWidth: 1180,
-            paddingBottom: 24,
-          }}
-        >
-          <div
-            style={{
-              borderTop: `1px solid ${BORDER}`,
-              paddingTop: 18,
-              display: "flex",
-              flexDirection: isMobile ? "column" : "row",
-              justifyContent: "space-between",
-              alignItems: isMobile ? "flex-start" : "center",
-              gap: 10,
-              color: TEXT_SOFT,
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            <div>Smartemark</div>
-            <a
-              href="mailto:knowwilltech@gmail.com"
-              style={{
-                color: TEXT_SOFT,
-                textDecoration: "none",
-              }}
-            >
-              knowwilltech@gmail.com
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {eaOpen && (
-        <div
-          onClick={closeEarlyAccess}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(15, 23, 42, 0.44)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 9999,
-            padding: 18,
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              width: isMobile ? "94vw" : 520,
-              borderRadius: 22,
-              padding: isMobile ? "18px 16px" : "22px 20px",
-              background: "#ffffff",
-              border: `1px solid ${BORDER}`,
-              boxShadow: "0 28px 70px rgba(88, 89, 202, 0.18)",
-              position: "relative",
-            }}
-          >
-            <button
-              onClick={closeEarlyAccess}
-              aria-label="Close"
-              style={{
-                position: "absolute",
-                top: 12,
-                right: 12,
-                width: 34,
-                height: 34,
-                borderRadius: 999,
-                border: `1px solid ${BORDER}`,
-                background: "#f7f8ff",
-                color: TEXT,
-                cursor: "pointer",
-                fontWeight: 700,
+                fontSize: isMobile ? 38 : 58,
                 lineHeight: 1,
+                letterSpacing: "-0.05em",
+                fontWeight: 700,
+                marginBottom: 20,
               }}
             >
-              ×
-            </button>
-
-            <div style={{ fontWeight: 700, fontSize: isMobile ? 22 : 24, marginBottom: 8 }}>
-              Early Access
+              Questions before you launch
             </div>
 
-            <div style={{ color: TEXT_SOFT, lineHeight: 1.7, fontWeight: 500 }}>
-              Join the list and we’ll reach out.
+            <div
+              style={{
+                display: "grid",
+                gap: 14,
+              }}
+            >
+              {FAQS.map((item, idx) => (
+                <FAQItem
+                  key={item.q}
+                  item={item}
+                  open={openFaq === idx}
+                  onToggle={() => setOpenFaq(openFaq === idx ? -1 : idx)}
+                />
+              ))}
             </div>
-
-            <div style={{ height: 12 }} />
-
-            {!eaSubmitted ? (
-              <form onSubmit={submitEarlyAccess} style={{ marginTop: 6 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <input
-                    value={eaName}
-                    onChange={(e) => setEaName(e.target.value)}
-                    placeholder="Name"
-                    style={{
-                      width: "100%",
-                      padding: "0.82rem 0.95rem",
-                      borderRadius: 14,
-                      border: `1px solid ${BORDER}`,
-                      background: "#ffffff",
-                      color: TEXT,
-                      outline: "none",
-                      fontWeight: 600,
-                      fontSize: 15,
-                    }}
-                  />
-
-                  <input
-                    value={eaEmail}
-                    onChange={(e) => setEaEmail(e.target.value)}
-                    placeholder="Email"
-                    type="email"
-                    style={{
-                      width: "100%",
-                      padding: "0.82rem 0.95rem",
-                      borderRadius: 14,
-                      border: `1px solid ${BORDER}`,
-                      background: "#ffffff",
-                      color: TEXT,
-                      outline: "none",
-                      fontWeight: 600,
-                      fontSize: 15,
-                    }}
-                  />
-
-                  <button
-                    type="submit"
-                    style={{
-                      marginTop: 4,
-                      padding: "0.9rem 1.2rem",
-                      fontSize: "1rem",
-                      background: BTN,
-                      color: "#fff",
-                      border: "none",
-                      borderRadius: 999,
-                      fontWeight: 700,
-                      boxShadow: "0 14px 34px rgba(77,107,255,0.24)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Submit
-                  </button>
-                </div>
-              </form>
-            ) : (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontWeight: 700, fontSize: 18, color: TEXT }}>
-                  Thank you
-                </div>
-                <div style={{ marginTop: 8, color: TEXT_SOFT, fontWeight: 500, lineHeight: 1.7 }}>
-                  {eaServerOk ? (
-                    <>Your request was received.</>
-                  ) : (
-                    <>
-                      To be safe, click{" "}
-                      <a
-                        href={mailtoHref}
-                        style={{
-                          color: PURPLE_DARK,
-                          fontWeight: 700,
-                          textDecoration: "none",
-                        }}
-                      >
-                        send via email
-                      </a>
-                      .
-                    </>
-                  )}
-                </div>
-
-                <button
-                  onClick={closeEarlyAccess}
-                  style={{
-                    marginTop: 12,
-                    padding: "0.7rem 1.2rem",
-                    fontSize: "0.98rem",
-                    color: TEXT,
-                    background: "#f7f8ff",
-                    border: `1px solid ${BORDER}`,
-                    borderRadius: 999,
-                    cursor: "pointer",
-                    fontWeight: 700,
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            )}
-          </div>
+          </section>
         </div>
-      )}
+      </div>
     </div>
   );
-};
-
-export default Landing;
+}
