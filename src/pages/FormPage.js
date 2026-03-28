@@ -9,11 +9,11 @@ import { trackEvent } from "../analytics/gaEvents";
 /* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "#1f2450";
-const SURFACE = "#2a2f63";
-const TEAL = "#8f87ff";
-const TEAL_SOFT = "rgba(143,135,255,0.26)";
-const EDGE = "rgba(255,255,255,0.10)";
+const DARK_BG = "#cfd3ff";
+const SURFACE = "#dde1ff";
+const TEAL = "#7b72ff";
+const TEAL_SOFT = "rgba(123,114,255,0.20)";
+const EDGE = "rgba(93,89,234,0.12)";
 const SIDE_CHAT_LIMIT = 5;
 
 /* -------- Backend endpoints (proxy through Vercel) -------- */
@@ -1975,7 +1975,7 @@ async function generatePosterBPair(runToken) {
           right: "-10vw",
           width: 640,
           height: 640,
-          background: "radial-gradient(40% 40% at 50% 50%, rgba(155,145,255,0.28), transparent 70%)",
+          background: "radial-gradient(40% 40% at 50% 50%, rgba(123,114,255,0.18), transparent 70%)",
           filter: "blur(18px)",
           pointerEvents: "none",
           zIndex: 0,
@@ -2044,7 +2044,7 @@ async function generatePosterBPair(runToken) {
       >
         <div
           style={{
-            color: "#ddd9ff",
+            color: "#6f66f5",
             fontSize: 15,
             fontWeight: 900,
             marginBottom: 10,
@@ -2066,7 +2066,7 @@ async function generatePosterBPair(runToken) {
             overflowY: "auto",
             marginBottom: 16,
             padding: 16,
-            background: "#2b315f",
+            background: "#eef1ff",
             borderRadius: 12,
             border: `1px solid ${EDGE}`,
             display: "flex",
