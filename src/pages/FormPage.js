@@ -9,11 +9,11 @@ import { trackEvent } from "../analytics/gaEvents";
 /* --------- Palette / fonts --------- */
 const MODERN_FONT = "'Poppins', 'Inter', 'Segoe UI', Arial, sans-serif";
 const AD_FONT = "Helvetica, Futura, Impact, Arial, sans-serif";
-const DARK_BG = "linear-gradient(180deg, #f4f1eb 0%, #eeece7 40%, #e8e6f4 72%, #dddaf3 100%)";
-const SURFACE = "rgba(255,255,255,0.72)";
-const TEAL = "#6f66f5";
-const TEAL_SOFT = "rgba(111,102,245,0.14)";
-const EDGE = "rgba(80,72,120,0.10)";
+const DARK_BG = "linear-gradient(115deg, #efede8 0%, #ebe8e2 34%, #e8e6ef 68%, #dddaf0 100%)";
+const SURFACE = "rgba(248,246,242,0.82)";
+const TEAL = "#8f87ff";
+const TEAL_SOFT = "rgba(143,135,255,0.14)";
+const EDGE = "rgba(108,101,145,0.10)";
 const SIDE_CHAT_LIMIT = 5;
 
 /* -------- Backend endpoints (proxy through Vercel) -------- */
@@ -1967,7 +1967,7 @@ async function generatePosterBPair(runToken) {
         .chat-scroll::-webkit-scrollbar-track { background: #14181d; }
       `}</style>
 
-                 <div
+         <div
         aria-hidden
         style={{
           position: "fixed",
@@ -1975,11 +1975,11 @@ async function generatePosterBPair(runToken) {
           pointerEvents: "none",
           zIndex: 0,
           background:
-            "linear-gradient(120deg, rgba(255,255,255,0.26) 10%, rgba(255,255,255,0.04) 34%, rgba(141,133,241,0.10) 62%, rgba(111,102,245,0.14) 100%)",
+            "linear-gradient(120deg, rgba(255,255,255,0.22) 10%, rgba(255,255,255,0.03) 34%, rgba(151,145,233,0.08) 62%, rgba(143,135,255,0.10) 100%)",
         }}
       />
 
-      <div
+         <div
         aria-hidden
         style={{
           position: "fixed",
@@ -1987,7 +1987,7 @@ async function generatePosterBPair(runToken) {
           right: "-8vw",
           width: 640,
           height: 640,
-          background: "radial-gradient(42% 42% at 50% 50%, rgba(137,128,246,0.18), transparent 72%)",
+          background: "radial-gradient(42% 42% at 50% 50%, rgba(156,149,243,0.14), transparent 72%)",
           filter: "blur(24px)",
           pointerEvents: "none",
           zIndex: 0,
@@ -2043,7 +2043,7 @@ async function generatePosterBPair(runToken) {
           maxWidth: 760,
           marginTop: 20,
           marginBottom: 26,
-          background: "rgba(255,255,255,0.68)",
+          background: "rgba(248,246,242,0.78)",
           borderRadius: 28,
           border: `1px solid ${EDGE}`,
           boxShadow: "0 16px 42px rgba(66,54,120,0.10)",
@@ -2079,7 +2079,7 @@ async function generatePosterBPair(runToken) {
             overflowY: "auto",
             marginBottom: 16,
             padding: 16,
-            background: "rgba(255,255,255,0.46)",
+            background: "rgba(250,248,244,0.52)",
             borderRadius: 22,
             border: `1px solid ${EDGE}`,
             display: "flex",
@@ -2121,7 +2121,7 @@ async function generatePosterBPair(runToken) {
               display: "flex",
               gap: 10,
               alignItems: "center",
-              background: "rgba(255,255,255,0.88)",
+              background: "rgba(249,247,243,0.92)",
               border: `1px solid ${EDGE}`,
               borderRadius: 22,
               padding: 8,
@@ -2249,21 +2249,21 @@ async function generatePosterBPair(runToken) {
               </span>
 
               <button
-                style={{
-                  background: "#1ad6b7",
-                  color: "#222",
-                  border: "none",
-                  borderRadius: 12,
-                  fontWeight: 700,
-                  fontSize: "1.01rem",
-                  padding: "6px 20px",
-                  cursor: imageLoading ? "not-allowed" : "pointer",
-                  marginLeft: 8,
-                  boxShadow: "0 2px 7px #19e5b733",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 7,
-                }}
+              style={{
+  background: "#e5e0ff",
+  color: "#5f56eb",
+  border: "none",
+  borderRadius: 12,
+  fontWeight: 700,
+  fontSize: "1.01rem",
+  padding: "6px 20px",
+  cursor: imageLoading ? "not-allowed" : "pointer",
+  marginLeft: 8,
+  boxShadow: "0 2px 10px rgba(143,135,255,0.14)",
+  display: "flex",
+  alignItems: "center",
+  gap: 7,
+}}
                 onClick={handleRegenerateImage}
                 disabled={imageLoading}
                 title="Regenerate Image Ad"
@@ -2509,22 +2509,22 @@ async function generatePosterBPair(runToken) {
       >
         <button
           disabled={false}
-          style={{
-            background: TEAL,
-            color: "#0e1519",
-            border: "none",
-            borderRadius: 13,
-            fontWeight: 900,
-            fontSize: "1.08rem",
-            padding: "16px 56px",
-            marginBottom: 4,
-            fontFamily: MODERN_FONT,
-            boxShadow: `0 2px 16px ${TEAL_SOFT}`,
-            cursor: "pointer",
-            transition: "background 0.18s, opacity 0.18s, transform 0.18s",
-            opacity: 1,
-            transform: "translateY(0)",
-          }}
+        style={{
+  background: "#e9e4dc",
+  color: "#3a3648",
+  border: "none",
+  borderRadius: 13,
+  fontWeight: 900,
+  fontSize: "1.08rem",
+  padding: "16px 56px",
+  marginBottom: 4,
+  fontFamily: MODERN_FONT,
+  boxShadow: "0 8px 22px rgba(90,82,120,0.08)",
+  cursor: "pointer",
+  transition: "background 0.18s, opacity 0.18s, transform 0.18s",
+  opacity: 1,
+  transform: "translateY(0)",
+}}
           onClick={() => {
             if (!hasGenerated) {
               alert("Generate your previews first. Type 'yes' in the chat.");
