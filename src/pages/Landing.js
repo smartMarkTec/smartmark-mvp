@@ -494,31 +494,21 @@ export default function Landing() {
     </div>
   </div>
 
-  <div
-    style={{
-      background: "#ffffff",
-      border: `1px solid ${BORDER}`,
-      borderRadius: 18,
-      padding: 16,
-    }}
-  >
-    <div style={{ color: "#7b849f", fontWeight: 800, fontSize: 12, marginBottom: 8 }}>
-      AI Status
-    </div>
-    <div style={{ color: TEXT, fontWeight: 900, fontSize: 26, marginBottom: 6 }}>
-      Optimizing
-    </div>
-    <div
-      style={{
-        color: "#6b63f4",
-        fontWeight: 800,
-        fontSize: 13,
-        lineHeight: 1.35,
-      }}
-    >
-      Scaling winners and refreshing creatives
-    </div>
+<div
+  style={{
+    background: "#ffffff",
+    border: `1px solid ${BORDER}`,
+    borderRadius: 18,
+    padding: 16,
+  }}
+>
+  <div style={{ color: "#7b849f", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
+    AI Status
   </div>
+  <div style={{ color: TEXT, fontWeight: 700, fontSize: 26, marginBottom: 2 }}>
+    Optimizing
+  </div>
+</div>
 </div>
 
                     <div
