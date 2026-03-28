@@ -505,7 +505,7 @@ export default function Landing() {
   <div style={{ color: "#7b849f", fontWeight: 700, fontSize: 12, marginBottom: 8 }}>
     AI Status
   </div>
-  <div style={{ color: TEXT, fontWeight: 500, fontSize: 26, marginBottom: 2 }}>
+  <div style={{ color: TEXT, fontWeight: 700, fontSize: 26, marginBottom: 2 }}>
     Optimizing
   </div>
 </div>
