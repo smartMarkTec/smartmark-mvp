@@ -1,6 +1,6 @@
 /* eslint-disable */
 import React, { useEffect, useState } from "react";
-import { FaArrowRight, FaBolt, FaCheckCircle, FaChevronDown } from "react-icons/fa";
+import { FaArrowRight, FaBolt, FaChevronDown } from "react-icons/fa";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 
@@ -364,38 +364,8 @@ export default function Landing() {
                   <CTAButton onClick={openDemoPopup}>Launch Campaign</CTAButton>
                 </div>
 
-                <div
-                  style={{
-                    display: "grid",
-                    gap: 12,
-                    maxWidth: 760,
-                  }}
-                >
-                  {[
-                    "No agency or ad knowledge needed",
-                    "AI takes in your business info and creates the ads",
-                    "Launches through your connected Facebook account",
-                    "Manages campaign performance and next steps",
-                  ].map((item) => (
-                    <div
-                      key={item}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        color: TEXT,
-                        fontWeight: 700,
-                        fontSize: 16,
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      <span style={{ color: PURPLE }}>
-                        <FaCheckCircle />
-                      </span>
-                      <span>{item}</span>
-                    </div>
-                  ))}
-                </div>
+            
+          
               </div>
 
               <div
