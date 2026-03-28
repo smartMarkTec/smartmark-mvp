@@ -745,6 +745,71 @@ function buildGeneratedCreativePatchFromAction(action) {
 
   return patch;
 }
+function normalizeAdPreviewImage(url) {
+  return String(url || '').trim();
+}
+
+function buildOptimizerCreativeViewModel({ optimizerState, perAdImages = [] }) {
+  const pending = optimizerState?.pendingCreativeTest || null;
+  const winner = optimizerState?.currentWinner || null;
+
+  const controlAdIds = Array.isArray(pending?.controlAdIds)
+    ? pending.controlAdIds.map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+
+  const candidateAdIds = Array.isArray(pending?.candidateAdIds)
+    ? pending.candidateAdIds.map((v) => String(v || '').trim()).filter(Boolean)
+    : [];
+
+  const imageMap = new Map(
+    (Array.isArray(perAdImages) ? perAdImages : []).map((item) => [
+      String(item?.adId || '').trim(),
+      {
+        adId: String(item?.adId || '').trim(),
+        adName: String(item?.adName || '').trim(),
+        imageUrl: normalizeAdPreviewImage(item?.imageUrl),
+      },
+    ])
+  );
+
+  const control = controlAdIds
+    .map((adId) => imageMap.get(adId))
+    .filter(Boolean)
+    .map((item) => ({
+      ...item,
+      role: 'control',
+      isWinner: winner?.adId && String(winner.adId).trim() === item.adId,
+    }));
+
+  const challengers = candidateAdIds
+    .map((adId) => imageMap.get(adId))
+    .filter(Boolean)
+    .map((item) => ({
+      ...item,
+      role: 'challenger',
+      isWinner: winner?.adId && String(winner.adId).trim() === item.adId,
+    }));
+
+  const winnerCard =
+    winner?.adId && imageMap.get(String(winner.adId).trim())
+      ? {
+          ...imageMap.get(String(winner.adId).trim()),
+          role: 'winner',
+          isWinner: true,
+          winnerType: String(winner?.winnerType || winner?.type || '').trim() || null,
+        }
+      : null;
+
+  return {
+    hasOptimizerCreativeState: control.length > 0 || challengers.length > 0 || !!winnerCard,
+    pendingStatus: String(pending?.status || '').trim().toLowerCase(),
+    activeTestType: String(optimizerState?.activeTestType || '').trim(),
+    control,
+    challengers,
+    winner: winnerCard,
+  };
+}
+
 function makeInitialPublicSummary(overrides = {}) {
   return {
     headline: 'Monitoring campaign performance',
@@ -3994,12 +4059,14 @@ router.get('/facebook/adaccount/:accountId/campaign/:campaignId/creatives', asyn
       },
     });
 
-    const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
+     const ads = Array.isArray(adsRes.data?.data) ? adsRes.data.data : [];
     console.log('[creatives] ads fetched', {
       campaignId: normalizedCampaignId,
       accountId: normalizedAccountId,
       adCount: ads.length,
     });
+
+    const perAdImages = [];
 
    let recoveredHeadline = safeMetaFromRecord.headline;
 let recoveredBody = safeMetaFromRecord.body;
@@ -4083,7 +4150,15 @@ for (let i = 0; i < ads.length; i += 1) {
     if (localHit) break;
   }
 
-  if (localHit) perAdLocalImages.push(localHit);
+  if (localHit) {
+    perAdLocalImages.push(localHit);
+    perAdImages.push({
+      adId: String(ad?.id || '').trim(),
+      adName: String(ad?.name || '').trim(),
+      imageUrl: String(localHit || '').trim(),
+    });
+  }
+
   if (perAdLocalImages.length >= 2) break;
 }
 
@@ -4156,6 +4231,27 @@ if (!finalImages.length) {
     db.data.campaign_creatives = creativeList;
     await db.write();
 
+       let optimizerState = null;
+
+    try {
+      optimizerState = await findExactOptimizerCampaignState({
+        campaignId: normalizedCampaignId,
+        accountId: normalizedAccountId,
+        ownerKey: String(ownerKeyFromReq(req) || getDebugOwnerKeyOverride(req) || '').trim(),
+      });
+
+      if (!optimizerState) {
+        optimizerState = await findOptimizerCampaignStateByCampaignId(normalizedCampaignId);
+      }
+    } catch (stateErr) {
+      console.warn('[creatives] optimizer state lookup failed:', stateErr?.message || stateErr);
+    }
+
+    const optimizerCreativeView = buildOptimizerCreativeViewModel({
+      optimizerState,
+      perAdImages,
+    });
+
     return res.json({
       campaignId: normalizedCampaignId,
       accountId: normalizedAccountId,
@@ -4164,6 +4260,8 @@ if (!finalImages.length) {
       status: nextRecord.status,
       mediaSelection: 'image',
       images: finalImages,
+      perAdImages,
+      optimizerCreativeView,
       videos: [],
       fbVideoIds: [],
       meta: nextRecord.meta,

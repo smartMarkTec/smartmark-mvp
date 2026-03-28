@@ -2,7 +2,19 @@
 // src/pages/CampaignSetup.js
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { FaPause, FaPlay, FaTrash, FaPlus, FaChevronDown, FaBolt, FaSearch, FaChartLine, FaShieldAlt, FaRegClock } from "react-icons/fa";
+import {
+  FaPause,
+  FaPlay,
+  FaTrash,
+  FaPlus,
+  FaChevronDown,
+  FaBolt,
+  FaSearch,
+  FaChartLine,
+  FaShieldAlt,
+  FaRegClock,
+  FaEllipsisV,
+} from "react-icons/fa";
 import { trackEvent } from "../analytics/gaEvents";
 
 
@@ -619,6 +631,26 @@ const writeCreativeMap = (user, actId, map) => {
     localStorage.setItem(CREATIVE_MAP_KEY(user, actId), JSON.stringify(map || {}));
   } catch {}
 };
+
+const CAMPAIGN_SETTINGS_KEY = (user) =>
+  user ? withUser(user, "sm_campaign_settings_v1") : "sm_campaign_settings_v1";
+
+function readCampaignSettingsMap(user) {
+  try {
+    const raw =
+      localStorage.getItem(CAMPAIGN_SETTINGS_KEY(user)) ||
+      localStorage.getItem("sm_campaign_settings_v1");
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCampaignSettingsMap(user, map) {
+  try {
+    localStorage.setItem(CAMPAIGN_SETTINGS_KEY(user), JSON.stringify(map || {}));
+  } catch {}
+}
 
 /* ------------------ expire logic (persist only until campaign duration ends) ------------------ */
 function isExpiredSavedCreative(saved) {
@@ -1792,21 +1824,21 @@ function PendingCreativeTestCard({
 
   const pending = optimizerCreativeState?.pendingCreativeTest || null;
 
-  const original = (originalImages || []).map(toAbsoluteMedia).filter(Boolean);
-  const variants = generatedCreatives.map((x) => x.url).map(toAbsoluteMedia).filter(Boolean);
+  const currentImages = (originalImages || []).map(toAbsoluteMedia).filter(Boolean);
+  const aiImages = generatedCreatives.map((x) => x.url).map(toAbsoluteMedia).filter(Boolean);
 
-  if (!original.length && !variants.length) return null;
+  if (!currentImages.length && !aiImages.length) return null;
 
   const status = String(pending?.status || "generated").trim().toLowerCase();
 
   const statusLabel =
     status === "live"
-      ? "A/B testing"
+      ? "A/B testing in progress"
       : status === "ready"
-      ? "Strategizing"
+      ? "AI preparing next move"
       : status === "resolved"
-      ? "Resolved"
-      : "Generated";
+      ? "Latest test resolved"
+      : "Creative monitoring";
 
   return (
     <>
@@ -1838,7 +1870,7 @@ function PendingCreativeTestCard({
                 marginBottom: 4,
               }}
             >
-              Ad Creatives
+              Creative Activity
             </div>
             <div
               style={{
@@ -1848,7 +1880,7 @@ function PendingCreativeTestCard({
                 lineHeight: 1.5,
               }}
             >
-              Current creatives and any AI challengers for this campaign.
+              Smartemark keeps your ad visuals here and updates this area when AI starts testing.
             </div>
           </div>
 
@@ -1879,24 +1911,12 @@ function PendingCreativeTestCard({
             flexWrap: "wrap",
           }}
         >
-          <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-            <div>
-              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                Originals
-              </div>
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 22 }}>
-                {original.length}
-              </div>
-            </div>
-
-            <div>
-              <div style={{ color: "#94a3b8", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
-                Challengers
-              </div>
-              <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 22 }}>
-                {variants.length}
-              </div>
-            </div>
+          <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13, lineHeight: 1.6 }}>
+            {status === "live"
+              ? "AI is actively comparing creative performance."
+              : status === "ready"
+              ? "AI has a new creative direction ready."
+              : "Your current campaign visuals are stored here."}
           </div>
 
           <button
@@ -1970,7 +1990,7 @@ function PendingCreativeTestCard({
                     marginTop: 4,
                   }}
                 >
-                  Originals first. AI challengers appear here only when they exist.
+                  Current visuals and any AI updates for this campaign.
                 </div>
               </div>
 
@@ -1992,15 +2012,15 @@ function PendingCreativeTestCard({
               </button>
             </div>
 
-            {!!original.length && (
+            {!!currentImages.length && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 15 }}>
-                  Current Ad Creatives
+                  Current Creatives
                 </div>
                 <CreativeThumbGrid
-                  items={original}
-                  labels={original.map((_, idx) =>
-                    original.length === 1 ? "Creative" : `Creative ${idx + 1}`
+                  items={currentImages}
+                  labels={currentImages.map((_, idx) =>
+                    currentImages.length === 1 ? "Creative" : `Creative ${idx + 1}`
                   )}
                   onOpen={(url) => onOpenImage && onOpenImage(url)}
                   height={190}
@@ -2008,14 +2028,14 @@ function PendingCreativeTestCard({
               </div>
             )}
 
-            {!!variants.length && (
+            {!!aiImages.length && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 15 }}>
-                  AI Challengers
+                  AI Updates
                 </div>
                 <CreativeThumbGrid
-                  items={variants}
-                  labels={variants.map((_, idx) => `Challenger ${idx + 1}`)}
+                  items={aiImages}
+                  labels={aiImages.map((_, idx) => `AI Creative ${idx + 1}`)}
                   onOpen={(url) => onOpenImage && onOpenImage(url)}
                   height={190}
                 />
@@ -2573,22 +2593,33 @@ useEffect(() => {
   const [pages, setPages] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
-const [metricsMap, setMetricsMap] = useState({});
-const [publicSummaryMap, setPublicSummaryMap] = useState({});
-const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
-const [optimizerCreativeMap, setOptimizerCreativeMap] = useState({});
-const [optimizerStateMap, setOptimizerStateMap] = useState({});
-const [launched, setLaunched] = useState(false);
-const [launchResult, setLaunchResult] = useState(null);
-const [loading, setLoading] = useState(false);
+  const [metricsMap, setMetricsMap] = useState({});
+  const [publicSummaryMap, setPublicSummaryMap] = useState({});
+  const [campaignCreativesMap, setCampaignCreativesMap] = useState({});
+  const [optimizerCreativeMap, setOptimizerCreativeMap] = useState({});
+  const [optimizerStateMap, setOptimizerStateMap] = useState({});
+  const [launched, setLaunched] = useState(false);
+  const [launchResult, setLaunchResult] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [, setCampaignStatus] = useState("ACTIVE");
   const [campaignCount, setCampaignCount] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
- const [expandedId, setExpandedId] = useState(null);
-const [setupTab, setSetupTab] = useState("connect");
+  const [expandedId, setExpandedId] = useState(null);
+  const [setupTab, setSetupTab] = useState("connect");
 
-const [showImageModal, setShowImageModal] = useState(false);
-const [modalImg, setModalImg] = useState("");
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [modalImg, setModalImg] = useState("");
+
+  const [showCampaignMenu, setShowCampaignMenu] = useState(false);
+  const [showEditCampaignModal, setShowEditCampaignModal] = useState(false);
+  const [campaignSettingsMap, setCampaignSettingsMap] = useState(() =>
+    readCampaignSettingsMap(resolvedUser)
+  );
+  const [editCampaignForm, setEditCampaignForm] = useState({
+    budget: "",
+    startDate: "",
+    endDate: "",
+  });
 
   const [draftCreatives, setDraftCreatives] = useState({
     images: [],
@@ -3630,14 +3661,13 @@ const handleDeleteCampaign = async (campaignId) => {
 
 const adminActive = true;
 
-const canLaunch = !!(
+ const canLaunch = !!(
   fbConnected &&
   selectedAccount &&
   selectedPageId &&
   budget &&
   !isNaN(parseFloat(budget)) &&
-  parseFloat(budget) >= 3 &&
-  (adminActive || billingInfo.hasAccess)
+  parseFloat(budget) >= 3
 );
 
   function capTwoWeeksISO(startISO, endISO) {
@@ -3783,7 +3813,12 @@ function isValidHttpUrl(u) {
 }
 
 
-  const handleLaunch = async () => {
+   const handleLaunch = async () => {
+    if (!billingInfo?.hasAccess) {
+      await handleSubscribeToPlan();
+      return;
+    }
+
     setLoading(true);
     try {
 const acctId = String(selectedAccount || "").trim().replace(/^act_/, "");
@@ -4197,21 +4232,75 @@ const getSavedCreatives = (campaignId) => {
       ? getSavedCreatives(selectedCampaignId)
       : { images: [], mediaSelection: "image", meta: { headline: "", body: "", link: "" } };
 
-  const selectedOptimizerSummary =
-    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
-      ? publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()
-      : getFallbackPublicSummary();
-
-  const selectedOptimizerState =
-    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
-      ? optimizerStateMap[selectedCampaignId] || null
-      : null;
-
-  const selectedOptimizerCreativeState =
+   const selectedOptimizerCreativeState =
     selectedCampaignId && selectedCampaignId !== "__DRAFT__"
       ? optimizerCreativeMap[selectedCampaignId] || null
       : null;
 
+      const selectedOptimizerState =
+  selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+    ? optimizerStateMap[selectedCampaignId] || null
+    : null;
+
+const selectedOptimizerSummary =
+  selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+    ? publicSummaryMap[selectedCampaignId] || getFallbackPublicSummary()
+    : getFallbackPublicSummary();
+
+  const selectedCampaignSettings =
+    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+      ? campaignSettingsMap[selectedCampaignId] || {}
+      : {};
+
+  const displayedCampaignSettings =
+    selectedCampaignId && selectedCampaignId !== "__DRAFT__"
+      ? {
+          budget: String(selectedCampaignSettings?.budget || "—").trim(),
+          startDate: String(selectedCampaignSettings?.startDate || "—").trim(),
+          endDate: String(selectedCampaignSettings?.endDate || "—").trim(),
+        }
+      : {
+          budget: String(budget || "—").trim(),
+          startDate: String(startDate || "—").trim(),
+          endDate: String(endDate || "—").trim(),
+        };
+
+  useEffect(() => {
+    writeCampaignSettingsMap(resolvedUser, campaignSettingsMap);
+  }, [resolvedUser, campaignSettingsMap]);
+
+  const openEditCurrentCampaign = () => {
+    if (!selectedLiveCampaign) return;
+
+    const id = String(selectedLiveCampaign.id || "").trim();
+    const saved = campaignSettingsMap[id] || {};
+
+    setEditCampaignForm({
+      budget: String(saved?.budget || "").trim(),
+      startDate: String(saved?.startDate || "").trim(),
+      endDate: String(saved?.endDate || "").trim(),
+    });
+
+    setShowCampaignMenu(false);
+    setShowEditCampaignModal(true);
+  };
+
+  const saveCurrentCampaignSettings = () => {
+    if (!selectedLiveCampaign) return;
+
+    const id = String(selectedLiveCampaign.id || "").trim();
+
+    setCampaignSettingsMap((prev) => ({
+      ...prev,
+      [id]: {
+        budget: String(editCampaignForm?.budget || "").trim(),
+        startDate: String(editCampaignForm?.startDate || "").trim(),
+        endDate: String(editCampaignForm?.endDate || "").trim(),
+      },
+    }));
+
+    setShowEditCampaignModal(false);
+  };
   /* ================================ UI ================================ */
   return (
     <div
@@ -4348,7 +4437,7 @@ const getSavedCreatives = (campaignId) => {
       gap: 10,
     }}
   >
-    {[
+     {[
       {
         key: "connect",
         step: "01",
@@ -4358,14 +4447,14 @@ const getSavedCreatives = (campaignId) => {
       {
         key: "creatives",
         step: "02",
-        title: "Ad Creatives",
-        subtitle: "Originals and challengers",
+        title: "Creatives",
+        subtitle: "Ad visuals and AI updates",
       },
       {
         key: "campaign",
         step: "03",
         title: "Campaign",
-        subtitle: "Metrics, settings, launch",
+        subtitle: "Metrics, launch, management",
       },
     ].map((item) => {
       const active = setupTab === item.key;
@@ -4643,10 +4732,10 @@ const getSavedCreatives = (campaignId) => {
       <>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 28, lineHeight: 1.1 }}>
-            Ad Creatives
+            Creatives
           </div>
           <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
-            Keep your original creatives here. AI challengers appear only when Smartemark creates them.
+            This is where users see campaign visuals and AI creative activity.
           </div>
         </div>
 
@@ -4662,23 +4751,23 @@ const getSavedCreatives = (campaignId) => {
             minHeight: 520,
           }}
         >
-          {!!((draftCreatives?.images && draftCreatives.images.length) || (Array.isArray(navImageUrls) && navImageUrls.length)) && (
+          {selectedCampaignId ? (
             <>
               <div
                 style={{
                   display: "flex",
                   justifyContent: "space-between",
-                  alignItems: "center",
+                  alignItems: "flex-start",
                   gap: 12,
                   flexWrap: "wrap",
                 }}
               >
                 <div>
                   <div style={{ color: "#0f172a", fontWeight: 900, fontSize: 18, marginBottom: 4 }}>
-                    Current Ad Creatives
+                    Campaign Creatives
                   </div>
                   <div style={{ color: "#64748b", fontWeight: 700, fontSize: 13 }}>
-                    Your original generated assets.
+                    Smartemark stores the current visuals here and updates this page when AI starts testing.
                   </div>
                 </div>
 
@@ -4693,42 +4782,40 @@ const getSavedCreatives = (campaignId) => {
                   }}
                 >
                   {optimizerCreativeMap[selectedCampaignId || ""]?.pendingCreativeTest?.status === "live"
-                    ? "A/B testing"
+                    ? "A/B testing in progress"
                     : optimizerCreativeMap[selectedCampaignId || ""]?.generatedCreatives?.length
-                    ? "Strategizing"
-                    : "Ready"}
+                    ? "AI preparing next move"
+                    : "Monitoring"}
                 </div>
               </div>
 
               <CreativeThumbGrid
-                items={
-                  (draftCreatives?.images && draftCreatives.images.length
-                    ? draftCreatives.images
-                    : navImageUrls
-                  ) || []
-                }
-                labels={((draftCreatives?.images && draftCreatives.images.length
-                  ? draftCreatives.images
-                  : navImageUrls
-                ) || []).map((_, idx) => `Creative ${idx + 1}`)}
+                items={(selectedCampaignCreatives?.images || []).slice(0, 2)}
+                labels={((selectedCampaignCreatives?.images || []).slice(0, 2)).map(
+                  (_, idx) => `Creative ${idx + 1}`
+                )}
                 height={210}
                 onOpen={(url) => {
                   setModalImg(url);
                   setShowImageModal(true);
                 }}
               />
-            </>
-          )}
 
-          {selectedCampaignId && selectedCampaignId !== "__DRAFT__" && (
-            <PendingCreativeTestCard
-              optimizerCreativeState={optimizerCreativeMap[selectedCampaignId] || null}
-              originalImages={(getSavedCreatives(selectedCampaignId)?.images || []).slice(0, 2)}
-              onOpenImage={(url) => {
-                setModalImg(url);
-                setShowImageModal(true);
-              }}
-            />
+              {selectedCampaignId !== "__DRAFT__" && (
+                <PendingCreativeTestCard
+                  optimizerCreativeState={optimizerCreativeMap[selectedCampaignId] || null}
+                  originalImages={(getSavedCreatives(selectedCampaignId)?.images || []).slice(0, 2)}
+                  onOpenImage={(url) => {
+                    setModalImg(url);
+                    setShowImageModal(true);
+                  }}
+                />
+              )}
+            </>
+          ) : (
+            <div style={{ color: "#64748b", fontWeight: 700, fontSize: 14, lineHeight: 1.6 }}>
+              Select a campaign to view its creative library and AI update status.
+            </div>
           )}
         </div>
       </>
@@ -4805,7 +4892,7 @@ const getSavedCreatives = (campaignId) => {
                   </div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", position: "relative" }}>
                   {selectedLiveCampaign && (
                     <button
                       type="button"
@@ -4845,6 +4932,86 @@ const getSavedCreatives = (campaignId) => {
                         <FaPause />
                       )}
                     </button>
+                  )}
+
+                  {selectedLiveCampaign && (
+                    <button
+                      type="button"
+                      onClick={() => setShowCampaignMenu((v) => !v)}
+                      title="Campaign actions"
+                      style={{
+                        width: 34,
+                        height: 34,
+                        borderRadius: 10,
+                        border: "1px solid #dbe4ff",
+                        background: "#ffffff",
+                        color: "#111827",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <FaEllipsisV />
+                    </button>
+                  )}
+
+                  {showCampaignMenu && selectedLiveCampaign && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 42,
+                        right: 42,
+                        minWidth: 170,
+                        background: "#ffffff",
+                        border: "1px solid #e5e7eb",
+                        borderRadius: 14,
+                        boxShadow: "0 18px 40px rgba(15,23,42,0.12)",
+                        padding: 8,
+                        zIndex: 20,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={openEditCurrentCampaign}
+                        style={{
+                          background: "#ffffff",
+                          color: "#111827",
+                          border: "none",
+                          textAlign: "left",
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          fontWeight: 800,
+                          fontSize: 13,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Edit budget + duration
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowCampaignMenu(false);
+                          handleDeleteCampaign(selectedLiveCampaign.id);
+                        }}
+                        style={{
+                          background: "#ffffff",
+                          color: "#b42318",
+                          border: "none",
+                          textAlign: "left",
+                          padding: "10px 12px",
+                          borderRadius: 10,
+                          fontWeight: 800,
+                          fontSize: 13,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Delete campaign
+                      </button>
+                    </div>
                   )}
 
                   <button
@@ -4971,7 +5138,7 @@ const getSavedCreatives = (campaignId) => {
                           lineHeight: 1.2,
                         }}
                       >
-                        Campaign Copy
+                        Campaign Settings
                       </div>
                       <div
                         style={{
@@ -4981,7 +5148,7 @@ const getSavedCreatives = (campaignId) => {
                           marginTop: 4,
                         }}
                       >
-                        Current ad copy and destination link for this campaign.
+                        Saved settings for this campaign only.
                       </div>
                     </div>
 
@@ -5005,42 +5172,36 @@ const getSavedCreatives = (campaignId) => {
                       borderRadius: 14,
                       padding: 14,
                       background: "#f7f9ff",
+                      display: "grid",
+                      gridTemplateColumns: isMobile ? "1fr" : "repeat(3, minmax(0, 1fr))",
+                      gap: 12,
                     }}
                   >
-                    <div
-                      style={{
-                        color: "#111827",
-                        fontWeight: 900,
-                        fontSize: 16,
-                        lineHeight: 1.3,
-                        marginBottom: 8,
-                      }}
-                    >
-                      {selectedCampaignCreatives?.meta?.headline || "No headline yet"}
+                    <div>
+                      <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
+                        Budget
+                      </div>
+                      <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+                        {displayedCampaignSettings.budget || "—"}
+                      </div>
                     </div>
 
-                    <div
-                      style={{
-                        color: "#475467",
-                        fontWeight: 600,
-                        fontSize: 13,
-                        lineHeight: 1.6,
-                        marginBottom: 10,
-                        whiteSpace: "pre-wrap",
-                      }}
-                    >
-                      {selectedCampaignCreatives?.meta?.body || "No body copy yet"}
+                    <div>
+                      <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
+                        Start
+                      </div>
+                      <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+                        {displayedCampaignSettings.startDate || "—"}
+                      </div>
                     </div>
 
-                    <div
-                      style={{
-                        color: "#5b5cf0",
-                        fontWeight: 800,
-                        fontSize: 12,
-                        wordBreak: "break-word",
-                      }}
-                    >
-                      {selectedCampaignCreatives?.meta?.link || "No destination link yet"}
+                    <div>
+                      <div style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11, marginBottom: 6 }}>
+                        End
+                      </div>
+                      <div style={{ color: "#111827", fontWeight: 900, fontSize: 16 }}>
+                        {displayedCampaignSettings.endDate || "—"}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -5058,7 +5219,6 @@ const getSavedCreatives = (campaignId) => {
               </div>
             )}
           </div>
-
           <div
             style={{
               background: "#ffffff",
@@ -5075,10 +5235,10 @@ const getSavedCreatives = (campaignId) => {
           >
             <div>
               <div style={{ color: "#111827", fontWeight: 900, fontSize: 18, marginBottom: 6 }}>
-                Campaign Settings
+                New Campaign
               </div>
               <div style={{ color: "#667085", fontWeight: 700, fontSize: 13, lineHeight: 1.5 }}>
-                Budget, billing, dates, and launch.
+                These settings are for the next campaign you launch.
               </div>
             </div>
 
@@ -5100,6 +5260,55 @@ const getSavedCreatives = (campaignId) => {
                   outline: "none",
                 }}
               />
+            </div>
+
+            <div
+              style={{
+                border: "1px solid #dbe4ff",
+                borderRadius: 14,
+                padding: 14,
+                background: "#f7f9ff",
+                display: "flex",
+                flexDirection: "column",
+                gap: 10,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
+                  Facebook Billing
+                </div>
+                <button
+                  type="button"
+                  onClick={openFbPaymentPopup}
+                  style={{
+                    border: "none",
+                    borderRadius: 10,
+                    padding: "8px 10px",
+                    background: "#5b5cf0",
+                    color: "#ffffff",
+                    fontWeight: 900,
+                    fontSize: 12,
+                    cursor: "pointer",
+                  }}
+                >
+                  Open Billing
+                </button>
+              </div>
+
+              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
+                {billingLoading
+                  ? "Checking billing status..."
+                  : billingInfo?.hasAccess
+                  ? "Facebook billing is ready."
+                  : "Billing will be completed before launch."}
+              </div>
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -5169,160 +5378,106 @@ const getSavedCreatives = (campaignId) => {
               </div>
             </div>
 
-            <div
-              style={{
-                border: "1px solid #dbe4ff",
-                borderRadius: 14,
-                padding: 14,
-                background: "#f7f9ff",
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-              }}
-            >
-              <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-                Login Credentials
-              </div>
-
-              <input
-                type="text"
-                value={loginUser}
-                onChange={(e) => setLoginUser(e.target.value)}
-                placeholder="Username"
-                style={{
-                  padding: "11px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #dbe4ff",
-                  background: "#ffffff",
-                  color: "#111827",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  outline: "none",
-                }}
-              />
-
-              <input
-                type="password"
-                value={loginPass}
-                onChange={(e) => setLoginPass(e.target.value)}
-                placeholder="Password"
-                style={{
-                  padding: "11px 12px",
-                  borderRadius: 10,
-                  border: "1px solid #dbe4ff",
-                  background: "#ffffff",
-                  color: "#111827",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  outline: "none",
-                }}
-              />
-
-              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
-                These stay tied to your Smartemark workspace and Stripe access.
-              </div>
-            </div>
-
-            <div
-              style={{
-                border: "1px solid #dbe4ff",
-                borderRadius: 14,
-                padding: 14,
-                background: "#f7f9ff",
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-              }}
-            >
+            {!getUserFromStorage() && (
               <div
                 style={{
+                  border: "1px solid #dbe4ff",
+                  borderRadius: 14,
+                  padding: 14,
+                  background: "#f7f9ff",
                   display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
+                  flexDirection: "column",
+                  gap: 10,
                 }}
               >
                 <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-                  Payment Method
+                  Login
                 </div>
-                <button
-                  type="button"
-                  onClick={openFbPaymentPopup}
+
+                <input
+                  type="text"
+                  value={loginUser}
+                  onChange={(e) => setLoginUser(e.target.value)}
+                  placeholder="Username"
                   style={{
-                    border: "none",
+                    padding: "11px 12px",
                     borderRadius: 10,
-                    padding: "8px 10px",
-                    background: "#5b5cf0",
-                    color: "#ffffff",
-                    fontWeight: 900,
-                    fontSize: 12,
-                    cursor: "pointer",
+                    border: "1px solid #dbe4ff",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    outline: "none",
                   }}
-                >
-                  Open Billing
-                </button>
-              </div>
+                />
 
-              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12, lineHeight: 1.5 }}>
-                {billingLoading
-                  ? "Checking billing status..."
-                  : billingInfo?.hasAccess
-                  ? "Billing connected and ready."
-                  : "Complete billing before launch."}
+                <input
+                  type="password"
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  placeholder="Password"
+                  style={{
+                    padding: "11px 12px",
+                    borderRadius: 10,
+                    border: "1px solid #dbe4ff",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontWeight: 700,
+                    fontSize: 13,
+                    outline: "none",
+                  }}
+                />
               </div>
-            </div>
-
-            <div
-              style={{
-                border: "1px solid #dbe4ff",
-                borderRadius: 14,
-                padding: 14,
-                background: "#f7f9ff",
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <div style={{ color: "#111827", fontWeight: 900, fontSize: 14 }}>
-                  Launch Summary
-                </div>
-                <div style={{ color: "#5b5cf0", fontWeight: 900, fontSize: 13 }}>
-                  ${calculateFees(budget).total || 0}
-                </div>
-              </div>
-
-              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12 }}>
-                Ad spend: ${Number(budget || 0) || 0}
-              </div>
-              <div style={{ color: "#667085", fontWeight: 700, fontSize: 12 }}>
-                Smartemark fee: ${calculateFees(budget).fee || 0}
-              </div>
-            </div>
+            )}
 
             <button
               onClick={handleLaunch}
-              disabled={loading || !canLaunch}
+              disabled={
+                loading ||
+                !(
+                  fbConnected &&
+                  selectedAccount &&
+                  selectedPageId &&
+                  budget &&
+                  !isNaN(parseFloat(budget)) &&
+                  parseFloat(budget) >= 3
+                )
+              }
               style={{
                 width: "100%",
                 border: "none",
                 borderRadius: 14,
                 padding: "14px 16px",
-                background: loading || !canLaunch ? "#b8c2ff" : "#5b5cf0",
+                background:
+                  loading ||
+                  !(
+                    fbConnected &&
+                    selectedAccount &&
+                    selectedPageId &&
+                    budget &&
+                    !isNaN(parseFloat(budget)) &&
+                    parseFloat(budget) >= 3
+                  )
+                    ? "#b8c2ff"
+                    : "#5b5cf0",
                 color: "#ffffff",
                 fontWeight: 900,
                 fontSize: 15,
-                cursor: loading || !canLaunch ? "not-allowed" : "pointer",
+                cursor:
+                  loading ||
+                  !(
+                    fbConnected &&
+                    selectedAccount &&
+                    selectedPageId &&
+                    budget &&
+                    !isNaN(parseFloat(budget)) &&
+                    parseFloat(budget) >= 3
+                  )
+                    ? "not-allowed"
+                    : "pointer",
               }}
             >
-              {loading ? "Launching..." : "Launch Campaign"}
+              {loading ? "Working..." : "Launch Campaign"}
             </button>
           </div>
         </div>
@@ -5330,6 +5485,155 @@ const getSavedCreatives = (campaignId) => {
     )}
   </div>
 </main>
+
+          {showEditCampaignModal && selectedLiveCampaign && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1007,
+            background: "rgba(15,23,42,0.35)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+          onClick={() => setShowEditCampaignModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "min(520px, 94vw)",
+              background: "#ffffff",
+              border: "1px solid #e5e7eb",
+              borderRadius: 24,
+              padding: 22,
+              boxShadow: "0 30px 80px rgba(15,23,42,0.18)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div>
+              <div style={{ color: "#111827", fontWeight: 900, fontSize: 22, marginBottom: 6 }}>
+                Edit Campaign
+              </div>
+              <div style={{ color: "#667085", fontWeight: 700, fontSize: 13, lineHeight: 1.6 }}>
+                Save budget and duration for this campaign only.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Budget</label>
+              <input
+                type="number"
+                value={editCampaignForm.budget}
+                onChange={(e) =>
+                  setEditCampaignForm((prev) => ({ ...prev, budget: e.target.value }))
+                }
+                placeholder="Budget"
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid #dbe4ff",
+                  background: "#ffffff",
+                  color: "#111827",
+                  fontWeight: 700,
+                  fontSize: 14,
+                  outline: "none",
+                }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr",
+                gap: 10,
+              }}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>Start Date</label>
+                <input
+                  type="date"
+                  value={editCampaignForm.startDate}
+                  onChange={(e) =>
+                    setEditCampaignForm((prev) => ({ ...prev, startDate: e.target.value }))
+                  }
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    border: "1px solid #dbe4ff",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <label style={{ color: "#98a2b3", fontWeight: 800, fontSize: 11 }}>End Date</label>
+                <input
+                  type="date"
+                  value={editCampaignForm.endDate}
+                  onChange={(e) =>
+                    setEditCampaignForm((prev) => ({ ...prev, endDate: e.target.value }))
+                  }
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: 12,
+                    border: "1px solid #dbe4ff",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontWeight: 700,
+                    fontSize: 14,
+                    outline: "none",
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setShowEditCampaignModal(false)}
+                style={{
+                  background: "#f8fafc",
+                  color: "#111827",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontWeight: 900,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={saveCurrentCampaignSettings}
+                style={{
+                  background: "#5b5cf0",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  fontWeight: 900,
+                  fontSize: 12,
+                  cursor: "pointer",
+                }}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ImageModal
         open={showImageModal}
