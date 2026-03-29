@@ -1,14 +1,12 @@
 import React, { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import smartmarkLogo from "../assets/smartmark-logo.svg";
+import smartmarkLogo from "./assets/smartmark-logo.svg";
 
 const FONT = "'Inter', 'Poppins', 'Segoe UI', Arial, sans-serif";
 const BG = "linear-gradient(180deg, #bcc3fb 0%, #d6dbff 38%, #ecefff 100%)";
 const TEXT = "#101426";
 const TEXT_SOFT = "#66708b";
 const PURPLE = "#5d59ea";
-const BLUE = "#4c63ff";
-const BLUE_HOVER = "#4058f4";
 const BORDER = "rgba(93, 89, 234, 0.13)";
 const PANEL = "rgba(255,255,255,0.90)";
 const SHADOW = "0 18px 46px rgba(83, 77, 212, 0.12)";
@@ -65,7 +63,9 @@ const Signup = () => {
         location.state?.selectedPlan ||
           localStorage.getItem("sm_selected_plan") ||
           "starter"
-      ).trim().toLowerCase(),
+      )
+        .trim()
+        .toLowerCase(),
     [location.state]
   );
 
@@ -74,7 +74,9 @@ const Signup = () => {
   const [fullName, setFullName] = useState(
     localStorage.getItem("sm_signup_full_name") || ""
   );
-  const [email, setEmail] = useState(localStorage.getItem("sm_signup_email") || "");
+  const [email, setEmail] = useState(
+    localStorage.getItem("sm_signup_email") || ""
+  );
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -236,7 +238,8 @@ const Signup = () => {
                 maxWidth: 420,
               }}
             >
-              Set up your Smartemark account, then continue into campaign setup and billing.
+              Set up your Smartemark account, then continue into campaign setup
+              and billing.
             </div>
           </div>
 
