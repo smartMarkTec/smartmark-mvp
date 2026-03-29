@@ -939,7 +939,8 @@ router.get('/facebook', (req, res) => {
     `&redirect_uri=${encodeURIComponent(FACEBOOK_REDIRECT_URI)}` +
     `&response_type=code` +
     `&state=${encodeURIComponent(state)}` +
-    `&config_id=${encodeURIComponent(FACEBOOK_LOGIN_CONFIG_ID)}`;
+    `&config_id=${encodeURIComponent(FACEBOOK_LOGIN_CONFIG_ID)}` +
+    `&scope=${encodeURIComponent(FB_SCOPES.join(','))}`;
 
   res.redirect(fbUrl);
 });
